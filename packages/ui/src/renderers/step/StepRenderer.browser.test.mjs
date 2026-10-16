@@ -338,14 +338,14 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   await view.partMenu('base', 'Expand');
   // The part's topology lands after it expands, and a press before it lands picks the part:
   // press until a face answers, then hold it to cadgen's id.
-  for (let attempt = 0; attempt < 50 && !(await selected()).some(id => /\/f:[0-9a-f]{12}$/.test(id)); attempt += 1) {
+  for (let attempt = 0; attempt < 50 && !(await selected()).some(id => /\/f:[\w.]+$/.test(id)); attempt += 1) {
     await page.mouse.click(...at([6, 6, 5]));
     await page.waitForTimeout(100);
   }
-  assert.deepEqual(await selected(), [`${base.id}/${top.token}`], 'the top face is the table\'s row, under its occurrence');
+  assert.deepEqual(await selected(), [`${base.id}/${top.name}`], 'the top face is the table\'s row, under its occurrence');
   await page.mouse.click(...at([10, 6, 5]));
-  await page.waitForFunction(() => /\/e:[0-9a-f]{12}$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
-  assert.deepEqual(await selected(), [`${base.id}/${rim.token}`], 'the rim edge is the table\'s row');
+  await page.waitForFunction(() => /\/e:[\w.]+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
+  assert.deepEqual(await selected(), [`${base.id}/${rim.name}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
   // alone (its ends each meet two edges at a right angle), however close the neighbours lie.
   await pane.locator('[data-view-controls]').getByRole('button', { name: /^Select mode: / }).click();
@@ -354,8 +354,8 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
   await page.mouse.click(...at([10, 6, 5]));
-  await page.waitForFunction(() => /\/e:[0-9a-f]{12}$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
-  const chain = edges.filter(edge => edge.chain === rim.chain).map(edge => `${base.id}/${edge.token}`);
+  await page.waitForFunction(() => /\/e:[\w.]+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
+  const chain = edges.filter(edge => edge.chain === rim.chain).map(edge => `${base.id}/${edge.name}`);
   assert.deepEqual((await selected()).sort(), chain.sort(), 'the grown selection is the table\'s chain');
   assert.deepEqual(errors, []);
 });
@@ -380,7 +380,7 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   // press until a face answers.
   await view.partMenu('base', 'Expand');
   const oneFace = () => page.evaluate(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
-    return ids.length === 1 && /\/f:[0-9a-f]{12}$/.test(ids[0]); });
+    return ids.length === 1 && /\/f:[\w.]+$/.test(ids[0]); });
   for (let attempt = 0; attempt < 50 && !(await oneFace()); attempt += 1) {
     await page.mouse.click(...at([6, 6, 5]));
     await page.waitForTimeout(100);
@@ -392,7 +392,7 @@ test('Select picks parts and faces, a selection lives only under Select, and the
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Describe your changes');
   await page.mouse.click(...at([10, 6, 5]));
   await page.waitForFunction(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
-    return ids.length === 1 && /\/e:[0-9a-f]{12}$/.test(ids[0]); });
+    return ids.length === 1 && /\/e:[\w.]+$/.test(ids[0]); });
   // Collapsing the part unloads its faces, and the pick with them.
   await view.partMenu('base', 'Collapse');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 0);
@@ -535,14 +535,14 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
     }).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
   await page.mouse.click(...at([6, 6, 5]));
-  await page.waitForFunction(id => new RegExp(`^topology\\|${id}\\|face\\|${id}/f:[0-9a-f]{12}$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), ids.base);
+  await page.waitForFunction(id => new RegExp(`^topology\\|${id}\\|face\\|${id}/f:[\\w.]+$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), ids.base);
   const face = (await selected())[0].split('|').at(-1);
   assert.deepEqual(await page.evaluate(() => window.__sawLoading.slice(0, 1)), [0], 'the Features panel said it was loading, before anything was picked');
   assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByText('Loading…').count(), 0, 'and stops once the face is picked');
   assert.equal(await pane.locator('[data-cad-toolbar] [role=status]').count(), 0, 'nothing under the strip says so');
   // Named by its part as the tree names it and its kind, never by its raw id, which is no row either.
   const faceText = (await reference.innerText()).replace(/\s+/g, ' ');
-  // The face by its token, the geometry's name: what a copy carries too.
+  // The face by its name, its lineage: what a copy carries too.
   assert.match(faceText, new RegExp(`^base · face ${face.split('/').pop()} Area [\\d,.]+ mm² Copy`), 'the Reference names the face under the pointer, over its area');
   assert.doesNotMatch(faceText, new RegExp(`\\bType\\b|\\bID\\b|${face}|Center|Normal|Material`));
   assert.deepEqual((await view.state()).selectedPartIds, [], 'the mode never falls back to the part');
@@ -551,7 +551,7 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   const sawBefore = await page.evaluate(() => window.__sawLoading.length);
   await mode('Edges');
   await page.mouse.click(...at([20, 0, 4]));
-  await page.waitForFunction(id => new RegExp(`^topology\\|${id}\\|edge\\|${id}/e:[0-9a-f]{12}$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), ids.arm);
+  await page.waitForFunction(id => new RegExp(`^topology\\|${id}\\|edge\\|${id}/e:[\\w.]+$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), ids.arm);
   assert.ok(await page.evaluate(() => window.__sawLoading.length) > sawBefore, 'only the pressed part had loaded');
   const edge = (await selected())[0].split('|').at(-1);
   const edgeText = (await reference.innerText()).replace(/\s+/g, ' ');
@@ -1612,7 +1612,7 @@ test('a click selects at once, and a double-click ends where it did when a click
   await view.chooseSelectMode('Faces');
   for (const [point, part] of [[[15, 0, 4], ids.arm], [[6, 6, 5], ids.base]]) {
     await page.mouse.click(...at(point));
-    await page.waitForFunction(id => new RegExp(`\\|${id}/f:[0-9a-f]{12}$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), part);
+    await page.waitForFunction(id => new RegExp(`\\|${id}/f:[\\w.]+$`).test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()), part);
   }
   await page.keyboard.press('Escape');
   await cleared();
@@ -1621,8 +1621,8 @@ test('a click selects at once, and a double-click ends where it did when a click
   await settle(page);
   const armFace = (await selection()).refs;
   assert.equal(armFace.length, 1, `the double-clicked face is the selection: ${JSON.stringify(armFace)}`);
-  assert.match(armFace[0], new RegExp(`\\|${ids.arm}/f:[0-9a-f]{12}$`));
-  assert.match(await page.evaluate(() => window.__clipboardWrites[0]), new RegExp(`^/models/hinge_block\\.step#${ids.arm}/f:[0-9a-f]{12}$`));
+  assert.match(armFace[0], new RegExp(`\\|${ids.arm}/f:[\\w.]+$`));
+  assert.match(await page.evaluate(() => window.__clipboardWrites[0]), new RegExp(`^/models/hinge_block\\.step#${ids.arm}/f:[\\w.]+$`));
   // ...also when it was selected already: the two clicks it is made of do not toggle it off.
   await page.mouse.dblclick(...at([15, 0, 4]));
   await page.waitForFunction(() => window.__clipboardWrites.length === 2);
@@ -1637,7 +1637,7 @@ test('a click selects at once, and a double-click ends where it did when a click
   const both = (await selection()).refs;
   assert.equal(both.length, 2, `shift adds the double-clicked face: ${JSON.stringify(both)}`);
   assert.equal(both[0], armFace[0]);
-  assert.match(both[1], new RegExp(`\\|${ids.base}/f:[0-9a-f]{12}$`));
+  assert.match(both[1], new RegExp(`\\|${ids.base}/f:[\\w.]+$`));
   await page.keyboard.down('Shift');
   await page.mouse.dblclick(...at([6, 6, 5]));
   await page.keyboard.up('Shift');

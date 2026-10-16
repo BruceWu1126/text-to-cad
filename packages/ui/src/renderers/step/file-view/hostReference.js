@@ -100,7 +100,7 @@ export function referenceLabel(selector, treeRoot) {
  * Tried in order: the reference map, which knows every loaded entity by its
  * canonical, display and copy spellings; the tree, which knows parts and
  * subassemblies by occurrence token, name and label; and a label-qualified
- * element (`bracket/f:9d2e8c1b5a70`) resolved through the labelled node's occurrence.
+ * element (`bracket/f:bracket.extrude1.3`) resolved through the labelled node's occurrence.
  * A list selects its first member.
  */
 export function resolveSelectorSelection(selector, { referenceMap, treeRoot } = {}) {
@@ -120,14 +120,14 @@ export function resolveSelectorSelection(selector, { referenceMap, treeRoot } = 
     }
     return { kind: "part", id: stepTreeNodeIdForWorkspace(node) };
   }
-  // `label/f:…` (or a token pair the map does not hold under that spelling): the element of
-  // an occurrence, by the occurrence's spelling; the element's token is the geometry's.
+  // `label/f:…` (or an occurrence/element pair the map does not hold under that spelling): the
+  // element of an occurrence, by the occurrence's spelling; the element's name is its part's.
   const split = splitElementRef(first);
   if (split) {
     const ownerNode = findStepTreeNodeForSelector(treeRoot, split.owner);
     const occurrenceId = String(ownerNode?.occurrenceId || "").trim();
     if (occurrenceId) {
-      const qualified = referenceMap?.get?.(elementRef(occurrenceId, split.token));
+      const qualified = referenceMap?.get?.(elementRef(occurrenceId, split.element));
       if (qualified?.id) {
         return { kind: "reference", id: String(qualified.id) };
       }

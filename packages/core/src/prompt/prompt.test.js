@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, promptReferenceIds } from './index.js';
 
-// A ref is `<occurrence token>/<element token>`, as cadgen and the viewer compose it.
-const FACE = 'o:3f2a9c1d7e5b/f:9d2e8c1b5a70';
-const EDGE = 'o:3f2a9c1d7e5b/e:4b1f9e2a7c03';
+// A ref is `<occurrence token>/<element name>`, as cadgen and the viewer compose it.
+const FACE = 'o:3f2a9c1d7e5b/f:bracket.extrude1.3';
+const EDGE = 'o:3f2a9c1d7e5b/e:bracket.fillet1.2';
 const reference = { resource: { kind: 'workspace-file', path: '/work/STEP/my part.step', revision: 'v1' }, target: { kind: 'cad-selector', selectors: [FACE] } };
 test('one context retains image/reference relationships and formats canonical references', () => {
   const capture = Promise.resolve(new Blob(['png'], { type: 'image/png' }));

@@ -826,7 +826,7 @@ function StepSurfaceBody({ view, data }) {
     const previous = selectedEntryBuildSnapshotRef.current;
     const sameEntry = previous.fileRef === fileRef;
     const stepChanged = sameEntry && !!previous.stepHash && !!stepHash && previous.stepHash !== stepHash;
-    // A preview replaced by its own save clears nothing: the tokens are the same (STORE.md 9b). Any
+    // A preview replaced by its own save clears nothing: its refs are the same (STORE.md 9b). Any
     // other change of tree -- a preview taking the saved file's place included -- is a new revision.
     const savedPreview = stepChanged && previous.preview && previewRevision.saved === stepHash;
 

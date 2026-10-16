@@ -4,10 +4,10 @@ import test from "node:test";
 import { STEP_MODEL_ROOT_ID } from "@text-to-cad/core/lib/step/stepTree.js";
 import { nodeCopyText, selectionCopyPayload } from "./stepCopy.js";
 
-// Occurrence tokens of two parts and a face token of the first: a ref is `<occurrence>/<element>`.
+// Occurrence tokens of two parts and a face name of the first: a ref is `<occurrence>/<element>`.
 const BASE = "o:3f2a9c1d7e5b";
 const ARM = "o:a1b2c3d4e5f6";
-const FACE = `${BASE}/f:9d2e8c1b5a70`;
+const FACE = `${BASE}/f:base.extrude1.3`;
 const face = { id: FACE, selectorType: "face", copyText: `#${FACE}` };
 const context = (overrides = {}) => ({
   entry: { file: "hinge.step", kind: "assembly", fileRefPrefix: "hinge.step" }, isAssemblyView: true,

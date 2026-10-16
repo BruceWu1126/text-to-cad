@@ -9,15 +9,13 @@ cadgen's articulation of its kinematics (``hinge_block.articulation.json``,
 display mesh (``components/<cid>.glb``) and its selector table
 (``components/<cid>.selectors.json``) -- read from the store under the part's key.
 Every id in them is minted by the build: the occurrences' tokens from the tree,
-the elements' from their geometry.
+the elements' names from their lineage.
 
 Run from the repository root with the repo's Python whenever the view schema,
-the sidecar schema, the tree's tokens or the model moves:
+the sidecar schema, the mesher, the selector table, the part key or the model
+moves:
 
     .venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_view.py
-
-``make_meshes.py`` and ``make_selectors.py`` rewrite the parts alone, from the
-shapes, when only the mesher or the table moves.
 """
 
 from __future__ import annotations

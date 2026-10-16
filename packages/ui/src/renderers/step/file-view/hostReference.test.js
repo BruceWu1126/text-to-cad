@@ -13,15 +13,16 @@ import {
   resolveSelectorSelection,
 } from "./hostReference.js";
 
-// Tokens as cadgen mints them (`o:`, `f:`, `e:` + 12 hex); a ref is `<occurrence>/<element>`.
+// Occurrence tokens as cadgen mints them (`o:` + 12 hex) and element names (`f:`, `e:` and the
+// element's lineage); a ref is `<occurrence>/<element>`.
 const ROOT = "o:1a2b3c4d5e6f";
 const BRACKET = "o:3f2a9c1d7e5b";
 const SHAFT = "o:a1b2c3d4e5f6";
 const ELSEWHERE = "o:0f1e2d3c4b5a";
-const F3 = "f:9d2e8c1b5a70";
-const F7 = "f:0c7b6a594837";
-const F45 = "f:77aa88bb99cc";
-const E3 = "e:4b1f9e2a7c03";
+const F3 = "f:shaft.extrude1.3";
+const F7 = "f:shaft.hole1.1";
+const F45 = "f:bracket.fillet1.2";
+const E3 = "e:bracket.extrude1.3";
 
 test("referenceFromCopyText: the file by its absolute path, the selector without its #, the text as copied", () => {
   assert.deepEqual(referenceFromCopyText(`/models/STEP/bracket.step#${SHAFT}`, "/models/STEP/bracket.step"), {
@@ -92,7 +93,7 @@ test("resolveSelectorSelection: reference map first, then the tree, then a label
   assert.deepEqual(resolveSelectorSelection(SHAFT, options), { kind: "part", id: SHAFT });
   assert.deepEqual(resolveSelectorSelection("bracket", options), { kind: "part", id: BRACKET });
   assert.deepEqual(resolveSelectorSelection(`${SHAFT}/${F3}`, options), { kind: "reference", id: `topology|${SHAFT}|face|${SHAFT}/${F3}` });
-  // `bracket/f:…`: the labelled node's occurrence, then its element in the map by token.
+  // `bracket/f:…`: the labelled node's occurrence, then its element in the map by name.
   assert.deepEqual(resolveSelectorSelection(`bracket/${F45}`, options), { kind: "reference", id: `ref:${BRACKET}/${F45}` });
   // A list selects its first member; nothing known is null, not a guess.
   assert.deepEqual(resolveSelectorSelection(`${BRACKET},${SHAFT}`, options), { kind: "part", id: BRACKET });

@@ -10,15 +10,15 @@ import {
 } from './stepTreeSelection.js';
 
 // The tree's node ids are occurrence tokens (`o:` + 12 hex), as a view's are; an element ref
-// is `<occurrence token>/<element token>`.
+// is `<occurrence token>/<element name>`.
 const ROOT = 'o:1a2b3c4d5e6f';
 const SUB = 'o:2b3c4d5e6f70';
 const BRACKET = 'o:3f2a9c1d7e5b';
 const PIN = 'o:a1b2c3d4e5f6';
 const PLATE = 'o:0f1e2d3c4b5a';
-const F1 = 'f:9d2e8c1b5a70';
-const F2 = 'f:0c7b6a594837';
-const E4 = 'e:4b1f9e2a7c03';
+const F1 = 'f:bracket.extrude1.3';
+const F2 = 'f:bracket.hole1.1';
+const E4 = 'e:bracket.fillet1.4';
 
 const root = { id: ROOT, nodeType: 'assembly', children: [
   { id: SUB, nodeType: 'assembly', children: [
@@ -71,7 +71,7 @@ test('external reference requests reveal an unloaded owner and ancestors without
   assert.deepEqual(collectStepTreeRevealExpansionIds(root, BRACKET, { expandSelf: true }), [ROOT, SUB, BRACKET]);
   const single = { id: STEP_MODEL_ROOT_ID, nodeType: 'part', children: [] };
   assert.deepEqual(collectStepTreeRevealExpansionIds(single, STEP_MODEL_ROOT_ID, { expandSelf: true }), [STEP_MODEL_ROOT_ID]);
-  // A single-leaf document resolves a bare element token.
+  // A single-leaf document resolves a bare element name.
   assert.deepEqual(stepTreeTopologyOwnersForSelectors(single, [F2], { isAssemblyView: false }), [STEP_MODEL_ROOT_ID]);
   assert.deepEqual(expandedVisibleStepTreeTopologyNodeIds(single, [STEP_MODEL_ROOT_ID], { isAssemblyView: false }), [STEP_MODEL_ROOT_ID]);
 });

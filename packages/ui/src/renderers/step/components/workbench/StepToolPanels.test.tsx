@@ -109,7 +109,7 @@ it("Features opens as tall as its rows need, up to the whole column, on desktop 
 
 // What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
 // under it; a part file has no tree, its one row being all there would be, and the Reference alone.
-const face = { id: 'o:0b1c2d3e4f5a/f:bbbbbbbbbbb2', normalizedSelector: 'o:0b1c2d3e4f5a/f:bbbbbbbbbbb2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane', area: 20 } };
+const face = { id: 'o:0b1c2d3e4f5a/f:base.extrude1.2', normalizedSelector: 'o:0b1c2d3e4f5a/f:base.extrude1.2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane', area: 20 } };
 function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
   const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
   return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,
@@ -131,7 +131,7 @@ it("a part file shows no tree under Select, only the Reference for what is picke
   render(<Panels assembly references={[face]} onClearSelection={onClearSelection} />);
   expect(shown()).toEqual(['Features', 'Reference details']);
   const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  expect(reference.getByRole('heading').textContent).toBe('base · face f:bbbbbbbbbbb2');
+  expect(reference.getByRole('heading').textContent).toBe('base · face f:base.extrude1.2');
   expect(reference.getByRole('button', { name: 'Copy' }).getAttribute('aria-keyshortcuts')).toBe('Meta+C');
   expect(screen.getByRole('region', { name: 'Reference details' }).style.maxHeight).toBe(`${STACK_HEIGHT}px`);
   fireEvent.click(reference.getByRole('button', { name: 'Clear selection' }));

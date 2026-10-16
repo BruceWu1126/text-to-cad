@@ -34,11 +34,11 @@ and the part's record names the display mesh the page reads to draw it
 Every mesh the viewer draws is cadgen's (OCCT's triangulation of the exact BREP,
 every face of it verified and where needed repaired by cadgen's native library,
 stored by cadgen, derived by the build that made the model before it reported
-done); the browser never tessellates. A part is named by its component's geometry
-(its fingerprint, cadgen's `STORE.md` §2), not its bytes, so a body read back from
-the STEP it was written to shares the mesh of the body that was written, and a
-build's preview revision (§5) shares its parts with the saved file that follows
-it. The parts' records are probed a chunk
+done); the browser never tessellates. A part is named by the construction that
+made its component (its key, cadgen's `STORE.md` §2), not its bytes, so a body
+read back from the STEP it was written to shares the mesh of the body that was
+written, and a build's preview revision (§5) shares its parts with the saved file
+that follows it. The parts' records are probed a chunk
 of components at a time and their meshes read a batch at a time
 (`createInitialDisplayPlans` in `renderers/step/render/initialDisplay.js`,
 `packageBatchReads.js`), the first of each the size of the first publish, so the
@@ -194,12 +194,12 @@ build began over, which the feed does not call superseded -- and it replaces the
 preview in place with nothing fetched twice (the parts are the preview's, by key; a
 routine is keyed by its keyframes, so a playing one is neither stopped nor rewound),
 the label goes, and nothing on screen moves: no selection, measurement, ink or pose
-is cleared by a preview replaced by its own save, since the tokens are the same, where
+is cleared by a preview replaced by its own save, since its refs are the same, where
 any other change of tree clears what a revision clears today. A preview is never
 presented as the file: no sidecar binds to it, the prompt resource and the live state
 keep the saved file's revision (and say `preview`), snapshots and exports read the
 saved file alone, and selection, measurements and reference copying resolve against
-it as against any revision, by token. Before the preview exists the model on screen
+it as against any revision, by ref. Before the preview exists the model on screen
 says it is updating. A failed build leaves what is on screen -- the labelled preview,
 or the previous model -- under its alert, whose card says the preview is what is
 shown; the preview goes when the file moves past the build (`superseded`), when the

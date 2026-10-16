@@ -85,24 +85,24 @@ function itemKey(item) {
 
 /**
  * A reference as a person reads it: its own label when it has one (a part's or subassembly's
- * name, a named face), otherwise where it is and what — "base · face f:9d2e8c1b5a70" — from its
- * part as the tree names it (`partName`) and its element's token, the geometry's name that a
- * copy carries too. A generated label that only restates the selector ("Face o:…/f:…") is not a
- * name. A single-part file's part with no name of its own is the file's ("l_bracket · face
- * f:…"): the tree's root is that part, named after the file. The occurrence token names the
- * part only when nothing else does; the element's raw selector never names anything.
+ * name, a named face), otherwise where it is and what — "base · face f:base.extrude1.3" — from
+ * its part as the tree names it (`partName`) and its element's name, the one a copy carries
+ * too. A generated label that only restates the selector ("Face o:…/f:…") is not a name. A
+ * single-part file's part with no name of its own is the file's ("l_bracket · face f:…"): the
+ * tree's root is that part, named after the file. The occurrence token names the part only when
+ * nothing else does; the element's raw selector never names anything.
  */
 function referenceName(item, meshData, partName) {
   if (isPartNode(item)) return String(item.name || item.displayName || "").trim() || itemKey(item);
   const selector = String(item.displaySelector || item.normalizedSelector || item.id || "").split("|").pop();
   const split = splitElementRef(selector);
-  const token = split?.token || "";
+  const element = split?.element || "";
   const text = value => String(value ?? "").trim();
   const own = [item.name, item.pickData?.name, item.label].map(text)
-    .find(value => value && !(token && value.includes(token)) && !value.includes(selector));
+    .find(value => value && !(element && value.includes(element)) && !value.includes(selector));
   if (own) return own;
   const kind = (SELECTOR_TYPE_LABELS[item.selectorType] || "Reference").toLowerCase();
-  const number = token;
+  const number = element;
   const occurrence = item.occurrenceId || split?.owner || "";
   const parts = Array.isArray(meshData?.parts) ? meshData.parts : [];
   const part = parts.find(entry => [entry.occurrenceId, entry.id].includes(occurrence));

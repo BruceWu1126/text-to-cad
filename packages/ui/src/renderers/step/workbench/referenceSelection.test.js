@@ -31,16 +31,16 @@ const STEP_ENTRY = {
 };
 
 // Occurrence tokens of three parts (in the order a sorted copy line lists them) and element
-// tokens: a ref is `<occurrence token>/<element token>`.
+// names: a ref is `<occurrence token>/<element name>`.
 const ROOT = "o:1a2b3c4d5e6f";
 const BRACKET = "o:2b3c4d5e6f70";
 const PRISM = "o:3c4d5e6f7081";
-const F1 = "f:9d2e8c1b5a70";
-const F4 = "f:0c7b6a594837";
-const E1 = "e:4b1f9e2a7c03";
+const F1 = "f:base.extrude1.3";
+const F4 = "f:base.hole1.1";
+const E1 = "e:base.extrude1.5";
 
-// A part's selector table (cadgen selector_table.py, schema 2) as `joinSelectorTable` extends
-// it: element rows lead with their token and name no occurrence; the page places them.
+// A part's selector table (cadgen selector_table.py, schema 3) as `joinSelectorTable` extends
+// it: element rows lead with their name and name no occurrence; the page places them.
 function selectorBundle() {
   return {
     manifest: {
@@ -48,8 +48,8 @@ function selectorBundle() {
       tables: {
         occurrenceColumns: ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"],
         shapeColumns: ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"],
-        faceColumns: ["token", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"],
-        edgeColumns: ["token", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"]
+        faceColumns: ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"],
+        edgeColumns: ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"]
       },
       occurrences: [
         [null, null, 0, 1, 0, 1, 0, 1, 0, 0]

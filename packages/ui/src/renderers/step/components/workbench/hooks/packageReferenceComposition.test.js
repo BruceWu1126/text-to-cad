@@ -176,24 +176,24 @@ test("the package composer builds each occurrence once and releases what stops b
 test("Group edges and Group faces group the same references through the package composer", () => {
   // One square face bounded by four line edges, three of them one chain as cadgen decided it,
   // and one tangent edge between two faces of one tangent group: chains and groups both exist.
-  // The table's rows lead with their tokens (schema 2) and name no occurrence: the composer
+  // The table's rows lead with their names (schema 3) and name no occurrence: the composer
   // places them by each occurrence's token.
   const bundle = {
     manifest: {
       tables: {
         occurrenceColumns: ["bbox"],
         shapeColumns: ["ordinal", "kind"],
-        faceColumns: ["token", "ordinal", "shape", "surfaceType", "edgeStart", "edgeCount", "tangentGroup"],
-        edgeColumns: ["token", "ordinal", "shape", "curveType", "faceStart", "faceCount", "segmentStart", "segmentCount", "visibilityClass", "chain"],
+        faceColumns: ["name", "ordinal", "shape", "surfaceType", "edgeStart", "edgeCount", "tangentGroup"],
+        edgeColumns: ["name", "ordinal", "shape", "curveType", "faceStart", "faceCount", "segmentStart", "segmentCount", "visibilityClass", "chain"],
       },
       occurrences: [[null]],
       shapes: [[1, "solid"]],
-      faces: [["f:9d2e8c1b5a70", 1, 1, "plane", 0, 4, 1], ["f:0c7b6a594837", 2, 1, "cylinder", 0, 1, 1]],
+      faces: [["f:base.extrude1.1", 1, 1, "plane", 0, 4, 1], ["f:base.hole1.1", 2, 1, "cylinder", 0, 1, 1]],
       edges: [
-        ["e:4b1f9e2a7c03", 1, 1, "line", 0, 2, 0, 1, "tangent", 1],
-        ["e:5e6d7c8b9a01", 2, 1, "line", 0, 1, 1, 1, "feature", 2],
-        ["e:6f7e8d9c0b12", 3, 1, "line", 0, 1, 2, 2, "feature", 2],
-        ["e:708f9e0d1c23", 4, 1, "line", 0, 1, 4, 1, "feature", 2],
+        ["e:base.hole1.1", 1, 1, "line", 0, 2, 0, 1, "tangent", 1],
+        ["e:base.extrude1.1", 2, 1, "line", 0, 1, 1, 1, "feature", 2],
+        ["e:base.extrude1.2", 3, 1, "line", 0, 1, 2, 2, "feature", 2],
+        ["e:base.extrude1.3", 4, 1, "line", 0, 1, 4, 1, "feature", 2],
       ],
       relations: { faceEdgeRows: [0, 1, 2, 3, 0], edgeFaceRows: [0, 1, 0, 0, 0] },
     },

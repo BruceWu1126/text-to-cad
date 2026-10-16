@@ -13,8 +13,9 @@ import {
   stepTreeNodeLeafPartIds
 } from "./stepTree.js";
 
-// Occurrence and element tokens as cadgen mints them (`o:`, `f:`, `e:` + 12 hex); a ref is
-// `<occurrence token>/<element token>`. The values are arbitrary, their shape is the grammar's.
+// Occurrence tokens as cadgen mints them (`o:` + 12 hex) and element names (`f:`, `e:` and the
+// element's lineage); a ref is `<occurrence token>/<element name>`. The values are arbitrary,
+// their shape is the grammar's.
 const BASE = "o:1a2b3c4d5e6f";
 const LID = "o:2b3c4d5e6f70";
 const PAD = "o:7c8d9e0f1a2b";
@@ -22,10 +23,10 @@ const ARM = "o:9e8d7c6b5a40";
 const SERVO = "o:3f2a9c1d7e5b";
 const GRIPPER = "o:a1b2c3d4e5f6";
 const ELSEWHERE = "o:0f1e2d3c4b5a";
-const F1 = "f:9d2e8c1b5a70";
-const F2 = "f:0c7b6a594837";
-const E1 = "e:4b1f9e2a7c03";
-const ref = (occurrence, token) => `${occurrence}/${token}`;
+const F1 = "f:arm.extrude1.3";
+const F2 = "f:arm.hole1.1";
+const E1 = "e:arm.extrude1.5";
+const ref = (occurrence, element) => `${occurrence}/${element}`;
 
 const nestedRoot = {
   id: "root",
@@ -217,7 +218,7 @@ test("STEP tree topology rows attach below their owning part", () => {
     ]
   };
   // A body is no reference (the occurrence names it), so the runtime hands the tree an
-  // occurrence, its faces and its edges, and the tree shows each element by its token.
+  // occurrence, its faces and its edges, and the tree shows each element by its name.
   const augmented = buildStepTreeRootWithTopology({
     root,
     references: [

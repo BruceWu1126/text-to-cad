@@ -18,7 +18,7 @@ function StepReferenceSection(props:any){
 const heading=()=>screen.getByRole('heading').textContent;
 // The picker's name and its "i/N", read apart.
 const picker=()=>{const label=screen.getByRole('combobox').querySelector('[data-reference-label]')!;return [label.firstElementChild!.textContent,label.querySelector('[data-reference-count]')!.textContent];};
-const arc={id:'o:1a2b3c4d5e6f/e:aaaaaaaaaaa1',normalizedSelector:'o:1a2b3c4d5e6f/e:aaaaaaaaaaa1',selectorType:'edge',pickData:{curveType:'circle',length:7.8,params:{radius:5,sweepRadians:Math.PI/2,center:[0,0,0]},center:[3,3,0]}};
+const arc={id:'o:1a2b3c4d5e6f/e:knob.revolve1.1',normalizedSelector:'o:1a2b3c4d5e6f/e:knob.revolve1.1',selectorType:'edge',pickData:{curveType:'circle',length:7.8,params:{radius:5,sweepRadians:Math.PI/2,center:[0,0,0]},center:[3,3,0]}};
 function browse(name:string){
  fireEvent.keyDown(screen.getByRole('combobox',{name:'Inspect selected reference'}),{key:'ArrowDown'});
  fireEvent.click(screen.getByRole('option',{name,exact:true}));
@@ -37,25 +37,25 @@ it('an edge shows its key measurements alone: an arc\'s diameter, radius, arc le
 });
 
 it('browses individual selected edges from the heading, and shows only the browsed one\'s rows',()=>{
- const refs=[3,4].map((length,i)=>({id:`o:1a2b3c4d5e6f/e:aaaaaaaaaaa${i}`,selectorType:'edge',normalizedSelector:`o:1a2b3c4d5e6f/e:aaaaaaaaaaa${i}`,pickData:{curveType:'line',length}}));
+ const refs=[3,4].map((length,i)=>({id:`o:1a2b3c4d5e6f/e:base.extrude1.${i+1}`,selectorType:'edge',normalizedSelector:`o:1a2b3c4d5e6f/e:base.extrude1.${i+1}`,pickData:{curveType:'line',length}}));
  render(<StepReferenceSection references={refs}/>);
  expect(screen.queryByText(/^Total/)).toBeNull();
- expect(picker()).toEqual(['o:1a2b3c4d5e6f · edge e:aaaaaaaaaaa1','2/2']);
+ expect(picker()).toEqual(['o:1a2b3c4d5e6f · edge e:base.extrude1.2','2/2']);
  expect(screen.getByText('4 mm')).toBeTruthy();
- browse('o:1a2b3c4d5e6f · edge e:aaaaaaaaaaa0');
+ browse('o:1a2b3c4d5e6f · edge e:base.extrude1.1');
  expect(screen.getByText('3 mm')).toBeTruthy();expect(screen.queryByText('4 mm')).toBeNull();
- expect(picker()).toEqual(['o:1a2b3c4d5e6f · edge e:aaaaaaaaaaa0','1/2']);
- expect(screen.queryByText('o:1a2b3c4d5e6f/e:aaaaaaaaaaa0')).toBeNull();
+ expect(picker()).toEqual(['o:1a2b3c4d5e6f · edge e:base.extrude1.1','1/2']);
+ expect(screen.queryByText('o:1a2b3c4d5e6f/e:base.extrude1.1')).toBeNull();
  expect(screen.queryByRole('button',{name:'Previous element'})).toBeNull();
 });
 
 it('a face shows its area, and a round one its radii: nothing of its kind, id, place or part beyond what its heading names',()=>{
  const {rerender}=render(<StepReferenceSection references={[arc]}/>);
- const face={id:'o:1a2b3c4d5e6f/f:bbbbbbbbbbb2',normalizedSelector:'o:1a2b3c4d5e6f/f:bbbbbbbbbbb2',selectorType:'face',pickData:{surfaceType:'plane',area:662.734,center:[2,4,6],normal:[0,0,1],sourceName:'Camera',bbox:{min:[0,0,0],max:[40,20,0]}}};
+ const face={id:'o:1a2b3c4d5e6f/f:base.extrude1.2',normalizedSelector:'o:1a2b3c4d5e6f/f:base.extrude1.2',selectorType:'face',pickData:{surfaceType:'plane',area:662.734,center:[2,4,6],normal:[0,0,1],sourceName:'Camera',bbox:{min:[0,0,0],max:[40,20,0]}}};
  rerender(<StepReferenceSection references={[face]}/>);
- expect(heading()).toBe('Camera · face f:bbbbbbbbbbb2');
+ expect(heading()).toBe('Camera · face f:base.extrude1.2');
  expect(rows()).toEqual(['Area662.73 mm²']);
- for (const gone of ['Type','Face · Planar','ID','o:1a2b3c4d5e6f/f:bbbbbbbbbbb2','Center','Normal','Size','Component']) expect(screen.queryByText(gone),gone).toBeNull();
+ for (const gone of ['Type','Face · Planar','ID','o:1a2b3c4d5e6f/f:base.extrude1.2','Center','Normal','Size','Component']) expect(screen.queryByText(gone),gone).toBeNull();
  rerender(<StepReferenceSection references={[{...face,pickData:{...face.pickData,surfaceType:'cylinder',area:94.25,params:{radius:3}}}]}/>);
  expect(rows()).toEqual(['Diameter Ø6 mm','Radius R3 mm','Area94.25 mm²']);
 });
@@ -131,15 +131,15 @@ it('retains bounding measurements as read-only facts when only part geometry is 
 
 it('names a face or edge by its own label, else by its part and kind, never by its raw id',()=>{
  const meshData={parts:[{id:'o:0a1b2c3d4e5f',occurrenceId:'o:0a1b2c3d4e5f',name:'base'}]};
- const named={id:'topology|o:0a1b2c3d4e5f|face|o:0a1b2c3d4e5f/f:bbbbbbbbbbb3',normalizedSelector:'o:0a1b2c3d4e5f/f:bbbbbbbbbbb3',selectorType:'face',occurrenceId:'o:0a1b2c3d4e5f',label:'Mounting face',pickData:{surfaceType:'plane'}};
+ const named={id:'topology|o:0a1b2c3d4e5f|face|o:0a1b2c3d4e5f/f:base.extrude1.3',normalizedSelector:'o:0a1b2c3d4e5f/f:base.extrude1.3',selectorType:'face',occurrenceId:'o:0a1b2c3d4e5f',label:'Mounting face',pickData:{surfaceType:'plane'}};
  const {rerender}=render(<StepReferenceSection references={[named]} meshData={meshData}/>);
  expect(heading()).toBe('Mounting face');
  rerender(<StepReferenceSection references={[{...named,label:undefined}]} meshData={meshData}/>);
- expect(heading()).toBe('base · face f:bbbbbbbbbbb3');
- rerender(<StepReferenceSection references={[{id:'topology|o:0a1b2c3d4e5f|edge|o:0a1b2c3d4e5f/e:aaaaaaaaaaa4',normalizedSelector:'o:0a1b2c3d4e5f/e:aaaaaaaaaaa4',selectorType:'edge',occurrenceId:'o:0a1b2c3d4e5f',pickData:{curveType:'line',length:2}}]} meshData={meshData}/>);
- expect(heading()).toBe('base · edge e:aaaaaaaaaaa4');
+ expect(heading()).toBe('base · face f:base.extrude1.3');
+ rerender(<StepReferenceSection references={[{id:'topology|o:0a1b2c3d4e5f|edge|o:0a1b2c3d4e5f/e:base.fillet1.4',normalizedSelector:'o:0a1b2c3d4e5f/e:base.fillet1.4',selectorType:'edge',occurrenceId:'o:0a1b2c3d4e5f',pickData:{curveType:'line',length:2}}]} meshData={meshData}/>);
+ expect(heading()).toBe('base · edge e:base.fillet1.4');
  expect(rows()).toEqual(['Length2 mm']);
- expect(screen.queryByText('o:0a1b2c3d4e5f/e:aaaaaaaaaaa4')).toBeNull();
+ expect(screen.queryByText('o:0a1b2c3d4e5f/e:base.fillet1.4')).toBeNull();
 });
 
 it('names the part of a single-part file with no name of its own after the file',()=>{
@@ -148,21 +148,21 @@ it('names the part of a single-part file with no name of its own after the file'
  const meshData={parts:[{id:'o:0a1b2c3d4e5f',occurrenceId:'o:0a1b2c3d4e5f',name:'o:0a1b2c3d4e5f'}]};
  const root=new Map([['__step_model__','l_bracket.step']]);
  const partName=(id:string)=>root.get(id)||'';
- const token=(n:number)=>`f:bbbbbbbbbb${String(n).padStart(2,'0')}`;
- const face=(n:number)=>({id:`o:0a1b2c3d4e5f/${token(n)}`,normalizedSelector:`o:0a1b2c3d4e5f/${token(n)}`,selectorType:'face',occurrenceId:'o:0a1b2c3d4e5f',
-   label:`Face o:0a1b2c3d4e5f/${token(n)}`,pickData:{surfaceType:'plane',name:null,sourceName:null}});
+ const name=(n:number)=>`f:bracket.extrude1.${n}`;
+ const face=(n:number)=>({id:`o:0a1b2c3d4e5f/${name(n)}`,normalizedSelector:`o:0a1b2c3d4e5f/${name(n)}`,selectorType:'face',occurrenceId:'o:0a1b2c3d4e5f',
+   label:`Face o:0a1b2c3d4e5f/${name(n)}`,pickData:{surfaceType:'plane',name:null,sourceName:null}});
  const {rerender}=render(<StepReferenceSection references={[face(11)]} meshData={meshData} partName={partName}/>);
- expect(heading()).toBe('l_bracket · face f:bbbbbbbbbb11');
+ expect(heading()).toBe('l_bracket · face f:bracket.extrude1.11');
  // The picker's entries read the same.
  rerender(<StepReferenceSection references={[face(11),face(12)]} meshData={meshData} partName={partName}/>);
- expect(picker()).toEqual(['l_bracket · face f:bbbbbbbbbb12','2/2']);
+ expect(picker()).toEqual(['l_bracket · face f:bracket.extrude1.12','2/2']);
  fireEvent.keyDown(screen.getByRole('combobox',{name:'Inspect selected reference'}),{key:'ArrowDown'});
- expect(screen.getAllByRole('option').map(option=>option.textContent)).toEqual(['l_bracket · face f:bbbbbbbbbb11','l_bracket · face f:bbbbbbbbbb12']);
+ expect(screen.getAllByRole('option').map(option=>option.textContent)).toEqual(['l_bracket · face f:bracket.extrude1.11','l_bracket · face f:bracket.extrude1.12']);
  cleanup();
  // A lone part with a name of its own keeps it; one with none and no file to go by is its occurrence.
  render(<StepReferenceSection references={[face(3)]} meshData={{parts:[{id:'o:0a1b2c3d4e5f',occurrenceId:'o:0a1b2c3d4e5f',name:'sun_gear'}]}} partName={partName}/>);
- expect(heading()).toBe('sun_gear · face f:bbbbbbbbbb03');
+ expect(heading()).toBe('sun_gear · face f:bracket.extrude1.3');
  cleanup();
  render(<StepReferenceSection references={[face(3)]} meshData={meshData}/>);
- expect(heading()).toBe('o:0a1b2c3d4e5f · face f:bbbbbbbbbb03');
+ expect(heading()).toBe('o:0a1b2c3d4e5f · face f:bracket.extrude1.3');
 });

@@ -56,10 +56,10 @@ and assets, so the app does not scan another package's source.
   its **preview revision** -- its result tree and the parts that draw it,
   artifact-side objects -- before saving its STEP output, and the viewer draws it
   labelled as a preview until the saved file replaces it in place; a preview is
-  never shown as the file. Parts and refs are named by geometry (a component's
-  fingerprint; `o:`/`f:`/`e:`/`v:` tokens), never by bytes, ordinals or
-  positions, so the preview's parts are the saved file's and a copied ref
-  survives a rebuild.
+  never shown as the file. A part is named by the construction that made it and
+  a ref by its place in the tree and its element's lineage (an `o:` token, then
+  an `f:`/`e:`/`v:` name), never by bytes, ordinals or positions, so the
+  preview's parts are the saved file's and a copied ref survives a rebuild.
 - **Independent motion**: kinematics and animation compose in effect records.
   Annotation revisions reload without rebuilding geometry. A mismatched STEP
   digest leaves geometry viewable and reports unavailable annotations.

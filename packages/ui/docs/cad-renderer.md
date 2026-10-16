@@ -984,7 +984,7 @@ A STEP's panels in the tool stack (`components/workbench/StepPanels.js`), in ord
   part file has none, its one row being all there would be.
 - **Reference** (Select, with a selection): headed by the reference being read
   (`StepReferenceSection.js`'s `useStepReference`: its label, else its part as the tree
-  names it and its kind — `base · face f:9d2e8c1b5a70`; with several, a picker with `i/N`) and an X
+  names it and its kind — `base · face f:base.extrude1.3`; with several, a picker with `i/N`) and an X
   that clears the selection; its rows are the browsed reference's key measurements alone,
   compact and in the UI font. A resizable panel of its own, apart from the tree (`StepPanels`
   draws it, a part file's too): it opens at the one width, capped at the stack's height, and

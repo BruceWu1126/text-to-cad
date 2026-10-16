@@ -20,14 +20,14 @@ one revolute mate. Every property is there for a test:
 
 | file | bytes | the request it answers |
 | --- | ---: | --- |
-| `assembly.json` | 3,220 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `producer`, two components (each naming its `part` and its `fingerprint`), two occurrences and the model box. Every id is a token the build minted: the root `o:895cdc947985`, the base `o:cec517897e79`, the arm `o:5da881c8dcfe`. |
-| `components/552fc5fd1b854ab4.selectors.json` | 7,887 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table (schema 2): each face's, edge's and vertex's token, the facts, adjacency, chains and tangent groups picking and measuring join to the mesh by ordinal. |
-| `components/df492f79c6123df5.selectors.json` | 6,089 | the same, for the arm. |
+| `assembly.json` | 3,380 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `producer`, two components (each naming its `part`), two occurrences and the model box. Every id is one the build minted: the root `o:895cdc947985`, the base `o:cec517897e79`, the arm `o:5da881c8dcfe`. |
+| `components/ec7b31f67285c5f1.selectors.json` | 8,181 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table (schema 3): each face's, edge's and vertex's name (its lineage: `f:hinge_block.make_box1.1`, the bore `f:hinge_block.make_cylinder1.1`, the cut's new rims `e:base.1` and `e:base.2`), the facts, adjacency, chains and tangent groups picking and measuring join to the mesh by ordinal. |
+| `components/453b45b958ac1a06.selectors.json` | 5,907 | the same, for the arm, whose label names its box's elements (`f:arm.1` … `f:arm.6`). |
 | `components/<cid>.glb` | 2,604–9,292 | the parts' display meshes (GLB bodies), one per component, each its part record's `glb`: what the harness's part store serves (`/__tess_cache/` probe, batch and single reads, by each component's `part`). |
 | `hinge_block.step.json` | 2,247 | **no request at all.** The harness puts its `animation` section inline on the catalog entry, which is what the real scanner does, and the renderer plays the routine's keyframes straight from there; its tracks name the arm by its token. |
 | `hinge_block.articulation.json` | 554 | **no request at all.** cadgen's articulation of the sidecar's kinematics (`cadgen.articulation.step_articulation` over `assembly.json` and the sidecar), which the harness puts inline on the catalog entry as `articulation`, as the real scanner does; the Position tool plays it. `tests/python/packages/cadgen/test_articulation.py` asserts it is what cadgen writes today. |
 
-Total 31,893 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
+Total 32,165 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
 paths prints nothing), and the repository carries no LFS. Keep it that way — an
 LFS pointer would be rejected by name at `renderAssetClient.js`'s readers.
 
@@ -54,29 +54,14 @@ descriptor (`assembly.json`, as `descriptor_for_view` serves it for the saved
 document's tree), the document-bound sidecar, cadgen's articulation of its
 kinematics, and each component's part -- its display mesh and its selector
 table -- read from the store under the part's key. Every id in them is minted
-by the build: the occurrences' tokens from the tree, the elements' from their
-geometry, so a rebuild of the unchanged model mints the same ones. Run it from
+by the build: the occurrences' tokens from the tree, the elements' names from
+their lineage (the features of `hinge_block.py` that made them), so a rebuild of
+the unchanged model mints the same ones. It takes a few seconds; run it from
 the repository root with the repo's Python whenever the view schema, the sidecar
-schema, the tree's tokens or the model moves:
+schema, the mesher, the selector table, the part key or the model moves:
 
 ```sh
 .venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_view.py
-```
-
-When only the mesher or the table moves, the parts are rewritten alone, from the
-shapes: `source/make_meshes.py` rebuilds the two parts, meshes them with cadgen's
-producer at the display tolerance, and writes them in the committed selector
-tables' ordinals, each face and edge matched by its token (the name its
-geometry gives it, the same in every build), so the committed table and the mesh
-stay joined by ordinal; it also writes each component's `part` (cadgen's key for
-it under the view's producer) and the view's `viewId` into `assembly.json`.
-`source/make_selectors.py` rebuilds each table from its exact BREP and topology
-facts (`cadgen._internal.selector_table`) in the committed table's ordinals,
-matched the same way. Run them from the repository root, the meshes first:
-
-```sh
-.venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_meshes.py
-.venv/bin/python packages/ui/src/renderers/step/__fixtures__/step/source/make_selectors.py
 ```
 
 When the STEP bytes or the view change, the component ids, `tree`, `viewId` and
