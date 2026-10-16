@@ -1,12 +1,19 @@
 """The broker: the pool's two static mechanisms that span processes.
 
 1. **Job slots** — one running build per core. A counting semaphore of
-   ``N = os.cpu_count()`` (``CADGEN_JOBS`` overrides), FIFO. A job takes a slot
+   ``N = os.cpu_count()`` (``CADGEN_JOBS`` overrides). A job takes a slot
    before its body runs and holds it through its emit; it YIELDS the slot while it
-   waits for children it forced (a waiting parent does no kernel work, but
-   retains its geometry and memory reservation in the worker pool) and reacquires
-   — queuing again if it must — when they are done. That yield is the deadlock
-   avoidance: a 1-slot pool still builds a 3-level tree.
+   waits for children it forced or for its display job (a waiting parent does no
+   kernel work, but retains its geometry and memory reservation in the worker
+   pool) and reacquires — queuing again if it must — when they are done. That
+   yield is the deadlock avoidance: a 1-slot pool still builds a 3-level tree.
+   Work already under way goes first: a slot asked for to continue it -- an
+   artifact job a build or a view waits on, a job taking back the slot it
+   yielded -- is granted ahead of every job not yet started, in order among
+   themselves; the rest are granted in order (FIFO). So a build's own display
+   job runs in the slot the build yields to wait for it, and the build takes the
+   slot back the moment the job is done, rather than both queuing behind builds
+   that have not begun.
 2. **In-flight coalescing** — a submit for ``(model, closure hash)`` that matches a
    job already in flight attaches to that job instead of starting another. In-flight
    only, identical source only; never the requested model of a top-level request.
@@ -60,13 +67,16 @@ def job_limit() -> int:
 
 
 class Broker:
-    """FIFO slots plus the in-flight registry. Thread-safe; one per executor."""
+    """Slots -- work under way first, then FIFO -- plus the in-flight registry.
+    Thread-safe; one per executor."""
 
     def __init__(self, limit: int | None = None) -> None:
         self._cv = threading.Condition()
         self._limit = limit if limit is not None else job_limit()
         self._running: dict[int, str] = {}  # lease id -> label
         self._queue: collections.deque[int] = collections.deque()
+        # The queued leases that continue work under way, always the queue's head.
+        self._first: set[int] = set()
         self._next = 0
         self._peak = 0
         self._granted = 0
@@ -83,16 +93,23 @@ class Broker:
     def limit(self) -> int:
         return self._limit
 
-    def acquire(self, label: str, *, cancelled: Callable[[], bool] | None = None) -> int | None:
-        """Block until a slot is free (FIFO). Returns the lease id, or None if
+    def acquire(self, label: str, *, cancelled: Callable[[], bool] | None = None,
+                first: bool = False) -> int | None:
+        """Block until a slot is free: in order, or, for work under way (``first``),
+        in order ahead of every job not yet started. Returns the lease id, or None if
         ``cancelled()`` turned true while waiting (the requester went away)."""
         with self._cv:
             self._next += 1
             lease = self._next
-            self._queue.append(lease)
+            if first:
+                self._queue.insert(len(self._first), lease)
+                self._first.add(lease)
+            else:
+                self._queue.append(lease)
             while True:
                 if self._queue[0] == lease and len(self._running) < self._limit:
                     self._queue.popleft()
+                    self._first.discard(lease)
                     self._running[lease] = label
                     self._granted += 1
                     self._peak = max(self._peak, len(self._running))
@@ -100,6 +117,7 @@ class Broker:
                     return lease
                 if cancelled is not None and cancelled():
                     self._queue.remove(lease)
+                    self._first.discard(lease)
                     self._cv.notify_all()
                     return None
                 self._cv.wait(timeout=0.5 if cancelled is not None else None)
@@ -263,7 +281,7 @@ class Broker:
                 peer_gone.set()
             return peer_gone.is_set()
 
-        lease = self.acquire(label, cancelled=cancelled)
+        lease = self.acquire(label, cancelled=cancelled, first=bool(request.get("first")))
         if lease is None:
             return
         try:
@@ -488,9 +506,11 @@ class Lease:
 
 
 def acquire_slot(label: str, *, on_queued: Callable[[], None] | None = None,
-                 required: bool = False, endpoint=None) -> Lease | None:
-    """Block until the broker grants a slot. None when there is no broker."""
-    conn = _open({"kind": "slot", "op": "acquire", "label": label}, endpoint=endpoint)
+                 required: bool = False, endpoint=None, first: bool = False) -> Lease | None:
+    """Block until the broker grants a slot. None when there is no broker. ``first``:
+    the slot continues work under way, and goes ahead of jobs not yet started."""
+    conn = _open({"kind": "slot", "op": "acquire", "label": label, **({"first": True} if first else {})},
+                 endpoint=endpoint)
     if conn is None:
         if required:
             raise RuntimeError("artifact CPU broker is unavailable; work was not run")
@@ -522,9 +542,10 @@ def current_lease() -> Lease | None:
 
 @contextlib.contextmanager
 def held(label: str, *, on_queued: Callable[[], None] | None = None,
-         required: bool = False, endpoint=None) -> Iterator[Lease | None]:
-    """Run the block holding a job slot (or none, when no broker is reachable)."""
-    lease = acquire_slot(label, on_queued=on_queued, required=required, endpoint=endpoint)
+         required: bool = False, endpoint=None, first: bool = False) -> Iterator[Lease | None]:
+    """Run the block holding a job slot (or none, when no broker is reachable); ``first``
+    as :func:`acquire_slot`'s."""
+    lease = acquire_slot(label, on_queued=on_queued, required=required, endpoint=endpoint, first=first)
     previous = current_lease()
     _CURRENT.lease = lease
     try:
@@ -549,7 +570,7 @@ def yielded() -> Iterator[None]:
     try:
         yield
     finally:
-        _CURRENT.lease = acquire_slot(lease.label, required=lease.required, endpoint=lease.endpoint)
+        _CURRENT.lease = acquire_slot(lease.label, required=lease.required, endpoint=lease.endpoint, first=True)
 
 
 def claim_artifact(request: dict, *, store_root: str, endpoint=None) -> tuple[str, transport.Channel]:

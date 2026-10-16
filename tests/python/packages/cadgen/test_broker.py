@@ -1,4 +1,5 @@
-"""The broker: FIFO job slots that a waiting parent gives back, and in-flight coalescing.
+"""The broker: job slots -- work under way first, then FIFO -- that a waiting parent gives
+back, and in-flight coalescing.
 
 Driven through a real private broker over the real transport, in threads, so the lease
 semantics (a slot is a connection; closing it releases) are the ones production uses.
@@ -204,6 +205,55 @@ class Slots(PrivateBrokerFixture):
         held[1].release()
         self.assertEqual(order, ["first", "second", "third"])
         self.assertLessEqual(self.private.broker.snapshot()["peakRunning"], 2)
+
+    def test_work_under_way_goes_ahead_of_jobs_not_yet_started(self):
+        """A slot asked for to continue work under way -- an artifact job something waits on
+        -- is granted before every job not yet started, in order among themselves."""
+        held = [broker.acquire_slot(f"h{i}") for i in range(2)]
+        order: list[str] = []
+
+        def waiter(name: str, first: bool) -> None:
+            lease = broker.acquire_slot(name, first=first)
+            order.append(name)
+            lease.release()
+
+        threads = []
+        for name, first in (("new1", False), ("display1", True), ("new2", False), ("display2", True)):
+            thread = threading.Thread(target=waiter, args=(name, first))
+            thread.start()
+            threads.append(thread)
+            self._settle(lambda s, n=len(threads): s["queued"] == n)
+        # One slot freed: the grants cascade one at a time, in the broker's order.
+        held[0].release()
+        for thread in threads:
+            thread.join(timeout=10)
+        held[1].release()
+        self.assertEqual(order, ["display1", "display2", "new1", "new2"])
+
+    def test_a_yielded_slot_is_taken_back_ahead_of_jobs_not_yet_started(self):
+        other = broker.acquire_slot("other")
+        order: list[str] = []
+        with broker.held("parent"):
+            with broker.yielded():
+                child = broker.acquire_slot("child")
+                waiting = threading.Thread(target=lambda: (broker.acquire_slot("new").release(), order.append("new")))
+                waiting.start()
+                self._settle(lambda s: s["queued"] == 1)
+
+                def release_child_once_the_parent_asks() -> None:
+                    self._settle(lambda s: s["queued"] == 2)
+                    child.release()
+
+                # The child's slot comes free once the parent asks for its own back: the
+                # parent is granted it, and the job queued before it waits.
+                releaser = threading.Thread(target=release_child_once_the_parent_asks)
+                releaser.start()
+            releaser.join(timeout=10)
+            order.append("parent")
+            self.assertEqual(self.private.broker.snapshot()["queued"], 1, "the new job still waits")
+        waiting.join(timeout=10)
+        other.release()
+        self.assertEqual(order, ["parent", "new"])
 
     def test_yielded_gives_the_slot_back_for_the_wait(self):
         other = broker.acquire_slot("other")

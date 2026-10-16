@@ -1927,7 +1927,7 @@ requests remain serviceable so a parent cannot deadlock while saving its result.
 
 CPU scheduling and reuse remain independent of memory admission:
 
-1. **Job slots — one running build per core.** A FIFO counting semaphore of
+1. **Job slots — one running build per core.** A counting semaphore of
    `N = os.cpu_count()` slots per executor (`CADGEN_JOBS` overrides; daemon-wide
    for the daemon executor, per top-level build for the transient one, whose
    root process runs a private broker its workers inherit). A job takes a slot
@@ -1935,7 +1935,12 @@ CPU scheduling and reuse remain independent of memory admission:
    while it waits for a child's source result or declared outputs** and reacquires
    — queuing if it must — when that wait ends. A waiting parent holds no CPU slot, which is
    why a 1-slot pool still builds a 3-level tree. It retains its geometry and
-   memory reservation. Slots count kernel work only:
+   memory reservation. Work under way goes first: a slot asked for to continue
+   it -- an artifact job a build or a view waits on, a job taking back the slot
+   it yielded -- is granted ahead of every job not yet started, in order among
+   themselves, and the rest in order (FIFO), so a build's display job runs in
+   the slot the build yields to wait for it and the build takes it back the
+   moment the job is done. Slots count kernel work only:
    the build pipeline takes one around a model body and its emit, in the
    build's own process, and its display job takes one of its own (§3: a build
    has its parts' display data derived by the pool), which the build yields its
