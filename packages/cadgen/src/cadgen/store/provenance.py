@@ -186,13 +186,23 @@ def where(document: Path | str, ref: str) -> Where:
     if answer.kind == "occurrence":
         made_by, modified_by = lineage.get("made"), None
     else:
+        names = lineage[_PLURAL[answer.kind]]
+        if element not in names:
+            # A ref by geometry (a token copied before the element had a name) names the
+            # element of this body with that geometry, whatever names it now.
+            try:
+                ordinal = _ordinal_by_geometry(component, element, answer.kind)
+            except (OSError, ValueError, RuntimeError):
+                return answer.unknown("the body's geometry is no longer in the store; run the model again")
+            if ordinal is None or ordinal >= len(names):
+                return answer.unknown("the body has no element of that name: the ref names a build "
+                                      "this document is not")
+            if names[ordinal] is None:
+                return answer.unknown("no feature of the model's run made this element: it is named by its "
+                                      "geometry, as an element of a file read or of a shape built elsewhere is")
+            element = names[ordinal]
+            answer.ref = f"#{occurrence_id}/{element}"
         made_by = element_feature(element)
-        if made_by is None:
-            return answer.unknown("no feature of the model's run made this element: it is named by its "
-                                  "geometry, as an element of a file read or of a shape built elsewhere is")
-        if element not in lineage[_PLURAL[answer.kind]]:
-            return answer.unknown("the body has no element of that name: the ref names a build "
-                                  "this document is not")
         modified_by = (lineage.get("modified") or {}).get(element)
     answer.made = features.get(str(made_by)) if made_by is not None else None
     answer.modified = features.get(str(modified_by)) if modified_by is not None else None
@@ -204,6 +214,23 @@ def where(document: Path | str, ref: str) -> Where:
                      if name is not None and name in features]
     answer.known = True
     return answer
+
+
+def _ordinal_by_geometry(component: dict[str, Any], token: str, kind: str) -> int | None:
+    """The 0-based ordinal of the element of ``component`` (a flattened tree's entry)
+    whose geometric token is ``token``, or None: the fallback matcher, its tokens
+    measured once per body and remembered by its bytes
+    (``geometric_tokens.component_tokens``)."""
+    from cadgen._internal.component_package import decode_geometry_component
+    from cadgen._internal.geometric_tokens import TOKEN_RE, component_tokens
+    from cadgen.store.objects import read_verified_object
+
+    if not TOKEN_RE.fullmatch(token):
+        return None
+    codec, brep = str(component["codec"]), str(component["brep"])
+    shape = decode_geometry_component(component, read_verified_object(brep))
+    tokens = component_tokens(getattr(shape, "wrapped", shape), (codec, brep))[_PLURAL[kind]]
+    return tokens.index(token) if token in tokens else None
 
 
 def _resolve(parsed: Any, text: str, flat: dict[str, Any]) -> tuple[str, str]:

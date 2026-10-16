@@ -128,7 +128,9 @@ class StepScene:
     place in the document's tree, an element by its name -- its lineage, the
     feature of the model's run that made it, or, where it has none, the geometric
     token of its geometry within its body -- so a ref survives a rebuild that keeps
-    the construction. The scene does not apply kinematics/animation poses.
+    the construction. A ref in token form also finds the element of a body named
+    by lineage whose geometry it names. The scene does not apply kinematics/animation
+    poses.
     """
 
     def __init__(self, scene: LoadedStepScene):
@@ -142,6 +144,7 @@ class StepScene:
         self._occurrences: dict[str, Occurrence] = {}
         self._maps: dict[tuple[Any, str], Any] = {}
         self._names: dict[Any, dict] = {}
+        self._tokens: dict[Any, dict] = {}
         self._prototype_ids = {key: f"p{i}" for i, key in enumerate(scene.prototype_shapes, 1)}
         for node in self._walk(scene.roots):
             ref = _node_ref(node)
@@ -208,21 +211,42 @@ class StepScene:
         if occurrence._node.prototype_key is None:
             raise ValueError(f"{oid} is a group; enumerate its entities or specify a leaf occurrence")
         names = self._element_names(occurrence)[_PLURAL[kind]]
-        if parsed.element not in names:
-            raise ValueError(f"unknown {kind} reference: {ref!r} ({len(names)} {_PLURAL[kind]} in {oid})")
-        return Selection(self, oid, kind, names.index(parsed.element) + 1)
+        if parsed.element in names:
+            return Selection(self, oid, kind, names.index(parsed.element) + 1)
+        from cadgen._internal.geometric_tokens import TOKEN_RE
+
+        if TOKEN_RE.fullmatch(parsed.element):
+            # A geometric token (copied from a file read, or before its element had a name)
+            # matches an element by its geometry, whatever names it now.
+            tokens = self._element_tokens(occurrence)[_PLURAL[kind]]
+            if parsed.element in tokens:
+                return Selection(self, oid, kind, tokens.index(parsed.element) + 1)
+        raise ValueError(f"unknown {kind} reference: {ref!r} ({len(names)} {_PLURAL[kind]} in {oid})")
 
     def _element_names(self, occurrence) -> dict:
         """The names of the occurrence's prototype's elements by ordinal: its lineage's,
-        and the geometric token of each element no lineage names, measured here, once
-        per prototype, only when one has none."""
+        and the geometric token of each element no lineage names, measured once per
+        prototype, only when one has none (``geometric_tokens.element_names``)."""
         key = occurrence._node.prototype_key
         if key not in self._names:
             from cadgen._internal.geometric_tokens import element_names
 
             self._names[key] = element_names((self._loaded.prototype_identity.get(key) or (None, None))[1],
-                                             self._loaded.prototype_shapes[key])
+                                             self._loaded.prototype_shapes[key],
+                                             component=self._loaded.prototype_components.get(key))
         return self._names[key]
+
+    def _element_tokens(self, occurrence) -> dict:
+        """The geometric tokens of the occurrence's prototype's elements by ordinal: the
+        fallback matcher, measured the first time a ref asks for it and remembered by the
+        stored component's bytes (``geometric_tokens.component_tokens``)."""
+        key = occurrence._node.prototype_key
+        if key not in self._tokens:
+            from cadgen._internal.geometric_tokens import component_tokens
+
+            self._tokens[key] = component_tokens(self._loaded.prototype_shapes[key],
+                                                 self._loaded.prototype_components.get(key))
+        return self._tokens[key]
 
     def _name(self, selection: Selection) -> str:
         occurrence = self._occurrences[selection.occurrence_ref]

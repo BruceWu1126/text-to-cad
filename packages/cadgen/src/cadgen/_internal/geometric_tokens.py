@@ -7,10 +7,11 @@ a model took from a shape no feature of its run made -- is named by its
 a hash of the element's geometry within its body under one scheme string,
 ``GEOMETRIC_TOKEN_SCHEME``, and of nothing positional, so the token survives a
 STEP round trip of the body and whatever order OCCT lists the elements in. This
-is the fallback matcher, measured on demand where a part's display data is
-derived (``cadgen.store.parts``) and where ``read_scene`` resolves a token, and
-kept with the part's selector table: nothing on the way from a model's run to its
-record measures one (README law 20).
+is the fallback matcher, measured on demand -- where a part's display data is
+derived (``cadgen.store.parts``, in the build pool), and where a reader resolves
+a ref in this form against a body its lineage names (``read_scene``, ``store
+where``) -- and remembered by the component's bytes (``component_tokens``):
+nothing on the way from a model's run to its record measures one (README law 20).
 
 Rounding is relative to the body's extent: the quantum is the power of two at
 or below ``RELATIVE_QUANTUM`` times the diagonal of the body's tight box (a
@@ -44,8 +45,8 @@ import math
 import re
 from typing import Any
 
-__all__ = ["GEOMETRIC_TOKEN_SCHEME", "RELATIVE_QUANTUM", "TOKEN_RE", "element_names", "element_tokens",
-           "quantum_for_extent"]
+__all__ = ["GEOMETRIC_TOKEN_SCHEME", "RELATIVE_QUANTUM", "TOKEN_RE", "component_tokens", "element_names",
+           "element_tokens", "quantum_for_extent"]
 
 # The ONLY version on a geometric token. Bump it when the same shape must be
 # named differently (what a signature reads, or how it rounds, changes), and
@@ -262,15 +263,30 @@ def element_tokens(shape: Any, *, brep: str | None = None) -> dict[str, list[str
     }
 
 
-def element_names(lineage: dict[str, Any] | None, shape: Any, *, brep: str | None = None) -> dict[str, list[str]]:
+def component_tokens(shape: Any, component: tuple[str, str] | None = None) -> dict[str, list[str]]:
+    """:func:`element_tokens` of ``shape``, remembered by the stored component it was
+    decoded from -- ``component``, its codec and BREP object -- in the store's
+    ``index/bounds`` (``bounds.cached_tokens``), so a body is measured once wherever
+    its tokens are asked for; measured here, unremembered, when ``component`` is None."""
+    if component is None:
+        return element_tokens(shape)
+    from cadgen.store.bounds import cached_tokens
+
+    codec, brep = component
+    return cached_tokens(codec, brep, lambda: element_tokens(shape, brep=brep))
+
+
+def element_names(lineage: dict[str, Any] | None, shape: Any, *,
+                  component: tuple[str, str] | None = None) -> dict[str, list[str]]:
     """Every face's, edge's and vertex's name in ``shape`` (one unlocated component), by
     ordinal: the name ``lineage`` gives it (``component_package.read_lineage``), and the
-    geometric token of each element it does not name -- measured only when one has none."""
+    geometric token of each element it does not name -- measured only when one has none
+    (:func:`component_tokens`, remembered by ``component`` when given)."""
     plurals = ("faces", "edges", "vertices")
     names = {plural: list(lineage[plural]) if lineage is not None else None for plural in plurals}
     if all(listed is not None and None not in listed for listed in names.values()):
         return names
-    tokens = element_tokens(shape, brep=brep)
+    tokens = component_tokens(shape, component)
     for plural, listed in names.items():
         if listed is None:
             names[plural] = tokens[plural]

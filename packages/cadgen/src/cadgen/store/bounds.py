@@ -29,6 +29,12 @@ half the display chord tolerance (``store.build._same_body``) -- keyed by both
 components' codecs and BREP objects: a saved document's leaf takes its authored
 component only where they do, and a parent writing the same body again finds
 the verdict its child's save reached.
+
+Last, keyed by a component's codec and BREP object under the geometric token
+scheme, it remembers the GEOMETRIC TOKENS of its faces, edges and vertices
+(``_internal/geometric_tokens``): the fallback matcher's names, measured on
+demand -- where a part's display data is derived, or a reader resolves a ref in
+that form -- and once.
 """
 from __future__ import annotations
 
@@ -187,6 +193,23 @@ def cached_agreement(parts: tuple, measure: Callable[[], bool | None]) -> bool |
     measure that cannot say (None) is not remembered."""
     return _remember(AGREEMENT_ALGORITHM, tuple(str(part) for part in parts), measure,
                      lambda value: type(value) is bool)
+
+
+def _is_tokens(value: Any) -> bool:
+    from cadgen._internal.geometric_tokens import TOKEN_RE
+
+    return (type(value) is dict and set(value) == {"faces", "edges", "vertices"}
+            and all(type(names) is list and all(type(name) is str and TOKEN_RE.fullmatch(name) for name in names)
+                    for names in value.values()))
+
+
+def cached_tokens(codec: str, brep: str, measure: Callable[[], dict]) -> dict:
+    """The geometric tokens of a stored component's elements (``measure()``,
+    ``geometric_tokens.element_tokens``), remembered by its codec and BREP object under
+    the token scheme."""
+    from cadgen._internal.geometric_tokens import GEOMETRIC_TOKEN_SCHEME
+
+    return _remember(f"element_tokens.{GEOMETRIC_TOKEN_SCHEME}", (str(codec), str(brep)), measure, _is_tokens)
 
 
 def clear() -> None:

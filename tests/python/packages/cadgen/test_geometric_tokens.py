@@ -1,7 +1,8 @@
 """Geometric tokens (``cadgen._internal.geometric_tokens``): the names of the elements no
 construction names are functions of rounded geometry, of nothing positional, and survive the
-STEP round trip; other geometry has another name; and a body's names take its lineage's where
-it has them and a token for each element it does not name."""
+STEP round trip; other geometry has another name; a body's names take its lineage's where
+it has them and a token for each element it does not name; and a stored body's tokens are
+measured once, remembered by its bytes."""
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from cadgen._internal.geometric_tokens import (  # noqa: E402
     GEOMETRIC_TOKEN_SCHEME,
     RELATIVE_QUANTUM,
     TOKEN_RE,
+    component_tokens,
     element_names,
     element_tokens,
     quantum_for_extent,
@@ -151,6 +153,26 @@ class ElementNamesTest(unittest.TestCase):
         lineage = {"faces": [None], "edges": [], "vertices": []}
         with self.assertRaisesRegex(ValueError, "does not describe this shape"):
             element_names(lineage, _topods(Box(1, 2, 3)))
+
+
+class RememberedTokensTest(unittest.TestCase):
+    def test_a_stored_bodys_tokens_are_measured_once_by_its_bytes(self) -> None:
+        """Asked again -- by this process or another -- for the body a component's codec and
+        BREP object name, the tokens are the store's, and nothing is measured."""
+        import os
+        from unittest import mock
+
+        from cadgen.store import bounds
+
+        box = _topods(Box(10, 20, 30))
+        with tempfile.TemporaryDirectory() as store, mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": store}):
+            component = ("bintools-v4", "a" * 64)
+            measured = component_tokens(box, component)
+            self.assertEqual(measured, element_tokens(box))
+            bounds.clear()
+            with mock.patch("cadgen._internal.geometric_tokens.element_tokens",
+                            side_effect=AssertionError("measured again")):
+                self.assertEqual(component_tokens(box, component), measured)
 
 
 if __name__ == "__main__":

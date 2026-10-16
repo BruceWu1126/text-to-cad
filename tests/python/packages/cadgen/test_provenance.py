@@ -89,6 +89,12 @@ REFS = """
             "edge": list(leaf.entities("edge"))[0].ref,
             "vertex": list(leaf.entities("vertex"))[0].ref,
         }
+        # The first cylinder's geometric token (the fallback matcher's name for it), and
+        # what the scene resolves that token to.
+        first = next(i for i, f in enumerate(faces) if f.shape().geom_type.name == "CYLINDER")
+        token = scene._element_tokens(leaf)["faces"][first]
+        found[leaf.label]["cylinderToken"] = token
+        found[leaf.label]["byGeometry"] = scene.resolve(leaf.ref + "/" + token).ref
     print(json.dumps(found))
 """
 
@@ -273,6 +279,23 @@ class StoreWhere(ProvenanceCase):
         code, by_label = self._where("#pin_right/" + left["planes"][0].rsplit("/", 1)[1])
         self.assertEqual(0, code, by_label)
         self.assertEqual("Solid.make_cylinder", by_label["made"]["op"])
+
+    def test_a_ref_by_geometry_finds_the_element_its_geometry_names(self) -> None:
+        """A face named by its geometric token -- a ref copied before it had a name --
+        resolves to the face with that geometry, in a scene and in ``store where``, which
+        answers by the face's name now."""
+        bar = self.refs["bar"]
+        self.assertRegex(bar["cylinderToken"], r"^f:[0-9a-f]{12}$")
+        self.assertEqual(bar["byGeometry"], bar["cylinders"][0])
+        code, by_geometry = self._where("#bar/" + bar["cylinderToken"])
+        self.assertEqual(0, code, by_geometry)
+        code, by_name = self._where(bar["cylinders"][0])
+        self.assertEqual(0, code, by_name)
+        self.assertEqual((by_geometry["ref"], by_geometry["made"], by_geometry["modified"]),
+                         (by_name["ref"], by_name["made"], by_name["modified"]))
+        code, nothing = self._where("#bar/f:000000000000")
+        self.assertEqual(1, code)
+        self.assertIn("no element of that name", nothing["reason"])
 
     def test_a_vertex_and_what_it_does_not_know(self) -> None:
         code, vertex = self._where(self.refs["bar"]["vertex"])

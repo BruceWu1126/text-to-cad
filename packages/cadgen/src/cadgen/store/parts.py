@@ -396,13 +396,13 @@ def element_names(entry: dict, topods: Any) -> dict[str, list[str]]:
     """Every face's, edge's and vertex's name in a decode of the component ``entry``
     describes, by ordinal: its lineage's (the object the entry names, read verified),
     and the geometric token of each element no lineage names (``geometric_tokens``,
-    measured once per component per process with the topology facts:
-    ``topology_extract.component_metrics``)."""
+    measured from the topology facts' metrics and remembered by the component's bytes:
+    ``geometric_tokens.component_tokens``)."""
     from cadgen._internal import geometric_tokens
     from cadgen._internal.component_package import read_lineage
 
     lineage = read_lineage(read_verified_object(entry["lineage"])) if entry.get("lineage") else None
-    return geometric_tokens.element_names(lineage, topods, brep=entry["brep"])
+    return geometric_tokens.element_names(lineage, topods, component=(entry["codec"], entry["brep"]))
 
 
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
