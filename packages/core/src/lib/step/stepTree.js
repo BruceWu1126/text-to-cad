@@ -148,14 +148,14 @@ function topologyReferenceSelector(reference) {
   return normalizeString(reference?.displaySelector || reference?.normalizedSelector || reference?.id);
 }
 
-// An element ref is `<occurrence token>/<element token>`: the element's token names its
-// geometry, the owner the occurrence that places it.
-function topologySelectorToken(selector) {
+// An element ref is `<occurrence token>/<element name>`: the element's name says what made
+// it, the owner the occurrence that places it.
+function topologySelectorElement(selector) {
   const normalizedSelector = normalizeString(selector);
   if (!normalizedSelector) {
     return "";
   }
-  return splitElementRef(normalizedSelector)?.token || normalizedSelector;
+  return splitElementRef(normalizedSelector)?.element || normalizedSelector;
 }
 
 function topologyOccurrenceIdFromSelector(selector) {
@@ -190,7 +190,7 @@ function topologyReferenceName(reference) {
 function topologyReferenceLabel(reference) {
   const selectorType = normalizeString(reference?.selectorType);
   const selector = topologyReferenceSelector(reference);
-  const selectorToken = topologySelectorToken(selector);
+  const element = topologySelectorElement(selector);
   const name = topologyReferenceName(reference);
   const summary = normalizeString(reference?.summary || reference?.shortSummary);
 
@@ -198,10 +198,10 @@ function topologyReferenceLabel(reference) {
     return summary || name || selector || "Occurrence";
   }
   if (selectorType === "face") {
-    return selectorToken ? `Face ${selectorToken}` : "Face";
+    return element ? `Face ${element}` : "Face";
   }
   if (selectorType === "edge") {
-    return selectorToken ? `Edge ${selectorToken}` : "Edge";
+    return element ? `Edge ${element}` : "Edge";
   }
   return summary || selector || "Topology";
 }

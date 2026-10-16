@@ -1,5 +1,5 @@
 {
-  "comment": "Shared contract for the CAD selector grammar. The Python parser (cadgen.cad_ref_syntax) and the JS parser (@text-to-cad/core/lib/cadRefs.js) are separate implementations of the same language; this fixture is the only thing that keeps them honest. Every case must hold in BOTH. A ref names geometry: an occurrence token (`o:` + 12 hex), an element token (`f:`/`e:`/`v:` + 12 hex) under an occurrence token or a part label, joined by `/`. Cases tagged phase 1 cover label selectors.",
+  "comment": "Shared contract for the CAD selector grammar. The Python parser (cadgen.cad_ref_syntax) and the JS parser (@text-to-cad/core/lib/cadRefs.js) are separate implementations of the same language; this fixture is the only thing that keeps them honest. Every case must hold in BOTH. A ref names geometry: an occurrence token (`o:` + 12 hex) and an element name under an occurrence token or a part label, joined by `/`. An element name is its kind (`f:`/`e:`/`v:`) and its lineage -- a feature (a label, or `function.operationN`), the element's number among what that feature made and, for a piece of a split element, the piece's number -- or, for an element no construction names, its geometric token (12 hex). Cases tagged phase 1 cover label selectors.",
   "selectorCases": [
     {
       "phase": 0,
@@ -7,7 +7,7 @@
       "selector": "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "o:4b1f9e2a7c03",
-      "token": "f:9d2e8c1b5a70",
+      "element": "f:9d2e8c1b5a70",
       "canonical": "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
     },
     {
@@ -16,7 +16,7 @@
       "selector": "o:0a9e8d7c6b5f/e:12ab34cd56ef",
       "selectorType": "edge",
       "occurrenceId": "o:0a9e8d7c6b5f",
-      "token": "e:12ab34cd56ef",
+      "element": "e:12ab34cd56ef",
       "canonical": "o:0a9e8d7c6b5f/e:12ab34cd56ef"
     },
     {
@@ -25,8 +25,35 @@
       "selector": "o:0a9e8d7c6b5f/v:fedcba987654",
       "selectorType": "vertex",
       "occurrenceId": "o:0a9e8d7c6b5f",
-      "token": "v:fedcba987654",
+      "element": "v:fedcba987654",
       "canonical": "o:0a9e8d7c6b5f/v:fedcba987654"
+    },
+    {
+      "phase": 0,
+      "why": "an element named by its lineage: the feature that made it (function.operationN) and its number there",
+      "selector": "o:4b1f9e2a7c03/f:dial.extrude1.3",
+      "selectorType": "face",
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "element": "f:dial.extrude1.3",
+      "canonical": "o:4b1f9e2a7c03/f:dial.extrude1.3"
+    },
+    {
+      "phase": 0,
+      "why": "a piece of an element a later feature split: its number among the pieces after a further dot",
+      "selector": "o:4b1f9e2a7c03/e:dial.extrude1.3.2",
+      "selectorType": "edge",
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "element": "e:dial.extrude1.3.2",
+      "canonical": "o:4b1f9e2a7c03/e:dial.extrude1.3.2"
+    },
+    {
+      "phase": 0,
+      "why": "a feature the author labelled goes by its label",
+      "selector": "o:4b1f9e2a7c03/v:lid.2",
+      "selectorType": "vertex",
+      "occurrenceId": "o:4b1f9e2a7c03",
+      "element": "v:lid.2",
+      "canonical": "o:4b1f9e2a7c03/v:lid.2"
     },
     {
       "phase": 0,
@@ -34,7 +61,7 @@
       "selector": "o:4b1f9e2a7c03",
       "selectorType": "occurrence",
       "occurrenceId": "o:4b1f9e2a7c03",
-      "token": "",
+      "element": "",
       "canonical": "o:4b1f9e2a7c03"
     },
     {
@@ -43,7 +70,7 @@
       "selector": "f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "",
-      "token": "f:9d2e8c1b5a70",
+      "element": "f:9d2e8c1b5a70",
       "canonical": "f:9d2e8c1b5a70"
     },
     {
@@ -51,7 +78,7 @@
       "selector": "e:12ab34cd56ef",
       "selectorType": "edge",
       "occurrenceId": "",
-      "token": "e:12ab34cd56ef",
+      "element": "e:12ab34cd56ef",
       "canonical": "e:12ab34cd56ef"
     },
     {
@@ -59,8 +86,17 @@
       "selector": "v:fedcba987654",
       "selectorType": "vertex",
       "occurrenceId": "",
-      "token": "v:fedcba987654",
+      "element": "v:fedcba987654",
       "canonical": "v:fedcba987654"
+    },
+    {
+      "phase": 0,
+      "why": "a bare element name by lineage (a document with one leaf)",
+      "selector": "f:_bored_plate.cut12.4",
+      "selectorType": "face",
+      "occurrenceId": "",
+      "element": "f:_bored_plate.cut12.4",
+      "canonical": "f:_bored_plate.cut12.4"
     },
     {
       "phase": 0,
@@ -68,7 +104,7 @@
       "selector": "#o:4b1f9e2a7c03/f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "o:4b1f9e2a7c03",
-      "token": "f:9d2e8c1b5a70",
+      "element": "f:9d2e8c1b5a70",
       "canonical": "o:4b1f9e2a7c03/f:9d2e8c1b5a70"
     },
     {
@@ -77,7 +113,7 @@
       "selector": "o:4B1F9E2A7C03",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "o:4B1F9E2A7C03",
       "canonical": "o:4B1F9E2A7C03"
     },
@@ -87,8 +123,53 @@
       "selector": "o:4b1f9e2a7c03/s:9d2e8c1b5a70",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "o:4b1f9e2a7c03/s:9d2e8c1b5a70"
+    },
+    {
+      "phase": 0,
+      "why": "a feature alone is no element: a name ends in the element's number",
+      "selector": "o:4b1f9e2a7c03/f:dial.extrude1",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "element": "",
+      "canonical": "o:4b1f9e2a7c03/f:dial.extrude1"
+    },
+    {
+      "phase": 0,
+      "why": "numbers count from one",
+      "selector": "o:4b1f9e2a7c03/f:dial.extrude1.0",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "element": "",
+      "canonical": "o:4b1f9e2a7c03/f:dial.extrude1.0"
+    },
+    {
+      "phase": 0,
+      "why": "a piece of a piece is no name: a split piece is numbered once",
+      "selector": "o:4b1f9e2a7c03/f:dial.extrude1.3.2.1",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "element": "",
+      "canonical": "o:4b1f9e2a7c03/f:dial.extrude1.3.2.1"
+    },
+    {
+      "phase": 0,
+      "why": "a feature is a label or function.operation, never three segments",
+      "selector": "o:4b1f9e2a7c03/f:a.b.c.1",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "element": "",
+      "canonical": "o:4b1f9e2a7c03/f:a.b.c.1"
+    },
+    {
+      "phase": 0,
+      "why": "a geometric token holds no dot, and a segment starts with a letter",
+      "selector": "o:4b1f9e2a7c03/f:9d2e8c1b5a70.3",
+      "selectorType": "opaque",
+      "occurrenceId": "",
+      "element": "",
+      "canonical": "o:4b1f9e2a7c03/f:9d2e8c1b5a70.3"
     },
     {
       "phase": 0,
@@ -96,7 +177,7 @@
       "selector": "o1.2.f7",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "o1.2.f7"
     },
     {
@@ -105,7 +186,7 @@
       "selector": "f7",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "f7",
       "canonical": "f7"
     },
@@ -115,7 +196,7 @@
       "selector": "m1",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "m1"
     },
     {
@@ -124,7 +205,7 @@
       "selector": "not a selector!",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "not a selector!"
     },
     {
@@ -133,7 +214,7 @@
       "selector": "eye_shank",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "eye_shank",
       "canonical": "eye_shank"
     },
@@ -143,9 +224,19 @@
       "selector": "servo_end_plate/f:9d2e8c1b5a70",
       "selectorType": "face",
       "occurrenceId": "",
-      "token": "f:9d2e8c1b5a70",
+      "element": "f:9d2e8c1b5a70",
       "label": "servo_end_plate",
       "canonical": "servo_end_plate/f:9d2e8c1b5a70"
+    },
+    {
+      "phase": 1,
+      "why": "label + lineage name",
+      "selector": "servo_end_plate/f:servo_end_plate.fillet2.5",
+      "selectorType": "face",
+      "occurrenceId": "",
+      "element": "f:servo_end_plate.fillet2.5",
+      "label": "servo_end_plate",
+      "canonical": "servo_end_plate/f:servo_end_plate.fillet2.5"
     },
     {
       "phase": 1,
@@ -153,7 +244,7 @@
       "selector": "piston_rod:chrome/e:12ab34cd56ef",
       "selectorType": "edge",
       "occurrenceId": "",
-      "token": "e:12ab34cd56ef",
+      "element": "e:12ab34cd56ef",
       "label": "piston_rod:chrome",
       "canonical": "piston_rod:chrome/e:12ab34cd56ef"
     },
@@ -163,7 +254,7 @@
       "selector": "cast_rim:5spoke_2",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "cast_rim:5spoke_2",
       "canonical": "cast_rim:5spoke_2"
     },
@@ -173,7 +264,7 @@
       "selector": "5spoke",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "5spoke"
     },
     {
@@ -182,7 +273,7 @@
       "selector": "outer_ring",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "outer_ring",
       "canonical": "outer_ring"
     },
@@ -192,7 +283,7 @@
       "selector": "o:",
       "selectorType": "label",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "label": "o:",
       "canonical": "o:"
     },
@@ -202,7 +293,7 @@
       "selector": "o:4b1f9e2a7c03#f:9d2e8c1b5a70",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "o:4b1f9e2a7c03#f:9d2e8c1b5a70"
     },
     {
@@ -211,7 +302,7 @@
       "selector": "o:4b1f9e2a7c03#",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "o:4b1f9e2a7c03#"
     },
     {
@@ -220,7 +311,7 @@
       "selector": "eye#shank",
       "selectorType": "opaque",
       "occurrenceId": "",
-      "token": "",
+      "element": "",
       "canonical": "eye#shank"
     }
   ],
@@ -233,6 +324,16 @@
         "o:4b1f9e2a7c03",
         "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
         "o:4b1f9e2a7c03/e:12ab34cd56ef"
+      ]
+    },
+    {
+      "phase": 0,
+      "why": "names by lineage inherit as tokens do",
+      "input": "o:4b1f9e2a7c03,f:dial.extrude1.3,e:dial.fillet1.2.1",
+      "expected": [
+        "o:4b1f9e2a7c03",
+        "o:4b1f9e2a7c03/f:dial.extrude1.3",
+        "o:4b1f9e2a7c03/e:dial.fillet1.2.1"
       ]
     },
     {
@@ -328,6 +429,16 @@
         "o:4b1f9e2a7c03",
         "o:4b1f9e2a7c03/f:9d2e8c1b5a70",
         "o:4b1f9e2a7c03/e:12ab34cd56ef"
+      ]
+    },
+    {
+      "phase": 2,
+      "why": "names by lineage behind a prefix",
+      "text": "plate.step#o:4b1f9e2a7c03/f:plate.cut1.2,e:plate.cut1.7",
+      "cadPath": "plate.step",
+      "selectors": [
+        "o:4b1f9e2a7c03/f:plate.cut1.2",
+        "o:4b1f9e2a7c03/e:plate.cut1.7"
       ]
     },
     {

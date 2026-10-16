@@ -1,16 +1,17 @@
 // A component's selector table, joined to its stored mesh.
 //
-// cadgen mints every selector fact once, from the exact BREP, into a table it
+// cadgen derives every selector fact once, from the exact BREP, into a table it
 // stores in the part's record beside its display mesh (cadgen/_internal/selector_table.py,
 // cadgen/store/parts.py) and serves by part (`/__tess_cache/<part>.selectors.json`):
-// each element's token (`f:`, `e:`, `v:` + 12 hex, a hash of its rounded geometry,
-// cadgen/_internal/geometry_fingerprint.py) that a ref ends in, exact metrics and
+// each element's name that a ref ends in (`f:`, `e:`, `v:` and its lineage, the
+// feature that made it and its number there -- `f:dial.extrude1.3` -- or, where no
+// construction names it, its geometric token, 12 hex), exact metrics and
 // parameters, plane normals, referenceable flags and relevance, face-edge and
 // edge-vertex adjacency, each edge's chain and each face's tangent group. The page
 // joins those rows to the mesh it draws -- by ORDINAL, which the table and the
 // mesh's face and edge tables share -- so a face's triangle range and an edge's
 // segment range are its range on screen, and composes a ref as
-// `occurrenceId + "/" + token` (selectors/runtime.js). Nothing here decides a
+// `occurrenceId + "/" + name` (selectors/runtime.js). Nothing here decides a
 // fact: a row the table lacks is a row the page does not have.
 
 import { meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
@@ -18,9 +19,10 @@ import { meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
 // The table's wire schema (cadgen/_internal/selector_table.py
 // SELECTOR_TABLE_SCHEMA_VERSION): a table of another is refused, never read
 // halfway. tests/python/global/test_artifact_version_policy.py holds both equal.
-// 2: element rows lead with their token, and carry no id, localId, occurrenceId
-// or shapeId column (an occurrence's rows are the part's, placed by the page).
-export const SELECTOR_TABLE_SCHEMA_VERSION = 2;
+// 2: element rows carry no id, localId, occurrenceId or shapeId column (an
+// occurrence's rows are the part's, placed by the page). 3: element rows lead with
+// their name.
+export const SELECTOR_TABLE_SCHEMA_VERSION = 3;
 
 const TABLES = Object.freeze({
   occurrences: "occurrenceColumns", shapes: "shapeColumns", faces: "faceColumns",

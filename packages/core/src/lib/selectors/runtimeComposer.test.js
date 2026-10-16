@@ -21,22 +21,23 @@ function random(seed) {
   };
 }
 
-// The selector table's columns (cadgen selector_table.py, schema 2) as `joinSelectorTable` extends
+// The selector table's columns (cadgen selector_table.py, schema 3) as `joinSelectorTable` extends
 // them with each face's triangle range and each edge's segment range. Element rows lead with
-// their token; `shape` is the owning solid's ordinal; no row names an occurrence.
+// their name; `shape` is the owning solid's ordinal; no row names an occurrence.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
 const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"];
-const FACE_COLUMNS = ["token", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance",
+const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance",
   "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
-const EDGE_COLUMNS = ["token", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart",
+const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart",
   "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain",
   "segmentStart", "segmentCount"];
 const FACE_EDGE_COUNT = FACE_COLUMNS.indexOf("edgeCount");
 const FACE_TRIANGLE_START = FACE_COLUMNS.indexOf("triangleStart");
 const EDGE_FACE_COUNT = EDGE_COLUMNS.indexOf("faceCount");
 
-// A token of the grammar's shape (`f:` + 12 hex) for the n-th element of a synthetic part.
-const token = (kind, n) => `${kind}:${n.toString(16).padStart(12, "0")}`;
+// A name of the grammar's shape for the n-th element of a synthetic part: the n-th its one
+// feature made.
+const elementName = (kind, n) => `${kind}:part.extrude1.${n}`;
 
 // `faces` faces over `shapes` solids; each face bounded by a loop of edges that share their
 // end vertices with the next edge BY VALUE (sometimes through a duplicated vertex index), plus a
@@ -62,7 +63,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       edgeIndices.push(vertexIndices[i], vertexIndices[i + 1]);
       edgeIds.push(row);
     }
-    edges.push([token("e", row + 1), row + 1, shape, curveType, 1 + rand(), [0, 0, 0],
+    edges.push([elementName("e", row + 1), row + 1, shape, curveType, 1 + rand(), [0, 0, 0],
       { min: [-1, -1, -1], max: [1, 1, 1] }, 0, 2, 0, 0, 0, 0, params, 2, "c0",
       rand() * 180, rand() < 0.5 ? "feature" : "tangent", row + 1, segmentStart, edgeIds.length - segmentStart]);
     return row;
@@ -116,7 +117,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       // Vertices one coordinate apart are different vertices.
       loop.push(pushEdge(shape, [b, [b[0], b[1], b[2] + 1.5], [b[0] + 0.5, b[1], b[2] + 1.5], a]));
     }
-    faces.push([token("f", f + 1), f + 1, shape, f % 2 ? "plane" : "cylinder", 10 * rand(), [coord(), coord(), coord()],
+    faces.push([elementName("f", f + 1), f + 1, shape, f % 2 ? "plane" : "cylinder", 10 * rand(), [coord(), coord(), coord()],
       [0, 0, 1], { min: [-100, -100, -100], max: [100, 100, 100] }, 0, loop.length, 0, 0,
       f % 2 ? { origin: [coord(), coord(), coord()], normal: [0, 0, 1] } : { axis: [0, 1, 0], center: [coord(), coord(), coord()], radius: 3 },
       f + 1, 0, 0]);
@@ -199,7 +200,7 @@ function placement(index) {
 
 // The occurrence the page places the n-th part by: a token of the tree's shape (`o:` + 12 hex).
 function occurrenceOptions(index, { copyCadPath = "cars/hypercar.step", single = false } = {}) {
-  const id = token("o", 0xa0 + index);
+  const id = `o:${(0xa0 + index).toString(16).padStart(12, "0")}`;
   return { copyCadPath, partId: single ? "" : id, transform: placement(index), occurrenceId: id };
 }
 

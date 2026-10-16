@@ -6,7 +6,7 @@ import test from "node:test";
 import {
   buildCadRefToken,
   elementRef,
-  isElementToken,
+  isElementName,
   isNativeCadSelector,
   isOccurrenceToken,
   normalizeCadRefSelectors,
@@ -28,6 +28,8 @@ const O2 = "o:0a9e8d7c6b5f";
 const F = "f:9d2e8c1b5a70";
 const E = "e:12ab34cd56ef";
 const V = "v:fedcba987654";
+// Names by lineage: the feature that made the element, its number there, and a split piece's.
+const NAMED = ["f:dial.extrude1.3", "e:dial.extrude1.3.2", "v:lid.2"];
 
 test("every selector case parses as the shared fixture says", () => {
   for (const testCase of FIXTURE.selectorCases) {
@@ -35,7 +37,7 @@ test("every selector case parses as the shared fixture says", () => {
     assert.ok(parsed, `${testCase.selector} should parse`);
     assert.equal(parsed.selectorType, testCase.selectorType, testCase.selector);
     assert.equal(parsed.occurrenceId, testCase.occurrenceId, testCase.selector);
-    assert.equal(parsed.token ?? "", testCase.token, testCase.selector);
+    assert.equal(parsed.element ?? "", testCase.element, testCase.selector);
     assert.equal(parsed.canonical, testCase.canonical, testCase.selector);
     assert.equal(parsed.label ?? "", testCase.label ?? "", testCase.selector);
   }
@@ -51,9 +53,9 @@ test("comma lists inherit as the shared fixture says", () => {
   }
 });
 
-// The parse ordering: a token form is tried before the label form, so a token is never a label.
-test("token selectors never take the label branch", () => {
-  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, "m1", "m17"]) {
+// The parse ordering: token and name forms are tried before the label form, so neither is a label.
+test("token and name selectors never take the label branch", () => {
+  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, ...NAMED, ...NAMED.map(name => `${O2}/${name}`), "m1", "m17"]) {
     const parsed = parseCadRefSelector(selector);
     assert.equal(parsed.label ?? "", "", `${selector} must not be read as a label`);
   }
@@ -65,21 +67,24 @@ test("mates stay opaque even though they match the label shape", () => {
   }
 });
 
-test("isNativeCadSelector accepts every token form and rejects labels and the retired grammar", () => {
-  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, "m1"]) {
+test("isNativeCadSelector accepts every token and name form and rejects labels and the retired grammar", () => {
+  for (const selector of [O1, `${O1}/${F}`, `${O1}/${E}`, `${O1}/${V}`, F, E, V, ...NAMED, `${O1}/${NAMED[0]}`, "m1", "M3"]) {
     assert.ok(isNativeCadSelector(selector), selector);
   }
-  for (const selector of ["eye_shank", `servo_end_plate/${F}`, "", "not a selector!", "o1", "o1.2", "o1.2.f7", "f45", "s2"]) {
+  for (const selector of ["eye_shank", `servo_end_plate/${F}`, `bracket/${NAMED[0]}`, "", "not a selector!", "o1", "o1.2",
+    "o1.2.f7", "f45", "s2", "o:4B1F9E2A7C03", "f:dial.extrude1", "f:dial.extrude1.3.2.1"]) {
     assert.ok(!isNativeCadSelector(selector), selector);
   }
   assert.ok(isOccurrenceToken(O1) && !isOccurrenceToken(F) && !isOccurrenceToken("o1.2"));
-  assert.ok(isElementToken(F) && isElementToken(E) && isElementToken(V) && !isElementToken(O1) && !isElementToken("f7"));
+  for (const name of [F, E, V, ...NAMED]) assert.ok(isElementName(name), name);
+  for (const value of [O1, "f7", "f:dial.extrude1", "f:9d2e8c1b5a70.3", "x:dial.extrude1.3"]) assert.ok(!isElementName(value), value);
 });
 
 test("an element ref is composed and split by one rule", () => {
   assert.equal(elementRef(O1, F), `${O1}/${F}`);
-  assert.deepEqual(splitElementRef(`${O1}/${F}`), { owner: O1, token: F });
-  assert.deepEqual(splitElementRef(`#base_plate/${E}`), { owner: "base_plate", token: E });
+  assert.deepEqual(splitElementRef(`${O1}/${F}`), { owner: O1, element: F });
+  assert.deepEqual(splitElementRef(`#base_plate/${E}`), { owner: "base_plate", element: E });
+  assert.deepEqual(splitElementRef(`${O1}/${NAMED[1]}`), { owner: O1, element: NAMED[1] });
   assert.equal(splitElementRef(O1), null);
   assert.equal(splitElementRef(`${O1}/s:9d2e8c1b5a70`), null);
   assert.equal(splitElementRef("o1.2.f7"), null);

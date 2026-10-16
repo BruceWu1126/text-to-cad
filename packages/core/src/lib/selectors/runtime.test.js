@@ -7,31 +7,32 @@ import {
   composeSelectorRuntimes
 } from "./runtime.js";
 
-// Tokens as cadgen mints them: an occurrence's from its place in the tree, an element's from its
-// geometry (`f:`, `e:` + 12 hex). The values here are arbitrary; only their shape is the grammar's.
+// Names as cadgen gives them: an occurrence's token from its place in the tree, an element's name
+// from its lineage (the feature that made it and its number there) or, where it has none, its
+// geometric token (`f:` + 12 hex). The values here are arbitrary; only their shape is the grammar's.
 const A = "o:3f2a9c1d7e5b";
 const B = "o:a1b2c3d4e5f6";
-const F1 = "f:9d2e8c1b5a70";
-const F2 = "f:0c7b6a594837";
-const F7 = "f:77aa88bb99cc";
-const E1 = "e:4b1f9e2a7c03";
-const E4 = "e:5e6d7c8b9a01";
+const F1 = "f:plate.extrude1.1";
+const F2 = "f:plate.extrude1.2";
+const F7 = "f:plate.fillet1.3.2";
+const E1 = "e:plate.extrude1.1";
+const E4 = "e:9d2e8c1b5a70";
 
-// The selector table's wire columns (cadgen selector_table.py, schema 2) as `joinSelectorTable`
+// The selector table's wire columns (cadgen selector_table.py, schema 3) as `joinSelectorTable`
 // extends them: a face gains its triangle range, an edge its segment range.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
 const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"];
-const FACE_COLUMNS = ["token", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
-const EDGE_COLUMNS = ["token", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"];
+const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
+const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"];
 const TABLES = { occurrenceColumns: OCCURRENCE_COLUMNS, shapeColumns: SHAPE_COLUMNS, faceColumns: FACE_COLUMNS, edgeColumns: EDGE_COLUMNS };
 
 const box = (x0, x1, y1) => ({ min: [x0, 0, 0], max: [x1, y1, 0] });
 const occurrenceRow = (bbox, shapes, faces, edges) => [null, bbox, 0, shapes, 0, faces, 0, edges, 0, 0];
 const shapeRow = (ordinal, bbox, center, volume, faces, edges) => [ordinal, "solid", bbox, center, 1, volume, 0, faces, 0, edges];
-const faceRow = (token, ordinal, shape, { center = [0, 0, 0], bbox = null, edges = 0, tangentGroup = 1, triangles = [0, 0] } = {}) =>
-  [token, ordinal, shape, "plane", 1, center, [0, 0, 1], bbox, 0, edges, 0, 0, {}, tangentGroup, ...triangles];
-const edgeRow = (token, ordinal, shape, { center = [0, 0, 0], bbox = null, faces = 0, chain = null, visibilityClass = "feature", segments = [0, 0] } = {}) =>
-  [token, ordinal, shape, "line", 1, center, bbox, 0, faces, 0, 0, 0, 0, {}, faces, "c0", 90, visibilityClass, chain, ...segments];
+const faceRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, edges = 0, tangentGroup = 1, triangles = [0, 0] } = {}) =>
+  [name, ordinal, shape, "plane", 1, center, [0, 0, 1], bbox, 0, edges, 0, 0, {}, tangentGroup, ...triangles];
+const edgeRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, faces = 0, chain = null, visibilityClass = "feature", segments = [0, 0] } = {}) =>
+  [name, ordinal, shape, "line", 1, center, bbox, 0, faces, 0, 0, 0, 0, {}, faces, "c0", 90, visibilityClass, chain, ...segments];
 
 function fakeComponentRuntime(occurrenceId) {
   // A minimal per-component selector runtime: 2 faces, 1 edge, one occurrence, with the face
@@ -43,8 +44,8 @@ function fakeComponentRuntime(occurrenceId) {
   return {
     occurrences: [{ occurrenceId }],
     shapes: [],
-    faces: [{ token: F1 }, { token: F2 }],
-    edges: [{ token: E1 }],
+    faces: [{ name: F1 }, { name: F2 }],
+    edges: [{ name: E1 }],
     bbox: { min: [0, 0, 0], max: [1, 1, 1] },
     references: [
       ref(occurrenceId, "occurrence", 0),
@@ -101,10 +102,10 @@ test("composeSelectorRuntimes merges per-component runtimes with disjoint row/pr
   assert.equal(refBySel(`${B}/${F1}`).pickData.triangleStart, 1);
 });
 
-test("buildSelectorRuntime composes the placing occurrence with each row's own token", () => {
-  // The tokens are cadgen's (the selector table's `token` column), minted from each element's
+test("buildSelectorRuntime composes the placing occurrence with each row's own name", () => {
+  // The names are cadgen's (the selector table's `name` column), from each element's lineage or
   // geometry; the ordinal is the mesh join only. A composed ref says what cadgen says, never
-  // `f${rowIndex + 1}`, and a row without a token has no ref.
+  // `f${rowIndex + 1}`, and a row without a name has no ref.
   const bundle = {
     manifest: {
       cadRef: "parts/source",
@@ -124,14 +125,14 @@ test("buildSelectorRuntime composes the placing occurrence with each row's own t
   const runtime = buildSelectorRuntime(bundle, { copyCadPath: "parts/root", partId: A, occurrenceId: A });
   const faces = runtime.references.filter((reference) => reference.selectorType === "face");
 
-  assert.deepEqual(faces.map((reference) => reference.displaySelector), [`${A}/${F1}`, `${A}/${F7}`], "a row without a token has no ref");
+  assert.deepEqual(faces.map((reference) => reference.displaySelector), [`${A}/${F1}`, `${A}/${F7}`], "a row without a name has no ref");
   assert.deepEqual(faces.map((reference) => reference.pickData.tangentGroup), [1, 3]);
   assert.deepEqual(faces.map((reference) => reference.pickData.ordinal), [1, 7]);
   assert.equal(faces[0].id, `topology|${A}|face|${A}/${F1}`);
   const [edge] = runtime.references.filter((reference) => reference.selectorType === "edge");
   assert.equal(edge.displaySelector, `${A}/${E4}`);
   assert.equal(edge.pickData.chain, 2);
-  assert.equal(edge.pickData.token, E4);
+  assert.equal(edge.pickData.element, E4);
   // copyCadPath reaches the copy text, so a copied ref says which file it came from. The viewer
   // supplies the name its host gives the file (its path under the host's root).
   assert.equal(faces[1].copyText, `parts/root#${A}/${F7}`);
@@ -141,9 +142,9 @@ test("buildSelectorRuntime composes the placing occurrence with each row's own t
   assert.equal(occurrence.occurrenceId, "", "an occurrence reference IS the occurrence");
 });
 
-test("a part placed by no occurrence composes the bare element token", () => {
-  // A document with one leaf resolves a bare token (cadgen assembly_lookup does the same), so a
-  // bundle built for no occurrence names its elements by token alone.
+test("a part placed by no occurrence composes the bare element name", () => {
+  // A document with one leaf resolves a bare name (cadgen assembly_lookup does the same), so a
+  // bundle built for no occurrence names its elements by name alone.
   const bundle = {
     manifest: {
       cadRef: "parts/alone",
@@ -159,7 +160,7 @@ test("a part placed by no occurrence composes the bare element token", () => {
   assert.deepEqual(
     runtime.references.map((reference) => [reference.selectorType, reference.displaySelector]),
     [["face", F1], ["edge", E1]],
-    "an occurrence nobody named is no reference; its elements are bare tokens"
+    "an occurrence nobody named is no reference; its elements are bare names"
   );
   assert.equal(runtime.references[0].copyText, `parts/alone#${F1}`);
 });
@@ -300,8 +301,8 @@ test("buildTransformedSelectorRuntime applies part transforms to rows and proxy 
 test("edge tangency, adjacency and connected ids survive placing into separate assembly occurrences", () => {
   const bundle = { manifest: { tables: {
     occurrenceColumns: ["bbox"],
-    faceColumns: ["token", "ordinal", "shape", "tangentGroup"],
-    edgeColumns: ["token", "ordinal", "shape", "faceStart", "faceCount", "visibilityClass", "chain"],
+    faceColumns: ["name", "ordinal", "shape", "tangentGroup"],
+    edgeColumns: ["name", "ordinal", "shape", "faceStart", "faceCount", "visibilityClass", "chain"],
   }, occurrences: [[null]], faces: [[F1, 1, 1, 1], [F2, 2, 1, 1]],
   edges: [[E1, 1, 1, 0, 2, "tangent", 4]], relations: { edgeFaceRows: [0, 1] } }, buffers: {} };
   const runtimes = [A, B].map((id) => buildSelectorRuntime(bundle, { partId: id, occurrenceId: id }));
@@ -310,7 +311,7 @@ test("edge tangency, adjacency and connected ids survive placing into separate a
   assert.deepEqual(edges.map((ref) => ref.pickData.visibilityClass), ["tangent", "tangent"]);
   assert.deepEqual(edges.map((ref) => ref.pickData.adjacentSelectors), [[`${A}/${F1}`, `${A}/${F2}`], [`${B}/${F1}`, `${B}/${F2}`]]);
   // cadgen's connected sets ride through composition and posing unchanged: they are local to the
-  // component, like the tokens.
+  // component, like the names.
   assert.deepEqual(edges.map((ref) => [ref.occurrenceId, ref.pickData.chain]), [[A, 4], [B, 4]]);
   const posed = buildTransformedSelectorRuntime(composed, { [B]: [1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30, 0, 0, 0, 1] });
   assert.deepEqual(posed.references.filter((ref) => ref.selectorType === "face").map((ref) => ref.pickData.tangentGroup), [1, 1, 1, 1]);

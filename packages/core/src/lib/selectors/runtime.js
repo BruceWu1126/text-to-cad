@@ -222,11 +222,11 @@ function referenceSummary(selectorType, row) {
 }
 
 // A ref is the one composition rule cadgen applies (cadRefs.js, cadgen assembly_lookup):
-// the occurrence that places this part, then the row's own element token --
-// `o:4b1f9e2a7c03/f:9d2e8c1b5a70`. The table carries the token (cadgen minted it from the
-// element's geometry); the page carries the occurrence. A part placed by no occurrence (a
-// bundle built with no `occurrenceId`) composes the bare token, which a document with one
-// leaf resolves. A row without a token has no selector here.
+// the occurrence that places this part, then the row's own element name --
+// `o:4b1f9e2a7c03/f:dial.extrude1.3`. The table carries the name (cadgen's, from the
+// element's lineage); the page carries the occurrence. A part placed by no occurrence (a
+// bundle built with no `occurrenceId`) composes the bare name, which a document with one
+// leaf resolves. A row without a name has no selector here.
 function selectorForRow(selectorType, row, occurrenceId) {
   if (!row) {
     return "";
@@ -234,11 +234,17 @@ function selectorForRow(selectorType, row, occurrenceId) {
   if (selectorType === "occurrence") {
     return occurrenceId;
   }
-  const token = String(row?.token || "").trim();
-  if (!token) {
+  const element = elementName(selectorType, row);
+  if (!element) {
     return "";
   }
-  return occurrenceId ? elementRef(occurrenceId, token) : token;
+  return occurrenceId ? elementRef(occurrenceId, element) : element;
+}
+
+// A face's, edge's or vertex's row leads with its element's name; an occurrence's `name` is
+// what the tree calls it, never an element's.
+function elementName(selectorType, row) {
+  return selectorType === "occurrence" ? "" : String(row?.name || "").trim();
 }
 
 function buildAdjacencySelectors(row, relationRows, targetRows, startKey, countKey, targetSelectorType, occurrenceId) {
@@ -294,9 +300,9 @@ function buildReference({
     pickData: {
       selectorType,
       rowIndex,
-      token: String(row.token || "") || null,
+      element: elementName(selectorType, row) || null,
       ordinal: Number.isInteger(row.ordinal) ? row.ordinal : null,
-      name: row.name || null,
+      name: (selectorType === "occurrence" && row.name) || null,
       sourceName: row.sourceName || null,
       kind: row.kind || null,
       bbox: row.bbox || null,

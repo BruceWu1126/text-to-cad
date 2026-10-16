@@ -1,39 +1,49 @@
-// The ref grammar: one language, shared with cadgen (cadgen/cad_ref_syntax.py). A ref names
-// geometry, never a position: an occurrence by its token (`o:` + 12 hex, minted from its place in
-// the tree), an element by `<occurrence token>/<element token>` (`f:`, `e:`, `v:` + 12 hex, minted
-// from the element's geometry within its body) -- `#o:4b1f9e2a7c03/f:9d2e8c1b5a70`. A part label
-// stands in for an occurrence token (`#base`, `#base/f:9d2e8c1b5a70`); a bare element token
-// resolves in a document with one leaf. The cases of cadRefs.parity.json are asserted by both
-// languages.
+// The ref grammar: one language, shared with cadgen (cadgen/cad_ref_syntax.py). A ref names an
+// occurrence by its token (`o:` + 12 hex, minted from its place in the tree) and an element by the
+// occurrence's token, a slash and the element's name: its kind (`f:`, `e:`, `v:`) and its lineage,
+// the feature that made it and its number among what that feature made --
+// `#o:4b1f9e2a7c03/f:dial.extrude1.3`. A piece of an element a later feature split takes its
+// number among the pieces after a further dot (`f:dial.extrude1.3.2`), and a feature the author
+// labelled goes by the label (`f:lid.2`). An element no construction names (an imported file's) is
+// named by its geometric token, 12 hex (`f:9d2e8c1b5a70`). A part label stands in for an occurrence
+// token (`#base`, `#base/f:dial.extrude1.3`); a bare element name resolves in a document with one
+// leaf. The cases of cadRefs.parity.json are asserted by both languages.
 //
 // `<file>#<selectors>`, file half optional. Mirrors QUOTED_PREFIX_RE in cadgen/cad_ref_syntax.py.
 // The prefix sits LEFT of the '#' so it can never collide with the selector grammar on the right.
 // JSON-quote paths containing whitespace or delimiters: `"my part.step"#o:4b1f9e2a7c03`.
 const CAD_TOKEN_RE = /^\s*("(?:[^"\\\r\n]|\\.)*"|[^#"\s]*)#([^\s]*)/;
 const OCCURRENCE_TOKEN_SOURCE = "o:[0-9a-f]{12}";
-const ELEMENT_TOKEN_SOURCE = "[fev]:[0-9a-f]{12}";
+// Mirrors FEATURE_NAME_PATTERN and ELEMENT_NAME_PATTERN in cadgen/cad_ref_syntax.py: a feature is
+// a label or `function.operationN`; segments start with a letter and numbers with a digit, so the
+// two never read as one another, and a geometric token holds no dot.
+const SEGMENT_SOURCE = "[A-Za-z_][A-Za-z0-9_]*";
+const NUMBER_SOURCE = "[1-9][0-9]*";
+const FEATURE_NAME_SOURCE = `${SEGMENT_SOURCE}(?:\\.${SEGMENT_SOURCE})?`;
+const ELEMENT_NAME_SOURCE = `[fev]:(?:[0-9a-f]{12}|${FEATURE_NAME_SOURCE}\\.${NUMBER_SOURCE}(?:\\.${NUMBER_SOURCE})?)`;
 const OCCURRENCE_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})$`);
-const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})/(${ELEMENT_TOKEN_SOURCE})$`);
-const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_TOKEN_SOURCE})$`);
+const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
+const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_NAME_SOURCE})$`);
 const MATE_SELECTOR_RE = /^m\d+$/i;
 
 // Mirrors LABEL_PATTERN in cadgen/cad_ref_syntax.py. Kept in step by cadRefs.parity.json,
 // which both this module's tests and the Python tests assert against.
 const LABEL_SOURCE = "[A-Za-z_][A-Za-z0-9_:]*";
 const LABEL_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})$`);
-const LABEL_ELEMENT_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})/(${ELEMENT_TOKEN_SOURCE})$`);
-
-// The union of every selector form the viewer treats as a real CAD selector rather than an
-// opaque string: a token, a token pair, a bare element token, or a mate.
-const NATIVE_CAD_SELECTOR_RE = new RegExp(
-  `^(?:${OCCURRENCE_TOKEN_SOURCE}(?:/${ELEMENT_TOKEN_SOURCE})?|${ELEMENT_TOKEN_SOURCE}|m\\d+)$`,
-  "i"
-);
+const LABEL_ELEMENT_SELECTOR_RE = new RegExp(`^(${LABEL_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
 const OCCURRENCE_TOKEN_RE = new RegExp(`^${OCCURRENCE_TOKEN_SOURCE}$`);
-const ELEMENT_TOKEN_RE = new RegExp(`^${ELEMENT_TOKEN_SOURCE}$`);
 
+/**
+ * Whether `candidate` is a ref in the grammar itself -- an occurrence token, an occurrence/element
+ * pair, a bare element name or a mate -- rather than a label or an opaque string. Mirrors
+ * `is_native_selector` in cadgen/cad_ref_syntax.py.
+ */
 export function isNativeCadSelector(candidate) {
-  return NATIVE_CAD_SELECTOR_RE.test(String(candidate || "").trim());
+  const parsed = parseStructuredSelector(candidate);
+  if (!parsed || parsed.label) {
+    return false;
+  }
+  return parsed.selectorType !== "opaque" || MATE_SELECTOR_RE.test(parsed.canonical);
 }
 
 /** Whether `value` is an occurrence token (`o:` + 12 hex). */
@@ -41,9 +51,9 @@ export function isOccurrenceToken(value) {
   return OCCURRENCE_TOKEN_RE.test(String(value || "").trim());
 }
 
-/** Whether `value` is an element token (`f:`, `e:` or `v:` + 12 hex). */
-export function isElementToken(value) {
-  return ELEMENT_TOKEN_RE.test(String(value || "").trim());
+/** Whether `value` is an element name (`f:`, `e:` or `v:` and its lineage or geometric token). */
+export function isElementName(value) {
+  return ELEMENT_SELECTOR_RE.test(String(value || "").trim());
 }
 
 function selectorTypeForKind(kind) {
@@ -56,12 +66,12 @@ function selectorTypeForKind(kind) {
   return "vertex";
 }
 
-/** The one composition rule: `<occurrence token>/<element token>`. */
-export function elementRef(occurrenceId, token) {
-  return `${occurrenceId}/${token}`;
+/** The one composition rule: `<occurrence token>/<element name>`. */
+export function elementRef(occurrenceId, element) {
+  return `${occurrenceId}/${element}`;
 }
 
-/** `{ owner, token }` of an element ref (`o:…/f:…`, `label/f:…`), or null for anything else. */
+/** `{ owner, element }` of an element ref (`o:…/f:…`, `label/f:…`), or null for anything else. */
 export function splitElementRef(selector) {
   const text = String(selector || "").trim().replace(/^#/, "");
   const slash = text.indexOf("/");
@@ -69,8 +79,8 @@ export function splitElementRef(selector) {
     return null;
   }
   const owner = text.slice(0, slash);
-  const token = text.slice(slash + 1);
-  return isElementToken(token) ? { owner, token } : null;
+  const element = text.slice(slash + 1);
+  return isElementName(element) ? { owner, element } : null;
 }
 
 function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inheritedLabel = "" } = {}) {
@@ -82,13 +92,13 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
   const occurrenceElementMatch = selector.match(OCCURRENCE_ELEMENT_SELECTOR_RE);
   if (occurrenceElementMatch) {
     const occurrenceId = occurrenceElementMatch[1];
-    const token = occurrenceElementMatch[2];
+    const element = occurrenceElementMatch[2];
     return {
-      selectorType: selectorTypeForKind(token[0]),
+      selectorType: selectorTypeForKind(element[0]),
       occurrenceId,
-      token,
-      kind: token[0],
-      canonical: elementRef(occurrenceId, token)
+      element,
+      kind: element[0],
+      canonical: elementRef(occurrenceId, element)
     };
   }
 
@@ -97,7 +107,7 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
     return {
       selectorType: "occurrence",
       occurrenceId: occurrenceMatch[1],
-      token: "",
+      element: "",
       kind: "",
       canonical: occurrenceMatch[1]
     };
@@ -105,15 +115,15 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
 
   const elementMatch = selector.match(ELEMENT_SELECTOR_RE);
   if (elementMatch) {
-    const token = elementMatch[1];
-    const kind = token[0];
+    const element = elementMatch[1];
+    const kind = element[0];
     if (inheritedOccurrenceId) {
       return {
         selectorType: selectorTypeForKind(kind),
         occurrenceId: inheritedOccurrenceId,
-        token,
+        element,
         kind,
-        canonical: elementRef(inheritedOccurrenceId, token)
+        canonical: elementRef(inheritedOccurrenceId, element)
       };
     }
     // An inherited label carries forward exactly like an inherited occurrence token.
@@ -121,35 +131,35 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
       return {
         selectorType: selectorTypeForKind(kind),
         occurrenceId: "",
-        token,
+        element,
         kind,
         label: inheritedLabel,
-        canonical: elementRef(inheritedLabel, token)
+        canonical: elementRef(inheritedLabel, element)
       };
     }
     return {
       selectorType: selectorTypeForKind(kind),
       occurrenceId: "",
-      token,
+      element,
       kind,
-      canonical: token
+      canonical: element
     };
   }
 
-  // Label forms are tried only after every token form, so a token can never be read as a label.
+  // Label forms are tried only after every token and name form, so neither is read as a label.
   // Mates look like labels and are excluded explicitly.
   if (!MATE_SELECTOR_RE.test(selector)) {
     const labelElementMatch = selector.match(LABEL_ELEMENT_SELECTOR_RE);
     if (labelElementMatch) {
       const label = labelElementMatch[1];
-      const token = labelElementMatch[2];
+      const element = labelElementMatch[2];
       return {
-        selectorType: selectorTypeForKind(token[0]),
+        selectorType: selectorTypeForKind(element[0]),
         occurrenceId: "",
-        token,
-        kind: token[0],
+        element,
+        kind: element[0],
         label,
-        canonical: elementRef(label, token)
+        canonical: elementRef(label, element)
       };
     }
 
@@ -159,7 +169,7 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
       return {
         selectorType: "label",
         occurrenceId: "",
-        token: "",
+        element: "",
         kind: "",
         label,
         canonical: label
@@ -170,7 +180,7 @@ function parseStructuredSelector(rawSelector, { inheritedOccurrenceId = "", inhe
   return {
     selectorType: "opaque",
     occurrenceId: "",
-    token: "",
+    element: "",
     kind: "",
     canonical: selector
   };

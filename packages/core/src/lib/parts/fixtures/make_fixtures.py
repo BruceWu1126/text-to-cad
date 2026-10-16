@@ -7,11 +7,14 @@ mesh of it at the display tolerance), naming a fixed test part key
 (``cadgen._internal.selector_table``): what the page joins to the mesh, and the
 oracle every id and fact a JS test expects comes from. Both are made as cadgen
 derives a part (``cadgen.store.parts``): the table from the component's topology
-facts, extracted in memory, and the mesh from the table and the component's face
-colours.
+facts, extracted in memory, and its elements' names, and the mesh from the table
+and the component's face colours. Each shape is built inside a kernel run, as a
+model's build makes it, so its elements are named by their lineage
+(``f:sun_gear.extrude1.3``), as a build names them.
 
 The shapes are built here, not read from ``models/``. Run from the repository
-root with the repo's Python whenever cadgen's selector table or mesh output changes:
+root with the repo's Python whenever cadgen's selector table, its names or its
+mesh output changes:
 
     .venv/bin/python packages/core/src/lib/parts/fixtures/make_fixtures.py
 """
@@ -68,8 +71,9 @@ def slot():
 
 
 def main() -> None:
-    from cadgen._internal import tessellate
+    from cadgen._internal import kernel_memo, tessellate
     from cadgen._internal.component_package import decode_display_shape, effective_face_colors, prepare_geometry_component
+    from cadgen._internal.geometric_tokens import element_names
     from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.index import versioned_key
@@ -79,11 +83,14 @@ def main() -> None:
     chord, angle = DISPLAY_TESSELLATION["chordTolerance"], DISPLAY_TESSELLATION["angleTolerance"]
     manifest = {}
     for name, build in (("sun_gear", sun_gear), ("cam_follower_roller", cam_follower_roller), ("slot", slot)):
-        prepared = prepare_geometry_component(build())
+        with kernel_memo.run(Path(__file__)) as run:
+            shape = build()
+        _construction, lineage = run.identify(shape)
+        prepared = prepare_geometry_component(shape)
         entry, payload = prepared["entry"], prepared["payload"]
         topods = decode_display_shape(entry, payload).wrapped
         colors = effective_face_colors(topods, entry["faceColors"])
-        table = build_selector_table(topods, extract_topology_facts(topods))
+        table = build_selector_table(topods, extract_topology_facts(topods), element_names(lineage, topods))
         (HERE / f"{name}.selectors.json").write_bytes(selector_table_bytes(table) + b"\n")
         part = versioned_key(hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest(), PART_VERSION)
         body = tessellate.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
