@@ -66,8 +66,11 @@ TREE_KIND = "geometry-tree"
 # component pins its topology facts as ``topology``, a field an older sweeper
 # does not mark. 4: every occurrence, link and node id is an ``o:`` token. 5: a
 # component carries the construction key and the lineage object its build named
-# it by (README law 20), an object an older sweeper does not mark.
-TREE_SCHEMA = 5
+# it by (README law 20), an object an older sweeper does not mark. 6: a leaf's
+# token rounds its translation as the STEP file states it (``tree_tokens``), so a
+# leaf within a stated digit of a rounding boundary has another id than a schema-5
+# tree gave it, and minting a schema-5 tree's ids again would disagree with them.
+TREE_SCHEMA = 6
 FLAT_KIND = "assembly-package"
 
 # Metadata readers need an independently owned flattened descriptor but not the

@@ -74,6 +74,19 @@ class TokenTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             rounded_placement([1.0, 2.0])
 
+    def test_a_translation_rounds_as_a_step_file_states_it(self) -> None:
+        """A STEP file states a real to twelve decimals, or thirteen significant digits from
+        a thousand up, and a reader reads back exactly the number stated (``step_reals``): a
+        translation within a stated digit of a rounding boundary rounds as stated, so the
+        token a reader mints from the file is the result's by construction."""
+        from cadgen._internal.step_reals import written_real
+
+        candidates = (1234.0 + (n + 0.5) * TRANSLATION_QUANTUM - 3e-10 for n in range(1000))
+        stated = next(value for value in candidates
+                      if round(value / TRANSLATION_QUANTUM) != round(written_real(value) / TRANSLATION_QUANTUM))
+        self.assertEqual(rounded_placement(_moved(stated)), rounded_placement(_moved(written_real(stated))))
+        self.assertEqual(rounded_placement(_moved(1.0 + TRANSLATION_QUANTUM / 10)), rounded_placement(_moved(1.0)))
+
     def test_tokens_are_assigned_from_the_tree_and_a_sibling_inserted_moves_none(self) -> None:
         before = _tree([("o1.1", "base", IDENTITY), ("o1.2", "pin", _moved(5.0))])
         after = _tree([("o1.1", "base", IDENTITY), ("o1.2", "spacer", _moved(2.0)), ("o1.3", "pin", _moved(5.0))])
@@ -143,6 +156,39 @@ class BuiltTreeTokensTest(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
         env.start()
         self.addCleanup(env.stop)
+
+    def test_a_tree_minted_before_translations_rounded_as_stated_is_never_read(self) -> None:
+        """Before a translation rounded as the STEP file states it, a leaf within a stated
+        digit of a rounding boundary was minted another id than it is now; a tree of that
+        format is another schema, which is never read, so no id it holds meets the one minted
+        today."""
+        import json
+
+        from build123d import Box, Compound, Pos
+
+        from cadgen._internal import tree_tokens
+        from cadgen._internal.component_package import canonical_json_bytes
+        from cadgen._internal.step_reals import written_real
+        from cadgen.store.build import build_tree_from_compound
+        from cadgen.store.objects import put_object, read_verified_object
+        from cadgen.store.trees import get_tree
+
+        candidates = (1234.0 + (n + 0.5) * TRANSLATION_QUANTUM - 3e-10 for n in range(1000))
+        stated = next(value for value in candidates
+                      if round(value / TRANSLATION_QUANTUM) != round(written_real(value) / TRANSLATION_QUANTUM))
+        base, pin = Box(2, 2, 2), Pos(stated, 0, 0) * Box(1, 1, 1)
+        base.label, pin.label = "base", "pin"
+        tree_hash = build_tree_from_compound(Compound(children=[base, pin], label="fixture"), root_name="fixture")[0]
+        tree = json.loads(read_verified_object(tree_hash))
+        row = next(row for row in tree["occurrences"] if row["name"] == "pin")
+        unstated = [round(value / (TRANSLATION_QUANTUM if index % 4 == 3 else ROTATION_QUANTUM))
+                    for index, value in enumerate(row["transform"][:12])]
+        then = tree_tokens._token([tree["assembly"]["root"]["id"], "pin", unstated])
+        self.assertNotEqual(then, row["id"], "the premise: its translation rounded unstated, the pin had another id")
+        older = json.loads(json.dumps(tree).replace(row["id"], then))
+        older["schemaVersion"] = 5
+        self.assertIsNone(get_tree(put_object(canonical_json_bytes(older))))
+        self.assertIsNotNone(get_tree(tree_hash))
 
     def test_a_rebuild_with_a_sibling_inserted_keeps_every_other_token(self) -> None:
         from build123d import Box, Compound, Cylinder, Pos

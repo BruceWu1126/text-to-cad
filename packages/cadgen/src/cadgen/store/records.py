@@ -73,7 +73,9 @@ RECORD_KIND = "record"
 # appearance assignments are keyed by them (README law 20).
 # Schema 10: the tree a record names is geometry schema 5, whose components carry the
 # construction key and lineage their build named them by.
-RECORD_SCHEMA_VERSION = 10
+# Schema 11: the tree a record names is geometry schema 6, whose leaves' tokens round a
+# translation as the STEP file states it.
+RECORD_SCHEMA_VERSION = 11
 # A format change bumps it and lands on new keys (document_key).
 # Schema 6: an XCAF label entry (`=>[0:1:1:2]`) reads as no name, and an
 # occurrence without one of its own never shows a shared product's name that is
@@ -89,7 +91,9 @@ RECORD_SCHEMA_VERSION = 10
 # Schema 9: the tree an entry names is geometry schema 4, its ids tokens.
 # Schema 10: the tree an entry names is geometry schema 5: a saved document's leaves
 # carry the construction key and lineage of the components they were written from.
-DOCUMENT_SCHEMA_VERSION = 10
+# Schema 11: the tree an entry names is geometry schema 6, whose leaves' tokens round a
+# translation as the STEP file states it.
+DOCUMENT_SCHEMA_VERSION = 11
 
 
 def record_key(model: Path | str) -> str:

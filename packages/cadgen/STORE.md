@@ -381,7 +381,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 ```json
 {
   "kind": "geometry-tree",
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "label": "link_arm",
   "entryKind": "assembly",
   "units": "mm",
@@ -811,29 +811,34 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   geometry while retaining their own finishes. Appearance-sensitive exports
   include the normalized appearance digest in their variant, including absence.
 
-  Model records use payload schema 10: the tree a record names is geometry
-  schema 5, whose components carry their construction keys and lineage;
-  schema 9 named schema-4 trees, whose ids are tokens, and keyed the
-  correspondence maps and appearance assignments by them, as 10 does; schema 8
-  (reach slices, import-time slices, absent, roots and listing entries) keyed
-  them by position. Earlier records are misses: the next source run rebuilds
-  outputs whose input hashes may have been captured after a mid-build edit, as
+  Model records use payload schema 11: the tree a record names is geometry
+  schema 6, whose leaves' tokens round a translation as the STEP file states
+  it; schema 10 named schema-5 trees, whose components carry their
+  construction keys and lineage, as 6 does; schema 9 named schema-4 trees,
+  whose ids are tokens, and keyed the correspondence maps and appearance
+  assignments by them, as 10 and 11 do; schema 8 (reach slices, import-time
+  slices, absent, roots and listing entries) keyed them by position. Earlier
+  records are misses: the next source run rebuilds outputs whose input hashes
+  may have been captured after a mid-build edit, as
   well as outputs predating distinct occurrence colours.
   This is one source rebuild; existing geometry objects remain reusable.
   A record with no `closure.own` leaves nothing out of its listings, which is
   how it hashed them, so it needs no new schema.
-  Document mappings use payload schema 10 (the tree an entry names is geometry
-  schema 5, and the hint is `producer`; schema 9 named schema-4 trees, 8
-  schema-3 trees, 7 schema-2 trees): saved bytes stay authoritative and are
-  reparsed without guessing colours that the document does not contain. There
-  are no directory or document-byte-key salts. Trees use only geometry schema
-  5; there is no optional old-tree decoder. Schema 5 names a component made by
-  a construction of its run by its `construction` key and `lineage` object
-  (§2); 4 named every occurrence, link and node by its `o:` token, which 5
-  keeps; 3 admitted resolved named intrinsic appearance on authored trees and
-  pinned an eager-only component's topology facts as `topology`, which 4 and 5
-  keep. Document indexes may carry an
-  optional exact loaded `producer` hint outside the tree. A same-tree
+  Document mappings use payload schema 11 (the tree an entry names is geometry
+  schema 6, and the hint is `producer`; schema 10 named schema-5 trees, 9
+  schema-4 trees, 8 schema-3 trees, 7 schema-2 trees): saved bytes stay
+  authoritative and are reparsed without guessing colours that the document
+  does not contain. There are no directory or document-byte-key salts. Trees
+  use only geometry schema 6; there is no optional old-tree decoder. Schema 6
+  mints a leaf's token rounding its translation as the STEP file states it
+  (`_internal/tree_tokens.py`), so a leaf within a stated digit of a rounding
+  boundary has another id than in 5; 5 names a component made by a
+  construction of its run by its `construction` key and `lineage` object
+  (§2), which 6 keeps; 4 named every occurrence, link and node by its `o:`
+  token, which 5 and 6 keep; 3 admitted resolved named intrinsic appearance on
+  authored trees and pinned an eager-only component's topology facts as
+  `topology`, which 4, 5 and 6 keep. Document indexes may carry an optional
+  exact loaded `producer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
   hint from one atomic record snapshot. Geometry ignores absent or invalid

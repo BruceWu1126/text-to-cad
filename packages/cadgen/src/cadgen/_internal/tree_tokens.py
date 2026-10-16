@@ -3,8 +3,8 @@
 
 A token is a hash of the node's place in ITS tree and of nothing outside it:
 its parent's token, its name and -- for a leaf -- its placement rounded
-(translation to ``TRANSLATION_QUANTUM`` mm, the linear part to
-``ROTATION_QUANTUM``); a group and a link have no placement of their own (a
+(translation, as a STEP file states it, to ``TRANSLATION_QUANTUM`` mm, the
+linear part to ``ROTATION_QUANTUM``); a group and a link have no placement of their own (a
 document places groups at the identity), so theirs hash the parent and the
 name alone. The root's token is hashed from the tree's label. When siblings
 share all of that (two unnamed pins at one placement), the second and later
@@ -40,9 +40,16 @@ __all__ = [
 _SCHEME = "cadgen-tree-token-v1"
 _HEX = 12
 OCCURRENCE_TOKEN_RE = re.compile(r"^o:[0-9a-f]{12}$")
-# A placement is rounded absolutely: a translation to a micron, a rotation
-# entry to a nanoradian's worth. A STEP writes twelve decimals, so a placement
-# written and read back rounds alike.
+# A placement is rounded absolutely: a translation to a micron, a rotation entry
+# to a nanoradian's worth. A STEP file states a real to twelve decimals below a
+# thousand in magnitude and to thirteen significant digits from a thousand up
+# (``step_reals``), which near a rounding boundary can round otherwise than the
+# number written; a reader reads back exactly the number stated. So a translation
+# is rounded as the file states it, and a translation written and read back rounds
+# alike by construction. A rotation entry is not stated -- a reader rebuilds it from
+# two stated directions -- so one written and read back can round otherwise; a
+# writer that names its occurrences keeps every rotation it writes from reading
+# back as another token (``step_placements``).
 TRANSLATION_QUANTUM = 1e-6
 ROTATION_QUANTUM = 1e-9
 
@@ -58,7 +65,10 @@ def _token(material: list) -> str:
 
 def rounded_placement(transform: Any) -> list[int] | None:
     """The 12 placement numbers of a 16-float row-major transform, rounded to
-    the quanta, as integers; None for no placement (a group, a link)."""
+    the quanta, as integers -- each translation as a STEP file states it;
+    None for no placement (a group, a link)."""
+    from cadgen._internal.step_reals import written_real
+
     if transform is None:
         return None
     values = [float(v) for v in transform]
@@ -70,8 +80,10 @@ def rounded_placement(transform: Any) -> list[int] | None:
     for row in range(3):
         for column in range(4):
             value = values[row * 4 + column]
-            quantum = TRANSLATION_QUANTUM if column == 3 else ROTATION_QUANTUM
-            out.append(int(round(value / quantum)))
+            if column == 3:
+                out.append(int(round(written_real(value) / TRANSLATION_QUANTUM)))
+            else:
+                out.append(int(round(value / ROTATION_QUANTUM)))
     return out
 
 
