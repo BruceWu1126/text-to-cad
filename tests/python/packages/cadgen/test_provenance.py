@@ -25,7 +25,7 @@ from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, warm_entries
+from tests.python.support.warm_daemon import served, verified, warm_entries
 
 add_repo_path("packages/cadgen/src")
 
@@ -429,15 +429,13 @@ class TheEntryAndTheStore(unittest.TestCase):
     """Edits, forget, gc and the warm path, each on its own pin."""
 
     def setUp(self) -> None:
-        self._tmp = generated_cad_directory(prefix="provenance-store-")
-        self.root = Path(self._tmp.name) / "proj"
+        tmp = generated_cad_directory(prefix="provenance-store-")
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name) / "proj"
         (self.root / "src").mkdir(parents=True)
-        self.cache = Path(self._tmp.name) / "store"
+        self.cache = Path(tmp.name) / "store"
         (self.root / "src" / "pin.py").write_text(textwrap.dedent(PIN).lstrip(), encoding="utf-8")
         (self.root / "src" / "refs.py").write_text(textwrap.dedent(REFS).lstrip(), encoding="utf-8")
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
 
     def _build(self, *argv: str, warm: bool = False) -> subprocess.CompletedProcess:
         # The absolute script: the daemon's completed-job line names it (served()).
@@ -555,6 +553,7 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertEqual(0, self._store("where", "STEP/pin.step", self._face()).returncode)
 
     def test_a_warm_rerun_writes_the_entry_a_cold_run_wrote(self) -> None:
+        self.addCleanup(verified, self.cache)
         self._build()
         cold = self._entry()
         self.assertIsNotNone(cold)

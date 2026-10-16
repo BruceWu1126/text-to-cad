@@ -114,3 +114,26 @@ def served(marker: str) -> bool:
     except OSError:
         return False
     return any("-> exit" in line and marker in line for line in text.splitlines())
+
+
+def verified(store: Path) -> None:
+    """Wait for the verify of every STEP this module's warm daemon saved into ``store``.
+
+    A daemon build returns once its STEP is saved, and the file's verify goes on in the
+    daemon, writing the file's document entry into ``store`` when it answers (STORE.md
+    §3, *Exports*): a test that removes ``store`` waits for those writes first, as a door
+    does, by joining the verify of each entry still pending
+    (``cadgen.store.exports.confirm_document``)."""
+    import json
+    from unittest import mock
+
+    from cadgen.store.exports import confirm_document
+    from cadgen.store.paths import index_dir
+
+    with mock.patch.dict(os.environ, {**warm_entries(), "CADGEN_CACHE_DIR": str(store)}):
+        records = index_dir("model")
+        for path in sorted(records.iterdir()) if records.is_dir() else ():
+            outputs = json.loads(path.read_text(encoding="utf-8")).get("outputs") or {}
+            for document, output in outputs.items():
+                if Path(document).suffix.lower() in (".step", ".stp") and output.get("sha256"):
+                    confirm_document(Path(document), output["sha256"])
