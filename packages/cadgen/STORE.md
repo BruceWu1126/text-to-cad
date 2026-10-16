@@ -211,6 +211,8 @@ test:
    must not select geometry, then hash a possibly replaced file to bind its
    annotations or export ledger. A snapshot rejects a topology manifest from
    a different selected document instead of combining revisions.
+   A tree that links its children's (a model's result) reads flattened: the
+   hierarchy its file was written with.
    `read_scene` retains verified native bytes and decodes prototypes on demand.
    Its occurrence and selector views stay bound to that captured revision;
    each `shape()` returns privately copied topology. An already open scene
@@ -1345,7 +1347,13 @@ Each with the failure it prevents.
   OCCT writes its label's address instead (`0:1:1:2`, `=>[0:1:1:2]`; a
   single-part document's root is one): that, a blank, the translator's
   default, a shape kind and digits alone read as no name
-  (`step_scene_loader._normalize_label_name`). An occurrence with no name of
+  (`step_scene_loader._normalize_label_name`), and a result names its nodes as
+  that rule reads their labels (`store.build._own_name`), so a compile of a file
+  mints the tokens of the result it was written from. STEP places no root
+  product: a document of one part placed away from the identity is written
+  inside an unnamed product of one, and a reader takes such a file as that one
+  part, placed (`step_scene_loader.document_roots`); one part is its document,
+  its occurrence named as the document's root. An occurrence with no name of
   its own shows its product's, unless that is another occurrence's own label
   -- a writer names a product its occurrences share after one of them, cadgen's
   after the last (`step_scene_loader._withhold_borrowed_product_names`) -- and

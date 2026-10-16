@@ -190,25 +190,13 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
     from cadgen._internal.component_package import decode_geometry_component
     from cadgen.store.trees import TREE_KIND, capture_tree, _validate_structure
 
-    # Verify and flatten the SAME snapshot. Canonical byte-derived document
-    # trees have no source links, so no second tree lookup may occur here.
+    # Verify and flatten the SAME snapshot. A tree that links its children's reads
+    # flattened: the hierarchy the file was written with.
     descriptor, captured = capture_tree(tree_hash)
     tree = json.loads(captured[tree_hash])
-    if not isinstance(tree, dict) or tree.get("kind") != TREE_KIND or tree.get("links"):
+    if not isinstance(tree, dict) or tree.get("kind") != TREE_KIND:
         return None
     _validate_structure(tree, native=True)
-    assembly = tree.get("assembly")
-    if not isinstance(assembly, dict) or not isinstance(assembly.get("root"), dict):
-        return None
-    pending = [assembly["root"]]
-    while pending:
-        node = pending.pop()
-        if not isinstance(node, dict) or node.get("nodeType") == "link":
-            return None
-        children = node.get("children") or []
-        if not isinstance(children, list):
-            return None
-        pending.extend(children)
     if not isinstance(descriptor, dict) or descriptor.get("kind") != "assembly-package":
         return None
     components = descriptor.get("components")
@@ -341,8 +329,11 @@ def scene_tokens(scene: LoadedStepScene) -> None:
     """Name every node of a parsed scene by the token the document tree built from it
     would give it (``cadgen.store.build._document_walk``'s structure and names:
     ``part``, ``group`` and ``model`` for products the STEP gives no name, several free
-    roots under a synthetic ``model`` root), on each node's ``id``. A scene from a document
-    tree already carries them."""
+    roots under a synthetic ``model`` root), on each node's ``id``; a file of one placed
+    part is that part, its wrapper dropped from the scene's roots
+    (``step_scene_loader.document_roots``). A scene from a document tree already carries
+    them."""
+    from cadgen._internal.step_scene_loader import document_roots
     from cadgen._internal.tree_tokens import assign_tokens
 
     occurrences: list[dict] = []
@@ -360,7 +351,7 @@ def scene_tokens(scene: LoadedStepScene) -> None:
         occurrences.append({"id": node_id, "transform": list(node.transform)})
         return {"id": node_id, "node": node, "name": str(node.name or node.source_name or "part"), "children": []}
 
-    roots = list(scene.roots)
+    roots = scene.roots = document_roots(scene.roots)
     if not roots:
         return
     if len(roots) == 1:

@@ -190,6 +190,7 @@ def build_tree_from_compound(
     through it (:func:`build_tree_through_step`)."""
     progress = resolve_progress(progress)
     walk = _walk_compound(compound, root_name=root_name, progress=progress, namer=namer)
+    root_name = walk.root["name"]  # as a reader of its file reads it
     from cadgen._internal.source_sidecar import resolve_materials
     from cadgen.store.trees import flatten_tree
 
@@ -215,9 +216,10 @@ def _document_walk(scene: Any) -> tuple[_Walk, dict[str, list[str]], dict[str, s
     (``_Walk.tokenize``); the maps relate the parser's positional paths to their
     canonical node and descendant leaf tokens, including synthetic wrapping when
     a STEP has several free roots. A product the STEP gives no name is ``part``
-    (a leaf), ``group`` (a product with children) or ``model`` (the root).
+    (a leaf), ``group`` (a product with children) or ``model`` (the root), and a
+    file of one placed part is that part (``step_scene_loader.document_roots``).
     """
-    from cadgen._internal.step_scene_loader import _selector_id
+    from cadgen._internal.step_scene_loader import _selector_id, document_roots
 
     walk = _Walk()
     occurrence_map: dict[str, list[str]] = {}
@@ -257,11 +259,15 @@ def _document_walk(scene: Any) -> tuple[_Walk, dict[str, list[str]], dict[str, s
         return {"id": occurrence_id, "name": name, "nodeType": "part",
                 "leafPartIds": [occurrence_id], "children": []}
 
-    roots = list(scene.roots)
-    if not roots:
+    if not scene.roots:
         raise RuntimeError("STEP has no product roots")
+    roots = document_roots(scene.roots)
     if len(roots) == 1:
         walk.root = collect(roots[0], "o1")
+        if roots[0] is not scene.roots[0]:
+            # The product a file wraps one placed part in is that part (``document_roots``).
+            wrapper = _selector_id(scene.roots[0].path)
+            occurrence_map[wrapper], node_map[wrapper] = ["o1"], "o1"
         if walk.root["children"]:
             walk.root["nodeType"] = "assembly"
             walk.root["name"] = node_name(roots[0], "model")
@@ -594,13 +600,18 @@ def build_document_tree(
 
 
 def _own_name(label: object, default: str) -> str:
-    """A node's name in the tree being walked: its label, unless that is an
-    occurrence token. A label that is a token came from a tree, not an author
-    (a node read back from a document or a materialized tree carries one), and
-    a token names nothing at its place here. ``default`` is what an unlabelled
-    node is called: ``part`` for a leaf, ``group`` for a group -- never anything
-    positional, since a name enters the node's token."""
-    text = str(label or "")
+    """A node's name in the tree being walked: its label as a reader of a file written
+    from the tree reads it (``step_scene_loader._normalize_label_name``: runs of
+    whitespace as one space, a shape kind, digits alone or a blank as no name), unless
+    that is an occurrence token. A name enters the node's token, so a result and the
+    files written from it name every node alike. A label that is a token came from a
+    tree, not an author (a node read back from a document or a materialized tree
+    carries one), and a token names nothing at its place here. ``default`` is what an
+    unlabelled node is called: ``part`` for a leaf, ``group`` for a group -- never
+    anything positional."""
+    from cadgen._internal.step_scene_loader import _normalize_label_name
+
+    text = _normalize_label_name(label) or ""
     return default if not text or is_occurrence_token(text) else text
 
 
@@ -628,6 +639,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
         # The root is the model: it goes by the tree's label here as in the general walk
         # below, so a result built from references and one built from its materialized
         # children are one tree.
+        root_name = _own_name(root_name, "model")
         walk.root = {
             "id": "o1", "name": root_name,
             "nodeType": "assembly", "leafPartIds": [row["id"] for row in references],
@@ -830,8 +842,12 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
         root["nodeType"] = "assembly" if root.get("children") else "part"
     if not occurrences and not links:
         raise RuntimeError(f"model {root_name!r} has no geometry")
-    # The root is the model: it goes by the tree's label, whatever the compound was called.
-    root["name"] = root_name
+    # The root is the model: it goes by the tree's label, whatever the compound was
+    # called, as a reader of its file reads that label. One part is its document, and
+    # its file names its one product so (``step_export``).
+    root["name"] = root_name = _own_name(root_name, "model" if root.get("children") else "part")
+    if not root.get("children"):
+        occurrences[0]["name"] = root_name
     walk.root = root
     walk.tokenize(root_name=root_name)
     return walk
@@ -1470,6 +1486,7 @@ def build_tree_through_step(
 
     progress = resolve_progress(progress)
     walk = _walk_compound(compound, root_name=root_name, progress=progress, namer=namer)
+    root_name = walk.root["name"]  # as a reader of its file reads it
 
     # Only cadgen's own source-publication callback opts in. Arbitrary direct
     # on_preview callers retain their original construction/error ordering.

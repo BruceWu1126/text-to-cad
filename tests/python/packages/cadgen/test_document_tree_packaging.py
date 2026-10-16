@@ -76,8 +76,9 @@ class DocumentTreePackagingTest(unittest.TestCase):
             "assignments": [{"targets": ["#authored-part-name"], "material": "finish"}],
         }
         output = self.root / "original.step"
+        # One part is its document, named by its label (generation._document_root_name).
         result, tree, stats, _ = build_tree_through_step(
-            shape, output, root_name="authored-root-name", materials=materials
+            shape, output, root_name="authored-part-name", materials=materials
         )
         self.assertEqual(tree["occurrences"][0]["name"], "authored-part-name")
         self.assertEqual(tree["appearance"]["materials"]["finish"], finish)
@@ -141,7 +142,7 @@ class DocumentTreePackagingTest(unittest.TestCase):
         # wrapper children: one part, the way build123d handed it back.
         fused = Solid.make_box(2, 3, 4).fuse(Solid.make_box(2, 3, 4).moved(Location((10, 0, 0))))
         fused.label = "frame:underbone"
-        _, tree, _, _ = build_tree_through_step(fused, self.root / "fused.step", root_name="fused")
+        _, tree, _, _ = build_tree_through_step(fused, self.root / "fused.step", root_name="frame:underbone")
         self.assertEqual(tree["entryKind"], "part")
         self.assertEqual(tree["assembly"]["root"]["nodeType"], "part")
         self.assertEqual(len(tree["occurrences"]), 1)

@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 import unicodedata
 
 from OCP.BinXCAFDrivers import BinXCAFDrivers
@@ -206,6 +206,21 @@ def _normalize_label_name(raw_name: object) -> str | None:
     if text.isdigit() or _XCAF_LABEL_ENTRY.fullmatch(text):
         return None
     return text
+
+
+def document_roots(roots: Sequence[Any]) -> list[Any]:
+    """The roots of the document a parsed STEP is: its product roots, but for a file of
+    one part placed away from the identity. STEP can place no root product, so a writer
+    wraps such a part in an unnamed product holding it alone (``step_export``): that file
+    is the one part, placed, as the result it was written from has it. Every reader that
+    names a parse's nodes takes its roots here (``store.build._document_walk``,
+    ``step_scene_package.scene_tokens``)."""
+    roots = list(roots)
+    if len(roots) == 1:
+        root = roots[0]
+        if not (root.name or root.source_name) and len(root.children) == 1 and not root.children[0].children:
+            return [root.children[0]]
+    return roots
 
 
 def _label_name(label: object) -> str | None:

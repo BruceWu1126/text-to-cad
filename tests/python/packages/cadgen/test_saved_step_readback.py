@@ -41,9 +41,10 @@ class SavedStepReadbackTest(unittest.TestCase):
     def build(self, shape=None, *, force=False, materials=None):
         from cadgen.store.build import build_tree_through_step
 
+        # One part is its document, named by its label (generation._document_root_name).
         return build_tree_through_step(
             self.shape() if shape is None else shape, self.root / "part.step",
-            root_name="root", force=force, materials=materials,
+            root_name="part", force=force, materials=materials,
         )
 
     def seed(self, shape=None, *, materials=None):
@@ -121,7 +122,11 @@ class SavedStepReadbackTest(unittest.TestCase):
     def test_a_kept_document_is_neither_written_nor_read_back_unless_forced(self):
         from cadgen.store.build import build_tree_through_step
 
-        expected = self.seed()
+        def finish(name):
+            return {"definitions": {"finish": {"name": name, "roughness": .4, "metalness": .9}},
+                    "assignments": [{"targets": ["#part"], "material": "finish"}]}
+
+        expected = self.seed(materials=finish("Polished"))
         kept = {"stepHash": expected[3], "documentTree": expected[2]["documentTree"], "bbox": expected[1]["bbox"],
                 "documentOccurrenceMap": expected[2]["documentOccurrenceMap"],
                 "documentNodeMap": expected[2]["documentNodeMap"]}
@@ -131,22 +136,23 @@ class SavedStepReadbackTest(unittest.TestCase):
             offered.append(writer_input)
             return kept
 
-        relabeled = self.shape()
-        relabeled.label = "renamed"
+        # A finish rides the sidecar, never the STEP: another one is another result, written alike.
+        finished = finish("Brushed")
         with mock.patch("cadgen.step_export.export_build123d_step_file", side_effect=AssertionError("kept document written")), \
                 mock.patch("cadgen._internal.step_scene_loader.load_step_scene", side_effect=AssertionError("kept document read")):
             tree_hash, tree, stats, step_hash = build_tree_through_step(
-                relabeled, self.root / "kept" / "part.step", root_name="root", kept_document=keep,
+                self.shape(), self.root / "kept" / "part.step", root_name="part", kept_document=keep,
+                materials=finished,
             )
         self.assertEqual(offered, [expected[2]["writerInput"]])
         self.assertTrue(stats["documentKept"])
         self.assertEqual((step_hash, stats["documentTree"]), (expected[3], expected[2]["documentTree"]))
         self.assertEqual(stats["documentNodeMap"], expected[2]["documentNodeMap"])
         self.assertEqual(tree["bbox"], expected[1]["bbox"])
-        self.assertNotEqual(tree_hash, expected[0], "the authored label is part of the result")
+        self.assertNotEqual(tree_hash, expected[0], "the finish is part of the result")
         self.assertFalse((self.root / "kept" / "part.step").exists())
-        forced = build_tree_through_step(relabeled, self.root / "forced" / "part.step", root_name="root",
-                                         force=True, kept_document=keep)
+        forced = build_tree_through_step(self.shape(), self.root / "forced" / "part.step", root_name="part",
+                                         force=True, kept_document=keep, materials=finished)
         self.assertEqual(len(offered), 1, "a forced build never offers to keep")
         self.assertNotIn("documentKept", forced[2])
         self.assertEqual(forced[3], expected[3])
@@ -426,20 +432,6 @@ class SavedStepReadbackTest(unittest.TestCase):
                     repaired = self.build()
                 self.assert_same_document(expected, repaired)
                 self.assertEqual({digest: read_verified_object(digest) for digest in captured}, captured)
-
-    def test_linked_tree_is_rejected_before_flattening(self):
-        from cadgen._internal.step_scene_package import scene_from_render_package
-        from cadgen.store.objects import put_object
-        from cadgen.store.records import note_document_tree
-        from cadgen.store.trees import get_tree
-
-        expected = self.seed()
-        bad_tree = get_tree(expected[2]["documentTree"])
-        bad_tree["links"] = [{"id": "o1.1", "tree": expected[0]}]
-        # Deliberately malformed input bypasses the strict tree writer.
-        note_document_tree(expected[3], put_object(json.dumps(bad_tree).encode()))
-        with mock.patch("cadgen.store.trees.flatten_tree", side_effect=AssertionError("linked document flattened")):
-            self.assertIsNone(scene_from_render_package(self.root / "part.step", step_hash=expected[3]))
 
     def test_honestly_hashed_invalid_native_recipe_and_eager_inputs_cannot_reuse_identity(self):
         from cadgen._internal import component_package as cp, step_scene_package

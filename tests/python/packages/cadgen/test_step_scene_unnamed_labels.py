@@ -89,7 +89,8 @@ class XcafLabelEntryTests(unittest.TestCase):
 
         roots = IsolatedCadRoots(self, prefix="xcaf-label-entry-")
         # A placed single part, as cadgen saves one: OCCT wraps it in a root product it names
-        # `=>[0:1:1:2]` and names the usage the same; the part's own product is `l_bracket`.
+        # `=>[0:1:1:2]` and names the usage the same; the part's own product is `l_bracket`,
+        # and the file reads as that part, placed.
         part = Location((1.0, 2.0, 3.0)) * Box(10, 8, 4)
         part.label = "l_bracket"
         path = roots.cad_root / "l_bracket.step"
@@ -100,8 +101,7 @@ class XcafLabelEntryTests(unittest.TestCase):
         # What a cadgen from before the entry rule left for these bytes -- a tree naming the root
         # and the part `=>[0:1:1:2]` -- is a miss, never served: the bytes compile again.
         stale = get_tree(tree)
-        stale["label"] = stale["assembly"]["root"]["name"] = "=>[0:1:1:2]"
-        stale["assembly"]["root"]["children"][0]["name"] = stale["occurrences"][0]["name"] = "=>[0:1:1:2]"
+        stale["label"] = stale["assembly"]["root"]["name"] = stale["occurrences"][0]["name"] = "=>[0:1:1:2]"
         write_entry("document", document, {"schemaVersion": 4, "tree": put_tree(stale), "kind": "step"})
         self.assertEqual((document, tree), document_snapshot(path))
 
@@ -109,16 +109,16 @@ class XcafLabelEntryTests(unittest.TestCase):
         descriptor = json.loads((view / "assembly.json").read_text(encoding="utf-8"))
         from cadgen._internal.tree_tokens import is_occurrence_token
 
+        # The wrapper reads as no name, and a file of one placed part is that part.
         root = descriptor["assembly"]["root"]
-        (leaf,) = root["children"]
-        self.assertTrue(is_occurrence_token(root["id"]) and is_occurrence_token(leaf["id"]))
-        self.assertEqual([(root["id"], "model"), (leaf["id"], "l_bracket")],
-                         [(node["id"], node["name"]) for node in (root, *root["children"])])
-        self.assertEqual([(leaf["id"], "l_bracket")], [(row["id"], row["name"]) for row in descriptor["occurrences"]])
-        self.assertEqual([(leaf["id"], "l_bracket")],
+        self.assertEqual([], root["children"])
+        self.assertTrue(is_occurrence_token(root["id"]))
+        self.assertEqual("l_bracket", root["name"])
+        self.assertEqual([(root["id"], "l_bracket")], [(row["id"], row["name"]) for row in descriptor["occurrences"]])
+        self.assertEqual([(root["id"], "l_bracket")],
                          [(row["id"], row["name"]) for row in assembly_occurrence_rows(descriptor, None)])
         scene = read_scene(path)
-        self.assertEqual("model", scene.roots[0].label)
+        self.assertEqual("l_bracket", scene.roots[0].label)
         self.assertEqual(["l_bracket"], [leaf.label for leaf in scene.leaves()])
 
     def test_an_unnamed_occurrence_never_shows_a_siblings_label(self) -> None:
