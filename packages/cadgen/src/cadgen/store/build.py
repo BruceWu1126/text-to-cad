@@ -402,26 +402,6 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
     )
 
     walk = _Walk()
-    from cadgen.store._references import links as reference_links
-
-    references = reference_links(compound)
-    if references is not None:
-        progress.phase(PHASE_PACKAGE)
-        walk.links = references
-        # The root is the model: it goes by the tree's label here as in the general walk
-        # below, so a result built from references and one built from its materialized
-        # children are one tree.
-        root_name = _own_name(root_name, "model")
-        walk.root = {
-            "id": "o1", "name": root_name,
-            "nodeType": "assembly", "leafPartIds": [row["id"] for row in references],
-            "children": [{"id": row["id"], "name": row["name"], "nodeType": "link",
-                          "tree": row["tree"], "children": []} for row in references],
-        }
-        for row in references:
-            progress.advance(detail=row["name"])
-        walk.tokenize(root_name=root_name)
-        return walk
     occurrences = walk.occurrences
     links = walk.links
     components = walk.components

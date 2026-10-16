@@ -24,9 +24,10 @@ Protocol — one JSON request per connection, JSON-lines response:
             before that reply when nothing is running -- so the respawn binds.
 
 Routing: a request that names a model script goes to THAT model's worker
-(STORE.md §9). A busy worker means an extra, never a wait; a model with no
-worker binds a spare; no spare means a spawn. Requests that name no script
-borrow a spare for one job. Nothing here caps, counts memory or queues.
+(STORE.md §9), which builds the model and, inside its body, every child it
+calls. A busy worker means an extra, never a wait; a model with no worker binds
+a spare; no spare means a spawn. Requests that name no script borrow a spare
+for one job. Nothing here caps, counts memory or queues.
 """
 
 from __future__ import annotations
@@ -210,14 +211,14 @@ def _wait_for_inflight_consumer(conn: transport.Channel, entry: dict) -> int | N
 
     A request client sends no more messages, so a nonblocking receive is purely
     an EOF probe. It emits no heartbeat frames and cannot disturb other users of
-    the same in-flight entry.
+    the same in-flight entry. An artifact job's result is relayed as it lands.
     """
     result_seen = False
     while True:
-        event, done, code = _BROKER.wait_update(entry, result_seen=result_seen)
+        result, done, code = _BROKER.wait_update(entry, result_seen=result_seen)
         try:
-            if event is not None:
-                _send(conn, event if entry.get("artifact") else {"event": event})
+            if result is not None:
+                _send(conn, result)
                 result_seen = True
         except OSError:
             return None
@@ -338,9 +339,9 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     send_lock = threading.Lock()
     started = time.perf_counter()
 
-    if request.get("kind") in {"slot", "inflight"}:
-        # A worker asking for a job slot or registering a job in flight. Blocks for the
-        # lease's lifetime on this request thread.
+    if request.get("kind") == "slot":
+        # A worker asking for a job slot. Blocks for the lease's lifetime on this
+        # request thread.
         _BROKER.handle(conn, request)
         return
 
@@ -530,11 +531,8 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                         raise _WorkerBrokeProtocol(f"invalid artifact worker result: {exc}") from exc
                     _JOBS.record_artifact_result(job, frame["artifactResult"])
                     _BROKER.publish_artifact_result(inflight, frame["artifactResult"])
-            event = frame.get("event")
-            if inflight is not None and isinstance(event, dict) and event.get("job") == job["id"]:
-                _BROKER.publish_result(inflight, event)
             if build is not None:
-                build.observe(event)
+                build.observe(frame.get("event"))
             if relay_connected:
                 try:
                     with send_lock:
@@ -811,7 +809,7 @@ def serve() -> int:
                 token_changed = request.get("token") != token or gone
                 # A dependency, and a worker's slot for the job it runs, are work already
                 # under way: a drain finishes them.
-                dependency = bool(request.get("dependency") or request.get("kind") in {"slot", "inflight"})
+                dependency = bool(request.get("dependency") or request.get("kind") == "slot")
                 dependency_finishing_old_work = dependency and bool(state["draining"] or _active_requests())
                 if state["draining"] and not dependency:
                     with contextlib.suppress(OSError):
@@ -821,7 +819,7 @@ def serve() -> int:
                     active = _active_requests()
                     if active:
                         # Keep the old address and singleton lock together while its
-                        # jobs finish. Their workers can still submit child/artifact
+                        # jobs finish. Their workers can still submit compile and artifact
                         # dependencies; fresh top-level calls are told to restart until
                         # the drain completes (ordinary ones run cold, artifact requests
                         # ask again until the successor binds). Closing the listener here

@@ -132,8 +132,9 @@ def building() -> bool:
 
 
 def job_child() -> None:
-    """The job's model called another: an assembly. Called wherever a model composes a child; it counts
-    only for a build made in this process (``cold_build``) -- the daemon sees a worker's in its events."""
+    """The job's model called another: an assembly. Called where a model's body composes a child
+    (``cadgen.authoring``); it counts only for a build made in this process (``cold_build``) -- the
+    daemon sees a worker's in its events, which carry the parent."""
     if _JOB is not None:
         _JOB["children"] = True
 

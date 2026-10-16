@@ -194,15 +194,14 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         cold_hash, _, _ = build_document_tree(load_step_scene(output))
         assert_same_document(self, document, get_tree(cold_hash))
 
-    def test_pre_force_face_override_moves_without_reusing_the_original_child_finish(self):
+    def test_a_face_override_on_a_decoded_child_moves_without_reusing_the_original_child_finish(self):
         from build123d import Compound, Location
         from cadgen.store.build import build_tree_from_compound
-        from cadgen.store.lazy import LazyCompound
         from cadgen.store.materialize import materialize
         from cadgen.store.trees import flatten
 
         red_tree, _, _ = build_tree_from_compound(self.box({1: RED}), root_name="child")
-        original = LazyCompound("absent.py::child", None, frame=None, label="child", tree=red_tree)
+        original = materialize(red_tree, label="child")
         original.cad_face_ordinal_colors = {1: BLUE}
         moved = original.moved(Location((8, 0, 0)))
         moved.cad_face_ordinal_colors[1] = RED

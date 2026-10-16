@@ -19,9 +19,7 @@ children's components, the animation bake's leaf boxes.
 
 It also remembers each component's TOPOLOGY: its face and edge counts, how many
 of each are curved, and its loose box, the per-prototype facts the adaptive
-edge policy classifies a scene by (``step_scene_mesh.prototype_topology``). A
-build of an all-link parent reads them by the BREP its pins name and decodes
-only a component whose entry is missing (``cadgen.store._references``).
+edge policy classifies a scene by (``step_scene_mesh.prototype_topology``).
 
 Last, keyed by a component's codec and BREP object under the geometric token
 scheme, it remembers the GEOMETRIC TOKENS of its faces, edges and vertices

@@ -15,7 +15,6 @@ assembly — with zero forked logic.
 from __future__ import annotations
 
 import argparse
-import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -107,16 +106,11 @@ def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> i
     if not script.is_file():
         parser.error(f"model script does not exist: {items[0]}")
 
-    # Where this process's build-tree events go. A transient worker (CADGEN_EVENTS=1)
-    # writes them as lines its parent reads; a daemon worker already relays them
-    # as frames; a root that reached here directly (`python -m cadgen.cli._run_model`)
-    # renders the tree itself.
+    # Where this process's build-tree events go: a daemon worker already relays them
+    # as frames; a root renders the tree itself.
     from cadgen.cli_tree import build_tree
-    from cadgen.daemon import executors
 
-    if os.environ.get("CADGEN_EVENTS") == "1" and not executors.sink_installed():
-        executors.install_line_sink()
-    with build_tree(json_lines=bool(args.json)), executors.root_context():
+    with build_tree(json_lines=bool(args.json)):
         return _run(args, script, prog)
 
 
@@ -175,17 +169,4 @@ def main(argv: Sequence[str] | None = None, *, prog: str = "python <model>.py") 
 
 
 if __name__ == "__main__":
-    code = main()
-    if os.environ.get("CADGEN_EVENTS") == "1":
-        # A transient worker (cadgen.daemon.executors): its parent is waiting on this
-        # exit, and tearing down an interpreter with OCP loaded costs ~0.3 s of
-        # destructors that free nothing anyone will use. Flush and leave.
-        import sys
-
-        for stream in (sys.stdout, sys.stderr):
-            try:
-                stream.flush()
-            except (OSError, ValueError):
-                pass
-        os._exit(int(code or 0))
-    raise SystemExit(code)
+    raise SystemExit(main())

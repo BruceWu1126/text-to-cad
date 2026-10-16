@@ -32,7 +32,7 @@ document and this one disagree, the mechanism document is right.
 
 | Document | What it is for | Go there when |
 |---|---|---|
-| [`STORE.md`](STORE.md) | The store's contract: layout, the two-sides law, tree/record shapes, the gate, invariants, link-vs-component, concurrency, GC, the daemon, lazy children, editing previews, debugging. Sectioned, with a table of contents | changing anything that writes to or reads from `~/.cache/cadgen`, or any build, door or reader that depends on it |
+| [`STORE.md`](STORE.md) | The store's contract: layout, the two-sides law, tree/record shapes, the gate, invariants, link-vs-component, concurrency, GC, the daemon, children, editing previews, debugging. Sectioned, with a table of contents | changing anything that writes to or reads from `~/.cache/cadgen`, or any build, door or reader that depends on it |
 | [`SNAPSHOTS.md`](SNAPSHOTS.md) | Snapshots: display presets, what a mesh, robot or drawing snapshot draws (the CAD Viewer's own scene for it), requests and OUT, sizes, and `--debug --json` — every measured browser stage, what each one covers, and which durations must not be added together | changing what a snapshot draws or accepts, or reading snapshot timings |
 
 ## The design laws
@@ -400,9 +400,9 @@ names the faces, edges and vertices of what the run made, and whose trace is
 what provenance keeps (law 20, `STORE.md` §3). The hooks that
 remain change no result: `determinism.py` fixes the iteration order of
 build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
-point that leaves equality alone), lazy children defer a child's geometry
-until it is read (`STORE.md` §9a), and the file trace only watches what the
-run opens (`STORE.md` §5). An expensive part may still be its own model; it
+point that leaves equality alone), a child call hands back the child's
+stored result decoded (`STORE.md` §9a), and the file trace only watches what
+the run opens (`STORE.md` §5). An expensive part may still be its own model; it
 no longer has to be.
 *Pressure-test*: call a model's function under plain Python, then inside a
 cadgen build with the memo cold, then again with it hot; the geometry each
@@ -523,7 +523,8 @@ src/cadgen/
   <format>.py            # public namespaces: step, stl, threemf, glb, dxf,
                          #   urdf, srdf, sdf — each binds its verbs
   authoring.py           # @step/@dxf/@stl/@glb/@threemf decorators; a call
-                         #   builds at top level and composes (a lazy child)
+                         #   builds at top level and composes (a child: its
+                         #   stored result decoded, or built here, serially)
                          #   inside a body; a model's outputs are what they
                          #   declare — a mesh decorator alone is a model that
                          #   writes no STEP
@@ -566,7 +567,7 @@ src/cadgen/
                          #   out, for a copy nothing else keeps up to date
                          #   (_internal/channel.py)
   store/                 # the store (STORE.md): objects, index, records, trees,
-                         #   closure, gate, materialize, publish, lazy, gc, view,
+                         #   closure, gate, materialize, publish, gc, view,
                          #   exports (a model's STEP written from its result and
                          #   verified against it, §3), provenance (the build's
                          #   account of its code, §3)

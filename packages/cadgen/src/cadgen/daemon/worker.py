@@ -9,8 +9,9 @@ daemon.
 The frames here are deliberately the same shape the daemon sends its client
 (``{"stream": ..., "data": ...}`` then ``{"exit": ...}``), so the supervisor is a pure
 relay and the client's wire protocol is untouched. A third frame, ``{"event": ...}``,
-carries build-tree events (STORE.md §Lazy children): a child a model's body submits
-from inside this worker reports through the same channel as the worker's own output.
+carries build-tree events (STORE.md §9a): the model's own transitions and those of
+every child it builds inside its body, through the same channel as the worker's own
+output.
 A fourth, ``{"heartbeat": {"phase": ..., "cpu": ...}}``, is the worker's liveness
 while a job runs (``_heartbeat``); the supervisor consumes it and never relays it.
 A fifth, ``{"artifactNext": true}``, is an artifact job asking before each derivation
@@ -388,7 +389,7 @@ def serve() -> int:
     sys.stdout.flush()
     _FRAMES[0] = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8",
                            errors="backslashreplace", newline="\n")
-    # Child-build events from this worker's jobs ride the frame channel; the
+    # The build-tree events of this worker's jobs ride the frame channel; the
     # supervisor relays them to the requesting client verbatim.
     from cadgen.daemon import executors
 

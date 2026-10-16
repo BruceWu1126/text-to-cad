@@ -76,15 +76,9 @@ INTERNAL_ENV_VARS = frozenset({
     "CADGEN_DAEMON_CHILD",
     "CADGEN_DAEMON_SOCKET",
     "CADGEN_DAEMON_STATE_DIR",
-    # A request's own fields (worker._apply_request_env), and a transient worker's
-    # event lines (executors._submit_transient).
+    # A request's own fields (worker._apply_request_env).
     "CADGEN_ROOT_ID",
     "CADGEN_JOB_ID",
-    "CADGEN_EVENTS",
-    # The job-slot broker a process's builds share (broker.BROKER_*_VAR).
-    "CADGEN_BROKER",
-    "CADGEN_BROKER_KEY",
-    "CADGEN_BROKER_STATS",
     # The daemon's processes report their installation's channel, whoever started
     # them (_spawn_daemon), and a Windows worker names its virtual environment so
     # (pool.interpreter).
@@ -254,9 +248,9 @@ def _request_payload(
         # The top-level request this job belongs to; child-build events carry it
         # so the root's build tree can place them.
         "root_id": str(root_id) if root_id else None,
-        # In-flight coalescing (cadgen.daemon.broker): a child submit carries its source's
-        # closure hash and may join a job already building the same thing. A top-level
-        # request never does -- the model the user asked for runs.
+        # In-flight coalescing (cadgen.daemon.broker): a compile carries its document's
+        # digest and may join a job already compiling the same bytes. A top-level request
+        # never does -- the model the user asked for runs.
         "closure": str(closure) if closure else None,
         "coalesce": bool(coalesce and closure),
         # A nested request may consume the reserved dependency-progress
@@ -308,10 +302,11 @@ def run_nested(
     on_stream: Callable[[str], None] | None = None,
     on_event: Callable[[dict], None] | None = None,
 ) -> int | None:
-    """A child build submitted from INSIDE a build (a worker or a client).
+    """A job submitted from INSIDE a build or a door (a worker or a client): a
+    document's compile, coalesced by ``closure`` (the document's bytes).
 
     Unlike :func:`run_via_daemon` this ignores ``CADGEN_DAEMON_CHILD``: a worker
-    submitting a child is the pool's nesting, not recursion into itself. Stream
+    submitting a compile is the pool's nesting, not recursion into itself. Stream
     frames go to ``on_stream`` (captured for the error path), events to
     ``on_event``. ``None`` still means "the daemon could not take it".
     """

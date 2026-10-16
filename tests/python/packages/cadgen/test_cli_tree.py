@@ -318,11 +318,6 @@ class ProcessWiring(unittest.TestCase):
             self.assertIsNone(tree)
         self.assertTrue(executors.sink_installed(), "the worker's sink was replaced")
 
-    def test_a_transient_worker_gets_no_tree(self):
-        with mock.patch.dict(os.environ, {"CADGEN_EVENTS": "1"}):
-            with build_tree(json_lines=True) as tree:
-                self.assertIsNone(tree)
-
     def test_emit_event_tags_the_root_id(self):
         seen = []
         executors.set_event_sink(seen.append)

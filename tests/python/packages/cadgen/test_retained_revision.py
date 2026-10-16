@@ -123,7 +123,6 @@ class RetainedRevisionPublication(unittest.TestCase):
         with mock.patch.object(exports, "export_step", side_effect=injecting_export):
             result = generation._generate_part_outputs(
                 spec,
-                entries_by_step_path={target: spec},
                 preloaded_scene=scene,
                 require_step_file=False,
                 force=True,

@@ -362,7 +362,6 @@ def _emit(
     ):
         _generate_part_outputs(
             spec,
-            entries_by_step_path={spec.step_path: spec},
             preloaded_scene=scene,
             require_step_file=False,
             force=force,

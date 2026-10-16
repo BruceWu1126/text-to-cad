@@ -1,10 +1,10 @@
 """The build tree: how a top-level build shows the model graph as its bodies reveal it.
 
-Every model transition — submitted, building (with the phase), current, done, failed —
-is an EVENT (``cadgen.daemon.executors.emit_event``). Child builds run in other
-processes, so their events travel back to the top-level call through the pool: as
-``{"event": ...}`` frames from a daemon worker, as ``CADGEN_EVENT`` stderr lines from a
-transient worker. Both arrive here identically, tagged with the root request's id.
+Every model transition — building (with the phase), current, done, failed — is an
+EVENT (``cadgen.daemon.executors.emit_event``), the root's and those of each child
+built inside its body alike. A daemon worker's travel back to the top-level call as
+``{"event": ...}`` frames; a build with no daemon emits them in the process that
+renders them.
 
 Three renderings, chosen once per process:
 
@@ -421,13 +421,12 @@ def build_tree(*, json_lines: bool = False, stream: TextIO | None = None) -> Ite
     """Own this process's event sink for the length of a top-level build.
 
     Installs nothing when a sink is already present (a daemon worker relays events as
-    frames; a transient worker writes them as ``CADGEN_EVENT`` lines — see
-    ``cadgen.daemon.executors``): the tree belongs to the ROOT request only. Mints the
-    root id when this process is the root, so every child job inherits it.
+    frames — see ``cadgen.daemon.executors``): the tree belongs to the ROOT request
+    only. Mints the root id when this process is the root.
     """
     from cadgen.daemon import executors
 
-    if executors.sink_installed() or os.environ.get("CADGEN_EVENTS") == "1":
+    if executors.sink_installed():
         yield None
         return
     minted = False

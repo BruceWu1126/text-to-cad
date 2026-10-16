@@ -107,7 +107,7 @@ fi
 echo "    interpreter: $PYTHON"
 # Cold: a smoke test spawns no build daemon.
 export CADGEN_DAEMON=0
-unset CADGEN_BROKER CADGEN_BROKER_KEY CADGEN_BROKER_STATS CADGEN_ROOT_ID
+unset CADGEN_ROOT_ID
 # Isolated store: content keying would otherwise resolve the fixture against
 # the developer's real cache and skip the import this smoke test exists to run.
 export CADGEN_CACHE_DIR="$(mktemp -d)"

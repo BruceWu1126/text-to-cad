@@ -394,8 +394,6 @@ class _Run:
         index = self.trace.feature_of(shape)
         if index is not None:
             return index
-        if _pending(shape):
-            return None
         wrapped = _wrapped(shape)
         if wrapped is not None:
             index = self.made_by(wrapped.TShape())
@@ -482,8 +480,6 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
     try:
         op = _op_name(label, kind, args, kwargs)
         shapes = _shape_args(_key_args(label, kind, args), kwargs)
-        if any(_pending(shape) for shape in shapes):
-            return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
         # The memo is an optimization and never the reason a build fails: a key,
         # a capture or a snapshot that cannot be taken makes the call run plain,
         # counted under errors, and the call is still a feature. With the memo
@@ -649,17 +645,8 @@ def _key_args(label: str, kind: str, args: tuple) -> tuple:
     return args[1:] if kind in ("classmethod", "constructor") else args
 
 
-def _pending(shape: Any) -> bool:
-    """A child model's promise not yet forced: keying it would force it early."""
-    from cadgen.store.lazy import LazyCompound
-
-    return isinstance(shape, LazyCompound) and not shape._forced
-
-
 def _wrapped(shape: Any) -> Any:
-    """The shape's ``TopoDS_Shape`` from its own state, or None: an empty
-    shape, or a child model's promise or a reference assembly, whose property
-    would force what the body only placed (``store.lazy``, ``store._references``)."""
+    """The shape's ``TopoDS_Shape`` from its own state, or None for an empty shape."""
     state = getattr(shape, "__dict__", None)
     return None if state is None else state.get("_wrapped")
 
@@ -866,8 +853,6 @@ def _shape_key(shape: Any, state: _Run) -> int:
 
 def _placed_key(shape: Any, state: _Run) -> tuple:
     """Where a shape's geometry came from, with its location and orientation."""
-    if _pending(shape):
-        raise _Unkeyable("a pending child model")
     wrapped = _wrapped(shape)
     if wrapped is None:
         raise _Unkeyable("an empty shape")
@@ -891,7 +876,7 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
     from build123d.topology import Shape
 
     parent = shape.__dict__.get("topo_parent")
-    if not isinstance(parent, Shape) or parent is shape or _pending(parent):
+    if not isinstance(parent, Shape) or parent is shape:
         raise _Unkeyable("a shape no operation of this process made")
     parent_wrapped = _wrapped(parent)
     if parent_wrapped is None:
@@ -1195,8 +1180,6 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Ru
     shares its input's) keeps its first maker."""
     created: list[_Made] = []
     for position, shape in enumerate(_result_shapes(result)):
-        if _pending(shape):
-            continue  # a child's promise is placed, not read: reading it would force it
         wrapped = _wrapped(shape)
         if wrapped is None:
             continue

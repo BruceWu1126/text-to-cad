@@ -258,7 +258,6 @@ class FailureReasonTest(unittest.TestCase):
         from PIL import Image
 
         kernel = functools.partial(Image.new, "NOT A MODE", (1, 1))  # a library refusing what it was asked
-        child = type("ChildBuildError", (RuntimeError,), {"__module__": "cadgen.store.lazy"})
         raises = _raises
         cases = {
             "model_error": raises(ValueError("No module named secret: a message is never read")),
@@ -272,7 +271,6 @@ class FailureReasonTest(unittest.TestCase):
             "io_error": raises(PermissionError("locked")),
             "timeout": raises(TimeoutError()),
             "memory": raises(MemoryError()),
-            "child_failed": raises(child("child model secret_arm failed")),
         }
         for reason, call in cases.items():
             with self.subTest(reason=reason):

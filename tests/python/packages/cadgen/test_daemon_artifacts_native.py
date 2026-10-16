@@ -12,6 +12,7 @@ from unittest import mock
 
 from cadgen.daemon import artifacts, broker, client, pool, server, transport
 from cadgen.daemon.jobs import JobLedger
+from tests.python.support.broker import PrivateBroker
 from cadgen.daemon.memory import MemoryPolicy, MIB
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -22,10 +23,11 @@ class NativeArtifactTransport(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.store = str(self.root / "store")
-        self.private = broker.PrivateBroker(1)
+        self.private = PrivateBroker(1)
         self.addCleanup(self.private.close)
+        self.enterContext(self.private.served())
         self.enterContext(mock.patch.dict(os.environ, {
-            **self.private.env(), "CADGEN_CACHE_DIR": self.store,
+            "CADGEN_CACHE_DIR": self.store, "CADGEN_DAEMON_STATE_DIR": str(self.root / "state"),
             "CADGEN_DAEMON": "0", "CADGEN_JOBS": "1",
             "CADGEN_DAEMON_SPARES": "1", "CADGEN_COMPONENT_WORKERS": "1",
         }))
@@ -69,7 +71,7 @@ class NativeArtifactTransport(unittest.TestCase):
             snapshot = self.private.broker.snapshot()
             return not any(snapshot[key] for key in ("running", "queued", "inflight"))
         self.wait_for(idle, str(self.private.broker.snapshot()))
-        self.assertEqual(self.private.broker.snapshot()["peakRunning"], 1)
+        return self.private.broker.snapshot()
 
     def source_guard(self):
         # Record the attempt before raising, so a catch-all source scanner could
@@ -102,7 +104,10 @@ sys.addaudithook(audit)
 
     @contextlib.contextmanager
     def daemon(self, child_prelude):
+        # The daemon is its workers' broker: they reach it at the address the pool names
+        # for them (``CADGEN_DAEMON_SOCKET``) with the key it published.
         address = transport.private_address(transport.identity_digest(str(self.root) + "native-server"))
+        transport.publish_authkey(address, self.private.key)
         listener = transport.Server(address, self.private.key, backlog=8)
         workers = pool.Pool(policy=MemoryPolicy(limit_bytes=1024 * MIB, seed_bytes=1024 * MIB))
         ledger, handlers = JobLedger(), []
@@ -131,6 +136,7 @@ sys.addaudithook(audit)
                 handler.start()
 
         with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": address}))
             stack.enter_context(mock.patch.object(server, "_BROKER", self.private.broker))
             stack.enter_context(mock.patch.object(server, "_JOBS", ledger))
             stack.enter_context(mock.patch.object(server, "_POOL", workers))
@@ -169,7 +175,7 @@ sys.addaudithook(audit)
                 with self.subTest(changes=changes), self.assertRaisesRegex(artifacts.ArtifactJobError, message):
                     artifacts.submit_artifact({**self.request, **changes}, store_root=self.store).result(20)
             self.assert_geometry_and_result(result)
-            self.settled()
+            self.assertEqual(self.settled()["peakRunning"], 1)
             self.assertEqual(len(processes), 1)
             self.assertTrue(all(row["model"] == "" for row in workers.snapshot()["workers"]))
             jobs = ledger.snapshot()
@@ -178,19 +184,21 @@ sys.addaudithook(audit)
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
-    def test_with_no_daemon_a_display_job_derives_in_this_process_in_a_slot(self):
+    def test_with_no_daemon_a_display_job_derives_in_this_process_on_its_own_thread(self):
         from cadgen.store import parts
 
-        derive, leases = parts.derive, []
+        derive, threads, leases = parts.derive, [], []
 
         def leased(*args, **kwargs):
+            threads.append(threading.current_thread())
             leases.append(broker.current_lease())
             return derive(*args, **kwargs)
 
         with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("a process per job")), \
              mock.patch.object(parts, "derive", side_effect=leased):
             result = artifacts.submit_artifact(self.request, store_root=self.store).result(60)
-        self.assertIsNotNone(leases[0], "the job holds a slot of the caller's broker")
+        self.assertNotEqual(threads, [threading.current_thread()])
+        self.assertIsNone(leases[0], "with no daemon there is no broker to take a slot from")
         self.assert_geometry_and_result(result)
         self.settled()
 
@@ -231,7 +239,7 @@ parts.derive=derive
             self.assertIsNone(processes[0].poll())
             release.write_text("continue", encoding="utf-8")
             self.assert_geometry_and_result(second.result(20))
-            self.settled()
+            self.assertEqual(self.settled()["peakRunning"], 1)
             self.assertEqual(self.private.broker.snapshot()["granted"], 1)
             self.assertEqual(len(processes), 1)
             self.assertEqual(workers.snapshot()["imports"], 1)
