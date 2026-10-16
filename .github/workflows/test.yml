@@ -344,10 +344,11 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install the KiCad nightly
+        # Launchpad answers 503 now and then mid-download (a 65 MB package): apt retries it.
         run: |
           sudo add-apt-repository --yes ppa:kicad/kicad-dev-nightly
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends kicad-nightly kicad-nightly-footprints
+          sudo apt-get -o Acquire::Retries=5 update
+          sudo apt-get -o Acquire::Retries=5 install --yes --no-install-recommends kicad-nightly kicad-nightly-footprints
           kicad-cli-nightly version
 
       - name: Set up dependencies
