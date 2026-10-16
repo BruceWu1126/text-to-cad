@@ -141,7 +141,8 @@ def main() -> int:
         children = []
         for pin in record.get("children") or []:
             child = read_record(pin["model"]) or {}
-            children.append({"model": pin["model"], "pinnedTree": pin.get("tree"), "currentTree": child.get("tree"),
+            children.append({"model": pin["model"], "recordedKey": pin.get("key"), "currentKey": child.get("key"),
+                             "currentTree": child.get("tree"),
                              # The tree its file's bytes map to: its result once verified.
                              "fileTree": tree_for_document_hash(step_sha256(child)),
                              "documentHash": step_sha256(child) or None,
@@ -166,7 +167,7 @@ def main() -> int:
             if event.get("state") in {"done", "current", "failed"}:
                 timing["terminalMs"] = event["elapsedMs"]
                 timing["terminalState"] = event["state"]
-        current_pins = {child["model"]: child["pinnedTree"] for child in children}
+        current_pins = {child["model"]: child["recordedKey"] for child in children}
         if initial_child_pins is None:
             initial_child_pins = current_pins
         changed_pins = sorted(key for key in current_pins.keys() | initial_child_pins.keys()
@@ -174,7 +175,7 @@ def main() -> int:
         expected_changes = sorted(key for key in initial_child_pins
                                   if variant_kind == "geometry" and key.split("::")[0] == str(geometry_model))
         pin_check = (bool(initial_child_pins) and changed_pins == expected_changes
-                     and all(child["currentTree"] == child["pinnedTree"] for child in children))
+                     and all(child["currentKey"] == child["recordedKey"] for child in children))
         actual_outputs = {path: sha256(Path(path).read_bytes()) for path in record.get("outputs") or {}}
         actual_steps = [digest for path, digest in actual_outputs.items() if Path(path).suffix.lower() in {".step", ".stp"}]
         document_hash = actual_steps[0] if len(actual_steps) == 1 else None

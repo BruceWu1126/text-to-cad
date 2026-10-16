@@ -197,3 +197,30 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
   start`). The file carries the clip's own keys, not samples at a rate, and
   every bending tube as a glTF skin, so there is no rate or mode to choose:
   delete the keys. `clip`, `seconds`, `start` and `drop` keep their meaning.
+
+## Children build serially, and a parent follows its children by key, in 0.8
+
+A child a parent's body calls is decoded from its stored result when the store
+holds one for its inputs as they are, else built there and then, in the parent's
+own process, before the call returns. Children build one at a time, in the order
+the body calls them; nothing runs in parallel, and the time line counts a child's
+build under `children`.
+
+A parent records each child by its **key** -- a hash of the child (its script and
+function) and everything it was built from: its sources, data files, constants,
+its own children and the cadgen and kernel versions that built it -- so:
+
+- editing a child's source rebuilds the child AND its parent, even when the
+  child's geometry is unchanged. The parent's rerun decodes the child's stored
+  result; only the parent's own body runs. `cadgen store why <parent.py>` says
+  `child rebuilt: <child.py>`; a child not yet rebuilt reads `child stale`.
+- upgrading cadgen or the CAD kernel rebuilds every model once:
+  `producer changed: cadgen 0.7.21 -> 0.8.0`.
+- bringing a source back to a state already built is a hit: the stored result is
+  restored and nothing runs.
+- deleting a model's STEP (or a declared mesh) beside a current model exports it
+  again from the stored result, without running the model.
+
+The record's `children` entries read `{"model", "key"}`; a record from 0.7.21
+is not read (its schema is in the key), so the first run of each model after
+the upgrade builds it.

@@ -68,12 +68,12 @@ Direct execution puts the script's directory first on the import path, so
 entrypoint name or module execution avoids that. A module and a same-named model
 function shadow each other on import; an alias separates them.
 
-Dependencies are tracked as **models by result, constants by value, functions by reach**:
+Dependencies are tracked as **models by key, constants by value, functions by reach**:
 
 ```python
 from lib import fasteners  # helper module: tracked by what the model can run in it
 from plate import WIDTH    # literal from a model module: tracked by value
-from plate import plate    # model: calling it pins its result
+from plate import plate    # model: calling it records its result's key
 ```
 
 `cadgen store why src/<model>.py` explains freshness. Importing a model never

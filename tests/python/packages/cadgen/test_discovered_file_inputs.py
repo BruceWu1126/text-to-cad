@@ -596,6 +596,7 @@ class OldRecordTests(unittest.TestCase):
         from cadgen.store.gate import stale
         from cadgen.store.objects import put_object, read_verified_object
         from cadgen.store.records import note_document_tree, read_record, write_record
+        from cadgen.store.results import producer_versions
         from tests.python.support.tmp_root import generated_cad_directory
 
         with generated_cad_directory(prefix="old-record-admission-") as folder:
@@ -616,7 +617,8 @@ class OldRecordTests(unittest.TestCase):
                 payload = b"immutable saved geometry"
                 tree = put_object(payload)
                 note_document_tree(document_hash, tree)
-                record = {"tree": None, "closure": closure.as_json(), "children": [], "outputs": {}}
+                record = {"tree": None, "closure": closure.as_json(), "children": [], "outputs": {},
+                          "producer": producer_versions()}
                 with mock.patch("cadgen.store.records.RECORD_SCHEMA_VERSION", 5):
                     write_record(script, record)
                     self.assertFalse(stale(script).stale, "precondition: the old record falsely passes")

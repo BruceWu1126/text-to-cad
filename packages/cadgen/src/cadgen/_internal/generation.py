@@ -50,16 +50,16 @@ from cadgen._internal.generation_spec import (
 )
 
 def _pinned_child_records(scene: object) -> Iterator[tuple[str, dict]]:
-    """Each child tree the body pinned, with that child's record, only while the
-    record still pins that exact tree: a child rebuilt since the parent called it
-    yields nothing, and the parent's export writes it whole."""
+    """Each child the body composed, by the tree of its record, only while that record
+    still holds the key the parent composed: a child rebuilt since the parent called
+    it yields nothing, and the parent's export writes it whole."""
     from cadgen.store.records import read_record
 
     for child in getattr(scene, "store_children", None) or ():
-        model, tree = child.get("model"), child.get("tree")
-        record = read_record(model) if model and tree else None
-        if record and record.get("tree") == tree:
-            yield str(tree), record
+        model, key = child.get("model"), child.get("key")
+        record = read_record(model) if model and key else None
+        if record and record.get("key") == key and record.get("tree"):
+            yield str(record["tree"]), record
 
 
 def _pinned_child_steps(scene: object) -> dict[str, object]:
@@ -823,10 +823,14 @@ def _generate_part_outputs(
                         "wholes": closure_wholes, "own": closure_own, "static": closure_static},
             # Literals imported from model files, tracked by VALUE (gate clause 2).
             "constants": dict(getattr(scene, "source_closure_constants", None) or {}) if generated else {},
-            "children": list(getattr(scene, "store_children", None) or []),
+            # Every child the body called, by the key it composed (store/results.py).
+            "children": _children_by_key(getattr(scene, "store_children", None)),
             "outputs": outputs,
         }
+        from cadgen.store.results import producer_versions
         from cadgen.store.trees import get_tree
+
+        record["producer"] = producer_versions()
 
         unannotated = get_tree(str(record["unannotatedTree"]))
         intrinsic_appearance = (unannotated or {}).get("appearance")
@@ -878,7 +882,7 @@ def _generate_part_outputs(
             # Claimed, not just checked: the record below names this closure, so no
             # sweep may take any part of it from here on (STORE.md §8).
             if not claim_tree(tree_hash):
-                raise RuntimeError(f"{spec.cad_ref}: result was not saved: pinned geometry disappeared from the cache during the build")
+                raise RuntimeError(f"{spec.cad_ref}: result was not saved: the result's geometry disappeared from the cache during the build")
             # A re-emitted STEP has an immutable byte/annotation input closure,
             # not a Python source closure that current_closure_hash can read
             # (still_saves below).
@@ -911,12 +915,14 @@ def _generate_part_outputs(
             # never a reader's).
             for output_path in outputs:
                 note_output(output_path, model_path)
-        write_record(model_path, record)
+        # Keyed, and stored under its key, as it is written (store/results.py): what
+        # a later build of these inputs restores.
+        key = write_record(model_path, record)
         if provenance is not None:
             from cadgen.store.provenance import write_provenance
 
             # Beside the record and after it: code side, read by `store where`
-            # and by nothing on a render path.
+            # and by nothing on a render path; kept with the result.
             write_provenance(model_path, provenance, tree=tree_hash)
         if kernel_run is not None:
             # The run's trace was this job's: nothing after it reads the run.
@@ -934,6 +940,7 @@ def _generate_part_outputs(
         while display_jobs:
             _await_display(display_jobs.pop(0), progress=progress, logger=logger)
         stats["published"] = True
+        stats["key"] = key
         return stats
 
     jobs.append(_ArtifactJob("tree", component_package_job))
@@ -955,7 +962,18 @@ def _generate_part_outputs(
         raise
     tree_result = artifact_results.get("tree") or {}
     return GeneratedStepResult(spec=spec, scene=scene, tree=str(tree_result.get("tree") or "") or None,
-                               step_kept=bool(tree_result.get("stepKept")))
+                               step_kept=bool(tree_result.get("stepKept")), key=tree_result.get("key"))
+
+
+def _children_by_key(called: object) -> list[dict[str, str]]:
+    """The record's ``children``: each model the body called, once, by the key of the
+    result the call composed (``cadgen.authoring``), in the order first called."""
+    children: dict[str, str] = {}
+    for child in called or ():
+        model, key = str((child or {}).get("model") or ""), str((child or {}).get("key") or "")
+        if model and model not in children:
+            children[model] = key
+    return [{"model": model, "key": key} for model, key in children.items()]
 
 
 def _generate_step_outputs(
@@ -979,10 +997,13 @@ def _generate_step_outputs(
 
         refreshed_tree = refresh_annotations(spec, verdict=verdict)
         if refreshed_tree is not None:
+            from cadgen.store.records import read_record
+
             _current_source_result(spec, refreshed_tree)
             _ensure_reused_display(spec, refreshed_tree, progress=progress, logger=logger)
             _produce_declared_mesh_exports(spec, logger=logger, source_tree=refreshed_tree)
-            return GeneratedStepResult(spec=spec, scene=None, tree=refreshed_tree)
+            refreshed = read_record(_model_for_spec(spec)) or {}  # the record the refresh just wrote
+            return GeneratedStepResult(spec=spec, scene=None, tree=refreshed_tree, key=refreshed.get("key"))
     reuse_tree = _checked_source_tree(spec, verdict) if not force else None
     # Reuse fast path: skip the build when the tree is already present and
     # current and nothing forces a run. A generated model's freshness rides on its recorded
@@ -1008,7 +1029,8 @@ def _generate_step_outputs(
             reuse_tree = result_tree_for(spec.step_path)
         _ensure_reused_display(spec, reuse_tree, progress=progress, logger=logger)
         _produce_declared_mesh_exports(spec, logger=logger, source_tree=reuse_tree)
-        return GeneratedStepResult(spec=spec, scene=None, tree=reuse_tree)
+        return GeneratedStepResult(spec=spec, scene=None, tree=reuse_tree,
+                                   key=verdict.key if verdict is not None else None)
     output_kwargs: dict[str, object] = {
         "force": force,
         "progress": progress,
@@ -1555,7 +1577,7 @@ def _document_root_name(shape: object, step_path: Path) -> str:
 def _stale_after_build(spec: EntrySpec) -> str | None:
     """The already-stale-on-completion notice: after publishing, the gate runs once
     more. A child edited during the build leaves the parent stale the moment it is done
-    -- the parent built against the child it pinned -- and the tree says so instead of
+    -- the parent built against the child it composed -- and the tree says so instead of
     letting the next run be the first to notice."""
     model = _model_for_spec(spec)
     if model is None or spec.source != "generated":
@@ -1598,7 +1620,7 @@ def _model_for_spec(spec: EntrySpec) -> str | None:
 
 def _assembly_is_current(spec: EntrySpec) -> bool:
     """Whether a generated model is current — THE gate (``cadgen.store.gate``):
-    record present, closure unchanged, children pinned at their current trees,
+    record present, closure unchanged, children standing at the keys it recorded,
     tree complete, outputs verify. Parts and assemblies share it."""
     if spec.source != "generated" or spec.step_path is None:
         return False
@@ -1618,13 +1640,14 @@ def _gate_verdict(spec: EntrySpec):
 
 
 def _checked_source_tree(spec: EntrySpec, verdict: object | None = None) -> str | None:
-    """The exact source result ``verdict`` checked, if current; without a
-    verdict the gate is asked now."""
+    """The exact source result ``verdict`` checked, while it stands (``Verdict.key``:
+    the gate's clauses 1-4 and 6 hold, and the files owe at most an export); without
+    a verdict the gate is asked now."""
     if spec.source != "generated" or spec.step_path is None:
         return None
     if verdict is None:
         verdict = _gate_verdict(spec)
-    return verdict.tree if not verdict.stale else None
+    return verdict.tree if verdict.key is not None else None
 
 
 def _generated_assembly_glb_closure_current(spec: EntrySpec) -> bool:
@@ -1664,6 +1687,9 @@ class _Built:
     outcome: str
     step_kept: bool = False
     timings: dict[str, float] | None = None
+    #: The key the result is stored under (store/results.py); a parent records the
+    #: child by it.
+    key: str | None = None
 
 
 def build_model(
@@ -1697,10 +1723,12 @@ def build_model(
 
     if not force:
         tree = _checked_source_tree(spec, verdict())
+        if tree is None:
+            tree = _restore_result(spec, verdict(), logger=logger)
         if tree is not None:
             _hit(spec, tree, logger=logger)
             _tree_event(spec, "current")
-            return _Built(tree, "current")
+            return _Built(tree, "current", key=verdict().key)
 
     # The same question, asked again when the run opens, so a run that started behind
     # a concurrent build of this model no-ops instead of rebuilding it. --force always
@@ -1735,10 +1763,40 @@ def build_model(
         )
         captured._finish(0)
         if isinstance(result, _SkippedGeneration):
-            return _Built(result.tree, "skipped-peer")
+            return _Built(result.tree, "skipped-peer", key=verdict().key)
         if spec.source == "generated":
             result.tree = captured.wait_result()
-    return _Built(result.tree, "built", step_kept=result.step_kept, timings=timed.get("timings"))
+    return _Built(result.tree, "built", step_kept=result.step_kept, timings=timed.get("timings"), key=result.key)
+
+
+def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> str | None:
+    """A stored result for the source as it is NOW (``Verdict.candidate``, STORE.md
+    §4): a source reverted to a state already built. Its record and provenance are
+    restored from the result (``store.results``), and the model takes it as a
+    current one, exporting what the files owe. None when there is none to restore,
+    or its tree is gone; the verdict then names the restored key."""
+    candidate = getattr(verdict, "candidate", None)
+    if spec.source != "generated" or spec.step_path is None or not candidate:
+        return None
+    from cadgen.store.provenance import write_provenance
+    from cadgen.store.records import note_output, write_record
+    from cadgen.store.results import read_result
+    from cadgen.store.trees import claim_tree, tree_complete
+
+    result = read_result(candidate)
+    tree = str((result or {}).get("tree") or "")
+    if not result or not tree or not tree_complete(tree) or not claim_tree(tree):
+        return None
+    record = dict(result["record"])
+    model = _model_for_spec(spec)
+    verdict.key = write_record(model, record)
+    if result.get("provenance"):
+        write_provenance(model, result["provenance"], tree=tree)
+    for output_path in record.get("outputs") or {}:
+        note_output(output_path, model)
+    verdict.tree = tree
+    logger.info(f"{spec.cad_ref}: an earlier build's result answers for the source as it is now; restored")
+    return tree
 
 
 def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
@@ -1759,24 +1817,24 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
     return written
 
 
-def build_child(defn: object) -> str:
-    """A child model a parent's body called (``cadgen.authoring``): the tree of its
-    stored result, or of the result of running it now, in this process, as a build
+def build_child(defn: object) -> tuple[str, str]:
+    """A child model a parent's body called (``cadgen.authoring``): ``(key, tree)`` of
+    its stored result, or of the result of running it now, in this process, as a build
     of its own -- once per run, however often it is called."""
     from cadgen.authoring import current_run
 
     run = current_run()
     if run is None:
         raise RuntimeError(f"{defn.ref} was called inside a body with no build run to belong to")
-    tree = run.results.get(defn.ref)
-    if tree is None:
+    result = run.results.get(defn.ref)
+    if result is None:
         spec = _entry_spec_from_source(source_from_path(defn.script_path, function=defn.name))
         logger = run.logger if run.logger is not None else CliLogger("cadgen")
         built = build_model(spec, generator=defn.func, force=False, profile=False, logger=logger)
-        if not built.tree:
+        if not built.tree or not built.key:
             raise RuntimeError(f"{defn.ref}: build supplied no source result")
-        tree = run.results[defn.ref] = built.tree
-    return tree
+        result = run.results[defn.ref] = (built.key, built.tree)
+    return result
 
 
 def generate_step_targets(
@@ -1910,7 +1968,7 @@ def generate_dxf_targets(
 
     def dxf_output_current(spec: EntrySpec, output_path: Path | None) -> bool:
         # The ONE gate every model answers to (STORE.md §4): the drawing's record,
-        # its closure, its pinned children and its .dxf output.
+        # its closure, its children by key and its .dxf output.
         #
         # Ask it by the model's IDENTITY (``script::fn``), never by the bare script
         # path: a file may hold several models, and a bare path is ambiguous there --

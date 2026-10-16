@@ -142,20 +142,22 @@ when the child is stale -- the result of building it there and then, in the
 parent's process, before the call returns. Children build one at a time, in
 the order the body calls them.
 
-**Dependency is pull.** A parent's record pins each child's tree hash, so a
-child edit that yields identical geometry leaves the parent current. A parent
-that finished against a child changed during its build says it is already
-stale.
+**Dependency is pull.** A parent's record keeps each child's key -- a hash of
+the child and everything it was built from -- so a child edit rebuilds the parent,
+which relinks the child's stored result (identical geometry included: the
+parent's own run is cheap, the child is not built again). A parent that
+finished against a child changed during its build says it is already stale.
 
-### What a rebuild tracks — models by result, constants by value, functions by reach
+### What a rebuild tracks — models by key, constants by value, functions by reach
 
 What an importer TAKES from a model file decides how that file counts:
 
-- **`from widget import widget`** (the model), called → tracked by RESULT: an
-  edit inside `widget()`'s body rebuilds the parent only when the child's
-  geometry changes. Importing `widget.py` still runs its top level in the
-  parent's process, so an edit to its imports, module-level code or a non-literal
-  decorator argument rebuilds the parent too.
+- **`from widget import widget`** (the model), called → tracked by KEY: an
+  edit inside `widget()`'s body rebuilds the child, and the parent follows it,
+  decoding the child's stored result rather than building it again. Importing
+  `widget.py` still runs its top level in the parent's process, so an edit to
+  its imports, module-level code or a non-literal decorator argument rebuilds
+  the parent too.
 - **`from widget import WIDTH`** (a module-level literal: number, string, bool,
   `None`, or tuples/lists/dicts of those) → tracked by VALUE: only a changed
   value rebuilds the importer. A value computed at module level is import-time

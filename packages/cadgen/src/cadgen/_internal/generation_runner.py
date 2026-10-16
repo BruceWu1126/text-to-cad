@@ -344,8 +344,8 @@ def _write_drawing_record(
     spec: EntrySpec, output_path: Path, *, source_closure, children
 ) -> None:
     """The drawing's model record: ``tree: null``, its ``.dxf`` as the one output,
-    children from the body's calls. Published under the same rule as a @step
-    record (never replace a current record with a stale one)."""
+    children from the body's calls, each by its key. Published under the same rule
+    as a @step record (never replace a current record with a stale one)."""
     import hashlib
 
     from cadgen.store.publish import decide
@@ -371,12 +371,14 @@ def _write_drawing_record(
             "static": False,
         },
         "constants": dict(getattr(source_closure, "constants", None) or {}),
-        "children": [{"model": str(child), "tree": tree} for child, tree in children],
+        "children": [{"model": str(child), "key": key} for child, key in children],
         "outputs": {str(written): {"sha256": hashlib.sha256(written.read_bytes()).hexdigest()}},
     }
     from cadgen._internal.build_timing import record_fields
+    from cadgen.store.results import producer_versions
 
     record.update(record_fields())
+    record["producer"] = producer_versions()
     decision = decide(model_path, ran_closure_hash=closure_hash, ran_files=closure_files,
                       ran_names=record["closure"]["names"], ran_shas=record["closure"]["shas"],
                       ran_wholes=record["closure"]["wholes"], ran_own=record["closure"]["own"])
@@ -646,7 +648,7 @@ def _run_script_generator_body(
         # The children the body called -- recorded from the CALLS, never derived
         # from the tree's links (a modified child is still a dependency).
         generated_scene.store_children = [
-            {"model": str(child), "tree": tree} for child, tree in children
+            {"model": str(child), "key": key} for child, key in children
         ]
     elif model_format == "dxf":
         if spec.dxf_path is None:

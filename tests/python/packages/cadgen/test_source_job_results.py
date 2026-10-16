@@ -187,10 +187,8 @@ class SourceJobResults(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertTrue((self.root / "child.step").is_file(), "the discarded child's declared STEP was not written")
         self.assertNotEqual((self.root / "parent.step").read_bytes(), b"previous parent document")
-        child_tree = read_record(self.root / "child.py")["tree"]
-        self.assertEqual([c["model"] for c in read_record(self.root / "parent.py")["children"]],
-                         [f"{self.root / 'child.py'}::child"])
-        self.assertEqual(read_record(self.root / "parent.py")["children"][0]["tree"], child_tree)
+        self.assertEqual(read_record(self.root / "parent.py")["children"],
+                         [{"model": f"{self.root / 'child.py'}::child", "key": read_record(self.root / "child.py")["key"]}])
 
     def test_a_child_failure_the_body_catches_still_fails_the_run_and_keeps_the_parents_file(self):
         from cadgen.store.records import read_record

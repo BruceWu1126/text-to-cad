@@ -12,10 +12,21 @@
    model read by its value in this process's environment (a daemon job's is
    its caller's) — or a constant the model imported by value
    (``record.constants``) no longer hashes the same;
-3. for any recorded child: ``stale(child)`` **or** its current tree hash != the
-   pinned hash;
+3. for any recorded child: its stored result does not stand (``child stale``)
+   **or** stands under another key than the one recorded (``child rebuilt``);
 4. the tree object or any object it (transitively) references is missing;
-5. any declared output does not match ``outputs``.
+5. any declared output does not match ``outputs``;
+6. the producer that built the record -- cadgen, the kernel -- is not this one.
+
+A model's stored result STANDS when clauses 1–4 and 6 hold and clause 5 finds at
+most a STEP or a declared mesh to owe: ``Verdict.key`` is then the record's key,
+and a decorated call takes the result as it is, exporting what the files owe
+without running the body. Anything else the gate finds is a rebuild. The verdict
+also names the key the source has NOW (``Verdict.candidate``): what a result would
+be keyed by if this source were built, from this model, the record's closure as it
+hashes now, its constants as they read now, its children's keys as they stand now
+and this producer -- what a stored result is looked up by before the body runs
+(``store.results``).
 
 Evaluated once in the requesting process (fast, no kernel import) and again on
 the worker immediately before building. Recursion in (3) is memoized per request.
@@ -34,10 +45,15 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cadgen._internal import filetrace
-from cadgen.store.closure import changed_constant, current_closure_hash
+from cadgen.store.closure import current_closure_hash
 from cadgen.store.index import resolve_model_ref, split_model_ref
 from cadgen.store.records import read_record
 from cadgen.store.trees import _stamp, _stamp_is_settled, tree_complete
+
+
+#: The outputs a standing result still owes without a run: its STEP, exported again
+#: from the stored result, and its declared meshes, cut again (``generation._hit``).
+_EXPORTED_SUFFIXES = frozenset({".step", ".stp", ".stl", ".glb", ".3mf"})
 
 
 @dataclass
@@ -46,17 +62,25 @@ class Verdict:
     stale: bool
     clauses: list[dict[str, Any]] = field(default_factory=list)
     #: The source's closure hash as it is NOW (the script's own sha when there is no
-    #: record to name a closure): what in-flight coalescing keys on.
+    #: record to name a closure).
     closure: str | None = None
     #: Exact result from the record this verdict checked, never a later lookup.
     tree: str | None = None
+    #: The record's key while its stored result stands (the module docstring); None
+    #: when the model must run.
+    key: str | None = None
+    #: The key the source has now, when the record can say (the module docstring);
+    #: None without a record, when a child's result does not stand, or when a
+    #: constant's module cannot be read.
+    candidate: str | None = None
 
     def reason(self) -> str:
         """The first stale clause as a phrase: ``no record``, ``closure changed: <file>``,
         ``closure changed: <file> appeared``, ``environment variable <NAME> changed``,
         ``constant changed: <NAME> in <file>``, ``child stale: <child.py>``,
-        ``child result moved: <child.py>``, ``tree or components missing``,
-        ``never written: <path>`` / ``output missing: <path>`` / ``output changed: <path>``."""
+        ``child rebuilt: <child.py>``, ``tree or components missing``,
+        ``never written: <path>`` / ``output missing: <path>`` / ``output changed: <path>``,
+        ``producer changed: <name> <recorded> -> <now>``."""
         for clause in self.clauses:
             if not clause.get("stale"):
                 continue
@@ -64,7 +88,7 @@ class Verdict:
             if number == 3:
                 for child in clause.get("children") or []:
                     if child.get("stale"):
-                        name = Path(str(child.get("model") or "")).name or "?"
+                        name = Path(str(child.get("model") or "").split("::", 1)[0]).name or "?"
                         return f"{child.get('why') or 'child stale'}: {name}"
             if number == 5:
                 for output in clause.get("outputs") or []:
@@ -166,16 +190,16 @@ def stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verdi
 
 def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verdict:
     memo = memo if memo is not None else {}
-    key = resolve_model_ref(model)
-    script, _function = split_model_ref(key)
-    cached = memo.get(key)
+    ref = resolve_model_ref(model)
+    script, _function = split_model_ref(ref)
+    cached = memo.get(ref)
     if cached is not None:
         return cached
-    verdict = Verdict(model=key, stale=False)
-    memo[key] = verdict  # cycle guard: a self-referencing graph reads "current" mid-walk
+    verdict = Verdict(model=ref, stale=False)
+    memo[ref] = verdict  # cycle guard: a self-referencing graph reads "current" mid-walk
     clauses = verdict.clauses
 
-    record = read_record(key)
+    record = read_record(ref)
     if record is None:
         clauses.append({"clause": 1, "stale": True, "why": "no record"})
         verdict.stale = True
@@ -203,6 +227,10 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
     else:
         now = None
     verdict.closure = now or _sha256_file(script)
+    # The constants as they read now, by recorded name, each module imported once
+    # kernel-free: clause 2 compares them, and the candidate key is made of them.
+    recorded_constants = record.get("constants") or {}
+    constants_now = _constants_now(script, recorded_constants)
     if not recorded_hash or now != recorded_hash:
         clauses.append(
             {
@@ -217,7 +245,10 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
     else:
         # Constants by value: a literal imported from a model file is compared as
         # a value, not as that file's bytes (the file itself is not in the closure).
-        constant = changed_constant(script, record.get("constants") or {})
+        # A module gone, or a name no longer bound to a literal, counts as changed.
+        constant = next((f"{rel}:{name}" for rel, names in sorted(recorded_constants.items())
+                         for name, recorded in sorted(names.items())
+                         if (constants_now.get(rel) or {}).get(name) != recorded), None)
         if constant is not None:
             rel, _, name = str(constant).rpartition(":")
             clauses.append({"clause": 2, "stale": True, "why": f"constant changed: {name} in {rel}", "constant": constant})
@@ -225,26 +256,29 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         else:
             clauses.append({"clause": 2, "stale": False, "files": len(files)})
 
+    # Clause 3, by key: a child's stored result must stand, under the very key the
+    # parent composed. A child rebuilt from an edited source stands under another key
+    # -- whatever its geometry -- and the parent follows it (STORE.md §4).
     child_clauses: list[dict[str, Any]] = []
+    child_keys: list[str] = []
     for child in record.get("children") or []:
         child_model = str((child or {}).get("model") or "")
-        pinned = str((child or {}).get("tree") or "")
+        recorded = str((child or {}).get("key") or "")
         child_verdict = stale(child_model, memo=memo) if child_model else None
-        current_tree = child_verdict.tree if child_verdict is not None else None
-        moved = current_tree != pinned
-        child_stale = child_verdict is None or child_verdict.stale or moved
+        current_key = child_verdict.key if child_verdict is not None else None
+        rebuilt = current_key is not None and current_key != recorded
+        child_stale = current_key is None or rebuilt
         child_clauses.append(
             {
                 "model": child_model,
                 "stale": child_stale,
-                "why": (
-                    "child stale" if child_verdict is None or child_verdict.stale
-                    else "child result moved" if moved else None
-                ),
-                "pinned": pinned,
-                "current": current_tree,
+                "why": "child stale" if current_key is None else "child rebuilt" if rebuilt else None,
+                "recorded": recorded,
+                "current": current_key,
             }
         )
+        if current_key is not None:
+            child_keys.append(current_key)
         if child_stale:
             verdict.stale = True
     clauses.append({"clause": 3, "stale": any(c["stale"] for c in child_clauses), "children": child_clauses})
@@ -260,6 +294,7 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         verdict.stale = True
 
     output_clauses: list[dict[str, Any]] = []
+    owed_a_run = False
     for path, meta in (record.get("outputs") or {}).items():
         expected = str((meta or {}).get("sha256") or "")
         actual = _sha256_file(Path(path))
@@ -268,8 +303,51 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         output_clauses.append({"path": path, "stale": not ok, "why": why})
         if not ok:
             verdict.stale = True
+            # A STEP or a declared mesh is exported again from the stored result; any
+            # other output (a sidecar, a drawing) comes only from a run.
+            owed_a_run = owed_a_run or Path(path).suffix.lower() not in _EXPORTED_SUFFIXES
     clauses.append({"clause": 5, "stale": any(c["stale"] for c in output_clauses), "outputs": output_clauses})
+
+    from cadgen.store.results import producer_versions, result_key
+
+    recorded_producer = {str(k): str(v) for k, v in (record.get("producer") or {}).items()}
+    producer_now = producer_versions()
+    changed = next((name for name in sorted(set(recorded_producer) | set(producer_now))
+                    if recorded_producer.get(name) != producer_now.get(name)), None)
+    clauses.append({
+        "clause": 6, "stale": changed is not None,
+        "why": (f"producer changed: {changed} {recorded_producer.get(changed) or '?'} -> {producer_now.get(changed) or '?'}"
+                if changed is not None else None),
+        "recorded": recorded_producer, "current": producer_now,
+    })
+    if changed is not None:
+        verdict.stale = True
+
+    stands = not any(clause["stale"] for clause in clauses if clause["clause"] in (1, 2, 3, 4, 6)) and not owed_a_run
+    key = str(record.get("key") or "")
+    verdict.key = key if stands and key else None
+    readable = all(constants_now.get(rel) is not None and all(name in constants_now[rel] for name in names)
+                   for rel, names in recorded_constants.items())
+    if now and readable and len(child_keys) == len(child_clauses):
+        verdict.candidate = result_key(
+            model=ref, closure_hash=now, children=child_keys, producer=producer_now,
+            constants={rel: {name: constants_now[rel][name] for name in names} for rel, names in recorded_constants.items()},
+        )
     return verdict
+
+
+def _constants_now(script: Path, constants: Mapping[str, Mapping[str, str]]) -> dict[str, dict[str, str] | None]:
+    """The record's constants as their modules hold them now, by module: each name's
+    hash (``closure.module_constant_hashes``), a name no longer a literal absent, a
+    module that cannot be read kernel-free None."""
+    from cadgen.store.closure import _resolve_relative, module_constant_hashes
+
+    base = Path(script).resolve().parent
+    now: dict[str, dict[str, str] | None] = {}
+    for rel, names in sorted(constants.items()):
+        resolved = _resolve_relative(str(rel), base)
+        now[str(rel)] = module_constant_hashes(resolved, names) if resolved is not None else None
+    return now
 
 
 def _closure_why(script: Path, closure: Mapping[str, Any], now: str | None) -> str:

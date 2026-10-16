@@ -6,7 +6,7 @@ statically by what the importer TAKES from a model file:
 
 - only model functions (``from arm import arm``; ``import arm`` + ``arm.arm()``)
   → a **result edge**: ``arm.py`` is excluded from this closure and the child
-  is tracked by its pinned tree hash (``record.children``);
+  is tracked by its result's key (``record.children``, ``store/results.py``);
 - a plainly hashable constant (``from plate import WIDTH`` — a number, str,
   bool, None, or tuples/lists/dicts of those, however the module computed it)
   → a **value edge**: the file stays out of the closure and the record carries
@@ -15,7 +15,7 @@ statically by what the importer TAKES from a model file:
 - anything else (a helper function, a build123d object, an expression) → a
   **source edge**: the file is in the closure like any other.
 
-Constants by value, functions by reach, models by result.
+Constants by value, functions by reach, models by key.
 
 **Non-model files are sliced by reach.** A helper module (``lib/frame.py``) is
 in the closure of every model whose reach enters it, but what the record hashes
@@ -1103,7 +1103,7 @@ def _child_ownership(script: Path, statics: StaticImports, called_files: set[Pat
     sources belong to the child that calls it, and the whole subtree runs in
     this process when the body imports its child. Stopping one level down put
     every grandchild model file in the parent's closure, so an edit two levels
-    away rebuilt the root even when the pinned trees were unchanged.
+    away reached the root's own closure instead of its child's key.
     """
     child_owned: set[Path] = set()
     ours: set[Path] = {script, *statics.source_files}
@@ -1177,7 +1177,7 @@ def build_closure(
     statics = walk.result()
     ours.update(statics.source_files)
     child_owned -= ours
-    # A child's files stay out of this closure (models by result), but
+    # A child's files stay out of this closure (models by key), but
     # importing a child runs its import-time code in this process: what that
     # reaches in a file this closure shares with it is this model's too.
     imports = _Walk(script, syntax=_SYNTAX, sources=captured, model_boundaries=False, import_time=True)

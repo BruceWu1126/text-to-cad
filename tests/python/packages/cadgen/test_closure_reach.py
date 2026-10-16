@@ -12,6 +12,14 @@ from unittest import mock
 from tests.python.support.tmp_root import generated_cad_directory
 
 
+def _built_here(record: dict) -> dict:
+    """``record`` as a build of this producer writes it (clause 6 holds a record
+    another producer built stale)."""
+    from cadgen.store.results import producer_versions
+
+    return {**record, "producer": producer_versions()}
+
+
 GEO = """
 import math
 from lib import spec
@@ -243,11 +251,11 @@ class ReachClosure(unittest.TestCase):
         script = self.root / script
         closure = build_closure(script, executed=executed if executed is not None else {})
         reference = model_ref(script, function)
-        write_record(reference, {
+        write_record(reference, _built_here({
             "entryKind": "part", "sourceKind": "python", "tree": None,
             "closure": closure.as_json(), "constants": closure.constants,
             "children": [], "outputs": {},
-        })
+        }))
         return reference, closure
 
     def verdict(self, reference):
@@ -543,9 +551,9 @@ class ReachClosure(unittest.TestCase):
         closure = build_closure(script, executed=ran,
                                 sources={key: Path(key).read_bytes() for key in ran} if sources else None)
         reference = model_ref(script, "part")
-        write_record(reference, {"entryKind": "part", "sourceKind": "python", "tree": None,
-                                 "closure": closure.as_json(), "constants": closure.constants,
-                                 "children": [], "outputs": {}})
+        write_record(reference, _built_here({"entryKind": "part", "sourceKind": "python", "tree": None,
+                                         "closure": closure.as_json(), "constants": closure.constants,
+                                         "children": [], "outputs": {}}))
         self.assert_clause_two(reference, False)
         self.edit(self.root / "lib/shapes.py", "return 20.0", "return 25.0")
         self.assert_clause_two(reference, True, "lib/shapes.py")
@@ -704,9 +712,9 @@ class ReachClosure(unittest.TestCase):
         closure = build_closure(script, executed={}, listings=[parts], outputs=outputs)
         self.assertEqual(closure.own, {"./": ("meshes", "part.step", "part.step.json")})
         reference = model_ref(script, "part")
-        write_record(reference, {"entryKind": "part", "sourceKind": "python", "tree": None,
-                                 "closure": closure.as_json(), "constants": closure.constants,
-                                 "children": [], "outputs": {}})
+        write_record(reference, _built_here({"entryKind": "part", "sourceKind": "python", "tree": None,
+                                         "closure": closure.as_json(), "constants": closure.constants,
+                                         "children": [], "outputs": {}}))
         (parts / "meshes").mkdir()
         for output in outputs:
             output.write_bytes(b"")
@@ -730,9 +738,9 @@ class ReachClosure(unittest.TestCase):
         closure = build_closure(script, executed={}, listings=[profiles])
         self.assertIn("profiles/", closure.files)
         reference = model_ref(script, "part")
-        write_record(reference, {"entryKind": "part", "sourceKind": "python", "tree": None,
-                                 "closure": closure.as_json(), "constants": closure.constants,
-                                 "children": [], "outputs": {}})
+        write_record(reference, _built_here({"entryKind": "part", "sourceKind": "python", "tree": None,
+                                         "closure": closure.as_json(), "constants": closure.constants,
+                                         "children": [], "outputs": {}}))
         self.assert_clause_two(reference, False)
         (profiles / "b.json").write_text("{}", encoding="utf-8")
         self.assert_clause_two(reference, True, "profiles/")
@@ -755,9 +763,9 @@ class ReachClosure(unittest.TestCase):
         script = parts / "part.py"
         closure = build_closure(script, executed={}, listings=[parts])
         reference = model_ref(script, "part")
-        write_record(reference, {"entryKind": "part", "sourceKind": "python", "tree": None,
-                                 "closure": closure.as_json(), "constants": closure.constants,
-                                 "children": [], "outputs": {}})
+        write_record(reference, _built_here({"entryKind": "part", "sourceKind": "python", "tree": None,
+                                         "closure": closure.as_json(), "constants": closure.constants,
+                                         "children": [], "outputs": {}}))
         stage.rmdir()
         temp.unlink()
         self.assert_clause_two(reference, False)

@@ -172,10 +172,10 @@ class StandaloneDxfSourceTests(unittest.TestCase):
             self.assertFalse(stale(script_path).stale)
             self.assertNotEqual(rendered, sibling.read_bytes())
 
-    def test_a_drawing_pins_the_model_it_composes(self) -> None:
-        # A drawing is a model in the graph: calling `bracket()` in its body pins
-        # bracket's tree in the drawing's record (gate clause 3), so the flat
-        # pattern goes stale when bracket's GEOMETRY changes — no `--force`.
+    def test_a_drawing_follows_the_model_it_composes_by_key(self) -> None:
+        # A drawing is a model in the graph: calling `bracket()` in its body records
+        # bracket's key in the drawing's record (gate clause 3), so the flat
+        # pattern goes stale when bracket is rebuilt — no `--force`.
         import os
         from unittest import mock
 
@@ -226,7 +226,7 @@ class StandaloneDxfSourceTests(unittest.TestCase):
             record = read_record(pattern_path) or {}
             children = record.get("children") or []
             self.assertEqual([Path(c["model"]).name for c in children], ["bracket.py::bracket"])
-            self.assertEqual(children[0]["tree"], (read_record(bracket_path) or {}).get("tree"))
+            self.assertEqual(children[0]["key"], (read_record(bracket_path) or {}).get("key"))
             self.assertFalse(stale(pattern_path).stale)
             first = pattern_path.with_suffix(".dxf").read_bytes()
 

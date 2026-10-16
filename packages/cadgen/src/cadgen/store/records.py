@@ -8,15 +8,21 @@ A record says what a model's build depended on and what it produced::
       "kind": "step",
       "entryKind": "assembly",
       "tree": "<tree object hash>",
+      "key": "<result key>",
+      "producer": {"cadgen": "0.8.0", "build123d": "…", "cadqueryOcp": "…"},
       "closure": {"hash": "…", "files": ["robot.py", "lib/frame.py"]},
-      "children": [{"model": "/abs/src/arm.py", "tree": "…"}],
+      "children": [{"model": "/abs/src/arm.py::arm", "key": "…"}],
       "outputs": {"/abs/STEP/robot.step": {"sha256": "…", "writer": "cadgen-step-writer-4"}, …}
     }
 
-``children`` is recorded from the CALLS the body made, never derived from the
-tree's links — that is what makes the link/component decision in
-``cadgen.store.trees`` safe. ``closure.files`` are relative to the script's
-folder and hashed by ``cadgen.store.closure``.
+``key`` is the result's identity: a hash of the model, the closure, the
+constants, the children's keys and the producer, computed by ``write_record``
+from what the record holds (``cadgen.store.results``), under which the record
+is also stored as written (``index/result``). ``children`` is recorded from the
+CALLS the body made, each by its key, never derived from the tree's links —
+that is what makes the link/component decision in ``cadgen.store.trees`` safe.
+``closure.files`` are relative to the script's folder and hashed by
+``cadgen.store.closure``.
 
 Identity is the SCRIPT. A generated document carries no tie back to its
 source (a generated file is independent of its script).
@@ -79,7 +85,9 @@ RECORD_KIND = "record"
 # the source result, its STEP output pending (an empty sha256) until the export lands,
 # then its sha256 and writer (``plain`` for a file written without names). No separate
 # document tree, correspondence maps or writer input.
-RECORD_SCHEMA_VERSION = 12
+# Schema 13: the record carries its result's key and the producer that built it, and
+# names each child by the child's key (store/results.py), never by its tree.
+RECORD_SCHEMA_VERSION = 13
 # A format change bumps it and lands on new keys (document_key).
 # Schema 6: an XCAF label entry (`=>[0:1:1:2]`) reads as no name, and an
 # occurrence without one of its own never shows a shared product's name that is
@@ -147,7 +155,12 @@ def records_for_script(script: Path | str) -> list[tuple[str, dict[str, Any]]]:
     return found
 
 
-def write_record(model: Path | str, payload: dict[str, Any]) -> None:
+def write_record(model: Path | str, payload: dict[str, Any]) -> str:
+    """Write ``payload`` as ``model``'s record and return its key. Every record is
+    keyed by what it holds (``results.key_for``), and the result at that key is the
+    record as last written under it (``results.write_result``)."""
+    from cadgen.store.results import key_for, write_result
+
     body = dict(payload)
     body["kind"] = RECORD_KIND
     body["schemaVersion"] = RECORD_SCHEMA_VERSION
@@ -156,7 +169,10 @@ def write_record(model: Path | str, payload: dict[str, Any]) -> None:
     body["model"] = ref
     body["script"] = str(script)
     body["function"] = function
+    body["key"] = key_for(body, ref)
     write_entry("model", record_key(ref), body)
+    write_result(body["key"], ref, body)
+    return body["key"]
 
 
 def remove_record(model: Path | str) -> None:

@@ -208,7 +208,7 @@ def _why_one(model: str, as_json: bool) -> int:
             print(f"  [{mark}] 3 children ({len(children)})")
             for child in children:
                 cmark = "x" if child.get("stale") else "ok"
-                print(f"        [{cmark}] {child.get('model')}  pinned {str(child.get('pinned'))[:12]}  current {str(child.get('current'))[:12]}  {child.get('why') or ''}")
+                print(f"        [{cmark}] {child.get('model')}  key {str(child.get('recorded'))[:12]}  now {str(child.get('current'))[:12]}  {child.get('why') or ''}")
         elif number == 4:
             print(f"  [{mark}] 4 tree {str(clause.get('tree'))[:12]} {'complete' if not clause.get('stale') else clause.get('why')}")
         elif number == 5:
@@ -222,7 +222,10 @@ def _why_one(model: str, as_json: bool) -> int:
                     print(f"              shows its own content: {'; '.join(document['differ'])}")
                 elif document is not None:
                     print("              verify pending")
+        elif number == 6:
+            print(f"  [{mark}] 6 producer {clause.get('why') or 'this cadgen and kernel'}")
     if record:
+        print(f"key     {str(record.get('key'))[:12]}")
         closure = record.get("closure") or {}
         names = closure.get("names") or {}
         own = closure.get("own") or {}

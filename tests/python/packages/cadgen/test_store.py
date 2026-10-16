@@ -90,9 +90,13 @@ class StoreCase(unittest.TestCase):
             }
         )[0])
 
-    def record(self, script: Path, *, tree: str, children=(), output: Path | None = None) -> dict:
+    def record(self, script: Path, *, tree: str, children=(), output: Path | None = None,
+               producer: dict | None = None) -> dict:
+        """A record as a build writes it: ``children`` are child scripts, each recorded by
+        the key its record holds now; ``producer`` this cadgen's unless given."""
         from cadgen.store.closure import current_closure_hash
-        from cadgen.store.records import note_output, write_record
+        from cadgen.store.records import note_output, read_record, write_record
+        from cadgen.store.results import producer_versions
 
         files = [str(script)]
         outputs = {}
@@ -103,10 +107,11 @@ class StoreCase(unittest.TestCase):
             "sourceKind": "python",
             "tree": tree,
             "closure": {"hash": current_closure_hash(script, files), "files": files, "static": False},
-            "children": [{"model": str(child), "tree": child_tree} for child, child_tree in children],
+            "children": [{"model": str(child), "key": read_record(child)["key"]} for child in children],
             "outputs": outputs,
+            "producer": producer if producer is not None else producer_versions(),
         }
-        write_record(script, record)
+        record["key"] = write_record(script, record)
         if output is not None:
             note_output(output, script)
         return record
@@ -140,33 +145,40 @@ class GateTruthTable(StoreCase):
         script.write_text(script.read_text(encoding="utf-8").replace("SIZE = 10.0", "SIZE = 11.0"), encoding="utf-8")
         self.assertEqual(self.stale_clause(script), 2)
 
-    def test_clause_3_a_child_whose_result_moved_or_is_itself_stale(self) -> None:
+    def test_clause_3_a_child_rebuilt_under_another_key_or_itself_stale(self) -> None:
+        from cadgen.store.gate import stale
+
         child = self.model("pin")
         parent = self.model("arm")
         child_tree = self.tree_for("pin")
         self.record(child, tree=child_tree)
-        self.record(parent, tree=self.tree_for("arm"), children=[(child, child_tree)])
+        self.record(parent, tree=self.tree_for("arm"), children=[child])
         self.assertIsNone(self.stale_clause(parent))
 
-        # The child's result changed under the parent's pin.
-        self.record(child, tree=self.tree_for("pin", payload=b"BREP\x01"))
-        self.assertEqual(self.stale_clause(parent), 3)
-
-        # The pin matches again but the child itself is stale (its source moved on).
-        self.record(child, tree=child_tree)
-        self.assertIsNone(self.stale_clause(parent))
+        # The child's source moved on and it has not been rebuilt: its result does not stand.
         child.write_text(child.read_text(encoding="utf-8").replace("SIZE = 10.0", "SIZE = 12.0"), encoding="utf-8")
         self.assertEqual(self.stale_clause(parent), 3)
+        self.assertEqual(stale(parent).reason(), "child stale: pin.py")
 
-    def test_clause_3_an_identical_result_after_a_child_edit_leaves_the_parent_current(self) -> None:
-        child = self.model("pin")
-        parent = self.model("arm")
-        child_tree = self.tree_for("pin")
-        self.record(parent, tree=self.tree_for("arm"), children=[(child, child_tree)])
-        # The child was edited and rebuilt, and produced the SAME tree.
-        child.write_text(child.read_text(encoding="utf-8").replace("SIZE = 10.0", "SIZE = 10.0 * 1"), encoding="utf-8")
+        # Rebuilt from that source -- the same tree, as it happens -- it stands under
+        # another key than the parent composed: the parent follows its children by key.
         self.record(child, tree=child_tree)
-        self.assertIsNone(self.stale_clause(parent), "a parent depends on its children by result")
+        self.assertIsNone(self.stale_clause(child))
+        self.assertEqual(self.stale_clause(parent), 3)
+        self.assertEqual(stale(parent).reason(), "child rebuilt: pin.py")
+        self.record(parent, tree=self.tree_for("arm"), children=[child])
+        self.assertIsNone(self.stale_clause(parent))
+
+    def test_clause_6_a_record_another_producer_built(self) -> None:
+        from cadgen.store.gate import stale
+        from cadgen.store.results import producer_versions
+
+        script = self.model("plate")
+        self.record(script, tree=self.tree_for("plate"), producer={**producer_versions(), "cadgen": "0.4.0"})
+        self.assertEqual(self.stale_clause(script), 6)
+        self.assertTrue(stale(script).reason().startswith("producer changed: cadgen 0.4.0 -> "))
+        self.record(script, tree=self.tree_for("plate"))
+        self.assertIsNone(self.stale_clause(script))
 
     def test_clause_4_a_missing_component_object(self) -> None:
         from cadgen.store.objects import object_path
@@ -180,14 +192,27 @@ class GateTruthTable(StoreCase):
         self.assertEqual(self.stale_clause(script), 4)
 
     def test_clause_5_an_output_that_changed_on_disk(self) -> None:
+        from cadgen.store.gate import stale
+
         script = self.model("plate")
         out = self.root / "plate.step"
         out.write_bytes(b"ISO-10303-21;\n")
-        self.record(script, tree=self.tree_for("plate"), output=out)
+        record = self.record(script, tree=self.tree_for("plate"), output=out)
+        self.assertEqual(stale(script).key, record["key"])
         out.write_bytes(b"ISO-10303-21; edited\n")
         self.assertEqual(self.stale_clause(script), 5)
+        # A STEP is owed an export, not a run: the stored result still stands.
+        self.assertEqual(stale(script).key, record["key"])
         out.unlink()
         self.assertEqual(self.stale_clause(script), 5)
+        self.assertEqual(stale(script).key, record["key"])
+        # A sidecar is a run's: without it the result does not stand.
+        sidecar = self.root / "plate.step.json"
+        sidecar.write_bytes(b"{}")
+        self.record(script, tree=self.tree_for("plate"), output=sidecar)
+        sidecar.unlink()
+        self.assertEqual(self.stale_clause(script), 5)
+        self.assertIsNone(stale(script).key)
 
 
 class GateVerifiesOncePerProcess(StoreCase):
@@ -310,7 +335,7 @@ class ClosureBoundaryRule(StoreCase):
         # Constants by value: the literal is tracked by its value hash, not the file.
         self.assertEqual({"plate.py": {"SIZE"}}, {Path(k).name: set(v) for k, v in closure.constants.items()})
 
-    # --- constants by value, functions by file, models by result ----------------
+    # --- constants by value, functions by file, models by key -------------------
 
     def _mirror_over(self, handlebar_text: str, mirror_import: str = "from handlebar import MIRROR_MOUNT_LEFT") -> Path:
         (self.root / "handlebar.py").write_text(textwrap.dedent(handlebar_text), encoding="utf-8")
@@ -349,19 +374,20 @@ class ClosureBoundaryRule(StoreCase):
         from cadgen.store.closure import build_closure
         from cadgen.store.records import write_record
 
+        from cadgen.store.results import producer_versions
+
         closure = build_closure(script, executed={})
-        write_record(
-            script,
-            {
-                "entryKind": "part",
-                "sourceKind": "python",
-                "tree": self.tree_for("mirror"),
-                "closure": closure.as_json(),
-                "constants": closure.constants,
-                "children": [],
-                "outputs": {},
-            },
-        )
+        record = {
+            "entryKind": "part",
+            "sourceKind": "python",
+            "tree": self.tree_for("mirror"),
+            "closure": closure.as_json(),
+            "constants": closure.constants,
+            "children": [],
+            "outputs": {},
+            "producer": producer_versions(),
+        }
+        write_record(script, record)
         self.assertEqual({"handlebar.py": {"MIRROR_MOUNT_LEFT"}}, {k: set(v) for k, v in closure.constants.items()})
         # Importing handlebar runs its module body here: it is in by what that runs.
         self.assertTrue(closure.shas["handlebar.py"].startswith("islice1:"))
@@ -507,7 +533,7 @@ class HashAtExecution(StoreCase):
         lazy = self.root / "nested_lazy.py"
         helper.write_text("SIZE = 3\n", encoding="utf-8")
         child.write_text("from nested_helper import SIZE\n", encoding="utf-8")
-        lazy.write_text("LATE = 1\n", encoding="utf-8")
+        lazy.write_bytes(b"LATE = 1\n")
         for name in ("nested_child", "nested_helper", "nested_lazy"):
             sys.modules.pop(name, None)
         with mock.patch.object(sys, "path", [str(self.root), *sys.path]), _first_party_from_source():
@@ -1095,7 +1121,7 @@ class StoreCli(StoreCase):
         self.assertIn(f"index/model entries in format {RECORD_SCHEMA_VERSION + 1}", json.loads(out)["deferred"]["evidence"][0])
 
 
-# The two-level fixture ChildrenByResult runs: a pin and an arm that places it twice.
+# The two-level fixture ChildrenByKey runs: a pin and an arm that places it twice.
 # Written by the test so the run reads nothing under models/.
 LINK_PIN_SOURCE = """\
 from cadgen import step
@@ -1135,9 +1161,10 @@ if __name__ == "__main__":
 """
 
 
-class ChildrenByResult(StoreCase):
-    """End to end over real model runs: a child edit with identical geometry
-    leaves the parent current; a geometry change rebuilds it."""
+class ChildrenByKey(StoreCase):
+    """End to end over real model runs: a child edit, whatever its geometry, rebuilds
+    the parent, which relinks the child's stored result; a geometry change reaches it
+    the same way."""
 
     def run_model(self, script: Path) -> str:
         env = dict(os.environ)
@@ -1148,7 +1175,9 @@ class ChildrenByResult(StoreCase):
         self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
         return completed.stdout.strip().splitlines()[-1].split(" ", 1)[0]
 
-    def test_a_parent_pins_its_children_by_result(self) -> None:
+    def test_a_parent_follows_its_children_by_key(self) -> None:
+        from cadgen.store.records import read_record
+
         src = self.root / "src"
         src.mkdir()
         (src / "link_pin.py").write_text(LINK_PIN_SOURCE, encoding="utf-8")
@@ -1160,17 +1189,22 @@ class ChildrenByResult(StoreCase):
         # gate's verdict (`stale`), which is asked directly, without a cold interpreter.
         self.assertEqual(self.run_model(arm), "built")
         self.assertIsNone(self.stale_clause(arm))
-        self.assertIsNone(self.stale_clause(pin), "the child was built inline and recorded")
+        self.assertIsNone(self.stale_clause(pin), "the child was built inside the parent and recorded")
+        self.assertEqual(read_record(arm)["children"], [{"model": f"{pin}::link_pin", "key": read_record(pin)["key"]}])
 
         pin.write_text(pin.read_text(encoding="utf-8").replace("height=12.0", "height=12.0 * 1.0"), encoding="utf-8")
+        self.assertEqual(self.stale_clause(arm), 3, "the child's source moved on: its result does not stand")
         self.assertEqual(self.run_model(pin), "built", "a semantic edit rebuilds the child")
-        self.assertIsNone(self.stale_clause(arm), "identical geometry: the parent's pin still holds")
+        self.assertEqual(self.stale_clause(arm), 3, "identical geometry, another key: the parent follows the child")
+        first_tree = read_record(arm)["tree"]
+        self.assertEqual(self.run_model(arm), "built", "the parent rebuilds, relinking the child's stored result")
+        self.assertEqual(read_record(arm)["tree"], first_tree, "the child's geometry is the same, so the parent's is")
+        self.assertEqual(read_record(arm)["children"][0]["key"], read_record(pin)["key"])
 
         # A publish claims everything its record names -- reused components and
-        # a pinned child's tree alike -- so a sweep already running keeps it all
+        # a child's tree alike -- so a sweep already running keeps it all
         # (STORE.md §8). Everything here is past the grace window beforehand.
         from cadgen.store.objects import iter_objects, object_path
-        from cadgen.store.records import read_record
         from cadgen.store.trees import tree_objects
 
         then = time.time() - 3 * 3600
@@ -1184,10 +1218,10 @@ class ChildrenByResult(StoreCase):
 
         pin.write_text(pin.read_text(encoding="utf-8").replace("radius=2.0", "radius=2.5"), encoding="utf-8")
         self.assertEqual(self.run_model(arm), "built", "a geometry change reaches the parent")
-
         record = read_record(arm)
         self.assertEqual([Path(c["model"]).name for c in record["children"]], ["link_pin.py::link_pin"])
-        self.assertEqual(record["children"][0]["tree"], read_record(pin)["tree"])
+        self.assertEqual(record["children"][0]["key"], read_record(pin)["key"])
+        self.assertNotEqual(record["tree"], first_tree)
 
 
 if __name__ == "__main__":

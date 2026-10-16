@@ -282,10 +282,14 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     else:
         outputs.pop(str(output), None)
         forget_output(output)
+    from cadgen.store.results import producer_versions
+
     updated = {**record, 'tree': tree, 'closure': {**closure, 'hash': full_hash, 'shas': shas},
                'outputs': outputs, 'materials': material_declaration, 'animation': animation,
-               'appearance': sidecar.get('appearance'), 'kinematics': kinematics}
+               'appearance': sidecar.get('appearance'), 'kinematics': kinematics,
+               'producer': producer_versions()}
     # If source changed in this tiny publication interval the captured hashes
-    # intentionally leave this record stale; no newer bytes are claimed.
+    # intentionally leave this record stale; no newer bytes are claimed. The
+    # closure moved, so the record is keyed anew and its result stored under that key.
     write_record(model, updated)
     return tree

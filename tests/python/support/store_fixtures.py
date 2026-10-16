@@ -72,6 +72,7 @@ def seed_result(
     from cadgen.store.objects import put_object
     from cadgen.store.parts import _write, part_key
     from cadgen.store.records import note_document_tree, note_output, write_record
+    from cadgen.store.results import producer_versions
     from cadgen.store.trees import TREE_KIND, TREE_SCHEMA, tree_kind
 
     def inflate(text: str) -> bytes:
@@ -146,7 +147,7 @@ def seed_result(
     owner = Path(model) if model is not None else document
     record = {"entryKind": tree["entryKind"], "sourceKind": "python" if model is not None else "step",
               "tree": tree_hash, "closure": {"hash": sha, "files": [], "static": True}, "children": [],
-              "outputs": {str(document.resolve()): {"sha256": sha}}}
+              "outputs": {str(document.resolve()): {"sha256": sha}}, "producer": producer_versions()}
     if sidecar:
         record.update(sidecar)
     write_record(owner, record)

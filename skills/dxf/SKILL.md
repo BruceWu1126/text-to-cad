@@ -108,7 +108,7 @@ Copy the full template for the applicable workflow from
 
    ```python
    from cadgen import dxf, flatten
-   from bracket import bracket        # a child: tracked by its RESULT
+   from bracket import bracket        # a child: tracked by its KEY
 
    KERF = 0.15
 
@@ -122,10 +122,10 @@ Copy the full template for the applicable workflow from
        bracket_drawing()
    ```
 
-   The drawing's record pins the part's tree, so a part edit that changes its
-   geometry makes the drawing stale, and one that does not (a comment, a
-   refactor, a colour) leaves it current. Constants imported from the part
-   (`from bracket import THICKNESS`) are tracked by value the same way.
+   The drawing's record keeps the part's key, so a part edit makes the drawing
+   stale (a comment or formatting is no edit), and the drawing's rerun decodes
+   the part's stored result rather than building it again. Constants imported
+   from the part (`from bracket import THICKNESS`) are tracked by value.
 
 3. **Flat pattern of an imported STEP** (a `.step`/`.stp` with no Python source):
    read it with `cadgen.read_step` (warm from the store, the same geometry as
@@ -159,7 +159,7 @@ Copy the full template for the applicable workflow from
    source STEPs in an `imported/` directory beside the drawing, committed like any
    other input — input path and output path being different files is the whole
    rule. For a STEP this project DOES generate, use workflow 2 instead: import the
-   model script and call it, which is tracked by result and never touches an
+   model script and call it, which is tracked by key and never touches an
    artifact.
 
 One model per file is the recommendation, and a drawing gets its own script:

@@ -109,6 +109,8 @@ class GeneratedStepResult:
     tree: str | None = None
     # The saved STEP was kept, not written: the kept rule held (STORE.md §3, *Exports*).
     step_kept: bool = False
+    # The key the result is stored under (store/results.py): the record's.
+    key: str | None = None
 
 
 def _cli_progress_line(

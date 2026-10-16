@@ -33,7 +33,7 @@ Readers never open it (STORE.md §2, the two sides). Its one reader is
 entry, then the ref resolved in the tree the record names (by the one resolver every
 ref goes through, ``cadgen.refs``) to its occurrence and component, and the entry
 that describes that occurrence -- the model's, or, through each link it sits under,
-a pinned child's -- where the feature the element's name (or, for an occurrence, its
+a child's -- where the feature the element's name (or, for an occurrence, its
 body's lineage) names is looked up, among the calls that made that occurrence, with
 the one the lineage says last modified it. Without an entry, or with one for other
 bytes, it says it does not know; nothing here finds or renders geometry. The entry
@@ -81,7 +81,9 @@ def provenance_key(model: Path | str) -> str:
 
 def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str) -> None:
     """The entry for ``model``'s build that published ``tree``: ``payload`` holds its
-    ``features``, ``components`` and ``occurrences``. Idempotent; atomic."""
+    ``features``, ``components`` and ``occurrences``. Written after the record, and
+    kept with the result stored under the record's key (``store.results``), which
+    restores it. Idempotent; atomic."""
     ref = resolve_model_ref(model)
     body = {
         "kind": PROVENANCE_KIND,
@@ -93,6 +95,12 @@ def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str) -
         "occurrences": {str(token): index for token, index in sorted(dict(payload.get("occurrences") or {}).items())},
     }
     write_entry(PROVENANCE_KIND, provenance_key(ref), body)
+    from cadgen.store.records import read_record
+    from cadgen.store.results import write_result_provenance
+
+    record = read_record(ref)
+    if record and record.get("key"):
+        write_result_provenance(str(record["key"]), body)
 
 
 def read_provenance(model: Path | str) -> dict[str, Any] | None:
@@ -262,7 +270,7 @@ def _described(model: str, record: dict[str, Any], entry: dict[str, Any], token:
     """The build that made the occurrence ``token`` of the model's flattened result, whose
     component is ``cid``: its model, its entry, and the feature whose call made the shape
     the occurrence places (None where the entry does not say). An occurrence the model's
-    run placed is in its entry; one a link placed is followed into the pinned child's
+    run placed is in its entry; one a link placed is followed into the child's
     entry, through each link it sits under (``trees.flatten_tree``'s origins), by its
     token there. Else the first entry listing the component answers."""
     from cadgen.store.trees import flatten_tree, get_tree
@@ -285,7 +293,7 @@ def _described(model: str, record: dict[str, Any], entry: dict[str, Any], token:
             break
         linked, child_token = origins[node]
         child = next(((child_model, child_record, child_entry)
-                      for child_model, child_record, child_entry in _pinned(owner_record)
+                      for child_model, child_record, child_entry in _composed(owner_record)
                       if child_record.get("tree") == linked), None)
         if child is None:
             break
@@ -327,33 +335,33 @@ def _parallel(rows: list[dict[str, Any]], first: int, other: int) -> dict[int, i
     return counterparts
 
 
-def _pinned(record: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
-    """Each child ``record`` pins, with its record and entry, while both still describe
-    the pinned tree."""
+def _composed(record: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Each child ``record`` names, with its record and entry, while the child's record
+    still holds the key the parent composed and its entry describes its tree."""
     from cadgen.store.records import read_record
 
     for child in record.get("children") or []:
-        child_model, pin = str(child.get("model") or ""), str(child.get("tree") or "")
+        child_model, key = str(child.get("model") or ""), str(child.get("key") or "")
         if not child_model:
             continue
         child_record = read_record(child_model)
         child_entry = read_provenance(child_model)
         if child_record is None or child_entry is None:
             continue
-        if child_record.get("tree") != pin or child_entry.get("tree") != pin:
+        if child_record.get("key") != key or child_entry.get("tree") != child_record.get("tree"):
             continue
         yield child_model, child_record, child_entry
 
 
 def _entries(model: str, record: dict[str, Any], entry: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """The model's entry, then each pinned child's (``_pinned``), children first-called
+    """The model's entry, then each composed child's (``_composed``), children first-called
     first, their own children after them."""
     yield model, entry
     seen = {model}
     pending = [record]
     while pending:
         current = pending.pop(0)
-        for child_model, child_record, child_entry in _pinned(current):
+        for child_model, child_record, child_entry in _composed(current):
             if child_model in seen:
                 continue
             seen.add(child_model)

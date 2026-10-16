@@ -186,7 +186,7 @@ def claim_tree(tree_hash: str) -> bool:
     """:func:`tree_complete` for a publish: verify the closure, then claim all of it.
 
     A record about to name this tree must not lose any part of it -- its own
-    components, or a child's tree pinned long ago -- to a sweep that began
+    components, or a child's tree composed long ago -- to a sweep that began
     before the publish (STORE.md §8). Every object in the verified closure is
     claimed (:func:`cadgen.store.objects.claim_object`), through the metadata
     capture: an object this process verified and that keeps its identity is

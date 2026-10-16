@@ -10,20 +10,22 @@ three kinds of thing:
   entries an older version of cadgen's derivation wrote, which no reader of
   this cadgen asks for again (``parts.obsolete_key``), and the records and
   document entries at keys this cadgen does not own (another schema
-  version's, ``owned_key``) go, with every object only they named, once last
-  written ``OBSOLETE_RETIRE_AFTER_SECONDS`` ago (a week): another cadgen
+  version's, ``owned_key``) and the results another cadgen stored by key
+  (``results.obsolete_result``) go, with every object only they named, once
+  last written ``OBSOLETE_RETIRE_AFTER_SECONDS`` ago (a week): another cadgen
   sharing the store may still read them, and a read never writes. Until then
-  they keep what they name, the trees such a record or document entry names
-  among it, and a retired kind's entries are evicted under a cap like any
-  derived entry.
+  they keep what they name, the trees such a record, document entry or result
+  names among it, and a retired kind's entries are evicted under a cap like
+  any derived entry.
 - **Evicted entries**, only under a cap: derived entries (``DERIVED_KINDS``),
   least recently written first, until the store fits ``LOW_WATERMARK`` of the
   cap. A record, a document entry, an output entry or a provenance entry is
-  never evicted.
-- **Unreachable objects**: not in the closure of a current record's or
-  document entry's tree (or a week-young one's at a key this cadgen does not
-  own), not named by a surviving derived entry, and not written or claimed
-  within the grace window (default 1 h).
+  never evicted; a result stored by key is derived, and its tree is protected
+  only while the entry stands.
+- **Unreachable objects**: not in the closure of a current record's,
+  document entry's or result's tree (or a week-young one's at a key this
+  cadgen does not own), not named by a surviving derived entry, and not
+  written or claimed within the grace window (default 1 h).
 
 A store a newer cadgen writes to is left alone. A record, document entry or
 tree in a newer format than this cadgen's, or an ``index/`` folder it does not
@@ -95,6 +97,9 @@ _NAMED_FIELDS = {
     # A robot entry names its payload and the primitive meshes the payload draws.
     "robot": ("object", "meshes"),
     "bounds": (),
+    # A result stored by key names its tree, protected with its closure while the
+    # entry stands (_read_roots); evicting the entry frees the tree it alone kept.
+    "result": ("tree",),
     # A provenance entry names no object: its ``tree`` is the record's, which the
     # record protects (README law 20: provenance never names geometry).
     "provenance": (),
@@ -289,9 +294,9 @@ def _unowned(found: Scan, retire_before: float) -> list[_Entry]:
 
 def _read_roots(found: Scan, should_stop: Callable[[], bool], newer_since: float | None,
                 retire_before: float | None = None) -> list[object]:
-    """The protected trees: every ``tree`` of this cadgen's own records, and every
-    tree of its own document entries; and those of the
-    records and document entries at keys it does not own, written after
+    """The protected trees: every ``tree`` of this cadgen's own records, of its own
+    document entries and of the results it stored by key; and those of the
+    records, document entries and results at keys it does not own, written after
     ``retire_before`` (all of them, without it) -- another cadgen may still use
     them, and a pass retires them only once they are older.
 
@@ -316,6 +321,14 @@ def _read_roots(found: Scan, should_stop: Callable[[], bool], newer_since: float
             if _newer(version, current):
                 what = f"index/{kind} entries in format {version} (this cadgen reads {current})"
                 newer[what] = max(mtime, newer.get(what, mtime))
+    from cadgen.store.results import obsolete_result
+
+    for count, (key, (_size, mtime)) in enumerate(found.entries.get("result", {}).items()):
+        if count % _STOP_EVERY == 0 and should_stop():
+            raise _Stopped
+        entry = read_entry("result", key)
+        if entry and (not obsolete_result(entry) or retire_before is None or mtime > retire_before):
+            roots.append(entry.get("tree"))
     if newer_since is not None:
         _defer_if_recent(newer, newer_since)
     return roots
@@ -425,11 +438,15 @@ class _Entry:
     obsolete: bool = False
 
 
-def _obsolete(kind: str, key: str) -> bool:
+def _obsolete(kind: str, key: str, entry: dict | None) -> bool:
     if kind == "part":
         from cadgen.store.parts import obsolete_key
 
         return obsolete_key(key)
+    if kind == "result":
+        from cadgen.store.results import obsolete_result
+
+        return obsolete_result(entry)
     return False
 
 
@@ -443,7 +460,7 @@ def _read_entries(found: Scan, kinds, should_stop: Callable[[], bool]) -> list[_
             entry = None if kind == "bounds" else _read_json(folder / key)
             named = named_objects(kind, entry)
             rows.append(_Entry(kind, key, size, mtime, tuple(d for d in named if d in found.objects),
-                               _obsolete(kind, key)))
+                               _obsolete(kind, key, entry)))
     return rows
 
 

@@ -34,7 +34,6 @@ class RetainedRevisionPublication(unittest.TestCase):
 
         from build123d import Box, Cylinder
         from cadgen.store.build import build_tree_from_compound
-        from cadgen.store.records import write_record
 
         self.child_model = self.root / "child.py"
         self.child_model.write_text("# synthetic child identity\n", encoding="utf-8")
@@ -44,10 +43,18 @@ class RetainedRevisionPublication(unittest.TestCase):
         self.new_tree, _tree, _stats = build_tree_from_compound(
             Cylinder(1, 9), root_name="child"
         )
-        write_record(
-            self.child_model,
-            {"tree": self.old_tree, "closure": {"hash": "", "files": []}, "children": [], "outputs": {}},
-        )
+        self.child_key = self._write_child(self.old_tree, closure_hash="")
+
+    def _write_child(self, tree: str, *, closure_hash: str) -> str:
+        """Publish the child's record with ``tree`` as the result of the closure at
+        ``closure_hash``; returns the key it is keyed by."""
+        from cadgen.store.records import read_record, write_record
+        from cadgen.store.results import producer_versions
+
+        record = {**(read_record(self.child_model) or {}), "tree": tree,
+                  "closure": {"hash": closure_hash, "files": []}, "children": [], "outputs": {},
+                  "producer": producer_versions()}
+        return write_record(self.child_model, record)
 
     def _publication(self):
         import build123d as bd
@@ -94,12 +101,12 @@ class RetainedRevisionPublication(unittest.TestCase):
             reemit_annotation_hash=hashlib.sha256(b"no annotation").hexdigest(),
         )
         scene.source_compound = parent
-        scene.store_children = [{"model": str(self.child_model), "tree": self.old_tree}]
+        scene.store_children = [{"model": str(self.child_model), "key": self.child_key}]
         return spec, scene, target, original_pair, float(parent.volume)
 
     def _run_with_export_fault(self, fault):
-        """Publish the parent with ``fault`` run as its export starts: after its result,
-        record and pins are published and before anything is written from them."""
+        """Publish the parent with ``fault`` run as its export starts: after its result
+        and record are published and before anything is written from them."""
         import build123d as bd
 
         from cadgen._internal import generation
@@ -133,15 +140,14 @@ class RetainedRevisionPublication(unittest.TestCase):
     def test_newer_child_record_and_normal_gc_do_not_change_the_pinned_save(self) -> None:
         from cadgen.store.gc import collect
         from cadgen.store.index import model_ref
-        from cadgen.store.records import read_record, write_record
+        from cadgen.store.records import read_record
         from cadgen.store.trees import get_tree, tree_complete
 
         gc_reports = []
 
         def publish_new_child_and_collect():
-            record = read_record(self.child_model)
-            self.assertIsNotNone(record)
-            write_record(self.child_model, {**record, "tree": self.new_tree})
+            # The child's source moved and it was rebuilt: a new tree under a new key.
+            self._write_child(self.new_tree, closure_hash="moved")
             gc_reports.append(collect())
 
         _result, target, original_pair, pinned_volume, observed, spec = self._run_with_export_fault(
@@ -150,7 +156,7 @@ class RetainedRevisionPublication(unittest.TestCase):
 
         parent_record = read_record(model_ref(spec.script_path, "parent"))
         self.assertEqual(read_record(self.child_model)["tree"], self.new_tree)
-        self.assertEqual(parent_record["children"], [{"model": str(self.child_model), "tree": self.old_tree}])
+        self.assertEqual(parent_record["children"], [{"model": str(self.child_model), "key": self.child_key}])
         self.assertEqual(get_tree(parent_record["tree"])["links"][0]["tree"], self.old_tree)
         self.assertEqual(observed["tree"], parent_record["tree"], "the file is written from the pinned result")
         self.assertTrue(tree_complete(parent_record["tree"]))
@@ -159,11 +165,8 @@ class RetainedRevisionPublication(unittest.TestCase):
         self.assertNotEqual(target.read_bytes(), original_pair[0])
 
     def _assert_deletion_fails_before_named_replacement(self, delete):
-        from cadgen.store.records import read_record, write_record
-
         def replace_child_then_delete():
-            record = read_record(self.child_model)
-            write_record(self.child_model, {**record, "tree": self.new_tree})
+            self._write_child(self.new_tree, closure_hash="moved")
             delete()
 
         target = self.root / "parent.step"

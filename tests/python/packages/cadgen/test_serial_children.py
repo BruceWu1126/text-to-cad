@@ -147,7 +147,7 @@ class SerialChildren(unittest.TestCase):
         self.assertNotIn("size.txt", parent["closure"]["files"])
         self.assertIn("size.txt", child["closure"]["files"])
         self.assertEqual({c["model"] for c in parent["children"]}, {f"{self.child}::child"})
-        self.assertEqual({c["tree"] for c in parent["children"]}, {child["tree"]})
+        self.assertEqual({c["key"] for c in parent["children"]}, {child["key"]})
         (self.root / "size.txt").write_text("6.0", encoding="utf-8")
         self.assertEqual(stale(self.child).reason(), "closure changed: size.txt")
         verdict = stale(self.parent)

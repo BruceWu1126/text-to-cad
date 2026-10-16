@@ -71,7 +71,7 @@ this one:
 | Mechanism | What it must not break | Specified in |
 |---|---|---|
 | Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; the file is exported from that very tree, and its bytes map to it once written, so the saved file's parts are the preview's and nothing is fetched twice | no reader reaches source, closure or a model record; a preview never stands in for a saved file, and no bytes map to a tree before they are written from it | [`STORE.md`](STORE.md) §9b |
-| Composition: what a decorated call returns, what a parent may consume before a child's save, and when an exact `Compound(children=[...])` keeps its children's pins | the link/component decision, declared-output completion, `isinstance(root, Compound)` | [`STORE.md`](STORE.md) §6, §9a |
+| Composition: what a decorated call returns -- the child's stored result, decoded, or built there and then -- and how a parent records it | the link/component decision, the child's key | [`STORE.md`](STORE.md) §6, §9a |
 | Display data: canonical trees pin encoded BREP and effective intrinsic face colors; each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — is derived by the build pool, never on the build's thread (a daemon worker, or with no daemon a thread of the build's process): the jobs a build asks for the moment its result exists -- one, or a pool slot's share each of a large batch -- and waits for before it reports done (a parent's children's builds had theirs derived); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
 | Exports: a model's STEP written from its stored result by the build pool -- an eligible all-link parent spliced from its children's saved STEP files instead of exported through OCCT -- and every exported file verified against the tree it was written from | the file maps to its result only where a parse of it verifies; one that does not is its own content and the build says so; the spliced file's cold compile is the exported file's | [`STORE.md`](STORE.md) §3 |
 
@@ -105,7 +105,7 @@ folder it does not know is never touched. A read never writes the store, and a w
 that finds its bytes already present claims them, so deletion needs no
 coordination: a sweep keeps whatever a publish has claimed, and a racing
 reader re-misses and rebuilds. Store correctness needs
-no lock protocol: atomic writes, pins and the publish rule (`STORE.md` §5, §7)
+no lock protocol: atomic writes, keys and the publish rule (`STORE.md` §5, §7)
 decide concurrent outcomes. Saved-file readers never wait for a source model
 to finish; missing derived artifacts are resolved through the build pool.
 *Pressure-test*: build a model and snapshot it, make the store read-only, then
@@ -128,8 +128,8 @@ geometry and intrinsic appearance; a parent never reads the child's sidecar.
 *Pressure-test*: build a child that declares `kinematics=`, then build a parent
 that composes it. The parent's kinematics section contains only its own
 declarations, and the child's sidecar is unchanged by the parent's build.
-Intrinsic finishes travel with the pinned geometry and are rebound to the
-parent document's occurrences when it is saved.
+Intrinsic finishes travel with the child's stored geometry and are rebound to
+the parent document's occurrences when it is saved.
 
 ### 4. A written artifact carries its identity, never its context
 
@@ -268,9 +268,11 @@ artifact-side objects a client reads like any other -- and clients render
 the saved file, or that preview labelled as one until the file replaces it.
 Correctness never depends on a store hit, and a door confirms an unverified
 document entry before it answers with it (13). Composition: importing binds, calling links — a parent
-depends on a child by its RESULT (the pinned tree) and on what importing it
-runs in the parent's process (its module body and model headers, never a
-model body), on a constant by its VALUE, on a helper by its REACH (the part of
+depends on a child by its KEY (the child and everything it was built from: its
+sources, data, children and producer, as its record keeps them -- so a child
+source edit rebuilds its parent, which relinks the child's stored result) and
+on what importing it runs in the parent's process (its module body and model
+headers, never a model body), on a constant by its VALUE, on a helper by its REACH (the part of
 the helper the script and every file the build executed can run, closed
 statically; the whole file — or the whole closure — wherever the analysis
 cannot see), on a data file by its BYTES (every file the build opened,
@@ -309,7 +311,7 @@ else: a `Compound` placing children is packaged as occurrences, a single
 solid as one component, and `part`/`assembly` is read off the resulting tree.
 A posed or differently configured export is authored geometry, or another
 model. Intrinsic appearance participates in the authored tree identity so it
-inherits through pinned children, while component identities and STEP bytes
+inherits through composed children, while component identities and STEP bytes
 remain unchanged.
 
 Because they cannot change geometry, literal `kinematics=` and `materials=`

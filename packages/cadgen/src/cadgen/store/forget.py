@@ -5,11 +5,12 @@ The store has three resets. ``--force`` on a run rebuilds one model.
 drop the index entries for one model or one document so the next run, open or
 door call does its work again, and touch nothing else.
 
-- A **model script** argument drops its record (``index/model/<sha(script::fn)>-v<schema>``)
-  and the provenance entry written beside it (``index/provenance``, the build's
-  account of its own code). The next run rebuilds both; its children are
-  untouched, and its parents see a moved pin only after that rebuild — exactly
-  as after any edit.
+- A **model script** argument drops its record (``index/model/<sha(script::fn)>-v<schema>``),
+  the provenance entry written beside it (``index/provenance``, the build's
+  account of its own code) and the results it stored by key (``index/result``),
+  so nothing of it stands and ``gc`` may take its geometry. The next run
+  rebuilds it; its children are untouched, and its parents see it rebuilt,
+  under another key, only after that rebuild — exactly as after any edit.
 - A **document** argument (a ``.step``/``.dxf``/mesh path) drops the
   ``index/document/<sha256(bytes)>-v<schema>`` entry, so the next open or door call
   compiles the file from its bytes again; when a record lists that path as an
@@ -29,6 +30,7 @@ from typing import Any
 from cadgen.store.index import model_ref, path_key, read_entry, remove_entry, split_model_ref
 from cadgen.store.provenance import remove_provenance
 from cadgen.store.records import document_key, read_record, records_for_script, remove_record
+from cadgen.store.results import RESULT_KIND, results_of
 
 
 def _resolved(target: str | Path) -> Path:
@@ -58,10 +60,14 @@ def forget(target: str | Path, *, dry_run: bool = False) -> dict[str, Any]:
         record = read_record(model)
         if record is None:
             return
-        forgot.append({"kind": "record", "model": str(record.get("model") or model), "tree": record.get("tree")})
+        ref = str(record.get("model") or model)
+        results = results_of(ref)
+        forgot.append({"kind": "record", "model": ref, "tree": record.get("tree"), "results": len(results)})
         if not dry_run:
-            remove_record(str(record.get("model") or model))
-            remove_provenance(str(record.get("model") or model))
+            remove_record(ref)
+            remove_provenance(ref)
+            for key in results:
+                remove_entry(RESULT_KIND, key)
 
     if resolved.suffix.lower() == ".py":
         if function is not None:
@@ -105,7 +111,9 @@ def describe(report: dict[str, Any]) -> list[str]:
         kind = item.get("kind")
         if kind == "record":
             tree = str(item.get("tree") or "")[:12]
-            lines.append(f"{verb} record  {item.get('model')}" + (f"  (tree {tree})" if tree else ""))
+            results = int(item.get("results") or 0)
+            facts = ([f"tree {tree}"] if tree else []) + ([f"{results} stored result{'s' if results != 1 else ''}"] if results else [])
+            lines.append(f"{verb} record  {item.get('model')}" + (f"  ({', '.join(facts)})" if facts else ""))
         elif kind == "document":
             lines.append(f"{verb} document  {report.get('path')}  (sha {str(item.get('sha256'))[:12]}, tree {str(item.get('tree') or '')[:12]})")
         elif kind == "output":

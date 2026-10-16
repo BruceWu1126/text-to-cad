@@ -39,8 +39,8 @@ One word per concept; the code uses these words and no others.
 | **component** | exact encoded BREP plus an immutable effective face-color recipe; its part's display data is derived separately |
 | **tree** | a model's result object: its own components + links, with placements, names, colors; its hash is the model's result identity |
 | **link** | a tree entry pointing at a child's tree hash, with placement and name |
-| **pin** | the child tree hash a parent resolved during a build (noun and verb) |
-| **record** | the mutable per-model entry in `index/`: current tree hash, closure, children pins, outputs |
+| **key** | a model's result identity: a hash of the model (its script and function) and what it was built from -- its closure, its constants by value, its children's keys and the producer (cadgen and the kernel) that built it -- with an empty argument digest (`store/results.py`); the record is stored under it as written, and a parent records each child by it |
+| **record** | the mutable per-model entry in `index/`: current tree hash, key, producer, closure, children by key, outputs |
 | **index** | the input-addressed side of the store: records, bounds, part entries |
 | **closure** | what a model's build depended on: the source it reaches, the files it read, the folders it listed, and the files its imports rely on not existing |
 | **stale / current**, **gate** | the freshness state and the check that decides it |
@@ -55,7 +55,7 @@ One word per concept; the code uses these words and no others.
 | **verify** | a parse of an exported file compared with the tree it was written from, by the build pool (`store/exports.py`): every occurrence by token, every part's faces and edges named and placed within the display tolerance, drawn in the same colours; a file that verifies maps to that tree, one that does not to its own content (§3, *Exports*) |
 | **preview revision** | what a build announces the moment its result exists (§9b): its result tree -- the tree its STEP is then written from -- the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place, every part kept |
 | **provenance** | where a build's features ran: the run's trace, kept as a code-side entry per model, `index/provenance` (§3) -- each feature's name, operation, file, line and inputs, and the components the run made -- read by `store where` and by nothing on a render path |
-| **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
+| **obsolete** | a part entry an older version of cadgen's derivation wrote, a result another cadgen stored by key, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
 
 Retired words: node, package, manifest, ref (as a store concept), scope, blob.
@@ -76,6 +76,7 @@ One word is NOT retired, and it has exactly one meaning:
   index/model/<sha256(script::function)>-v<schema>  records (input-addressed, mutable, atomic)
   index/output/<sha256(output path)>  {model}: which script wrote the file at this path
   index/provenance/<sha256(script::function)>-v<schema>  CODE side: which operation at which source frame made each component and element of the model's current result (§3)
+  index/result/<key>                  a model's result under its key: its record and provenance as published, its tree (§3; derived, evictable, §8)
   index/component/<cid>               geometry-input entries → encoded BREP and intrinsic recipe
   index/bounds/<sha256(bounds key)>   bounding boxes of stored geometry, inline
   index/part/<digest>-v<version>      a part's display data → its display mesh (GLB) and selector table objects
@@ -220,7 +221,7 @@ test:
    reads -- the result tree and the parts the build pool derived for it, named
    by the build feed and read as objects -- and a viewer draws it labelled as a
    preview until the file is written: then the file's bytes map to that very
-   tree (§3, *Exports*), and a parent pins its tree as it pins any child's.
+   tree (§3, *Exports*), and a parent composes it as it composes any child's.
 3. **Records are deletable.** `rm -rf index/model index/output
    index/provenance` loses no artifact: every reader still works from objects;
    a rebuild re-creates the records without rebuilding a tree whose objects
@@ -466,7 +467,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   eager-only hashes moved with the pin. Native access raises
   `NativeUnavailable`; a saved-file reader may privately reparse its exact
   selected STEP bytes, and the build exports the file in its own process from
-  the live shape (*Exports*). Authored child pins never substitute a saved
+  the live shape (*Exports*). A child's stored result never substitutes a saved
   document. A compile skips that private decode for a parsed prototype whose
   exact bintools-v4 bytes already exist as an object under a component entry
   declaring the same native recipe: the fence was proven for those bytes by the
@@ -860,27 +861,40 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
 ```json
 {
   "kind": "record",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "model": "/abs/models/assemblies/src/link_robot/link_robot.py::link_robot",
   "script": "/abs/models/assemblies/src/link_robot/link_robot.py",
   "function": "link_robot",
   "entryKind": "assembly",
   "sourceKind": "python",
   "tree": "64429167…",
+  "key": "9b1d3c0e…",
+  "producer": {"cadgen": "0.8.0", "build123d": "0.11.1", "cadqueryOcp": "7.9.3.1.1"},
   "closure": {"hash": "e341ac84…", "files": ["link_robot.py", "lib/frame.py"], "shas": {"link_robot.py": "ast1:…", "lib/frame.py": "slice4:…"}, "names": {"lib/frame.py": ["WIDTH", "bar"]}, "wholes": {"lib/frame.py": "ast1:…"}, "own": {}, "static": false},
   "children": [
-    {"model": "/abs/models/assemblies/src/link_robot/link_arm.py::link_arm", "tree": "c161092b…"},
-    {"model": "/abs/models/assemblies/src/link_robot/link_pin.py::link_pin", "tree": "265aee57…"}
+    {"model": "/abs/models/assemblies/src/link_robot/link_arm.py::link_arm", "key": "c161092b…"},
+    {"model": "/abs/models/assemblies/src/link_robot/link_pin.py::link_pin", "key": "265aee57…"}
   ],
   "outputs": {"/abs/models/assemblies/STEP/link_robot/link_robot.step": {"sha256": "823699b0…", "writer": "cadgen-step-writer-4"}},
   "modelSeconds": 1.84
 }
 ```
 
+- `key` is the result's identity (§1): computed as the record is written
+  (`write_record`), from the model, the closure's hash, the constants, the
+  children's keys and the producer -- two models of one file share a closure
+  and are two results. The result is stored under it too, `index/result/<key>`:
+  the record as last written under that key and the provenance written beside
+  it, with the tree -- so a source brought back to a state already built is a
+  hit on that result (§4), and a parent depends on a child by everything the
+  child was built from. `store forget` drops a model's results with its record.
+- `producer` is who built it: this cadgen's version and the kernel
+  distributions', read from installed metadata (never the kernel). A record
+  another producer built is rebuilt once (§4, clause 6).
 - `children` is recorded from the CALLS the body made — every child wrapper
-  entered during the body appends `(model, pinned tree)`, whether that child
-  ended up linked, inlined, modified or discarded. It is never derived from
-  links.
+  entered during the body appends `(model, key)`, whether that child ended up
+  linked, inlined, modified or discarded; a model called twice is listed once.
+  It is never derived from links.
 - `modelSeconds` is how long the build's model code ran: the body's call less
   its waits for children and the loading of their geometry
   (`cadgen._internal.build_timing`). It is no input and no gate reads it; the
@@ -940,14 +954,14 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
   keyframes in the unified sidecar, and they never enter geometry identity. The
   boundary is decided statically by what the importer TAKES from a model
   file: only model functions (`from arm import arm`) → a result edge, file
-  excluded, the child tracked by its pin (also when that file declares several
+  excluded, the child tracked by its key (also when that file declares several
   models); a module-level literal (`from plate
   import WIDTH` where `WIDTH = 40.0` — numbers, str, bool, None, tuples/
   lists/dicts of those) → a value edge, file excluded, the value tracked in
   `constants`; anything else (a helper function, a `bd.` object, an
   expression) → a source edge, file included. **Constants by value,
-  functions by reach, models by result.** Hit and miss runs record identical
-  closures by construction. `closure.static: true` marks a record whose
+  functions by reach, models by key.** Hit and miss runs record identical
+  closures by construction: a child's build opens scopes of its own (§9a). `closure.static: true` marks a record whose
   inputs are not files (a document re-emitted by `cadgen step build`); the
   gate's clause 2 does not re-hash files for it.
 - **A listing leaves out the model's own outputs** (`closure.own`): each one
@@ -1011,8 +1025,9 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
     child owns — a plugin imported for its side effect, a module found through
     a `sys.path` insert — so what IT calls in a sliced file is in that slice.
   - **What importing a child runs is this model's input.** A child's model
-    BODY never runs in this process — it runs in the child's own build, or not
-    at all — so it is tracked by the pin (models by result). But importing the
+    BODY never runs in this model's scopes — it runs in the child's own build,
+    inside this one or not at all — so it is tracked by the key (models by
+    key). But importing the
     child runs its module body, the module bodies of the helpers it imports,
     and its model definitions' **headers** (decorators, defaults, annotations)
     here, and any of them can change what this body computes (a registry
@@ -1025,11 +1040,11 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
     the closure reflective. An import-time walk follows what import-time code
     reads; binding a name by `from x import y` runs none of `y`. What that
     code reaches in a file this closure shares is reached too.
-  - **A pin is only a call.** A model function taken from a model file is a
+  - **A child is only a call.** A model function taken from a model file is a
     result edge only while the importer calls it: an attribute of it
     (`arm.__wrapped__`, `arm.__cadgen_model__`) can reach its body, so the file
     is taken as source; and a model's wrapper carries no `__wrapped__`. A
-    `@dxf` function is not a pin at all: called inside another build it runs
+    `@dxf` function is not a child at all: called inside another build it runs
     its body inline, so taking one is taking source.
   - **Anything dynamic falls back to whole files.** Per module, and the walk
     then descends into all of it: a star import (importer and target whole);
@@ -1109,7 +1124,7 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
   executed. Computed and imported annotations stay in that geometry
   fingerprint; an unchanged one can coexist with a literal edit by reusing its
   recorded value. Changing its expression or dependency, reflection, constants
-  used anywhere else, child-pin changes, incomplete trees, and changed output
+  used anywhere else, a child under another key, incomplete trees, and changed output
   bytes fall back to the ordinary build. `animation=` clips are always computed:
   a refresh writes the record's baked keyframes back unchanged, and an edited
   clip is an ordinary build.
@@ -1119,9 +1134,9 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
   or preserve their declared exports when writing this bookkeeping.
 - A **drawing** (`@dxf`) is a model like any other: the same wrapper, record,
   gate and job. `entryKind: "drawing"`, `tree: null` (gate clause 4 is
-  vacuous), its `.dxf` as the one output, and `children` pinned from the
-  models its body called — a flat pattern of `bracket()` goes stale when
-  bracket's geometry changes. The viewer and `dxf snapshot` read the `.dxf`
+  vacuous), its `.dxf` as the one output, and `children` recorded by key from
+  the models its body called — a flat pattern of `bracket()` goes stale when
+  bracket is rebuilt. The viewer and `dxf snapshot` read the `.dxf`
   file directly; there is no drawing-specific freshness anywhere.
 - A model's **outputs are whatever its decorators declare**. STEP is one
   output kind, not the primary: a model declared by `@stl`/`@glb`/`@threemf`
@@ -1176,9 +1191,9 @@ through, `cadgen.refs`; a ref in geometric-token form is matched to its element
 by geometry first, §2) to its occurrence and its component, whose lineage
 names the feature the element's name holds -- looked up in the entry that
 describes that occurrence: the model's, or, for an occurrence a link placed, the
-pinned child's, by the occurrence's token in the child's own tree (through the
-record's pins, while the child's record and entry still describe the pinned
-tree), among the calls that made that occurrence. It is a code-side walk, like
+child's, by the occurrence's token in the child's own tree (through the
+record's children, while the child's record still holds the key the parent
+composed and its entry describes its tree), among the calls that made that occurrence. It is a code-side walk, like
 `store why`'s, that no door, view or render path takes (§2, property 2). It
 answers with the feature that made what the ref names, as `file:line in
 function (operation)` with the features it was given, and for a face, an edge or
@@ -1214,14 +1229,30 @@ of:
    `closure.own` records (§3); a file recorded absent by whether it still
    is; an environment variable the model read by its value in the asking
    process's environment, the caller's (§3, §9).
-3. **Any recorded child is stale, or its current tree hash differs from the
-   pinned hash.** Protects against a child whose RESULT changed — and lets a
-   child edit that yields identical geometry leave the parent current.
-   Recursion is memoized per request.
+3. **Any recorded child's stored result does not stand (`child stale`), or
+   stands under another key than the one recorded (`child rebuilt`).**
+   Protects against a child built from other inputs than the parent composed
+   -- a child source edit rebuilds its parent, whatever geometry it yields,
+   and the parent relinks the child's stored result. Recursion is memoized
+   per request.
 4. **The tree object, or any component it (transitively) references, is
    missing.** Protects against a collected or half-copied store.
 5. **A declared output does not match `outputs`.** Protects against a deleted,
    hand-edited or foreign `.step`/sidecar/mesh file beside the model.
+6. **The producer that built the record is not this one** (`producer
+   changed: cadgen 0.7.21 -> 0.8.0`). Protects against a result another
+   cadgen or kernel made: an upgrade rebuilds every model once.
+
+A model's stored result **stands** when clauses 1–4 and 6 hold and clause 5
+finds at most its STEP or a declared mesh to owe (`Verdict.key`, the record's
+key): a decorated call takes that result as it is, exporting what the files
+owe without running the body -- a deleted STEP is exported again, not rebuilt.
+A missing sidecar or drawing is a run's. Before a body runs, the gate also
+names the key the source has NOW (`Verdict.candidate`: this model, the record's
+closure as it hashes now, its constants as they read now, its children's keys
+as they stand, this producer); a result stored under that key (§3, `index/result`) is
+restored -- record and provenance -- and taken as current, so a source brought
+back to a state already built never runs again.
 
 Clauses 4 and 5 verify each object and each output once per process. One
 build evaluates the gate many times over the same closures, and a large
@@ -1368,14 +1399,14 @@ Each with the failure it prevents.
   child dropping out of the dependency edge, so an edit to it would not reach
   the parent.
 - **Closure boundary rule.** A model file reached only through its model
-  function is a result edge (pin); a module-level literal taken from it is a
+  function is a result edge (its key); a module-level literal taken from it is a
   value edge (`constants`); anything else taken from it is a source edge
   (file in the closure). A non-model file is in the closure by the names the
   model reaches in it from the script and from every file the build
   executed (§3, functions by reach), whole when anything dynamic is in the
   way; a file that ran here because a child was imported, by what its import
   runs; a file the imports rely on not existing, as `!<path>`. Constants by
-  value, functions by reach, models by result. Prevents both false-current (a
+  value, functions by reach, models by key. Prevents both false-current (a
   constant imported from a model file changing unnoticed; a helper edit hidden
   behind a `getattr` on its module; a child's module body patching what this
   body reads; a new `__init__.py` or module changing what an import finds) and
@@ -1393,8 +1424,9 @@ Each with the failure it prevents.
   document rendering differently from its twin, a render path going stale or
   refusing because of a record's state, and a store-side cleanup destroying
   anything a user can see.
-- **Pins and snapshot isolation.** A parent materializes the tree it pinned
-  when the child was resolved, even if the child is rebuilt mid-parent-build.
+- **Keys and the run memo.** A parent composes the result a child's call
+  decoded or built, and records the child by that result's key; a model is
+  decoded or built once per run, however often a run calls it (§9a).
   Prevents: a parent's result mixing two versions of one child.
 - **Objects are immutable.** An object is written once under its hash and
   never edited. Prevents: a component changing under every tree that shares
@@ -1424,7 +1456,7 @@ Each with the failure it prevents.
   store wipe destroying a user's documents, and a document pretending to be
   current after a hand edit.
 - **A hit is a read.** No reader writes the store: a part probe, a bounds
-  hit, a document lookup, the gate, a materialized pin --
+  hit, a document lookup, the gate, a decoded result --
   none refreshes a stamp or an mtime, so "recently used" for eviction means
   recently written (§8). Prevents: a store this user cannot write failing
   every build that only hits it, which the last-use stamps an earlier
@@ -1438,7 +1470,7 @@ Each with the failure it prevents.
   reuse.
 - **No locks are needed for correctness.** Objects are idempotent, entries
   are temp+rename, the publish rule decides concurrent same-model outcomes,
-  pins isolate parents. There is no lock layer (§7); two builders of one
+  keys isolate parents. There is no lock layer (§7); two builders of one
   model may do the same kernel work twice, and the publish rule keeps one.
 
 ## 6. Link or component
@@ -1543,14 +1575,15 @@ are not cancelled merely because a newer editing request exists.
   and then consults the publish rule: the one whose closure matches the
   sources as they are now wins the record; the other's result is left as
   unreferenced objects for GC. A rejected explicit save reports failure.
-- **Edit a child while its parent builds.** The parent already pinned the
-  child's tree when it called it; it materializes that pin and publishes a
-  record whose pin no longer matches the child's current tree. The parent is
-  therefore already stale when it finishes — the next gate says so (clause
-  3) and the next run rebuilds it. `cadgen store why` shows the mismatch.
+- **Edit a child while its parent builds.** The parent composed the child's
+  result when it called it, and records the child by that result's key; a
+  build of the child from the edited source, by another process meanwhile,
+  publishes a record under another key. The parent is therefore already stale
+  when it finishes — the next gate says so (clause 3, `child rebuilt`) and the
+  next run rebuilds it. `cadgen store why` shows the two keys.
 - **Edit a parent while a child builds.** Unrelated: the child's record and
   tree are its own. The parent's next build calls the child, finds it
-  current, and pins the new tree.
+  current, and records its key.
 - **A sweep beside a build.** A pass never coordinates with builds: a write
   claims what it reuses, a publish claims its record's closure, and the
   sweeper deletes by rename, then recheck (§5, §8), so no record is written
@@ -1615,12 +1648,13 @@ kinds of thing:
    an object the grace window still keeps waits for the next pass, so that
    object goes with its entry rather than with the next full sweep, and an
    entry written again since the scan stays. The records and document entries
-   at keys this cadgen does not own go on the same rule -- a week after their
-   last write, and not if written again since the scan; their trees' objects
-   are left to the sweep (3), which takes what nothing else reaches.
-2. **Evicted entries**, only under a cap: the derived kinds -- `part`,
-   `component`, `bounds`, `drawing`, `skin`, `robot` -- least recently written
-   first, until the store fits 80% of the cap. Sizes
+   at keys this cadgen does not own, and the results another cadgen stored by
+   key (§3), go on the same rule -- a week after their last write, and not if
+   written again since the scan; their trees' objects are left to the sweep
+   (3), which takes what nothing else reaches.
+2. **Evicted entries**, only under a cap: the derived kinds -- `result`,
+   `part`, `component`, `bounds`, `drawing`, `skin`, `robot` -- least recently
+   written first, until the store fits 80% of the cap. Sizes
    are deduplicated: an
    object goes only when nothing that stays still needs it, so evicting a
    component entry whose BREP a current tree places frees only the entry.
@@ -1630,8 +1664,9 @@ kinds of thing:
    **Records, document entries, output entries and provenance entries are
    never evicted.**
 3. **Unreachable objects.** Kept: every object in the closure, through links,
-   of a current-schema record's `tree` or a current-schema document entry's
-   tree, and of those trees of a record or document entry at
+   of a current-schema record's `tree`, a current-schema document entry's
+   tree or the tree of a result this cadgen stored by key while the entry
+   stands, and of those trees of a record, document entry or result at
    a key this cadgen does not own while it is younger than a week, as far as
    this cadgen reads their format (the *protected* set); every object a surviving
    derived entry names; anything written or claimed within the grace window
@@ -1651,7 +1686,7 @@ changes an answer: every reader treats a missing entry or object as a miss.
 **Deletion is rename, then recheck** (`objects.delete_unclaimed`). A write that
 finds its bytes already present claims them (`objects.put_object`,
 `objects.claim_object`), and a publish claims its record's whole closure --
-its own components, and a child's tree it pinned long before -- right before it
+its own components, and a child's tree it composed long before -- right before it
 writes the record (`trees.claim_tree`). The sweeper renames an object it means
 to delete, then reads the mtime again from the renamed file: a claim made
 before the rename shows there, and the object goes back; a claim made after it
@@ -2135,8 +2170,8 @@ Running existing decorated code publishes a complete preview before any of the
 root's exports, then continues that same build until its declared outputs
 finish. No model author imports a session, cache or ownership helper.
 Source files remain the durable authored inputs. The active worker owns the
-prepared geometry and frozen child pins for the pending save; a worker crash
-fails that request. There is no crash-resumable save queue hidden in the cache.
+prepared geometry and the children's keys it composed for the pending save; a
+worker crash fails that request. There is no crash-resumable save queue hidden in the cache.
 
 The daemon identifies each accepted request by an epoch and monotonic ordinal,
 records its store root and declared output paths, and attaches producer IDs to
@@ -2226,8 +2261,8 @@ The CAD app's tunnel (`cadgen.mcp.tunnel`) never holds the request: it drops the
 cursor, so the daemon answers with a snapshot at once, and the client paces
 itself (a host relays every call through a few slots all its views share).
 
-The preview is the model's final immutable source result. Parents may pin and
-materialize that result before the child's STEP save finishes. It becomes
+The preview is the model's final immutable source result. A parent composes
+that result before the child's STEP save finishes. It becomes
 `record.tree` once the model's publication checks pass, before its exports
 (its STEP output pending until written, §3); it is never replaced by translated
 STEP geometry. The bytes an export writes from it map to it once they exist,
@@ -2248,14 +2283,14 @@ supersession does not cancel their exports.
 - Which record: `index/model/<sha256(script::function)>-v<schema>` —
   `cadgen store why <model.py>` prints it (every model of the file; name one
   as `model.py::function`), the gate's verdict clause by
-  clause (with each child's pinned vs current tree), the closure files (a
+  clause (with each child's recorded vs current key), the closure files (a
   sliced helper as `lib/geo.py[plane, cyl_along, …]`, its reached names) and
   the tree's links. The verdict line names the first stale clause as a
   phrase: `no record`, `closure changed: <file>` (the record keeps each
   closure file's hash under `closure.shas`), `closure changed: <file>
   appeared` (a file the imports relied on not existing), `environment
   variable <NAME> changed`, `constant changed: <NAME> in
-  <file>`, `child stale: <child.py>`, `child result moved: <child.py>`,
+  <file>`, `child stale: <child.py>`, `child rebuilt: <child.py>`,
   `tree or components missing`, `never written: <path>`, `output missing:
   <path>`, `output changed: <path>`.
 - Which code made a part, a face or an edge of a generated STEP:
@@ -2310,18 +2345,21 @@ supersession does not cancel their exports.
   --dry-run [--max-size [SIZE]]` reports what a pass would retire, evict and
   remove, and deletes nothing.
 - **Resets, smallest first.** `python model.py --force` rebuilds one model
-  now. `cadgen store forget <model.py>` drops that model's record (the next
-  run rebuilds it; children untouched, parents see the moved pin then);
+  now. `cadgen store forget <model.py>` drops that model's record, its
+  provenance and the results it stored by key (the next run rebuilds it;
+  children untouched, parents see it rebuilt then);
   `cadgen store forget <document>` drops this cadgen's `index/document` entry for the
   file's bytes and the record that wrote it, so the next open or door call
   compiles it again. `forget` never deletes objects — `cadgen store gc` does,
-  for whatever no record reaches any more. Clearing the store is always safe:
+  for whatever no record, document entry or result reaches any more. Clearing
+  the store is always safe:
   delete `~/.cache/cadgen` (or the `CADGEN_CACHE_DIR` directory); every model
   reads as stale and rebuilds; no project file is touched.
-- The gate has no cadgen-version clause: a record built by a cadgen with a
-  bug stays current after the fix, and so does every parent tree that linked
-  what it built. Recover with `forget` on the affected models (or the parents
-  that link them), or clear the store.
+- The gate's producer clause (§4, clause 6) rebuilds every model once after a
+  cadgen or kernel upgrade, so a record a cadgen with a bug built does not
+  outlive the fix. A wrong record under the same producer is recovered with
+  `forget` on the affected models (or the parents that link them), or by
+  clearing the store.
 
 ## 11. Never
 
@@ -2332,7 +2370,7 @@ supersession does not cancel their exports.
 - Add a version salt to an object's address, or a global schema number to component
   identity (§2, identity and versions).
 - Add a lock that a reader consults to decide freshness — or any build lock
-  at all; the publish rule and pins are the whole concurrency story.
+  at all; the publish rule and keys are the whole concurrency story.
 - Let a door, the viewer, snapshot or any render path open `index/model`,
   `index/output` or `index/provenance` (§2, property 2). A reader's one lookup
   is `sha256(bytes)` → `index/document` → objects.

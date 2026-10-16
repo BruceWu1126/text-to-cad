@@ -149,7 +149,7 @@ class BuildFrame:
         self.model: str | None = model_ref(script_path, function) if script_path is not None else None
         # The model whose body called this one, for the build tree's events.
         self.parent = parent
-        # (child model ref, the tree the call composed) -- one entry per CALL.
+        # (child model ref, the key of the result the call composed) -- one per CALL.
         self.children: list[tuple[str, str]] = []
         # A child whose build failed inside this body: the run fails with it even
         # when the body caught the exception (STORE.md §9a).
@@ -159,11 +159,11 @@ class BuildFrame:
 class BuildRun:
     """One top-level build in this process, shared by every frame nested in it:
     the models decoded or run so far, each once per run (``results``: model ->
-    tree), and what the root command owns for the run (its logger)."""
+    (key, tree)), and what the root command owns for the run (its logger)."""
 
     def __init__(self, logger: Any = None) -> None:
         self.logger = logger
-        self.results: dict[str, str] = {}
+        self.results: dict[str, tuple[str, str]] = {}
 
 
 def current_run() -> BuildRun | None:
@@ -546,7 +546,7 @@ def _decorator(
             return _built_geometry(current, tree=tree)
 
         model.__cadgen_model__ = defn  # type: ignore[attr-defined]
-        # A model's body runs in its own build, reached through a pin -- never
+        # A model's body runs in its own build, reached through a call -- never
         # inline behind a caller's closure. functools.wraps would hand it out as
         # __wrapped__ (``arm.__wrapped__()``, ``inspect.unwrap``).
         del model.__wrapped__
@@ -769,11 +769,11 @@ def _child(defn: ModelDef, frame: BuildFrame) -> Any:
     telemetry.job_child()  # an assembly, for a build this process counts itself (``cold_build``)
     try:
         with child_build(), paused():
-            tree = build_child(defn)
+            key, tree = build_child(defn)
     except BaseException as exc:
         frame.failed.append(exc)
         raise
-    frame.children.append((child, tree))
+    frame.children.append((child, key))
     # Loading the child's geometry is cadgen's time, not the parent's model code.
     with cadgen_work():
         return materialize(tree, label=defn.name)

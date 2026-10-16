@@ -4,7 +4,7 @@ A build writes, beside its record, the features its run called -- each with the
 line of the model's code it ran at -- and the components it made, each with the
 feature every name of its lineage stands for (a part names its features among its
 own); ``store where`` answers a ref from it: through the model's own entry, and through a
-pinned child's for a part placed from a child model. It knows the file's bytes
+child's for a part placed from a child model. It knows the file's bytes
 only while they are the ones it describes, says so otherwise, goes with ``store
 forget``, is never evicted, and a warm rerun writes the same entry a cold run
 did. Real CLIs, transient builds and one private warm daemon, a temp store.

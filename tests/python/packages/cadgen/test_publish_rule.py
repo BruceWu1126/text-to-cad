@@ -3,7 +3,8 @@
 Real processes on the transient executor (``CADGEN_DAEMON=0``), which is the unbrokered
 mode -- the one where the publish rule and atomic writes are all that stand between two
 builders of one model. Also the parent/child snapshot-isolation story: a child rebuilt
-while its parent is mid-body leaves the parent built against its pin and flagged stale.
+while its parent is mid-body leaves the parent built against the child's earlier key and
+flagged stale.
 """
 
 from __future__ import annotations
@@ -195,7 +196,7 @@ class PublishRuleTest(unittest.TestCase):
         self.assertTrue(done, err)
         self.assertIn("stale", done[-1], "the tree did not say the parent is already stale")
         # The notice is the gate's phrase, not a repr of the method that makes it.
-        self.assertIn("child result moved", done[-1]["stale"], done[-1])
+        self.assertIn("child rebuilt", done[-1]["stale"], done[-1])
         from cadgen.store.gate import stale
 
         self.assertTrue(stale(parent).stale, "the parent built against its pin and must read stale now")
