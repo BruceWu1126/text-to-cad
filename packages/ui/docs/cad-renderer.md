@@ -916,13 +916,17 @@ STEP's Select tool filters by All, Parts, Faces or Edges and, under **Connected
 selection**, Group edges or Group faces (`workbench/selectionFilter.js`); Measure's
 snapping filters are Any geometry, Points, Edges and Faces. Explicit
 filters never fall back to a different entity type. In an assembly, face and edge filters
-(the connected ones too) load topology per leaf part, on demand: a press on a part whose
-faces are not pickable yet requests that part's topology through the same per-node path a
-Features row uses (`loadInspectionTopology`, which expands it in the tree), holds the press
-(`pendingTopologyPick`, with "Loading selectable geometry…" under the toolbar) and, once
+(the connected ones too) load topology per leaf part, on demand: a press that finds the
+part — its faces not pickable at the press, whether still to load or landed since the
+press's raycast (a load can land between a press and its release, and the viewport stamps
+a part's pick groups in an effect after the commit that lists its faces) — requests that
+part's topology through the same per-node path a Features row uses
+(`loadInspectionTopology`, which expands it in the tree), holds the press
+(`workbench/usePendingTopologyPick.js`, the Features panel saying "Loading…") and, once
 the part's references are composed, picks again at the same point through `pickAtRef` —
-one press, never the part. A hover over such a part lights the whole part, the one hint
-that a press there reaches it. A chosen part is also loaded when the filter is picked.
+one press, never the part, and never dropped. A hover over such a part lights the whole
+part, the one hint that a press there reaches it. A chosen part is also loaded when the
+filter is picked.
 Opening a STEP starts with render geometry; activating Select or Measure requests
 exact inspection topology when it is needed.
 Shift-click adds/removes entities. A double-click on a face or edge (outside the
