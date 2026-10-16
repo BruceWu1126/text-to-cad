@@ -253,10 +253,13 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     model_path = _model_for_spec(spec)
     staged = stage() / spec.step_path.name
     export = None
+    plain = plan.plain
     if plan.kept is None:
         export = _export(tree, staged, names=not plan.plain, live=live,
                          children={} if plan.plain else children(), logger=logger)
         digest = str(export["sha256"])
+        # As written, not as planned: a worker that cannot name its producer writes plain.
+        plain = plain or export["producer"] is None
     else:
         digest = plan.kept_sha256
     if sidecar_payload is not None:
@@ -283,9 +286,9 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     if plan.kept is None:
         # The bytes, mapped to the tree they were written from before any parse of them:
         # pending until the verify answers.
-        note_document_tree(digest, tree, producer=producer, verified=False, plain=plan.plain)
+        note_document_tree(digest, tree, producer=producer, verified=False, plain=plain)
     outputs = record["outputs"]
-    outputs[str(step_path)] = {**plan.output(), "sha256": digest}
+    outputs[str(step_path)] = {**plan.output(), "sha256": digest, **({"plain": True} if plain else {})}
     sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
     if sidecar is not None:
         outputs[sidecar_key] = {"sha256": sidecar}

@@ -151,6 +151,24 @@ class FilesAsExportsTest(unittest.TestCase):
             self.assertEqual(plain, self.step.read_bytes())
             self.assertNotIn("does not hold the result", said)
 
+    def test_a_runtime_that_cannot_name_its_producer_writes_plain_and_the_record_says_so(self) -> None:
+        """A part key names its producer, so a runtime that cannot name its own writes the
+        file plain, and the record's output entry and the file's entry say plain -- as
+        written, not as planned -- so no door verifies the plain file as a named one."""
+        from cadgen._internal.step_scene_loader import load_step_scene
+
+        with mock.patch("cadgen.store.parts.producer_identity", side_effect=ValueError("no kernel version")):
+            outcome, said = self.build()
+        self.assertEqual("built", outcome)
+        self.assertNotIn("does not hold the result", said)
+        self.assertTrue(self.record()["outputs"][str(self.step.resolve())]["plain"])
+        entry = self.entry()
+        self.assertEqual((self.record()["tree"], False), (entry["tree"], "verified" in entry))
+        self.assertTrue(all(not component.part and not component.faces
+                            for component in load_step_scene(self.step).prototype_step_names.values()))
+        self.assertEqual("current", self.build()[0])
+        self.assertEqual("current", self.build()[0])
+
     def test_a_file_whose_entry_the_store_lost_is_mapped_and_verified_again(self) -> None:
         """A current model's file the store has no entry for is exported again by its next
         run: the same bytes, which keep the file and its stamp, mapped to the result and
