@@ -6,12 +6,18 @@ import re
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cadgen._internal.atomic_replace import (
     open_with_ladder,
     read_bytes_with_ladder,
     write_bytes_atomic,
+)
+from cadgen._internal.step_names import (
+    ComponentNames,
+    direct_faces,
+    name_definition,
+    write_names,
 )
 from cadgen._internal.step_scene import LoadedStepScene, load_step_scene_from_xcaf_doc, step_file_hash
 
@@ -107,7 +113,10 @@ def quantity_color_rgba_from_color(color: object) -> object | None:
     return wrapped_rgba
 
 
-def _create_bin_xcaf_doc(to_export: Any) -> Any:
+def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames | None] | None = None) -> Any:
+    """The XCAF document of ``to_export``. ``names``, given a leaf shape (or the root of a
+    document that is one shape), answers what the file names it by: its part key and its
+    faces' and edges' names (``step_names``), or None."""
     from OCP.TopLoc import TopLoc_Location
     from build123d.exporters3d import (
         Compound,
@@ -174,8 +183,9 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
             )
         return color_signature(getattr(shape, "color", None)), face_signature
 
-    def leaf_shape_for_appearance(unlocated: object, shape: object) -> object:
-        signature = leaf_appearance_signature(shape)
+    def leaf_shape_for_appearance(unlocated: object, shape: object, component_names: ComponentNames | None) -> object:
+        # Names are the definition's too: a leaf named otherwise is another product.
+        signature = (leaf_appearance_signature(shape), component_names)
         bucket = leaf_variants.setdefault(hash(unlocated), [])
         for native_shape, variants in bucket:
             # IsEqual includes orientation (location is already stripped).
@@ -197,12 +207,14 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
         bucket.append((unlocated, {signature: unlocated}))
         return unlocated
 
-    def set_face_colors(label: object, unlocated: object, shape: object) -> None:
+    def set_face_colors(label: object, unlocated: object, shape: object, replaced: Callable[[Any], Any] | None) -> None:
         """Per-face colours (``cad_face_ordinal_colors``, keyed by MapShapes ordinal
         on the unlocated shape) as coloured sub-shape labels — the XCAF form
         the scene loader reads back (``_face_color_map_from_label``). A vendor
         part composed through ``read_step`` keeps its face colours this way, and
-        the build's tree, re-read from the written STEP, still renders them."""
+        the build's tree, re-read from the written STEP, still renders them.
+        ``replaced`` maps a face to the one the definition holds for it, where
+        that is a rebuild (``definition_shape``)."""
         face_colors = getattr(shape, "cad_face_ordinal_colors", None)
         if not face_colors or label.IsNull():
             return
@@ -215,8 +227,33 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
             ordinal = int(ordinal)
             if not 1 <= ordinal <= face_map.Extent():
                 continue
-            sub_label = shape_tool.AddSubShape(label, face_map.FindKey(ordinal))
+            face = face_map.FindKey(ordinal)
+            sub_label = shape_tool.AddSubShape(label, face if replaced is None else replaced(face))
             set_label_color(sub_label, color)
+
+    # A named leaf's definition holds what OCCT's writer would rebuild it as, made once per
+    # representative: a face the writer rebuilt itself would lose its name
+    # (``step_names.direct_faces``). Keyed by the representative, which ``leaf_variants`` keeps.
+    held_shapes: dict[int, tuple[object, Callable[[Any], Any] | None]] = {}
+    named_definitions: set[int] = set()
+
+    def definition_shape(unlocated: object,
+                         component_names: ComponentNames | None) -> tuple[object, Callable[[Any], Any] | None]:
+        """The shape a leaf's definition holds and the map from the leaf's sub-shapes to
+        its own, None where it holds the leaf's own shape."""
+        if component_names is None or not (component_names.faces or component_names.edges):
+            return unlocated, None
+        held = held_shapes.get(id(unlocated))
+        if held is None:
+            held = held_shapes[id(unlocated)] = direct_faces(unlocated)
+        return held
+
+    def name_leaf(label: object, unlocated: object, component_names: ComponentNames | None,
+                  replaced: Callable[[Any], Any] | None) -> None:
+        if component_names is None or label.IsNull() or id(unlocated) in named_definitions:
+            return
+        named_definitions.add(id(unlocated))
+        name_definition(shape_tool, label, unlocated, component_names, replaced)
 
     def shape_location(shape: object) -> object:
         wrapped = getattr(shape, "wrapped", None)
@@ -274,12 +311,15 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
             return definition_label
 
         unlocated = shape_without_location(shape)
-        unlocated = leaf_shape_for_appearance(unlocated, shape)
-        definition_label = shape_tool.AddShape(unlocated, False)
+        component_names = names(shape) if names is not None else None
+        unlocated = leaf_shape_for_appearance(unlocated, shape, component_names)
+        held, replaced = definition_shape(unlocated, component_names)
+        definition_label = shape_tool.AddShape(held, False)
         shape_definitions[key] = definition_label
         set_label_name(definition_label, getattr(shape, "label", None))
         set_label_color(definition_label, getattr(shape, "color", None))
-        set_face_colors(definition_label, unlocated, shape)
+        set_face_colors(definition_label, unlocated, shape, replaced)
+        name_leaf(definition_label, unlocated, component_names, replaced)
         return definition_label
 
     if is_assembly:
@@ -287,28 +327,31 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
         shape_tool.UpdateAssemblies()
         return doc
 
-    root_label = shape_tool.AddShape(to_export.wrapped, is_assembly)
-    set_face_colors(
-        shape_tool.FindShape(shape_without_location(to_export), findInstance=False)
-        if not root_label.IsNull() else root_label,
-        shape_without_location(to_export),
-        to_export,
-    )
+    # A document that is one shape: its root is its one leaf.
+    unlocated = shape_without_location(to_export)
+    component_names = names(to_export) if names is not None else None
+    held, replaced = definition_shape(unlocated, component_names)
+    root_shape = to_export.wrapped if replaced is None else held.Located(to_export.wrapped.Location())
+    root_label = shape_tool.AddShape(root_shape, is_assembly)
+    definition_label = shape_tool.FindShape(held, findInstance=False) if not root_label.IsNull() else root_label
+    set_face_colors(definition_label, unlocated, to_export, replaced)
+    name_leaf(definition_label, unlocated, component_names, replaced)
 
     for node in PreOrderIter(to_export):
         if not node.label and node.color is None:
             continue
 
-        node_label = shape_tool.FindShape(node.wrapped, findInstance=False)
+        node_shape = root_shape if node is to_export else node.wrapped
+        node_label = shape_tool.FindShape(node_shape, findInstance=False)
         sub_node_labels = []
         if node.color is not None and isinstance(node, Compound) and not node.children:
             sub_nodes = []
             if isinstance(node, Part):
-                explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_SOLID)
+                explorer = TopExp_Explorer(node_shape, ta.TopAbs_SOLID)
             elif isinstance(node, Sketch):
-                explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_FACE)
+                explorer = TopExp_Explorer(node_shape, ta.TopAbs_FACE)
             elif isinstance(node, Curve):
-                explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_EDGE)
+                explorer = TopExp_Explorer(node_shape, ta.TopAbs_EDGE)
             else:
                 # A bare `Compound` leaf (a boolean/chamfer chain that came
                 # back as plain Compound rather than Part/Sketch/Curve) still
@@ -317,11 +360,11 @@ def _create_bin_xcaf_doc(to_export: Any) -> Any:
                 # ships each leaf alone, so the model rendered washed-out.
                 # Color whatever the compound actually contains, most solid
                 # content first.
-                explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_SOLID)
+                explorer = TopExp_Explorer(node_shape, ta.TopAbs_SOLID)
                 if not explorer.More():
-                    explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_FACE)
+                    explorer = TopExp_Explorer(node_shape, ta.TopAbs_FACE)
                 if not explorer.More():
-                    explorer = TopExp_Explorer(node.wrapped, ta.TopAbs_EDGE)
+                    explorer = TopExp_Explorer(node_shape, ta.TopAbs_EDGE)
 
             while explorer.More():
                 sub_nodes.append(explorer.Current())
@@ -1109,8 +1152,8 @@ def _has_respelled_name(model: Any) -> bool:
     """Whether any product or occurrence in ``model`` has a name cadgen spells unlike OCCT:
     one holding a Part 21 directive (a non-ASCII name, :func:`ascii_name`), or one OCCT's
     reader would misread. Rare, so a file is read again only when one is there. A product's
-    id is its name, an occurrence's is its number, and their descriptions are empty. About
-    4 µs a record."""
+    id is its name, an occurrence's is its number, and their descriptions are empty or, a
+    part's, its part key (``step_names``), which is hexadecimal. About 4 µs a record."""
     from OCP.StepBasic import StepBasic_Product
     from OCP.StepRepr import StepRepr_NextAssemblyUsageOccurrence
 
@@ -1231,6 +1274,9 @@ def write_xcaf_doc_step_file(
     Interface_Static.SetIVal_s("write.precision.mode", PrecisionMode.AVERAGE.value)
     with (logger.timed(f"transfer XCAF to STEP model {output_path.name}") if logger is not None else nullcontext()):
         writer.Transfer(doc, STEPControl_StepModelType.STEPControl_AsIs)
+    # What the document names (``step_names``): its parts' faces and edges, and its parts by key.
+    with (logger.timed("write names") if logger is not None else nullcontext()):
+        write_names(writer.Writer(), doc)
 
     # NAUO instance ids come from a process-global OCCT counter, so a warm
     # process that has exported before writes different ids than a cold one
@@ -1383,14 +1429,21 @@ def export_build123d_step_file(
     output_path: Path,
     *,
     logger: object | None = None,
+    names: Callable[[Any], ComponentNames | None] | None = None,
 ) -> str:
     """Write a build123d shape to a text STEP file (no scene), returning its hash.
 
     The write-only counterpart to :func:`export_build123d_step_scene`, used by the
     on-demand ``--step`` export: the build already holds the in-memory scene/compound,
-    so STEP export only needs to serialize the shape, not rebuild a scene."""
+    so STEP export only needs to serialize the shape, not rebuild a scene.
+
+    ``names``, given each leaf shape (or the shape itself, for a document of one), answers
+    what the file names that component by (``step_names.ComponentNames``: its part key, on
+    its product, and its faces' and edges' names, by the ordinals of its unlocated shape),
+    or None. Names move no geometry: a named file is the unnamed one, byte for byte, but for
+    the names. Without ``names`` the file is written as it always was."""
     with (logger.timed("build XCAF document") if logger is not None else nullcontext()):
-        doc = _create_bin_xcaf_doc(to_export)
+        doc = _create_bin_xcaf_doc(to_export, names=names)
     return write_xcaf_doc_step_file(
         doc,
         output_path,
