@@ -1069,7 +1069,7 @@ def _request_display(tree: str, *, producer: dict | None = None, cids: list[str]
     try:
         return request_display(tree, producer=producer, cids=cids)
     except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
-        _note_display_warnings([f"display data not derived ({type(error).__name__}: {error}); the first view derives it"])
+        _note_warnings([f"display data not derived ({type(error).__name__}: {error}); the first view derives it"])
         return None
 
 

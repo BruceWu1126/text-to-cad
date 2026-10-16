@@ -257,6 +257,16 @@ class BuildDerivesDisplayData(unittest.TestCase):
         warnings = [line for line in self.output.splitlines() if "could not be meshed" in line]
         self.assertEqual(warnings, [f"[cadgen] warning: pair: {PEG_FAILED}; views leave it out"])
 
+    def test_a_display_job_that_cannot_be_asked_for_is_a_warning_on_the_build(self) -> None:
+        from cadgen.store import parts
+
+        self.script.write_text(MODEL.replace('@stl(out="../STL/pair.stl")\n', ""), encoding="utf-8")
+        with mock.patch.object(parts, "request_display", side_effect=RuntimeError("no pool")):
+            self.assertEqual(self.build()[0], "built", "the build stands")
+        warnings = [line for line in self.output.splitlines() if "display data not derived" in line]
+        self.assertEqual(warnings, ["[cadgen] warning: pair: display data not derived (RuntimeError: no pool); "
+                                    "the first view derives it"])
+
     def test_a_snapshot_and_a_list_go_on_without_a_part_that_cannot_be_meshed_naming_it(self) -> None:
         """As the CAD Viewer does: a snapshot draws the rest of the model and a list lists it,
         each warning of the part in the build's words, and exits as for any warning. A snapshot
