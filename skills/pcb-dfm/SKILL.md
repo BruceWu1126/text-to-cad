@@ -25,12 +25,13 @@ checklists here.
 1. **KiCad's DRC.** With $pcb: `cadgen pcb drc board.kicad_pcb` runs KiCad's
    design rule check on the saved board and prints every violation of the
    board's rules and custom rules and every unconnected item; it exits 1 on any
-   error. Every error blocks ordering. Read every warning too: KiCad's
+   error (a `@pcb` build prints the same findings under its report line). Every
+   error blocks ordering. Read every warning too: KiCad's
    silkscreen, mask and courtyard rules are warnings, and they are what a fab's
    CAM engineer flags.
 2. **Measurements.** What KiCad does not check: decoupling distance, track
    width against current, sourcing. Measure them from the board read back with
-   $pcb's `read_board` (positions, widths, nets, pads: its inspection reference
+   $pcb's `read_board` (positions, widths, nets, pads: its checks reference
    says how) and from the script's part list.
    [references/electrical.md](references/electrical.md) and
    [references/assembly.md](references/assembly.md) say what to measure and how

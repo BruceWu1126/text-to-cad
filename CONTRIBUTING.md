@@ -435,8 +435,12 @@ imports remain inside its directory.
 
 A `@pcb` script is built by KiCad itself: `cadgen.pcb` starts `kicad-cli api-server`
 (headless, an empty settings directory, one server per build) and drives it with
-kicad-python. Only the **KiCad 10.99 nightly** (the KiCad 11 API) has that server;
-KiCad 10.0 is refused at start. Building a board, running `cadgen pcb drc` and the
+kicad-python, then runs `kicad-cli pcb drc` on the saved board and prints its counts in
+the report line and its findings below (`--no-drc` skips it; the exit code stays 0, and
+`cadgen pcb drc` is the exit-1 check). A build refuses to overwrite a board saved by
+anything but its script since the last build, recorded as the `CADGEN_BUILD` text variable
+KiCad keeps in the board and project files; `--force` overwrites. Only the **KiCad 10.99
+nightly** (the KiCad 11 API) has that server; KiCad 10.0 is refused at start. Building a board, running `cadgen pcb drc` and the
 `kicad` test suite therefore need the nightly installed; everything else in the
 repo, every required check included, runs without KiCad.
 
@@ -444,7 +448,14 @@ repo, every required check included, runs without KiCad.
   kicad-nightly kicad-nightly-footprints`. The package puts `kicad-cli-nightly` on
   `PATH`, a wrapper that sources `/usr/share/kicad-nightly/kicad-nightly.env` before
   `/usr/lib/kicad-nightly/bin/kicad-cli`; cadgen looks for that name first.
-  Symbols and 3D models are not needed.
+  Symbols and 3D models are not needed. A cloud session's setup script installs it
+  in two lines:
+
+  ```sh
+  sudo add-apt-repository -y ppa:kicad/kicad-dev-nightly
+  sudo apt-get install -y kicad-nightly kicad-nightly-footprints
+  ```
+
 - macOS and Windows: the nightly installers from kicad.org. cadgen finds `kicad-cli`
   in KiCad.app and under `Program Files\KiCad\<version>`; `CADGEN_KICAD_CLI` names
   one anywhere.

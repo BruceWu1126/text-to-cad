@@ -17,9 +17,9 @@ from cadgen.kipy.project_types import NetClass, NetClassAssignment, NetClassAssi
 
 Enumerations live in the generated protocol modules under `cadgen.kipy.proto`:
 `board.board_types_pb2` (`ZoneType`, `ZoneConnectionStyle`, `PadType`, `ViaType`),
-`board.board_rules_pb2` (`CustomRuleConstraintType`), `board.board_commands_pb2`
-(`BoardOriginType`), `board.board_jobs_pb2` (`StatsOutputFormat`, `DrillFormat`,
-`Board3DFormat`), `common.types.base_types_pb2` (`MinOptMax`, `DocumentType`),
+`board.board_rules_pb2` (`CustomRuleConstraintType`, `CustomRuleDisallowType`,
+`CustomRuleConstraintOption`), `board.board_commands_pb2` (`BoardOriginType`, `CustomRulesStatus`), `board.board_jobs_pb2` (`StatsOutputFormat`, `DrillFormat`,
+`Board3DFormat`), `common.types.base_types_pb2` (`MinOptMax`, `RuleSeverity`, `DocumentType`),
 `common.types.library_types_pb2` (`LibraryType`, `LibraryLoadStatus`) and
 `common.types.project_settings_pb2` (the `NetClass` message a net class is made from).
 
@@ -103,8 +103,7 @@ board.update_items([fp])                             # the reference and the net
 the project's `fp-lib-table`, or KiCad answers `footprint 'Nickname:Name' not found`
 ([parts](parts.md)). The returned `FootprintInstance` has `.position`, `.orientation`,
 `.layer`, `.definition` (the `Footprint`: `.pads`, `.shapes`, `.texts`, `.models`) and its
-fields. Read a pad's number before you decide its net: numbers follow the footprint, not
-the datasheet's pin names.
+fields. Pad numbers follow the footprint, not the datasheet's pin names.
 
 ## Nets
 
@@ -200,33 +199,46 @@ fab's limits ([manufacturing](manufacturing.md)).
 
 ## Custom rules
 
-KiCad's rule language, for what the board-wide numbers cannot scope: one footprint's pads,
-one net, one layer.
+KiCad's rule language, for what the board-wide numbers cannot scope: one net, one footprint's
+pads, one layer. The file is `<board>.kicad_dru` beside the board, hand-written in KiCad's text
+([checks](checks.md) holds the catalogue in that form). The API writes the same file from objects,
+for a script that would rather declare them in Python, and replaces a hand-written one:
 
 ```python
-rule = CustomRule()
-rule.name, rule.condition = "VBUS width", "A.NetName == 'VBUS'"
-width = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_TRACK_WIDTH)
-width.numeric = MinOptMax(min=from_mm(0.5))          # .min/.opt/.max in nm
-rule.constraints = [width]
+def rule(name, condition, *constraints):
+    r = CustomRule()
+    r.name, r.condition, r.constraints = name, condition, list(constraints)
+    return r                              # also r.single_layer = BoardLayer.BL_F_Cu, r.severity = RuleSeverity.RS_WARNING
 
-solid = CustomRule()
-solid.name, solid.condition = "J1 solid to pour", "A.memberOfFootprint('J1') && A.NetName == 'GND'"
-connection = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_ZONE_CONNECTION)
-connection.zone_connection = ZoneConnectionStyle.ZCS_FULL
-solid.constraints = [connection]
+def numeric(kind, **min_opt_max):         # nm; a count for CRCT_VIA_COUNT
+    constraint = CustomRuleConstraint.from_type(kind)
+    constraint.numeric = MinOptMax(**min_opt_max)
+    return constraint
 
-response = board.set_custom_design_rules([rule, solid])   # replaces the set; writes <board>.kicad_dru
-assert not response.error_text, response.error_text
+solid = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_ZONE_CONNECTION)
+solid.zone_connection = ZoneConnectionStyle.ZCS_FULL
+no_vias = CustomRuleConstraint.from_type(CustomRuleConstraintType.CRCT_DISALLOW)
+no_vias.disallow.types = [CustomRuleDisallowType.CRDT_THROUGH_VIAS]
+response = board.set_custom_design_rules([                       # replaces the set; writes <board>.kicad_dru
+    rule("VBUS carries 2 A", "A.NetName == 'VBUS'", numeric(CustomRuleConstraintType.CRCT_TRACK_WIDTH, min=from_mm(0.78))),
+    rule("J1 solid to pour", "A.memberOfFootprint('J1') && A.NetName == 'GND'", solid),
+    rule("no via under R1", "A.intersectsCourtyard('R1')", no_vias),
+])
+assert response.status == CustomRulesStatus.CRS_VALID, response.error_text
 ```
 
-Constraint types are KiCad's (`CRCT_CLEARANCE`, `CRCT_HOLE_CLEARANCE`, `CRCT_EDGE_CLEARANCE`,
-`CRCT_TRACK_WIDTH`, `CRCT_ANNULAR_WIDTH`, `CRCT_VIA_DIAMETER`, `CRCT_ZONE_CONNECTION`,
-`CRCT_THERMAL_SPOKE_WIDTH`, `CRCT_LENGTH`, `CRCT_SKEW`, `CRCT_DIFF_PAIR_GAP`, `CRCT_DISALLOW`
-(`.disallow.types`), `CRCT_ASSERTION` (`.assertion_expression`), ...); a rule may also name
-`single_layer` or `severity`. Conditions are KiCad's expressions (`A.memberOfFootprint('U1')`,
-`A.NetClass == 'Power'`, `A.Type == 'Via'`); a condition KiCad cannot parse comes back in
-`response.error_text`, and the DRC reports it too.
+Constraint types are `CRCT_` plus the rule keyword (`CRCT_TRACK_WIDTH`, `CRCT_VIA_COUNT`,
+`CRCT_LENGTH`, `CRCT_SKEW` with `CRCO_SKEW_WITHIN_DIFF_PAIRS` appended to `.proto.options`,
+`CRCT_DIFF_PAIR_GAP`, `CRCT_MAX_UNCOUPLED` for `diff_pair_uncoupled`, `CRCT_HOLE_TO_HOLE`,
+`CRCT_EDGE_CLEARANCE`, `CRCT_SILK_CLEARANCE`, `CRCT_COURTYARD_CLEARANCE`, `CRCT_CREEPAGE`,
+`CRCT_THERMAL_RELIEF_GAP`, `CRCT_THERMAL_SPOKE_WIDTH`, `CRCT_ASSERTION` with
+`.assertion_expression`, ...). KiCad parses the text it is about to write: an invalid condition
+or an unsupported type refuses the whole set, `response.status` is `CRS_INVALID` and
+`error_text` says where. On today's nightly that refusal includes the API's own `track_angle`
+(`90deg`) and `min_resolved_spokes` (`(min 2)`), and `return_path`, `stub_length` and
+`net_chain_length` have no type: those rules go in a hand-written `<board>.kicad_dru`
+([checks](checks.md#declaring-rules)), which a build keeps as long as the script sets no rules
+through the API.
 
 ## Net classes
 
@@ -258,9 +270,8 @@ setter fails on an empty via stack): size vias directly, or hold them with a
 ## Exports
 
 Every export is one of KiCad's own jobs, run by the server on the **saved** board file: a
-job on a board that was never saved fails with `Failed to load board`. So, at the end of your
-function, refill and save first (the decorator refills and saves again afterwards, cheaply),
-then export:
+job on a board that was never saved fails with `Failed to load board`, so a function that exports
+refills and saves first (the decorator refills and saves again afterwards, cheaply):
 
 ```python
 board.refill_zones()

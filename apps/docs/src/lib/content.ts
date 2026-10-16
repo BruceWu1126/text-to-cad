@@ -156,7 +156,7 @@ export const skillGroups = [
     name: "PCB",
     path: "skills/pcb",
     summary:
-      "Designs circuit boards as Python scripts on KiCad's own API: footprints, placement, hand routing, pours and design rules, built by the KiCad nightly into a board KiCad's DRC checks and exports to Gerbers.",
+      "Designs circuit boards as Python scripts on KiCad's own API: footprints, placement, hand routing, pours and design rules, built and DRC-checked by the KiCad nightly on every run, exported to Gerbers.",
   },
   {
     name: "PCB DFM",

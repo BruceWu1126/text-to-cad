@@ -2,8 +2,7 @@
 
 A part on the board is a footprint from a library: copper pads with numbers, a courtyard,
 silkscreen, a 3D model's name. There is no symbol and no schematic; the script says which
-net each pad number is on. So two things matter: that the library is declared, and that you
-know the footprint's pads before you wire them.
+net each pad number is on, so the library must be declared and the pad numbers known.
 
 ## `fp-lib-table`
 
@@ -51,15 +50,14 @@ Listing the folder is the fastest way to find names: `ls .../footprints | grep -
 `Resistor_SMD`, `Capacitor_SMD`, `Inductor_SMD`, `LED_SMD`, `Diode_SMD`, `Package_TO_SOT_SMD`,
 `Package_SO`, `Package_QFP`, `Package_DFN_QFN`, `Package_BGA`, `Crystal`, `Button_Switch_SMD`,
 `Connector_PinHeader_2.54mm`, `Connector_JST`, `Connector_USB`, `TestPoint`, `MountingHole`,
-`Fiducial`. Never guess a footprint name: find it in the folder or by browsing the library
-(below), then copy it exactly.
+`Fiducial`. KiCad refuses a name no loaded library has, so a footprint id is copied from the
+folder or from the library browsed (below), never guessed.
 
-## Reading a footprint's pads
+## A footprint's pads
 
-Before wiring a part, read its pads: their numbers (which the nets go on), positions
-(which decide where tracks leave) and types. The same server a build uses answers, from a
-script beside the board's `fp-lib-table`
-([board API: browsing libraries](board-api.md#browsing-libraries)):
+A footprint's pad numbers are what the nets go on, their positions where tracks leave, their
+types what they are. The same server a build uses answers, from a script beside the board's
+`fp-lib-table` ([board API: browsing libraries](board-api.md#browsing-libraries)):
 
 ```python
 footprint = kicad.get_library_footprint("Package_TO_SOT_SMD:SOT-23-5")
@@ -68,28 +66,27 @@ for pad in footprint.pads:
 ```
 
 Positions are relative to the footprint's origin, before placement; once placed with
-`place_footprint_from_library`, `fp.definition.pads` carries absolute positions. Map pad
-numbers to the datasheet's pin functions yourself and keep that mapping in the script, as a
-dict next to the part, so the netlist is read in one place:
+`place_footprint_from_library`, `fp.definition.pads` carries absolute positions. The mapping
+from pad numbers to the datasheet's pin functions is the script's, a dict next to the part, so
+the netlist is read in one place:
 
 ```python
 U1 = {"1": "EN", "2": "GND", "3": "VIN", "4": "NC", "5": "VOUT"}   # SOT-23-5 regulator, pin numbers from the datasheet
 ```
 
-A footprint whose pad numbering differs from the datasheet's pin numbering (common for
-connectors and multi-pad parts: a shield's several pads share one number) is where boards go
-wrong: check the footprint's own description (`fp.definition` carries it in the file; the
-`.kicad_mod` text has `descr`) against the part.
+A footprint's pad numbering can differ from the datasheet's pin numbering (connectors and
+multi-pad parts: a shield's several pads share one number); the footprint's own description
+(`descr` in the `.kicad_mod` text) says which part it is for.
 
 ## The board's own footprints
 
 For a part KiCad's libraries lack, keep a library beside the script, `my.pretty/` with one
 `<Name>.kicad_mod` per footprint, and declare it with a `${KIPRJMOD}` row. The file is
-KiCad's footprint format: draw it in KiCad's footprint editor and save it into that folder,
-take the manufacturer's KiCad footprint, or convert a vendor's (parts from LCSC convert with
+KiCad's footprint format: the manufacturer's KiCad footprint, one drawn in KiCad's footprint
+editor and saved into that folder, or a vendor's converted (parts from LCSC convert with
 `easyeda2kicad --full --lcsc_id C2837938`; step.parts listings often come with KiCad files).
-Check every imported footprint's pad numbers and sizes against the datasheet's land pattern
-before you trust it, and read its pads the same way as a stock one.
+An imported footprint's pad numbers and sizes are checked against the datasheet's land
+pattern; its pads read like a stock one's.
 
 ## Values and fields
 

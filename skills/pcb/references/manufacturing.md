@@ -2,17 +2,16 @@
 
 A fab makes a board from Gerber and drill files; an assembler adds a placement file and a
 bill of materials. All of them come out of KiCad's own export jobs on the saved board, and
-the limits they are made to are the board's design rules. Nothing here is automatic: the
-script sets the rules, runs the exports it needs, and `cadgen pcb drc` is the gate you run
-before handing anything over.
+the limits they are made to are the board's design rules: the script sets the rules and runs
+the exports it needs, and `cadgen pcb drc` exiting 0 is the gate before anything is handed over.
 
 ## The fab's limits are the design rules
 
-`cadgen pcb drc` checks the board against the numbers in its own design rules
-([board API](board-api.md#design-rules)), not against any fab. Set them to the fab's
-standard-tier limits before the first routed build, so every finding is a real one. Numbers
-from each fab's own capability pages (October 2026); check the page before ordering anything
-near a limit, and expect a surcharge for anything finer than the standard tier.
+KiCad's DRC checks the board against the numbers in its own design rules
+([board API](board-api.md#design-rules)), not against any fab, so the rules are the fab's
+standard-tier limits from the first routed build and every finding is a real one. Numbers from
+each fab's own capability pages (October 2026); the page decides anything near a limit, and
+anything finer than the standard tier costs a surcharge.
 
 | Fab (standard 2-layer service) | `min_track_width` / `min_clearance` | `min_through_drill` | `copper_edge_clearance` | Assembly |
 | --- | --- | --- | --- | --- |
@@ -35,13 +34,14 @@ are on the same pages. Four-layer and finer services have their own numbers.
 cadgen pcb drc boards/blinky.kicad_pcb
 ```
 
-Runs KiCad's design rule check (`kicad-cli pcb drc`, the same KiCad that built the board)
-on the saved file: every violation of the board's rules and custom rules, and every
-unconnected item, printed as text with KiCad's rule name, the items and their positions.
-Exit 1 when any error-severity violation or unconnected item remains; warnings (silkscreen
-over a pad, a dangling via) print and do not fail. It never runs inside a build and never
-writes into the project. Run it after every build that changed copper; a board goes to a fab
-only when it exits 0.
+KiCad's design rule check (`kicad-cli pcb drc`, the same KiCad that built the board) on the
+saved file: every violation of the board's rules and custom rules, and every unconnected item,
+one line each with severity, KiCad's type, the description, the items and a position. Exit 1
+when any error-severity violation or unconnected item remains; warnings (silkscreen over a
+pad, a dangling via) print and do not fail; `--json` for KiCad's report. Every build runs the
+same check after saving and prints the same lines under its report line, with the exit code
+left at 0, so this command is the gate: a board goes to a fab when it exits 0. It writes
+nothing into the project and nothing is cached.
 
 ## The export jobs
 
@@ -86,14 +86,3 @@ and is corrected on their page.
 - **Seeed Fusion** and **NextPCB**: Gerbers, and for assembly the BOM and placement files.
 
 Never order on the user's behalf: hand them the files and the steps.
-
-## Before handing off
-
-- The build line says `0 unconnected` and `cadgen pcb drc` exits 0 with no warning you have
-  not read.
-- The design rules are the fab's limits for the service that will be ordered.
-- Every part has a value, and parts to be assembled have a part number in the BOM.
-- The silkscreen labels connectors and polarity (pin 1, +/-, LED and diode orientation) and
-  the DRC did not report them clipped.
-- Mounting holes and connectors match the enclosure.
-- For anything beyond a first prototype, $pcb-dfm reviews the board before ordering.

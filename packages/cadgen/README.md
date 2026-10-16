@@ -23,8 +23,8 @@ in the chat for every other MCP Apps host).
 **MAY DEPEND ON** — the Python ecosystem it declares (OCP/build123d lazily,
 never at namespace-import time) and the bundled runtime. Boards need the KiCad
 10.99 nightly (the KiCad 11 API) installed: a build starts its `kicad-cli
-api-server` and stops it, the DRC door runs its `kicad-cli pcb drc`, nothing of
-KiCad's is imported, and everything else works without it; importing
+api-server` and stops it, then every build and the DRC door run its `kicad-cli pcb
+drc` on the saved file, nothing of KiCad's is imported, and everything else works without it; importing
 `cadgen.pcb` or `cadgen.kipy` touches no KiCad. kicad-python's own dependencies
 (`protobuf`, `pynng`) are cadgen's, and the viewer reads a board from its file.
 Never app code, never JavaScript source at runtime.
@@ -403,9 +403,13 @@ src/cadgen/
                          #   creates the document, loads the footprint
                          #   libraries the project's fp-lib-table declares,
                          #   hands the board (kipy's Board) to the function,
-                         #   refills zones, counts unconnected pads, saves and
-                         #   stops the server. Nothing of KiCad's is imported
-                         #   or re-implemented; no store, daemon or tracer
+                         #   refills zones, counts unconnected pads, saves,
+                         #   stops the server and runs kicad-cli pcb drc on the
+                         #   saved file (counts in the report line, findings
+                         #   below; --no-drc skips). A board saved by anything
+                         #   but its script is refused unless --force (the
+                         #   CADGEN_BUILD text variable). Nothing of KiCad's is
+                         #   imported or re-implemented; no store, daemon or tracer
   kipy/                  # kicad-python, vendored verbatim at a pinned commit
                          #   with its generated protocol modules, its imports
                          #   rewritten to cadgen.kipy; VENDOR.json names the
