@@ -121,7 +121,7 @@ class HitsNeverWrite(StoreSweepCase):
         self.assertFalse(stale(self.root / "part.step").stale)
         self.assertEqual(tree_for_document_hash(hashlib.sha256(b"fixture document").hexdigest()), tree)
         self.assertIsNotNone(capture_tree(tree, retain_payloads=False))
-        self.assertEqual(parts.ensure_display(tree, producer=FIXTURE_PRODUCER), [], "every part is stored")
+        self.assertIsNone(parts.request_display(tree, producer=FIXTURE_PRODUCER), "every part is stored: no job")
         self.assertIsNotNone(parts.probe(part))
         self.assertIsNotNone(parts.read(part, "glb"))
         self.assertIsNotNone(parts.read(part, "selectors"))

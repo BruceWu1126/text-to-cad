@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from functools import lru_cache
 from typing import Any, Callable
 
@@ -510,54 +511,126 @@ def stored_keys(keys: dict[str, str]) -> dict[str, str]:
     return {cid: key for cid, key in keys.items() if probe(key) is not None}
 
 
-def ensure_display(tree_hash: str, *, producer: dict | None = None,
-                   progress: Callable[[int, int], None] | None = None,
-                   cids: list[str] | None = None,
-                   on_derived: Callable[[str, str], None] | None = None) -> list[str]:
-    """Derive in this process the display data of every part of ``tree_hash`` the store
-    lacks, and return a line for each part that could not be derived, naming the
-    occurrences that place it and the error. A build does this as soon as its result
-    exists (``_internal/generation.py``), so a view of what it built only reads.
+def request_display(tree_hash: str, *, producer: dict | None = None,
+                    cids: list[str] | None = None) -> "DisplayJob | None":
+    """Have the build pool derive the display data of every part of ``tree_hash`` the store
+    lacks -- ONE job (``kind: display``, ``daemon/artifacts.py``) that runs while the
+    caller goes on, never in this process -- and return it; None when the store holds them
+    all. A build submits it the moment its result exists and waits for it before it
+    reports done (``_internal/generation.py``), so a view of what it built only reads.
 
-    Which parts are missing is asked of the store alone (``probe``): a tree whose
-    display data is all stored imports no kernel. ``producer`` is the one a view of the
-    tree selects (its document's), this runtime's when None. ``cids`` restricts the work
-    to those components (a parent's own: a child's job derives the child's), every
-    component when None. ``progress(done, total)`` hears how many of the missing parts
-    are done, before each one and at the end; ``on_derived(cid, key)`` hears each part
-    the moment it is stored."""
+    Which parts are missing is asked of the store alone (``probe``): a tree whose display
+    data is all stored starts no job. ``producer`` is the one a view of the tree selects
+    (its document's), this runtime's when None. ``cids`` restricts the work to those
+    components (a parent's own: a child's build derives the child's), every component
+    when None."""
     descriptor, producer = _captured(tree_hash, producer)
     components = descriptor["components"]
     key = producer_key(producer)
     wanted = list(components) if cids is None else list(dict.fromkeys(cids))
     if any(cid not in components for cid in wanted):
         raise ValueError("display request names an unpinned component")
-    keys = {cid: _part_key(components[cid], key) for cid in wanted}
-    missing = [cid for cid in wanted if probe(keys[cid]) is None]
+    missing = {cid: _part_key(components[cid], key) for cid in wanted}
+    missing = {cid: part for cid, part in missing.items() if probe(part) is None}
     if not missing:
-        return []
-    if producer != producer_identity():
-        raise ProducerUnavailable()
-    failures = []
-    for done, cid in enumerate(missing):
-        if progress is not None:
-            progress(done, len(missing))
-        try:
-            _derive(components[cid], keys[cid])
-        except Exception as error:  # noqa: BLE001 - one part's failure is reported, the rest derive
-            failures.append((cid, f"{type(error).__name__}: {error}"))
-            continue
-        if on_derived is not None:
-            on_derived(cid, keys[cid])
-    if progress is not None:
-        progress(len(missing), len(missing))
-    if not failures:
-        return []
-    from cadgen.store.meshes import placed_parts
+        return None
+    from cadgen.daemon.artifacts import submit_artifact
+    from cadgen.store.meshes import placements
 
-    placed: dict[str, list[tuple[str, str]]] = {}
-    for row in descriptor.get("occurrences") or ():
-        if isinstance(row, dict) and row.get("component") and row.get("id"):
-            placed.setdefault(str(row["component"]), []).append((str(row["id"]), str(row.get("name") or "")))
-    return [f"{placed_parts(placed[cid]) if placed.get(cid) else f'part {cid}'} could not be meshed ({error})"
-            for cid, error in failures]
+    future = submit_artifact({"kind": "display", "tree": tree_hash, "cids": list(missing), "producer": producer})
+    return DisplayJob(future, missing, placements(descriptor.get("occurrences")))
+
+
+class DisplayJob:
+    """The build pool's job deriving the display data of the parts a tree's store lacked
+    (:func:`request_display`): ``keys``, ``{cid: part key}``, are those parts."""
+
+    def __init__(self, future: Any, keys: dict[str, str], placed: dict[str, list[tuple[str, str]]]) -> None:
+        self._future = future
+        self.keys = keys
+        self._placed = placed
+        self._heard = threading.Event()
+        self._heard.set()
+
+    def when_done(self, callback: Callable[["DisplayJob"], None]) -> None:
+        """Call ``callback(self)`` once the job has finished, however it finished: on the
+        thread that finished it, or here when it already has. :meth:`wait` and
+        :meth:`settle` return once it has returned."""
+        self._heard.clear()
+
+        def done(_future: Any) -> None:
+            try:
+                callback(self)
+            finally:
+                self._heard.set()
+
+        self._future.add_done_callback(done)
+
+    def settle(self) -> None:
+        """Wait for the job to finish, however it finishes (:meth:`wait` says how)."""
+        with contextlib.suppress(Exception):
+            self._future.result()
+        self._heard.wait()
+
+    def wait(self) -> list[str]:
+        """Wait for the job -- yielding this thread's CPU lease to it meanwhile -- and
+        return a line for each part it could not derive, naming the occurrences that place
+        it and why (``#o:3f2a9c1d7e5b peg could not be meshed (MeshProductionError:
+        ValueError: boom)``); the rest of its parts are stored. A failure that leaves no
+        part missing for a reason of its own is raised."""
+        try:
+            self._future.result()
+        except Exception as error:  # noqa: BLE001 - a part's failure is a line; any other is raised
+            failed = failed_parts(self.keys, error)
+            if not failed:
+                raise
+            from cadgen.store.meshes import failed_part
+
+            return [failed_part(self._placed.get(cid) or [], reason, component=cid) for cid, reason in failed.items()]
+        finally:
+            self._heard.wait()
+        return []
+
+    def abandon(self) -> None:
+        """Leave the job: its worker stops once no one else wants it."""
+        self._future.detach()
+
+
+# How a display job's failure names each part it could not derive, however the job ran
+# (raised where it was submitted, or the text of a pooled worker's refusal):
+# ``component <cid>: <that part's MeshProductionError>``, the parts joined by "; "
+# (:func:`derive`).
+_FAILED_COMPONENT = re.compile(r"component ([0-9a-f]{16}): ")
+# What a pooled job's failure wraps its last line in (``daemon/artifacts.py``, ``daemon/client.py``).
+_JOB_FAILURE_PREFIXES = ("artifact request failed: ", "artifact worker failed or returned no result: ",
+                         "cadgen._internal.tessellate.MeshProductionError: ", "MeshProductionError: ")
+
+
+def failed_parts(keys: dict[str, str], error: Exception) -> dict[str, str]:
+    """The parts of ``keys`` (``{cid: part key}``) a display job that failed with ``error``
+    left missing, each with its reason -- the part's own ``MeshProductionError``
+    (``MeshProductionError: ValueError: boom``), or, where the failure names no part (a
+    worker that died, a service that did not answer), the failure's last line. Never a
+    component id or a worker's traceback. ``{}`` for any other failure, or when every part
+    is stored after all."""
+    from cadgen.daemon.artifacts import ArtifactJobError
+
+    if not isinstance(error, ArtifactJobError) and type(error).__name__ != "MeshProductionError":
+        return {}
+    from cadgen._internal.tessellate import MeshProductionError
+
+    failed = [cid for cid, key in keys.items() if probe(key) is None]
+    if not failed:
+        return {}
+    text = str(error)
+    own: dict[str, str] = {}
+    for line in text.splitlines():
+        named = list(_FAILED_COMPONENT.finditer(line))
+        for index, match in enumerate(named):
+            end = named[index + 1].start() if index + 1 < len(named) else len(line)
+            own[match.group(1)] = f"{MeshProductionError.__name__}: {line[match.end():end].strip().removesuffix(';')}"
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    reason = lines[-1] if lines else type(error).__name__
+    for prefix in _JOB_FAILURE_PREFIXES:
+        reason = reason.removeprefix(prefix)
+    return {cid: own.get(cid, reason) for cid in failed}

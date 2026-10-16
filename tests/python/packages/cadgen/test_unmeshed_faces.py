@@ -8,8 +8,9 @@ without it, the plate whole, and each door does its work and names the face it l
 the list counts the pin without it, the view draws the rest, and the STL is written open
 where the face was.
 
-The compile meshes every part before it reports done; here it runs in this process
-(``step.compile``), so the refusal reaches it, and every door after it only reads.
+The compile has every part meshed, by one build-pool job, before it reports done; here
+the compile and its job run in this process (``step.compile``, ``inline_artifacts``), so
+the refusal reaches it, and every door after it only reads.
 """
 
 from __future__ import annotations
@@ -19,13 +20,15 @@ import unittest
 from unittest import mock
 
 from tests.python.support.cad_test_roots import ClassCadRoots
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.paths import add_repo_path
 from tests.python.support.png import read_png
 
 add_repo_path("packages/cadgen/src")
 
 SIZE = (320, 240)
-# The pin by its occurrence token, the face by its element token: the refs a person pastes.
+# The pin by its occurrence token, the face by its geometric token (a file read names its
+# elements by their geometry): the refs a person pastes.
 WARNED = r"^#o:[0-9a-f]{12} pin: 1 face \(f:[0-9a-f]{12}\) could not be meshed, so "
 
 
@@ -71,7 +74,7 @@ class UnmeshedFaceTests(unittest.TestCase):
         import cadgen.stl as stl_door
         from cadgen._internal import tessellate
 
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), inline_artifacts(), \
                 mock.patch.object(tessellate, "_mesh", refusing_the_pins_side(tessellate._mesh)):
             step_door.compile(document)
         # Each door only reads what the compile stored: none starts a derivation job.

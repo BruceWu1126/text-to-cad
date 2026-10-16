@@ -1,7 +1,8 @@
-"""A build's preview revision (STORE.md §9b): the result tree and its parts the moment the
-result exists, then its annotations as one object, all before the STEP is written; the saved
-file's parts are the preview's; its catalog row carries what the annotations carried, by the
-same tokens; and the viewer's reads of a preview open no record and import no kernel."""
+"""A build's preview revision (STORE.md §9b): the result tree the moment the result exists,
+its annotations as one object, and its parts as the build pool's one job derives them, all
+before the STEP is published; the saved file's parts are the preview's; its catalog row
+carries what the annotations carried, by the same tokens; and the viewer's reads of a
+preview open no record and import no kernel."""
 from __future__ import annotations
 
 import contextlib
@@ -127,25 +128,20 @@ class PreviewRevision(unittest.TestCase):
         return [event for event in events if field in event]
 
     def test_the_preview_names_its_parts_before_the_step_is_written_and_the_saved_file_shares_them(self):
+        from cadgen.daemon import artifacts
         from cadgen.store import parts
         from cadgen.store.records import document_entry_for_hash
         from cadgen.store.view import descriptor_for_view
 
-        derivations: list[str] = []
-        real = parts._derive
-
-        def counted(entry, key, keep_going=None):
-            derivations.append(key)
-            return real(entry, key, keep_going)
-
-        with mock.patch.object(parts, "_derive", side_effect=counted):
+        with mock.patch.object(artifacts, "submit_artifact", wraps=artifacts.submit_artifact) as submitted:
             code, events = self.build()
         self.assertEqual(code, 0, self.output)
         previews, annotations, saved = (self._of(events, field) for field in ("preview", "annotations", "saved"))
         self.assertTrue(previews and annotations and saved, events)
-        # The tree and its parts, then the annotations, then the save: no STEP on disk before it.
-        self.assertLess(events.index(previews[-1]), events.index(annotations[0]))
-        self.assertLess(events.index(annotations[0]), events.index(saved[0]))
+        # The tree first; its annotations, and its parts once the pool's job is done, whichever
+        # is first; then the save: no STEP on disk before it.
+        self.assertLess(events.index(previews[0]), events.index(annotations[0]))
+        self.assertLess(max(events.index(previews[-1]), events.index(annotations[0])), events.index(saved[0]))
         self.assertFalse(any(event["stepOnDisk"] for event in previews + annotations))
         self.assertTrue(saved[0]["stepOnDisk"])
         tree = previews[0]["preview"]["tree"]
@@ -153,10 +149,12 @@ class PreviewRevision(unittest.TestCase):
         keys, producer = parts.part_keys(tree)
         final = previews[-1]["preview"]
         self.assertEqual((final["parts"], final["complete"], final["producer"]), (keys, True, producer))
-        # Stored parts first, then one event per part derived: the map only grows.
+        # Stored parts first, then the job's: the map only grows.
         sizes = [len(event["preview"]["parts"]) for event in previews]
         self.assertEqual(sizes, sorted(sizes))
-        self.assertEqual(sorted(derivations), sorted(keys.values()), "each part derived once, by the build")
+        [job] = [call.args[0] for call in submitted.call_args_list]
+        self.assertEqual((job["kind"], job["tree"], sorted(job["cids"])), ("display", tree, sorted(keys)),
+                         "one job derives the build's parts")
         # The saved document names the same parts (law 20): nothing is derived or fetched twice.
         digest = saved[0]["saved"]["documentHash"]
         document = descriptor_for_view(document_entry_for_hash(digest)["tree"], document_hash=digest)

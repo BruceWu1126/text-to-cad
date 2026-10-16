@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import threading
 import time
 
 from collections.abc import Callable, Iterator, Mapping
@@ -412,6 +413,9 @@ def _generate_part_outputs(
     jobs: list[_ArtifactJob] = []
 
     artifact_results: dict[str, object] = {}
+    # The build pool's job deriving this build's parts (``_request_display``), running while
+    # the build saves its STEP; waited for before the build reports done.
+    display_jobs: list = []
 
     # UNIFIED render artifact: every model — part or assembly, generated or imported — is
     # a TREE (a store object keyed by content hash: assembly.json plus content-addressed
@@ -465,18 +469,19 @@ def _generate_part_outputs(
         except ValueError:
             producer = None
 
-        def tree_kinematics(result_hash: str):
+        def tree_kinematics(result_hash: str, display=None):
             declaration = getattr(scene, "kinematics", None)
             if not declaration:
                 return None
             from cadgen._internal.kinematics_resolve import resolve_kinematics_block
 
             # Mates resolve against the result's occurrences and labels; only an
-            # axis ref reads a component's topology, and only its own.
+            # axis ref reads a component's topology, and only its own: once ``display``,
+            # the job deriving this build's parts, is done.
             with logger.timed("tree: kinematics"):
                 resolved, _ = resolve_kinematics_block(
                     declaration, tree_hash=result_hash, source_ref=str(spec.source_ref),
-                    producer=producer,
+                    producer=producer, ready=display.settle if display is not None else None,
                 )
             return resolved
 
@@ -484,11 +489,12 @@ def _generate_part_outputs(
         resolved: dict[str, object] = {}
 
         def publish_preview(result_hash: str, result_tree: dict):
-            """The preview revision (STORE.md §9b), the moment the result exists: its parts
-            derived here, its tree and parts announced, then its annotations as one object.
-            The role, output path and progress belong to this request, never in the
-            content-addressed tree or the saved document's index: a build's status names
-            objects, and its readers take neither geometry nor annotations from it."""
+            """The preview revision (STORE.md §9b), the moment the result exists: its tree and
+            parts announced, the parts the store lacks derived by the build pool meanwhile,
+            then its annotations as one object. The role, output path and progress belong to
+            this request, never in the content-addressed tree or the saved document's index:
+            a build's status names objects, and its readers take neither geometry nor
+            annotations from it."""
             from cadgen._internal.preview_revision import annotations_object
             from cadgen.store.parts import part_keys, stored_keys
 
@@ -497,42 +503,42 @@ def _generate_part_outputs(
             output = str(spec.step_path.expanduser().resolve())
             announce = writes_step and executors.sink_installed()
             keys, selected, stored = {}, None, {}
+            # The display job announces its parts from the thread that finishes it.
+            announcing = threading.Lock()
 
-            def preview_event(*, complete: bool, phase: str | None = None) -> None:
-                if announce:
+            def preview_event(*, phase: str | None = None) -> None:
+                if not announce:
+                    return
+                with announcing:
+                    stored.update(stored_keys(keys))
                     executors.emit_event(executors.model_event(
                         _model_for_spec(spec), "building", phase=phase,
                         preview={"output": output, "tree": result_hash, "producer": selected,
-                                 "parts": dict(stored), "complete": complete}))
+                                 "parts": dict(stored), "complete": bool(keys) and len(stored) == len(keys)}))
 
+            display = None
             if producer is not None:
-                # Stored parts first, so a viewer draws them before the rest are derived;
-                # then this build's own, one event each. A child's parts are its own job's.
+                # The parts the store holds first, so a viewer draws them at once; this
+                # build's own others the moment the pool's one job for them is done. A
+                # child's parts are its own build's.
                 keys, selected = part_keys(result_hash, producer=producer)
-                stored = stored_keys(keys)
-                preview_event(complete=len(stored) == len(keys))
-                own = [cid for cid in result_tree.get("components") or {} if cid not in stored]
-
-                def derived(cid: str, key: str) -> None:
-                    stored[cid] = key
-                    preview_event(complete=len(stored) == len(keys))
-
-                if own:
-                    _ensure_display(result_hash, producer=producer, progress=progress, logger=logger,
-                                    cids=own, on_derived=derived)
+                preview_event()
+                display = _request_display(result_hash, producer=producer,
+                                           cids=list(result_tree.get("components") or {}))
+                if display is not None:
+                    display_jobs.append(display)
+                    display.when_done(lambda _job: preview_event())
             else:
                 # No display producer here: the parts are a view's to find, as for a saved file.
-                preview_event(complete=False)
+                preview_event()
             wait_children = getattr(scene, "wait_child_outputs", None)
             if wait_children is not None:
                 wait_children()
-            if producer is not None:
-                stored = stored_keys(keys)
-            preview_event(complete=bool(keys) and len(stored) == len(keys),
-                          phase="Saving STEP" if writes_step else None)
+            preview_event(phase="Saving STEP" if writes_step else None)
             # The declarations, resolved against the result tree: for the sidecar below,
-            # and for the preview as the one annotations object a viewer binds to.
-            resolved["kinematics"] = tree_kinematics(result_hash)
+            # and for the preview as the one annotations object a viewer binds to. An axis
+            # ref reads its component's selector table once the display job is done.
+            resolved["kinematics"] = tree_kinematics(result_hash, display=display)
             if announce:
                 annotations = annotations_object(
                     result_hash, kinematics=resolved["kinematics"],
@@ -602,6 +608,15 @@ def _generate_part_outputs(
                     publish_preview(tree_hash, tree)
         stats["tree"] = tree_hash
         document_tree_hash = str(stats.get("documentTree") or tree_hash)
+        # Before anything is published -- the saved file, the record -- every part of the
+        # result is stored (the pool's job for them ran while the STEP was saved), and then
+        # any the document has that the result had not (a body the STEP does not read back
+        # as it was written; every part of a document compiled from its bytes): a view of
+        # either only reads.
+        while display_jobs:
+            _await_display(display_jobs.pop(0), progress=progress, logger=logger)
+        if producer is not None:
+            _await_display(_request_display(document_tree_hash, producer=producer), progress=progress, logger=logger)
         # The build's account of its code (STORE.md §3): the features its run called,
         # where each ran, and the components it made, which name their elements by
         # those features; written beside the record, after it, for a model whose saved
@@ -853,15 +868,22 @@ def _generate_part_outputs(
 
     from contextlib import ExitStack
 
-    with ExitStack() as publication_cleanup:
-        artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
-    # The render artifact is the tree; each part's selector table is derived
-    # with its display data (_ensure_display, below), so generation returns no
-    # selector bundle.
+    try:
+        with ExitStack() as publication_cleanup:
+            artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
+    except Exception:
+        # A build that failed after its preview leaves the preview standing under the
+        # failure, its parts announced as the pool derives them.
+        for display in display_jobs:
+            display.settle()
+        raise
+    except BaseException:
+        for display in display_jobs:
+            display.abandon()
+        raise
+    # The render artifact is the tree; each part's selector table is derived with its
+    # display data (_request_display), so generation returns no selector bundle.
     tree_result = artifact_results.get("tree") or {}
-    # The record is written: a part that fails to derive now never makes the geometry rebuild.
-    _ensure_display(str(tree_result.get("documentTree") or tree_result.get("tree") or ""), progress=progress,
-                    logger=logger)
     return GeneratedStepResult(spec=spec, scene=scene, selector_bundle=None,
                                tree=str(tree_result.get("tree") or "") or None,
                                step_kept=bool(tree_result.get("documentKept")))
@@ -956,37 +978,47 @@ def _generate_step_outputs(
     return result
 
 
-def _ensure_display(tree: str, *, producer: dict | None = None, progress: object | None = None,
-                    logger: CliLogger | None = None, cids: list[str] | None = None,
-                    on_derived: Callable[[str, str], None] | None = None) -> None:
-    """Derive here the display data of every part of ``tree`` the store lacks -- its
-    display mesh and selector table (``store.parts.ensure_display``) -- as soon as the
-    build's result exists, so its preview and every view of what it built only read.
-    ``cids`` restricts that to the build's own components, ``on_derived`` hears each
-    part as it is stored (both ``ensure_display``'s). A part that cannot be derived is a
-    warning on the build, never its failure: a view, a snapshot and a list leave that
-    part out and name it. The parts of a child the build composed are normally there
-    already: the child's own job derived them before it reported done."""
+def _request_display(tree: str, *, producer: dict | None = None, cids: list[str] | None = None):
+    """The build pool's job deriving the display data -- each part's mesh and selector
+    table -- of every part of ``tree`` the store lacks (``store.parts.request_display``):
+    submitted the moment the build's result exists, it runs while the build saves its
+    STEP, never in the build's process, and the build waits for it before it reports done
+    (:func:`_await_display`), so its preview and every view of what it built only read.
+    ``cids`` restricts it to the build's own components: the parts of a child the build
+    composed are there already, the child's build having had them derived before it
+    reported done. None when nothing is missing, or when the job could not be asked for
+    (a warning: the first view derives the parts)."""
     if not tree:
+        return None
+    from cadgen.store.parts import request_display
+
+    try:
+        return request_display(tree, producer=producer, cids=cids)
+    except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
+        _note_display_warnings([f"display data not derived ({type(error).__name__}: {error}); the first view derives it"])
+        return None
+
+
+def _await_display(job, *, progress: object | None = None, logger: CliLogger | None = None) -> None:
+    """Wait for the display ``job`` (:func:`_request_display`), when there is one. A part it
+    could not derive is a warning on the build, never its failure: a view, a snapshot and
+    a list leave that part out and name it."""
+    if job is None:
         return
     from contextlib import nullcontext
 
-    from cadgen.store.parts import ensure_display
-
     progress = resolve_progress(progress)
-
-    def counted(done: int, total: int) -> None:
-        if done == 0:
-            progress.phase(PHASE_MESH, total=total)
-        else:
-            progress.advance()
-
+    progress.phase(PHASE_MESH, total=len(job.keys))
     try:
         with logger.timed("display data") if logger is not None else nullcontext():
-            failures = ensure_display(tree, producer=producer, progress=counted, cids=cids, on_derived=on_derived)
-        texts = [f"{failure}; views leave it out" for failure in failures]
+            texts = [f"{failure}; views leave it out" for failure in job.wait()]
     except Exception as error:  # noqa: BLE001 - the build's result stands; its display data waits for a view
         texts = [f"display data not derived ({type(error).__name__}: {error}); the first view derives it"]
+    progress.advance(len(job.keys))
+    _note_display_warnings(texts)
+
+
+def _note_display_warnings(texts: list[str]) -> None:
     from cadgen._internal.build_timing import note_warning
 
     for text in texts:
@@ -998,9 +1030,10 @@ def _ensure_display(tree: str, *, producer: dict | None = None, progress: object
 
 def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: object | None = None,
                            logger: CliLogger | None = None) -> None:
-    """:func:`_ensure_display` for a build that reuses its tree: the tree its saved
-    document selects, under the producer that document names -- what a view of it
-    reads -- or a mesh-only model's own tree."""
+    """The display data of a build that reuses its tree, derived by the pool where the store
+    lacks it (:func:`_request_display`) before the build reports done: the tree its saved
+    document selects, under the producer that document names -- what a view of it reads --
+    or a mesh-only model's own tree."""
     producer = None
     if spec.step_output and spec.entry_path is not None:
         from cadgen.catalog import result_snapshot_for
@@ -1012,7 +1045,7 @@ def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: objec
         document_hash, tree = snapshot
         producer = _reused_display_producer(
             document_hash, tree, (document_entry_for_hash(document_hash) or {}).get("producer"))
-    _ensure_display(tree or "", producer=producer, progress=progress, logger=logger)
+    _await_display(_request_display(tree or "", producer=producer), progress=progress, logger=logger)
 
 
 def _reused_display_producer(document_hash: str, tree: str, hint: object) -> object:

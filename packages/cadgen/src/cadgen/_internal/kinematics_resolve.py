@@ -21,7 +21,7 @@ stored exactly as returned.
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 if TYPE_CHECKING:
     from cadgen.label_refs import TreeNames
@@ -49,20 +49,21 @@ _ENTITY_TYPES = frozenset({"face", "edge", "vertex"})
 
 
 def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], *, tree_hash: str,
-                         producer: dict | None):
+                         producer: dict | None, ready: Callable[[], None] | None):
     """``index`` plus the shapes, faces, edges and vertices of every leaf an
     axis ref in ``refs`` names, placed exactly as the composed index places
     them (``assembly_lookup.merge_assembly_entities``). Each row is a function
     of its occurrence's placement and its part's selector table alone, so an axis
     resolves to the same numbers as it would against every occurrence's rows.
     A ref that names no leaf's entity reads nothing, and fails as it would
-    have: the composed index holds entities for leaves only."""
+    have: the composed index holds entities for leaves only. ``ready`` is called
+    before any table is read (the build's display job, done)."""
     import shutil
 
     from cadgen import cad_ref_syntax as syntax
     from cadgen.assembly_lookup import merge_assembly_entities
     from cadgen.lookup import canonicalize_selector
-    from cadgen.store.parts import derive, producer_identity
+    from cadgen.store.parts import producer_identity
     from cadgen.store.view import export_view
 
     named: set[str] = set()
@@ -77,11 +78,11 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
     if not rows:
         return index
     cids = list(dict.fromkeys(str(row["component"]).strip() for row in rows))
-    # The build resolving its own kinematics derives, here in its process, whatever
-    # display data of these components the store lacks; the view then only reads.
-    producer = producer or producer_identity()
-    derive(tree_hash, cids, producer=producer)
-    view = export_view(tree_hash, producer=producer, cids=cids)
+    # The tables are the parts' display data: the build's display job derives its own,
+    # and the view asks the build pool for any the store still lacks, never this process.
+    if ready is not None:
+        ready()
+    view = export_view(tree_hash, producer=producer or producer_identity(), cids=cids)
     try:
         return merge_assembly_entities(index, {**descriptor, "occurrences": rows}, view)
     finally:
@@ -239,12 +240,15 @@ def remap_document_kinematics(
 
 def resolve_kinematics_block(
     block: Mapping[str, Any], *, tree_hash: str, source_ref: str, producer: dict | None = None,
+    ready: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Validated declaration -> sidecar-ready block (axes as numbers), plus the
     mate-ref -> occurrence-id map, against the stored tree ``tree_hash``.
 
     ``producer`` is the display producer an axis ref's part is derived under;
-    None resolves it through the build pool, and only when an axis ref needs it."""
+    None resolves it through the build pool, and only when an axis ref needs it.
+    ``ready``, when given, is called before an axis ref reads a part's selector
+    table: a build waits there for its display job, which derives its parts."""
     from cadgen.store.trees import flatten
 
     descriptor = flatten(tree_hash)
@@ -276,6 +280,7 @@ def resolve_kinematics_block(
             continue
         if "ref" in axis:
             if entities is None:
-                entities = _with_named_entities(index, descriptor, axis_refs, tree_hash=tree_hash, producer=producer)
+                entities = _with_named_entities(index, descriptor, axis_refs, tree_hash=tree_hash, producer=producer,
+                                                ready=ready)
             mate["axis"] = _axis_from_ref(entities, str(axis["ref"]), mate=name, source_ref=source_ref)
     return resolved, occurrence_ids

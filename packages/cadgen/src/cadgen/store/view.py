@@ -25,7 +25,6 @@ import atexit
 import contextlib
 import json
 import os
-import re
 import shutil
 import tempfile
 import threading
@@ -200,16 +199,6 @@ def materialize_parts(descriptor: dict, cids: list[str] | None = None, *,
     return descriptor, records
 
 
-# How a display job's failure names each part it could not derive, however the job ran
-# (raised where it was submitted, or the text of a pooled worker's refusal):
-# ``component <cid>: <that part's MeshProductionError>``, the parts joined by "; "
-# (``parts.derive``).
-_FAILED_COMPONENT = re.compile(r"component ([0-9a-f]{16}): ")
-# What a pooled job's failure wraps its last line in (``daemon/artifacts.py``, ``daemon/client.py``).
-_JOB_FAILURE_PREFIXES = ("artifact request failed: ", "artifact worker failed or returned no result: ",
-                         "cadgen._internal.tessellate.MeshProductionError: ", "MeshProductionError: ")
-
-
 def _without_failed_parts(descriptor: dict, wanted: list[str], missing: list[str], error: Exception, *,
                           drawable: bool) -> tuple[dict, dict]:
     """``materialize_parts`` once its display job failed with ``error``. A ``drawable`` view
@@ -217,7 +206,9 @@ def _without_failed_parts(descriptor: dict, wanted: list[str], missing: list[str
     components carrying why; otherwise those parts' failure is raised as a reader says it
     (:func:`failed_parts_error`). ``error`` itself is raised for any other failure, or when
     every part is stored after all."""
-    failed = _failed_parts(descriptor, missing, error)
+    from cadgen.store.parts import failed_parts
+
+    failed = failed_parts({cid: descriptor["components"][cid]["part"] for cid in missing}, error)
     if not failed:
         raise error
     if not drawable or len(failed) == len(wanted):
@@ -230,37 +221,6 @@ def _without_failed_parts(descriptor: dict, wanted: list[str], missing: list[str
     if any(cid not in records and cid not in failed for cid in wanted):
         raise FileNotFoundError("display data disappeared before view publication")
     return descriptor, records
-
-
-def _failed_parts(descriptor: dict, cids: list[str], error: Exception) -> dict[str, str]:
-    """The parts of ``cids`` a display job that failed with ``error`` left missing, each with
-    its reason -- the part's own ``MeshProductionError`` as a build words it
-    (``MeshProductionError: ValueError: boom``, ``parts.ensure_display``), or, where the
-    failure names no part (a worker that died, a service that did not answer), the
-    failure's last line. Never a component id or a worker's traceback. ``{}`` for any other
-    failure, or when every part is stored after all."""
-    from cadgen.daemon.artifacts import ArtifactJobError
-
-    if not isinstance(error, ArtifactJobError) and type(error).__name__ != "MeshProductionError":
-        return {}
-    from cadgen._internal.tessellate import MeshProductionError
-
-    stored = stored_parts(descriptor, cids)
-    failed = [cid for cid in cids if cid not in stored]
-    if not failed:
-        return {}
-    text = str(error)
-    own: dict[str, str] = {}
-    for line in text.splitlines():
-        named = list(_FAILED_COMPONENT.finditer(line))
-        for index, match in enumerate(named):
-            end = named[index + 1].start() if index + 1 < len(named) else len(line)
-            own[match.group(1)] = f"{MeshProductionError.__name__}: {line[match.end():end].strip().removesuffix(';')}"
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    reason = lines[-1] if lines else type(error).__name__
-    for prefix in _JOB_FAILURE_PREFIXES:
-        reason = reason.removeprefix(prefix)
-    return {cid: own.get(cid, reason) for cid in failed}
 
 
 def failed_parts_error(failed: dict[str, str], placed: dict[str, list[tuple[str, str]]]) -> Exception:

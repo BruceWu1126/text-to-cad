@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -84,15 +85,16 @@ class PartStoreTest(unittest.TestCase):
             parts.derive(tree)
         others = {key: key != failed[0] for key in keys}
         self.assertEqual(stored(), others, "the other part was stored before the failure was reported")
-        # A build's derivation returns the one failure and fails nothing (what the build then
-        # prints: test_build_derives_display).
-        with mock.patch.object(tessellate, "mesh_component", side_effect=mesher):
-            [_failure] = parts.ensure_display(tree)
+        # A build's job, asked for the part still missing, says the one failure as a line and
+        # fails nothing (what the build then prints: test_build_derives_display).
+        with inline_artifacts() as jobs, mock.patch.object(tessellate, "mesh_component", side_effect=mesher):
+            [_failure] = parts.request_display(tree).wait()
+        self.assertEqual([len(call.args[0]["cids"]) for call in jobs.call_args_list], [1], "one job, for the part missing")
         self.assertEqual(stored(), others)
         # An interrupt is not a part's failure.
-        with mock.patch.object(tessellate, "mesh_component", side_effect=KeyboardInterrupt), \
+        with inline_artifacts(), mock.patch.object(tessellate, "mesh_component", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
-            parts.ensure_display(tree)
+            parts.request_display(tree).wait()
 
     def test_part_keys_carry_their_version_and_an_older_one_is_obsolete(self) -> None:
         digest = self.key.rsplit("-v", 1)[0]
