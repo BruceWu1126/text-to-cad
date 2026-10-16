@@ -133,7 +133,7 @@ def verified(store: Path) -> None:
     with mock.patch.dict(os.environ, {**warm_entries(), "CADGEN_CACHE_DIR": str(store)}):
         records = index_dir("model")
         for path in sorted(records.iterdir()) if records.is_dir() else ():
-            outputs = json.loads(path.read_text(encoding="utf-8")).get("outputs") or {}
-            for document, output in outputs.items():
-                if Path(document).suffix.lower() in (".step", ".stp") and output.get("sha256"):
-                    confirm_document(Path(document), output["sha256"])
+            record = json.loads(path.read_text(encoding="utf-8"))
+            for document, output in (record.get("outputs") or {}).items():
+                if Path(document).suffix.lower() in (".step", ".stp") and output.get("sha256") and record.get("tree"):
+                    confirm_document(Path(document), output["sha256"], record["tree"])

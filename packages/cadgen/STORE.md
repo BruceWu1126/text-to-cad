@@ -687,7 +687,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   file written plain), the record's output entry filled (`{sha256, writer,
   plain?}`, empty until then, which the gate reads as never written), and the
   `STEP saved` event. `--verbose` relays the job's steps, and says why a parent
-  was not spliced.
+  was not spliced. A model's declared meshes (`@stl`/`@glb`/`@threemf` beside
+  its `@step`) are then cut from the result and keyed on the STEP's bytes as
+  the record names them -- the build's own knowledge of the file it just
+  wrote, never a door's lookup of it, so they wait on no verify -- and the
+  command returns once its exports are written.
 
   The **verify** job (kind `verify`, keyed by the bytes and the tree, never
   the path) parses the file's exact bytes and compares them with the tree
@@ -703,32 +707,47 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   surface does (as a reader trims it again otherwise): an element its box puts
   off its place is measured again on both sides by what it is -- a face by a
   mesh of it -- before it is called moved. A file that verifies is its tree:
-  its entry is written again without `verified`. One that does not maps to its
-  own content as above, the differences listed (`differ`, and `plain` for a
-  file written plain). A build with no daemon waits for its verify and warns;
-  a daemon's build returns once its files are written, and the verify
-  finishes on the pool, so a mismatch reaches the next touch of the file -- a
-  door, `store why`, the next run. A door given an entry still
-  pending (`read_step`/`read_scene`, a snapshot, the mesh doors, `step
-  compile`'s current check) has that verify answered first and answers with
-  what the entry says after it (`exports.confirm_document`); a view draws a
-  pending entry at once. When two models write equal bytes, the last export's
-  entry stands.
+  its entry is written again without `verified` (and without `plain`: whether
+  a file was written plain is its record's output entry's to say). One that
+  does not maps to its own content as above, the differences listed (`differ`,
+  and `plain` for a file written plain). A verify that cannot compare the file
+  with the tree (a component the store cannot decode, a tree swept from under
+  its entry) has not verified it and answers the same way, `differ` saying
+  why, so no entry stays pending on a verify that ran; one that cannot parse
+  the file raises, and the entry stays pending. The build hears its verify's
+  answer (`exports.verify_warnings`): one with no daemon waits for it and
+  warns -- of a file that does not hold the result, or of a verify that
+  raised, naming the error; a daemon's build returns once its files are
+  written, the verify finishes on the pool, a failure of it goes to the
+  daemon's log, and a mismatch reaches the next touch of the file -- a door,
+  `store why`, the next run. A door given an entry still pending
+  (`read_step`/`read_scene`, a snapshot, the mesh doors, `step compile`'s
+  current check) has that verify answered first and answers with what the
+  entry says after it (`exports.confirm_document`): one job for every door
+  asking about the same bytes, and a job that read another copy of them,
+  replaced meanwhile, is asked again for the door's own file. An entry still
+  pending after that -- its verify raised (the door warns once, naming the
+  error), or the file's bytes moved on -- answers nothing: the door compiles
+  the file's bytes, as for a miss, and the compile's entry stands. A view
+  draws a pending entry at once. When two models write equal bytes, the last
+  export's entry stands.
 
   **The kept rule.** A rebuild keeps its STEP -- writes and verifies nothing
   -- when its record's last build had the same tree, wrote the file with this
   writer (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on
-  disk when the build started still has the bytes recorded, and those bytes
-  held the result (their entry lists no differences) or were written plain --
-  the same result is written plain to the same bytes, so a plain file that does
-  not hold it stays its own content; `--force` always writes.
-  A kept file's entry is written again where the store lost it, and its
-  sidecar only where its bytes changed: viewers version a sidecar by its
-  stamp, and a new one reloads the model. The run says `kept STEP`. A rebuild
-  that exports the bytes the file already has leaves the file, and its stamp,
-  in place. A file that did not hold its result is exported plain by the
-  model's next run, even one whose model is current, with no body run
-  (`generation._reexport`); another result, a forced build or another writer
+  disk when the build started still has the bytes recorded, the store maps
+  those bytes to a tree (their document entry), and they held the result
+  (their entry lists no differences) or were written plain -- the same result
+  is written plain to the same bytes, so a plain file that does not hold it
+  stays its own content; `--force` always writes.
+  A kept file's sidecar is written only where its bytes changed: viewers
+  version a sidecar by its stamp, and a new one reloads the model. The run
+  says `kept STEP`. A rebuild that exports the bytes the file already has
+  leaves the file, and its stamp, in place. A current model's file is exported
+  again by its next run, with no body run (`generation._reexport`, which says
+  why), where it did not hold its result (plain, this time), another writer
+  wrote it, or the store lost its entry (the same bytes, kept in place, mapped
+  and verified again); another result, a forced build or another writer
   writes the names again. Bump `STEP_WRITER_SCHEME` with any change to the
   bytes cadgen writes for the same tree.
 

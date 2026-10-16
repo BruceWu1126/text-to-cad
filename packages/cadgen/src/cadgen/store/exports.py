@@ -23,6 +23,12 @@ a tree, a staged file or a document and its digest, never a script.
 
 A document entry an export wrote is pending until its verify answers (``verified:
 false``): a door confirms it first (:func:`confirm_document`), and a view draws it at once.
+A verify that cannot compare the file with the tree (a component of the tree the store
+cannot decode, a tree swept from under its entry) has not verified the file: it answers as
+for one that does not hold the tree, saying why, so no entry stays pending on a verify that
+ran. One that cannot parse the file raises -- there is nothing to map the bytes to -- which
+the build hears as a warning (:func:`verify_warnings`); a door given that entry compiles the
+file's bytes, as for a miss.
 """
 
 from __future__ import annotations
@@ -34,7 +40,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-__all__ = ["confirm_document", "export_step", "file_warning", "verify_document"]
+__all__ = ["confirm_document", "export_step", "file_warning", "verify_document", "verify_warnings"]
 
 # How many of the differences a document entry lists, and a warning shows.
 _LISTED = 50
@@ -157,14 +163,13 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
     names the file's own content and what differs), ``{"ok": None}`` when the file no longer
     has those bytes (nothing is written). ``producer`` is the one whose part keys the file was
     written with, None for a file written plain: it is then verified by its occurrences
-    alone (``step_verify``)."""
+    alone (``step_verify``). A file the comparison cannot be made for -- a component of the
+    tree the store cannot decode, a tree swept from under its entry -- is not verified: it
+    answers as one that does not hold the tree, ``differ`` saying why. A file that does not
+    parse raises."""
     from cadgen._internal.atomic_replace import read_bytes_with_ladder
     from cadgen._internal.step_scene_package import _scene_from_selected_bytes
-    from cadgen._internal.step_verify import expected_component, verify_scene
-    from cadgen._internal.step_names import ComponentNames
-    from cadgen.store.parts import _decoded, part_key
     from cadgen.store.records import document_entry_for_hash
-    from cadgen.store.trees import capture_tree
 
     path = Path(document).expanduser().resolve()
     payload = read_bytes_with_ladder(path)
@@ -172,9 +177,42 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
         return {"ok": None}
     scene = _scene_from_selected_bytes(path, payload)
     del payload
-    descriptor, payloads = capture_tree(tree_hash)
-    from cadgen._internal.component_package import read_lineage
+    try:
+        differ = _compared(scene, tree_hash, producer)
+    except MemoryError:
+        raise
+    except Exception as error:  # noqa: BLE001 - not verified: the file is its own content, and its entry says why
+        differ = [f"the file could not be verified against the result ({type(error).__name__}: {error})"]
+    answer = {"ok": True} if not differ else {"ok": False, "differ": differ}
+    entry = document_entry_for_hash(sha256)
+    if entry is None or entry.get("tree") != tree_hash or entry.get("verified") is not False:
+        # The entry is not this export's to settle: another export of equal bytes wrote it
+        # since (the last one wins), or a verify already did.
+        return answer
+    from cadgen.store.records import note_document_tree
 
+    if not differ:
+        note_document_tree(sha256, tree_hash, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"))
+        return answer
+    from cadgen.store.build import build_document_tree
+
+    own, _tree, _stats = build_document_tree(scene)
+    note_document_tree(sha256, own, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"),
+                       plain=producer is None, differ=differ)
+    return answer
+
+
+def _compared(scene: Any, tree_hash: str, producer: dict | None) -> list[str]:
+    """What differs between the parse ``scene`` of a file and the tree ``tree_hash`` it was
+    written from (:func:`verify_document`), as its entry lists it; empty when the file holds
+    the tree."""
+    from cadgen._internal.component_package import read_lineage
+    from cadgen._internal.step_names import ComponentNames
+    from cadgen._internal.step_verify import expected_component, verify_scene
+    from cadgen.store.parts import _decoded, part_key
+    from cadgen.store.trees import capture_tree
+
+    descriptor, payloads = capture_tree(tree_hash)
     components = descriptor["components"]
     # A plain file is verified by its occurrences: its parts are told apart by their content.
     keys = {cid: part_key(entry, producer) if producer is not None else f"{entry['contentHash']}-v1"
@@ -194,24 +232,7 @@ def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: di
     colors = {row["id"]: color for row in rows
               if (color := row.get("color") or components[row["component"]].get("color")) is not None}
     mismatches = verify_scene(scene, expected.values(), occurrences, colors, named=producer is not None)
-    differ = _differ(mismatches, rows, keys)
-    answer = {"ok": True} if not differ else {"ok": False, "differ": differ}
-    entry = document_entry_for_hash(sha256)
-    if entry is None or entry.get("tree") != tree_hash or entry.get("verified") is not False:
-        # The entry is not this export's to settle: another export of equal bytes wrote it
-        # since (the last one wins), or a verify already did.
-        return answer
-    from cadgen.store.records import note_document_tree
-
-    if not differ:
-        note_document_tree(sha256, tree_hash, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"))
-        return answer
-    from cadgen.store.build import build_document_tree
-
-    own, _tree, _stats = build_document_tree(scene)
-    note_document_tree(sha256, own, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"),
-                       plain=producer is None, differ=differ)
-    return answer
+    return _differ(mismatches, rows, keys)
 
 
 def _differ(mismatches: list[Any], rows: list[Mapping[str, Any]], keys: Mapping[str, str]) -> list[str]:
@@ -235,33 +256,77 @@ def _differ(mismatches: list[Any], rows: list[Mapping[str, Any]], keys: Mapping[
     return found
 
 
-def confirm_document(document: Path, digest: str) -> bool:
-    """Before a door answers with the tree the bytes ``digest`` of ``document`` map to: an
-    entry an export wrote that no verify has answered is verified first, by the build pool
-    (one job for every door asking about the same bytes), and a file that does not hold
-    the result it was written from is reported once -- it shows its own content. True
-    when a verify answered, and the entry may name another tree since."""
+def confirm_document(document: Path, digest: str, tree: str) -> str | None:
+    """The tree a door answers with for the bytes ``digest`` of ``document``, having found
+    ``tree`` for them: ``tree`` itself where nothing was pending. An entry an export wrote
+    that no verify has answered is verified first, by the build pool -- one job for every
+    door asking about the same bytes, and a job that read another copy of them, replaced
+    meanwhile, is asked again for this one -- and the door answers with the tree the entry
+    names after. A file that does not hold the result it was written from is reported once:
+    it shows its own content. None where the entry is still pending after that -- its verify
+    could not answer (it raised, reported once, naming the error), or ``document`` no longer
+    holds those bytes -- and the door compiles the file's bytes, as for a miss."""
     from cadgen.store.records import document_entry_for_hash
 
+    path = Path(document).expanduser().resolve()
     entry = document_entry_for_hash(digest)
-    verified = entry is not None and entry.get("verified") is False
-    if verified:
+    pending = entry is not None and entry.get("verified") is False
+    while entry is not None and entry.get("verified") is False:
         from cadgen.daemon.artifacts import resolve_artifact
 
-        resolve_artifact({"kind": "verify", "tree": entry["tree"], "document": str(Path(document).resolve()),
-                          "sha256": digest, "producer": None if entry.get("plain") else entry.get("producer")})
+        try:
+            answer = resolve_artifact({"kind": "verify", "tree": entry["tree"], "document": str(path), "sha256": digest,
+                                       "producer": None if entry.get("plain") else entry.get("producer")})
+        except Exception as error:  # noqa: BLE001 - the door compiles the file's bytes instead
+            _warn_once(digest, f"{path.name} could not be verified against the result it was written from "
+                               f"({type(error).__name__}: {error}); it is compiled from its bytes")
+            return None
         entry = document_entry_for_hash(digest)
-    if entry is not None and entry.get("differ") and digest not in _WARNED:
-        _WARNED.add(digest)
-        from cadgen._internal.build_timing import note_warning
+        if answer.get("ok") is not None or not _holds(path, digest):
+            break
+    if pending and (entry is None or entry.get("verified") is False):
+        return None
+    if entry is not None and entry.get("differ"):
+        _warn_once(digest, file_warning(path, entry["differ"], plain=bool(entry.get("plain"))))
+    return str(entry["tree"]) if pending else tree
 
-        text = file_warning(Path(document), entry["differ"], plain=bool(entry.get("plain")))
-        if not note_warning(text):
-            print(f"[cadgen] warning: {text}", file=sys.stderr)
-    return verified
+
+def verify_warnings(job: Any, document: Path, *, plain: bool) -> list[str]:
+    """What a build says of its verify ``job`` (``daemon.artifacts.ArtifactFuture``), waited
+    for where it is not done: the file's warning where it does not hold the result it was
+    written from (:func:`file_warning`), that the verify could not answer, naming the error,
+    or nothing."""
+    try:
+        answer = job.result()
+    except Exception as error:  # noqa: BLE001 - the file is published; a verify that raised is a warning
+        return [f"{Path(document).name} could not be verified against the result it was written from "
+                f"({type(error).__name__}: {error})"]
+    return [file_warning(document, answer["differ"], plain=plain)] if answer.get("differ") else []
 
 
 _WARNED: set[str] = set()
+
+
+def _warn_once(digest: str, text: str) -> None:
+    """``text`` on the build's done event, else stderr: once per process for the bytes
+    ``digest``, however many doors ask about them."""
+    if digest in _WARNED:
+        return
+    _WARNED.add(digest)
+    from cadgen._internal.build_timing import note_warning
+
+    if not note_warning(text):
+        print(f"[cadgen] warning: {text}", file=sys.stderr)
+
+
+def _holds(path: Path, digest: str) -> bool:
+    """Whether the file at ``path`` still has the bytes ``digest``."""
+    from cadgen._internal.atomic_replace import read_bytes_with_ladder
+
+    try:
+        return hashlib.sha256(read_bytes_with_ladder(path)).hexdigest() == digest
+    except OSError:
+        return False
 
 
 def file_warning(document: Path, differ: list[str], *, plain: bool) -> str:

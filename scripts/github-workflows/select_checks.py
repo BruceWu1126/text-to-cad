@@ -298,7 +298,7 @@ RULES: tuple[Rule, ...] = (
     Rule((
         "scripts/release/**", "scripts/install/**", "scripts/github-workflows/deploy-vercel-app.sh",
         "scripts/git-hooks/**", "scripts/bench/cadgen-performance/**", "scripts/bench/mesh-scoreboard/**",
-        "scripts/README.md",
+        "scripts/bench/README.md", "scripts/bench/*.py", "scripts/README.md",
         ".github/workflows/release-publish.yml", ".github/workflows/release-prepare.yml",
         ".github/workflows/deploy-docs.yml", ".github/workflows/deploy-api.yml",
         ".github/dependabot.yml", ".github/release.yml", ".githooks/**",
