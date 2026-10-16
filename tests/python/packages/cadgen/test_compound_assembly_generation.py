@@ -10,7 +10,8 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 from cadgen._internal import generation_runner
-from cadgen.step_export import _create_bin_xcaf_doc, export_build123d_step_scene
+from cadgen._internal.step_scene_loader import load_step_scene
+from cadgen.step_export import _create_bin_xcaf_doc, export_build123d_step_file
 from cadgen._internal.step_scene import _bbox_from_shape, scene_leaf_occurrences, scene_occurrence_shape
 
 
@@ -74,10 +75,8 @@ class CompoundAssemblyGenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="cadgen-compound-") as tempdir:
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                scene = export_build123d_step_scene(
-                    shape,
-                    Path(tempdir) / "bare_leaf.step",
-                )
+                export_build123d_step_file(shape, Path(tempdir) / "bare_leaf.step")
+            scene = load_step_scene(Path(tempdir) / "bare_leaf.step")
 
         messages = [str(item.message) for item in caught]
         self.assertNotIn("Unknown Compound type, color not set", messages)
@@ -109,10 +108,8 @@ class CompoundAssemblyGenerationTests(unittest.TestCase):
             right.color = build123d.Color(0, 0, 1)
             shape = build123d.Compound(children=[left, right], label="colored_assembly")
 
-            scene = export_build123d_step_scene(
-                shape,
-                Path(tempdir) / "colored_assembly.step",
-            )
+            export_build123d_step_file(shape, Path(tempdir) / "colored_assembly.step")
+            scene = load_step_scene(Path(tempdir) / "colored_assembly.step")
 
         colors = {
             tuple(round(component, 3) for component in color)
@@ -149,10 +146,8 @@ class CompoundAssemblyGenerationTests(unittest.TestCase):
             placed.label = "placed_motor"
             root = build123d.Compound(children=[placed], label="arm")
 
-            scene = export_build123d_step_scene(
-                root,
-                Path(tempdir) / "arm.step",
-            )
+            export_build123d_step_file(root, Path(tempdir) / "arm.step")
+            scene = load_step_scene(Path(tempdir) / "arm.step")
 
         leaves = scene_leaf_occurrences(scene)
         self.assertEqual(1, len(leaves))

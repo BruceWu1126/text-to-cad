@@ -23,18 +23,6 @@ from cadgen._internal.step_placements import readable_placement
 from cadgen._internal.step_scene import LoadedStepScene, load_step_scene_from_xcaf_doc, step_file_hash
 
 
-def _attach_occurrence_tree(scene: LoadedStepScene, shape: Any) -> LoadedStepScene:
-    # compound_from_instances bakes placements at the OCCT level, so the
-    # compound has no build123d children and _create_bin_xcaf_doc flattens it
-    # to a single shape. Its assembly hierarchy lives in the explicit
-    # occurrence tree; attach it so scene consumers (interference) can walk
-    # the same occurrence namespace the packager and the on-disk STEP use.
-    occurrence_tree = getattr(shape, "_occurrence_tree", None)
-    if occurrence_tree is not None:
-        scene.instance_occurrence_tree = occurrence_tree
-    return scene
-
-
 def create_bin_xcaf_doc() -> Any:
     from OCP.BinXCAFDrivers import BinXCAFDrivers
     from build123d.exporters3d import (
@@ -409,29 +397,6 @@ def _create_bin_xcaf_doc(to_export: Any, names: Callable[[Any], ComponentNames |
 
     shape_tool.UpdateAssemblies()
     return doc
-
-
-def export_xcaf_doc_step_scene(
-    doc: Any,
-    output_path: Path,
-    *,
-    label: str | None = None,
-    originating_system: str = "cadgen",
-    logger: object | None = None,
-) -> LoadedStepScene:
-    step_hash = write_xcaf_doc_step_file(
-        doc,
-        output_path,
-        label=label,
-        originating_system=originating_system,
-        logger=logger,
-    )
-    with (logger.timed(f"load scene from XCAF {output_path.name}") if logger is not None else nullcontext()):
-        return load_step_scene_from_xcaf_doc(
-            output_path,
-            doc,
-            step_hash=step_hash,
-        )
 
 
 def _renumber_nauo_ids(model: Any) -> None:
@@ -1421,19 +1386,6 @@ def write_xcaf_doc_step_file(
     return step_file_hash(final_path)
 
 
-def export_build123d_step_scene(
-    to_export: Any,
-    output_path: Path,
-) -> LoadedStepScene:
-    doc = _create_bin_xcaf_doc(to_export)
-    scene = export_xcaf_doc_step_scene(
-        doc,
-        output_path,
-        label=getattr(to_export, "label", None),
-    )
-    return _attach_occurrence_tree(scene, to_export)
-
-
 def build_build123d_step_scene(
     to_export: Any,
     output_path: Path,
@@ -1442,13 +1394,12 @@ def build_build123d_step_scene(
     source_hash: str | None = None,
 ) -> LoadedStepScene:
     doc = _create_bin_xcaf_doc(to_export)
-    scene = load_step_scene_from_xcaf_doc(
+    return load_step_scene_from_xcaf_doc(
         output_path,
         doc,
         source_kind=source_kind,
         source_hash=source_hash,
     )
-    return _attach_occurrence_tree(scene, to_export)
 
 
 #: The STEP writer's own version, recorded with every file a build saves (a record's
@@ -1467,11 +1418,8 @@ def export_build123d_step_file(
     logger: object | None = None,
     names: Callable[[Any], ComponentNames | None] | None = None,
 ) -> str:
-    """Write a build123d shape to a text STEP file (no scene), returning its hash.
-
-    The write-only counterpart to :func:`export_build123d_step_scene`, used by the
-    on-demand ``--step`` export: the build already holds the in-memory scene/compound,
-    so STEP export only needs to serialize the shape, not rebuild a scene.
+    """Write a build123d shape to a text STEP file (no scene), returning its hash: the
+    writer behind every STEP cadgen exports (``store/exports.py``).
 
     ``names``, given each leaf shape (or the shape itself, for a document of one), answers
     what the file names that component by (``step_names.ComponentNames``: its part key, on

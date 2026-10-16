@@ -130,7 +130,7 @@ class CadGenerationTests(unittest.TestCase):
         snapshot, the CAD Viewer, and `cadgen import` all share.
         """
         from build123d import Box, Compound, Pos
-        from cadgen.step_export import export_build123d_step_scene
+        from cadgen.step_export import export_build123d_step_file
 
         # A real multi-part STEP on disk standing in for a committed assembly input.
         block_a = Pos(0, 0, 0) * Box(10, 10, 10)
@@ -139,7 +139,7 @@ class CadGenerationTests(unittest.TestCase):
         block_b.label = "block_b"
         assembly = Compound(children=[block_a, block_b], label="imported_fixture")
         step_path = self.temp_root / "imported_fixture.step"
-        export_build123d_step_scene(assembly, step_path)
+        export_build123d_step_file(assembly, step_path)
         self.assertTrue(step_path.is_file())
 
         package_dir = cad_catalog.result_view_dir(step_path)
