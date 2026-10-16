@@ -37,6 +37,9 @@ class ComponentGcReachability(unittest.TestCase):
         write_entry("component", cid, {"schemaVersion": 1, **entry})
         remove_entry("document", document_key(hashlib.sha256(b"fixture document").hexdigest()))
         remove_entry("model", next((self.store / "index/model").iterdir()).name)
+        # The result the record stored by key protects the tree while it stands (test_result_keys).
+        for key, _ in list(iter_entries("result")):
+            remove_entry("result", key)
         orphan = put_object(b"unreferenced")
         [(part, _)] = iter_entries("part")
         named = [probe(part)[role]["object"] for role in ("glb", "selectors")]
@@ -68,7 +71,7 @@ class ComponentGcReachability(unittest.TestCase):
         parent = put_tree(tokenized({"label":"parent","units":"mm","entryKind":"assembly","components":{},"occurrences":[],
             "links":[{"id":"o1.1","name":"child","tree":child,"transform":IDENTITY_16}],
             "assembly":{"root":{"id":"o1","nodeType":"assembly","children":[{"id":"o1.1","nodeType":"link","children":[]}]}}})[0])
-        for kind in ("document", "model", "part"):
+        for kind in ("document", "model", "result", "part"):
             for key, _ in list(iter_entries(kind)): remove_entry(kind, key)
         external = put_object(b"external exported mesh")
         note_document_tree("d" * 64, parent)

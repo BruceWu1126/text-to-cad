@@ -290,20 +290,21 @@ class PinnedChildStepsTest(unittest.TestCase):
         root = Path(scratch.name)
         step = str(root / "current.step")
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "store")}):
-            write_record(root / "current.py", {"tree": "a" * 64, "key": "k-current", "outputs": {
+            # A record is keyed as it is written (store/results.py): the keys are read back.
+            current = write_record(root / "current.py", {"tree": "a" * 64, "outputs": {
                 str(root / "current.stl"): {"sha256": "1" * 64}, step: {"sha256": "1" * 64}}})
             # Rebuilt since the parent composed it: its record holds another key.
-            write_record(root / "moved.py", {"tree": "b" * 64, "key": "k-moved-again",
+            write_record(root / "moved.py", {"tree": "b" * 64, "closure": {"hash": "moved again"},
                                              "outputs": {str(root / "moved.step"): {"sha256": "2" * 64}}})
-            write_record(root / "mesh_only.py", {"tree": "c" * 64, "key": "k-mesh", "outputs": {}})
+            mesh = write_record(root / "mesh_only.py", {"tree": "c" * 64, "outputs": {}})
             # Its export has not landed: the output is pending.
-            write_record(root / "pending.py", {"tree": "d" * 64, "key": "k-pending",
-                                               "outputs": {str(root / "pending.step"): {"sha256": ""}}})
+            pending = write_record(root / "pending.py", {"tree": "d" * 64,
+                                                         "outputs": {str(root / "pending.step"): {"sha256": ""}}})
             scene = mock.Mock(store_children=[
-                {"model": str(root / "current.py"), "key": "k-current"},
+                {"model": str(root / "current.py"), "key": current},
                 {"model": str(root / "moved.py"), "key": "k-moved"},
-                {"model": str(root / "mesh_only.py"), "key": "k-mesh"},
-                {"model": str(root / "pending.py"), "key": "k-pending"},
+                {"model": str(root / "mesh_only.py"), "key": mesh},
+                {"model": str(root / "pending.py"), "key": pending},
             ])
             self.assertEqual(_pinned_child_steps(scene), {"a" * 64: ChildStep(Path(step), "1" * 64)})
 

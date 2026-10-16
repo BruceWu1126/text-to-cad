@@ -427,6 +427,12 @@ class AnotherSchemaVersion(StoreSweepCase):
         other.write_bytes(b"a document another cadgen compiled")
         other_tree = seed_result(other, components=("a", "b"))
         only_other = {other_tree} | {c["brep"] for c in get_tree(other_tree)["components"].values()} - {brep}
+        # That cadgen stored no result of this one's by key: only its own entries name the tree.
+        from cadgen.store.index import remove_entry
+        from cadgen.store.results import results_of
+
+        for key in results_of(other):
+            remove_entry("result", key)
         # Its entries, as the other versions wrote them: cadgen 0.7.19's document
         # entry (schema 4, at the unversioned key), and an older record schema's record.
         index = self.store / "index"
