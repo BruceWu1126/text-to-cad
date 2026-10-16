@@ -74,7 +74,6 @@ class StepExportTargetTests(unittest.TestCase):
         self._class_roots.copy_store_into(self._isolated_roots)
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.temp_root, ignore_errors=True)
         self._tempdir.cleanup()
 
     def _assert_export_file(self, out_path: Path, fmt: str) -> None:

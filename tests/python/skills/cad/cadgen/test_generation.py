@@ -1,7 +1,6 @@
 import contextlib
 import io
 import json
-import shutil
 import types
 import unittest
 from pathlib import Path
@@ -26,7 +25,6 @@ class CadGenerationTests(unittest.TestCase):
         self.relative_dir = self.temp_root.relative_to(Path.cwd()).as_posix()
 
     def tearDown(self) -> None:
-        shutil.rmtree(self.temp_root, ignore_errors=True)
         self._tempdir.cleanup()
 
     def _cad_ref(self, name: str) -> str:
