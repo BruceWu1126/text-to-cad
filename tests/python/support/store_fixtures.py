@@ -14,7 +14,6 @@ def build_view(
     package_dir: Path,
     root_name: str,
     force: bool = False,
-    provenance: Mapping[str, Any] | None = None,
     progress: Any | None = None,
 ) -> dict[str, Any]:
     """Build ``compound``'s tree into the store and lay a view of it at
@@ -147,7 +146,7 @@ def seed_result(
     owner = Path(model) if model is not None else document
     record = {"entryKind": tree["entryKind"], "sourceKind": "python" if model is not None else "step",
               "tree": tree_hash, "closure": {"hash": sha, "files": [], "static": True}, "children": [],
-              "outputs": {str(document.resolve()): {"sha256": sha}}, "stepHash": sha}
+              "outputs": {str(document.resolve()): {"sha256": sha}}}
     if sidecar:
         record.update(sidecar)
     write_record(owner, record)

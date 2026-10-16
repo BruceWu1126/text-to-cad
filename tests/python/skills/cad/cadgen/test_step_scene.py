@@ -111,11 +111,10 @@ class StepSceneSelectorArtifactTests(unittest.TestCase):
                     compound,
                     package_dir=package_dir,
                     root_name="synthetic",
-                    provenance={"stepHash": step_hash, "sourceKind": "step"},
                 )
             write_record(
                 step_path,
-                {"sourceKind": "step", "entryKind": "assembly", "tree": built["tree"], "closure": {"hash": step_hash, "files": [], "static": True}, "children": [], "outputs": {}, "stepHash": step_hash},
+                {"sourceKind": "step", "entryKind": "assembly", "tree": built["tree"], "closure": {"hash": step_hash, "files": [], "static": True}, "children": [], "outputs": {}},
             )
 
             from cadgen.store.records import note_document_tree
