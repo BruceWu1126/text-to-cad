@@ -100,6 +100,19 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=600)
 
 
+def _api_servers() -> list[str]:
+    """Every live ``kicad-cli api-server`` on this (Linux) machine, by its command line."""
+    found = []
+    for entry in Path("/proc").glob("[0-9]*/cmdline") if Path("/proc").is_dir() else ():
+        try:
+            words = [word for word in entry.read_bytes().split(b"\0") if word]
+        except OSError:
+            continue
+        if len(words) > 1 and words[0].endswith(b"kicad-cli") and words[1] == b"api-server":
+            found.append(b" ".join(words).decode(errors="replace"))
+    return found
+
+
 class HeadlessBuild(unittest.TestCase):
     def _project(self, prefix: str, led: str) -> Path:
         tempdir = temporary_directory(prefix=prefix)
@@ -111,8 +124,12 @@ class HeadlessBuild(unittest.TestCase):
 
     def test_the_script_writes_kicads_files_and_the_board_passes_drc(self) -> None:
         root = self._project("pcb-smoke-", "LED_SMD:LED_0603_1608Metric")
+        servers = _api_servers()
         built = _run([sys.executable, "blinky.py"], root)
         self.assertEqual(0, built.returncode, built.stderr)
+        # The server a build starts dies with it: Ubuntu's kicad-cli-nightly is a shell wrapper
+        # that would keep it alive past the signal that stops it (cadgen.kicad.install.unwrap).
+        self.assertEqual(servers, _api_servers(), "a build left its API server running")
         self.assertRegex(built.stdout, r"^blinky\.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, DRC 0 errors 0 warnings, \d+\.\d s\n$")
         for suffix in (".kicad_pcb", ".kicad_pro", ".kicad_prl"):
             self.assertTrue((root / f"blinky{suffix}").is_file(), suffix)

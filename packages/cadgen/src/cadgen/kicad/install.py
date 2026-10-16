@@ -17,6 +17,15 @@ it where the version is free -- ``cadgen.pcb`` from the server's own
 ``get_version()`` once it is up, the DRC door from ``kicad-cli version`` before
 an eight-second check. Nothing here runs at import; :func:`find_kicad_cli` runs
 nothing at all.
+
+What is found is what a command runs; what the API server runs is :func:`unwrap`
+of it. Ubuntu's nightly package puts a shell wrapper on ``PATH`` (``kicad-cli-nightly``
+sources ``/usr/share/kicad-nightly/kicad-nightly.env`` for ``LD_LIBRARY_PATH`` and
+``KICAD_PATH``, then runs ``/usr/lib/kicad-nightly/bin/kicad-cli`` without ``exec``),
+and a signal to that shell stops the shell alone: the server it started lives on,
+330 MB resident, until the machine is rebooted. A command that runs to its end
+(``version``, ``pcb drc``) is fine through the wrapper; the server, which is
+stopped with a signal, is started as the binary in the wrapper's environment.
 """
 
 from __future__ import annotations
@@ -89,6 +98,45 @@ def find_kicad_cli() -> Path:
             "KiCad's command line, kicad-cli, was not found (CADGEN_KICAD_CLI is unset, neither "
             f"kicad-cli-nightly nor kicad-cli is on PATH, and KiCad is not in its usual install folder): {install_hint()}"
         ) from None
+
+
+def unwrap(cli: Path) -> tuple[Path, dict[str, str]]:
+    """The program to run for ``cli`` and the environment it needs: ``cli`` itself and
+    nothing, unless ``cli`` is a wrapper like Ubuntu's ``kicad-cli-nightly`` -- a shell
+    script whose every line sources an environment file (``. FILE``) or runs one program
+    on the arguments (``PROGRAM "$@"``), with no ``exec``. Only exactly that shape is
+    unwrapped; the environment is the files' ``NAME=VALUE`` lines, ``export`` or not."""
+    try:
+        text = cli.read_text(encoding="utf-8", errors="replace")
+        if not text.startswith("#!"):
+            return cli, {}
+        program: Path | None = None
+        environment: dict[str, str] = {}
+        for line in text.splitlines()[1:]:
+            words = line.split()
+            if not words or words[0].startswith("#"):
+                continue
+            if words[0] in (".", "source") and len(words) == 2:
+                environment.update(_environment_file(Path(words[1])))
+            elif len(words) == 2 and words[1] == '"$@"' and program is None:
+                program = Path(words[0])
+            else:
+                return cli, {}
+    except (OSError, ValueError):
+        return cli, {}
+    if program is None or not program.is_file():
+        return cli, {}
+    return program, environment
+
+
+def _environment_file(path: Path) -> dict[str, str]:
+    variables: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip().removeprefix("export ").strip()
+        name, equals, value = line.partition("=")
+        if equals and name.isidentifier():
+            variables[name] = value.strip().strip("\"'")
+    return variables
 
 
 def kicad_version(cli: Path) -> str | None:

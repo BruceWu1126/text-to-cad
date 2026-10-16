@@ -61,6 +61,40 @@ class Discovery(unittest.TestCase):
         self.assertIn(install.install_hint(), str(caught.exception))
 
 
+class Unwrap(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tempdir = tempfile.TemporaryDirectory(prefix="tmp-kicad-unwrap-")
+        self.addCleanup(self._tempdir.cleanup)
+        self.root = Path(self._tempdir.name).resolve()
+        self.binary = self.root / "lib" / "kicad-cli"
+        self.binary.parent.mkdir()
+        self.binary.write_bytes(b"\x7fELF not really")
+
+    def _wrapper(self, text: str) -> Path:
+        wrapper = self.root / "kicad-cli-nightly"
+        wrapper.write_text(text, encoding="utf-8")
+        return wrapper
+
+    def test_ubuntus_nightly_wrapper_is_run_as_its_binary_in_its_environment(self) -> None:
+        # The shape Ubuntu's package ships: an environment file sourced, the binary run on
+        # the arguments, no exec -- so a signal to the wrapper would leave the server running.
+        env = self.root / "kicad-nightly.env"
+        env.write_text('export LD_LIBRARY_PATH=/usr/lib/kicad-nightly/lib/\nKICAD_PATH="/usr/share/kicad-nightly"\n# noise\n', encoding="utf-8")
+        wrapper = self._wrapper(f"#!/bin/sh\n. {env}\n {self.binary} \"$@\"\n")
+        self.assertEqual(
+            (self.binary, {"LD_LIBRARY_PATH": "/usr/lib/kicad-nightly/lib/", "KICAD_PATH": "/usr/share/kicad-nightly"}),
+            install.unwrap(wrapper),
+        )
+
+    def test_anything_but_that_shape_is_run_as_it_is(self) -> None:
+        self.assertEqual((self.binary, {}), install.unwrap(self.binary), "a binary")
+        other = self._wrapper(f"#!/bin/sh\nif [ -z \"$DISPLAY\" ]; then exit 1; fi\nexec {self.binary} \"$@\"\n")
+        self.assertEqual((other, {}), install.unwrap(other), "a script with logic of its own")
+        gone = self._wrapper(f"#!/bin/sh\n{self.root / 'nowhere' / 'kicad-cli'} \"$@\"\n")
+        self.assertEqual((gone, {}), install.unwrap(gone), "a wrapper over a binary that is not there")
+        self.assertEqual((self.root / "missing", {}), install.unwrap(self.root / "missing"), "no file at all")
+
+
 class Version(unittest.TestCase):
     def test_the_nightly_passes_and_a_stable_kicad_is_named_as_too_old(self) -> None:
         cli = Path("/opt/kicad/bin/kicad-cli")

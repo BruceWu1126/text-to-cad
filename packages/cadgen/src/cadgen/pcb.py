@@ -186,20 +186,26 @@ def pcb(func: Callable[[Any], Any] | None = None, *, path: str | None = None):
 
 
 def connect(cli: Path, settings: Path):
-    """A ``cadgen.kipy.KiCad`` on a fresh headless server run by ``cli``, its settings in
-    ``settings``: ``KICAD_CONFIG_HOME`` is set around the start, which inherits this
-    process's environment, and restored. The one seam between a build and KiCad."""
+    """A ``cadgen.kipy.KiCad`` on a fresh headless server, its settings in ``settings``.
+    The server is the program behind ``cli`` (:func:`cadgen.kicad.install.unwrap`: a
+    wrapper script would swallow the signal that stops it), started in this process's
+    environment with ``KICAD_CONFIG_HOME`` and the wrapper's variables set for the start
+    and restored after it. The one seam between a build and KiCad."""
+    from cadgen.kicad.install import unwrap
     from cadgen.kipy import KiCad
 
-    previous = os.environ.get("KICAD_CONFIG_HOME")
-    os.environ["KICAD_CONFIG_HOME"] = str(settings)
+    program, environment = unwrap(cli)
+    variables = {**environment, "KICAD_CONFIG_HOME": str(settings)}
+    previous = {name: os.environ.get(name) for name in variables}
+    os.environ.update(variables)
     try:
-        return KiCad(headless=True, kicad_cli_path=str(cli), timeout_ms=_TIMEOUT_MS)
+        return KiCad(headless=True, kicad_cli_path=str(program), timeout_ms=_TIMEOUT_MS)
     finally:
-        if previous is None:
-            del os.environ["KICAD_CONFIG_HOME"]
-        else:
-            os.environ["KICAD_CONFIG_HOME"] = previous
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def _start(cli: Path, settings: Path):
