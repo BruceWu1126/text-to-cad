@@ -24,7 +24,8 @@ source (a generated file is independent of its script).
 Two sides, two index kinds (STORE.md §2, the law):
 
 - ``index/document/<sha256(document BYTES)>-v<DOCUMENT_SCHEMA_VERSION>``
-  (``document_key``) → ``{"tree": …, "kind": …}``.
+  (``document_key``) → ``{"tree": …, "kind": …}`` (and, from an export, ``verified``,
+  ``plain`` and ``differ``: :func:`note_document_tree`).
   ARTIFACT → ARTIFACT. The only thing a reader (a door, the viewer, snapshot)
   consults to find the tree for a file: hash the bytes, look it up, read
   objects. Written whenever a tree is published for a document — by the
@@ -167,17 +168,30 @@ def _resolved(path: Path | str) -> str:
 
 def note_document_tree(
     document_hash: str, tree: str, *, kind: str = "step",
-    producer: dict[str, Any] | None = None,
+    producer: dict[str, Any] | None = None, verified: bool = True, plain: bool = False,
+    differ: list[str] | None = None,
 ) -> None:
     """``index/document/<sha256(bytes)>-v<schema>`` → the tree describing those
     bytes. Artifact → artifact; idempotent; atomic. Keeps the entry's mesh ledger
-    when the tree is unchanged (those meshes were cut from this same tree)."""
+    when the tree is unchanged (those meshes were cut from this same tree).
+
+    An export's publication maps the bytes it wrote to the tree it wrote them from
+    before any parse of them (``store/exports.py``): pending, ``verified`` False --
+    and ``plain`` for a file written without names -- until its verify answers.
+    Confirmed, the entry is written again without them; a file that does not hold
+    its tree maps to its own content, listing what differs (``differ``)."""
     digest = str(document_hash or "").strip()
     tree_hash = str(tree or "").strip()
     if not digest or not tree_hash:
         return
     existing = read_entry("document", document_key(digest)) or {}
     payload: dict[str, Any] = {"schemaVersion": DOCUMENT_SCHEMA_VERSION, "tree": tree_hash, "kind": str(kind or "step")}
+    if not verified:
+        payload["verified"] = False
+    if plain:
+        payload["plain"] = True
+    if differ:
+        payload["differ"] = [str(line) for line in differ]
     meshes = existing.get("meshes")
     if existing.get("schemaVersion") == DOCUMENT_SCHEMA_VERSION and isinstance(meshes, dict) and str(existing.get("tree") or "") == tree_hash:
         payload["meshes"] = meshes

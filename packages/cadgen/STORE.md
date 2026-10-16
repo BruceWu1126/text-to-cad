@@ -2076,7 +2076,12 @@ Geometry publication starts no extraction subprocesses: a build's display
 data is one artifact job (§3), as a view's is. A display job for parts the
 store lacks uses the shared artifact-job admission and one private derivation
 per requested component; it has no model binding, declared output
-or editing-producer order. On the daemon,
+or editing-producer order. Writing a stored tree to a staged STEP (`kind:
+export`) and comparing a written document with the tree it was written from
+(`kind: verify`, `store/exports.py`) are artifact jobs too: a request names a
+tree and a staged file, or a tree, a document and its bytes' digest, never a
+script; one verify answers every request for the same bytes and tree, wherever
+the document is, and is finished whoever still waits for it. On the daemon,
 an artifact job is never killed when its caller leaves, as the CAD Viewer's do
 routinely: the worker stays warm rather than being replaced by a fresh kernel
 import. Before each derivation the worker asks its supervisor whether anyone

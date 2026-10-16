@@ -25,8 +25,13 @@ part that have none of their own, which draw alike.
 
 What no file can name the result alone says (``step_names.unnameable``), and an expected
 component lists those edges: a reader makes them again (a pole, a whole sphere's seam) or
-holds them in a curve set, so they carry no name and have no place of their own to check,
-and their faces are checked instead. Every other name must be in the file.
+holds them in a curve set, so they carry no name. An edge a face bounds has no place of its
+own to check, and its face is checked instead; one no face bounds (a free wire's) answers
+for its body alone, by its place. Every other name must be in the file.
+
+A file written without names (``names=False``: it claims no part and no element) is
+verified by its occurrences alone: each holds a component with the faces and edges of the
+part the result places there, paired by place, drawn in the result's colours.
 
 Nothing here reads the store: the file and what the caller passes are the whole input, and
 the answer is the list of what differs, empty for a file that verifies.
@@ -58,9 +63,9 @@ class ExpectedComponent:
     how the file's component is found); the tight box of each of its faces and edges by the
     ordinals its names count by (None for one that bounds nothing, as a degenerate edge);
     its own face colours by face ordinal (``faceColors``); each face's and edge's own
-    tolerance (none given, none allowed); and the ordinals of the edges no file can name
-    (``step_names.unnameable``). :func:`expected_component` measures all of it from the
-    component's shape."""
+    tolerance (none given, none allowed); the ordinals of the edges no file can name
+    (``step_names.unnameable``) and of those no face bounds. :func:`expected_component`
+    measures all of it from the component's shape."""
 
     names: ComponentNames
     face_boxes: tuple[Box | None, ...]
@@ -69,6 +74,7 @@ class ExpectedComponent:
     face_tolerances: tuple[float, ...] = ()
     edge_tolerances: tuple[float, ...] = ()
     unnameable_edges: frozenset[int] = frozenset()
+    faceless_edges: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -94,7 +100,28 @@ def expected_component(shape: Any, names: ComponentNames, face_colors: Mapping[A
     _faces, edges = unnameable(shape)
     return ExpectedComponent(names=names, face_boxes=face_boxes(shape), edge_boxes=edge_boxes(shape),
                              face_colors=dict(face_colors or {}), face_tolerances=face_tolerances,
-                             edge_tolerances=edge_tolerances, unnameable_edges=edges)
+                             edge_tolerances=edge_tolerances, unnameable_edges=edges,
+                             faceless_edges=faceless_edges(shape))
+
+
+def faceless_edges(shape: Any) -> frozenset[int]:
+    """The ordinals of the edges no face of the unlocated component ``shape`` bounds, in
+    ``TopExp.MapShapes_s`` order: a free wire's, a free edge's."""
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopExp import TopExp, TopExp_Explorer
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    edges = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_EDGE, edges)
+    bounding: set[int] = set()
+    faces = TopExp_Explorer(shape, TopAbs_FACE)
+    while faces.More():
+        explorer = TopExp_Explorer(faces.Current(), TopAbs_EDGE)
+        while explorer.More():
+            bounding.add(edges.FindIndex(explorer.Current()))
+            explorer.Next()
+        faces.Next()
+    return frozenset(set(range(1, edges.Extent() + 1)) - bounding)
 
 
 def face_boxes(shape: Any) -> tuple[Box | None, ...]:
@@ -152,20 +179,30 @@ def element_tolerances(shape: Any) -> tuple[tuple[float, ...], tuple[float, ...]
 
 
 def verify_step(path: Path, expected: Iterable[ExpectedComponent], occurrences: Mapping[str, str] | None = None,
-                colors: Mapping[str, Any] | None = None) -> list[Mismatch]:
-    """What differs between the STEP at ``path`` and the result: ``expected``, the
-    components the result holds; ``occurrences``, each leaf of the flattened result by its
-    token, with the part key of the component it places (unchecked when None); and
-    ``colors``, the colour of each of those the result colours, by token (none coloured
-    when None). An occurrence either side has that the other does not, one holding another
-    part or drawing a face in another colour; a part either side holds that the other does
-    not, a component the file holds with no part key, and for each part both hold, how its
-    faces and edges differ in number, name or place -- and, where no occurrences are given,
-    the colour of each face it colours itself. Empty when the file verifies. ValueError for
-    an expected component that no part key finds, or two that one finds, or one whose names
-    and boxes do not count alike."""
-    from cadgen._internal.component_package import _normalized_face_colors
+                colors: Mapping[str, Any] | None = None, *, named: bool = True) -> list[Mismatch]:
+    """:func:`verify_scene` of a parse of the STEP at ``path``."""
     from cadgen._internal.step_scene_loader import load_step_scene
+
+    return verify_scene(load_step_scene(Path(path)), expected, occurrences, colors, named=named)
+
+
+def verify_scene(scene: Any, expected: Iterable[ExpectedComponent], occurrences: Mapping[str, str] | None = None,
+                 colors: Mapping[str, Any] | None = None, *, named: bool = True) -> list[Mismatch]:
+    """What differs between a parse of a STEP (``scene``, ``load_step_scene``'s) and the
+    result: ``expected``, the components the result holds; ``occurrences``, each leaf of the
+    flattened result by its token, with the part key of the component it places (unchecked
+    when None); and ``colors``, the colour of each of those the result colours, by token
+    (none coloured when None). An occurrence either side has that the other does not, one
+    holding another part or drawing a face in another colour; a part either side holds that
+    the other does not, a component the file holds with no part key, and for each part both
+    hold, how its faces and edges differ in number, name or place -- and, where no
+    occurrences are given, the colour of each face it colours itself. Empty when the file
+    verifies. A file written without names (``named`` False) holds no part keys and no
+    element names: each occurrence's component is the part the result places there, its
+    faces and edges paired by place. ValueError for an expected component that no part key
+    finds, or two that one finds, or one whose names and boxes do not count alike, and for
+    a file without names verified without its occurrences."""
+    from cadgen._internal.component_package import _normalized_face_colors
     from cadgen._internal.step_scene_mesh import _face_colors_by_ordinal
 
     wanted: dict[str, tuple[ExpectedComponent, dict[int, RGBA]]] = {}
@@ -180,8 +217,9 @@ def verify_step(path: Path, expected: Iterable[ExpectedComponent], occurrences: 
             if names and len(names) != len(boxes):
                 raise ValueError(f"part {part}: {len(names)} {kind} names and {len(boxes)} {kind} boxes")
         wanted[part] = (component, _normalized_face_colors(component.face_colors))
+    if not named and occurrences is None:
+        raise ValueError("a file without names is verified by its occurrences")
 
-    scene = load_step_scene(Path(path))
     read_colors: dict[int, dict[int, RGBA]] = {}
     for prototype_key, shape in scene.prototype_shapes.items():
         raw = scene.prototype_face_colors.get(prototype_key)
@@ -195,36 +233,47 @@ def verify_step(path: Path, expected: Iterable[ExpectedComponent], occurrences: 
         except RuntimeError as error:
             mismatches.append(Mismatch(None, None, f"the file does not read as a document: {error}"))
         else:
-            mismatches.extend(_occurrence_differences(read, occurrences))
+            mismatches.extend(_occurrence_differences(read, occurrences, named=named))
 
-    held: set[str] = set()
-    face_pairs: dict[int, dict[int, int]] = {}
-    for prototype_key, shape in scene.prototype_shapes.items():
-        names = scene.prototype_step_names.get(prototype_key) or ComponentNames()
-        if names.part is None:
-            label = scene.prototype_names.get(prototype_key)
-            mismatches.append(Mismatch(None, None, f"component {label or 'with no name'} carries no part key"))
-            continue
-        if names.part not in wanted:
-            mismatches.append(Mismatch(None, names.part, "the file holds a part the result does not"))
-            continue
-        held.add(names.part)
-        component, own = wanted[names.part]
-        differences, face_pairs[prototype_key] = _differences(shape, names, component)
-        mismatches.extend(Mismatch(None, names.part, message) for message in differences)
-        if occurrences is None:
-            # Unplaced, a face is drawn in its part's own colour where its part gives one.
-            drawn = _drawn_otherwise(face_pairs[prototype_key], read_colors[prototype_key],
-                                     scene.prototype_colors.get(prototype_key), own, None, owned_only=True)
-            if drawn:
-                mismatches.append(Mismatch(None, names.part, _recoloured("part", component, drawn)))
-    mismatches.extend(Mismatch(None, part, "the file does not hold this part") for part in wanted if part not in held)
+    # The faces of each component the file holds paired with its part's, by the component
+    # (its prototype) and the part.
+    face_pairs: dict[tuple[int, str], dict[int, int]] = {}
+    if named:
+        held: set[str] = set()
+        for prototype_key, shape in scene.prototype_shapes.items():
+            names = scene.prototype_step_names.get(prototype_key) or ComponentNames()
+            if names.part is None:
+                label = scene.prototype_names.get(prototype_key)
+                mismatches.append(Mismatch(None, None, f"component {label or 'with no name'} carries no part key"))
+                continue
+            if names.part not in wanted:
+                mismatches.append(Mismatch(None, names.part, "the file holds a part the result does not"))
+                continue
+            held.add(names.part)
+            component, own = wanted[names.part]
+            differences, face_pairs[prototype_key, names.part] = _differences(shape, names, component)
+            mismatches.extend(Mismatch(None, names.part, message) for message in differences)
+            if occurrences is None:
+                # Unplaced, a face is drawn in its part's own colour where its part gives one.
+                drawn = _drawn_otherwise(face_pairs[prototype_key, names.part], read_colors[prototype_key],
+                                         scene.prototype_colors.get(prototype_key), own, None, owned_only=True)
+                if drawn:
+                    mismatches.append(Mismatch(None, names.part, _recoloured("part", component, drawn)))
+        mismatches.extend(Mismatch(None, part, "the file does not hold this part") for part in wanted if part not in held)
+    else:
+        for token, part in occurrences.items():
+            if read is None or token not in read or part not in wanted or (read[token][1], part) in face_pairs:
+                continue
+            prototype_key = read[token][1]
+            differences, face_pairs[prototype_key, part] = _differences(
+                scene.prototype_shapes[prototype_key], ComponentNames(), wanted[part][0], named=False)
+            mismatches.extend(Mismatch(None, part, message) for message in differences)
 
     for token, part in (occurrences or {}).items():
         if read is None or token not in read:
             continue
         name, prototype_key, read_part, read_color = read[token]
-        if read_part != part or part not in wanted or prototype_key not in face_pairs:
+        if (named and read_part != part) or part not in wanted or (prototype_key, part) not in face_pairs:
             continue
         component, own = wanted[part]
         color = None if (colors or {}).get(token) is None else _rgba(colors[token])
@@ -234,7 +283,7 @@ def verify_step(path: Path, expected: Iterable[ExpectedComponent], occurrences: 
                 mismatches.append(Mismatch(token, part, f"the occurrence {name} is drawn in {_shown(read_color)} "
                                                         f"where the result draws it in {_shown(color)}"))
             continue
-        drawn = _drawn_otherwise(face_pairs[prototype_key], read_colors[prototype_key], read_color, own, color)
+        drawn = _drawn_otherwise(face_pairs[prototype_key, part], read_colors[prototype_key], read_color, own, color)
         if drawn:
             mismatches.append(Mismatch(token, part, _recoloured(f"occurrence {name}", component, drawn)))
     return mismatches
@@ -258,14 +307,14 @@ def _read_occurrences(scene: Any) -> dict[str, tuple[str, int, str | None, RGBA 
 
 
 def _occurrence_differences(read: Mapping[str, tuple[str, int, str | None, RGBA | None]],
-                            expected: Mapping[str, str]) -> list[Mismatch]:
+                            expected: Mapping[str, str], *, named: bool = True) -> list[Mismatch]:
     """The occurrences a compile of the file names otherwise than the result: by token, one
-    either side has that the other does not, or one the file gives another part."""
+    either side has that the other does not, or (``named``) one the file gives another part."""
     mismatches = []
     for token, part in expected.items():
         if token not in read:
             mismatches.append(Mismatch(token, part, "the file has no occurrence with this token"))
-        elif read[token][2] != part:
+        elif named and read[token][2] != part:
             mismatches.append(Mismatch(token, part, f"the occurrence {read[token][0]} holds part {read[token][2]}"))
     for token, (name, _key, part, _color) in read.items():
         if token not in expected:
@@ -303,10 +352,11 @@ def _recoloured(subject: str, component: ExpectedComponent, drawn: list[tuple[in
     return f"the {subject} draws {_listed(labels)} in other colours than the result"
 
 
-def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent) -> tuple[list[str], dict[int, int]]:
+def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent, *,
+                 named: bool = True) -> tuple[list[str], dict[int, int]]:
     """How the component ``shape`` the file holds, named ``names``, differs from
     ``component`` in its faces and edges, and its faces' pairs, from the result's index to
-    the file's."""
+    the file's. Not ``named``, no name is compared, every element paired by place."""
     read_faces, read_edges = face_boxes(shape), edge_boxes(shape)
     display = max(_FLOOR, _display_tolerance([*component.face_boxes, *component.edge_boxes]),
                   _display_tolerance([*read_faces, *read_edges]))
@@ -317,14 +367,17 @@ def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent
 
     pairs = {}
     unnameable = {ordinal - 1 for ordinal in component.unnameable_edges}
-    for kind, read, wanted, read_given, wanted_given, own, skipped in (
+    # An edge no file names that a face bounds is checked through its face; one no face
+    # bounds answers for its body by its place.
+    through_faces = {ordinal - 1 for ordinal in component.unnameable_edges - component.faceless_edges}
+    for kind, read, wanted, read_given, wanted_given, own, unnamed, skipped in (
             ("face", read_faces, component.face_boxes, names.faces, component.names.faces, component.face_tolerances,
-             set()),
+             set(), set()),
             ("edge", read_edges, component.edge_boxes, names.edges, component.names.edges, component.edge_tolerances,
-             unnameable)):
-        read_names = _by_ordinal(read_given, len(read))
-        expected_names = _by_ordinal(wanted_given, len(wanted))
-        excused = {expected_names[index] for index in skipped if index < len(expected_names)} - {None}
+             unnameable, through_faces)):
+        read_names = _by_ordinal(read_given if named else (), len(read))
+        expected_names = _by_ordinal(wanted_given if named else (), len(wanted))
+        excused = {expected_names[index] for index in unnamed if index < len(expected_names)} - {None}
         differences.extend(_name_differences(kind, read_names, expected_names, excused))
         bounds = [display + (own[index] if index < len(own) else 0.0) for index in range(len(wanted))]
         pairs[kind] = _paired(kind, read_names, read, expected_names, wanted, bounds, display, differences, skipped)
@@ -337,9 +390,9 @@ def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | Non
     """Pair the result's elements of ``kind`` with the file's -- by a name on one element of
     each, the rest by place -- and add to ``differences`` the named ones off their place (by
     more than their ``bounds``, the display tolerance ``display`` and their own) and the
-    number no place pairs. The result's elements at ``skipped`` (those no file can name) are
-    not paired: their faces answer for them. The pairs, from the result's index to the
-    file's."""
+    number no place pairs. The result's elements at ``skipped`` (edges no file can name that
+    a face bounds) are not paired: their faces answer for them. The pairs, from the result's
+    index to the file's."""
     counted = Counter(name for name in read_names if name is not None)
     at = {name: index for index, name in enumerate(read_names) if name is not None and counted[name] == 1}
     pairs: dict[int, int] = {}

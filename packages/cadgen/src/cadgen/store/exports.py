@@ -1,0 +1,205 @@
+"""A model's STEP as an export of its stored result, and the check it is verified by
+(STORE.md §3, *Exports*).
+
+A build publishes its result tree before anything is written from it. Its STEP is then
+written from that tree by the build pool -- the export job, :func:`export_step` -- and a
+parse of the file is compared with the tree, by the pool too -- the verify job,
+:func:`verify_document`. Both are artifact jobs (``daemon/artifacts.py``): a request names
+a tree, a staged file or a document and its digest, never a script.
+
+- :func:`export_step` materializes the tree (``store.materialize``) and writes it with the
+  names writer (``step_export.export_build123d_step_file``): each component's part key, on
+  its product, and its faces' and edges' names, on the entities written for them
+  (``step_names``) -- or, written plain, none of them, so that its bytes claim nothing
+  about the store it came from. The file is a function of the tree and the writer
+  (``step_export.STEP_WRITER_SCHEME``) alone.
+- :func:`verify_document` compares a parse of the written bytes with the tree
+  (``_internal/step_verify.py``): the occurrences a compile of the file names, by token,
+  each holding the tree's part, every part's faces and edges named and placed as the tree
+  has them, drawn in its colours. A file that verifies is the tree: its document entry
+  names it, confirmed. A file that does not is its own content: its entry names the tree a
+  compile of the file publishes -- read as any file is, its elements named by their
+  geometry -- and lists what differs (``differ``). The model's next run writes it plain.
+
+A document entry an export wrote is pending until its verify answers (``verified:
+false``, ``records.note_document_tree``).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Callable, Iterator, Mapping
+
+__all__ = ["export_step", "verify_document"]
+
+# How many of the differences a document entry lists, and a warning shows.
+_LISTED = 50
+
+
+class _Spans:
+    """What a writer's logger is told (``CliLogger``'s ``timed`` and ``warning``), kept to
+    hand back: each step and the seconds it took, and the warnings, which the build that
+    asked relays to its own logger."""
+
+    def __init__(self) -> None:
+        self.rows: list[list[Any]] = []
+        self.warnings: list[str] = []
+
+    @contextmanager
+    def timed(self, label: str) -> Iterator[None]:
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.rows.append([label, time.perf_counter() - started])
+
+    def warning(self, message: str) -> None:
+        self.warnings.append(str(message))
+
+    def debug(self, message: str) -> None:
+        pass
+
+
+def export_step(tree_hash: str, out: Path, *, names: bool = True,
+                shapes: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Write the stored tree ``tree_hash`` to ``out`` and return the file's ``sha256``, the
+    producer whose part keys it carries (``producer``, None when written plain) and the
+    writer's ``spans`` and ``warnings``. ``names`` False writes it plain: no part key and no
+    element name. ``shapes`` gives the build's own live shapes by cid for components the
+    store cannot decode (an eager-only component's), which only the build's own process
+    holds (STORE.md §3)."""
+    from cadgen.step_export import export_build123d_step_file
+    from cadgen.store.materialize import materialize_descriptor
+    from cadgen.store.trees import capture_tree
+
+    spans = _Spans()
+    with spans.timed("materialize"):
+        descriptor, payloads = capture_tree(tree_hash)
+        placed: dict[int, str] = {}
+        document = materialize_descriptor(descriptor, captured_objects=payloads, shapes=shapes,
+                                          tree_hash=tree_hash, placed=placed)
+    producer = None
+    namer = None
+    if names:
+        from cadgen.store.parts import producer_identity
+
+        producer = producer_identity()
+        namer = _namer(descriptor, payloads, placed, producer)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    digest = export_build123d_step_file(document, Path(out), logger=spans, names=namer)
+    return {"sha256": digest, "producer": producer, "spans": spans.rows, "warnings": spans.warnings}
+
+
+def _namer(descriptor: Mapping[str, Any], payloads: Mapping[str, bytes], placed: Mapping[int, str],
+           producer: dict) -> Callable[[Any], Any]:
+    """What the file names each placed leaf of the materialized ``descriptor`` by: its
+    component's part key under ``producer`` and its lineage's names for its faces and edges
+    (``step_names.ComponentNames``); None for a shape no component placed."""
+    from cadgen._internal.component_package import read_lineage
+    from cadgen._internal.step_names import ComponentNames
+    from cadgen.store.parts import part_key
+
+    components = descriptor["components"]
+    found: dict[str, Any] = {}
+
+    def names(shape: Any) -> Any:
+        cid = placed.get(id(shape))
+        if cid is None:
+            return None
+        if cid not in found:
+            entry = components[cid]
+            lineage = read_lineage(payloads[entry["lineage"]]) if entry.get("lineage") else None
+            found[cid] = ComponentNames(part=part_key(entry, producer),
+                                        faces=tuple(lineage["faces"]) if lineage else (),
+                                        edges=tuple(lineage["edges"]) if lineage else ())
+        return found[cid]
+
+    return names
+
+
+def verify_document(tree_hash: str, document: Path, sha256: str, *, producer: dict | None) -> dict[str, Any]:
+    """Whether the document at ``document``, whose bytes hash to ``sha256``, holds the tree
+    ``tree_hash`` it was written from, and its entry made to say so: ``{"ok": True}`` when it
+    does (the entry confirmed), ``{"ok": False, "differ": [...]}`` when it does not (the entry
+    names the file's own content and what differs), ``{"ok": None}`` when the file no longer
+    has those bytes (nothing is written). ``producer`` is the one whose part keys the file was
+    written with, None for a file written plain: it is then verified by its occurrences
+    alone (``step_verify``)."""
+    from cadgen._internal.atomic_replace import read_bytes_with_ladder
+    from cadgen._internal.step_scene_package import _scene_from_selected_bytes
+    from cadgen._internal.step_verify import expected_component, verify_scene
+    from cadgen._internal.step_names import ComponentNames
+    from cadgen.store.parts import _decoded, part_key, producer_identity
+    from cadgen.store.records import document_entry_for_hash
+    from cadgen.store.trees import capture_tree
+
+    path = Path(document).expanduser().resolve()
+    payload = read_bytes_with_ladder(path)
+    if hashlib.sha256(payload).hexdigest() != sha256:
+        return {"ok": None}
+    scene = _scene_from_selected_bytes(path, payload)
+    del payload
+    descriptor, payloads = capture_tree(tree_hash)
+    from cadgen._internal.component_package import read_lineage
+
+    components = descriptor["components"]
+    # A plain file is verified by its occurrences: any producer's part keys tell its parts apart.
+    keys = {cid: part_key(entry, producer if producer is not None else producer_identity())
+            for cid, entry in components.items()}
+    expected = {}
+    for cid, entry in components.items():
+        if keys[cid] in expected:
+            continue
+        lineage = read_lineage(payloads[entry["lineage"]]) if producer is not None and entry.get("lineage") else None
+        names = ComponentNames(part=keys[cid], faces=tuple(lineage["faces"]) if lineage else (),
+                               edges=tuple(lineage["edges"]) if lineage else ())
+        topods, _colors = _decoded(entry)
+        expected[keys[cid]] = expected_component(topods, names, entry["faceColors"])
+    rows = descriptor["occurrences"]
+    occurrences = {row["id"]: keys[row["component"]] for row in rows}
+    # Each occurrence is drawn in its own colour, else its component's, as it is written.
+    colors = {row["id"]: color for row in rows
+              if (color := row.get("color") or components[row["component"]].get("color")) is not None}
+    mismatches = verify_scene(scene, expected.values(), occurrences, colors, named=producer is not None)
+    differ = _differ(mismatches, rows, keys)
+    answer = {"ok": True} if not differ else {"ok": False, "differ": differ}
+    entry = document_entry_for_hash(sha256)
+    if entry is None or entry.get("tree") != tree_hash or entry.get("verified") is not False:
+        # The entry is not this export's to settle: another export of equal bytes wrote it
+        # since (the last one wins), or a verify already did.
+        return answer
+    from cadgen.store.records import note_document_tree
+
+    if not differ:
+        note_document_tree(sha256, tree_hash, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"))
+        return answer
+    from cadgen.store.build import build_document_tree
+
+    own, _tree, _stats = build_document_tree(scene)
+    note_document_tree(sha256, own, kind=str(entry.get("kind") or "step"), producer=entry.get("producer"),
+                       differ=differ)
+    return answer
+
+
+def _differ(mismatches: list[Any], rows: list[Mapping[str, Any]], keys: Mapping[str, str]) -> list[str]:
+    """What differs, as a document entry lists it: each difference by the occurrence it
+    concerns, by its name and token, or by every occurrence placing the part it concerns."""
+    placing: dict[str, list[str]] = {}
+    for row in rows:
+        placing.setdefault(keys[row["component"]], []).append(f"{row.get('name') or 'part'} (#{row['id']})")
+    named = {row["id"]: f"{row.get('name') or 'part'} (#{row['id']})" for row in rows}
+    found: list[str] = []
+    for mismatch in mismatches:
+        if mismatch.occurrence is not None:
+            where = named.get(mismatch.occurrence) or f"#{mismatch.occurrence}"
+        elif mismatch.part in placing:
+            where = ", ".join(placing[mismatch.part])
+        else:
+            where = "the file"
+        found.append(f"{where}: {mismatch.message}")
+    if len(found) > _LISTED:
+        found[_LISTED:] = [f"and {len(found) - _LISTED} more"]
+    return found

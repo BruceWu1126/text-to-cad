@@ -572,16 +572,18 @@ def materialize_descriptor(
     captured_objects: dict[str, bytes] | None = None,
     label: str | None = None,
     tree_hash: str | None = None,
+    placed: dict[int, str] | None = None,
 ) -> Any:
     """:func:`materialize` of a FLATTENED descriptor (``flatten``/``flatten_tree``).
 
-    ``shapes`` supplies unlocated build123d shapes by cid for components that
-    are not in the store yet — the build's own, before it publishes them
-    (``cadgen.store.build`` assembles the STEP it writes from exactly this);
-    every other component is read from its declared BREP codec and the
-    immutable intrinsic face-color recipe. Each occurrence owns its metadata even when two components
-    share identical BREP bytes. The result is tagged as a materialized tree
-    only when ``tree_hash`` names one."""
+    ``shapes`` supplies unlocated build123d shapes by cid for components the store
+    cannot decode -- the build's own eager-only ones, which its STEP is written from
+    (``store/exports.py``) -- or does not hold yet; every other component is read from
+    its declared BREP codec and the immutable intrinsic face-color recipe. Each
+    occurrence owns its metadata even when two components share identical BREP bytes.
+    ``placed``, when given, is told the cid of every placed leaf, by the leaf's ``id``:
+    what the STEP writer names it by. The result is tagged as a materialized tree only
+    when ``tree_hash`` names one."""
     from build123d import Compound
 
     from cadgen._internal.component_package import (
@@ -598,9 +600,9 @@ def materialize_descriptor(
     decoded_by_object: dict[str, Any] = {}
     face_colors_by_cid: dict[str, dict[int, tuple[float, float, float, float]]] = {}
     for cid, entry in components.items():
-        if entry.get("kind") == "eager-only":
+        if entry.get("kind") == "eager-only" and cid not in shapes:
             raise NativeUnavailable("eager-only component has no admitted native representation")
-        if entry.get("kind") != "native":
+        if entry.get("kind") not in ("native", "eager-only"):
             raise ValueError("unsupported geometry component kind")
         if cid in shapes:
             # Unpublished own shapes have no published component yet. Their
@@ -672,6 +674,8 @@ def materialize_descriptor(
         else:
             child.__dict__.pop("__cadgen_component_identity__", None)
         placed_by_id[str(occurrence.get("id") or "")] = child
+        if placed is not None:
+            placed[id(child)] = cid
 
     def build_node(node: dict[str, Any]):
         node_type = str(node.get("nodeType") or "")

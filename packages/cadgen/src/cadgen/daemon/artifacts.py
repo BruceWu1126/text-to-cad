@@ -1,10 +1,14 @@
-"""Build-pool artifact jobs, independent of source models and document paths: this
-runtime's producer (``kind: producer``), and the display data of the parts a
-view found missing from the store (``kind: display``: one request, one job, one
-worker). A job runs on a daemon worker, or, with no daemon (``CADGEN_DAEMON=0``),
-in the process that asks, on a thread of its own: never a process per job. The
-caller's own thread never imports the native producer. Requests contain immutable
-pins, never a script, a declared output, or an instruction to run arbitrary Python.
+"""Build-pool artifact jobs, independent of source models: this runtime's producer
+(``kind: producer``); the display data of the parts a view found missing from the
+store (``kind: display``: one request, one job, one worker); a stored tree written to
+a staged STEP (``kind: export``) and a written document checked against the tree it
+was written from (``kind: verify``, ``store/exports.py``). A job runs on a daemon
+worker, or, with no daemon (``CADGEN_DAEMON=0``), in the process that asks, on a
+thread of its own: never a process per job. The caller's own thread never imports
+the native producer. Requests contain immutable pins and may name a staged file or a
+document, never a script, a declared output, or an instruction to run arbitrary
+Python. A verify is keyed by the bytes and the tree, not by the path it reads them at,
+so every door asking about one document joins one job.
 """
 
 from __future__ import annotations
@@ -52,6 +56,14 @@ def _producer(value):
     return result
 
 
+def _path(value, name):
+    if not isinstance(value, str) or not value or not os.path.isabs(value):
+        raise ValueError(f"artifact {name} must be an absolute path")
+    if Path(value).suffix.lower() not in (".step", ".stp"):
+        raise ValueError(f"artifact {name} must name a STEP document")
+    return str(Path(value))
+
+
 def normalize_request(request):
     """Own a closed, canonical JSON request without consulting any source/store."""
     if not isinstance(request, dict):
@@ -59,8 +71,19 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
+    if kind == "export" and set(request) == {"kind", "tree", "out", "names"}:
+        if not isinstance(request["names"], bool):
+            raise ValueError("artifact names must be a boolean")
+        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "out": _path(request["out"], "out"),
+                "names": request["names"]}
+    if kind == "verify" and set(request) == {"kind", "tree", "document", "sha256", "producer"}:
+        producer = request["producer"]
+        return {"kind": kind, "tree": _digest(request["tree"], "tree"),
+                "document": _path(request["document"], "document"), "sha256": _digest(request["sha256"], "sha256"),
+                "producer": None if producer is None else _producer(producer)}
     if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
-        raise ValueError("artifact request must be producer, or display with exactly tree, cids and producer")
+        raise ValueError("artifact request must be producer; display with exactly tree, cids and producer; "
+                         "export with tree, out and names; or verify with tree, document, sha256 and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
@@ -72,7 +95,12 @@ def normalize_request(request):
 
 
 def request_key(request):
-    encoded = json.dumps(normalize_request(request), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    """What one job answers: the request, but for a verify the path it reads its bytes
+    at, which are named by their digest."""
+    request = normalize_request(request)
+    if request["kind"] == "verify":
+        request = {key: value for key, value in request.items() if key != "document"}
+    encoded = json.dumps(request, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -118,12 +146,20 @@ def execute(request, *, keep_going=None):
     """Worker-only native entry. Source and model lookup are absent by design.
 
     ``keep_going`` is asked before each part (``parts.derive``): a daemon worker's asks
-    its supervisor whether anyone still wants the job."""
+    its supervisor whether anyone still wants the job. An export and a verify are one step
+    each, and a verify is finished whoever still waits for it: its answer is the store's."""
     request = normalize_request(request)
     from cadgen.store import parts
 
     if request["kind"] == "producer":
         return parts.producer_identity()
+    if request["kind"] in ("export", "verify"):
+        from cadgen.store import exports
+
+        if request["kind"] == "export":
+            return exports.export_step(request["tree"], Path(request["out"]), names=request["names"])
+        return exports.verify_document(request["tree"], Path(request["document"]), request["sha256"],
+                                       producer=request["producer"])
     return parts.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
 
 

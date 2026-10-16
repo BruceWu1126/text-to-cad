@@ -542,8 +542,10 @@ class GeometryInputs(unittest.TestCase):
                 with self.assertRaises(error):
                     snapshot.prepare_document()
                 if mode == "eager-only":
-                    with self.assertRaises(cp.NativeUnavailable):
-                        materialize_descriptor(flat, shapes={cid: shape, other: shape})
+                    # The build's own shape for its eager-only component, which only its process
+                    # holds: the document its STEP is written from is assembled with it.
+                    document = materialize_descriptor(flat, captured_objects=objects, shapes={other: shape})
+                    self.assertEqual(2, len(document.children))
 
 
 if __name__ == "__main__":

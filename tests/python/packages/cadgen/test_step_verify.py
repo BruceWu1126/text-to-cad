@@ -104,6 +104,22 @@ class VerifyStepTest(unittest.TestCase):
         self.assertEqual({occurrence for occurrence, _p, message in found if "holds part None" in message},
                          set(self.occurrences))
 
+    def test_a_file_written_without_names_is_verified_by_its_occurrences(self) -> None:
+        """A plain file claims no part and no element: each occurrence holds the faces and
+        edges of the part the result places there, wherever they are named."""
+        from cadgen._internal.step_verify import verify_step
+
+        self.assertEqual(verify_step(self.plain, self.components.values(), self.occurrences, named=False), [])
+        from cadgen._internal.step_names import ComponentNames
+
+        # Where the result places the ball, a bracket.
+        swapped = {**self.components, "ball": dataclasses.replace(self.components["bracket"],
+                                                                  names=ComponentNames(part=_KEYS["ball"]))}
+        found = self.messages(verify_step(self.plain, swapped.values(), self.occurrences, named=False))
+        self.assertTrue(found and all(part == _KEYS["ball"] for _occurrence, part, _message in found), found)
+        with self.assertRaises(ValueError):
+            verify_step(self.plain, self.components.values(), named=False)
+
     def test_names_that_differ_are_reported_on_their_part(self) -> None:
         bracket = self.components["bracket"]
         renamed = dataclasses.replace(bracket.names, faces=("f:bracket.make2.1",) + bracket.names.faces[1:],
@@ -396,6 +412,26 @@ class VerifyStepTest(unittest.TestCase):
         self.assertNotEqual(written, {round(box[2], 3) for box in edge_boxes(read) if box},
                             "the premise: the file's edges are not where the result's are")
         self.assertEqual(verify_step(path, [component]), [])
+
+    def test_a_wire_answers_for_its_body_by_its_place(self) -> None:
+        """A body without faces has only its edges to answer for it, and a free wire's carry no
+        name in any file: they are compared by their place, so two wires of as many edges
+        never verify as each other."""
+        import build123d as bd
+
+        from cadgen._internal.step_verify import verify_step
+        from cadgen.step_export import export_build123d_step_file
+
+        written = bd.Wire.make_polygon([(0, 0, 0), (5, 0, 0), (5, 2, 0)])
+        written.label = "wire"
+        other = bd.Wire.make_polygon([(0, 0, 0), (6, 0, 0), (6, 3, 0)])
+        component = _expected(written, "wire", _KEYS["ball"])
+        path = Path(self._tmp.name) / "wire.step"
+        export_build123d_step_file(written, path, names=lambda leaf: component.names)
+        self.assertEqual(verify_step(path, [component]), [])
+        ((occurrence, part, message),) = self.messages(verify_step(path, [_expected(other, "wire", _KEYS["ball"])]))
+        self.assertEqual((None, _KEYS["ball"]), (occurrence, part))
+        self.assertTrue(message.startswith("3 edges not paired by name have no counterpart within"), message)
 
     def test_the_result_names_each_component_by_one_part_key(self) -> None:
         from cadgen._internal.step_verify import verify_step
