@@ -375,6 +375,56 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertIsNotNone(self._entry())
         self.assertEqual(0, self._store("where", "STEP/pin.step", face).returncode)
 
+    def test_a_leaf_an_earlier_build_of_the_same_bytes_holds_is_answered_by_its_names(self) -> None:
+        """A saved file whose document index holds an earlier build's tree keeps that build's
+        leaf where it is named as this build's (the kernel wrote its bytes a little
+        differently that time): ``where`` answers it from this build's entry, by its names."""
+        from OCP.BRep import BRep_Builder, BRep_Tool
+        from OCP.TopAbs import TopAbs_VERTEX
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+
+        from cadgen._internal.component_package import (
+            _component_id, decode_geometry_component, prepare_geometry_component, read_lineage)
+        from cadgen._internal.step_hash import step_file_hash
+        from cadgen.store.index import write_entry
+        from cadgen.store.objects import put_object, read_verified_object
+        from cadgen.store.records import note_document_tree, tree_for_document_hash
+        from cadgen.store.trees import get_tree, put_tree
+
+        self._build()
+        face = self._face()
+        step = self.root / "STEP" / "pin.step"
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
+            step_hash = step_file_hash(step)
+            tree = get_tree(tree_for_document_hash(step_hash))
+            [occurrence] = tree["occurrences"]
+            entry = tree["components"].pop(occurrence["component"])
+            shape = decode_geometry_component(entry, read_verified_object(entry["brep"]))
+            vertex = TopoDS.Vertex_s(TopExp_Explorer(shape.wrapped, TopAbs_VERTEX).Current())
+            BRep_Builder().UpdateVertex(vertex, BRep_Tool.Tolerance_s(vertex) * 10)
+            lineage = read_lineage(read_verified_object(entry["lineage"]))
+            prepared = prepare_geometry_component(shape, identity=(entry.get("construction"), lineage))
+            put_object(prepared["payload"])
+            other = prepared["entry"]
+            cid = _component_id(other["contentHash"])
+            write_entry("component", cid, {"schemaVersion": 1, **other})
+            tree["components"][cid] = {**other, **({"color": entry["color"]} if "color" in entry else {})}
+            occurrence["component"] = cid
+            note_document_tree(step_hash, put_tree(tree))
+        step.unlink()  # written again, the same bytes, and read back through the index
+        self._build()
+        self.assertEqual(step_file_hash(step), step_hash, "the same bytes again")
+        why = self._store("why", "src/pin.py", "--json")
+        self.assertEqual(0, why.returncode, why.stdout + why.stderr)
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
+            self.assertIn(cid, get_tree(json.loads(why.stdout)["record"]["documentTree"])["components"],
+                          "the saved file keeps the earlier build's leaf")
+        answer = self._store("where", "STEP/pin.step", face, "--json")
+        self.assertEqual(0, answer.returncode, answer.stdout + answer.stderr)
+        self.assertEqual(("pin.py", "pin", "Solid.make_cylinder"),
+                         tuple(json.loads(answer.stdout)["made"][key] for key in ("file", "function", "op")))
+
     def test_the_sweeper_never_evicts_the_entry_and_retires_one_it_does_not_own(self) -> None:
         self._build()
         from cadgen.store import gc

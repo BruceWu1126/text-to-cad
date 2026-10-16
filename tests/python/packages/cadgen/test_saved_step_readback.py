@@ -763,6 +763,79 @@ class ReadBackVerificationTest(unittest.TestCase):
         self.assertTrue(all(re.fullmatch(r"#o:[0-9a-f]{12}/f:[0-9a-f]{12}", token) for token in tokens), tokens)
         self.assertEqual(sorted(named.resolve(token).ref for token in tokens), sorted(refs))
 
+    def test_an_earlier_build_of_the_same_bytes_names_the_saved_file_as_this_one(self):
+        """The document index holds the tree an earlier build of these bytes published. A
+        leaf of it holding a component of the same construction and lineage in other bytes
+        -- the kernel wrote the body a little differently that time -- names the leaf as
+        this build's does, and the tree is reused; one named otherwise (another model's
+        build of the same bytes) is the parse's to replace."""
+        from OCP.BRep import BRep_Builder, BRep_Tool
+        from OCP.TopAbs import TopAbs_VERTEX
+        from OCP.TopExp import TopExp_Explorer
+        from OCP.TopoDS import TopoDS
+        from build123d import Solid
+
+        from cadgen._internal import kernel_memo
+        from cadgen._internal.component_package import (
+            _component_id, decode_geometry_component, lineage_bytes, prepare_geometry_component, read_lineage)
+        from cadgen.store.build import build_tree_through_step
+        from cadgen.store.index import write_entry
+        from cadgen.store.objects import put_object, read_verified_object
+        from cadgen.store.records import note_document_tree
+        from cadgen.store.trees import get_tree, put_tree
+
+        def block():
+            return Solid.make_box(4, 3, 2).cut(Solid.make_cylinder(0.5, 9))
+
+        def build():
+            with kernel_memo.run(Path(__file__)) as run:
+                body = block()
+            body.label = "block"
+            return build_tree_through_step(body, self.root / "block.step", root_name="block", namer=run.identify)
+
+        self.addCleanup(kernel_memo.clear)
+        _tree_hash, _tree, stats, step_hash = build()
+        note_document_tree(step_hash, stats["documentTree"])
+
+        def earlier(rename: bool) -> str:
+            """The document tree an earlier build might have published for these bytes: the
+            leaf's body in other bytes (a vertex's tolerance), named alike or otherwise."""
+            tree = get_tree(stats["documentTree"])
+            [occurrence] = tree["occurrences"]
+            entry = tree["components"].pop(occurrence["component"])
+            shape = decode_geometry_component(entry, read_verified_object(entry["brep"]))
+            vertex = TopoDS.Vertex_s(TopExp_Explorer(shape.wrapped, TopAbs_VERTEX).Current())
+            BRep_Builder().UpdateVertex(vertex, BRep_Tool.Tolerance_s(vertex) * 10)
+            lineage = read_lineage(read_verified_object(entry["lineage"]))
+            if rename:
+                lineage = {**lineage, "faces": [name.replace("block.", "other.") for name in lineage["faces"]],
+                           "edges": [name.replace("block.", "other.") for name in lineage["edges"]],
+                           "vertices": [name.replace("block.", "other.") for name in lineage["vertices"]],
+                           "made": lineage["made"].replace("block.", "other."), "modified": {
+                               name.replace("block.", "other."): feature.replace("block.", "other.")
+                               for name, feature in lineage["modified"].items()}}
+            prepared = prepare_geometry_component(shape, identity=(entry.get("construction"), lineage))
+            put_object(prepared["payload"])
+            put_object(lineage_bytes(lineage))
+            other = prepared["entry"]
+            cid = _component_id(other["contentHash"])
+            self.assertNotEqual(other["brep"], entry["brep"])
+            write_entry("component", cid, {"schemaVersion": 1, **other})
+            tree["components"][cid] = {**other, **({"color": entry["color"]} if "color" in entry else {})}
+            occurrence["component"] = cid
+            return put_tree(tree)
+
+        alike = earlier(rename=False)
+        note_document_tree(step_hash, alike)
+        _tree_hash, _tree, again, again_hash = build()
+        self.assertEqual(again_hash, step_hash)
+        self.assertEqual((again["documentReadback"], again["documentTree"]), ("indexed", alike))
+        named_otherwise = earlier(rename=True)
+        note_document_tree(step_hash, named_otherwise)
+        _tree_hash, _tree, parsed, _hash = build()
+        self.assertEqual(parsed["documentReadback"], "parsed")
+        self.assertNotEqual(parsed["documentTree"], named_otherwise)
+
     def test_a_placements_colour_read_back_on_its_faces_is_the_result(self):
         """A coloured compound's colour comes back on each of its faces: drawn alike, the
         leaf is the result's, coloured as the result's occurrence is."""

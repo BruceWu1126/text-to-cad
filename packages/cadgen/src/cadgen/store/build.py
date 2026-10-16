@@ -375,39 +375,43 @@ def _drawn_alike(read: Any, written: Any, color: Any, shape: Callable[[], Any]) 
 
 def _same_body(authored: Any, written: Any) -> bool:
     """Whether the unlocated ``written`` body is ``authored`` within the display tolerance,
-    face by face and edge by edge: as many of each, and each one's tight box within the
-    display chord tolerance of the larger body's diagonal of its counterpart's -- in
-    order, else as a whole set, since a reader need not list them in the order they
-    were written -- so the two draw alike. A face a translation trimmed to its
-    complement has another box though the body's is unchanged."""
+    face by face: as many faces and edges, and each face's tight box within the display
+    chord tolerance of the larger body's diagonal of its counterpart's -- in order, else
+    as a whole set, since a reader need not list them in the order they were written --
+    so the two draw alike. A face a translation trimmed to its complement has another
+    box though the body's is unchanged; an edge a writer approximated a few microns off
+    its curve draws as it did."""
     import math
 
     from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopExp import TopExp
     from OCP.TopLoc import TopLoc_Location
+    from OCP.TopTools import TopTools_IndexedMapOfShape
 
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     bodies = [body.Located(TopLoc_Location()) for body in (authored, written)]
-    elements = []
-    for kind in (TopAbs_FACE, TopAbs_EDGE):
-        boxes = [_element_boxes(body, kind) for body in bodies]
-        if len(boxes[0]) != len(boxes[1]):
-            return False
-        elements.append(boxes)
+    edges = []
+    for body in bodies:
+        mapped = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(body, TopAbs_EDGE, mapped)
+        edges.append(mapped.Extent())
+    faces = [_element_boxes(body, TopAbs_FACE) for body in bodies]
+    if edges[0] != edges[1] or len(faces[0]) != len(faces[1]):
+        return False
     diagonals = []
-    for side in (0, 1):
-        found = [box for boxes in elements for box in boxes[side] if box is not None]
+    for boxes in faces:
+        found = [box for box in boxes if box is not None]
         if found:
             low = [min(box[axis] for box in found) for axis in range(3)]
             high = [max(box[axis + 3] for box in found) for axis in range(3)]
             diagonals.append(math.dist(low, high))
-    tolerance = DISPLAY_TESSELLATION["chordTolerance"] * max(diagonals, default=0.0)
-    return all(_same_boxes(*boxes, tolerance) for boxes in elements)
+    return _same_boxes(*faces, DISPLAY_TESSELLATION["chordTolerance"] * max(diagonals, default=0.0))
 
 
 def _element_boxes(shape: Any, kind: Any) -> list[tuple[float, ...] | None]:
     """The tight box of each of ``shape``'s elements of ``kind``, in ``TopExp`` order;
-    None for one that bounds nothing (a degenerate edge)."""
+    None for one that bounds nothing."""
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
     from OCP.TopExp import TopExp
@@ -1243,7 +1247,9 @@ def _check_reused_document(readback: Any, authored: Mapping[str, _Authored], dif
     (:func:`_attach_components`): its authored component, or, for a leaf that does not
     verify as that, what the file holds, its name going on ``differs``. A reused tree
     another build published -- the same bytes from components named otherwise -- is the
-    parse's to replace."""
+    parse's to replace. A component of the same construction and lineage in other bytes
+    -- an earlier build of these bytes, whose kernel wrote the body a little differently
+    -- names the leaf as this build's does, and stays."""
     tree, objects = readback.tree(), dict(readback.objects)
     for occurrence in tree["occurrences"]:
         candidate = authored.get(str(occurrence["id"]))
@@ -1251,6 +1257,8 @@ def _check_reused_document(readback: Any, authored: Mapping[str, _Authored], dif
         if candidate is None or candidate.cid == cid:
             continue
         entry = tree["components"][cid]
+        if all(entry.get(name) == candidate.entry.get(name) for name in ("construction", "lineage")):
+            continue
 
         def reused(entry: dict[str, Any] = entry) -> Any:
             from cadgen._internal.component_package import decode_display_shape

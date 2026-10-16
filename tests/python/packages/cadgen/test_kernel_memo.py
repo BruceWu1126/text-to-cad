@@ -413,26 +413,24 @@ class SettingsTest(KernelMemoCase):
         bundled = Path(build123d.__file__).parent / "data" / "fonts" / "reliefsingleline" / "ReliefSingleLineCAD-Regular.ttf"
         # The font manager is the kernel's, process-wide: give the bundled face its file back.
         self.addCleanup(lambda: FontManager().register_font(str(bundled), True, True))
-        with tempfile.TemporaryDirectory() as folder:
-            font = Path(folder) / "face.ttf"
-            shutil.copyfile(bundled, font)
+        # The kernel may still hold a font it read open: on Windows that file outlives the test.
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as folder:
+            first, other, same = (Path(folder) / name for name in ("first.ttf", "other.ttf", "same.ttf"))
+            shutil.copyfile(bundled, first)
+            other.write_bytes(bundled.read_bytes() + bytes(4))  # the same glyphs, other bytes
+            shutil.copyfile(bundled, same)
 
             def text(path):
                 return Compound.make_text("cad", 5, font_path=str(path))
 
-            first, _, _ = _run(text, font)
-            key = kernel_memo.construction_key(first)
+            key = kernel_memo.construction_key(_run(text, first)[0])
             self.assertRegex(key, r"^[0-9a-f]{64}$")
-            font.write_bytes(font.read_bytes() + bytes(4))  # the same glyphs, other bytes
-            second, stats, _ = _run(text, font)
-            self.assertEqual(stats["hits"], 0, "a font file that changed is another text")
-            changed = kernel_memo.construction_key(second)
-            self.assertNotEqual(changed, key)
-            elsewhere = Path(folder) / "copy.ttf"
-            shutil.copyfile(font, elsewhere)
+            changed, stats, _ = _run(text, other)
+            self.assertEqual(stats["hits"], 0, "a font file of other bytes is another text")
+            self.assertNotEqual(kernel_memo.construction_key(changed), key)
             kernel_memo.clear()
-            third, _, _ = _run(text, elsewhere)
-            self.assertEqual(kernel_memo.construction_key(third), changed, "the same bytes at another path are the same font")
+            self.assertEqual(kernel_memo.construction_key(_run(text, same)[0]), key,
+                             "the same bytes at another path are the same font")
 
 
 class TraceTest(KernelMemoCase):

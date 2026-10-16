@@ -641,7 +641,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   read-back, not an identity: drawn in the same colours (the same face
   colours, or every face in the colour of a placement that had none, which
   is how a reader returns a placement's colour), and the same body face by
-  face and edge by edge -- as many of each, each tight box within the display
+  face -- as many faces and edges, each face's tight box within the display
   chord tolerance of its counterpart's, in order or as a set
   (`store.build._same_body`) -- remembered per pair of components in
   `index/bounds` (§2), so a parent writing the same body again finds the

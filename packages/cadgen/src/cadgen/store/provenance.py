@@ -177,13 +177,12 @@ def where(document: Path | str, ref: str) -> Where:
     if not component.get("lineage"):
         return answer.unknown("no feature of a model's run made this body: it was read from a file, or "
                               "built outside the kernel's constructions")
-    found = next(((owner, described) for owner, described in _entries(model, record, entry)
-                  if cid in (described.get("components") or {})), None)
+    found = _described(model, record, entry, cid, component)
     if found is None:
         return answer.unknown("no build the store remembers made this body; run the model again")
-    answer.model, described = found
+    answer.model, described, listed = found
     rows = described.get("features") or []
-    stands = {str(name): index for name, index in (described["components"][cid] or {}).items()
+    stands = {str(name): index for name, index in (described["components"][listed] or {}).items()
               if isinstance(index, int) and 0 <= index < len(rows)}
     named = {index: name for name, index in stands.items()}
     try:
@@ -226,6 +225,29 @@ def where(document: Path | str, ref: str) -> Where:
                      if index in named]
     answer.known = True
     return answer
+
+
+def _described(model: str, record: dict[str, Any], entry: dict[str, Any], cid: str,
+               component: dict[str, Any]) -> tuple[str, dict[str, Any], str] | None:
+    """The entry that lists the component ``cid`` (a flattened document tree's
+    ``component``), its model and the component it lists: ``cid`` itself, else the
+    component of the same construction and lineage in its build's tree -- a saved file
+    keeps an earlier build's leaf for the same bytes where the two are named alike
+    (``store.build._check_reused_document``)."""
+    from cadgen.store.trees import flatten
+
+    entries = list(_entries(model, record, entry))
+    for owner, described in entries:
+        if cid in (described.get("components") or {}):
+            return owner, described, cid
+    names = (component.get("construction"), component.get("lineage"))
+    for owner, described in entries:
+        listed = described.get("components") or {}
+        tree = flatten(str(described.get("tree") or "")) if described.get("tree") else None
+        for other, built in ((tree or {}).get("components") or {}).items():
+            if other in listed and (built.get("construction"), built.get("lineage")) == names:
+                return owner, described, other
+    return None
 
 
 def _ordinal_by_geometry(component: dict[str, Any], token: str, kind: str) -> int | None:

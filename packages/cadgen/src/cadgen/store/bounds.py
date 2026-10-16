@@ -24,7 +24,7 @@ build of an all-link parent reads them by the BREP its pins name and decodes
 only a component whose entry is missing (``cadgen.store._references``).
 
 And it remembers, for a body a build wrote to STEP and the body the STEP read
-back as, whether the two AGREE -- face by face and edge by edge, each tight box
+back as, whether the two AGREE -- as many faces and edges, each face's tight box
 within the display chord tolerance (``store.build._same_body``) -- keyed by both
 components' codecs and BREP objects: a saved document's leaf takes its authored
 component only where they do, and a parent writing the same body again finds
@@ -64,7 +64,7 @@ PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation
 TOPOLOGY_ALGORITHM = "component_topology.faces_edges_curved_loose_box.algorithm1"
 #: Names ``store.build._same_body``: change what it compares or its tolerance, and
 #: change this name with it.
-AGREEMENT_ALGORITHM = "component_agreement.each_face_and_edge_tight_box_chord.algorithm2"
+AGREEMENT_ALGORITHM = "component_agreement.face_and_edge_counts_each_face_tight_box_chord.algorithm3"
 
 
 def _is_box(value: Any) -> bool:
