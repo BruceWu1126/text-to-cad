@@ -331,8 +331,7 @@ label never is, and an edit anywhere else in the model renames nothing. The gram
 `[A-Za-z_][A-Za-z0-9_]*` joined by a dot, numbers from 1
 (`cad_ref_syntax.ELEMENT_NAME_PATTERN`, which the client's `cadRefs.js`
 mirrors). A construction the memo cannot key is still a feature: its elements
-are named by its place in the run like any other's, and it runs again on every
-run.
+are named like any other's, and it runs again on every run.
 
 **Geometric tokens are the fallback matcher.** An element no lineage names --
 every element of a file read, and those a model took from a shape no feature
