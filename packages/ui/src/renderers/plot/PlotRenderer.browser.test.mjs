@@ -196,6 +196,29 @@ test('a press on a pad’s pixels selects that pad and lights them; from the bot
 });
 
 
+test('a layer unticked in Display is not drawn: the track goes with F.Cu, and comes back with the Board mode', async (t) => {
+  const { page, pane, errors } = await open(t, 'blinky.kicad_pcb');
+  const fitted = await frame(pane);
+  const box = sheetBox(fitted);
+  const scale = box.width / 40;
+  const column = Math.round(box.minX + 30 * scale);
+  const middle = box.minY + 15 * scale;
+  assert.ok(red(pixel(fitted, column, middle)), `the VBUS track on F.Cu: ${pixel(fitted, column, middle)}`);
+  await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: 'Display', exact: true }).click();
+  const popover = page.locator('[data-display-popover]');
+  await popover.getByRole('checkbox', { name: 'F.Cu', exact: true }).uncheck();
+  const bare = await frame(pane, fitted);
+  assert.ok(near(pixel(bare, column, middle), hex(BOARD.sheets[0].background)), `bare board where the track was: ${pixel(bare, column, middle)}`);
+  // The mode reads Custom; choosing Board ticks F.Cu again and the track is back.
+  assert.equal(await popover.getByRole('combobox', { name: 'Mode' }).innerText(), 'Custom');
+  await popover.getByRole('combobox', { name: 'Mode' }).click();
+  await page.getByRole('option', { name: 'Board' }).click();
+  await page.keyboard.press('Escape');
+  const again = await frame(pane, bare);
+  assert.ok(red(pixel(again, column, middle)), `the track again: ${pixel(again, column, middle)}`);
+  assert.deepEqual(errors, []);
+});
+
 test('the theme is the surround only: the board keeps its own background', async (t) => {
   const { page, pane, errors } = await open(t, 'blinky.kicad_pcb');
   const light = await frame(pane);

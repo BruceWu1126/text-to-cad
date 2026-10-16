@@ -1,23 +1,21 @@
-import { SHELL_TOOL, createToolModes } from "../kit/tools/toolModes.js";
-
-/** A board's tools are Select, Draw and Measure (`PlotRenderer.jsx`). Draw is the shell's (`kit/shell/usePlaneShell.js`). */
-export const PLOT_TOOL = Object.freeze({ SELECT: "select", MEASURE: "measure", DRAW: SHELL_TOOL.DRAW });
-
-// A plot opens in Select: the tool in hand is never saved. Measure and Draw toggle: a second press
-// puts either down, back to Select (a press on Measure while it is up also clears its results, the
-// board's own rule, in `PlotRenderer.jsx`).
-export const PLOT_TOOL_MODES = createToolModes({
-  defaultMode: PLOT_TOOL.SELECT,
-  modes: { [PLOT_TOOL.SELECT]: {}, [PLOT_TOOL.MEASURE]: { toggles: true }, [PLOT_TOOL.DRAW]: { toggles: true } }
-});
+import { createToolModes } from "../kit/tools/toolModes.js";
 
 /**
- * Escape on a plot, innermost first, as on a STEP: an unfinished measurement, then Measure (its
- * results stay), then the selection. Answers whether it spent the key.
+ * A board's one tool is Select (`PlotRenderer.jsx`): the tree, the Reference, hover, net highlight,
+ * copy reference and Quick Edit. Neither Draw nor Measure is mounted for a board — the shell keeps
+ * both for the views that ask for them (`kit/shell/usePlaneShell.js`); the plot renderer asks for
+ * neither. A board is read and pointed at here; what is to change, the agent changes in the script.
  */
-export function escapePlot({ toolMode, selectTool, selection, measure }) {
-  if (measure.start) { measure.cancel(); return true; }
-  if (toolMode === PLOT_TOOL.MEASURE) { selectTool(PLOT_TOOL.SELECT); return true; }
+export const PLOT_TOOL = Object.freeze({ SELECT: "select" });
+
+// A plot opens in Select, and Select cannot be put down: the tool in hand is never saved.
+export const PLOT_TOOL_MODES = createToolModes({
+  defaultMode: PLOT_TOOL.SELECT,
+  modes: { [PLOT_TOOL.SELECT]: {} }
+});
+
+/** Escape on a plot: the selection, when there is one. Answers whether it spent the key. */
+export function escapePlot({ selection }) {
   if (selection.active) { selection.clear(); return true; }
   return false;
 }

@@ -22,13 +22,16 @@
  * that flip, a transform maps page to screen as `screen = page * scale + offset` on both axes.
  *
  * **A frame** (`drawPlot`) is the sheet's rectangle filled with its background, then the layers
- * a `view` chooses, in its order, clipped to the sheet: every layer but the courtyards, mask and
- * paste by default (the board as it is made, which the snapshot and a library card draw), or the
- * layers the view names; the copper with or without its pours; from the top, or from below, each
- * layer mirrored about the sheet's vertical centre line and the stack reversed. Each item's path
- * is made once (`Path2D`) and kept with the item, and what lies off the canvas is left out, so a
- * board of tens of thousands of items pans in a few milliseconds. The pane keeps rasters of a view
- * made with this same function and paints them with `drawPlotImages`.
+ * a `view` chooses, in its order: every layer but the courtyards, mask and paste by default (the
+ * board as it is made, which the snapshot and a library card draw), or the layers the view names;
+ * the copper with or without its pours; from the top, or from below, each layer mirrored about
+ * the sheet's vertical centre line and the stack reversed. Nothing is clipped to the sheet: the
+ * sheet is the outline's box, which the fit frames (`bounds`), and what the file draws past it
+ * (a fab note off the edge, as KiCad draws it) is drawn over the surround; `extent` is the box of
+ * everything drawn. Each item's path is made once (`Path2D`) and kept with the item, and what
+ * lies off the canvas is left out, so a board of tens of thousands of items pans in a few
+ * milliseconds. The pane keeps rasters of a view made with this same function and paints them
+ * with `drawPlotImages`.
  */
 import { fitTransform, modelToScreen, screenToModel } from "../drawing2d/transform.js";
 import { itemColor, layerColor } from "./theme.js";
@@ -93,8 +96,9 @@ const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
  * @property {number|null} unrouted The board's connections still to make (the ratsnest's lines), else null.
  * @property {readonly PlotSheet[]} sheets
  * @property {object|null} board The board's index (`payload.board`), sheet millimetres; else null.
- * @property {readonly [number, number, number, number]} bounds The page box, `[minX, minY, maxX, maxY]`, y down.
+ * @property {readonly [number, number, number, number]} bounds The sheet's page box, `[minX, minY, maxX, maxY]`, y down: what the fit frames.
  * @property {readonly [number, number, number, number]} modelBounds The same box in drawing2d's model space, y up.
+ * @property {readonly [number, number, number, number]} extent The page box of everything drawn: the sheet and every item, items past the sheet's edge included.
  *
  * @typedef {object} PlacedImage A raster of a view, placed in page space.
  * @property {CanvasImageSource|null} image
@@ -226,6 +230,14 @@ export function layoutPlot(payload) {
   });
   const [sheet] = placed;
   const board = payload.board && typeof payload.board === "object" && !Array.isArray(payload.board) ? payload.board : null;
+  const bounds = [0, 0, sheet.width, sheet.height];
+  const extent = [...bounds];
+  for (const layer of sheet.layers) {
+    for (const { box } of layer.items) {
+      if (box[0] < extent[0]) extent[0] = box[0]; if (box[1] < extent[1]) extent[1] = box[1];
+      if (box[2] > extent[2]) extent[2] = box[2]; if (box[3] > extent[3]) extent[3] = box[3];
+    }
+  }
   return Object.freeze({
     schemaVersion: payload.schemaVersion,
     kind: String(payload.kind ?? ""),
@@ -233,14 +245,15 @@ export function layoutPlot(payload) {
     unrouted: Number.isInteger(payload.unrouted) ? payload.unrouted : null,
     sheets: Object.freeze(placed),
     board,
-    bounds: Object.freeze([0, 0, sheet.width, sheet.height]),
-    modelBounds: Object.freeze([0, -sheet.height, sheet.width, 0])
+    bounds: Object.freeze(bounds),
+    modelBounds: Object.freeze([0, -sheet.height, sheet.width, 0]),
+    extent: Object.freeze(extent)
   });
 }
 
 /**
- * The view that frames the whole plot in a `width` x `height` pane: drawing2d's fit, through
- * the flip.
+ * The view that frames the sheet — the board's outline — in a `width` x `height` pane:
+ * drawing2d's fit, through the flip. What the file draws past the outline is drawn where it falls.
  *
  * @param {PlotLayout} layout
  * @param {number} width
@@ -425,8 +438,8 @@ function checkTransform(transform, who) {
 
 /**
  * Draw one frame of a plot: the sheet's rectangle in its background, then the layers `view`
- * chooses, in its order, each item in KiCad's colours, all in page space under the view and
- * clipped to the sheet.
+ * chooses, in its order, each item in KiCad's colours, all in page space under the view. Nothing
+ * is clipped to the sheet: an item past the outline is drawn over the surround, as KiCad draws it.
  *
  * The context carries the whole view (page millimetres to device pixels), so the picture is
  * exact at any zoom. A path of width 0 (a ratsnest line, a pour's outline) is a hairline of
@@ -447,16 +460,13 @@ export function drawPlot(ctx, layout, { transform, pixelRatio = 1, view = null, 
   ctx.save();
   for (const sheet of layout.sheets) {
     const mirrorX = view?.side === "bottom" ? sheet.x + sheet.width / 2 : null;
-    pageSpace(ctx, transform, pixelRatio, null);
-    if (visible && !rectsOverlap(visible, [sheet.x, sheet.y, sheet.x + sheet.width, sheet.y + sheet.height])) continue;
-    ctx.fillStyle = sheet.background;
-    ctx.fillRect(sheet.x, sheet.y, sheet.width, sheet.height);
-    ctx.beginPath();
-    ctx.rect(sheet.x, sheet.y, sheet.width, sheet.height);
-    ctx.clip();
-    pageSpace(ctx, transform, pixelRatio, mirrorX);
     // What the canvas shows, mirrored back into the board's own coordinates.
     const shown = visible && mirrorX != null ? [2 * mirrorX - visible[2], visible[1], 2 * mirrorX - visible[0], visible[3]] : visible;
+    if (shown && !rectsOverlap(shown, layout.extent)) continue;
+    pageSpace(ctx, transform, pixelRatio, null);
+    ctx.fillStyle = sheet.background;
+    ctx.fillRect(sheet.x, sheet.y, sheet.width, sheet.height);
+    pageSpace(ctx, transform, pixelRatio, mirrorX);
     for (const layer of viewedLayers(sheet, view)) drawLayer(ctx, layer, { hairline, poured, visible: shown, PathCtor });
   }
   ctx.restore();

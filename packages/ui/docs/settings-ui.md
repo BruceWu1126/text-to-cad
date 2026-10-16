@@ -148,7 +148,7 @@ none.
 | URDF / SRDF / SDF | Select, Position (posable joints only) |
 | GLB / STL / 3MF | none |
 | DXF | none: a 2D canvas |
-| KiCad board | Select, Draw, Measure (see [A KiCad board](#a-kicad-board)) |
+| KiCad board | Select (see [A KiCad board](#a-kicad-board)) |
 
 There is no separator or activity dot. There is no Animate tool: routines play in
 [preview](#camera-animation-and-preview). Display is not a tool: every 3D view has
@@ -285,13 +285,17 @@ on the strip.
 
 ## A KiCad board
 
-A board's tools are a STEP's, read for a flat picture (`renderers/plot/board`): Select, Draw
-and Measure on the strip, the board tree and the Reference in the stack, Quick Edit at the
-top-right, and the board's Display settings among the view's controls. None of them edits the
-board: the agent does, in its script. They come with the board's index (`payload.board`); a
-plot without one is the picture alone. The picture is the board drawn from its file, layer by
-layer in KiCad's default colours (core's [plot payload](../../core/docs/plot-payload.md)); no
-KiCad runs.
+A board's tools are a STEP's Select, read for a flat picture (`renderers/plot/board`): Select
+alone on the strip, the board tree and the Reference in the stack, Quick Edit at the top-right, and
+the board's Display settings among the view's controls. Draw and Measure are not offered: a board is
+read, pointed at and referenced here; what a person wants changed, the agent changes in the script,
+and distances are the script's numbers. The flat shell keeps Draw for any picture that asks for it
+and a STEP keeps both; the plot renderer asks for neither. None of the board's tools edits the
+board. They come with the board's index (`payload.board`); a plot without one is the picture alone.
+The picture is the board drawn from its file, layer by layer in KiCad's default colours (core's
+[plot payload](../../core/docs/plot-payload.md)); no KiCad runs. The view frames the board's
+outline, and what the file draws past it (a fab note off the edge, as KiCad draws it) is drawn too,
+over the surround, never clipped away.
 
 - **Select**'s four modes are its mode menu in the tree's filter row, drawn as STEP's are:
   **All** (the pointer: the most specific thing under it — a pad, a via or a track, then a
@@ -299,7 +303,7 @@ KiCad runs.
   **Pads** (a pad) and **Nets** (two pads and a trace: any copper picks its whole net, pours
   included, and the rest of the board steps back). Shift-click adds and removes. A
   double-click on something copies its reference and leaves it selected; on bare board it fits
-  the view.
+  the view. Escape clears the selection. Select cannot be put down: it is the board's one tool.
 - **The board tree** is Select's panel, closable as Features is: **Parts** by kind (ICs,
   Connectors, Capacitors…), each with its pads; and **Nets**, each with the pads on it (KiCad's
   names for a pin on nothing are left out). The filter finds a part
@@ -322,32 +326,33 @@ KiCad runs.
 - **References** are board references, the language `cadgen.pcb.read_board(path).resolve(ref)`
   reads: `#U3`, `#U3.9`, `#net:VIN`, `#net:VIN@x40.1y21.6` (that net's copper at a point) and
   `#@x40.1y21.6` (a point). Quick Edit carries them as it carries a STEP's.
-- **Measure** snaps as its mode menu says: **All**, **Pads** (pad centres), **Vias and
-  tracks** (via centres and track ends) and **Edges and holes**. Each measurement is a row:
-  its distance and what its two ends were, dx and dy on hover. It is kept, toggled and cleared
-  as a STEP's Measure is, Escape included; a second press on its first point (a double-click's)
-  measures nothing; a new revision of the board clears the measurements, taken on the board as
-  it was.
-- **Draw** is the shared drawing editor laid over the board, its Drawing panel and Copy Drawing
-  as a STEP's. While it is up the editor pans and zooms and the board follows it
-  (`kit/tools/draw/planeViewLock.js`), so ink stays on what it was drawn over — through a change of the
-  pane's size too; the sketch goes with a Quick Edit as the view with its ink. A host's or the
-  agent's selection while it is up shows under the ink and leaves the sketch alone, and a
-  capture never carries the hover.
 - **Display** (its button where a 3D view's is, at the navbar's right end, after the alert
-  card's icon; a board has no Preview; one **Display** section): **Mode**,
-  presets as a 3D view's are ([render-mode.md](./render-mode.md)) — **Board** (every layer but
-  the courtyards: copper, mask and paste, silkscreen, fabrication, vias and holes, the outline, the
-  ratsnest), **Copper**, **Assembly** (silkscreen, fab and courtyards) and **Placement** —
-  then **View from** Top or Bottom (the board mirrored, its bottom layers drawn over its top) and,
-  where the mode draws copper, **Copper pours** on or off — a pour hides the tracks under it. A
-  pour changed from its mode's reads as **Custom**; choosing a mode reapplies it and keeps the
-  side, as a 3D preset keeps the camera. **Placement** is the board before it is wired: no copper
-  and no drill layer (a via's hole is routing), the overlay drawing the pads, their holes and the
-  board's, and every connection as an airwire, routed or not — each net's pins joined by their
-  shortest tree (`board2d/airwires.js`). A net a pour joins shows its airwires only while
-  selected; a selected net's are highlighted. The payload carries every layer; a mode only
-  chooses among them. Kept with the file's view; one stored before modes (`layers`) opens in its mode.
+  card's icon; a board has no Preview) is two sections, always open, with no gates. **Display**:
+  **Mode**, presets as a 3D view's are ([render-mode.md](./render-mode.md)) — **Board** (every
+  layer but the courtyards: copper, mask and paste, silkscreen, fabrication, vias and holes, the
+  outline, the ratsnest), **Copper** (copper, vias, holes, the outline, the ratsnest), **Assembly**
+  (silkscreen, fab and courtyards, holes, the outline, the ratsnest) and **Placement** — then
+  **View from** Top or Bottom (the board mirrored, its bottom layers drawn over its top) and,
+  where the layers drawn include a copper layer, **Copper pours** on or off — a pour hides the
+  tracks under it. **Layers**: a checkbox per layer the payload holds, by id, grouped **Front**
+  (`F.CrtYd` … `F.Cu`, outermost first), **Inner** (`In1.Cu` …, a board with inner layers only),
+  **Back** (`B.Cu` … `B.CrtYd`, the copper first) and **Other** (the outline, the user layers and
+  `Margin`, then **Vias**, **Ratsnest** and **Drills**: the payload's `vias`, `ratsnest` and
+  `drills` layers); a group with no layers is left out, and so is a layer the payload leaves out
+  (a routed board has no ratsnest row). A mode is a layer set with its pours:
+  choosing one sets every checkbox and the pours, and keeps the side, as a 3D preset keeps the
+  camera; a checkbox or the pours changed from the mode's reads as **Custom**, and the mode is
+  kept as what Reset returns to. Ticking the set back to the mode's reads as the mode again.
+  **Placement** is the board before it is wired: no copper and no drill layer (a via's hole is
+  routing), the overlay drawing the pads, their holes and the board's, and every connection as an
+  airwire, routed or not — each net's pins joined by their shortest tree (`board2d/airwires.js`).
+  A net a pour joins shows its airwires only while selected; a selected net's are highlighted.
+  The payload carries every layer; a mode or a checkbox only chooses among them. The contract is
+  core's (`plot2d/boardDisplay.js`), one object for the view, the stored file view and
+  `cadgen pcb snapshot --display`: `{ "mode", "side", "poured", "layers" }` — `layers` the ids
+  drawn, or absent for the mode's own set — so the headless snapshot draws exactly what the
+  Display shows. Kept with the file's view; one stored before modes (`layers` as a word) opens in
+  its mode, and one stored before the checkboxes opens on its mode's set.
 
 ## The tool stack
 
@@ -819,8 +824,7 @@ pressed in while focus is on the page. Editable targets keep their own keys.
   included, a Select, a color picker, Display, the explorer) closes itself; then preview exits;
   then Draw's canvas spends its own Escape; then the renderer's (STEP: an
   unfinished measurement, then the Measure tool, then the selection, then
-  isolation; a KiCad board: an unfinished measurement, then the Measure tool,
-  then the selection; robots: the selection). The tool stack's
+  isolation; a KiCad board and robots: the selection). The tool stack's
   panels are never Escape's to close (a phone's sheet is dismissed like any sheet).
 - **A panel's grip** (its bottom-right corner) is a separator in the tab
   order: Left/Right nudge its width and Up/Down its cap by 16px, and Home and

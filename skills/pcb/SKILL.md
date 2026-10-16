@@ -145,7 +145,8 @@ file with `read_board`. Each rule and script, verified on the nightly, is in [ch
 
 ## The loop
 
-Build; look (show the board, or `cadgen pcb snapshot blinky.kicad_pcb tmp/blinky.png`); read the findings and
+Build; look (show the board, or `cadgen pcb snapshot blinky.kicad_pcb tmp/blinky.png`, with `--display copper` or
+`--display '{"mode":"copper","layers":["F.Cu","Edge.Cuts"]}'` for one layer set); read the findings and
 run your checks; change the script; again. A round is seconds, a real board hours of them, with the person
 pointing in the viewer. Keep the checks you repeat as `check_*.py` beside the board, run with `python`.
 Confirm when unspecified: the outline and mounting holes (from the enclosure, drill/place origin on a corner);

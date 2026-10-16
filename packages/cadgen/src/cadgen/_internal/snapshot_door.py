@@ -471,29 +471,34 @@ PLOT_DOOR_PICTURES: dict[str, str] = {
         "background. KiCad need not be installed."
     ),
 }
-#: The one display key that survives, said of a plot.
+#: What a plot's display IS, said where a scene's settings are refused.
 PLOT_APPEARANCE_HINT = (
-    "Light or dark is the whole of a plot's appearance — the background around its "
-    "sheets, which keep their own colours: pass --appearance light|dark (in a job, "
-    '"display": {"appearance": "dark"}).'
+    "A board's display is the viewer's Display — mode (board, copper, assembly or "
+    "placement), side (top or bottom), poured, layers (the layer ids drawn) — and the "
+    "appearance around its sheet, which keeps its own colours: pass --display "
+    "'{\"layers\": [\"F.Cu\", \"Edge.Cuts\"]}' and --appearance light|dark (in a job, "
+    '"display": {"appearance": "dark", "layers": ["F.Cu"]}).'
 )
 
 
 def plot_snapshot_verb(door: str):
     """The PLOT-shaped verb: a KiCad board drawn from its file, flat, as the viewer shows it.
 
-    The drawing's shape exactly: where, how big, and light or dark. A plot is
-    the board's layers, back to front on KiCad's board background, with its
-    unrouted connections as a ratsnest, fitted to the image.
-    So no ``camera`` (nothing to pose), no ``display`` (no surfaces, lighting or
-    render mode: the colours are KiCad's theme's), no ``mode`` (nothing to list
-    or section) and no ``view_labels`` (no view to name). ``appearance`` is the
-    surround the sheet sits on.
+    The drawing's shape — where, how big, and light or dark — plus the board's
+    own ``display``: the viewer's Display (`cadgen.snapshot_core.PLOT_DISPLAY_KEYS`),
+    which layers are drawn, with or without the copper pours, from which side,
+    as a preset name or a JSON object. A plot is those layers, back to front on
+    KiCad's board background, with its unrouted connections as a ratsnest,
+    fitted to the image. So no ``camera`` (nothing to pose), no scene settings
+    in ``display`` (no surfaces, lighting or render mode: the colours are
+    KiCad's theme's), no ``mode`` (nothing to list or section) and no
+    ``view_labels`` (no view to name). ``appearance`` is the surround the sheet
+    sits on.
 
-    Those four are absent rather than retired: this door never took them. A
-    job packet that asks for one -- or ``cadgen snapshot``, which routes a plot
-    here too -- is refused by name (``check_plot_render_job``). Each door says
-    what it draws in :data:`PLOT_DOOR_PICTURES`.
+    Those are absent rather than retired: this door never took them. A job
+    packet that asks for one -- or ``cadgen snapshot``, which routes a plot here
+    too -- is refused by name (``check_plot_render_job``). Each door says what
+    it draws in :data:`PLOT_DOOR_PICTURES`.
     """
     kinds = DOOR_KINDS[door]
     picture = PLOT_DOOR_PICTURES[door]
@@ -505,6 +510,7 @@ def plot_snapshot_verb(door: str):
         out: Path | None = None,
         *,
         job: Path | None = None,
+        display: str | dict | None = None,
         appearance: str = "light",
         width: int | None = None,
         height: int | None = None,
@@ -526,6 +532,13 @@ def plot_snapshot_verb(door: str):
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}. When given it wins: target/out are ignored, and
             the other flags override every job in it.
+        display: the board's Display, as the viewer shows it: board (default:
+            every layer but the courtyards), copper, assembly or placement, or
+            a JSON object or JSON file path with mode, side (top or bottom),
+            poured (true or false) and layers — the layer ids drawn, KiCad's
+            names plus "vias", "ratsnest" and "drills" — e.g.
+            '{"mode": "copper", "side": "bottom", "layers": ["B.Cu", "Edge.Cuts"]}'.
+            layers given draw exactly those; omitted, the mode's own set.
         appearance: light (default) or dark — the background around the
             sheets, which keep their own.
         width: output width in pixels (1..8192), overriding the size profile;
@@ -538,23 +551,26 @@ def plot_snapshot_verb(door: str):
         debug: report artifact resolution and measured browser stages in the
             result's debug field (read it with --json).
         """
-        from cadgen.snapshot_core import DISPLAY_APPEARANCES
+        from cadgen.snapshot_core import DISPLAY_APPEARANCES, PLOT_DISPLAY_MODES, load_display_option
 
         if appearance not in DISPLAY_APPEARANCES:
             raise ValueError(
                 f"appearance is {' or '.join(sorted(DISPLAY_APPEARANCES))}; got {appearance!r}"
             )
+        # The board's display, resolved here (a preset name, JSON or a file) so an
+        # explicit appearance joins it: one display object reaches the job. As a
+        # drawing's, it is passed only when asked for, so a `--job` file's own
+        # display is not overwritten by these defaults.
+        chosen: dict[str, object] | None = None
+        if display is not None:
+            chosen = dict(load_display_option(display, cwd=Path.cwd(), modes=PLOT_DISPLAY_MODES, kind=kinds[0]))
+        if "appearance" in _EXPLICIT_SNAPSHOT_OPTIONS.get():
+            chosen = {**(chosen or {}), "appearance": appearance}
         return _run(
             kinds,
             target=target, out=out, job=job, mode="view",
             camera=None,
-            # As a drawing's: passed only when asked for, so a `--job` file's
-            # own appearance is not overwritten by this default.
-            display=(
-                {"appearance": appearance}
-                if "appearance" in _EXPLICIT_SNAPSHOT_OPTIONS.get()
-                else None
-            ),
+            display=chosen,
             width=width, height=height, size_profile=size_profile,
             view_labels=False, debug=debug,
         )
@@ -754,8 +770,10 @@ def polymorphic_snapshot_verb():
             Omitted groups inherit the preset. edges, clip, exploded, the xray,
             hidden-line and wireframe modes and the hidden/off surface styles
             describe a STEP model; every other input takes solid or render. A
-            DXF or a KiCad board takes appearance alone (`--appearance` on
-            `cadgen dxf snapshot` and `cadgen pcb snapshot`).
+            DXF takes appearance alone (`--appearance` on `cadgen dxf snapshot`);
+            a KiCad board takes its own Display — board, copper, assembly or
+            placement, or JSON with mode, side, poured and layers (`cadgen pcb
+            snapshot --display`) — and appearance.
         kinematics: pose values for a STEP model's kinematics — a preset
             name or {dof: value} JSON; available in every display mode.
         animation: one still frame of a STEP model's clip — the clip name

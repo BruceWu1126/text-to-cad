@@ -1,21 +1,27 @@
 import { RotateCcw } from "lucide-react";
+import {
+  BOARD_DISPLAY_DEFAULTS, boardDisplayDrawsCopper, boardDisplayIsCustom, boardDisplayLayers, boardLayerGroups, readBoardDisplay,
+  selectBoardMode, toggleBoardLayer,
+} from "@text-to-cad/core/lib/plot2d/index.js";
 import { Button } from "@text-to-cad/ui/primitives/button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { FileSheetCheckboxRow, FileSheetSelectRow, FileSheetSettingsSection } from "../../kit/inspector/FileSheet.js";
 
 /**
- * A board's Display settings: its Mode, which side it is seen from (the bottom mirrored, its layers
- * on top) and whether copper pours are filled — a pour hides the tracks under it, and a person
- * reading the routing turns it off. Modes are presets, as a 3D view's are (`render-mode.md`): each
- * says which layers are drawn and whether pours are filled, and a setting changed away from its
- * mode reads as Custom, the mode kept as what Reset returns to. The side is not a preset's, as a
- * 3D view's camera is not. The payload carries every layer; a mode only chooses among them.
- * Placement draws no copper: the parts, their pads and courtyards, and every connection as an
- * airwire (`boardAirwires`), routed or not — the board as it is laid out, before it is wired. A
- * net its pours join shows its airwires only when selected.
- * Kept with the file's view, as a 3D file's Display settings are.
+ * A board's Display settings (`settings-ui.md`, "A KiCad board"): two sections, always open.
+ * **Display** is its Mode, which side it is seen from (the bottom mirrored, its layers on top) and
+ * whether copper pours are filled — a pour hides the tracks under it, and a person reading the
+ * routing turns it off. **Layers** is a checkbox per layer the payload holds, grouped front,
+ * inner, back and other (the outline, the user layers, then the vias, the ratsnest and the
+ * drills). Modes are presets, as a 3D view's are (`render-mode.md`): each is a layer set with its
+ * pours, and a checkbox or the pours changed from the mode's reads as Custom, the mode kept as what
+ * Reset returns to. The side is not a preset's, as a 3D view's camera is not.
+ *
+ * The contract — `{ mode, side, poured, layers }` — is core's (`plot2d/boardDisplay.js`), shared
+ * with the headless snapshot, so what is drawn here is drawn there. Kept with the file's view, as
+ * a 3D file's Display settings are.
  */
-export const BOARD_DISPLAY_DEFAULTS = Object.freeze({ side: "top", mode: "board", poured: true });
+export { BOARD_DISPLAY_DEFAULTS, readBoardDisplay };
 const SIDES = [{ value: "top", label: "Top" }, { value: "bottom", label: "Bottom" }];
 
 const icon = (children) => function BoardModeIcon(props) {
@@ -34,62 +40,40 @@ export const BOARD_MODE_OPTIONS = Object.freeze([
   Object.freeze({ value: "assembly", label: "Assembly", title: "Silkscreen, fab outlines and courtyards: what is placed where", Icon: AssemblyModeIcon }),
   Object.freeze({ value: "placement", label: "Placement", title: "Parts, pads and courtyards with their connections as airwires, before routing", Icon: PlacementModeIcon }),
 ]);
-// What each mode draws, by layer kind (the outline always), and its pours. Board is the board as
-// it is made: every layer but the courtyards (`plot2d`'s default view). `airwires`: the overlay
-// draws the pads, their holes and every connection as a straight line, over a plot without copper,
-// vias or drills (the drill layer holds the vias' holes too, and a via is routing).
-const MODES = Object.freeze({
-  board: { kinds: ["copper", "mask", "paste", "silk", "fab", "adhesive", "user", "margin", "via", "drill", "outline", "ratsnest"], poured: true, airwires: false },
-  copper: { kinds: ["copper", "via", "drill", "outline", "ratsnest"], poured: true, airwires: false },
-  assembly: { kinds: ["silk", "fab", "courtyard", "drill", "outline", "ratsnest"], poured: true, airwires: false },
-  placement: { kinds: ["fab", "courtyard", "outline"], poured: true, airwires: true },
-});
-// Before modes a display named its layers (`all`, `copper`, `assembly`); `all` is Board.
-const LEGACY_LAYERS = Object.freeze({ all: "board", copper: "copper", assembly: "assembly" });
 
-/** A stored display, or the defaults where it says nothing usable. */
-export function readBoardDisplay(raw) {
-  const value = raw && typeof raw === "object" ? raw : {};
-  const mode = MODES[value.mode] ? value.mode : LEGACY_LAYERS[value.layers] || "board";
-  return {
-    side: value.side === "bottom" ? "bottom" : "top",
-    mode,
-    poured: typeof value.poured === "boolean" ? value.poured : MODES[mode].poured,
-  };
-}
-
-/** Whether a display has left its mode's preset (the side is not a preset's). */
-export const boardDisplayIsCustom = (display) => display.poured !== MODES[display.mode].poured;
-
-/** The display's mode chosen: its preset's values, the side kept. */
-export const selectBoardMode = (display, mode) => ({ side: display.side, mode, poured: MODES[mode].poured });
-
-/** Whether a display draws the board's airwires and pads itself (its plot without copper). */
-export const boardDisplayAirwires = (display) => Boolean(display && MODES[display.mode].airwires);
-
-/** The drawing's view for a display: the layer ids to draw (null = all), pours, side. */
-export function boardDrawView(display, sheet) {
-  const kinds = MODES[display.mode].kinds;
-  const layers = Array.isArray(sheet?.layers) ? sheet.layers.filter((layer) => kinds.includes(layer.kind)).map((layer) => layer.id) : null;
-  return { layers, poured: display.poured, side: display.side };
-}
-
-export function BoardDisplaySection({ display, onChange }) {
-  const custom = boardDisplayIsCustom(display);
+/**
+ * @param {{ display: ReturnType<typeof readBoardDisplay>, onChange: (display: object) => void,
+ *   sheet: { layers: { id: string, kind: string, side: string }[] } | null }} props
+ *   `sheet`: the plot's, whose layers the checkboxes are; null until the plot is in (no Layers then).
+ */
+export function BoardDisplaySection({ display, onChange, sheet = null }) {
+  const custom = boardDisplayIsCustom(display, sheet);
   const changed = custom || display.side !== BOARD_DISPLAY_DEFAULTS.side || display.mode !== BOARD_DISPLAY_DEFAULTS.mode;
   const selected = BOARD_MODE_OPTIONS.find((option) => option.value === display.mode) || BOARD_MODE_OPTIONS[0];
   const ModeIcon = selected.Icon;
-  const drawsCopper = MODES[display.mode].kinds.includes("copper");
-  return <FileSheetSettingsSection title="Display" sectionId="board"
-    headingAction={changed ? <TooltipHint content="Reset board display"><Button type="button" variant="ghost" size="icon-xs" aria-label="Reset board display"
-      className="size-6 text-muted-foreground hover:text-foreground" onClick={() => onChange({ ...BOARD_DISPLAY_DEFAULTS })}>
-      <RotateCcw className="size-3" aria-hidden="true" /></Button></TooltipHint> : null}>
-    <FileSheetSelectRow label="Mode" value={custom ? "" : selected.value} placeholder="Custom"
-      onValueChange={(mode) => onChange(selectBoardMode(display, mode))}
-      triggerContent={custom ? undefined : <span className="flex min-w-0 items-center gap-1"><ModeIcon className="size-3 shrink-0" aria-hidden="true" /><span className="truncate">{selected.label}</span></span>}
-      triggerClassName="gap-1 px-1.5 [&_svg]:size-3"
-      options={BOARD_MODE_OPTIONS.map(({ Icon, ...option }) => ({ ...option, icon: <Icon className="size-3.5" aria-hidden="true" /> }))} />
-    <FileSheetSelectRow label="View from" value={display.side} options={SIDES} onValueChange={(side) => onChange({ ...display, side })} />
-    {drawsCopper ? <FileSheetCheckboxRow label="Copper pours" checked={display.poured} onCheckedChange={(poured) => onChange({ ...display, poured })} /> : null}
-  </FileSheetSettingsSection>;
+  const drawn = new Set(boardDisplayLayers(display, sheet));
+  const groups = boardLayerGroups(sheet);
+  return <>
+    <FileSheetSettingsSection title="Display" sectionId="board"
+      headingAction={changed ? <TooltipHint content="Reset board display"><Button type="button" variant="ghost" size="icon-xs" aria-label="Reset board display"
+        className="size-6 text-muted-foreground hover:text-foreground" onClick={() => onChange({ ...BOARD_DISPLAY_DEFAULTS })}>
+        <RotateCcw className="size-3" aria-hidden="true" /></Button></TooltipHint> : null}>
+      <FileSheetSelectRow label="Mode" value={custom ? "" : selected.value} placeholder="Custom"
+        onValueChange={(mode) => onChange(selectBoardMode(display, mode))}
+        triggerContent={custom ? undefined : <span className="flex min-w-0 items-center gap-1"><ModeIcon className="size-3 shrink-0" aria-hidden="true" /><span className="truncate">{selected.label}</span></span>}
+        triggerClassName="gap-1 px-1.5 [&_svg]:size-3"
+        options={BOARD_MODE_OPTIONS.map(({ Icon, ...option }) => ({ ...option, icon: <Icon className="size-3.5" aria-hidden="true" /> }))} />
+      <FileSheetSelectRow label="View from" value={display.side} options={SIDES} onValueChange={(side) => onChange({ ...display, side })} />
+      {boardDisplayDrawsCopper(display, sheet) ? <FileSheetCheckboxRow label="Copper pours" checked={display.poured} onCheckedChange={(poured) => onChange({ ...display, poured })} /> : null}
+    </FileSheetSettingsSection>
+    {groups.length ? <FileSheetSettingsSection title="Layers" sectionId="board-layers">
+      <div className="flex flex-col gap-1" data-board-layers="">
+        {groups.map((group) => <div key={group.id} role="group" aria-label={`${group.label} layers`} className="flex flex-col">
+          <span className="px-2 text-micro text-muted-foreground/80">{group.label}</span>
+          {group.layers.map((layer) => <FileSheetCheckboxRow key={layer.id} label={layer.label} checked={drawn.has(layer.id)}
+            onCheckedChange={(shown) => onChange(toggleBoardLayer(display, sheet, layer.id, shown))} />)}
+        </div>)}
+      </div>
+    </FileSheetSettingsSection> : null}
+  </>;
 }

@@ -27,7 +27,9 @@ a mismatch is refused by name on both sides.
 One sheet, in millimetres, y DOWN: KiCad's own frame moved so the board's outline (`Edge.Cuts`)
 has its top-left corner at (0, 0); `width` and `height` are the outline's box. A board with no
 outline is framed on everything it draws, 1 mm around. Every coordinate is rounded to four
-decimals. The renderer clips the layers to the sheet, as KiCad's plotter clips to the page.
+decimals. The sheet is what the renderer frames and fills with the board's background; it clips
+nothing to it. An item past the outline — a fab note off the edge, as KiCad draws one — is drawn
+where it falls, over the surround (`layoutPlot`'s `extent` is the box of everything drawn).
 
 ## The layers
 
@@ -48,7 +50,9 @@ the copper layers, which are always present so a view can name them.
 A view (`plot2d.drawPlot`'s `view`) chooses layers by id and orders them: without one, the board
 as it is made is every layer but the `courtyard`, `mask` and `paste` kinds; seen from below, the
 stack reverses and the `outline`, `via`, `ratsnest` and `drill` kinds stay on top, each layer
-mirrored about the sheet's vertical centre line.
+mirrored about the sheet's vertical centre line. The board's Display (`plot2d/boardDisplay.js`:
+`{ mode, side, poured, layers }`, the viewer's and `cadgen pcb snapshot --display`'s one contract)
+is a view over these ids: a mode is a set of layer kinds, `layers` an explicit set of ids.
 
 ## The items
 

@@ -49,11 +49,13 @@ DOOR_COMMANDS = {
 
 # Every door that stages a SCENE. A drawing is drawn flat, so `cadgen dxf
 # snapshot` has no display settings at all — `--appearance` alone decides its
-# background, and therefore the colour of its default pen. A plot is as flat:
-# `cadgen pcb snapshot` (a KiCad board, drawn from its file) takes the same
-# narrow shape.
-FLAT_DOORS = ("dxf", "pcb")
-SCENE_DOORS = tuple(door for door in DOOR_COMMANDS if door not in FLAT_DOORS)
+# background, and therefore the colour of its default pen. A plot is as flat,
+# but a board has a Display of its own in the viewer (which layers, the pours,
+# the side), so `cadgen pcb snapshot` takes that as `--display` beside
+# `--appearance`, and no scene setting.
+FLAT_DOORS = ("dxf",)
+PLOT_DOORS = ("pcb",)
+SCENE_DOORS = tuple(door for door in DOOR_COMMANDS if door not in FLAT_DOORS + PLOT_DOORS)
 
 
 def door_help(door: str) -> str:
@@ -264,13 +266,27 @@ class GeneratedHelpTests(unittest.TestCase):
     def test_the_flat_doors_take_an_appearance_instead_of_a_display(self):
         # The exception: there is no scene to configure, so `--appearance` is
         # not a second spelling of `--display` — it is what is left when
-        # everything else has no meaning. A drawing and a plot alike.
+        # everything else has no meaning.
         for door in FLAT_DOORS:
             with self.subTest(door=door):
                 text = door_help(door)
                 self.assertIn("--appearance", text)
                 for absent in ("--display", "--camera", "--mode", "--view-labels", "--render", "--theme"):
                     self.assertNotIn(absent, text, f"{absent} describes a scene a flat picture does not have")
+
+    def test_the_plot_door_takes_the_boards_display_and_an_appearance_and_nothing_of_a_scene(self):
+        # A board is as flat as a drawing, but it has a Display of its own in the
+        # viewer — which layers are drawn, the pours, the side — and `--display`
+        # here is that same object, so a snapshot draws what the Display shows.
+        for door in PLOT_DOORS:
+            with self.subTest(door=door):
+                text = door_help(door)
+                self.assertIn("--appearance", text)
+                self.assertIn("--display", text)
+                for word in ("board", "copper", "assembly", "placement", "layers", "poured", "side"):
+                    self.assertIn(word, text)
+                for absent in ("--camera", "--mode", "--view-labels", "--render", "--theme", "lighting", "wireframe"):
+                    self.assertNotIn(absent, text, f"{absent} describes a scene a board's picture does not have")
         pcb_help = door_help("pcb")
         self.assertIn(".kicad_pcb", pcb_help)
         for absent in (".kicad_sch", ".dxf", "KiCad installed"):

@@ -1,5 +1,5 @@
 import { StrictMode, useState } from 'react';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createCadClient } from '@text-to-cad/core/client';
 import { FileViewer } from '../../../dist/file-viewer/index.js';
@@ -77,13 +77,15 @@ async function open(name: string, { strict = false } = {}) {
     clipboard: { writeText: async (text: string | Promise<string>) => { if (refuseCopy) throw refuseCopy; copied.push(await text); }, readText: async () => '', writeImage: async () => {} },
     promptContext: { getSnapshot: () => DESTINATION, subscribe: () => noop, deliver: async () => ({ status: 'copied', partIds: [] }) },
   };
+  let latest: any = { renderers: {} };
   function Pane() {
-    const [state, setState] = useState<any>({ renderers: {} });
+    const [state, setState] = useState<any>(latest);
+    latest = state;
     return <section data-testid="pane"><FileViewer file={file} host={host as any} renderers={renderers} state={state} onStateChange={setState} /></section>;
   }
   render(strict ? <StrictMode><Pane /></StrictMode> : <Pane />);
   const pane = screen.getByTestId('pane');
-  return { pane, get controller() { return controller; }, dispose: () => client.dispose() };
+  return { pane, get controller() { return controller; }, get state() { return latest; }, dispose: () => client.dispose() };
 }
 
 // The navbar's right end, in order: the alert's icon, then the view's controls (`data-view-controls`).
@@ -157,14 +159,15 @@ it('host commands a plot cannot answer are declined in its own words; it fits an
   view.dispose();
 });
 
-it('a board with its index has Select and Measure, its parts and nets, and hands references to Quick Edit', async () => {
+it('a board with its index has Select alone, its parts and nets, and hands references to Quick Edit', async () => {
   const { pane, dispose } = await open('blinky.kicad_pcb');
   await opened(pane);
   const inPane = within(pane);
   const tools = await inPane.findByRole('group', { name: 'Interaction tools' });
   expect(within(tools).getByRole('button', { name: 'Select' }).getAttribute('aria-pressed')).toBe('true');
-  expect(within(tools).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Select', 'Draw', 'Measure']);
-  for (const name of ['Orbit', 'Explode', 'Clip', 'Position', 'Preview']) expect(inPane.queryByRole('button', { name }), name).toBeNull();
+  // Select only: neither Draw nor Measure is asked of the shell, and no Drawing panel can come up.
+  expect(within(tools).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Select']);
+  for (const name of ['Draw', 'Measure', 'Orbit', 'Explode', 'Clip', 'Position', 'Preview']) expect(inPane.queryByRole('button', { name }), name).toBeNull();
   // A board drawn layer by layer has its Display where a 3D view's is, the view's controls at the navbar's right end; no Preview.
   expect([...pane.querySelectorAll('[data-viewer-navbar] [data-view-controls] button')].map((button) => button.getAttribute('aria-label'))).toEqual(['Display']);
   expect(navbarControls(pane).at(-1)).toBe('Display');
@@ -181,6 +184,34 @@ it('a board with its index has Select and Measure, its parts and nets, and hands
   expect(pane.querySelector('[data-quick-edit]')?.textContent).toContain('1 ref');
   await act(async () => { inPane.getByRole('button', { name: 'Copy' }).click(); });
   await waitFor(() => expect(copied).toEqual(['/models/blinky.kicad_pcb#R1']));
+  dispose();
+});
+
+it('Display lists the board’s layers as checkboxes; one unticked reads as Custom and is kept with the file’s view', async () => {
+  const view = await open('blinky.kicad_pcb');
+  const { pane, dispose } = view;
+  await opened(pane);
+  const framesBefore = frames.length;
+  fireEvent.click(within(pane.querySelector<HTMLElement>('[data-view-controls]')!).getByRole('button', { name: 'Display' }));
+  const popover = await waitFor(() => { const found = document.querySelector<HTMLElement>('[data-display-popover]'); expect(found).not.toBeNull(); return found!; });
+  const inPopover = within(popover);
+  expect(inPopover.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Display', 'Layers']);
+  expect(inPopover.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Front layers', 'Back layers', 'Other layers']);
+  const copper = inPopover.getByRole('checkbox', { name: 'F.Cu' }) as HTMLInputElement;
+  expect(copper.checked).toBe(true);
+  expect(inPopover.getByRole('combobox', { name: 'Mode' }).textContent).toContain('Board');
+  await act(async () => { fireEvent.click(copper); });
+  expect((inPopover.getByRole('checkbox', { name: 'F.Cu' }) as HTMLInputElement).checked).toBe(false);
+  expect(inPopover.getByRole('combobox', { name: 'Mode' }).textContent).toContain('Custom');
+  // The pane draws the board again for the new view, and the file's view keeps the set.
+  await waitFor(() => expect(frames.length).toBeGreaterThan(framesBefore));
+  const key = JSON.stringify(['/models/blinky.kicad_pcb', 'plot']);
+  await waitFor(() => expect(view.state.renderers?.[key]?.renderer?.board?.value?.layers).toEqual(
+    ['B.Mask', 'B.Cu', 'F.Mask', 'F.Paste', 'F.SilkS', 'F.Fab', 'Edge.Cuts', 'vias', 'ratsnest', 'drills']));
+  // Ticked again, the set is the mode's own: stored as the mode's, so a rebuild's new layer follows it.
+  await act(async () => { fireEvent.click(inPopover.getByRole('checkbox', { name: 'F.Cu' })); });
+  expect(inPopover.getByRole('combobox', { name: 'Mode' }).textContent).toContain('Board');
+  await waitFor(() => expect(view.state.renderers?.[key]?.renderer?.board?.value).toEqual({ mode: 'board', side: 'top', poured: true, layers: null }));
   dispose();
 });
 

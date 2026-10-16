@@ -144,18 +144,6 @@ export function createBoardIndex(board, sheet = {}) {
   const parted = [...parts.values()];
   const partGrid = createSpatialGrid(parted.map((part) => part.box));
   const zoneGrid = createSpatialGrid(zones.map((zone) => zone.box));
-  // What a measurement snaps to, in the order it prefers them when two are as near: pad centres
-  // (a pin's first pad), via centres, track ends, holes, then the outline's corners.
-  const snapTargets = [];
-  for (const pad of pads.values()) snapTargets.push({ at: pad.at, kind: "pad", group: "pads", item: pad });
-  for (const via of vias) snapTargets.push({ at: via.at, kind: "via", group: "copper", item: via });
-  for (const track of tracks) {
-    snapTargets.push({ at: track.points[0], kind: "track", group: "copper", item: track });
-    snapTargets.push({ at: track.points[track.points.length - 1], kind: "track", group: "copper", item: track });
-  }
-  for (const hole of holes) snapTargets.push({ at: hole.at, kind: "hole", group: "outline", item: hole });
-  for (const line of outline) for (const corner of line) snapTargets.push({ at: corner, kind: "outline", group: "outline", item: null });
-  const snapGrid = createSpatialGrid(snapTargets.map((target) => [target.at[0], target.at[1], target.at[0], target.at[1]]));
 
   // ---- picking ---------------------------------------------------------------
   /**
@@ -298,36 +286,10 @@ export function createBoardIndex(board, sheet = {}) {
     return [at[0], at[1], at[0], at[1]];
   }
 
-  const SNAP_LABELS = {
-    pad: (target) => `${target.item.ref}.${target.item.number}`,
-    via: (target) => `via ${target.item.net}`,
-    track: (target) => `track ${target.item.net}`,
-    hole: () => "hole",
-    outline: () => "board edge",
-  };
-  /** Things a measurement snaps to near page point `at`: pad and via centres, track ends, holes, outline corners. */
-  function snap(at, { tolerance = 0, kinds = null } = {}) {
-    if (!point(at)) return null;
-    const reach = Math.max(0, Number(tolerance) || 0);
-    let best = null;
-    let bestOrder = Infinity;
-    snapGrid.visit(at[0] - reach, at[1] - reach, at[0] + reach, at[1] + reach, (order) => {
-      const target = snapTargets[order];
-      if (kinds && !kinds.includes(target.group)) return;
-      const distance = Math.hypot(at[0] - target.at[0], at[1] - target.at[1]);
-      if (distance > reach) return;
-      if (!best || distance < best.distance || (distance === best.distance && order < bestOrder)) { best = { target, distance }; bestOrder = order; }
-    });
-    if (!best) return null;
-    const { target, distance } = best;
-    const selector = target.kind === "pad" ? formatBoardRefSelector({ kind: "pad", ref: target.item.ref, pad: target.item.number }) : "";
-    return { at: target.at, distance, kind: target.kind, label: SNAP_LABELS[target.kind](target), selector };
-  }
-
   /** A pin's pads: the one that names it and any repeated under its number. */
   const shapesOf = (pad) => shapesByPin.get(`${pad.ref}.${pad.number}`) || [pad];
   return Object.freeze({
     document: "board", origin, parts, pads, padShapes, nets, tracks, vias, zones, holes, outline,
-    toScript, toPage, pick, pointSelector, resolve, extent, snap, shapesOf
+    toScript, toPage, pick, pointSelector, resolve, extent, shapesOf
   });
 }

@@ -60,8 +60,8 @@ export function createPlotRasters({ layout, onChange, view = null, createCanvas 
   let disposed = false;
 
   const deviceScale = (frame) => frame.transform.scale * frame.pixelRatio;
-  /** What of the plot the frame shows, in page millimetres, or null when it shows none of it. */
-  const shown = (frame) => intersect(visiblePageRect(frame.transform, frame.width, frame.height), layout.bounds);
+  /** What of the plot the frame shows, in page millimetres (its extent: the sheet and what is drawn past it), or null when it shows none of it. */
+  const shown = (frame) => intersect(visiblePageRect(frame.transform, frame.width, frame.height), layout.extent);
 
   /** Whether a patch draws everything the frame shows, at the frame's own scale. */
   const covers = (patch, frame, box) => sameScale(patch.scale, deviceScale(frame))
@@ -87,7 +87,7 @@ export function createPlotRasters({ layout, onChange, view = null, createCanvas 
     const visible = visiblePageRect(frame.transform, frame.width, frame.height);
     const marginX = (visible[2] - visible[0]) * PATCH_MARGIN;
     const marginY = (visible[3] - visible[1]) * PATCH_MARGIN;
-    let pixels = grid(intersect([visible[0] - marginX, visible[1] - marginY, visible[2] + marginX, visible[3] + marginY], layout.bounds));
+    let pixels = grid(intersect([visible[0] - marginX, visible[1] - marginY, visible[2] + marginX, visible[3] + marginY], layout.extent));
     if ((pixels[2] - pixels[0]) * (pixels[3] - pixels[1]) > PATCH_MAX_PIXELS) pixels = grid(box);
     const [left, top, right, bottom] = pixels;
     const canvas = createCanvas(right - left, bottom - top);

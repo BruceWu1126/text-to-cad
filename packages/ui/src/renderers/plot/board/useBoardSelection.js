@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PLOT_TOOL } from "../tools.js";
 
 const EMPTY = Object.freeze([]);
 
@@ -12,15 +11,12 @@ const EMPTY = Object.freeze([]);
  * because nothing but the canvas shows it and it changes as the pointer moves, over the canvas
  * (`hoverHit`) or down the tree (`hover`). Either repaints the canvas (`requestPaint`).
  *
- * The selection is Select's: leaving Select drops it, and selecting from another tool takes Select
- * up, except over Draw, where only a host or the agent selects (the person's presses are the
- * sketch's) and the selection shows under the ink.
- *
+ * The selection is Select's, a board's one tool, so it is never dropped for another tool.
  * A new revision keeps the selection where it still names something on it.
  *
- * @param {{ index: object | null, requestPaint: () => void, toolMode: string, selectTool: (mode: string) => void }} options
+ * @param {{ index: object | null, requestPaint: () => void }} options
  */
-export function useBoardSelection({ index, requestPaint, toolMode, selectTool }) {
+export function useBoardSelection({ index, requestPaint }) {
   const [selection, setSelection] = useState(EMPTY);
   const [selectMode, setSelectMode] = useState("all");
   const hoverRef = useRef(null);
@@ -39,28 +35,18 @@ export function useBoardSelection({ index, requestPaint, toolMode, selectTool })
   // A net is easier to read with the rest of the board stepped back.
   const dim = resolved.some((item) => item.kind === "net");
 
-  // ---- Select's, and only Select's ---------------------------------------------------
   const clear = useCallback(() => { setSelection(EMPTY); }, []);
-  const previousTool = useRef(toolMode);
-  useEffect(() => {
-    const was = previousTool.current;
-    previousTool.current = toolMode;
-    if (was === PLOT_TOOL.SELECT && toolMode !== PLOT_TOOL.SELECT) { hoverRef.current = null; clear(); requestPaint(); }
-  }, [toolMode, clear, requestPaint]);
-  const toolRef = useRef(toolMode);
-  toolRef.current = toolMode;
 
   /** Select what `selectors` name here (what names nothing is left out); `add` toggles each. */
   const select = useCallback((selectors, { add = false } = {}) => {
     const valid = (Array.isArray(selectors) ? selectors : [selectors]).map((selector) => index?.resolve(selector)?.selector).filter(Boolean);
-    if (toolRef.current !== PLOT_TOOL.DRAW && toolRef.current !== PLOT_TOOL.SELECT) selectTool(PLOT_TOOL.SELECT);
     setSelection((current) => {
       if (!add) return valid.length ? [...new Set(valid)] : EMPTY;
       const next = new Set(current);
       for (const selector of valid) { if (next.has(selector)) next.delete(selector); else next.add(selector); }
       return [...next];
     });
-  }, [index, selectTool]);
+  }, [index]);
 
   // ---- the hover -----------------------------------------------------------------
   /** What the pointer is over on the canvas (a pick, or null): repaints only when it changed. */

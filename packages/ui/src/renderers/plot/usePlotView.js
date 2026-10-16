@@ -26,7 +26,7 @@ import { createPlotRasters } from "./plotRasters.js";
  * @param {(transform: object|null) => void} options.onViewMoved  The view to remember, or null for the fit.
  * @param {string} options.noun  What the plot is called ("board").
  * @param {{ layers: string[]|null, poured: boolean, side: "top"|"bottom" }|null} [options.drawView]  A
- *   board's Display, as `drawPlot`'s `view`; a new one draws the plot afresh.
+ *   board's Display (`plot2d/boardDisplay.js`'s `boardDrawView`), as `drawPlot`'s `view`; a new one draws the plot afresh.
  */
 export function usePlotView({ plot, restored = null, colorScheme = "light", onViewMoved, noun, drawView = null }) {
   const plotRef = useRef(plot);

@@ -73,9 +73,12 @@ from cadgen.occurrence_groups import (
 from cadgen.cli_progress import cli_progress_line
 from cadgen.results import SnapshotResult
 from cadgen.snapshot_core import (
+    PLOT_DISPLAY_KEYS,
+    PLOT_INPUT_KINDS,
     SELECTION_KEYS,
     SUPPORTED_JOB_KEYS,
     SnapshotError,
+    ValidatedDisplay,
     asset_url_for_path,
     check_mesh_render_job,
     clear_render_output_targets,
@@ -284,6 +287,12 @@ def option_display_modes(options: SnapshotOptions) -> frozenset[str] | None:
     return display_modes_for_kind(input_kind(Path(options.input))) if options.input else None
 
 
+def _job_input_kind(job: Mapping[str, object], *, cwd: Path) -> str:
+    """A job's input kind as far as its name says, for loading its display; '' when it names none."""
+    raw_input = str(job.get("input") or "").strip()
+    return input_kind(resolve_input_path(raw_input, cwd=cwd)) if raw_input else ""
+
+
 def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd: Path) -> object:
     if not is_plain_object(job):
         return job
@@ -317,7 +326,10 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
     if options.joint_values_specified:
         next_job["jointValues"] = parse_joint_values_option(options.joint_values)
     if options.display_specified:
-        next_job["display"] = load_display_option(options.display, cwd=cwd)
+        kind = _job_input_kind(next_job, cwd=cwd)
+        next_job["display"] = load_display_option(
+            options.display, cwd=cwd, modes=display_modes_for_kind(kind) if kind else None, kind=kind
+        )
     if options.camera_specified:
         next_job["camera"] = parse_camera_option(options.camera)
     if options.animation_specified:
@@ -415,7 +427,7 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["output"] = output_settings
     if options.display_specified:
         job["display"] = load_display_option(
-            options.display, cwd=resolved_cwd, modes=option_display_modes(options)
+            options.display, cwd=resolved_cwd, modes=option_display_modes(options), kind=input_kind(Path(options.input))
         )
     if options.kinematics_specified:
         job["kinematics"] = parse_kinematics_option(options.kinematics)
@@ -1000,8 +1012,13 @@ def prepare_render_job(
         job["display"] if job.get("display") is not None else {},
         cwd=resolved_cwd,
         modes=display_modes_for_kind(kind),
+        kind=kind,
     )
     validate_display_for_kind(display, kind=kind, input_label=input_path.name)
+    if kind in PLOT_INPUT_KINDS and "mode" not in display:
+        # A board's default is its Board mode, not a scene's Solid: the page reads the
+        # same object the viewer's Display keeps (`plot2d/boardDisplay.js`).
+        display = ValidatedDisplay({"mode": "board", **display})
     job["display"] = display
     mode = normalize_render_mode(job.get("mode"))
     lighting = display.get("lighting")
@@ -1302,7 +1319,9 @@ def resolve_step_render_job(
 # core code (@text-to-cad/core/lib/drawing2d), so the CLI cannot show a picture
 # the viewer cannot. Everything below is what that costs the option surface.
 # A PLOT is drawn too -- a KiCad board, from its file, by the viewer's plot pane
-# code (@text-to-cad/core/lib/plot2d) -- and costs the same.
+# code (@text-to-cad/core/lib/plot2d) -- and costs the same, but its display is
+# the viewer's board Display (which layers, the pours, the side:
+# `cadgen.snapshot_core.PLOT_DISPLAY_KEYS`), not a scene's.
 #
 # `appearance` is the whole of a drawing's display: it picks the background,
 # and therefore the colour of an entity with no pen of its own (ACI 7). A plot's
@@ -1396,7 +1415,8 @@ def _drawing_output_labels(job: Mapping[str, object]) -> list[str]:
 
 
 def check_flat_render_job(
-    job: Mapping[str, object], *, input_path: Path, mode: str, words: FlatPictureWords
+    job: Mapping[str, object], *, input_path: Path, mode: str, words: FlatPictureWords,
+    display_keys: frozenset[str] = DRAWING_DISPLAY_KEYS,
 ) -> None:
     """What a flat picture cannot be asked for: anything that describes a 3D scene.
 
@@ -1409,7 +1429,7 @@ def check_flat_render_job(
     label = input_path.name
     is_ = words.is_
     display = job.get("display") if is_plain_object(job.get("display")) else {}
-    scene = sorted(f"display.{key}" for key in set(display) - DRAWING_DISPLAY_KEYS)
+    scene = sorted(f"display.{key}" for key in set(display) - display_keys)
     if scene:
         raise SnapshotError(
             drawing_scene_refusal(
@@ -1480,12 +1500,13 @@ def check_plot_render_job(
 ) -> None:
     """What a plot cannot be asked for: what a drawing cannot, in a plot's words.
 
-    `cadgen pcb snapshot` takes none of it (its signature is a drawing's), and
-    this is the path a job packet and `cadgen snapshot` route a board through,
-    so a request for a camera or a render mode is refused by name rather than
-    drawn as if it had not been made.
+    `cadgen pcb snapshot` takes none of it (its signature is a drawing's, plus
+    the board's own ``display``: :data:`cadgen.snapshot_core.PLOT_DISPLAY_KEYS`),
+    and this is the path a job packet and `cadgen snapshot` route a board
+    through, so a request for a camera or a render mode is refused by name
+    rather than drawn as if it had not been made.
     """
-    check_flat_render_job(job, input_path=input_path, mode=mode, words=plot_words(kind))
+    check_flat_render_job(job, input_path=input_path, mode=mode, words=plot_words(kind), display_keys=PLOT_DISPLAY_KEYS)
 
 
 def resolve_drawing_render_job(
@@ -1575,9 +1596,14 @@ def resolve_plot_render_job(
     (:func:`cadgen.plot.plot_payload_bytes`): the board is read from its file
     once, the store caches the payload by the file's bytes, and the page draws
     its layers with the viewer's own code. The job the page sees is a `plot`
-    job; which file it came from is `inputKind`.
+    job; which file it came from is `inputKind`. A display naming layers the
+    board does not have is refused here, with the board's own layer ids: the
+    page would otherwise draw a picture quietly missing them.
     """
     payload_path = plot_payload_file(input_path)
+    display = job.get("display") if is_plain_object(job.get("display")) else {}
+    if isinstance(display.get("layers"), list):
+        check_plot_display_layers(display["layers"], payload_path, input_name=input_path.name)
     serve_root = payload_path.parent
     resolved: dict[str, object] = {
         "rootPath": str(serve_root),
@@ -1589,6 +1615,25 @@ def resolve_plot_render_job(
     if bool(job.get("debug")):
         resolved["debug"] = {"plotSource": {"kind": kind, "payloadBytes": payload_path.stat().st_size}}
     return {**job, "resolved": resolved}
+
+
+def check_plot_display_layers(layers: Sequence[object], payload_path: Path, *, input_name: str) -> None:
+    """``display.layers`` against the layers the board's payload holds."""
+    try:
+        payload = json.loads(payload_path.read_bytes())
+        sheets = payload.get("sheets") if is_plain_object(payload) else None
+        held = [
+            layer.get("id") for sheet in (sheets or []) if is_plain_object(sheet)
+            for layer in (sheet.get("layers") or []) if is_plain_object(layer)
+        ]
+    except (OSError, ValueError, AttributeError):
+        held = []
+    missing = [str(layer) for layer in layers if layer not in held]
+    if missing:
+        raise SnapshotError(
+            f"display.layers names {'a layer' if len(missing) == 1 else 'layers'} {input_name} does not have: "
+            f"{', '.join(missing)}. Its layers are {', '.join(str(layer) for layer in held) or 'none'}."
+        )
 
 
 def plot_payload_file(source: Path) -> Path:

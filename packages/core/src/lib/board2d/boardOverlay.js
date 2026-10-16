@@ -1,7 +1,7 @@
 /**
- * What a person is pointing at, drawn over a board's plot: the hovered item, the selection and
- * the measurement in hand. The plot stays the board's picture; this draws on top of it, in the
- * same pass, so a capture of the view shows what was selected.
+ * What a person is pointing at, drawn over a board's plot: the hovered item and the selection.
+ * The plot stays the board's picture; this draws on top of it, in the same pass, so a capture of
+ * the view shows what was selected.
  *
  * `resolved` items come from the index's `resolve()` or `pick()` (`createBoardIndex`); geometry
  * is in page millimetres. Pure canvas 2D: the viewer and a headless capture draw the same thing.
@@ -27,7 +27,6 @@ export const BOARD_OVERLAY_COLORS = Object.freeze({
   selection: "#8dc5ff",
   hover: "rgba(141, 197, 255, 0.55)",
   dim: "rgba(0, 8, 20, 0.6)",
-  measure: "#ffd166",
 });
 const PART_FILL = "rgba(141, 197, 255, 0.10)";
 const PART_PAD_FILL = "rgba(141, 197, 255, 0.35)";
@@ -213,13 +212,13 @@ export function drawResolved(ctx, view, resolved, { color, toPage, weight = 1, s
  * @param {CanvasRenderingContext2D} ctx
  * @param {ReturnType<typeof import("./boardIndex.js").createBoardIndex>} index
  * @param {{ transform: object, pixelRatio?: number, width: number, height: number, hover?: object|null,
- *   selection?: object[], dim?: boolean, measure?: { points: number[][], draft?: number[]|null }|null,
- *   mirrorX?: number|null, colors?: typeof BOARD_OVERLAY_COLORS, placement?: boolean }} frame
+ *   selection?: object[], dim?: boolean, mirrorX?: number|null, colors?: typeof BOARD_OVERLAY_COLORS,
+ *   placement?: boolean }} frame
  *   `mirrorX`: the page x the board is mirrored about (the view from the bottom), or null.
  *   `placement`: a board's Placement display, its pads and airwires drawn here.
  */
 export function drawBoardOverlay(ctx, index, { transform, pixelRatio = 1, width, height, hover = null, selection = [], dim = false,
-  measure = null, mirrorX = null, colors = null, placement = false }) {
+  mirrorX = null, colors = null, placement = false }) {
   if (!ctx || !index || !transform || !(transform.scale > 0)) return;
   colors = colors || BOARD_OVERLAY_COLORS;
   const view = createView(transform, { width, height, mirrorX });
@@ -243,24 +242,8 @@ export function drawBoardOverlay(ctx, index, { transform, pixelRatio = 1, width,
     if (nets.size) strokes(ctx, view, boardAirwires(index).filter((wire) => nets.has(wire.net)), colors.selection, () => 2 * view.px);
   }
   if (hover && !selection.some((resolved) => resolved.selector === hover.selector)) highlight(hover, { color: colors.hover });
-  // Back to screen pixels: the crosshairs and a measurement keep their size.
+  // Back to screen pixels: a point's crosshair keeps its size.
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   for (const { at, color } of crosshairs) crosshair(ctx, view, at, color);
-  if (measure && measure.points.length) {
-    const points = (measure.draft ? [...measure.points, measure.draft] : measure.points).map(([x, y]) => view.project(x, y));
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    points.forEach(([sx, sy], at) => { if (at === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy); });
-    ctx.strokeStyle = colors.measure;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = colors.measure;
-    for (const [sx, sy] of points) {
-      ctx.beginPath();
-      ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
   ctx.restore();
 }

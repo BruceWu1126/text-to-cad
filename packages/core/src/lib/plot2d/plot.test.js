@@ -39,6 +39,8 @@ const LAYERS = [
   layer("ratsnest", "ratsnest", "both", [{ t: "path", pts: [[14.175, 20], [30, 10]], w: 0 }]),
   layer("drills", "drill", "both", [{ t: "circle", at: [20, 15], r: 0.15, w: 0, hole: "via" }, { t: "circle", at: [2, 2], r: 0.5, w: 0, hole: "pad" }])
 ];
+// A fab note past the board's right edge, as KiCad draws one: the sheet stays the outline's box, the note is drawn.
+const NOTE = layer("F.Fab", "fab", "front", [{ t: "text", text: "REV A", w: 0.15, strokes: [[[41, 2], [46, 2]], [[41, 2], [41, 4]]] }]);
 const INDEX = { origin: [20, 15], parts: [], pads: [] };
 const BOARD = {
   schemaVersion: 3, kind: "board", generator: "pcbnew 10.99", unrouted: 1,
@@ -51,6 +53,8 @@ test("a board is one sheet of layers at the page's origin, its index beside it",
   assert.deepEqual(layout.bounds, [0, 0, 40, 30]);
   // drawing2d's model space is the page with y negated: the same box, flipped.
   assert.deepEqual(layout.modelBounds, [0, -30, 40, 0]);
+  // The extent is everything drawn: the outline's 0.1 mm stroke reaches 0.05 past the sheet.
+  assert.deepEqual(layout.extent.map((v) => Math.round(v * 1000) / 1000), [-0.05, -0.05, 40.05, 30.05]);
   assert.deepEqual(layout.sheets.map(({ x, y, background, name }) => [x, y, background, name]), [[0, 0, "#001023", "blinky"]]);
   assert.deepEqual(layout.sheets[0].layers.map(({ id, kind, side }) => [id, kind, side]), LAYERS.map(({ id, kind, side }) => [id, kind, side]));
   assert.equal(layout.board, INDEX);
@@ -63,8 +67,11 @@ test("a board is one sheet of layers at the page's origin, its index beside it",
   assert.equal(layoutPlot(withoutGenerator).generator, "");
 });
 
-test("the fit frames the page the right way up: its top-left corner is the picture's", () => {
-  const layout = layoutPlot(BOARD);
+test("the fit frames the sheet the right way up, whatever is drawn past it: its top-left corner is the picture's", () => {
+  const layout = layoutPlot({ ...BOARD, sheets: [{ ...BOARD.sheets[0], layers: [...LAYERS, NOTE] }] });
+  // The note lies outside the sheet: in the extent, not in what the fit frames.
+  assert.deepEqual(layout.bounds, [0, 0, 40, 30]);
+  assert.deepEqual(layout.extent.map((v) => Math.round(v * 1000) / 1000), [-0.05, -0.05, 46.075, 30.05]);
   const transform = fitPlotTransform(layout, 600, 1000);
   const [left, top] = pageToScreen(transform, 0, 0);
   const [right, bottom] = pageToScreen(transform, ...layout.bounds.slice(2));
@@ -147,14 +154,15 @@ function recorder(width, height) {
 }
 const painted = (calls) => calls.filter(([name]) => name === "fill" || name === "stroke");
 
-test("a frame is the sheet in its background, clipped, then each layer's items in KiCad's colours", () => {
+test("a frame is the sheet in its background, unclipped, then each layer's items in KiCad's colours", () => {
   const layout = layoutPlot(BOARD);
   const { ctx, calls, Path2D } = recorder(800, 600);
   const transform = { scale: 10, offsetX: 0, offsetY: 0 };
   drawPlot(ctx, layout, { transform, pixelRatio: 2, Path2D });
-  assert.deepEqual(calls.slice(0, 6), [
-    ["save"], ["setTransform", 20, 0, 0, 20, 0, 0], ["fillRect", "#001023", 0, 0, 40, 30], ["beginPath"], ["rect", 0, 0, 40, 30], ["clip"]
+  assert.deepEqual(calls.slice(0, 4), [
+    ["save"], ["setTransform", 20, 0, 0, 20, 0, 0], ["fillRect", "#001023", 0, 0, 40, 30], ["setTransform", 20, 0, 0, 20, 0, 0]
   ]);
+  assert.ok(!calls.some(([name]) => name === "clip"), "nothing is clipped to the sheet");
   const drawn = painted(calls);
   // B.Cu: the pad filled, the pour filled, its outline a hairline (1 CSS px at 10 px/mm); then F.Cu's pad and the 1 mm track.
   assert.deepEqual(drawn.slice(0, 5).map(([name, , { fill, stroke, width }]) => [name, name === "fill" ? fill : stroke, width]), [
@@ -195,6 +203,27 @@ test("a view draws the layers it names, the copper without its pours, or the boa
   const colours = painted(calls).map(([name, , style]) => (name === "fill" ? style.fill : style.stroke));
   assert.ok(!colours.includes(VIA_COLORS.through), "the via is off the canvas");
   assert.ok(colours.includes(layerColor("Edge.Cuts")), "the outline reaches it");
+});
+
+test("what the file draws past the outline is drawn, not clipped to the sheet, and from below it is mirrored too", () => {
+  const layout = layoutPlot({ ...BOARD, sheets: [{ ...BOARD.sheets[0], layers: [...LAYERS, NOTE] }] });
+  const strokesOf = (calls) => painted(calls).filter(([name, , style]) => name === "stroke" && style.stroke === layerColor("F.Fab"));
+  // The pane shows x 0..50 mm: the sheet (0..40) and the note beside it (41..46).
+  const whole = recorder(500, 300);
+  drawPlot(whole.ctx, layout, { transform: { scale: 10, offsetX: 0, offsetY: 0 }, Path2D: whole.Path2D });
+  assert.equal(strokesOf(whole.calls).length, 1, "the note past the edge is drawn");
+  // A pane panned onto the note alone, past the sheet: the note is still drawn, and the sheet's rectangle is not filled on it.
+  const beside = recorder(100, 100);
+  drawPlot(beside.ctx, layout, { transform: { scale: 10, offsetX: -405, offsetY: 0 }, Path2D: beside.Path2D });
+  assert.equal(strokesOf(beside.calls).length, 1, "the note is drawn where the sheet is not");
+  // Showing nothing of the plot — 100 mm to its right — draws nothing at all.
+  const away = recorder(100, 100);
+  drawPlot(away.ctx, layout, { transform: { scale: 10, offsetX: -1000, offsetY: 0 }, Path2D: away.Path2D });
+  assert.equal(painted(away.calls).length, 0);
+  // From below the note mirrors to x -6..-1, left of the sheet: a pane there shows it.
+  const mirrored = recorder(100, 100);
+  drawPlot(mirrored.ctx, layout, { transform: { scale: 10, offsetX: 70, offsetY: 0 }, view: { side: "bottom" }, Path2D: mirrored.Path2D });
+  assert.equal(strokesOf(mirrored.calls).length, 1, "the note is drawn at its mirrored place");
 });
 
 test("the pane's frame is the sheet's background and the rasters placed over it, in page space", () => {

@@ -109,15 +109,25 @@ board's script. There is no schematic view: a board script has no schematic.
 
 ```bash
 cadgen pcb snapshot board.kicad_pcb review.png
-cadgen pcb snapshot board.kicad_pcb review.png --appearance dark --width 2400 --height 1600
+cadgen pcb snapshot board.kicad_pcb review.png --display copper --appearance dark --width 2400 --height 1600
+cadgen pcb snapshot board.kicad_pcb review.png --display '{"mode":"copper","side":"bottom","poured":false,"layers":["B.Cu","Edge.Cuts","vias"]}'
 ```
 
 It takes what the drawing door takes: `TARGET`, `OUT`, `--job`, `--appearance`
 (the surround the board sits on), `--width`/`--height`, `--size-profile`,
 `--debug` and `--json`, plus `output.renderScale` and `output.transparent` in a
-job. A job (or `cadgen snapshot` routing a board) that asks for a camera, a
-display key but `appearance`, a mode but `view`, a section, a scale, a view label
-or an output setting that frames a camera is refused by name with what a plot is.
+job; and `--display`, the board's Display as the viewer shows it: a mode word
+(`board`, the default, every layer but the courtyards; `copper`; `assembly`;
+`placement`), or a JSON object or file with `mode`, `side` (`top` or `bottom`),
+`poured` and `layers`, the ids drawn (KiCad's layer names plus `vias`,
+`ratsnest` and `drills`; omitted, the mode's own set). It is the one object the
+viewer's Display keeps with the file's view, so the picture is what the Display
+shows; in a job it is `"display": {"appearance": "dark", "mode": "copper",
+"layers": ["F.Cu", "Edge.Cuts"]}`. A layer the board does not have is refused
+with the board's layers named. A job (or `cadgen snapshot` routing a board) that
+asks for a camera, a display key outside those, a mode outside the four, a
+section, a scale, a view label or an output setting that frames a camera is
+refused by name with what a plot is.
 
 ## Requests and OUT
 

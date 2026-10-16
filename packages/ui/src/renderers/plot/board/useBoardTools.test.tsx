@@ -5,14 +5,13 @@ import { createBoardIndex } from '@text-to-cad/core/lib/board2d/boardIndex.js';
 import { BOARD_OVERLAY_COLORS } from '@text-to-cad/core/lib/board2d/boardOverlay.js';
 import { PLOT_TOOL, PLOT_TOOL_MODES, escapePlot } from '../../../../dist/renderers/plot/tools.js';
 import { useBoardSelection } from '../../../../dist/renderers/plot/board/useBoardSelection.js';
-import { useBoardMeasure } from '../../../../dist/renderers/plot/board/useBoardMeasure.js';
 import { useBoardPicking } from '../../../../dist/renderers/plot/board/useBoardPicking.js';
 import { useBoardIsolation } from '../../../../dist/renderers/plot/board/useBoardIsolation.js';
 
-// A board's tools composed as `PlotRenderer.jsx` composes them, over a 40 x 30 mm board drawn at
+// A board's tool composed as `PlotRenderer.jsx` composes it, over a 40 x 30 mm board drawn at
 // 10 px/mm from the pane's corner: a press at (x, y) px lands on page (x / 10, y / 10) mm. What a
-// person does to it — the tools, Escape, a double-click while measuring, a tree row's hover and eye, a
-// new revision — is decided here; the pixels are the browser suite's.
+// person does with it — a press, Escape, a tree row's hover and eye, a new revision — is decided
+// here; the pixels are the browser suite's.
 const square = (cx: number, cy: number, w: number, h: number) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
 const board = (parts = ['R1']) => ({
   origin: [5, 25], nets: [{ name: 'VIN', class: '' }, { name: 'GND', class: '' }],
@@ -34,17 +33,17 @@ function useTools({ index, restored }: { index: ReturnType<typeof indexOf>, rest
   }));
   const [toolMode, setToolMode] = useState(PLOT_TOOL_MODES.defaultMode);
   const selectTool = (mode: string) => setToolMode((current: string) => PLOT_TOOL_MODES.next(current, mode));
-  const selection = useBoardSelection({ index, requestPaint: view.requestPaint, toolMode, selectTool });
-  const measure = useBoardMeasure({ index, toolMode, requestPaint: view.requestPaint });
+  const selection = useBoardSelection({ index, requestPaint: view.requestPaint });
   const isolation = useBoardIsolation({ index, restored });
-  useBoardPicking({ view, index, sheet: SHEET, toolMode, selection, measure, isolated: isolation.resolved, onCopy: () => {} });
-  return { view, toolMode, selectTool, selection, measure, isolation, escape: () => escapePlot({ toolMode, selectTool, selection, measure }) };
+  const copied: string[][] = [];
+  useBoardPicking({ view, index, sheet: SHEET, selection, isolated: isolation.resolved, onCopy: (selectors: string[]) => copied.push(selectors) });
+  return { view, toolMode, selectTool, selection, isolation, copied, escape: () => escapePlot({ selection }) };
 }
 function mount(index = indexOf(), restored: string[] = []) {
   return renderHook(({ index: shown }) => useTools({ index: shown, restored }), { initialProps: { index } });
 }
 type View = ReturnType<typeof mount>;
-const tap = (view: View, x: number, y: number) => act(() => { view.result.current.view.layer!.picking.onTap({ x, y }, {}); });
+const tap = (view: View, x: number, y: number, event: Record<string, boolean> = {}) => act(() => { view.result.current.view.layer!.picking.onTap({ x, y }, event); });
 // The overlay's strokes and fills, as one paint of the frame sets them.
 function paint(view: View) {
   const styles: string[] = [];
@@ -58,57 +57,47 @@ function paint(view: View) {
 
 afterEach(cleanup);
 
-it('Escape cancels an unfinished measurement, then puts Measure down with its results kept, as on a STEP', () => {
+it('Select is the one tool, and cannot be put down: a press on it, or on Draw or Measure, leaves it in hand', () => {
   const view = mount();
-  act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
-  tap(view, 30, 30); tap(view, 370, 270);
-  // Hole to hole: 34 mm across and 24 mm down, in KiCad's frame.
-  expect(view.result.current.measure.measurements).toHaveLength(1);
-  expect(view.result.current.measure.measurements[0]).toMatchObject({ dx: 34, dy: 24 });
-  tap(view, 30, 30);
-  expect(view.result.current.measure.start).not.toBeNull();
-  act(() => { expect(view.result.current.escape()).toBe(true); });
-  expect(view.result.current.measure.start).toBeNull();
-  expect(view.result.current.toolMode).toBe(PLOT_TOOL.MEASURE);
-  act(() => { expect(view.result.current.escape()).toBe(true); });
-  expect(view.result.current.toolMode).toBe(PLOT_TOOL.SELECT);
-  expect(view.result.current.measure.measurements).toHaveLength(1);
+  expect(PLOT_TOOL).toEqual({ SELECT: 'select' });
+  for (const asked of [PLOT_TOOL.SELECT, 'draw', 'measure', '']) {
+    act(() => view.result.current.selectTool(asked));
+    expect(view.result.current.toolMode).toBe(PLOT_TOOL.SELECT);
+  }
 });
 
-it('a double-click while measuring measures nothing: its second press lands on the first', () => {
+it('a press selects a pad, a shift-press adds its neighbour, bare board clears, and a double-click copies', () => {
   const view = mount();
-  act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
-  tap(view, 30, 30); tap(view, 30, 30);
-  expect(view.result.current.measure.measurements).toEqual([]);
-  expect(view.result.current.measure.start?.label).toBe('hole');
+  tap(view, 141.75, 200);
+  expect(view.result.current.selection.selection).toEqual(['#R1.1']);
+  tap(view, 158.25, 200, { shiftKey: true });
+  expect(view.result.current.selection.selection).toEqual(['#R1.1', '#R1.2']);
+  tap(view, 300, 50);
+  expect(view.result.current.selection.selection).toEqual([]);
+  let copied = false;
+  act(() => { copied = view.result.current.view.layer!.picking.onDoubleTap({ x: 141.75, y: 200 }); });
+  expect(copied).toBe(true);
+  expect(view.result.current.selection.selection).toEqual(['#R1.1']);
+  // On bare board a double-click is not spent here: the view fits.
+  act(() => { copied = view.result.current.view.layer!.picking.onDoubleTap({ x: 300, y: 50 }); });
+  expect(copied).toBe(false);
 });
 
-it('a selection made from another tool takes Select up cleanly, and keeps only what the board has', () => {
+it('Escape clears the selection, and spends nothing with none', () => {
   const view = mount();
-  act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
-  tap(view, 30, 30);
+  act(() => view.result.current.selection.select(['#R1.2']));
+  expect(view.result.current.selection.active).toBe(true);
+  act(() => { expect(view.result.current.escape()).toBe(true); });
+  expect(view.result.current.selection.selection).toEqual([]);
+  act(() => { expect(view.result.current.escape()).toBe(false); });
+});
+
+it('a selection keeps only what the board has, and survives a rebuild for what still names something', () => {
+  const view = mount();
   act(() => view.result.current.selection.select(['#R1.2', '#U9', '#@x1y2']));
-  expect(view.result.current.toolMode).toBe(PLOT_TOOL.SELECT);
-  expect(view.result.current.measure.start).toBeNull();
   expect(view.result.current.selection.selection).toEqual(['#R1.2', '#@x1y2']);
-});
-
-it('a new revision clears the measurements: they were taken on the board as it was', () => {
-  const view = mount();
-  act(() => view.result.current.selectTool(PLOT_TOOL.MEASURE));
-  tap(view, 30, 30); tap(view, 370, 270); tap(view, 30, 30);
-  expect(view.result.current.measure.measurements).toHaveLength(1);
-  view.rerender({ index: indexOf() });
-  expect(view.result.current.measure.measurements).toEqual([]);
-  expect(view.result.current.measure.start).toBeNull();
-});
-
-it('a host selecting while Draw is up leaves the sketch alone: Draw stays up', () => {
-  const view = mount();
-  act(() => view.result.current.selectTool(PLOT_TOOL.DRAW));
-  act(() => view.result.current.selection.select(['#R1']));
-  expect(view.result.current.toolMode).toBe(PLOT_TOOL.DRAW);
-  expect(view.result.current.selection.selection).toEqual(['#R1']);
+  view.rerender({ index: indexOf(board(['C1'])) });
+  expect(view.result.current.selection.selection).toEqual(['#@x1y2']);
 });
 
 it('a capture leaves out the hover: the view is drawn without it once dropped', () => {

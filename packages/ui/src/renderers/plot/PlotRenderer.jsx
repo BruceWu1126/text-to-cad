@@ -1,15 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
+import { boardDisplayAirwires, boardDrawView } from "@text-to-cad/core/lib/plot2d/index.js";
 import { useViewerMobile } from "../../file-viewer/responsive.js";
 import PlaneShell from "../kit/shell/PlaneShell.jsx";
 import { readFileView } from "../kit/shell/fileView.js";
 import { usePlaneFileView, usePlaneShell } from "../kit/shell/usePlaneShell.js";
 import { useWorkspaceDocument } from "../workspace/useWorkspaceDocument.js";
-import { BoardDisplaySection, boardDisplayAirwires, boardDrawView, readBoardDisplay } from "./board/BoardDisplay.jsx";
-import { BoardMeasurePanel, BoardReferencePanel, BoardTreePanel } from "./board/BoardPanels.jsx";
-import { BoardMeasureIcon, BoardSelectIcon } from "./board/boardModes.jsx";
+import { BoardDisplaySection, readBoardDisplay } from "./board/BoardDisplay.jsx";
+import { BoardReferencePanel, BoardTreePanel } from "./board/BoardPanels.jsx";
+import { BoardSelectIcon } from "./board/boardModes.jsx";
 import { useBoardHandover } from "./board/useBoardHandover.js";
 import { readBoardIsolation, useBoardIsolation } from "./board/useBoardIsolation.js";
-import { useBoardMeasure } from "./board/useBoardMeasure.js";
 import { useBoardPicking } from "./board/useBoardPicking.js";
 import { useBoardSelection } from "./board/useBoardSelection.js";
 import { chromeStyle } from "./paperContrast.js";
@@ -20,10 +20,11 @@ import { usePlotView } from "./usePlotView.js";
 /**
  * A KiCad board as the picture drawn from its file, on a canvas (the payload comes from the BACKEND,
  * `GET /__cad/plot`; nothing here parses KiCad's files). Its frame is the flat views' shell
- * (`kit/shell/usePlaneShell.js`). A board whose payload carries its index has the tools a person
+ * (`kit/shell/usePlaneShell.js`). A board whose payload carries its index has the one tool a person
  * points with, speaking board references (`#U3`, `#U3.9`, `#net:VIN`): Select (its tree and
- * Reference), Draw, Measure, Quick Edit and the copy key, and its Display. A payload without an
- * index is the picture alone. Nothing here edits a design.
+ * Reference), with Quick Edit and the copy key, and its Display (the mode, the side, the pours and
+ * the layers drawn). Neither Draw nor Measure is asked of the shell. A payload without an index is
+ * the picture alone. Nothing here edits a design.
  */
 
 // The file's slices: the board's Display and what is isolated, kept across rebuilds (a new shape gets a new signature).
@@ -52,19 +53,18 @@ function PlotSurface({ view, data }) {
     onViewMoved: fileView.rememberView, noun: words.noun, drawView });
 
   // ---- what a person points at ------------------------------------------------------
+  // Select is the board's one tool; the shell's machine holds it so the strip reads as every file's.
   const [toolMode, setToolMode] = useState(PLOT_TOOL_MODES.defaultMode);
-  const selectTool = useCallback((mode) => setToolMode((current) => PLOT_TOOL_MODES.next(current, mode)), []);
-  const selection = useBoardSelection({ index, requestPaint: plotView.requestPaint, toolMode, selectTool });
-  const measure = useBoardMeasure({ index, toolMode, requestPaint: plotView.requestPaint });
+  const selection = useBoardSelection({ index, requestPaint: plotView.requestPaint });
   const handover = useBoardHandover({ workspace, document, selection, path: view.file.path });
   const { dropHover } = selection;
   const { capture: captureView } = plotView;
   // A capture is the view as it stands, without the hover under a pointer that has moved on to ask for it.
   const capture = useCallback(() => { dropHover(); return captureView(); }, [dropHover, captureView]);
   const escape = useMemo(() => ({
-    active: Boolean(index && (selection.active || measure.start || toolMode === PLOT_TOOL.MEASURE)),
-    handle: () => escapePlot({ toolMode, selectTool, selection, measure })
-  }), [index, selection, measure, toolMode, selectTool]);
+    active: Boolean(index && selection.active),
+    handle: () => escapePlot({ selection })
+  }), [index, selection]);
 
   const shell = usePlaneShell({
     view, services: workspace.services, resource: workspace.resource, modelKey: document.file, plane: plotView, load: document.load,
@@ -74,35 +74,27 @@ function PlotSurface({ view, data }) {
   const { copyText } = shell;
   const { copyText: referenceText } = handover;
   const copyReferences = useCallback((selectors) => copyText(referenceText(selectors)), [copyText, referenceText]);
-  useBoardPicking({ view: plotView, index, sheet: document.sheet, toolMode, selection, measure, isolated: isolation.resolved,
+  useBoardPicking({ view: plotView, index, sheet: document.sheet, selection, isolated: isolation.resolved,
     side: shownDisplay?.side, placement: boardDisplayAirwires(shownDisplay), onCopy: copyReferences });
   const { select } = selection;
 
-  // ---- tools and panels: Select, Draw and Measure ----
+  // ---- the tool and its panels: Select, its tree and the Reference ----
   const tools = index ? [
     shell.tools.own({ id: PLOT_TOOL.SELECT, label: "Select", panel: SELECT_PANEL,
       icon: <BoardSelectIcon mode={selection.selectMode} className="size-3.5" aria-hidden="true" /> }),
-    shell.tools.draw,
-    shell.tools.own({ id: PLOT_TOOL.MEASURE, label: "Measure",
-      icon: <BoardMeasureIcon mode={measure.mode} className="size-3.5" aria-hidden="true" />,
-      // A press while Measure is up clears it as it puts it down.
-      onSelect: () => { if (toolMode === PLOT_TOOL.MEASURE) measure.clear(); selectTool(PLOT_TOOL.MEASURE); } }),
   ] : [];
-  const selecting = toolMode === PLOT_TOOL.SELECT;
   const copyShortcut = mobile ? "" : shell.frame.copyShortcut;
   const toolPanels = index ? <>
     <BoardTreePanel index={index} selection={selection.selection} isolated={isolation.isolated}
       selectMode={selection.selectMode} onSelectMode={selection.setSelectMode} select={select} hover={selection.hover}
-      onIsolate={isolation.toggle} clear={selection.clear} active={selecting} />
-    <BoardReferencePanel index={index} resolved={selection.resolved} active={selecting}
+      onIsolate={isolation.toggle} clear={selection.clear} active />
+    <BoardReferencePanel index={index} resolved={selection.resolved} active
       onClear={selection.clear} onSelect={select} onCopy={() => copyReferences(selection.selection)} copyShortcut={copyShortcut} />
-    <BoardMeasurePanel measure={measure} shown={toolMode === PLOT_TOOL.MEASURE || measure.measurements.length > 0}
-      onClose={() => { measure.clear(); if (toolMode === PLOT_TOOL.MEASURE) selectTool(PLOT_TOOL.SELECT); }} />
   </> : null;
 
   return <PlaneShell shell={shell} surface="plot-surface" label={`${words.label}: ${view.file.name}`} interactive={Boolean(index)}
     tools={tools} toolPanels={toolPanels} onClearReferences={selection.clear}
-    display={layered ? <BoardDisplaySection display={display} onChange={setDisplay} /> : null}
+    display={layered ? <BoardDisplaySection display={display} onChange={setDisplay} sheet={document.sheet} /> : null}
     style={chromeStyle(document.plot?.layout.sheets, view.appearance?.colorScheme === "dark")} />;
 }
 

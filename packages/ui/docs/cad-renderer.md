@@ -360,24 +360,25 @@ the viewer was inventing from the file; a drawing is not that.
 (`.kicad_pcb`) as the picture drawn from its file: every layer, back to front, in KiCad's default
 colours. It is not on the 3D shell: no three.js, no viewport, no preview; its frame is the plane
 shell (`kit/shell/usePlaneShell.js`), as a DXF's is. A board whose payload carries its index
-(`board`) has the tools a person points with — Select, Draw and Measure, its tree, Reference,
-Quick Edit and its Display settings ([the design system](settings-ui.md#a-kicad-board)) — all
-drawn from the kit's shared pieces (`kit/shell/ToolColumn.jsx`, `kit/tools/*`, Quick Edit) over the
-canvas; a payload without one is the picture alone, with its Display. A board's 3D is the STEP or
+(`board`) has the one tool a person points with — Select, with its tree, Reference, Quick Edit —
+and its Display settings, the mode, the side, the pours and the layers drawn ([the design
+system](settings-ui.md#a-kicad-board)), all drawn from the kit's shared pieces
+(`kit/shell/ToolColumn.jsx`, `kit/tools/*`, Quick Edit) over the canvas; Draw and Measure are not
+asked of the shell. A payload without an index is the picture alone, with its Display. A board's 3D is the STEP or
 GLB its model exports, which are files of their own.
 
 - **Structure**, as a robot's is: `PlotRenderer.jsx` composes. `usePlotDocument` is the payload,
   the kind (`"board"`: the payload's, the suffix's until it arrives), its words, its index and the
-  load's alert; `plot/tools.js` the modes (`PLOT_TOOL_MODES`: Select by default, Measure and Draw
-  toggling) and Escape (`escapePlot`). A board with an index has the board hooks: `useBoardSelection`
-  (the selection, Select's mode, and the hover, from the canvas or a tree row, kept in a ref that
-  repaints; leaving Select drops the selection, and selecting from another tool takes Select up but
-  over Draw), `useBoardMeasure` (picks, the draft, the measurements; a new revision clears them),
-  `useBoardIsolation` (what a tree row's eye isolated), `useBoardPicking` (the pointer, picks and
-  snaps, made from the plot view's handle, and the overlay: it hands both to the view as its layer,
+  load's alert; `plot/tools.js` the one mode (`PLOT_TOOL_MODES`: Select, which cannot be put down)
+  and Escape (`escapePlot`: the selection). A board with an index has the board hooks:
+  `useBoardSelection` (the selection, Select's mode, and the hover, from the canvas or a tree row,
+  kept in a ref that repaints; a new revision keeps what still names something),
+  `useBoardIsolation` (what a tree row's eye isolated), `useBoardPicking` (the pointer and its
+  picks, made from the plot view's handle, and the overlay: it hands both to the view as its layer,
   `usePlotView`'s `setLayer`) and `useBoardHandover` (Quick Edit's references, the copy text, the
-  live `select` / `clearSelection` and the host's `selectReference`). A press on Measure while it is
-  up also clears its results; that rule is the board's, in the composer.
+  live `select` / `clearSelection` and the host's `selectReference`). The Display
+  (`board/BoardDisplay.jsx`) draws core's contract (`plot2d/boardDisplay.js`: the mode presets, the
+  side, the pours and the layer checkboxes), which the headless snapshot reads the same way.
 - **The tree** (`board/BoardPanels.jsx`): a row under the pointer, or in keyboard focus, lights
   what it names on the canvas, as a robot's Links rows do; a part's and a net's row wear the kit's
   eye (`kit/inspector/TreeRowEye.jsx`, `kind="isolate"`), which isolates it: everything else steps
@@ -387,8 +388,7 @@ GLB its model exports, which are files of their own.
   select them, as a robot's Reference selects links.
 - **The board's index** (`@text-to-cad/core/lib/board2d`): `createBoardIndex(payload.board)` picks
   what is under a page point by Select's mode (by the side looked at too; past copper on no net to
-  what lies under it), resolves a reference back to what it names, and finds what Measure snaps
-  to. The viewer picks on every pointer move, so what is near a point is found through a grid of
+  what lies under it) and resolves a reference back to what it names. The viewer picks on every pointer move, so what is near a point is found through a grid of
   the page (`board2d/spatialGrid.js`), never a scan of the board: tens of thousands of pads and
   tracks answer in microseconds. Every position and reference it answers is in KiCad's own
   frame (millimetres, y down, from the page origin; `payload.board.origin` says where that origin

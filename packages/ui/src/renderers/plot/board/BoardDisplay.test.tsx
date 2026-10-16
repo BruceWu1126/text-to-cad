@@ -1,43 +1,72 @@
-import { expect, it } from 'vitest';
-import {
-  BOARD_DISPLAY_DEFAULTS, boardDisplayAirwires, boardDisplayIsCustom, boardDrawView, readBoardDisplay, selectBoardMode,
-} from '../../../../dist/renderers/plot/board/BoardDisplay.js';
+import React from 'react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { BOARD_DISPLAY_DEFAULTS, BoardDisplaySection, readBoardDisplay } from '../../../../dist/renderers/plot/board/BoardDisplay.js';
+import BOARD from '../__fixtures__/board.plot.json';
 
-// A board's sheet as the plot lays it out: its layers by kind, courtyards, mask and paste included.
-const SHEET = {
-  layers: [
-    ['B.CrtYd', 'courtyard'], ['B.Fab', 'fab'], ['B.SilkS', 'silk'], ['B.Mask', 'mask'], ['B.Cu', 'copper'], ['F.Cu', 'copper'],
-    ['F.Mask', 'mask'], ['F.Paste', 'paste'], ['F.SilkS', 'silk'], ['F.Fab', 'fab'], ['F.CrtYd', 'courtyard'], ['Edge.Cuts', 'outline'],
-    ['vias', 'via'], ['ratsnest', 'ratsnest'], ['drills', 'drill'],
-  ].map(([id, kind]) => ({ id, kind })),
-};
+Object.assign(globalThis, { React });
+afterEach(cleanup);
 
-it('reads a stored display, a display stored before modes as its mode', () => {
-  expect(readBoardDisplay(null)).toEqual(BOARD_DISPLAY_DEFAULTS);
-  expect(readBoardDisplay({ mode: 'placement', side: 'bottom' })).toEqual({ mode: 'placement', side: 'bottom', poured: true });
-  expect(readBoardDisplay({ layers: 'all', poured: false })).toEqual({ mode: 'board', side: 'top', poured: false });
-  expect(readBoardDisplay({ layers: 'assembly' }).mode).toBe('assembly');
-  expect(readBoardDisplay({ mode: 'nonsense' }).mode).toBe('board');
+// The Display's two sections over the committed board (two copper layers, no inner): what each
+// control writes, and how the Mode reads it back. The contract itself is core's (`plot2d/boardDisplay.test.js`).
+const SHEET = BOARD.sheets[0];
+function mount(display = readBoardDisplay(null)) {
+  const onChange = vi.fn();
+  render(<BoardDisplaySection display={display} onChange={onChange} sheet={SHEET} />);
+  return onChange;
+}
+const checkbox = (name: string) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+
+it('lists a checkbox per layer of the payload in its groups, ticked as the mode draws them', () => {
+  mount();
+  const groups = screen.getAllByRole('group').map((group) => [group.getAttribute('aria-label'), within(group).getAllByRole('checkbox').map((box) => box.closest('label')!.textContent)]);
+  expect(groups).toEqual([
+    ['Front layers', ['F.CrtYd', 'F.Fab', 'F.SilkS', 'F.Paste', 'F.Mask', 'F.Cu']],
+    ['Back layers', ['B.Cu', 'B.Mask']],
+    ['Other layers', ['Edge.Cuts', 'Vias', 'Ratsnest', 'Drills']],
+  ]);
+  // Board: every layer but the courtyard.
+  expect(checkbox('F.CrtYd').checked).toBe(false);
+  for (const name of ['F.Cu', 'F.Mask', 'F.Paste', 'F.SilkS', 'F.Fab', 'B.Cu', 'B.Mask', 'Edge.Cuts', 'Vias', 'Ratsnest', 'Drills']) expect(checkbox(name).checked, name).toBe(true);
+  expect(screen.getByRole('combobox', { name: 'Mode' }).textContent).toContain('Board');
+  expect(checkbox('Copper pours').checked).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Reset board display' })).toBeNull();
 });
 
-it('draws each mode its layers: courtyards for assembly and placement, no copper for placement', () => {
-  const drawn = (mode: string) => boardDrawView({ ...BOARD_DISPLAY_DEFAULTS, mode }, SHEET).layers;
-  // Board is the board as it is made: every layer but the courtyards, mask and paste included.
-  expect(drawn('board')).toEqual(['B.Fab', 'B.SilkS', 'B.Mask', 'B.Cu', 'F.Cu', 'F.Mask', 'F.Paste', 'F.SilkS', 'F.Fab', 'Edge.Cuts', 'vias', 'ratsnest', 'drills']);
-  expect(drawn('copper')).toEqual(['B.Cu', 'F.Cu', 'Edge.Cuts', 'vias', 'ratsnest', 'drills']);
-  expect(drawn('assembly')).toEqual(['B.CrtYd', 'B.Fab', 'B.SilkS', 'F.SilkS', 'F.Fab', 'F.CrtYd', 'Edge.Cuts', 'ratsnest', 'drills']);
-  // Placement's airwires are every connection, drawn by the overlay: the plot's ratsnest (only the unrouted) is left out.
-  // Nor are the vias and drills: a via is routing; the overlay draws the pads' holes and the board's.
-  expect(drawn('placement')).toEqual(['B.CrtYd', 'B.Fab', 'F.Fab', 'F.CrtYd', 'Edge.Cuts']);
-  expect(boardDisplayAirwires({ ...BOARD_DISPLAY_DEFAULTS, mode: 'placement' })).toBe(true);
-  expect(boardDisplayAirwires({ ...BOARD_DISPLAY_DEFAULTS, mode: 'copper' })).toBe(false);
-  expect(boardDisplayAirwires(null)).toBe(false);
+it('a checkbox writes the mode\'s set with that layer changed; a set changed from its mode reads as Custom, with Reset', () => {
+  const onChange = mount();
+  fireEvent.click(checkbox('F.SilkS'));
+  expect(onChange).toHaveBeenLastCalledWith({ ...BOARD_DISPLAY_DEFAULTS, layers: ['B.Mask', 'B.Cu', 'F.Cu', 'F.Mask', 'F.Paste', 'F.Fab', 'Edge.Cuts', 'vias', 'ratsnest', 'drills'] });
+  cleanup();
+  const custom = mount(readBoardDisplay(onChange.mock.lastCall![0]));
+  expect(checkbox('F.SilkS').checked).toBe(false);
+  expect(screen.getByRole('combobox', { name: 'Mode' }).textContent).toContain('Custom');
+  expect(screen.getByRole('button', { name: 'Reset board display' })).not.toBeNull();
+  // Ticked back, the set is the mode's again.
+  fireEvent.click(checkbox('F.SilkS'));
+  expect(custom).toHaveBeenLastCalledWith({ ...BOARD_DISPLAY_DEFAULTS, layers: null });
+  fireEvent.click(screen.getByRole('button', { name: 'Reset board display' }));
+  expect(custom).toHaveBeenLastCalledWith(BOARD_DISPLAY_DEFAULTS);
 });
 
-it('reads as Custom once a setting leaves its mode, and choosing a mode reapplies it, keeping the side', () => {
-  const unpoured = { mode: 'copper', side: 'bottom', poured: false };
-  expect(boardDisplayIsCustom(unpoured)).toBe(true);
-  expect(boardDisplayIsCustom({ ...unpoured, poured: true })).toBe(false);
-  expect(selectBoardMode(unpoured, 'copper')).toEqual({ mode: 'copper', side: 'bottom', poured: true });
-  expect(selectBoardMode(unpoured, 'placement')).toEqual({ mode: 'placement', side: 'bottom', poured: true });
+it('Copper pours is a choice while a copper layer is drawn, and goes when none is', () => {
+  const onChange = mount();
+  fireEvent.click(checkbox('Copper pours'));
+  expect(onChange).toHaveBeenLastCalledWith({ ...BOARD_DISPLAY_DEFAULTS, poured: false });
+  cleanup();
+  mount({ ...BOARD_DISPLAY_DEFAULTS, mode: 'assembly' });
+  expect(screen.queryByRole('checkbox', { name: 'Copper pours' })).toBeNull();
+  cleanup();
+  // Assembly with F.Cu ticked draws copper: the pours are a choice again.
+  mount({ ...BOARD_DISPLAY_DEFAULTS, mode: 'assembly', layers: ['F.Cu', 'Edge.Cuts'] });
+  expect(checkbox('Copper pours').checked).toBe(true);
+  expect(checkbox('F.Cu').checked).toBe(true);
+  expect(checkbox('F.SilkS').checked).toBe(false);
+});
+
+it('View from writes the side alone, which no mode owns', () => {
+  const onChange = mount({ ...BOARD_DISPLAY_DEFAULTS, mode: 'copper', layers: ['F.Cu'] });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'View from' }), { key: 'ArrowDown' });
+  fireEvent.click(screen.getByRole('option', { name: 'Bottom' }));
+  expect(onChange).toHaveBeenLastCalledWith({ ...BOARD_DISPLAY_DEFAULTS, mode: 'copper', layers: ['F.Cu'], side: 'bottom' });
 });

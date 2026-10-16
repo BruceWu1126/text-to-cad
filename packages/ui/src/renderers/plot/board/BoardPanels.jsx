@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { TreeRowSurface, TreeRowChevron, TreeRowLabel } from "@text-to-cad/ui/primitives/tree-row";
 import { TreeFilterHighlight, TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
 import {
@@ -12,7 +12,7 @@ import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { InfoRow, REFERENCE_LINK_CLASS } from "../../kit/inspector/referenceRows.jsx";
 import TreeRowEye, { treeRowEyeLayout } from "../../kit/inspector/TreeRowEye.jsx";
 import { useTreeSearch } from "../../kit/inspector/modelTreeSearch.js";
-import { BoardMeasureModeMenu, BoardSelectModeMenu } from "./boardModes.jsx";
+import { BoardSelectModeMenu } from "./boardModes.jsx";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree } from "./boardTree.js";
 import { boardReferenceFacts } from "./boardFacts.js";
 
@@ -208,32 +208,5 @@ export function BoardReferencePanel({ index, resolved, active, onClear, onSelect
     <div className="px-2 pb-1.5" data-board-reference="">
       {shown ? shown.rows.map(row) : null}
     </div>
-  </ToolPanel>;
-}
-
-const ROW = "flex h-6 min-w-0 w-full items-center gap-1.5 rounded-sm px-1 text-micro outline-none";
-const length = (value) => `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 3 })} mm`;
-const end = (pick) => pick.label || "point";
-
-/** Measure's panel: its snapping in the heading, then each measurement, or a hint before the first. */
-export function BoardMeasurePanel({ measure, shown, onClose }) {
-  if (!shown) return null;
-  const items = measure.measurements;
-  return <ToolPanel id="measure" title="Measure" label="Measure" collapsible={false} onClose={onClose} closeLabel="Clear measurements"
-    actions={<BoardMeasureModeMenu mode={measure.mode} onModeChange={measure.setMode} />}>
-    {items.length ? <section aria-label="Measurements" className="flex min-w-0 flex-col gap-px px-1 pb-1" role="list">
-      {items.map((item, at) => <TooltipHint key={item.id} content={`${end(item.a)} → ${end(item.b)} · dx ${length(item.dx)} · dy ${length(item.dy)}`}>
-        <div role="listitem" tabIndex={0} className={cn("group/measure-row cursor-default text-sidebar-foreground/80 hover:bg-sidebar-accent", ROW)}>
-          <span className="min-w-0 flex-1 truncate tabular-nums">{length(item.distance)}
-            <span className="ml-1.5 text-muted-foreground">{`${end(item.a)} → ${end(item.b)}`}</span></span>
-          <button type="button" aria-label={`Delete measurement ${at + 1}`} onClick={() => measure.remove(item.id)}
-            className="grid size-4 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition group-hover/measure-row:opacity-100 focus-visible:opacity-100 hover:text-foreground">
-            <X className="size-3" strokeWidth={2} aria-hidden="true" />
-          </button>
-        </div>
-      </TooltipHint>)}
-    </section> : <p className="flex min-w-0 flex-col gap-px px-1 pb-1 select-none" data-measure-hint="">
-      <span className={cn(ROW, "text-muted-foreground")}>{measure.start ? `From ${end(measure.start)}: pick the second point` : "Pick two points to measure"}</span>
-    </p>}
   </ToolPanel>;
 }
