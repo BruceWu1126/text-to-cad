@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import contextlib
-import copy
 import os
 from pathlib import Path
 import subprocess
-import sys
 import threading
 import time
 import unittest
@@ -140,7 +138,7 @@ sys.addaudithook(audit)
             stack.enter_context(mock.patch.object(client, "_connect_or_spawn", side_effect=lambda _: transport.connect(address, self.private.key)))
             stack.enter_context(mock.patch("cadgen.daemon.executors.use_daemon", return_value=True))
             stack.enter_context(mock.patch.object(pool.subprocess, "Popen", side_effect=start))
-            stack.enter_context(mock.patch.object(artifacts, "_run_transient", side_effect=AssertionError("unaccounted fallback")))
+            stack.enter_context(mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted fallback")))
             for name in ("_script_path", "_document_path"):
                 stack.enter_context(mock.patch.object(server, name, side_effect=AssertionError("source/document routing")))
             stack.enter_context(mock.patch("cadgen.daemon.jobs.declared_outputs", side_effect=AssertionError("source scan")))
@@ -180,85 +178,20 @@ sys.addaudithook(audit)
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
 
-    def test_real_transient_display_derivation_keeps_coalesced_native_work_after_owner_detach(self):
-        entered = self.root / "native-entered"
-        release = self.root / "native-release"
-        derived = self.root / "native-derived"
-        script = self.source_guard() + f"""
-import time
-import build123d
-from cadgen._internal import component_package,topology_extract
-from cadgen.daemon import artifacts,broker
-from cadgen.store import parts
-original=parts.derive
-def derive(*args,**kwargs):
-    assert broker.current_lease() is not None
-    Path({str(entered)!r}).write_text('entered')
-    deadline=time.monotonic()+15
-    while not Path({str(release)!r}).exists():
-        if time.monotonic()>deadline: raise RuntimeError('test barrier')
-        time.sleep(.005)
-    result=original(*args,**kwargs)
-    Path({str(derived)!r}).write_text('derived')
-    return result
-parts.derive=derive
-raise SystemExit(artifacts._main())
-"""
-        original_popen, processes = subprocess.Popen, []
+    def test_with_no_daemon_a_display_job_derives_in_this_process_in_a_slot(self):
+        from cadgen.store import parts
 
-        def start(argv, **kwargs):
-            self.assertEqual(argv, [sys.executable, "-P", "-m", "cadgen.daemon.artifacts"])
-            process = original_popen([sys.executable, "-c", script], **kwargs)
-            processes.append(process)
-            self.addCleanup(self.stop_process, process)
-            return process
+        derive, leases = parts.derive, []
 
-        with mock.patch.object(artifacts.subprocess, "Popen", side_effect=start):
-            first = artifacts.submit_artifact(self.request, store_root=self.store)
-            self.addCleanup(first.detach)
-            self.wait_for(
-                lambda: entered.exists() or first.done(),
-                lambda: "native worker did not acquire its lease after cold native startup: "
-                f"child={processes[0].poll() if processes else 'not started'}, "
-                f"broker={self.private.broker.snapshot()}, future_done={first.done()}",
-                timeout=60,
-            )
-            if not entered.exists():
-                first.result()
-                self.fail("native worker completed without entering the guarded derivation")
-            second = artifacts.submit_artifact(copy.deepcopy(self.request), store_root=self.store)
-            self.addCleanup(second.detach)
-            self.wait_for(lambda: self.private.broker.snapshot()["coalesced"] == 1, "second subscriber did not attach")
-            self.assertTrue(first.detach())
-            with self.assertRaises(artifacts.ArtifactDetached):
-                first.result()
-            self.assertIsNone(processes[0].poll())
-            release.write_text("continue", encoding="utf-8")
+        def leased(*args, **kwargs):
+            leases.append(broker.current_lease())
+            return derive(*args, **kwargs)
 
-            # The entered marker is deliberately emitted after the child's lazy native
-            # imports. This test owns the detach/result handoff, not a cold OCP
-            # startup benchmark. Separate real display derivation from broker
-            # delivery so a failure names the stalled phase and its live state.
-            self.wait_for(
-                lambda: derived.exists() or second.done(),
-                lambda: "native display derivation did not finish after owner detach: "
-                f"child={processes[0].poll()}, broker={self.private.broker.snapshot()}, "
-                f"future_done={second.done()}",
-                timeout=60,
-            )
-            if not derived.exists():
-                second.result()
-                self.fail("native artifact completed without the guarded derivation marker")
-            self.wait_for(
-                second.done,
-                lambda: "derived native surface was not delivered to its attached subscriber: "
-                f"child={processes[0].poll()}, broker={self.private.broker.snapshot()}",
-            )
-            result = second.result()
-            self.assert_geometry_and_result(result)
-            self.wait_for(lambda: all(process.poll() is not None for process in processes), "native child remained alive")
-        self.assertEqual(len(processes), 1)
-        self.assertEqual(processes[0].returncode, 0)
+        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("a process per job")), \
+             mock.patch.object(parts, "derive", side_effect=leased):
+            result = artifacts.submit_artifact(self.request, store_root=self.store).result(60)
+        self.assertIsNotNone(leases[0], "the job holds a slot of the caller's broker")
+        self.assert_geometry_and_result(result)
         self.settled()
 
     def test_real_daemon_detach_retains_native_worker_for_attached_subscriber(self):

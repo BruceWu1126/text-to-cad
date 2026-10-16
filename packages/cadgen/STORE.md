@@ -487,13 +487,14 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   shape is consulted.
 
   **A build has its parts' display data derived; views only read.** A build
-  never measures or meshes geometry in its own process: its parts are the
+  never measures or meshes geometry on its own thread: its parts are the
   build pool's work. The moment a model build's result exists, it asks for the
   parts of its own components the store lacks (`parts.request_display`): one
   job (`kind: display`, `daemon/artifacts.py`), or, for a batch past half a
   megabyte of BREP, one job per such share, balanced by size, a pool slot each
   but the build's own, which pool workers derive while the build saves its
-  STEP -- in transient mode worker processes of the build's own pool -- and the
+  STEP -- with no daemon, threads of the build's own process, each in a slot of
+  its pool -- and the
   build waits for them, as one, before it publishes its saved file and record, then asks for any part of the saved document's tree the
   result did not have (a leaf the STEP did not verify as the body it was
   written from: none, as a rule).
@@ -1830,10 +1831,15 @@ Every build goes through one interface, `cadgen.daemon.executors.submit(model)
   directory, the request's root and job ids, the job-slot broker, the
   install channel). Nothing else a job sees comes from the process that
   started the daemon.
-- **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per job, alive for
-  this build only. Each imports build123d once, concurrently with its
+- **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per build job, alive
+  for this build only. Each imports build123d once, concurrently with its
   siblings. It inherits the environment, so a test's `CADGEN_CACHE_DIR`
-  isolates its store; tests and CI run this way.
+  isolates its store; tests and CI run this way. An artifact job (`kind:
+  display` and the rest, `daemon/artifacts.py`) is no process of its own: it
+  runs in the process that asks, on a thread of its own, in a slot of that
+  process's pool where it has one, against that process's store -- a process
+  per job imported the kernel again for every one, which cost a test suite
+  more than the work.
 
 **Scratch outlives a killed process.** A process keeps its served views
 (`cadgen-views/<pid>/`), an exported view (`cadgen-view-<pid>-*`), a build's

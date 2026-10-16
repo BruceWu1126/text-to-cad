@@ -57,8 +57,8 @@ def _apply_request_env(request: dict) -> None:
     client means unset for the job -- which also clears a var a previous job's
     model code exported. The names the daemon's machinery sets for itself
     (``client.INTERNAL_ENV_VARS``) are left as they are. A request that carries
-    no environment -- a one-shot artifact worker, started with its caller's --
-    changes none of it. The store root is an explicit request field and wins.
+    no environment changes none of it. The store root is an explicit request
+    field and wins.
 
     ``root_id`` names the build tree this job belongs to; a child this job
     submits inherits it through the environment so its events tag the same tree.
@@ -256,10 +256,10 @@ def _warm_imports() -> None:
         kernel_versions()
 
 
-def _run(request: dict, *, supervised: bool = False) -> int:
+def _run(request: dict) -> int:
     tool = request.get("tool")
     if tool == "artifact":
-        return _run_artifact(request, supervised=supervised)
+        return _run_artifact(request)
     argv = [str(a) for a in request.get("argv") or []]
     cwd = request.get("cwd")
     prog = str(request.get("prog") or "") or None
@@ -329,11 +329,9 @@ _REFUSALS = frozenset({("cadgen._internal.tessellate", "MeshProductionError"),
                        ("cadgen.store.parts", "ProducerUnavailable")})
 
 
-def _run_artifact(request: dict, *, supervised: bool = False) -> int:
-    """A typed operation has no parser, script path, declared outputs or hygiene scan.
-
-    ``supervised``: a daemon worker's job (``serve``), which asks before each derivation
-    whether anyone still wants it. A one-shot transient worker has nobody to ask."""
+def _run_artifact(request: dict) -> int:
+    """A typed operation has no parser, script path, declared outputs or hygiene scan. It
+    asks its supervisor before each derivation whether anyone still wants it (``_wanted``)."""
     from cadgen.daemon import artifacts, broker
 
     out, err = _FrameWriter("stdout"), _FrameWriter("stderr")
@@ -349,8 +347,7 @@ def _run_artifact(request: dict, *, supervised: bool = False) -> int:
         # Something waits on this job (a build, a view): it goes ahead of jobs not yet started.
         with broker.held(f"artifact:{operation['kind']}", required=True, first=True), \
              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            result = artifacts.result_frame(
-                operation, artifacts.execute(operation, keep_going=_wanted if supervised else None))
+            result = artifacts.result_frame(operation, artifacts.execute(operation, keep_going=_wanted))
             _emit({"artifactResult": result})
         return 0
     except BaseException as error:  # the worker stays reusable, but no success is emitted
@@ -426,7 +423,7 @@ def serve() -> int:
             _apply_request_env(request)
             telemetry.job_started()
             with _heartbeat():
-                code = _run(request, supervised=True)
+                code = _run(request)
             telemetry.job_ended(code)  # a failure nothing named: argparse's 2 is its arguments refused
             # What telemetry learned of the job rides its exit frame: the daemon counts it (server._handle_request).
             _emit({"exit": code, "pid": os.getpid(), **telemetry.job_finished()})

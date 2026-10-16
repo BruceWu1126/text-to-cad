@@ -521,7 +521,8 @@ def request_display(tree_hash: str, *, producer: dict | None = None,
                     cids: list[str] | None = None) -> "DisplayJob | None":
     """Have the build pool derive the display data of every part of ``tree_hash`` the store
     lacks -- jobs (``kind: display``, ``daemon/artifacts.py``) that run while the caller
-    goes on, never in this process: one, or for a large batch one per share of it
+    goes on, on daemon workers or, with no daemon, threads of this process: one, or for a
+    large batch one per share of it
     (``_BATCH_BYTES``), the shares balanced by BREP size -- and return them as one
     :class:`DisplayJob`; None when the store holds them all. A build submits it the moment
     its result exists and waits for it before it reports done

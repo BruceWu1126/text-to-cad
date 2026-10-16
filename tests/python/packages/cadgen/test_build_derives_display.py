@@ -18,6 +18,7 @@ import io
 import json
 import os
 import shutil
+import threading
 import traceback
 import unittest
 from pathlib import Path
@@ -109,11 +110,12 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.assertEqual(code, 0, self.output)
         return self.output.strip().splitlines()[-1].split(" ", 1)[0], meshed.call_count
 
-    def test_the_build_process_measures_nothing_its_parts_are_one_pool_job(self) -> None:
-        """Dispatched for real (a worker process of the build's own pool, the daemon being
-        off), the display job is the only thing that measures or meshes the build's
-        geometry: nothing in the build's process calls OCCT's surface integrals outside the
-        model's own code, nor the mesher -- and the parts are stored when it is done."""
+    def test_the_build_thread_measures_nothing_its_parts_are_one_pool_job(self) -> None:
+        """Dispatched for real (with the daemon off, on a thread of the build's own process,
+        as a pool job runs there), the display job is the only thing that measures or meshes
+        the build's geometry: nothing on the build's thread calls OCCT's surface integrals
+        outside the model's own code, nor the mesher -- and the parts are stored when it is
+        done."""
         from OCP.BRepGProp import BRepGProp
 
         from cadgen._internal import tessellate
@@ -123,18 +125,26 @@ class BuildDerivesDisplayData(unittest.TestCase):
         from cadgen.store.view import descriptor_for_view
 
         measured: list[str] = []
-        real = BRepGProp.SurfaceProperties_s
+        real_integral, real_mesher = BRepGProp.SurfaceProperties_s, tessellate.mesh_component
+
+        def on_the_job() -> bool:
+            return threading.current_thread().name == "cadgen-artifact"
 
         def integral(*args, **kwargs):
             # The model's own code may measure (build123d does, making a plane); cadgen may not.
             stack = traceback.extract_stack()[:-1]
-            if not any(Path(frame.filename).resolve() == self.script for frame in stack):
+            if not on_the_job() and not any(Path(frame.filename).resolve() == self.script for frame in stack):
                 measured.append(" < ".join(f"{Path(frame.filename).name}:{frame.name}" for frame in reversed(stack[-6:])))
-            return real(*args, **kwargs)
+            return real_integral(*args, **kwargs)
+
+        def mesher(*args, **kwargs):
+            if not on_the_job():
+                raise AssertionError("meshed on the build's thread")
+            return real_mesher(*args, **kwargs)
 
         output = io.StringIO()
         with mock.patch.object(BRepGProp, "SurfaceProperties_s", side_effect=integral), \
-                mock.patch.object(tessellate, "mesh_component", side_effect=AssertionError("meshed in the build")), \
+                mock.patch.object(tessellate, "mesh_component", side_effect=mesher), \
                 mock.patch.object(artifacts, "submit_artifact", wraps=artifacts.submit_artifact) as submitted, \
                 contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             code = run_model_argv([str(self.script)])

@@ -20,7 +20,8 @@
 
 One broker per executor. The daemon IS the broker for its workers (daemon-wide
 slots); a transient build's root process runs a private one for the workers it
-spawns (per-build slots). Both speak the same frames over the same transport, and
+spawns and the artifact jobs their processes run on threads of their own (per-build
+slots). Both speak the same frames over the same transport, and
 a lease is a CONNECTION: holding a slot is holding the connection open, so a worker
 that dies releases its slot by dying. Memory admission belongs to the worker
 pool, separately from these CPU leases; yielding a CPU lease never releases
@@ -299,10 +300,7 @@ class Broker:
         closure = str(request.get("closure") or "")
         op = request.get("op")
         if op == "claim":
-            if "artifact" in request:
-                owned, entry = self.claim_artifact_entry(request["artifact"], store_root=request.get("store_root"))
-            else:
-                owned, entry = self.claim_entry(model, closure, store_root=str(request.get("store_root") or ""))
+            owned, entry = self.claim_entry(model, closure, store_root=str(request.get("store_root") or ""))
             if owned:
                 # The claimer reports the outcome on this same connection; if it dies
                 # first, the attached parties are released with a failure.
@@ -310,21 +308,12 @@ class Broker:
                 try:
                     _send(conn, {"inflight": "yours"})
                     while True:
-                        if entry.get("artifact") and self.orphaned(entry):
-                            _send(conn, {"orphaned": True})
-                            break
-                        raw = conn.recv(.1 if entry.get("artifact") else None)
-                        if raw is None:
-                            continue
+                        raw = conn.recv(None)
                         if not raw:
                             break
                         payload = json.loads(raw.decode("utf-8"))
-                        if payload.get("ownerDetached") is True and entry.get("artifact"):
-                            self.abandon(entry)
                         if isinstance(payload.get("event"), dict):
                             self.publish_result(entry, payload["event"])
-                        if isinstance(payload.get("artifactResult"), dict):
-                            self.publish_artifact_result(entry, payload["artifactResult"])
                         if "exit" in payload:
                             code = int(payload["exit"])
                             break
@@ -339,7 +328,7 @@ class Broker:
                 while True:
                     event, done, code = self.wait_update(entry, result_seen=result_seen)
                     if event is not None:
-                        _send(conn, event if entry.get("artifact") else {"event": event})
+                        _send(conn, {"event": event})
                         result_seen = True
                     if done:
                         _send(conn, {"exit": code})
@@ -573,24 +562,6 @@ def yielded() -> Iterator[None]:
         _CURRENT.lease = acquire_slot(lease.label, required=lease.required, endpoint=lease.endpoint, first=True)
 
 
-def claim_artifact(request: dict, *, store_root: str, endpoint=None) -> tuple[str, transport.Channel]:
-    from cadgen.daemon.artifacts import ArtifactJobError, normalize_request, store_path
-
-    conn = _open({"kind": "inflight", "op": "claim", "artifact": normalize_request(request),
-                  "store_root": store_path(store_root)}, endpoint=endpoint)
-    if conn is None:
-        raise ArtifactJobError("artifact broker unavailable; no unaccounted retry")
-    try:
-        raw = conn.recv(30.0)
-        answer = json.loads(raw.decode("utf-8")) if raw else None
-        if not isinstance(answer, dict) or answer.get("inflight") not in {"yours", "attached"}:
-            raise ArtifactJobError("artifact broker returned no valid claim")
-        return answer["inflight"], conn
-    except BaseException:
-        conn.close()
-        raise
-
-
 def claim_inflight(model: str, closure: str, *, store_root: str = "") -> tuple[str, transport.Channel] | None:
     """Ask the broker who builds ``(model, closure)``. ``("yours", conn)`` means build
     it and call :func:`report_done` on ``conn``; ``("attached", conn)`` means another
@@ -629,32 +600,15 @@ def report_result(conn: transport.Channel, event: dict) -> None:
         _send(conn, {"event": event})
 
 
-def report_artifact_result(conn: transport.Channel, result: dict) -> None:
-    # A failed result publication is a failed operation, never a lost success
-    # silently reported to consumers that attached to this producer.
-    _send(conn, {"artifactResult": result})
-
-
-def detach_artifact_owner(conn: transport.Channel) -> None:
-    _send(conn, {"ownerDetached": True})
-
-
-def wait_attached(conn: transport.Channel, *, on_event: Callable[[dict], None] | None = None,
-                  on_artifact_result: Callable[[dict], None] | None = None, cancelled=None) -> int:
+def wait_attached(conn: transport.Channel, *, on_event: Callable[[dict], None] | None = None) -> int:
     try:
         while True:
-            if cancelled is not None and cancelled():
-                return 1
-            raw = conn.recv(.1 if cancelled is not None else None)
-            if raw is None:
-                continue
+            raw = conn.recv(None)
             if not raw:
                 break
             frame = json.loads(raw.decode("utf-8"))
             if isinstance(frame.get("event"), dict) and on_event is not None:
                 on_event(frame["event"])
-            if isinstance(frame.get("artifactResult"), dict) and on_artifact_result is not None:
-                on_artifact_result(frame["artifactResult"])
             if "exit" in frame:
                 return int(frame["exit"])
     except (OSError, ValueError, TypeError):

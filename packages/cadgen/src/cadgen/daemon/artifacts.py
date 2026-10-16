@@ -1,7 +1,9 @@
 """Build-pool artifact jobs, independent of source models and document paths: this
 runtime's producer (``kind: producer``), and the display data of the parts a
 view found missing from the store (``kind: display``: one request, one job, one
-worker). Only workers import the native producer. Requests contain immutable
+worker). A job runs on a daemon worker, or, with no daemon (``CADGEN_DAEMON=0``),
+in the process that asks, on a thread of its own: never a process per job. The
+caller's own thread never imports the native producer. Requests contain immutable
 pins, never a script, a declared output, or an instruction to run arbitrary Python.
 """
 
@@ -15,8 +17,6 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
-import sys
 import threading
 
 from cadgen.daemon import broker
@@ -188,152 +188,11 @@ class ArtifactFuture(Future):
             return copy.deepcopy(super().result(timeout))
 
 
-_PRIVATE_LOCK = threading.Lock()
-_PRIVATE = None
-_PRIVATE_USERS = 0
-
-
-def _transient_endpoint():
-    """Share a transient broker, passing its identity only in child env."""
-    global _PRIVATE, _PRIVATE_USERS
-    endpoint = broker._endpoint()
-    if endpoint is not None:
-        return endpoint, lambda: None
-    with _PRIVATE_LOCK:
-        if _PRIVATE is None:
-            _PRIVATE = broker.PrivateBroker()
-        private = _PRIVATE
-        _PRIVATE_USERS += 1
-
-    def release():
-        global _PRIVATE, _PRIVATE_USERS
-        with _PRIVATE_LOCK:
-            _PRIVATE_USERS -= 1
-            if _PRIVATE_USERS == 0:
-                _PRIVATE = None
-                private.close()
-
-    return (private.address, private.key), release
-
-
-def _run_transient(request, root, env, endpoint, *, subscriber=None):
-    ticket = broker.claim_artifact(request, store_root=root, endpoint=endpoint)
-    role, connection = ticket
-    received = []
-
-    def receive(payload):
-        if received:
-            raise ArtifactJobError("artifact worker returned more than one result")
-        received.append(validate_result(request, payload))
-
-    if role == "attached":
-        if subscriber is not None:
-            subscriber._bind_detach(connection.close)
-        code = broker.wait_attached(connection, on_artifact_result=receive,
-                                    cancelled=(lambda: subscriber.detached) if subscriber is not None else None)
-        if code or not received:
-            raise ArtifactJobError("attached artifact operation failed or returned no result")
-        return received[0]
-    process = None
-    code = 1
-    chunks = []
-    producer_done, orphaned = threading.Event(), threading.Event()
-    send_lock = threading.Lock()
-
-    def detach_owner():
-        # This channel belongs to the producer pump. Detaching its original
-        # subscriber must not close it while attached consumers need results.
-        with contextlib.suppress(OSError, ValueError, TypeError), send_lock:
-            broker.detach_artifact_owner(connection)
-
-    if subscriber is not None:
-        subscriber._bind_detach(detach_owner)
-
-    def watch_owner():
-        while not producer_done.is_set():
-            try:
-                raw = connection.recv(.1)
-            except (OSError, ValueError, TypeError):
-                raw = b""
-            if raw is None:
-                continue
-            # The broker sends only an orphan notification on this producer
-            # channel. EOF or any unexpected frame is also a terminal control
-            # failure, never permission to keep unobserved native work running.
-            orphaned.set()
-            if process is not None and process.poll() is None:
-                with contextlib.suppress(OSError):
-                    process.terminate()
-            return
-
-    watcher = threading.Thread(target=watch_owner, name="cadgen-artifact-owner", daemon=True)
-    try:
-        watcher.start()
-        from cadgen.daemon.executors import worker_env
-
-        child_env = worker_env(env)
-        child_env.update({broker.BROKER_ADDRESS_VAR: endpoint[0], broker.BROKER_KEY_VAR: endpoint[1].decode("ascii"),
-                          "CADGEN_DAEMON": "0", "CADGEN_CACHE_DIR": root})
-        if orphaned.is_set():
-            raise ArtifactDetached("artifact producer lost its last subscriber")
-        process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.daemon.artifacts"],
-                                   env=child_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="backslashreplace")
-        if orphaned.is_set():
-            raise ArtifactDetached("artifact producer lost its last subscriber")
-        # No "env": the worker was started with its caller's environment and keeps it.
-        payload = {"tool": "artifact", "argv": [], "artifact": request, "store_root": root,
-                   "root_id": env.get("CADGEN_ROOT_ID")}
-        process.stdin.write(json.dumps(payload) + "\n")
-        process.stdin.close()
-        exit_seen = None
-        for line in process.stdout:
-            if exit_seen is not None:
-                raise ArtifactJobError("artifact worker emitted data after its terminal frame")
-            try:
-                frame = json.loads(line)
-            except ValueError:
-                chunks.append(line)
-                continue
-            if not isinstance(frame, dict):
-                raise ArtifactJobError("malformed artifact worker frame")
-            if "artifactResult" in frame:
-                receive(frame["artifactResult"])
-                with send_lock:
-                    broker.report_artifact_result(connection, frame["artifactResult"])
-            elif "exit" in frame:
-                exit_seen = int(frame["exit"])
-            elif frame.get("stream") in {"stdout", "stderr"}:
-                chunks.append(str(frame.get("data") or ""))
-            else:
-                raise ArtifactJobError("unexpected artifact worker frame")
-        return_code = process.wait()
-        if return_code or exit_seen != 0 or not received or orphaned.is_set():
-            raise ArtifactJobError("artifact worker failed or returned no result: " + "".join(chunks).strip())
-        code = 0
-        return received[0]
-    finally:
-        producer_done.set()
-        if watcher.ident is not None:
-            watcher.join(timeout=1)
-        if process is not None:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-            for stream in (process.stdin, process.stdout):
-                if stream is not None:
-                    stream.close()
-        with send_lock:
-            broker.report_done(connection, code, required=not orphaned.is_set())
-
-
 def submit_artifact(request, *, store_root=None):
     """Start a typed artifact operation as ONE build-pool job, on a thread of its own,
-    without importing the CAD kernel here."""
+    without importing the CAD kernel on the caller's thread: a daemon worker's, or with no
+    daemon this process's (:func:`_run_here`), against the store it names, which must then
+    be this process's."""
     request = normalize_request(request)
     root = store_path(store_root)
     future = ArtifactFuture()
@@ -341,50 +200,40 @@ def submit_artifact(request, *, store_root=None):
     from cadgen.daemon.executors import use_daemon
 
     daemon = use_daemon()
-    env = dict(os.environ)
-    dependency = getattr(_WORKER, "root", None) is not None or broker.current_lease() is not None
-    # Capture before the dispatch thread: every request's root/dependency/env is
-    # its caller's, not whichever HTTP thread happens to run next.
-    payload = client.artifact_payload(request, store_root=root, dependency=dependency) if daemon else None
-    endpoint, release = (None, lambda: None) if daemon else _transient_endpoint()
+    payload = None
+    if daemon:
+        dependency = getattr(_WORKER, "root", None) is not None or broker.current_lease() is not None
+        # Captured before the dispatch thread: every request's root/dependency/env is
+        # its caller's, not whichever HTTP thread happens to run next.
+        payload = client.artifact_payload(request, store_root=root, dependency=dependency)
+    elif root != store_path():
+        raise ValueError(f"with no daemon an artifact job runs in this process, on its store, not {root}")
 
     def run():
         try:
             if not future._begin():
                 return
             value = (client.run_artifact(payload, subscriber=future) if daemon
-                     else _run_transient(request, root, env, endpoint, subscriber=future))
+                     else _run_here(request, keep_going=lambda: not future.detached))
             future._complete(value)
         except Exception as exc:
             future._complete(error=exc)
         finally:
             future._bind_detach(None)
-            release()
 
-    try:
-        threading.Thread(target=run, name="cadgen-artifact", daemon=True).start()
-    except Exception:
-        release()
-        raise
+    threading.Thread(target=run, name="cadgen-artifact", daemon=True).start()
     return future
+
+
+def _run_here(request, *, keep_going):
+    """The job in this process, with no daemon to run it: holding a slot of the caller's
+    broker where there is one (a transient build's), ahead of jobs not yet started, as a
+    worker's job does; asking ``keep_going`` before each derivation, which stops once its
+    one subscriber has left. The result is what a worker's would be: plain JSON."""
+    with broker.held(f"artifact:{request['kind']}", first=True):
+        return result_frame(request, execute(request, keep_going=keep_going))["result"]
 
 
 def resolve_artifact(request, *, store_root=None):
     """Resolve one operation; waits yield the caller's CPU lease."""
     return submit_artifact(request, store_root=store_root).result()
-
-
-def _main():
-    # Private one-shot worker, not an author CLI. No import of store.parts
-    # occurs until worker._run has acquired the required broker lease.
-    from cadgen.daemon import worker
-
-    request = json.loads(sys.stdin.readline())
-    worker._apply_request_env(request)
-    code = worker._run(request)
-    worker._emit({"exit": code})
-    return code
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main())

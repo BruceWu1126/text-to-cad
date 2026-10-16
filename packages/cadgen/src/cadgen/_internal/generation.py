@@ -985,7 +985,8 @@ def _request_display(tree: str, *, producer: dict | None = None, cids: list[str]
     """The build pool's job deriving the display data -- each part's mesh and selector
     table -- of every part of ``tree`` the store lacks (``store.parts.request_display``):
     submitted the moment the build's result exists, it runs while the build saves its
-    STEP, never in the build's process, and the build waits for it before it reports done
+    STEP, on the pool, never on the build's thread, and the build waits for it before it
+    reports done
     (:func:`_await_display`), so its preview and every view of what it built only read.
     ``cids`` restricts it to the build's own components: the parts of a child the build
     composed are there already, the child's build having had them derived before it
