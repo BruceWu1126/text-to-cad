@@ -511,13 +511,21 @@ def stored_keys(keys: dict[str, str]) -> dict[str, str]:
     return {cid: key for cid, key in keys.items() if probe(key) is not None}
 
 
+# A batch of parts this large or larger, in BREP bytes, goes to the pool as more than one job,
+# so free slots derive it together: about one job for each such share, at most one for each slot
+# but the one the caller holds. A small batch -- an edit's, a view's -- is one job.
+_BATCH_BYTES = 512 * 1024
+
+
 def request_display(tree_hash: str, *, producer: dict | None = None,
                     cids: list[str] | None = None) -> "DisplayJob | None":
     """Have the build pool derive the display data of every part of ``tree_hash`` the store
-    lacks -- ONE job (``kind: display``, ``daemon/artifacts.py``) that runs while the
-    caller goes on, never in this process -- and return it; None when the store holds them
-    all. A build submits it the moment its result exists and waits for it before it
-    reports done (``_internal/generation.py``), so a view of what it built only reads.
+    lacks -- jobs (``kind: display``, ``daemon/artifacts.py``) that run while the caller
+    goes on, never in this process: one, or for a large batch one per share of it
+    (``_BATCH_BYTES``), the shares balanced by BREP size -- and return them as one
+    :class:`DisplayJob`; None when the store holds them all. A build submits it the moment
+    its result exists and waits for it before it reports done
+    (``_internal/generation.py``), so a view of what it built only reads.
 
     Which parts are missing is asked of the store alone (``probe``): a tree whose display
     data is all stored starts no job. ``producer`` is the one a view of the tree selects
@@ -537,63 +545,111 @@ def request_display(tree_hash: str, *, producer: dict | None = None,
     from cadgen.daemon.artifacts import submit_artifact
     from cadgen.store.meshes import placements
 
-    future = submit_artifact({"kind": "display", "tree": tree_hash, "cids": list(missing), "producer": producer})
-    return DisplayJob(future, missing, placements(descriptor.get("occurrences")))
+    jobs: list[tuple[Any, dict[str, str]]] = []
+    try:
+        for batch in _batches(missing, components):
+            future = submit_artifact({"kind": "display", "tree": tree_hash, "cids": batch, "producer": producer})
+            jobs.append((future, {cid: missing[cid] for cid in batch}))
+    except BaseException:
+        for future, _keys in jobs:
+            future.detach()
+        raise
+    return DisplayJob(jobs, missing, placements(descriptor.get("occurrences")))
+
+
+def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:
+    """``missing``'s components as the batches the pool derives: one, or one per
+    ``_BATCH_BYTES`` of their BREP up to a slot each but the caller's, each component to
+    the batch with the fewest bytes so far, largest first."""
+    import math
+
+    from cadgen.daemon.broker import job_limit
+
+    sizes = {}
+    for cid in missing:
+        try:
+            sizes[cid] = object_path(components[cid]["brep"]).stat().st_size
+        except OSError:
+            sizes[cid] = 0
+    count = max(1, min(job_limit() - 1, len(missing), math.ceil(sum(sizes.values()) / _BATCH_BYTES)))
+    batches: list[list[str]] = [[] for _ in range(count)]
+    loads = [0] * count
+    for cid in sorted(missing, key=lambda cid: (-sizes[cid], cid)):
+        lightest = loads.index(min(loads))
+        batches[lightest].append(cid)
+        loads[lightest] += max(sizes[cid], 1)
+    return [batch for batch in batches if batch]
 
 
 class DisplayJob:
-    """The build pool's job deriving the display data of the parts a tree's store lacked
-    (:func:`request_display`): ``keys``, ``{cid: part key}``, are those parts."""
+    """The build pool's work deriving the display data of the parts a tree's store lacked
+    (:func:`request_display`), one job or several, waited for as one: ``keys``,
+    ``{cid: part key}``, are those parts."""
 
-    def __init__(self, future: Any, keys: dict[str, str], placed: dict[str, list[tuple[str, str]]]) -> None:
-        self._future = future
+    def __init__(self, jobs: list[tuple[Any, dict[str, str]]], keys: dict[str, str],
+                 placed: dict[str, list[tuple[str, str]]]) -> None:
+        self._jobs = jobs
         self.keys = keys
         self._placed = placed
         self._heard = threading.Event()
         self._heard.set()
 
     def when_done(self, callback: Callable[["DisplayJob"], None]) -> None:
-        """Call ``callback(self)`` once the job has finished, however it finished: on the
-        thread that finished it, or here when it already has. :meth:`wait` and
+        """Call ``callback(self)`` once every job has finished, however it finished: on the
+        thread that finished the last, or here when they all have. :meth:`wait` and
         :meth:`settle` return once it has returned."""
         self._heard.clear()
+        remaining = [len(self._jobs)]
+        counting = threading.Lock()
 
         def done(_future: Any) -> None:
+            with counting:
+                remaining[0] -= 1
+                last = remaining[0] == 0
+            if not last:
+                return
             try:
                 callback(self)
             finally:
                 self._heard.set()
 
-        self._future.add_done_callback(done)
+        for future, _keys in self._jobs:
+            future.add_done_callback(done)
 
     def settle(self) -> None:
-        """Wait for the job to finish, however it finishes (:meth:`wait` says how)."""
-        with contextlib.suppress(Exception):
-            self._future.result()
+        """Wait for every job to finish, however it finishes (:meth:`wait` says how)."""
+        for future, _keys in self._jobs:
+            with contextlib.suppress(Exception):
+                future.result()
         self._heard.wait()
 
     def wait(self) -> list[str]:
-        """Wait for the job -- yielding this thread's CPU lease to it meanwhile -- and
-        return a line for each part it could not derive, naming the occurrences that place
+        """Wait for the jobs -- yielding this thread's CPU lease to them meanwhile -- and
+        return a line for each part they could not derive, naming the occurrences that place
         it and why (``#o:3f2a9c1d7e5b peg could not be meshed (MeshProductionError:
-        ValueError: boom)``); the rest of its parts are stored. A failure that leaves no
+        ValueError: boom)``); the rest of the parts are stored. A failure that leaves no
         part missing for a reason of its own is raised."""
-        try:
-            self._future.result()
-        except Exception as error:  # noqa: BLE001 - a part's failure is a line; any other is raised
-            failed = failed_parts(self.keys, error)
-            if not failed:
-                raise
-            from cadgen.store.meshes import failed_part
+        from cadgen.store.meshes import failed_part
 
-            return [failed_part(self._placed.get(cid) or [], reason, component=cid) for cid, reason in failed.items()]
+        lines: list[str] = []
+        try:
+            for future, keys in self._jobs:
+                try:
+                    future.result()
+                except Exception as error:  # noqa: BLE001 - a part's failure is a line; any other is raised
+                    failed = failed_parts(keys, error)
+                    if not failed:
+                        raise
+                    lines.extend(failed_part(self._placed.get(cid) or [], reason, component=cid)
+                                 for cid, reason in failed.items())
         finally:
             self._heard.wait()
-        return []
+        return lines
 
     def abandon(self) -> None:
-        """Leave the job: its worker stops once no one else wants it."""
-        self._future.detach()
+        """Leave the jobs: each one's worker stops once no one else wants it."""
+        for future, _keys in self._jobs:
+            future.detach()
 
 
 # How a display job's failure names each part it could not derive, however the job ran

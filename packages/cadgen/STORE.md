@@ -486,12 +486,13 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 
   **A build has its parts' display data derived; views only read.** A build
   never measures or meshes geometry in its own process: its parts are the
-  build pool's work. The moment a model build's result exists, it asks for ONE
-  job (`kind: display`, `daemon/artifacts.py`; `parts.request_display`) for the
-  parts of its own components the store lacks, which a pool worker derives
-  while the build saves its STEP -- in transient mode a worker process of the
-  build's own pool -- and the build waits for it before it publishes its saved
-  file and record, then asks for any part of the saved document's tree the
+  build pool's work. The moment a model build's result exists, it asks for the
+  parts of its own components the store lacks (`parts.request_display`): one
+  job (`kind: display`, `daemon/artifacts.py`), or, for a batch past half a
+  megabyte of BREP, one job per such share, balanced by size, a pool slot each
+  but the build's own, which pool workers derive while the build saves its
+  STEP -- in transient mode worker processes of the build's own pool -- and the
+  build waits for them, as one, before it publishes its saved file and record, then asks for any part of the saved document's tree the
   result did not have (a leaf the STEP did not verify as the body it was
   written from: none, as a rule).
   Every other build job (`_internal/generation.py`: a no-op build that reuses
@@ -2225,7 +2226,7 @@ revision**: whether a build of the file is queued or running and its phase, a
 failure with its message, and, from the moment the build's body has returned,
 the result tree's hash and the part key of every component in it, with the
 parts the store holds -- at once those it held already, the rest the moment the
-build pool's one job for them (§3) is done, while the build saves its STEP.
+build pool's jobs for them (§3) are done, while the build saves its STEP.
 Those are artifact-side objects the viewer reads as it reads any tree and any
 part, and it draws them as they are named, labelled as a preview of the build
 in progress -- the picture is on screen before the STEP is written, read back

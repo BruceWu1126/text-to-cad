@@ -96,6 +96,32 @@ class PartStoreTest(unittest.TestCase):
                 self.assertRaises(KeyboardInterrupt):
             parts.request_display(tree).wait()
 
+    def test_a_large_batch_is_several_jobs_waited_for_as_one(self) -> None:
+        """A batch of parts past ``_BATCH_BYTES`` goes to the pool as several jobs -- a slot
+        each, the caller's kept -- balanced by BREP size, and the build waits for them as
+        one job; a small batch is one job."""
+        from build123d import Box, Compound, Cylinder, Pos, Sphere
+
+        bodies = [Box(4, 4, 4), Pos(10, 0, 0) * Cylinder(2, 4), Pos(20, 0, 0) * Sphere(3), Pos(30, 0, 0) * Box(1, 2, 3)]
+        tree, geometry, _ = build_tree_from_compound(Compound(children=bodies), root_name="row")
+        keys = {cid: parts.part_key(entry, self.producer) for cid, entry in geometry["components"].items()}
+        with inline_artifacts() as jobs, mock.patch.object(parts, "_BATCH_BYTES", 1), \
+                mock.patch("cadgen.daemon.broker.job_limit", return_value=3):
+            job = parts.request_display(tree)
+            heard = []
+            job.when_done(heard.append)
+            self.assertEqual(job.wait(), [])
+        batches = [call.args[0]["cids"] for call in jobs.call_args_list]
+        self.assertEqual(len(batches), 2, "a slot each, but the caller's")
+        self.assertEqual(sorted(cid for batch in batches for cid in batch), sorted(keys))
+        self.assertEqual(heard, [job], "told once, when the last job is done")
+        self.assertTrue(all(parts.probe(key) is not None for key in keys.values()))
+        for key in keys.values():
+            remove_entry("part", key)
+        with inline_artifacts() as jobs:
+            self.assertEqual(parts.request_display(tree).wait(), [])
+        self.assertEqual(len(jobs.call_args_list), 1, "four small parts are one job")
+
     def test_part_keys_carry_their_version_and_an_older_one_is_obsolete(self) -> None:
         digest = self.key.rsplit("-v", 1)[0]
         older, newer = f"{digest}-v{parts.PART_VERSION - 1}", f"{digest}-v{parts.PART_VERSION + 1}"
