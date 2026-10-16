@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from cadgen._internal.glb_topology import STEP_EDGE_VISIBILITY_CLASSES
 from cadgen._internal.glb_topology import normalize_step_edge_render_visibility_classes
 from cadgen._internal.step_scene import LoadedStepScene
 from cadgen._internal.step_scene import SelectorOptions
-from cadgen._internal.step_scene import adaptive_mesh_resolution_for_scene
 from cadgen.catalog import CadSource
 from cadgen.cli_logging import CliLogger
 from cadgen.cli_progress import cli_progress_line
@@ -159,44 +156,12 @@ def _entry_spec_from_source(source: CadSource) -> EntrySpec:
     )
 
 
-def _selector_options_for_part(spec: EntrySpec, *, scene: LoadedStepScene | None = None) -> SelectorOptions:
-    """The render options a build extracts topology with.
-
-    Only the edge-visibility class set varies, and it varies with the SCENE:
-    the adaptive resolver classifies the topology and
-    ``_edge_visibility_classes_for_resolution`` turns that classification into
-    the classes. Without a scene there is nothing to classify, so the default
-    set stands. Mesh tolerances are absent on purpose: a declared export's
+def _selector_options_for_part(spec: EntrySpec) -> SelectorOptions:
+    """The render options a compiled document's tree is read with: the default edge
+    classes, which ``store.build.build_document_tree`` fixes for every compile. A
+    result's tree classifies its own edges from the topology it is built from
+    (``store.build``). Mesh tolerances are absent on purpose: a declared export's
     reach its EXPORT job (``MeshExportJob``), which has its own content gate; a
-    tree is tessellation-free.
-    """
-    edge_visibility_classes = normalize_step_edge_render_visibility_classes(None)
-    if isinstance(scene, LoadedStepScene):
-        adaptive = adaptive_mesh_resolution_for_scene(scene)
-        edge_visibility_classes = _edge_visibility_classes_for_resolution(adaptive.profile, adaptive.hints)
-    return SelectorOptions(edge_visibility_classes=edge_visibility_classes)
-
-
-def _edge_visibility_classes_for_resolution(profile: str, hints: Mapping[str, object] | None) -> tuple[str, ...]:
-    normalized_profile = str(profile or "").strip().lower()
-    hint_values = hints if isinstance(hints, Mapping) else {}
-    occurrence_edge_count = _hint_int(hint_values.get("occurrenceEdgeCount"))
-    feature_only = (
-        normalized_profile in {"large-topology", "coarse-assembly"}
-        or occurrence_edge_count >= 8000
-    )
-    if feature_only:
-        return (STEP_EDGE_VISIBILITY_CLASSES["FEATURE"],)
-    return normalize_step_edge_render_visibility_classes(None)
-
-
-def _hint_float(value: object) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _hint_int(value: object) -> int:
-    return int(_hint_float(value))
-
+    tree is tessellation-free."""
+    del spec
+    return SelectorOptions(edge_visibility_classes=normalize_step_edge_render_visibility_classes(None))

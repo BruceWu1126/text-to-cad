@@ -13,7 +13,6 @@ from typing import Sequence
 
 from cadgen.catalog import source_from_path
 from cadgen.cli_logging import CliLogger
-from cadgen._internal.glb_topology import build_step_index_manifest
 from cadgen.coordination import (
     DRAWING_PACKAGE,
     PHASE_GENERATE,
@@ -436,31 +435,6 @@ def _existing_topology_artifact_matches_options(spec: EntrySpec, selector_option
     return bool(_package_descriptor_matches_spec(spec, selector_options))
 
 
-def _assembly_provenance_manifest(selector_options: SelectorOptions) -> dict[str, object]:
-    """The content-pure fields a generated tree carries: its edge capabilities
-    and the edge classes it was built with (``tree_extra`` below takes exactly
-    these two).
-
-    There is no ``mesh`` section. A tree stores geometry, not triangles:
-    each component's mesh is derived per tessellation into the store's mesh
-    entries (``cadgen.store.meshes``), keyed on its own relative tolerances. The
-    deflection numbers this block used to carry reached no mesher, and the adaptive ``resolution`` beside them was the
-    INPUT to a decision whose output — ``edgeRendering.visibilityClasses`` — is
-    recorded right here. No STEP hash either: nothing read it, and computing it
-    read the whole saved document once per build.
-    """
-
-    from cadgen._internal.glb_topology import step_edge_capabilities
-
-    # STEP-pure by contract: nothing here may derive from the Python source.
-    # Source-derived state (provenance, pose, mates) rides the source sidecar
-    # (_source_sidecar_payload below) — the tree keys on geometry alone.
-    return build_step_index_manifest({
-        "capabilities": step_edge_capabilities(selector_options.edge_visibility_classes),
-        "edgeRendering": {"visibilityClasses": list(selector_options.edge_visibility_classes)},
-    })
-
-
 def _source_sidecar_payload(scene: LoadedStepScene) -> dict[str, object] | None:
     """The sidecar payload for a GENERATED build, or None for an import.
 
@@ -562,15 +536,15 @@ def _generate_part_outputs(
         spec.step_path.resolve(): spec,
     }
     # Raw document compilation publishes the byte-derived canonical tree,
-    # whose edge classes are fixed by build_document_tree. Do not calculate
-    # generated-source metadata that this path never consumes. Re-emits and
-    # Python-backed scenes retain their ordinary preparation path.
+    # whose edge classes are fixed by build_document_tree. Re-emits and
+    # Python-backed scenes are walked as compounds, whose trees classify their
+    # own edges from the topology they are built from.
     raw_document = (
         spec.source != "generated"
         and str(getattr(scene, "source_kind", "step") or "step").strip().lower() != "python"
         and not str(getattr(scene, "reemit_source_hash", "") or "").strip()
     )
-    selector_options = _selector_options_for_part(spec, scene=None if raw_document else scene)
+    selector_options = _selector_options_for_part(spec)
     if (
         spec.source != "generated"
         and not force
@@ -596,14 +570,6 @@ def _generate_part_outputs(
     # else is one component. No declaration steers it and nothing is inferred from
     # source — the tree's entryKind is read off the tree once built.
     source_compound = getattr(scene, "source_compound", None)
-    package_provenance = {} if raw_document else _assembly_provenance_manifest(selector_options)
-    if getattr(scene, "disposable_prototypes", False):
-        # The reference scene's decoded prototypes have classified the topology
-        # (the edge policy above); everything after this reads geometry from
-        # the pinned trees. Drop them now rather than carry a second complete
-        # native copy of a large assembly through its publication.
-        scene.prototype_shapes = {}
-        scene.prototype_face_colors = {}
 
     def component_package_job() -> dict[str, object]:
         from pathlib import Path
@@ -624,13 +590,6 @@ def _generate_part_outputs(
             sidecar_payload = _source_sidecar_payload(scene)
         generated = sidecar_payload is not None
 
-        # Content-pure fields the tree carries (capabilities, edge classes); the
-        # provenance fields (generatedAt, sourceKind…) go to the record.
-        tree_extra = {
-            key: package_provenance[key]
-            for key in ("capabilities", "edgeRendering")
-            if key in package_provenance
-        }
         from cadgen.daemon import executors
         from cadgen.store.parts import producer_identity
 
@@ -744,8 +703,7 @@ def _generate_part_outputs(
             else:
                 tree_hash, tree, stats = build_tree_from_compound(
                     shape, root_name=_document_root_name(shape, spec.step_path), force=force,
-                    progress=progress, extra=tree_extra,
-                    materials=getattr(scene, "materials", None), namer=namer, live=live,
+                    progress=progress, materials=getattr(scene, "materials", None), namer=namer, live=live,
                 )
                 # The preview, before any export work: the result is what the file is
                 # written from.

@@ -143,12 +143,13 @@ leaf at the prototype's own placement, whose box is the remembered one shifted
 exactly; the bake, which wants a centre and a reach, composes the rest). Keyed like
 the leaf layout, it holds each component's **topology** — its face and edge
 counts, how many of each are curved, and its loose box — the facts the
-adaptive edge policy classifies a scene's prototypes by
-(`step_scene_mesh.prototype_topology`). An all-link parent's build reads them
-by the BREP each pin names and decodes a pinned component only when its entry
-is missing or invalid, so its edge classes are the ones the decoded prototypes
-give; a scene of an authored compound (a parent with geometry of its own)
-still measures its prototypes. Nothing in the index holds a value
+adaptive edge policy classifies a result's components by
+(`step_scene_mesh.prototype_topology`, `store.build._edge_rendering`). A
+build measures its own components' as it walks them and reads a linked
+child's by the BREP its tree names, decoding one only where the entry is
+missing or invalid, so a parent's edge classes are the ones its children's
+components give, and no document of the result is assembled for them.
+Nothing in the index holds a value
 computed while a model runs (README law 18): a model's own checks and
 operations always execute.
 
@@ -665,8 +666,10 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   passes the parsed scene directly to the canonical builder
   (`store.build.build_document_tree`), whose fixed edge classes govern every
   compiled document; it does not construct a discarded Python compound or
-  calculate source-only adaptive metadata. Generated models, annotated re-emits
-  and public `read_step` geometry retain their existing preparation paths.
+  classify its edges. A generated model's and an annotated re-emit's tree is
+  built from a compound (`build_tree_from_compound`) and classifies its edges
+  from the topology it walks; public `read_step` geometry keeps its
+  preparation.
   Compilation leaves the STEP and its sidecar untouched; declaration consumers
   retain their normal binding and schema checks. It verifies indexed component
   objects before reuse and derives failed entries again; a known damaged
@@ -2137,15 +2140,11 @@ may be packaged as exact links after their frame exits; a different active
 frame cannot adopt them. A later packaging/native consumer verifies its pin
 again, and final publication still validates the entire required disk closure.
 
-The internal source publisher can read these links through a private scene
-adapter without constructing the initial XCAF document. It decodes each distinct
-geometry once for that scene and retains separate occurrence/prototype keys so
-adaptive topology counts stay unchanged. Ordinary STEP preparation owns its
-own private native document. No native object is retained across builds or
-shared with an independent authored consumer, and the saved STEP is written
-from the published tree, never from these adapters. This is a constructor
-optimization within the
-existing object/index model, not a second assembly store.
+No build constructs an XCAF document of its result: a result's tree is built
+from the compound the body returned, its edge classes from that walk (§3),
+and the saved STEP is written from the published tree by the pool. No native
+object is retained across builds or shared with an independent authored
+consumer.
 
 Every called child still owes all declared outputs, including a call whose
 geometry was discarded. A parent publishes its complete source result and

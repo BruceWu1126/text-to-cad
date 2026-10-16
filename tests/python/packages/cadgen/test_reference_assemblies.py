@@ -334,32 +334,6 @@ class ReferenceAssemblies(unittest.TestCase):
                 results.append((volume, build_tree_from_compound(shape, root_name="assembly")[1]))
         self.assertEqual(results[0], results[1])
 
-    def test_source_scene_matches_eager_adaptive_hints_and_nested_appearance(self):
-        from cadgen.step_export import build_build123d_step_scene
-        from cadgen._internal.step_scene_mesh import _scene_mesh_resolution_hints, scene_leaf_occurrences
-
-        red, blue = bd.Solid.make_box(3, 4, 5), bd.Solid.make_torus(7, 1)
-        red.label, red.color = "red", "red"
-        blue.label, blue.color = "blue", "blue"
-        nested_tree = build_tree_from_compound(bd.Compound(children=[
-            bd.Compound(children=[red], label="group"),
-            blue.moved(bd.Location((20, 0, 0), (13, 21, 34))),
-        ], label="nested"), root_name="nested")[0]
-        with building(None) as frame:
-            children = [self.child(frame, i, nested_tree).moved(bd.Location((i * 30, 0, 0), (5, 9, 17)))
-                        for i in range(3)]
-            shape = bd.Compound(children=children, label="nested", color="green")
-        fast = _references.source_scene(shape, self.root / "nested.step")
-        self.assertIsNotNone(fast)
-        self.assertTrue(all(not child._forced for child in children))
-        eager = build_build123d_step_scene(shape, self.root / "nested.step")
-        self.assertEqual(_scene_mesh_resolution_hints(fast), _scene_mesh_resolution_hints(eager))
-
-        def rows(scene):
-            return [(node.path, node.name, tuple(round(v, 12) for v in node.transform), node.color)
-                    for node in scene_leaf_occurrences(scene)]
-        self.assertEqual(rows(fast), rows(eager))
-
     def test_reference_scene_opt_in_does_not_change_native_generator_reader(self):
         from cadgen._internal.generation_runner import _write_shape_step_payload
         from cadgen.cli_logging import CliLogger
@@ -372,8 +346,9 @@ class ReferenceAssemblies(unittest.TestCase):
             scene = _write_shape_step_payload({"shape": shape}, output_path=self.root / "assembly.step",
                                               script_path=script, logger=CliLogger("test"),
                                               defer_reference_scene=enabled)
-            self.assertTrue(scene.roots and scene.prototype_shapes)
-            self.assertEqual(all(not child._forced for child in children), enabled)
+            self.assertIs(scene.source_compound, shape)
+            # The reader assembles no document of the result, so it forces no child either way.
+            self.assertTrue(all(not child._forced for child in children))
             self.assertEqual(scene.source_kind, "python")
 
     def test_queued_child_resolution_keeps_order_and_yields_without_native_work(self):
@@ -419,11 +394,9 @@ class ReferenceAssemblies(unittest.TestCase):
         for enabled in (False, True):
             remove_record(parent)
             with mock.patch.object(_references, "_ENABLED", enabled), \
-                    mock.patch.object(generation_runner, "build_build123d_step_scene", wraps=generation_runner.build_build123d_step_scene) as xcaf, \
                     mock.patch.object(lazy_module, "_materialize_tree", wraps=lazy_module._materialize_tree) as reconstructed, \
                     contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 self.assertEqual(run_model_argv([str(parent), "--json"]), 0, output.getvalue())
-                self.assertEqual(xcaf.call_count, 0 if enabled else 1)
                 self.assertEqual(reconstructed.call_count, 0 if enabled else 2)
             results.append((read_record(parent)["tree"], (self.root / "parent.step").read_bytes(),
                             (self.root / "parent.step.json").read_bytes()))

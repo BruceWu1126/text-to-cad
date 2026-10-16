@@ -11,8 +11,8 @@ add_repo_path("packages/cadgen/src")
 
 from build123d import Box, Compound, Location, Solid  # noqa: E402
 
-from cadgen.step_export import build_build123d_step_scene  # noqa: E402
-from cadgen._internal.step_scene_loader import _normalize_label_name  # noqa: E402
+from cadgen.step_export import _create_bin_xcaf_doc  # noqa: E402
+from cadgen._internal.step_scene_loader import _load_occurrence_tree_from_xcaf_doc, _normalize_label_name  # noqa: E402
 
 
 class UnnamedLabelSceneTests(unittest.TestCase):
@@ -30,8 +30,10 @@ class UnnamedLabelSceneTests(unittest.TestCase):
     """
 
     def _build(self, shape):
+        """The reader's walk of the XCAF document of ``shape``, as the writer assembles it:
+        the one place the labels' names are read."""
         with tempfile.TemporaryDirectory() as directory:
-            return build_build123d_step_scene(shape, Path(directory) / "scene.step")
+            return _load_occurrence_tree_from_xcaf_doc(Path(directory) / "scene.step", _create_bin_xcaf_doc(shape))
 
     def _grid(self, count: int):
         return [Location((index * 30.0, 0.0, 0.0)) * Box(20, 20, 10) for index in range(count)]

@@ -20,7 +20,7 @@ from cadgen._internal.step_names import (
     write_names,
 )
 from cadgen._internal.step_placements import readable_placement
-from cadgen._internal.step_scene import LoadedStepScene, load_step_scene_from_xcaf_doc, step_file_hash
+from cadgen._internal.step_scene import step_file_hash
 
 
 def create_bin_xcaf_doc() -> Any:
@@ -1384,22 +1384,6 @@ def write_xcaf_doc_step_file(
         _respell_names_in_file(output_path)
     replace_atomic(output_path, final_path)
     return step_file_hash(final_path)
-
-
-def build_build123d_step_scene(
-    to_export: Any,
-    output_path: Path,
-    *,
-    source_kind: str = "step",
-    source_hash: str | None = None,
-) -> LoadedStepScene:
-    doc = _create_bin_xcaf_doc(to_export)
-    return load_step_scene_from_xcaf_doc(
-        output_path,
-        doc,
-        source_kind=source_kind,
-        source_hash=source_hash,
-    )
 
 
 #: The STEP writer's own version, recorded with every file a build saves (a record's

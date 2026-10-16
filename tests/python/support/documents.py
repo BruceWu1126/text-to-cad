@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 
 def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, names: bool = True,
-              namer: Any = None, materials: object = None, extra: Mapping[str, Any] | None = None,
+              namer: Any = None, materials: object = None,
               children: Mapping[str, Any] | None = None) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """Save ``shape`` to ``path`` as a model's build saves its STEP
     (``_internal/generation.py``): its result tree published
@@ -32,7 +32,7 @@ def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, na
 
     live: dict[str, Any] = {}
     tree_hash, tree, stats = build_tree_from_compound(shape, root_name=root_name, force=force, namer=namer,
-                                                     materials=materials, extra=dict(extra or {}), live=live)
+                                                     materials=materials, live=live)
     export = export_step(tree_hash, Path(path), names=names, shapes=live,
                          children=None if children is None else {
                              child: {"path": str(step.path), "sha256": step.step_hash} for child, step in children.items()})

@@ -790,7 +790,8 @@ class CadGenerationTests(unittest.TestCase):
 
         self.assertIsNotNone(observed_scene)
         self.assertEqual(step_path.resolve(), observed_scene.step_path)
-        self.assertIsNotNone(observed_scene.doc)
+        # The run's shape, which the tree is built from: no document of it is assembled.
+        self.assertIsNotNone(observed_scene.source_compound)
         self.assertEqual("python", observed_scene.source_kind)
         self.assertEqual(cad_generation.python_source_hash(script_path).source_hash, observed_scene.source_hash)
         # gen_step writes no STEP, so there is no on-disk STEP to hash.
