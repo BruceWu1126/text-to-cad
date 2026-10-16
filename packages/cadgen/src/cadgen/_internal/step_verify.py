@@ -36,6 +36,11 @@ holds them in a curve set, so they carry no name. An edge a face bounds has no p
 own to check, and its face is checked instead; one no face bounds (a free wire's) answers
 for its body alone, by its place. Every other name must be in the file.
 
+A degenerate edge -- a point where a face's boundary passes a singular point of its surface,
+with no curve of its own -- has no place and carries no name in any file, and a reader's
+healing adds one where the result's face has none (a fillet's corner patch gains them): on
+neither side is one counted or paired, and its faces answer for it.
+
 A file written without names (``names=False``: it claims no part and no element) is
 verified by its occurrences alone: each holds a component with the faces and edges of the
 part the result places there, paired by place, drawn in the result's colours.
@@ -68,11 +73,11 @@ _SHOWN = 5
 class ExpectedComponent:
     """One component of the result: what it is named by (``names.part``, its part key, is
     how the file's component is found); the tight box of each of its faces and edges by the
-    ordinals its names count by (None for one that bounds nothing, as a degenerate edge);
-    its own face colours by face ordinal (``faceColors``); each face's and edge's own
-    tolerance (none given, none allowed); the ordinals of the edges no file can name
-    (``step_names.unnameable``) and of those no face bounds. :func:`expected_component`
-    measures all of it from the component's shape."""
+    ordinals its names count by (None for one that bounds nothing); its own face colours by
+    face ordinal (``faceColors``); each face's and edge's own tolerance (none given, none
+    allowed); the ordinals of the edges no file can name (``step_names.unnameable``), of
+    those no face bounds and of the degenerate ones. :func:`expected_component` measures all
+    of it from the component's shape."""
 
     names: ComponentNames
     face_boxes: tuple[Box | None, ...]
@@ -82,6 +87,7 @@ class ExpectedComponent:
     edge_tolerances: tuple[float, ...] = ()
     unnameable_edges: frozenset[int] = frozenset()
     faceless_edges: frozenset[int] = frozenset()
+    degenerate_edges: frozenset[int] = frozenset()
     # The component's shape, from which an element its box puts off its place is measured
     # again (:func:`measured_again`); None, not measured again.
     shape: Any = field(default=None, compare=False, repr=False)
@@ -111,7 +117,8 @@ def expected_component(shape: Any, names: ComponentNames, face_colors: Mapping[A
     return ExpectedComponent(names=names, face_boxes=face_boxes(shape), edge_boxes=edge_boxes(shape),
                              face_colors=dict(face_colors or {}), face_tolerances=face_tolerances,
                              edge_tolerances=edge_tolerances, unnameable_edges=edges,
-                             faceless_edges=faceless_edges(shape), shape=shape)
+                             faceless_edges=faceless_edges(shape), degenerate_edges=degenerate_edges(shape),
+                             shape=shape)
 
 
 def faceless_edges(shape: Any) -> frozenset[int]:
@@ -132,6 +139,21 @@ def faceless_edges(shape: Any) -> frozenset[int]:
             explorer.Next()
         faces.Next()
     return frozenset(set(range(1, edges.Extent() + 1)) - bounding)
+
+
+def degenerate_edges(shape: Any) -> frozenset[int]:
+    """The ordinals of the degenerate edges of the unlocated component ``shape`` -- each a
+    point, with no curve of its own -- in ``TopExp.MapShapes_s`` order."""
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp
+    from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    edges = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_EDGE, edges)
+    return frozenset(ordinal for ordinal in range(1, edges.Extent() + 1)
+                     if BRep_Tool.Degenerated_s(TopoDS.Edge_s(edges.FindKey(ordinal))))
 
 
 def face_boxes(shape: Any) -> tuple[Box | None, ...]:
@@ -422,20 +444,26 @@ def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent
     display = max(_FLOOR, _display_tolerance([*component.face_boxes, *component.edge_boxes]),
                   _display_tolerance([*read_faces, *read_edges]))
     differences: list[str] = []
-    for kind, read, wanted in (("face", read_faces, component.face_boxes), ("edge", read_edges, component.edge_boxes)):
-        if len(read) != len(wanted):
-            differences.append(f"the file has {len(read)} {kind}s where the result has {len(wanted)}")
+    # A degenerate edge is a point, which neither side counts or pairs: its faces answer for it.
+    read_points = {ordinal - 1 for ordinal in degenerate_edges(shape)}
+    wanted_points = {ordinal - 1 for ordinal in component.degenerate_edges}
+    for kind, read, wanted, read_skipped, wanted_skipped in (
+            ("face", read_faces, component.face_boxes, set(), set()),
+            ("edge", read_edges, component.edge_boxes, read_points, wanted_points)):
+        if len(read) - len(read_skipped) != len(wanted) - len(wanted_skipped):
+            differences.append(f"the file has {len(read) - len(read_skipped)} {kind}s where the result has "
+                               f"{len(wanted) - len(wanted_skipped)}")
 
     pairs = {}
     unnameable = {ordinal - 1 for ordinal in component.unnameable_edges}
     # An edge no file names that a face bounds is checked through its face; one no face
     # bounds answers for its body by its place.
     through_faces = {ordinal - 1 for ordinal in component.unnameable_edges - component.faceless_edges}
-    for kind, read, wanted, read_given, wanted_given, own, unnamed, skipped in (
+    for kind, read, wanted, read_given, wanted_given, own, unnamed, skipped, ignored in (
             ("face", read_faces, component.face_boxes, names.faces, component.names.faces, component.face_tolerances,
-             set(), set()),
+             set(), set(), set()),
             ("edge", read_edges, component.edge_boxes, names.edges, component.names.edges, component.edge_tolerances,
-             unnameable, through_faces)):
+             unnameable, through_faces | wanted_points, read_points)):
         read_names = _by_ordinal(read_given if named else (), len(read))
         expected_names = _by_ordinal(wanted_given if named else (), len(wanted))
         excused = {expected_names[index] for index in unnamed if index < len(expected_names)} - {None}
@@ -443,7 +471,7 @@ def _differences(shape: Any, names: ComponentNames, component: ExpectedComponent
         bounds = [display + (own[index] if index < len(own) else 0.0) for index in range(len(wanted))]
         again = (_again(shape, kind), _again(component.shape, kind)) if component.shape is not None else None
         pairs[kind] = _paired(kind, read_names, read, expected_names, wanted, bounds, display, differences, skipped,
-                              again)
+                              again, ignored=ignored)
     return differences, pairs["face"]
 
 
@@ -469,16 +497,17 @@ def _again(shape: Any, kind: str) -> Callable[[int], Box | None]:
 def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | None, ...],
             expected_names: list[str | None], expected_boxes: tuple[Box | None, ...], bounds: list[float],
             display: float, differences: list[str], skipped: set[int],
-            again: tuple[Callable[[int], Box | None], Callable[[int], Box | None]] | None = None
-            ) -> dict[int, int]:
+            again: tuple[Callable[[int], Box | None], Callable[[int], Box | None]] | None = None, *,
+            ignored: set[int] = frozenset()) -> dict[int, int]:
     """Pair the result's elements of ``kind`` with the file's -- by a name on one element of
     each, the rest by place -- and add to ``differences`` the named ones off their place (by
     more than their ``bounds``, the display tolerance ``display`` and their own) and the
     number no place pairs. ``again`` measures an element of the file's and of the result's
     again (by index): one its box puts off its place, or leaves without a counterpart, is
     compared by those. The result's elements at ``skipped`` (edges no file can name that a
-    face bounds) are not paired: their faces answer for them. The pairs, from the result's
-    index to the file's."""
+    face bounds, and degenerate ones) are not paired, nor the file's at ``ignored`` (its
+    degenerate edges): their faces answer for them. The pairs, from the result's index to
+    the file's."""
     counted = Counter(name for name in read_names if name is not None)
     at = {name: index for index, name in enumerate(read_names) if name is not None and counted[name] == 1}
     pairs: dict[int, int] = {}
@@ -496,7 +525,7 @@ def _paired(kind: str, read_names: list[str | None], read_boxes: tuple[Box | Non
         differences.append(f"{kind}s off their place by more than {display:.3g} and their own tolerance: "
                            f"{_listed(moved)}")
     rest_expected = [index for index in range(len(expected_boxes)) if index not in pairs and index not in skipped]
-    rest_read = [index for index in range(len(read_boxes)) if index not in taken]
+    rest_read = [index for index in range(len(read_boxes)) if index not in taken and index not in ignored]
     matched = _by_place([expected_boxes[index] for index in rest_expected],
                         [read_boxes[index] for index in rest_read], [bounds[index] for index in rest_expected])
     pairs.update((rest_expected[a], rest_read[b]) for a, b in matched.items())

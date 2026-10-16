@@ -697,7 +697,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   by token, each holding the tree's part (by its key, or, in a plain file, by
   occurrence); every part's faces and edges by name and place, within the
   display chord tolerance of the part and each element's own tolerance (a body
-  without faces by its edges' places); and the colour each face is drawn in. A
+  without faces by its edges' places; a degenerate edge, a point a reader's
+  healing may add, by neither side); and the colour each face is drawn in. A
   place is a tight box, the kernel's search for each extreme, which can stop
   short of one it straddles on one of two equal surfaces: an element its box
   puts off its place is measured again on both sides, the search cut finer,

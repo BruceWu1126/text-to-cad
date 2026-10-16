@@ -210,6 +210,41 @@ class VerifyStepTest(unittest.TestCase):
         unnamed = dataclasses.replace(component, names=ComponentNames(part=_KEYS["ball"]))
         self.assertEqual(verify_step(keyed, [unnamed]), [])
 
+    def test_a_degenerate_edge_a_reader_adds_is_no_difference(self) -> None:
+        """A reader's healing gives a fillet's corner patches degenerate edges the result's
+        faces have none of: points, with no place and no name, which neither side counts or
+        pairs -- whether names pair the other edges or their places do."""
+        import build123d as bd
+
+        from cadgen._internal.step_names import ComponentNames
+        from cadgen._internal.step_scene_loader import load_step_scene
+        from cadgen._internal.step_verify import degenerate_edges, verify_step
+        from cadgen.step_export import export_build123d_step_file
+
+        # A twisted blade lofted through three sections, trimmed by a hub and filleted along
+        # every edge that is not flat.
+        sections = [
+            [(11.1171, 22.9968, 29.65), (10.4829, -8.4968, 2.45), (10.4829, -8.4968, -0.35), (11.1171, 22.9968, 26.85)],
+            [(43.4823, 17.5098, 23.3467), (35.3177, -12.9136, 7.3533), (35.3177, -12.9136, 4.5533),
+             (43.4823, 17.5098, 20.5467)],
+            [(73.7461, 7.4144, 18.15), (62.2539, -21.9144, 11.15), (62.2539, -21.9144, 8.35), (73.7461, 7.4144, 15.35)],
+        ]
+        body = bd.loft([bd.Face.make_surface(bd.Wire.make_polygon(points, close=True)) for points in sections])
+        body -= bd.Pos(0, 0, -45) * bd.Cylinder(29, 120, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        blade = bd.fillet([edge for edge in body.edges() if min(edge.bounding_box().size) > 0.2], radius=0.55)
+        blade.label = "blade"
+        component = _expected(blade, "blade", _KEYS["ball"])
+        named = Path(self._tmp.name) / "blade.step"
+        export_build123d_step_file(blade, named, names=lambda leaf: component.names)
+        ((_key, read),) = load_step_scene(named).prototype_shapes.items()
+        self.assertFalse(component.degenerate_edges)
+        self.assertTrue(degenerate_edges(read), "the premise: the reader adds degenerate edges")
+        self.assertEqual(verify_step(named, [component]), [])
+        keyed = Path(self._tmp.name) / "blade-keyed.step"
+        export_build123d_step_file(blade, keyed, names=lambda leaf: ComponentNames(part=_KEYS["ball"]))
+        self.assertEqual(verify_step(keyed, [dataclasses.replace(component, names=ComponentNames(part=_KEYS["ball"]))]),
+                         [])
+
     def test_a_face_is_drawn_in_the_results_colour(self) -> None:
         bracket = self.components["bracket"]
         coloured = dataclasses.replace(bracket, face_colors={"1": (1.0, 0.0, 0.0, 1.0)})
