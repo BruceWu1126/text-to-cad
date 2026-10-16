@@ -98,8 +98,9 @@ class RetainedRevisionPublication(unittest.TestCase):
         return spec, scene, target, original_pair, float(parent.volume)
 
     def _run_with_export_fault(self, fault):
-        """Publish the parent with ``fault`` run as its export starts: after its result,
-        record and pins are published and before anything is written from them."""
+        """Publish the parent with ``fault`` run as its export starts: after its result is
+        published and claimed, while the build writes its record, and before anything is
+        written from it."""
         import build123d as bd
 
         from cadgen._internal import generation
@@ -168,7 +169,8 @@ class RetainedRevisionPublication(unittest.TestCase):
             delete()
 
         target = self.root / "parent.step"
-        with self.assertRaises(FileNotFoundError):
+        # The export finds the geometry gone, or the build does before it names it in a record.
+        with self.assertRaises((FileNotFoundError, RuntimeError)):
             self._run_with_export_fault(replace_child_then_delete)
         # The pinned geometry is gone: nothing was written from it, and the saved file stays.
         self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), self.original)
