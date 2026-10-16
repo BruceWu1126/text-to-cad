@@ -4,28 +4,27 @@ mesh (a GLB body, ``cadgen.store.meshes``) and the selector table
 and read back.
 
 A part is a component under one producer, the kernel that derives it. Its key,
-``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes the
-component's geometric identity -- its **fingerprint** (``_internal/geometry_fingerprint``,
-README law 20), its intrinsic face colours keyed by face token, and the producer; never
-its ``contentHash``, so the body a build holds and the same body read back from the STEP
-it wrote (different bytes, one fingerprint) are one part. An eager-only component, whose
-bytes cannot stand for its shape, hashes its pinned topology facts in place of a
-fingerprint, its colours by ordinal. The version is bumped by any change to the
-extractor, the selector table, the mesher, the GLB payload or the
-fingerprint scheme, or in how the digest is hashed.
+``index/part/<digest>-v<PART_VERSION>``, carries no tolerance: the digest hashes what
+made the component -- its **construction key** (``_internal/kernel_memo``, README law 20),
+or, for geometry no construction of a run made, its ``contentHash`` -- with the lineage
+object that names its elements, its intrinsic face colours and the producer. So a
+component a run remakes with the same construction is the same part however its bytes
+fall, and the same body under another name is another part: a part's selector table
+carries its elements' names. The version is bumped by any change to the extractor, the
+selector table, the mesher, the GLB payload or the geometric token scheme, or in how the
+digest is hashed.
 The record is ``{"glb": {...}, "selectors": {...}}``: each object's address and byte
 length and what a reader sizes it by without opening it -- the mesh's decoded-bytes
 estimate and counts (and ``unmeshedFaceCount`` when a face could not be meshed), the
 table's counts. One probe answers whether a part's display data is stored.
 
 Derivation extracts the component's topology facts in memory (an eager-only component's
-are the object its tree pins), builds the selector table from them, meshes the component
-from the table and its face colours, writes the two objects and then the record, so a
-record always names complete objects. Nothing stores the facts. The table's ordinals are
-the derived decode's: the part of a body and its read-back is one, its stored table lists
-the elements of whichever derived it. A mesh export at another tolerance therefore builds
-the table for the bytes it decodes, the same way, and stores nothing (``mesh_at``): its
-mesh is the decode's and the tolerance's, whichever body derived the part (README law 5).
+are the object its tree pins), builds the selector table from them and the component's
+element names -- its lineage's, and the geometric token of each element no lineage names
+(``_internal/geometric_tokens``) -- meshes the component from the table and its face
+colours, writes the two objects and then the record, so a record always names complete
+objects. Nothing stores the facts. A mesh export at another tolerance builds the table for
+the bytes it decodes, the same way, and stores nothing (``mesh_at``).
 """
 from __future__ import annotations
 
@@ -49,10 +48,11 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # 4 and 5: two tessellators of cadgen's own that never shipped (a grid over each face's
 # parameters, in Python and then as a native library), retired before a release: a part at
 # either key is swept like any obsolete one.
-# 6: a part is keyed by its component's geometry fingerprint, not its bytes, and its selector
-# table names every face, edge and vertex by a geometric token (README law 20): every part has
-# a new key and a new table, and its mesh is version 3's mesher's.
-PART_VERSION = 6
+# 6: a part keyed by its component's geometry fingerprint, its table naming every element by a
+# geometric token. 7: a part is keyed by its component's construction key (or its content, for
+# geometry no construction made) and lineage, and its selector table names every element by its
+# lineage, or its geometric token where it has none (README law 20).
+PART_VERSION = 7
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -155,29 +155,15 @@ def part_key(entry: dict, producer: dict) -> str:
     return _part_key(entry, producer_key(producer))
 
 
-def geometric_key_material(entry: dict) -> tuple[str, dict]:
-    """What names ``entry``'s part geometrically: its fingerprint (an eager-only
-    component's: the object its topology facts are pinned as) and its intrinsic
-    face colours keyed by face token (by ordinal for an eager-only component,
-    whose tokens are its facts')."""
-    from cadgen._internal.component_package import _normalized_face_colors
-
-    colors = _normalized_face_colors(entry.get("faceColors"))
-    if entry.get("kind") == "eager-only":
-        return f"topology:{entry['topology']}", {str(ordinal): list(color) for ordinal, color in colors.items()}
-    tokens = {str(ordinal): token for ordinal, token in (entry.get("faceTokens") or {}).items()}
-    if set(tokens) != {str(ordinal) for ordinal in colors}:
-        raise ValueError("a part's face colours need the tokens of the faces they colour")
-    return f"fingerprint:{entry['fingerprint']}", {tokens[str(ordinal)]: list(color) for ordinal, color in colors.items()}
-
-
 def _part_key(entry: dict, producer: str) -> str:
-    """``part_key`` under the producer whose key is ``producer``."""
-    from cadgen._internal.component_package import canonical_json_bytes
+    """``part_key`` under the producer whose key is ``producer``: what made the component
+    (its construction key, else its content), its lineage, its face colours."""
+    from cadgen._internal.component_package import _normalized_face_colors, canonical_json_bytes
 
-    identity, colors = geometric_key_material(entry)
-    digest = hashlib.sha256(b"cadgen-part\0" + identity.encode() + b"\0" + canonical_json_bytes(colors) + b"\0"
-                            + producer.encode()).hexdigest()
+    made = f"construction:{entry['construction']}" if entry.get("construction") else f"content:{entry['contentHash']}"
+    colors = {str(ordinal): list(color) for ordinal, color in _normalized_face_colors(entry.get("faceColors")).items()}
+    digest = hashlib.sha256(b"cadgen-part\0" + made.encode() + b"\0" + str(entry.get("lineage") or "").encode()
+                            + b"\0" + canonical_json_bytes(colors) + b"\0" + producer.encode()).hexdigest()
     return versioned_key(digest, PART_VERSION)
 
 
@@ -222,12 +208,9 @@ def geometry_entry(view_entry: dict) -> dict:
     """The canonical tree entry behind a view's component (``view_from_geometry``)."""
     entry = {"kind": view_entry["kind"], "codec": view_entry["codec"], "brep": view_entry["brepObject"],
              "faceColors": view_entry["faceColors"], "contentHash": view_entry["contentHash"]}
-    if view_entry["kind"] == "eager-only":
-        entry["topology"] = view_entry["topology"]
-    else:
-        entry["fingerprint"] = view_entry["fingerprint"]
-        if view_entry.get("faceTokens"):
-            entry["faceTokens"] = view_entry["faceTokens"]
+    for field in ("topology", "construction", "lineage"):
+        if view_entry.get(field):
+            entry[field] = view_entry[field]
     return entry
 
 
@@ -327,11 +310,11 @@ def stored_unmeshed_faces(key: str) -> list[int]:
 
 def unmeshed_face_names(key: str, ordinals: list[int]) -> list[str]:
     """The faces ``ordinals`` of the part's table as a reader names them: each face's
-    token (``f:…``, the ref a person pastes), read off the part's stored selector table;
+    name (``f:…``, the ref a person pastes), read off the part's stored selector table;
     ``face <ordinal>`` for a face the table does not hold or when the table does not read."""
     from cadgen._internal.selector_table import read_selector_table
 
-    tokens: dict[int, str] = {}
+    names: dict[int, str] = {}
     payload = read(key, "selectors") if valid_key(key) else None
     if payload is not None:
         try:
@@ -340,9 +323,9 @@ def unmeshed_face_names(key: str, ordinals: list[int]) -> list[str]:
             table = None
         if table is not None:
             columns = table["tables"]["faceColumns"]
-            token_at, ordinal_at = columns.index("token"), columns.index("ordinal")
-            tokens = {int(row[ordinal_at]): str(row[token_at]) for row in table["faces"]}
-    return [tokens.get(int(ordinal), f"face {ordinal}") for ordinal in ordinals]
+            name_at, ordinal_at = columns.index("name"), columns.index("ordinal")
+            names = {int(row[ordinal_at]): str(row[name_at]) for row in table["faces"]}
+    return [names.get(int(ordinal), f"face {ordinal}") for ordinal in ordinals]
 
 
 def _write(key: str, glb: bytes, table: bytes) -> dict:
@@ -401,15 +384,24 @@ def _topology(entry: dict, topods: Any) -> dict:
 
 
 def _table(entry: dict, topods: Any) -> dict:
-    """The component's selector table, built for this decode: its facts and its geometric
-    identity, whose element tokens are minted from the decode (for a native component the
-    tokens the build's entry names: one geometry, one scheme) and whose ordinals are the
-    decode's own. The faces and edges are measured once per component per process, for
-    the facts and the identity together (``topology_extract.component_metrics``)."""
-    from cadgen._internal.geometry_fingerprint import geometry_identity
+    """The component's selector table, built for this decode: its facts and its elements'
+    names (:func:`element_names`)."""
     from cadgen._internal.selector_table import build_selector_table
 
-    return build_selector_table(topods, _topology(entry, topods), geometry_identity(topods, brep=entry["brep"]))
+    return build_selector_table(topods, _topology(entry, topods), element_names(entry, topods))
+
+
+def element_names(entry: dict, topods: Any) -> dict[str, list[str]]:
+    """Every face's, edge's and vertex's name in a decode of the component ``entry``
+    describes, by ordinal: its lineage's (the object the entry names, read verified),
+    and the geometric token of each element no lineage names (``geometric_tokens``,
+    measured once per component per process with the topology facts:
+    ``topology_extract.component_metrics``)."""
+    from cadgen._internal import geometric_tokens
+    from cadgen._internal.component_package import read_lineage
+
+    lineage = read_lineage(read_verified_object(entry["lineage"])) if entry.get("lineage") else None
+    return geometric_tokens.element_names(lineage, topods, brep=entry["brep"])
 
 
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
@@ -438,10 +430,8 @@ def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
     tree entry. The mesher reads what the display mesh's read -- a selector table and the
     component's face colours -- with the table built here for the bytes it decodes, as a
-    derivation builds it: the stored table may be another decode's of the same part (the
-    body a build held, where this is its read-back: law 20), listing the elements in
-    another order, and a mesh of these bytes at this tolerance is the same whichever body
-    derived the part (law 5)."""
+    derivation builds it, so the export is the same whether or not the store holds the
+    part (law 5)."""
     from cadgen._internal.tessellate import mesh_component
 
     with _meshing():

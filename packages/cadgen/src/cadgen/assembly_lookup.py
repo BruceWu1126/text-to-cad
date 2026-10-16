@@ -8,14 +8,14 @@ An assembly is described by two artifacts that answer different questions:
   the user when they click a part.
 * each component's selector table -- ``components/<cid>.selectors.json``, one of its part's
   two objects (``_internal/selector_table``, ``store.parts``) and the same table the CAD Viewer
-  reads. It knows the component's own topology: every face, edge and vertex with its token
+  reads. It knows the component's own topology: every face, edge and vertex with its name
   (``f:…``, ``e:…``, ``v:…``), its facts and its adjacency, placed nowhere.
 
 This module composes the two: for each occurrence, its component's rows placed into world
-coordinates and keyed by ``<occurrence token>/<element token>`` -- the one composition rule,
+coordinates and keyed by ``<occurrence token>/<element name>`` -- the one composition rule,
 which the page applies to the same table (``selectors/runtime.js``). So a ref the viewer shows
 resolves here to the entity it names there, and a ref copied from a build's preview resolves
-against the saved document: the tokens are the same (README law 20).
+against the saved document: the saved document's components are the preview's (README law 20).
 
 Coordinates are WORLD AT REST: occurrence transforms applied, parameter-sidecar poses not.
 That is the frame the viewer shows when the ref is picked and the frame ``snapshot --mode list``
@@ -346,8 +346,8 @@ def merge_assembly_entities(
     """Add each occurrence's faces, edges and vertices, placed into world coordinates.
 
     This is what makes a ref picked in the viewer measurable: ``#o:…/f:…`` is the face of that
-    occurrence's component whose token that is. Every element row is keyed by
-    ``<occurrence token>/<element token>`` and carries ``occurrenceId`` (the occurrence that
+    occurrence's component whose name that is. Every element row is keyed by
+    ``<occurrence token>/<element name>`` and carries ``occurrenceId`` (the occurrence that
     places it) and ``shapeId`` (the occurrence's solid, by the component's own ordinal);
     its range columns (``faceStart``, ``edgeCount``, ...) are copied as the component's table
     wrote them: they index that table, and nothing here reads them. The shapes of every
@@ -389,11 +389,11 @@ def merge_assembly_entities(
         for kind, rows, by_id in (("faces", faces, face_by_id), ("edges", edges, edge_by_id),
                                   ("vertices", vertices, vertex_by_id)):
             for row in component_rows[kind]:
-                token = str(row.get("token") or "").strip()
-                if not token:
+                name = str(row.get("name") or "").strip()
+                if not name:
                     continue
                 placed = _place_entity_row(matrix, row)
-                placed["id"] = element_ref(occurrence_id, token)
+                placed["id"] = element_ref(occurrence_id, name)
                 placed["occurrenceId"] = occurrence_id
                 placed["shapeId"] = f"{occurrence_id}#{row.get('shape')}"
                 rows.append(placed)

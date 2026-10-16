@@ -7,8 +7,8 @@ oriented normal, its analytic parameters and its loops as ordered edge
 ordinals; each edge's visibility class, continuity, dihedral angle, flags,
 adjacent faces, exact length, centroid, tight box, curve type, analytic
 parameters and, for a circle, its sweep. Face and edge ordinals are the
-``TopExp.MapShapes_s`` order the selector table joins a ref's element token to
-(``geometry_fingerprint``), and the component's mesh (``tessellate``) is
+``TopExp.MapShapes_s`` order the selector table joins an element's name to
+(``store.parts.element_names``), and the component's mesh (``tessellate``) is
 grouped by the same ordinals.
 
 ``extract_topology_facts`` returns them in memory as a plain structure -- the
@@ -119,9 +119,9 @@ def _bnd_box(topo) -> list[float] | None:
 
 # The exact metrics of a component's faces and edges -- the kernel's integrals and tight
 # boxes, most of what a table costs -- remembered per component in this process, so that
-# a build which fingerprints a component (``geometry_fingerprint``) and derives its part
-# (``store.parts``) in one worker measures each face and edge once. Keyed by the
-# component's BREP object, which both read the same decode of; memory only, bounded.
+# a part's derivation (``store.parts``), whose selector table and whose elements' geometric
+# tokens (``geometric_tokens``) both read them, measures each face and edge once. Keyed by
+# the component's BREP object, which both read the same decode of; memory only, bounded.
 # Each entry: the faces' metrics, the edges' integrals, and whether the edges' boxes --
 # which only the table reads -- have been measured and added to the edges' metrics.
 _METRICS_MEMO: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -133,11 +133,11 @@ def component_metrics(shape, *, brep: str | None = None, edge_boxes: bool = Fals
     """Each face's ``area``, ``center`` and tight ``bbox`` and each edge's ``length`` and
     ``center`` -- and, with ``edge_boxes``, each edge's tight ``bbox`` -- of the unlocated
     component ``shape``, in ``TopExp.MapShapes_s`` order; a key a measurement failed is
-    absent. The geometric identity reads the faces and the edges' integrals; the selector
+    absent. The geometric tokens read the faces and the edges' integrals; the selector
     table reads everything. ``brep``, the component's BREP object hash, keys the process
     memo: the measurements an earlier caller took of the same component are returned, the
     edges' boxes are added to them the first time a caller asks (so a component only ever
-    fingerprinted is never boxed edge by edge), and None measures without the memo."""
+    named by tokens is never boxed edge by edge), and None measures without the memo."""
     remembered = _remembered(brep)
     if remembered is None:
         face_map, edge_map = _element_maps(shape)

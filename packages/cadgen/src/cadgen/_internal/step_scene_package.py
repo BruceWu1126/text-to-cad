@@ -212,8 +212,11 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
     if not isinstance(components, dict) or not isinstance(occurrences, list) or not occurrences:
         return None
 
+    from cadgen._internal.component_package import read_lineage
+
     prototype_shapes: dict[int, Any] = {}
     prototype_names: dict[int, str | None] = {}
+    prototype_identity: dict[int, tuple[str | None, dict[str, Any] | None]] = {}
     prototype_colors: dict[int, ColorRGBA] = {}
     prototype_face_colors: dict[int, dict[int, ColorRGBA]] = {}
     key_by_cid: dict[str, int] = {}
@@ -235,6 +238,9 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
             key = _shape_hash(shape)
             prototype_shapes[key] = shape
         key_by_cid[str(cid)] = key
+        if entry.get("construction") or entry.get("lineage"):
+            prototype_identity[key] = (entry.get("construction"),
+                                       read_lineage(captured[entry["lineage"]]) if entry.get("lineage") else None)
         color = entry.get("color")
         if isinstance(color, list) and len(color) == 4:
             prototype_colors[key] = tuple(float(c) for c in color)
@@ -317,6 +323,7 @@ def _readback_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: 
         prototype_names=prototype_names,
         prototype_colors=prototype_colors,
         prototype_face_colors=prototype_face_colors,
+        prototype_identity=prototype_identity,
         step_hash=step_hash,
         source_kind="step",
     )

@@ -1,7 +1,7 @@
 """The selector index: every row a ref can resolve to, keyed by the ref that names it.
 
 An occurrence row is keyed by its token (``o:…``); a face, edge or vertex row by
-``<occurrence token>/<element token>``, the one composition rule
+``<occurrence token>/<element name>``, the one composition rule
 (``cad_ref_syntax.element_ref``). The rows come from the tree and the parts'
 selector tables (``assembly_lookup``); nothing here mints a name.
 """
@@ -38,7 +38,7 @@ class SelectorIndex:
     face_by_id: dict[str, dict[str, Any]]
     edge_by_id: dict[str, dict[str, Any]]
     vertex_by_id: dict[str, dict[str, Any]]
-    # The one leaf of a document that has one, so a bare element token (``#f:…``) names an
+    # The one leaf of a document that has one, so a bare element name (``#f:…``) names an
     # element of it; "" in an assembly.
     single_occurrence_id: str
     # Label aliases for this index's occurrences, filled in by
@@ -61,7 +61,7 @@ class SelectorIndex:
 def build_selector_index(manifest: dict[str, Any]) -> SelectorIndex:
     """An index over one table's rows: an occurrence row keyed by its ``id``, each element
     row by ``id`` where the table carries one (a composed index's do; a component's own
-    table carries tokens alone, which :mod:`cadgen.assembly_lookup` composes with the
+    table carries element names alone, which :mod:`cadgen.assembly_lookup` composes with the
     occurrence that places it)."""
     occurrences = _table_rows(manifest, "occurrences", "occurrenceColumns")
     shapes = _table_rows(manifest, "shapes", "shapeColumns")
@@ -113,7 +113,7 @@ def label_resolution_error(raw_selector: str, index: SelectorIndex) -> str | Non
 
 def canonicalize_selector(raw_selector: str, index: SelectorIndex) -> str | None:
     """The ref ``raw_selector`` names in ``index``'s terms: a label resolved to its occurrence
-    token, a bare element token qualified by the document's one leaf; None for a label that
+    token, a bare element name qualified by the document's one leaf; None for a label that
     does not resolve or a bare element in an assembly."""
     parsed = syntax.parse_selector(raw_selector)
     if parsed is None:
@@ -136,7 +136,7 @@ def canonicalize_selector(raw_selector: str, index: SelectorIndex) -> str | None
         return parsed.canonical
     if not index.single_occurrence_id:
         return None
-    return syntax.element_ref(index.single_occurrence_id, parsed.token)
+    return syntax.element_ref(index.single_occurrence_id, parsed.element)
 
 
 def lookup_selector(selector: str, index: SelectorIndex) -> tuple[str, dict[str, Any]] | None:

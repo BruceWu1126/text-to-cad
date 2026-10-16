@@ -89,7 +89,7 @@ _UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
 # What each derived kind names in objects/. A retired kind's entries are read
 # for any top-level object pointer: their readers are gone with their schema.
 _NAMED_FIELDS = {
-    "component": ("brep", "topology"),
+    "component": ("brep", "topology", "lineage"),
     "drawing": ("object",),
     "skin": ("object",),
     # A robot entry names its payload and the primitive meshes the payload draws.
@@ -380,7 +380,7 @@ def protected_objects(found: Scan, *, should_stop: Callable[[], bool] = lambda: 
     cadgen wrote to the store after it (:func:`_read_roots`), or on a tree in
     a newer format written after it.
     """
-    from cadgen.store.trees import TREE_SCHEMA, get_tree
+    from cadgen.store.trees import COMPONENT_OBJECTS, TREE_SCHEMA, get_tree
 
     roots = _read_roots(found, should_stop, newer_since, retire_before)
     marked: set[str] = set()
@@ -409,7 +409,7 @@ def protected_objects(found: Scan, *, should_stop: Callable[[], bool] = lambda: 
         marked.add(digest)
         for component in tree["components"].values():
             if isinstance(component, dict):
-                marked.update(component.get(name) for name in ("brep", "topology")
+                marked.update(component.get(name) for name in COMPONENT_OBJECTS
                               if component.get(name) in found.objects)
         pending.extend(link["tree"] for link in tree["links"])
     return marked

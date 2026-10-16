@@ -5,9 +5,9 @@ A tree holds the geometry a model made itself (``components``, placed by its
 child are two links to one tree. Nothing of a child is copied::
 
     {
-      "kind": "geometry-tree", "schemaVersion": 4,
+      "kind": "geometry-tree", "schemaVersion": 5,
       "label": "robot", "entryKind": "assembly",
-      "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…", "fingerprint": "…"}},
+      "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…", "construction": "…", "lineage": "<object>"}},
       "occurrences": [{"id": "o:4b1f9e2a7c03", "name": "housing", "component": "<cid>", "transform": [16 floats]}],
       "links":       [{"id": "o:e8a03d5b61f4", "name": "arm", "tree": "<object>", "transform": [16 floats]}],
       "assembly": {"root": {"id": "o:0f3a6c8e2d17", "name": "robot", "nodeType": "assembly", "children": [...]}},
@@ -64,9 +64,10 @@ TREE_KIND = "geometry-tree"
 # A format change bumps it (STORE.md §2, §8): a tree of another version is never
 # read, and a sweeper that finds a newer one stands down. 3: an eager-only
 # component pins its topology facts as ``topology``, a field an older sweeper
-# does not mark. 4: every occurrence, link and node id is an ``o:`` token and
-# every native component carries its ``fingerprint`` (README law 20).
-TREE_SCHEMA = 4
+# does not mark. 4: every occurrence, link and node id is an ``o:`` token. 5: a
+# component carries the construction key and the lineage object its build named
+# it by (README law 20), an object an older sweeper does not mark.
+TREE_SCHEMA = 5
 FLAT_KIND = "assembly-package"
 
 # Metadata readers need an independently owned flattened descriptor but not the
@@ -102,13 +103,16 @@ _METADATA_CAPTURE_STAMP_BYTES = 512
 # Component entries validated against their object's bytes (``validate_geometry_component``,
 # a pure function of the two), by object, cid and the sha256 of the canonical
 # entry -- a digest, since the table is bounded by count and an entry's
-# faceColors grow with its faces; pinned topology facts validated, by object.
+# faceColors grow with its faces; pinned topology facts and lineages validated, by object.
 # With the object still at its verified identity, the check holds without the bytes.
 _VALIDATED_CAPACITY = 1 << 16
 _VALIDATED_COMPONENTS: OrderedDict[tuple[str, str, bytes], None] = OrderedDict()
-_VALIDATED_TOPOLOGY: OrderedDict[str, None] = OrderedDict()
+_VALIDATED_OBJECTS: OrderedDict[str, None] = OrderedDict()
 
 IDENTITY_16 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+# The objects a component entry names: its encoded BREP, an eager-only one's topology
+# facts, and the lineage its build named it by.
+COMPONENT_OBJECTS = ("brep", "topology", "lineage")
 
 
 def put_tree(tree: dict[str, Any], *, repair: bool = False) -> str:
@@ -146,7 +150,7 @@ def tree_objects(tree_hash: str, *, _seen: set[str] | None = None) -> set[str]:
         for entry in tree["components"].values():
             if not isinstance(entry, dict):
                 continue
-            for field in ("brep", "topology"):
+            for field in COMPONENT_OBJECTS:
                 if entry.get(field):
                     try:
                         read_verified_object(entry[field])
@@ -504,8 +508,8 @@ def _validate_structure(tree: Any, *, native: bool = False) -> None:
         if type(link) is not dict or not is_object_hash(link.get("tree")):
             raise ValueError("invalid linked tree identity")
     for entry in tree["components"].values():
-        if type(entry) is not dict or (entry.get("kind") == "native" and not entry.get("fingerprint")):
-            raise ValueError("geometry component lacks its fingerprint")
+        if type(entry) is not dict:
+            raise ValueError("invalid geometry component")
     ids = set()
     occurrence_ids = {row.get("id") for row in tree["occurrences"] if type(row) is dict and type(row.get("id")) is str}
     for row in [*tree["occurrences"], *tree["links"]]:
@@ -632,7 +636,7 @@ def _reset_metadata_capture_cache() -> None:
         _METADATA_CAPTURE_CACHE.clear()
         _METADATA_CAPTURE_CACHE_SIZE = 0
         _VALIDATED_COMPONENTS.clear()
-        _VALIDATED_TOPOLOGY.clear()
+        _VALIDATED_OBJECTS.clear()
     _reset_verified()
 
 
@@ -680,7 +684,7 @@ def _capture(
     it did read. A native capture reads every object, since it owns the bytes,
     and remembers what it verified all the same.
     """
-    from cadgen._internal.component_package import canonical_json_bytes, validate_geometry_component
+    from cadgen._internal.component_package import canonical_json_bytes, read_lineage, validate_geometry_component
     from cadgen._internal.topology_facts import read_topology_facts
 
     cache_key = _metadata_capture_key(tree_hash)
@@ -771,19 +775,21 @@ def _capture(
         else:
             settled = True
         paths.add(key)
-        if entry["kind"] == "eager-only":
-            topology = entry["topology"]
-            known = topology in _VALIDATED_TOPOLOGY
-            key = held(topology) if known and not retain_payloads else None
+        for field, read in (("topology", read_topology_facts), ("lineage", read_lineage)):
+            digest = entry.get(field)
+            if not digest:
+                continue
+            known = digest in _VALIDATED_OBJECTS
+            key = held(digest) if known and not retain_payloads else None
             if key is None:
-                payload, key, topology_settled = verified(topology)
+                payload, key, object_settled = verified(digest)
                 if not known:
-                    read_topology_facts(payload)
-                    _note_validated(_VALIDATED_TOPOLOGY, topology)
+                    read(payload)
+                    _note_validated(_VALIDATED_OBJECTS, digest)
                 if retain:
-                    captured[topology] = payload
+                    captured[digest] = payload
                 del payload
-                settled = settled and topology_settled
+                settled = settled and object_settled
             paths.add(key)
         return settled
 

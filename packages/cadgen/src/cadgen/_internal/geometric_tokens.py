@@ -1,30 +1,24 @@
-"""Geometric identity: a component's fingerprint and its elements' tokens.
+"""Geometric tokens: the names of the elements no construction names.
 
-A component's bytes name its object (the cid, ``component_package``); its
-**geometry** names its part and the elements a ref points at (README law 20,
-STORE.md §2). Both names here are hashes of rounded geometry under one scheme
-string, ``GEOMETRY_FINGERPRINT_SCHEME``, and of nothing positional: the order
-OCCT lists faces, edges or vertices in never enters a fingerprint, and an
-element's token holds no ordinal. So the body a build holds and the same body
-read back from the STEP it wrote -- different bytes, faces listed in another
-order -- have one fingerprint, and each face one token.
+An element a model's run made is named by its lineage (``kernel_trace``). An
+element with none -- every face, edge and vertex of an imported file, and those
+a model took from a shape no feature of its run made -- is named by its
+**geometric token**: ``f:``, ``e:`` or ``v:`` and twelve hexadecimal characters,
+a hash of the element's geometry within its body under one scheme string,
+``GEOMETRIC_TOKEN_SCHEME``, and of nothing positional, so the token survives a
+STEP round trip of the body and whatever order OCCT lists the elements in. This
+is the fallback matcher, measured on demand where a part's display data is
+derived (``cadgen.store.parts``) and where ``read_scene`` resolves a token, and
+kept with the part's selector table: nothing on the way from a model's run to its
+record measures one (README law 20).
 
 Rounding is relative to the body's extent: the quantum is the power of two at
 or below ``RELATIVE_QUANTUM`` times the diagonal of the body's tight box (a
 power of two so the quantum itself is exact and moves only when the extent
-crosses one). Bodies that agree to that quantum are drawn alike at the display
-chord tolerance anyway. Rounding makes the name tolerant where a byte hash is
-exact: a body whose coordinates straddle a rounding boundary before and after
-its round trip costs one extra mesh derivation and renames one ref, never a
-wrong answer, and nothing that decides freshness or whether bytes were written
-reads a fingerprint.
+crosses one).
 
-What is read, and why (measured over the sample corpus: STORE.md §2):
+What is read, and why:
 
-- The fingerprint hashes the scheme, the quantum (so a scaled copy is another
-  body), the kinds of the body's solids (or shells, or the bare shape), its
-  counts of faces, edges and vertices, its vertex points rounded and sorted,
-  and its faces' signatures sorted.
 - A face's signature is its surface class, its tight box rounded and its
   oriented normal at its parametric middle rounded to quarters (an orientation
   signal that tells the coincident faces of two solids apart). Not its centroid
@@ -50,42 +44,28 @@ import math
 import re
 from typing import Any
 
-__all__ = [
-    "ELEMENT_TOKEN_RE",
-    "GEOMETRY_FINGERPRINT_SCHEME",
-    "RELATIVE_QUANTUM",
-    "element_tokens",
-    "fingerprint",
-    "geometry_identity",
-    "is_element_token",
-    "quantum_for_extent",
-]
+__all__ = ["GEOMETRIC_TOKEN_SCHEME", "RELATIVE_QUANTUM", "TOKEN_RE", "element_names", "element_tokens",
+           "quantum_for_extent"]
 
-# The ONLY version on a geometric name. Bump it when the same shape must be
-# named differently (what the fingerprint reads, or how it rounds, changes),
-# and bump cadgen.store.parts.PART_VERSION with it (STORE.md §2).
-GEOMETRY_FINGERPRINT_SCHEME = "cadgen-geometry-fingerprint-v1"
+# The ONLY version on a geometric token. Bump it when the same shape must be
+# named differently (what a signature reads, or how it rounds, changes), and
+# bump cadgen.store.parts.PART_VERSION with it (STORE.md §2).
+GEOMETRIC_TOKEN_SCHEME = "cadgen-geometric-token-v1"
 # The rounding quantum as a fraction of the body's extent, before it is taken
 # to a power of two: 2**-12 is 2.4e-4, half the display chord tolerance
-# (tessellation_policy.DISPLAY_TESSELLATION, 5e-4 of the extent). Finer quanta
-# straddle no more often over the corpus and keep more near-coincident elements
-# apart; coarser ones merge them and their tiebreaks drift.
+# (tessellation_policy.DISPLAY_TESSELLATION, 5e-4 of the extent).
 RELATIVE_QUANTUM = 2.0 ** -12
 # The normal of a face is rounded to this many steps per unit: an orientation
 # signal, telling the coincident faces of two solids apart, not a measurement.
 _NORMAL_STEPS = 4
 _HEX = 12
-ELEMENT_TOKEN_RE = re.compile(r"^[fev]:[0-9a-f]{12}$")
+TOKEN_RE = re.compile(r"^[fev]:[0-9a-f]{12}$")
 # Types the STEP translation exchanges read as one class.
 _TYPE_CLASSES = {
     "beziersurface": "spline", "bsplinesurface": "spline",
     "beziercurve": "spline", "bsplinecurve": "spline",
     "torus": "revolution", "surfaceofrevolution": "revolution",
 }
-
-
-def is_element_token(value: object) -> bool:
-    return isinstance(value, str) and ELEMENT_TOKEN_RE.match(value) is not None
 
 
 def quantum_for_extent(extent: float) -> float:
@@ -100,7 +80,7 @@ def quantum_for_extent(extent: float) -> float:
 
 def _digest(kind: str, material: Any) -> str:
     payload = json.dumps(material, separators=(",", ":"), sort_keys=False, allow_nan=False)
-    return hashlib.sha256(f"{GEOMETRY_FINGERPRINT_SCHEME}\0{kind}\0{payload}".encode()).hexdigest()
+    return hashlib.sha256(f"{GEOMETRIC_TOKEN_SCHEME}\0{kind}\0{payload}".encode()).hexdigest()
 
 
 def _rounded(value: float, quantum: float) -> int:
@@ -219,12 +199,6 @@ def _maps(shape: Any):
     return maps
 
 
-def _bodies(shape: Any) -> list[str]:
-    from cadgen._internal.entity_ordinals import shape_entities
-
-    return sorted(_enum(sub.ShapeType(), "TopAbs_") for sub in shape_entities(shape))
-
-
 def _extent(face_boxes: list[tuple[float, ...] | None], points: list[tuple[float, ...]]) -> float:
     """The diagonal of the union of the faces' tight boxes and the vertex points."""
     low = [math.inf] * 3
@@ -244,14 +218,13 @@ def _extent(face_boxes: list[tuple[float, ...] | None], points: list[tuple[float
     return math.sqrt(sum((high[axis] - low[axis]) ** 2 for axis in range(3)))
 
 
-def geometry_identity(shape: Any, *, brep: str | None = None) -> dict[str, Any]:
-    """The fingerprint and every element token of one unlocated component
-    shape (a ``TopoDS_Shape``), computed together: ``{"fingerprint": str,
-    "faces": [token per face ordinal], "edges": [...], "vertices": [...]}``,
-    the lists in ``TopExp.MapShapes_s`` order so a caller joins them to the
-    topology facts and the mesh by ordinal. ``brep``, the component's BREP object
-    hash when the caller has it, lets the faces' and edges' exact metrics be the
-    ones this process measures for its selector table
+def element_tokens(shape: Any, *, brep: str | None = None) -> dict[str, list[str]]:
+    """The geometric token of every face, edge and vertex of one unlocated
+    component shape (a ``TopoDS_Shape``): ``{"faces": [...], "edges": [...],
+    "vertices": [...]}``, in ``TopExp.MapShapes_s`` order so a caller joins them to
+    the topology facts and the mesh by ordinal. ``brep``, the component's BREP
+    object hash when the caller has it, lets the faces' and edges' exact metrics be
+    the ones this process measures for its selector table
     (``topology_extract.component_metrics``), once."""
     from OCP.BRep import BRep_Tool
     from OCP.TopoDS import TopoDS
@@ -282,28 +255,28 @@ def geometry_identity(shape: Any, *, brep: str | None = None) -> dict[str, Any]:
         for facts in edge_facts
     ]
     vertex_signatures = [(_point(point, quantum), point) for point in points]
-    material = {
-        "quantum": quantum,
-        "bodies": _bodies(shape),
-        "counts": [faces.Extent(), edges.Extent(), vertices.Extent()],
-        "vertices": sorted(signature for signature, _exact in vertex_signatures),
-        "faces": sorted(json.dumps(signature, separators=(",", ":")) for signature, _exact in face_signatures),
-    }
     return {
-        "fingerprint": _digest("fingerprint", material),
         "faces": _tokens("f", face_signatures),
         "edges": _tokens("e", edge_signatures),
         "vertices": _tokens("v", vertex_signatures),
     }
 
 
-def fingerprint(shape: Any) -> str:
-    """The fingerprint of one unlocated component shape: sha256 hex."""
-    return geometry_identity(shape)["fingerprint"]
-
-
-def element_tokens(shape: Any) -> dict[str, list[str]]:
-    """The ``f:``, ``e:`` and ``v:`` tokens of one unlocated component shape,
-    by ordinal (``geometry_identity`` without the fingerprint)."""
-    identity = geometry_identity(shape)
-    return {"faces": identity["faces"], "edges": identity["edges"], "vertices": identity["vertices"]}
+def element_names(lineage: dict[str, Any] | None, shape: Any, *, brep: str | None = None) -> dict[str, list[str]]:
+    """Every face's, edge's and vertex's name in ``shape`` (one unlocated component), by
+    ordinal: the name ``lineage`` gives it (``component_package.read_lineage``), and the
+    geometric token of each element it does not name -- measured only when one has none."""
+    plurals = ("faces", "edges", "vertices")
+    names = {plural: list(lineage[plural]) if lineage is not None else None for plural in plurals}
+    if all(listed is not None and None not in listed for listed in names.values()):
+        return names
+    tokens = element_tokens(shape, brep=brep)
+    for plural, listed in names.items():
+        if listed is None:
+            names[plural] = tokens[plural]
+            continue
+        if len(listed) != len(tokens[plural]):
+            raise ValueError(f"the lineage does not describe this shape: it names {len(listed)} {plural}, "
+                             f"the shape has {len(tokens[plural])}")
+        names[plural] = [token if name is None else name for name, token in zip(listed, tokens[plural])]
+    return names

@@ -207,7 +207,7 @@ class GeometryInputs(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsupported producer"):
                 parts.producer_key(malformed)
 
-    def test_geometry_identity_does_not_depend_on_the_producer(self):
+    def test_a_components_identity_does_not_depend_on_the_producer(self):
         scene=self.scene()
         first_hash,first=publish_document(scene)
 
@@ -511,15 +511,12 @@ class GeometryInputs(unittest.TestCase):
                 tree = copy.deepcopy(source)
                 variant = copy.deepcopy(entry)
                 if mode == "absent-face":
-                    # A colour on a face the body does not have, with a token beside it as
-                    # the entry's shape demands: the kernel-free checks pass, the kernel's do not.
+                    # A colour on a face the body does not have: the kernel-free checks
+                    # pass, the kernel's do not.
                     variant["faceColors"] = {999: (1., 0., 0., 1.)}
-                    variant["faceTokens"] = {999: "f:" + "0" * 12}
                     error = ValueError
                 else:
-                    # An eager-only component has no geometric identity: its pinned facts stand in.
-                    variant.pop("fingerprint", None)
-                    variant.pop("faceTokens", None)
+                    # An eager-only component: its pinned facts stand in for a decode.
                     variant.update(kind="eager-only", topology=surface)
                     error = cp.NativeUnavailable
                 payload = read_verified_object(entry["brep"])

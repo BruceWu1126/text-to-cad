@@ -544,6 +544,10 @@ def _generate_part_outputs(
         # Objects first: components + tree. Harmless if this build ends up not
         # publishing its record (publish rule below) — content-addressed and GC'd.
         writes_step = generated and bool(spec.step_output)
+        # The model's run, which names each component it made by its construction key
+        # and its lineage (README law 20); a document compiled from its bytes has none.
+        kernel_run = getattr(scene, "kernel_run", None) if generated else None
+        namer = kernel_run.identify if kernel_run is not None else None
         exported_hash: str | None = None
         staged_step: Path | None = None
         if writes_step:
@@ -581,6 +585,7 @@ def _generate_part_outputs(
                     child_documents=lambda: _pinned_child_documents(scene),
                     child_steps=lambda: _pinned_child_steps(scene),
                     kept_document=lambda digest: _kept_document(spec, digest, expected_document_pair),
+                    namer=namer,
                 )
         else:
             with logger.timed("tree: components"):
@@ -592,21 +597,18 @@ def _generate_part_outputs(
                     tree_hash, tree, stats = build_tree_from_compound(
                         shape, root_name=_document_root_name(shape, spec.step_path), force=force,
                         progress=progress, extra=tree_extra,
-                        materials=getattr(scene, "materials", None),
+                        materials=getattr(scene, "materials", None), namer=namer,
                     )
                     publish_preview(tree_hash, tree)
         stats["tree"] = tree_hash
         document_tree_hash = str(stats.get("documentTree") or tree_hash)
-        # The build's account of its code (STORE.md §3): which feature made each
-        # component of the document and each face and edge of it, by fingerprint
-        # and token. Computed now that the components are prepared, from the
-        # live shapes they were prepared from and the identities that measured;
-        # written beside the record, after it.
-        kernel_run = getattr(scene, "kernel_run", None) if writes_step else None
+        # The build's account of its code (STORE.md §3): the features its run called,
+        # where each ran, and the components it made, which name their elements by
+        # those features; written beside the record, after it, for a model whose saved
+        # document `store where` can be asked about.
         provenance = None
-        if kernel_run is not None:
-            with logger.timed("tree: provenance"):
-                provenance = kernel_run.provenance(stats["ownComponents"])
+        if kernel_run is not None and writes_step:
+            provenance = {"features": kernel_run.trace.feature_rows(), "components": stats["ownComponents"]}
 
         model_path = _model_for_spec(spec)
         outputs: dict[str, object] = {}

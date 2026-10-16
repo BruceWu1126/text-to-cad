@@ -2,7 +2,7 @@
 
 ``read_step`` returns native build123d geometry. ``read_scene`` retains the
 occurrence hierarchy and the document's refs (occurrence tokens, element
-tokens: README law 20); geometry is acquired only when requested. Neither reader
+names: README law 20); geometry is acquired only when requested. Neither reader
 discovers or executes source scripts.
 """
 from __future__ import annotations
@@ -67,10 +67,10 @@ class Selection:
     @property
     def ref(self) -> str:
         """The ref that names this selection: ``#<occurrence token>``, or
-        ``#<occurrence token>/<element token>`` for a face, edge or vertex."""
+        ``#<occurrence token>/<element name>`` for a face, edge or vertex."""
         if self.kind == "occurrence":
             return self.occurrence_ref
-        return f"{self.occurrence_ref}/{self._scene._token(self)}"
+        return f"{self.occurrence_ref}/{self._scene._name(self)}"
 
     def shape(self) -> Shape:
         """Native geometry in world coordinates, privately owned by the caller.
@@ -91,7 +91,7 @@ class Selection:
     def entities(self, kind: EntityKind) -> Iterator[Selection]:
         """Enumerate the faces, edges or vertices inside this selection.
 
-        Each carries its own ref: the occurrence's token and the element's.
+        Each carries its own ref: the occurrence's token and the element's name.
         Asking a face for edges gives the leaf's edges that bound it.
         """
         if kind not in _PLURAL:
@@ -125,9 +125,10 @@ class StepScene:
     """A saved document revision with immutable occurrence and selector views.
 
     References name the document's geometry: an occurrence by the token of its
-    place in the document's tree, an element by the token of its geometry
-    within its body, so a ref survives a rebuild that keeps the geometry and a
-    STEP round trip of it. The scene does not apply kinematics/animation poses.
+    place in the document's tree, an element by its name -- its lineage, the
+    feature of the model's run that made it, or, where it has none, the geometric
+    token of its geometry within its body -- so a ref survives a rebuild that keeps
+    the construction. The scene does not apply kinematics/animation poses.
     """
 
     def __init__(self, scene: LoadedStepScene):
@@ -140,7 +141,7 @@ class StepScene:
             scene_tokens(scene)
         self._occurrences: dict[str, Occurrence] = {}
         self._maps: dict[tuple[Any, str], Any] = {}
-        self._identities: dict[Any, dict] = {}
+        self._names: dict[Any, dict] = {}
         self._prototype_ids = {key: f"p{i}" for i, key in enumerate(scene.prototype_shapes, 1)}
         for node in self._walk(scene.roots):
             ref = _node_ref(node)
@@ -178,7 +179,7 @@ class StepScene:
         must name this scene's document as a path does (links resolved, a relative
         one read from the working directory, else matched against the end of the
         document's path).
-        Ambiguous labels raise with numbered candidates. A bare element token
+        Ambiguous labels raise with numbered candidates. A bare element name
         (``#f:…``) requires exactly one leaf. No fuzzy matching or first match.
         """
         from cadgen.cad_ref_syntax import parse_selector, ref_prefix_names, split_cad_ref
@@ -206,24 +207,26 @@ class StepScene:
         kind = parsed.selector_type
         if occurrence._node.prototype_key is None:
             raise ValueError(f"{oid} is a group; enumerate its entities or specify a leaf occurrence")
-        tokens = self._identity(occurrence)[_PLURAL[kind]]
-        if parsed.token not in tokens:
-            raise ValueError(f"unknown {kind} reference: {ref!r} ({len(tokens)} {_PLURAL[kind]} in {oid})")
-        return Selection(self, oid, kind, tokens.index(parsed.token) + 1)
+        names = self._element_names(occurrence)[_PLURAL[kind]]
+        if parsed.element not in names:
+            raise ValueError(f"unknown {kind} reference: {ref!r} ({len(names)} {_PLURAL[kind]} in {oid})")
+        return Selection(self, oid, kind, names.index(parsed.element) + 1)
 
-    def _identity(self, occurrence) -> dict:
-        """The geometric identity of the occurrence's prototype (``geometry_fingerprint``):
-        its element tokens by ordinal, computed once per prototype."""
+    def _element_names(self, occurrence) -> dict:
+        """The names of the occurrence's prototype's elements by ordinal: its lineage's,
+        and the geometric token of each element no lineage names, measured here, once
+        per prototype, only when one has none."""
         key = occurrence._node.prototype_key
-        if key not in self._identities:
-            from cadgen._internal.geometry_fingerprint import geometry_identity
+        if key not in self._names:
+            from cadgen._internal.geometric_tokens import element_names
 
-            self._identities[key] = geometry_identity(self._loaded.prototype_shapes[key])
-        return self._identities[key]
+            self._names[key] = element_names((self._loaded.prototype_identity.get(key) or (None, None))[1],
+                                             self._loaded.prototype_shapes[key])
+        return self._names[key]
 
-    def _token(self, selection: Selection) -> str:
+    def _name(self, selection: Selection) -> str:
         occurrence = self._occurrences[selection.occurrence_ref]
-        return self._identity(occurrence)[_PLURAL[selection.kind]][selection._ordinal - 1]
+        return self._element_names(occurrence)[_PLURAL[selection.kind]][selection._ordinal - 1]
 
     def _table(self, occurrence, kind):
         from cadgen._internal.entity_ordinals import entity_map

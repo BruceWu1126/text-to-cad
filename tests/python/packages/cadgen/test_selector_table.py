@@ -1,4 +1,4 @@
-"""The per-component selector table: the one place a ref's facts are minted.
+"""The per-component selector table: every fact a ref resolves to, under its element's name.
 
 Tiny generated BREPs, built here: a box (every edge and face alone), a box with
 its vertical edges filleted (tangent groups), and an extruded slot (a chain of
@@ -17,8 +17,9 @@ add_repo_path("packages/cadgen/src")
 
 from build123d import Axis, Box, BuildPart, BuildSketch, Plane, SlotOverall, extrude, fillet  # noqa: E402
 
-from cadgen._internal.geometry_fingerprint import geometry_identity, is_element_token  # noqa: E402
+from cadgen._internal.geometric_tokens import element_names, element_tokens  # noqa: E402
 from cadgen._internal.glb_topology import STEP_EDGE_FLAGS  # noqa: E402
+from cadgen.cad_ref_syntax import is_element_name  # noqa: E402
 from cadgen._internal.selector_table import (  # noqa: E402
     FACE_FLAG_NOT_REFERENCEABLE,
     SELECTOR_TABLE_SCHEMA_VERSION,
@@ -29,9 +30,9 @@ from cadgen._internal.selector_table import (  # noqa: E402
 from cadgen._internal.topology_extract import extract_topology_facts  # noqa: E402
 
 
-def _table(part):
+def _table(part, lineage=None):
     shape = part.wrapped
-    return build_selector_table(shape, extract_topology_facts(shape))
+    return build_selector_table(shape, extract_topology_facts(shape), element_names(lineage, shape))
 
 
 def _rows(table, name):
@@ -52,26 +53,37 @@ class BoxTableTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.table = _table(Box(10, 20, 30))
 
-    def test_rows_carry_the_tokens_of_the_geometry_by_ordinal(self) -> None:
+    def test_rows_carry_the_names_of_the_elements_by_ordinal(self) -> None:
         table = self.table
         self.assertEqual(table["schemaVersion"], SELECTOR_TABLE_SCHEMA_VERSION)
         self.assertEqual(table["stats"], {"occurrenceCount": 1, "leafOccurrenceCount": 1, "shapeCount": 1,
                                           "faceCount": 6, "edgeCount": 12, "vertexCount": 8})
-        identity = geometry_identity(Box(10, 20, 30).wrapped)
-        for name, prefix in (("faces", "f"), ("edges", "e"), ("vertices", "v")):
+        # No lineage: every element goes by its geometric token.
+        tokens = element_tokens(Box(10, 20, 30).wrapped)
+        for name, kind in (("faces", "face"), ("edges", "edge"), ("vertices", "vertex")):
             rows = _rows(table, name)
-            # The ordinal is the mesh join; the token is what a ref names. Both columns lead.
+            # The ordinal is the mesh join; the name is what a ref names. Both columns lead.
             columns = table["tables"][{"faces": "faceColumns", "edges": "edgeColumns", "vertices": "vertexColumns"}[name]]
-            self.assertEqual(columns[:2], ["token", "ordinal"])
+            self.assertEqual(columns[:2], ["name", "ordinal"])
             self.assertEqual([row["ordinal"] for row in rows], list(range(1, len(rows) + 1)))
-            self.assertEqual([row["token"] for row in rows], identity[name])
+            self.assertEqual([row["name"] for row in rows], tokens[name])
             for row in rows:
-                self.assertTrue(is_element_token(row["token"]) and row["token"].startswith(prefix + ":"), row["token"])
+                self.assertTrue(is_element_name(row["name"], kind), row["name"])
                 self.assertEqual(row["shape"], 1)
-            self.assertEqual(len(set(row["token"] for row in rows)), len(rows), "tokens are distinct")
+            self.assertEqual(len(set(row["name"] for row in rows)), len(rows), "names are distinct")
         for row in _rows(table, "shapes"):
             self.assertEqual(row["ordinal"], 1)
-            self.assertNotIn("token", row, "a shape has no token: a ref never names one")
+            self.assertNotIn("name", row, "a shape has no name: a ref never names one")
+
+    def test_a_lineage_names_the_rows_it_names(self) -> None:
+        lineage = {"faces": [f"f:part.make_box1.{n}" for n in range(1, 7)],
+                   "edges": [None, *[f"e:part.make_box1.{n}" for n in range(2, 13)]],
+                   "vertices": [f"v:part.make_box1.{n}" for n in range(1, 9)]}
+        table = _table(Box(10, 20, 30), lineage)
+        self.assertEqual([row["name"] for row in _rows(table, "faces")], lineage["faces"])
+        edges = [row["name"] for row in _rows(table, "edges")]
+        self.assertEqual(edges[1:], lineage["edges"][1:])
+        self.assertEqual(edges[0], element_tokens(Box(10, 20, 30).wrapped)["edges"][0])
 
     def test_every_edge_and_face_stands_alone(self) -> None:
         # At a box corner each edge end has two continuations and neither runs on through it.
@@ -90,7 +102,7 @@ class BoxTableTest(unittest.TestCase):
             for edge_row in touching:
                 edge = edges[edge_row]
                 ends = table["relations"]["edgeVertexRows"][edge["vertexStart"]:edge["vertexStart"] + edge["vertexCount"]]
-                self.assertIn(vertices.index(row), ends, f"{edge['token']} ends at {row['token']}")
+                self.assertIn(vertices.index(row), ends, f"{edge['name']} ends at {row['name']}")
         for edge in edges:
             self.assertEqual(edge["vertexCount"], 2)
             self.assertEqual(edge["faceCount"], 2)
@@ -106,7 +118,7 @@ class BoxTableTest(unittest.TestCase):
         payload = selector_table_bytes(self.table)
         self.assertEqual(read_selector_table(payload), json.loads(payload))
         damaged = json.loads(payload)
-        damaged["faces"][0][0] = "f7"  # the old ordinal spelling is not a token
+        damaged["faces"][0][0] = "f7"  # an ordinal is not a name
         with self.assertRaises(ValueError):
             read_selector_table(json.dumps(damaged).encode())
         twice = json.loads(payload)

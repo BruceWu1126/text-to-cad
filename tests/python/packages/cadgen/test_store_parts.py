@@ -1,4 +1,4 @@
-"""A part's display data (STORE.md §2): ONE record per part, keyed by the component's geometry
+"""A part's display data (STORE.md §2): ONE record per part, keyed by what made the component
 and the producer, naming its display mesh and selector table; derived once, read back bound
 to that record, and carried by a view for the CLI's readers; a part that fails to mesh is
 named once the rest are stored. A tiny box in a fresh store."""
@@ -152,80 +152,63 @@ class PartStoreTest(unittest.TestCase):
         columns = table["tables"]["faceColumns"]
         for row in table["faces"]:
             face = dict(zip(columns, row))
-            ref = f"{occurrence}/{face['token']}"
+            ref = f"{occurrence}/{face['name']}"
             found = lookup.lookup_selector(ref, merged)
             self.assertIsNotNone(found, f"{ref} resolves")
             self.assertEqual(found[0], "face")
             self.assertEqual(found[1]["ordinal"], face["ordinal"])
             self.assertEqual(found[1]["tangentGroup"], face["tangentGroup"])
-            # The one leaf qualifies a bare element token.
-            self.assertEqual(lookup.lookup_selector(face["token"], merged), found)
-        vertex_token = dict(zip(table["tables"]["vertexColumns"], table["vertices"][0]))["token"]
-        vertex = lookup.lookup_selector(f"{occurrence}/{vertex_token}", merged)
+            # The one leaf qualifies a bare element name.
+            self.assertEqual(lookup.lookup_selector(face["name"], merged), found)
+        vertex_name = dict(zip(table["tables"]["vertexColumns"], table["vertices"][0]))["name"]
+        vertex = lookup.lookup_selector(f"{occurrence}/{vertex_name}", merged)
         self.assertEqual(vertex[0], "vertex")
         self.assertIsNone(lookup.lookup_selector(f"{occurrence}.f1", merged), "the ordinal spelling is no ref")
 
-    def test_a_body_and_its_step_read_back_are_one_part(self) -> None:
-        """A part is keyed by its geometry (STORE.md §2): the body a build holds and the same
-        body read back from the STEP it wrote -- other bytes, faces in another order -- share
-        the fingerprint, the part key and each face's token."""
+    def test_a_part_is_what_made_it(self) -> None:
+        """A part is keyed by what made its component (STORE.md §2): the construction key its
+        model's run named it by, else its content -- this box was built outside any run --
+        with the lineage that names its elements, its face colours and the producer. One
+        construction is one part however its bytes fall; other names make another part."""
         from build123d import Solid, export_step, import_step
 
-        from cadgen._internal.geometry_fingerprint import geometry_identity
-
+        self.assertNotIn("construction", self.entry, "no model run made this box")
         step = self.root / "box.step"
         export_step(Solid.make_box(1, 2, 3), str(step))
-        read_back = import_step(str(step))
-        tree, _, _ = build_tree_from_compound(read_back, root_name="box")
-        descriptor, _ = capture_tree(tree, retain_payloads=False)
-        cid, entry = next(iter(descriptor["components"].items()))
-        self.assertNotEqual(cid, self.cid, "the read-back is another component (other bytes)")
-        self.assertEqual(entry["fingerprint"], self.entry["fingerprint"])
-        self.assertEqual(parts.part_key(entry, self.producer), self.key, "one part")
-        before, after = parts.derive(self.tree)[self.cid], parts.derive(tree)[cid]
-        self.assertEqual(before, after, "one record: the read-back derives nothing")
-        self.assertEqual(sorted(geometry_identity(read_back.wrapped)["faces"]),
-                         sorted(geometry_identity(Solid.make_box(1, 2, 3).wrapped)["faces"]))
+        tree, _, _ = build_tree_from_compound(import_step(str(step)), root_name="box")
+        read_back = next(iter(capture_tree(tree, retain_payloads=False)[0]["components"].values()))
+        self.assertNotEqual(read_back["contentHash"], self.entry["contentHash"])
+        self.assertNotEqual(parts.part_key(read_back, self.producer), self.key, "other bytes, nothing made them: another part")
+
+        def key(entry: dict, **fields) -> str:
+            return parts.part_key({**entry, **fields}, self.producer)
+
+        made, remade = key(self.entry, construction="a" * 64), key(read_back, construction="a" * 64)
+        self.assertEqual(made, remade, "one construction is one part whatever its bytes")
+        self.assertNotIn(made, (self.key, key(self.entry, construction="b" * 64)))
+        self.assertNotEqual(key(self.entry, construction="a" * 64, lineage="c" * 64),
+                            key(self.entry, construction="a" * 64, lineage="d" * 64), "other names: another part")
+        self.assertNotEqual(key(self.entry, faceColors={"1": [1.0, 0.0, 0.0, 1.0]}), self.key)
+        self.assertNotEqual(parts.part_key(self.entry, {**self.producer, "ocp": "0.0.0"}), self.key)
 
     def test_an_export_at_a_tolerance_meshes_the_bytes_it_decodes(self) -> None:
-        """The part of a body and of its read-back is one, so its stored table lists the
-        elements of whichever derived it; an export at another tolerance builds the table
-        for the bytes it decodes, and its mesh is the same whichever body derived the part
-        (README law 5). A sphere: its seam is drawn and its two pole edges are not, and the
-        read-back lists the three in another order, so a table of the wrong decode would
-        draw a pole and hide the seam."""
-        from build123d import Solid, export_step, import_step
+        """An export at another tolerance builds the table for the bytes it decodes and
+        stores nothing (``mesh_at``): its mesh is the same whether the store holds the part
+        or not. A sphere: its seam is drawn and its two pole edges are not."""
+        from build123d import Solid
 
-        from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen.store.meshes import EDGE_CLASSES, decode_payload
 
-        def edge_classes(entry: dict) -> list[str]:
-            return [edge["class"] for edge in extract_topology_facts(parts._decoded(entry)[0])["edges"]]
-
-        body = Solid.make_sphere(3)
-        step = self.root / "sphere.step"
-        export_step(body, str(step))
-        read_back = import_step(str(step))
-        held, _, _ = build_tree_from_compound(body, root_name="sphere")
-        read, _, _ = build_tree_from_compound(read_back, root_name="sphere")
-        held_entry = next(iter(capture_tree(held, retain_payloads=False)[0]["components"].values()))
-        read_entry = next(iter(capture_tree(read, retain_payloads=False)[0]["components"].values()))
-        key = parts.part_key(held_entry, self.producer)
-        self.assertEqual(parts.part_key(read_entry, self.producer), key, "one part")
-        self.assertEqual(sorted(edge_classes(held_entry)), sorted(edge_classes(read_entry)))
-        self.assertNotEqual(edge_classes(held_entry), edge_classes(read_entry),
-                            "the read-back lists its edges in another order: the fixture tells a table of "
-                            "the wrong decode apart")
-
-        parts.derive(held)
-        from_held_table = parts.mesh_at(read_entry, key, 2e-3, 0.5)
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store-alone")}):
-            build_tree_from_compound(read_back, root_name="sphere")
-            parts.derive(read)
-            alone = parts.mesh_at(read_entry, key, 2e-3, 0.5)
-        self.assertEqual(from_held_table, alone, "the read-back meshes differently once the body derived its part")
+        tree, _, _ = build_tree_from_compound(Solid.make_sphere(3), root_name="sphere")
+        entry = next(iter(capture_tree(tree, retain_payloads=False)[0]["components"].values()))
+        key = parts.part_key(entry, self.producer)
+        alone = parts.mesh_at(entry, key, 2e-3, 0.5)
+        self.assertIsNone(parts.probe(key), "an export stores nothing")
         self.assertEqual([EDGE_CLASSES[int(row[3])] for row in decode_payload(alone).edges], ["seam"],
                          "the seam is drawn as the seam and the poles are not drawn")
+        parts.derive(tree)
+        self.assertIsNotNone(parts.probe(key))
+        self.assertEqual(parts.mesh_at(entry, key, 2e-3, 0.5), alone, "the stored part changes nothing")
 
 
 class PartRecordTest(unittest.TestCase):

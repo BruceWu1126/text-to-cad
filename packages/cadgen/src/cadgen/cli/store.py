@@ -2,7 +2,7 @@
 
     cadgen store info              what is in the store, by kind, and its size against the cap
     cadgen store why <model.py>    why the gate says stale (or current), clause by clause
-    cadgen store where <doc> <ref> which operation at which source line made a face, an edge or a part
+    cadgen store where <doc> <ref> which operation at which source line made a part or one of its elements
     cadgen store forget <target>…  drop one model's record or one document's tree entry
     cadgen store gc [--dry-run]    retire old index kinds, mark and sweep unreachable objects
     cadgen store gc --max-size [SIZE]   evict least recently written entries to the cap, then sweep
@@ -311,19 +311,19 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
     why.add_argument("--json", action="store_true")
     where = sub.add_parser(
         "where",
-        help="which operation at which source line made a part, a face or an edge of a generated STEP",
+        help="which operation at which source line made a part, a face, an edge or a vertex of a generated STEP",
         description=(
             "The build's account of its code (provenance): for a part, the feature that made its body; for a "
-            "face or an edge, the feature that made it and the one that last modified it, each as "
-            "file:line in function (operation), with the features it was given. A feature is one kernel "
-            "construction the model's code called. The ref is one the CAD viewer copies or read_scene "
-            "resolves: #o:<token>, #o:<token>/f:<token>, #label/e:<token>. Answered from the model's "
+            "face, an edge or a vertex, the feature its name says made it and the one that last modified it, "
+            "each as file:line in function (operation), with the features it was given. A feature is one "
+            "kernel construction the model's code called. The ref is one the CAD viewer copies or read_scene "
+            "resolves: #o:<token>, #o:<token>/f:<name>, #label/e:<name>. Answered from the model's "
             "provenance entry, written with its record; for other bytes, or without an entry, it says it "
             "does not know."
         ),
     )
     where.add_argument("document", help="a STEP file a model of this cadgen wrote")
-    where.add_argument("ref", help="an occurrence, face or edge ref in that document")
+    where.add_argument("ref", help="an occurrence, face, edge or vertex ref in that document")
     where.add_argument("--json", action="store_true")
     forget = sub.add_parser(
         "forget",

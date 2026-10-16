@@ -1,4 +1,5 @@
-"""The kernel memo (README law 18) and the trace behind provenance (STORE.md §3).
+"""The kernel memo (README law 18), the construction keys it gives, and the trace that
+names what a run made (README law 20, STORE.md §3).
 
 The contract: inside a run, every kernel construction the model's code calls is
 a feature; a second run of the same code hands back the SAME live objects the
@@ -8,8 +9,9 @@ replayed on a hit and undone when the operation is gone; two identical
 constructions in one run are two objects; an input that changed, by geometry,
 placement or attribute, misses, and so does everything downstream of a miss;
 a shape no operation of this process made runs its call uncached; and with
-the memo off every call still runs and is still a feature. Small geometry,
-in process, no store.
+the memo off every call still runs and is still a feature. A component is
+named by the construction that made it, the same in every process, and its
+elements by the features that made them. Small geometry, in process, no store.
 """
 
 from __future__ import annotations
@@ -40,18 +42,6 @@ def _run(function, *args):
     with kernel_memo.run(None) as run:
         result = function(*args)
     return result, _delta(before, kernel_memo.stats()), run
-
-
-def _components(*shapes):
-    """The components as the tree build prepares them: by cid, the live shape
-    and the identity measured on it."""
-    from cadgen._internal.component_package import _component_id, prepare_geometry_component
-
-    components = {}
-    for shape in shapes:
-        prepared = prepare_geometry_component(shape)
-        components[_component_id(prepared["entry"]["contentHash"])] = (shape, prepared["identity"])
-    return components
 
 
 def _bored_plate(radius=3.0):
@@ -363,13 +353,17 @@ class KillSwitchTest(KernelMemoCase):
         (_box2, _tool2, body2), second, run2 = _run(_bored_plate)
         self.assertEqual((first["hits"], first["misses"], second["hits"], second["misses"]), (0, 0, 0, 0))
         self.assertIsNot(body2, body)
-        self.assertEqual([feature.id for feature in run1.trace.features], [feature.id for feature in run2.trace.features])
+        self.assertEqual([feature.name for feature in run1.trace.features], [feature.name for feature in run2.trace.features])
         self.assertEqual([feature.op for feature in run2.trace.features], ["Solid.make_box", "Solid.make_cylinder", "cut"])
         self.assertEqual(run2.trace.features[-1].inputs, [0, 0, 1])
+        # Nothing memoized made the body, so it has no construction key; its lineage stands.
+        key, lineage = run2.identify(body2)
+        self.assertIsNone(key)
+        self.assertEqual(lineage["made"], "_bored_plate.cut1")
 
 
 class TraceTest(KernelMemoCase):
-    def test_features_name_the_calling_line_and_their_inputs(self) -> None:
+    def test_features_are_named_by_function_operation_and_count(self) -> None:
         from build123d import Solid
 
         def model():
@@ -378,29 +372,31 @@ class TraceTest(KernelMemoCase):
             return box.cut(*tools)
 
         _, _, run = _run(model)
-        ids = [feature.id for feature in run.trace.features]
+        names = [feature.name for feature in run.trace.features]
         here = Path(__file__).as_posix()  # the trace names a file the same on every OS
-        box_line = ids[0]
-        self.assertRegex(box_line, rf"^fe:Solid\.make_box@{re.escape(here)}:\d+#1$")
+        self.assertEqual(names[0], "model.make_box1")
         self.assertTrue(all(feature.file == here for feature in run.trace.features))
         self.assertEqual(run.trace.features[0].function, "model")
-        # A line that ran twice numbers its runs; the same operation elsewhere starts at 1.
+        # A function's calls of one operation count up, wherever they are; a line is no part of a name.
         cylinders = [feature for feature in run.trace.features if feature.op == "Solid.make_cylinder"]
-        self.assertEqual([feature.n for feature in cylinders], [1, 2])
+        self.assertEqual([feature.name for feature in cylinders], ["model.make_cylinder1", "model.make_cylinder2"])
         self.assertEqual(len({feature.line for feature in cylinders}), 1)
+        self.assertEqual(names.count("model.make_box2"), 1, "the boxes the tools are placed by count on")
         cut = run.trace.features[-1]
-        self.assertEqual(cut.op, "cut")
+        self.assertEqual((cut.op, cut.name), ("cut", "model.cut1"))
         moved = [feature.index for feature in run.trace.features if feature.op == "moved"]
         self.assertEqual(cut.inputs, [0, 0, *moved], "the cut consumed the box and the two placed tools")
+        row = run.trace.feature_rows()[-1]
+        self.assertEqual((row["name"], row["op"], row["function"]), ("model.cut1", "cut", "model"))
+        self.assertEqual(row["inputs"][:2], ["model.make_box1", "model.make_box1"])
 
-    def test_lineage_is_by_geometry(self) -> None:
+    def test_elements_are_named_by_the_feature_that_made_them(self) -> None:
         """Unchanged: same surface, same extent, inherited. Modified: same
-        surface, another extent. Made: anything else."""
+        surface, another extent, the name kept and the modifier recorded. Made:
+        anything else, named by the feature that made it."""
         from build123d import Axis, Location, Solid
-        from OCP.TopLoc import TopLoc_Location
 
         from cadgen._internal.entity_ordinals import entity_map
-        from cadgen._internal.geometry_fingerprint import geometry_identity
 
         def model():
             box = Solid.make_box(20, 20, 8)
@@ -408,35 +404,97 @@ class TraceTest(KernelMemoCase):
             return box.cut(tool)
 
         body, _, run = _run(model)
-        features = {feature.index: feature for feature in run.trace.features}
-        payload = run.provenance(_components(body))
-        unlocated = body.wrapped.Located(TopLoc_Location())
-        identity = geometry_identity(unlocated)
-        faces, edges = entity_map(unlocated, "face"), entity_map(unlocated, "edge")
-        [component] = payload["components"].values()
-        self.assertIn(identity["fingerprint"], payload["components"])
-        self.assertEqual(features[component["made"]].op, "cut")
+        _key, lineage = run.identify(body)
+        self.assertEqual(lineage["made"], "model.cut1")
+        faces, edges = entity_map(body.wrapped, "face"), entity_map(body.wrapped, "edge")
 
-        def face_lineage(face):
-            return [None if index is None else features[index].op
-                    for index in component["faces"][identity["faces"][faces.FindIndex(face.wrapped) - 1]]]
+        def face(shape):
+            return lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
 
-        def edge_lineage(edge):
-            return [None if index is None else features[index].op
-                    for index in component["edges"][identity["edges"][edges.FindIndex(edge.wrapped) - 1]]]
+        def edge(shape):
+            return lineage["edges"][edges.FindIndex(shape.wrapped) - 1]
 
         bottom = body.faces().sort_by(Axis.Z)[0]
         side = body.faces().sort_by(Axis.X)[0]
-        bore = [face for face in body.faces() if face.geom_type.name == "CYLINDER"][0]
-        self.assertEqual(face_lineage(bottom), ["Solid.make_box", "cut"], "the hole changed the bottom face's extent")
-        self.assertEqual(face_lineage(side), ["Solid.make_box", None], "the cut left the side face alone")
-        self.assertEqual(face_lineage(bore), ["Solid.make_cylinder", "cut"], "the bore wall is the cylinder's face, trimmed")
+        bore = [shape for shape in body.faces() if shape.geom_type.name == "CYLINDER"][0]
+        self.assertRegex(face(bottom), r"^f:model\.make_box1\.[1-6]$")
+        self.assertEqual(lineage["modified"][face(bottom)], "model.cut1", "the hole changed the bottom face's extent")
+        self.assertRegex(face(side), r"^f:model\.make_box1\.[1-6]$")
+        self.assertNotIn(face(side), lineage["modified"], "the cut left the side face alone")
+        self.assertEqual(face(bore), "f:model.make_cylinder1.1", "the bore wall is the cylinder's face, trimmed")
+        self.assertEqual(lineage["modified"][face(bore)], "model.cut1")
         vertical = body.edges().filter_by(Axis.Z).sort_by(Axis.X)[0]
-        rim = [edge for edge in body.edges() if edge.geom_type.name == "CIRCLE"][0]
-        self.assertEqual(edge_lineage(vertical), ["Solid.make_box", None], "a box edge the cut never touched")
-        self.assertEqual(edge_lineage(rim), ["cut", None], "the hole's rim is a new circle the cut made")
+        rims = sorted(edge(shape) for shape in body.edges() if shape.geom_type.name == "CIRCLE")
+        self.assertRegex(edge(vertical), r"^e:model\.make_box1\.\d+$", "a box edge the cut never touched")
+        self.assertEqual(rims, ["e:model.cut1.1", "e:model.cut1.2"], "the hole's rims are new circles the cut made")
+        self.assertEqual(len(set(lineage["faces"])), len(lineage["faces"]))
+        self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
 
-    def test_a_shape_no_feature_made_has_unknown_lineage_even_placed(self) -> None:
+    def test_each_piece_of_a_split_element_is_numbered(self) -> None:
+        from build123d import Axis, Box
+
+        from cadgen._internal.entity_ordinals import entity_map
+
+        def model():
+            return Box(30, 20, 10) - Box(4, 30, 20)
+
+        body, _, run = _run(model)
+        _key, lineage = run.identify(body)
+        faces = entity_map(body.wrapped, "face")
+        # The slot cuts the box's top in two: two pieces of one face of the box, numbered.
+        top = sorted(lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
+                     for shape in body.faces() if abs(shape.center().Z - 5) < 1e-9)
+        self.assertEqual(len(top), 2)
+        stem = top[0].rsplit(".", 1)[0]
+        self.assertRegex(stem, r"^f:model\.make_box1\.[1-6]$")
+        self.assertEqual(top, [f"{stem}.1", f"{stem}.2"])
+        self.assertEqual(lineage["modified"][top[0]], "model.cut1")
+        ends = [lineage["faces"][faces.FindIndex(shape.wrapped) - 1] for shape in body.faces().filter_by(Axis.X)]
+        self.assertTrue(all(name.count(".") == 2 for name in ends), "an end the slot does not reach is whole")
+
+    def test_two_places_of_one_shape_are_two_elements_and_an_in_place_operation_is_followed(self) -> None:
+        """An extrusion's caps are one TShape at two places: the bottom is the
+        profile's face, passed through, and the top is a face the extrusion made.
+        The profile reaches the extrusion through an in-place ``clean`` and a
+        placement the builder makes outside the patched surface: the lineage
+        follows both back to the face the profile made."""
+        from build123d import Axis, BuildPart, BuildSketch, Plane, SlotOverall, extrude
+
+        from cadgen._internal.entity_ordinals import entity_map
+
+        def slot():
+            with BuildPart() as part:
+                with BuildSketch(Plane.XY):
+                    SlotOverall(30, 10)
+                extrude(amount=5)
+            return part.part
+
+        body, _, run = _run(slot)
+        _key, lineage = run.identify(body)
+        faces = entity_map(body.wrapped, "face")
+        bottom, top = (lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
+                       for shape in body.faces().filter_by(Axis.Z).sort_by(Axis.Z))
+        self.assertEqual((bottom, top), ("f:slot.face1.1", "f:slot.extrude1.5"))
+        self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
+        self.assertEqual(len(set(lineage["edges"])), len(lineage["edges"]), "a top edge is not its bottom twin")
+
+    def test_a_label_pins_the_name_of_what_the_author_labelled(self) -> None:
+        """A shape the model labels and hands on names the feature that made it,
+        through build123d's part wrapper and through a placement."""
+        from build123d import Compound, Cylinder, Pos
+
+        def model():
+            peg = Pos(40, 0, 0) * Cylinder(3, 10)
+            peg.label = "peg"
+            return Compound(children=[peg], label="pair")
+
+        compound, _, run = _run(model)
+        [peg] = compound.children
+        _key, lineage = run.identify(peg)
+        self.assertEqual(sorted(lineage["faces"]), ["f:peg.1", "f:peg.2", "f:peg.3"])
+        self.assertIn("peg", [feature.name for feature in run.trace.features])
+
+    def test_a_shape_no_feature_made_has_no_lineage_even_placed(self) -> None:
         from build123d import Location, Solid
 
         foreign = Solid.make_box(5, 5, 5)
@@ -446,18 +504,7 @@ class TraceTest(KernelMemoCase):
 
         placed, _, run = _run(model)
         self.assertEqual([feature.op for feature in run.trace.features], ["moved"])
-        payload = run.provenance(_components(placed))
-        [component] = payload["components"].values()
-        self.assertIsNone(component["made"])
-        self.assertEqual(len(component["faces"]), 6)
-        self.assertTrue(all(lineage == [None, None] for lineage in component["faces"].values()))
-        self.assertTrue(all(lineage == [None, None] for lineage in component["edges"].values()))
-
-    def test_a_component_without_an_identity_names_nothing(self) -> None:
-        body, _, run = _run(_bored_plate)
-        components = _components(body[2])
-        [cid] = components
-        self.assertEqual(run.provenance({cid: (components[cid][0], None)})["components"], {})
+        self.assertEqual(run.identify(placed), (None, None))
 
     def test_a_child_model_promise_is_placed_not_read(self) -> None:
         """A body places a child's promise (``Pos * child()``, then
@@ -489,7 +536,8 @@ class TraceTest(KernelMemoCase):
         assembly = Assembly(None, label="assembly")
         with kernel_memo.run(None) as run:
             for shape in (promise, assembly):
-                feature = run.trace.record("Compound", ("parent.py", 1, "parent"), [(shape, None)], [shape])
+                given = run.trace.given([shape], lambda _shape: None)
+                feature = run.trace.record("Compound", ("parent.py", 1, "parent"), given, [shape])
                 self.assertEqual((feature.handles, feature.results), ([None], [None]))
                 self.assertEqual(kernel_memo._register(shape, None, feature.index, run, None), [])
             self.assertEqual(run.transient, {})
@@ -521,20 +569,55 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(low[0], high[0])
         self.assertNotEqual(low[1], high[1])
 
-    def test_provenance_is_the_same_cold_and_hot(self) -> None:
-        import json
-
+    def test_names_and_construction_keys_are_the_same_cold_and_hot(self) -> None:
         def model():
             box, tool, body = _bored_plate()
             body.label = "plate"
-            return body, tool
+            return body
 
         cold, _, run1 = _run(model)
-        # A build computes its provenance before the worker runs anything else.
-        cold_payload = json.dumps(run1.provenance(_components(*cold)), sort_keys=True)
-        hot, _, run2 = _run(model)
-        self.assertEqual(cold_payload, json.dumps(run2.provenance(_components(*hot)), sort_keys=True))
-        self.assertIn('"made": 2', cold_payload)
+        # A build names its components before the worker runs anything else.
+        cold_identity = run1.identify(cold)
+        hot, stats, run2 = _run(model)
+        self.assertGreater(stats["hits"], 0)
+        self.assertEqual(run2.identify(hot), cold_identity)
+        self.assertRegex(cold_identity[0], r"^[0-9a-f]{64}$")
+
+
+class ConstructionKeyTest(KernelMemoCase):
+    def test_a_construction_key_follows_the_construction(self) -> None:
+        (_box, _tool, body), _, _run1 = _run(_bored_plate)
+        key = kernel_memo.construction_key(body)
+        kernel_memo.clear()
+        (_box, _tool, again), _, _run2 = _run(_bored_plate)
+        self.assertEqual(kernel_memo.construction_key(again), key, "the same construction, made again")
+        (_box, _tool, wider), _, _run3 = _run(_bored_plate, 4.0)
+        self.assertNotEqual(kernel_memo.construction_key(wider), key, "another parameter")
+        from build123d import Solid
+
+        self.assertIsNone(kernel_memo.construction_key(Solid.make_box(1, 1, 1)), "made outside a run")
+
+    def test_a_construction_key_is_the_same_in_another_process(self) -> None:
+        import subprocess
+        import sys
+        import tempfile
+
+        script = (
+            "from cadgen._internal import kernel_memo\n"
+            "from build123d import Solid\n"
+            "with kernel_memo.run(None):\n"
+            "    body = Solid.make_box(20, 20, 8).cut(Solid.make_cylinder(3.0, 30))\n"
+            "print(kernel_memo.construction_key(body))\n"
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            # The model's own code is a file of its own: a feature needs a first-party frame.
+            path = Path(folder) / "model.py"
+            path.write_text(script)
+            env = {**os.environ, "PYTHONPATH": str(Path(kernel_memo.__file__).resolve().parents[2])}
+            there = subprocess.run([sys.executable, str(path)], env=env, capture_output=True, text=True, check=True)
+        (_box, _tool, body), _, _run1 = _run(_bored_plate)
+        self.assertRegex(there.stdout.strip(), r"^[0-9a-f]{64}$")
+        self.assertEqual(there.stdout.strip(), kernel_memo.construction_key(body))
 
 
 if __name__ == "__main__":

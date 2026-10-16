@@ -99,7 +99,7 @@ print(json.dumps({
         return _run("-c", code, path, *refs, cwd=self.root, cache=self.cache)
 
     def _pin_refs(self) -> tuple[str, str, str]:
-        """The pin's leaf token and one face's and one edge's element tokens, read off
+        """The pin's leaf token and one face's and one edge's element names, read off
         ``pin.step``: the refs a person pastes, each ``#<occurrence>/<element>``."""
         result = self._read("src/pin.step")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -113,18 +113,25 @@ print(json.dumps({
         replaced = original.replace("HEADER;", "HEADER;\n/* fresh document bytes */", 1)
         self.assertNotEqual(original, replaced)
         copy.write_text(replaced, encoding="utf-8")
-        # The copy holds the same geometry under the same names, so a face ref read off
-        # the original names the same face of the copy, bare: the copy has one leaf.
+        # The original's faces go by what its build says made them: the pin's cylinder.
         leaf, face, _edge = self._pin_refs()
-        result = self._read("src/pin_copy.step", f"#{face}")
+        self.assertRegex(face, r"^f:pin\.[a-z_0-9]+\.\d+$")
+        # The copy is new bytes no build wrote: its first read compiles them, and names
+        # each face by its geometry. Its one leaf is the original's, by its place in the
+        # tree, and a face ref read off the copy names that face of it, bare.
+        result = self._read("src/pin_copy.step")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         payload = json.loads(result.stdout.strip())
         self.assertEqual(payload["leaves"], 1)
         self.assertEqual(payload["faces"], 3)
         self.assertEqual(payload["leaf_refs"], [f"#{leaf}"])
-        self.assertEqual(payload["refs"], [f"#{leaf}/{face}"])
+        copied_face = payload["first_face"].split("/")[1]
+        self.assertRegex(copied_face, r"^f:[0-9a-f]{12}$")
         import hashlib
         self.assertEqual(payload["hash"], hashlib.sha256(copy.read_bytes()).hexdigest())
+        again = self._read("src/pin_copy.step", f"#{copied_face}")
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertEqual(json.loads(again.stdout.strip())["refs"], [f"#{leaf}/{copied_face}"])
 
     def test_the_run_result_reads_kind_off_tree_without_source_grammar(self) -> None:
         pin, arm = self.runs["pin"], self.runs["arm"]

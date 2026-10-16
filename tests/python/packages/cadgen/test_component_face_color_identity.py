@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -111,7 +112,8 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
                 self.assertEqual(self.faces(component), colors)
                 with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / f"cold-{name}")}):
                     cold_hash, _, _ = build_document_tree(load_step_scene(output))
-                self.assertEqual(cold_hash, stats["documentTree"])
+                    cold = get_tree(cold_hash)
+                assert_same_document(self, document, cold)
                 documents.append(document)
                 step_hashes.append(digest)
         self.assertEqual(len(set(step_hashes)), 3)
@@ -181,12 +183,13 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         self.assertIsNotNone(warm_scene)
         self.assertEqual(build_document_tree(warm_scene)[0], stats["documentTree"])
 
-        # No source or model record is needed to recover the saved appearance.
+        # No source or model record is needed to recover the saved appearance: a cold
+        # compile reads the same document, every component from the file.
         shutil.rmtree(self.root / "store")
         with self.assertRaises(FileNotFoundError):
             materialize(red_tree)
         cold_hash, _, _ = build_document_tree(load_step_scene(output))
-        self.assertEqual((cold_hash, get_tree(cold_hash)), (stats["documentTree"], document))
+        assert_same_document(self, document, get_tree(cold_hash))
 
     def test_pre_force_face_override_moves_without_reusing_the_original_child_finish(self):
         from build123d import Compound, Location

@@ -23,7 +23,7 @@ import uuid
 from cadgen.store import parts
 from cadgen.store.objects import object_path
 from cadgen.store.paths import store_root
-from cadgen.store.trees import capture_tree
+from cadgen.store.trees import COMPONENT_OBJECTS, capture_tree
 
 LOG = logging.getLogger("cadgen.viewer.parts")
 
@@ -60,7 +60,7 @@ class _Pin:
         self.components = components
         self.paths: dict[str, tuple[str, ...]] = {}
         for cid, entry in components.items():
-            self.paths[cid] = tuple(str(object_path(entry[field])) for field in ("brep", "topology")
+            self.paths[cid] = tuple(str(object_path(entry[field])) for field in COMPONENT_OBJECTS
                                     if entry.get(field))
         self.tree_path = str(object_path(tree))
 

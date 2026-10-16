@@ -1,7 +1,7 @@
 """Resolve build123d part labels used as selector refs.
 
-``#o:4b1f9e2a7c03/f:9d2e8c1b5a70`` names a face by occurrence token. This module lets
-``#servo_end_plate/f:9d2e8c1b5a70`` name the same face by the part's label, which is what
+``#o:4b1f9e2a7c03/f:plate.cut1.2`` names a face by occurrence token. This module lets
+``#servo_end_plate/f:plate.cut1.2`` name the same face by the part's label, which is what
 the author actually wrote in the generator and what ``snapshot --mode list`` already prints
 beside every ref.
 
@@ -210,5 +210,5 @@ def resolve_label_selectors(
         if parsed.selector_type == "label":
             resolved.append(f"{leading_hash}{occurrence_id}")
             continue
-        resolved.append(f"{leading_hash}{element_ref(occurrence_id, parsed.token)}")
+        resolved.append(f"{leading_hash}{element_ref(occurrence_id, parsed.element)}")
     return resolved

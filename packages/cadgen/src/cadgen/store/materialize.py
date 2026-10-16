@@ -56,18 +56,18 @@ class _ComponentIdentity:
     brep: str
     codec: str
     face_colors: tuple[tuple[int, tuple[float, float, float, float]], ...]
-    # The component's geometric identity as its tree carries it (README law 20): the
-    # entry a reuse hands the packager is the published entry, fingerprint included.
-    fingerprint: str = ""
-    face_tokens: tuple[tuple[int, str], ...] = ()
+    # What the component's build named it by, as its tree carries it (README law 20):
+    # the entry a reuse hands the packager is the published entry, these included.
+    construction: str = ""
+    lineage: str = ""
 
     def entry(self) -> dict[str, Any]:
         entry = {"kind": "native", "codec": self.codec, "brep": self.brep,
                  "faceColors": dict(self.face_colors), "contentHash": self.content_hash}
-        if self.fingerprint:
-            entry["fingerprint"] = self.fingerprint
-        if self.face_tokens:
-            entry["faceTokens"] = dict(self.face_tokens)
+        if self.construction:
+            entry["construction"] = self.construction
+        if self.lineage:
+            entry["lineage"] = self.lineage
         return entry
 
 
@@ -164,14 +164,14 @@ def _native_children(shape: Any) -> list[Any]:
     return children
 
 
-def _geometry_fingerprint(shape: Any, memo: dict | None = None) -> str | tuple | None:
+def _geometry_digest(shape: Any, memo: dict | None = None) -> str | tuple | None:
     """Read geometry through a private topology copy, never change caller flags.
 
     copyGeom=False shares only curves/surfaces, which this function only reads.
     Every copied TShape is fresh. Meshing data is omitted and Checked is
     normalized on these private TShapes, so measurement/meshing stays intact.
 
-    A native Compound contains only an ordered child graph. Fingerprint that
+    A native Compound contains only an ordered child graph. Digest that
     graph explicitly, including each child's exact native identity, orientation
     and local placement. This catches structural and aliasing edits without
     serializing all geometry again at every assembly depth. Its native leaves
@@ -195,11 +195,11 @@ def _geometry_fingerprint(shape: Any, memo: dict | None = None) -> str | tuple |
     try:
         if shape.ShapeType() == TopAbs_COMPOUND:
             children = tuple(
-                (_native_key(child), _geometry_fingerprint(child, memo))
+                (_native_key(child), _geometry_digest(child, memo))
                 for child in _native_children(shape)
             )
             result = ("compound", int(shape.Orientation()), children) if all(
-                fingerprint is not None for _, fingerprint in children
+                digest is not None for _, digest in children
             ) else None
             memo[key] = result
             return result
@@ -276,7 +276,7 @@ def _capture_materialized_state(
     shape = node.wrapped
     return _MaterializedState(
         shape=shape,
-        geometry=_geometry_fingerprint(shape, geometry_memo),
+        geometry=_geometry_digest(shape, geometry_memo),
         metadata=_materialized_metadata(node, root=root),
         children=tuple(
             _capture_materialized_state(child, root=False, geometry_memo=geometry_memo)
@@ -663,12 +663,11 @@ def materialize_descriptor(
         content_hash = str((components.get(cid) or {}).get("contentHash") or "")
         brep = str((components.get(cid) or {}).get("brep") or "")
         if content_hash and cid == content_hash[:16] and brep and (components[cid].get("kind") == "native"):
-            face_tokens = components[cid].get("faceTokens") or {}
             child.__dict__["__cadgen_component_identity__"] = _ComponentIdentity(
                 cid=cid, content_hash=content_hash, brep=brep,
                 codec=components[cid]["codec"], face_colors=tuple(sorted(face_colors.items())),
-                fingerprint=str(components[cid].get("fingerprint") or ""),
-                face_tokens=tuple(sorted((int(ordinal), str(token)) for ordinal, token in face_tokens.items())),
+                construction=str(components[cid].get("construction") or ""),
+                lineage=str(components[cid].get("lineage") or ""),
             )
         else:
             child.__dict__.pop("__cadgen_component_identity__", None)

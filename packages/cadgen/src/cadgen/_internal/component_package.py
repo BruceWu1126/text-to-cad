@@ -532,14 +532,17 @@ class _StageTimer:
                 handle.write(json.dumps(record) + "\n")
 
 
-# The ONLY version on geometry identity. A component's cid hashes its BREP
-# bytes, its intrinsic face colours, and this scheme string; nothing else.
-# Bump it only when the same bytes must map to a different tree (a codec or
+# The ONLY version on a component's identity. A component's cid hashes its BREP
+# bytes, its intrinsic face colours, the construction key and the lineage its
+# build named it by (``construction``, ``lineage``: none for geometry no
+# construction of the run made), and this scheme string; nothing else. Bump it
+# only when the same inputs must map to a different tree (a codec or
 # interpretation change): that re-keys every user's store, so it is rare and
 # deliberate. An extractor, selector-table or mesher fix bumps the version of
 # that derived artifact (cadgen.store.parts.PART_VERSION) and never this
-# string. STORE.md "Geometry identity and versions" records the rule.
-GEOMETRY_SCHEME = "cadgen-geometry-input-v3"
+# string. STORE.md "Identity and versions" records the rule. 4: a component
+# carries its construction key and lineage.
+GEOMETRY_SCHEME = "cadgen-geometry-input-v4"
 GEOMETRY_CODECS = frozenset({"bintools-v4", "bintools-v3", "breptools-ascii-v3"})
 COMPONENT_KINDS = frozenset({"native", "eager-only"})
 _BREP_HEADERS = {
@@ -571,24 +574,71 @@ def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(json_value(value), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 def geometry_component_hash(codec: str, payload: bytes, face_colors: dict, *,
-                   kind: str = "native", topology: str | None = None) -> str:
-    """The complete geometry-input identity: the scheme, kind, codec, BREP bytes and
-    face colours, and -- an eager-only component's -- the object its topology facts
-    are pinned as (``topology``)."""
+                            kind: str = "native", topology: str | None = None,
+                            construction: str | None = None, lineage: str | None = None) -> str:
+    """A component's complete identity: the scheme, kind, codec, BREP bytes and face
+    colours, an eager-only component's topology facts object (``topology``), and the
+    construction key and lineage object its build named it by, where it did."""
     from cadgen.store.objects import is_object_hash
 
     if codec not in GEOMETRY_CODECS or kind not in COMPONENT_KINDS:
         raise ValueError("unsupported geometry codec/kind")
     if (kind == "eager-only") != is_object_hash(topology):
         raise ValueError("eager-only geometry must pin its topology facts")
+    if construction is not None and not is_object_hash(construction):
+        raise ValueError("a construction key is a sha256 hex digest")
+    if lineage is not None and not is_object_hash(lineage):
+        raise ValueError("a lineage is an object hash")
     digest = hashlib.sha256()
     digest.update(GEOMETRY_SCHEME.encode() + b"\0" + kind.encode() + b"\0" + codec.encode() + b"\0")
     digest.update(len(payload).to_bytes(8, "big"))
     digest.update(payload)
     digest.update(canonical_json_bytes(face_colors))
-    if topology is not None:
-        digest.update(b"\0" + topology.encode())
+    for name, value in (("topology", topology), ("construction", construction), ("lineage", lineage)):
+        if value is not None:
+            digest.update(b"\0" + name.encode() + b"\0" + value.encode())
     return digest.hexdigest()
+
+
+_LINEAGE_KINDS = (("faces", "face"), ("edges", "edge"), ("vertices", "vertex"))
+
+
+def lineage_bytes(lineage: Mapping[str, Any]) -> bytes:
+    """A component's lineage (``kernel_trace.Trace.lineage``) as the object its tree
+    entry names: canonical JSON, checked as :func:`read_lineage` reads it."""
+    payload = canonical_json_bytes(lineage)
+    read_lineage(payload)
+    return payload
+
+
+def read_lineage(payload: bytes) -> dict[str, Any]:
+    """A stored lineage: ``{"made", "faces", "edges", "vertices", "modified"}``, each
+    list an element name or None per ordinal, every name of its kind and distinct, and
+    ``modified`` naming only named elements. ValueError for anything else."""
+    from cadgen.cad_ref_syntax import is_element_name, is_feature_name
+
+    try:
+        lineage = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError("invalid lineage JSON") from error
+    if type(lineage) is not dict or set(lineage) != {"made", "modified", *(plural for plural, _kind in _LINEAGE_KINDS)}:
+        raise ValueError("a lineage holds made, faces, edges, vertices and modified")
+    if lineage["made"] is not None and not is_feature_name(lineage["made"]):
+        raise ValueError("a lineage's maker is not a feature name")
+    named: set[str] = set()
+    for plural, kind in _LINEAGE_KINDS:
+        names = lineage[plural]
+        if type(names) is not list or any(name is not None and not is_element_name(name, kind) for name in names):
+            raise ValueError(f"a lineage's {plural} are not {kind} names")
+        present = [name for name in names if name is not None]
+        if len(set(present)) != len(present):
+            raise ValueError(f"a lineage names two {plural} alike")
+        named.update(present)
+    modified = lineage["modified"]
+    if type(modified) is not dict or any(name not in named or not is_feature_name(feature)
+                                         for name, feature in modified.items()):
+        raise ValueError("a lineage's modifiers name its own elements and features")
+    return lineage
 
 def effective_face_colors(shape: Any, colors: Any) -> dict:
     from OCP.TopAbs import TopAbs_FACE
@@ -741,20 +791,8 @@ def _encode_brep(shape: Any) -> dict[str, Any]:
     raise CodecFidelityError("; ".join(failures))
 
 
-def geometric_identity_fields(identity: Mapping[str, Any], colors: Mapping[int, Any]) -> dict[str, Any]:
-    """The entry fields that name a native component by its geometry (README law
-    20), from its ``geometry_identity``: its ``fingerprint`` and, for each face
-    with an intrinsic colour, that face's token (``faceTokens``, by ordinal) --
-    what its part is keyed by (``cadgen.store.parts``). The identity is computed
-    from the unlocated shape itself, so the body a build holds and the body read
-    back from its STEP get the same."""
-    fields: dict[str, Any] = {"fingerprint": identity["fingerprint"]}
-    if colors:
-        fields["faceTokens"] = {int(ordinal): identity["faces"][int(ordinal) - 1] for ordinal in colors}
-    return fields
-
-
-def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dict[str, Any]:
+def prepare_geometry_component(shape: Any, *, face_colors: object = None,
+                               identity: tuple[str | None, Mapping[str, Any] | None] | None = None) -> dict[str, Any]:
     """Capture a component's owned bytes, effective recipe and private native input.
 
     No store write occurs here. Ordinary v4 decoding preserves the existing
@@ -762,12 +800,12 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     parameter-loss cases. Alternate codecs require full original-native bytes
     and their own byte fixed point. Failure pins the live shape's topology
     facts explicitly (``topology``, the bytes an eager-only component's tree
-    pins), never a falsely readable native entry. A native entry carries its
-    geometric identity (:func:`geometric_identity_fields`), and the whole
-    identity measured for it -- every face's and edge's token -- rides the
-    prepared component as ``identity`` for the build's provenance pass, so no
-    element is measured twice; an eager-only one has none, its pinned facts
-    standing in for it.
+    pins), never a falsely readable native entry. ``identity`` is what the run
+    that made the shape names it by (``kernel_memo._Run.identify``): its
+    construction key and its lineage, which the entry carries as
+    ``construction`` and ``lineage`` (the lineage's object, whose bytes ride the
+    prepared component as ``lineage`` until it is published). Nothing here
+    measures the shape's geometry for a name.
     """
     try:
         encoded = _encode_brep(shape)
@@ -785,32 +823,36 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None) -> dic
     entry = {"kind": kind, "codec": encoded["codec"],
              "brep": hashlib.sha256(payload).hexdigest(), "faceColors": colors}
     topology = None
-    identity = None
-    from OCP.TopLoc import TopLoc_Location
-
     if kind == "eager-only":
+        from OCP.TopLoc import TopLoc_Location
+
         from cadgen._internal.topology_extract import extract_topology_facts
         from cadgen._internal.topology_facts import topology_facts_bytes
 
         topology = topology_facts_bytes(
             extract_topology_facts(getattr(shape, "wrapped", shape).Located(TopLoc_Location())))
         entry["topology"] = hashlib.sha256(topology).hexdigest()
-    else:
-        from cadgen._internal.geometry_fingerprint import geometry_identity
-
-        identity = geometry_identity(private.wrapped.Located(TopLoc_Location()), brep=entry["brep"])
-        entry.update(geometric_identity_fields(identity, colors))
+    construction, lineage = identity if identity is not None else (None, None)
+    lineage_payload = None
+    if construction is not None:
+        entry["construction"] = construction
+    if lineage is not None:
+        lineage_payload = lineage_bytes(lineage)
+        entry["lineage"] = hashlib.sha256(lineage_payload).hexdigest()
     entry["contentHash"] = geometry_component_hash(
         entry["codec"], payload, colors, kind=kind, topology=entry.get("topology"),
+        construction=entry.get("construction"), lineage=entry.get("lineage"),
     )
     if private is not None:
         private.cad_face_ordinal_colors = dict(colors)
-    return {"entry": entry, "payload": payload, "shape": private, "topology": topology, "identity": identity}
+    return {"entry": entry, "payload": payload, "shape": private, "topology": topology, "lineage": lineage_payload}
 
 
-def prepare_published_component(shape: Any, *, face_colors: object = None) -> dict[str, Any]:
+def prepare_published_component(shape: Any, *, face_colors: object = None,
+                                identity: tuple[str | None, Mapping[str, Any] | None] | None = None) -> dict[str, Any]:
     """:func:`prepare_geometry_component` for a parsed prototype whose exact bytes
-    may already be published.
+    may already be published, named by ``identity`` as the component it was read
+    from is (a scene read from a stored tree carries it).
 
     A STEP read-back parses every prototype again, and each one was encoded,
     privately decoded and fenced for point fidelity on every save even when
@@ -830,30 +872,31 @@ def prepare_published_component(shape: Any, *, face_colors: object = None) -> di
     wrapped = getattr(shape, "wrapped", shape)
     payload = _shape_brep_bytes(wrapped)
     digest = hashlib.sha256(payload).hexdigest()
-    if has_object(digest):
+    construction, lineage = identity if identity is not None else (None, None)
+    lineage_payload = lineage_bytes(lineage) if lineage is not None else None
+    lineage_object = hashlib.sha256(lineage_payload).hexdigest() if lineage_payload is not None else None
+    if has_object(digest) and (lineage_object is None or has_object(lineage_object)):
         colors = effective_face_colors(
             wrapped, getattr(shape, "cad_face_ordinal_colors", None) if face_colors is None else face_colors,
         )
-        content = geometry_component_hash("bintools-v4", payload, colors)
-        entry = {"kind": "native", "codec": "bintools-v4", "brep": digest,
-                 "faceColors": colors, "contentHash": content}
+        content = geometry_component_hash("bintools-v4", payload, colors, construction=construction,
+                                          lineage=lineage_object)
+        entry = {"kind": "native", "codec": "bintools-v4", "brep": digest, "faceColors": colors}
+        for field, value in (("construction", construction), ("lineage", lineage_object)):
+            if value is not None:
+                entry[field] = value
+        entry["contentHash"] = content
         indexed = read_entry("component", _component_id(content)) or {}
-        published = {key: value for key, value in indexed.items()
-                     if key not in ("schemaVersion", "color", "fingerprint", "faceTokens")}
-        # The published entry's geometric identity was computed from these same bytes by the
-        # build that published them, and is taken with them.
-        if published and canonical_json_bytes(published) == canonical_json_bytes(entry) and "fingerprint" in indexed:
-            entry["fingerprint"] = indexed["fingerprint"]
-            if indexed.get("faceTokens"):
-                entry["faceTokens"] = {int(ordinal): token for ordinal, token in indexed["faceTokens"].items()}
+        published = {key: value for key, value in indexed.items() if key not in ("schemaVersion", "color")}
+        if published and canonical_json_bytes(published) == canonical_json_bytes(entry):
             try:
                 validate_geometry_component(entry, payload)
             except ValueError:
-                return prepare_geometry_component(shape, face_colors=face_colors)
+                return prepare_geometry_component(shape, face_colors=face_colors, identity=identity)
             prototype = _build123d_shape_from_topods(wrapped)
             prototype.cad_face_ordinal_colors = dict(colors)
-            return {"entry": entry, "payload": payload, "shape": prototype, "topology": None}
-    return prepare_geometry_component(shape, face_colors=face_colors)
+            return {"entry": entry, "payload": payload, "shape": prototype, "topology": None, "lineage": lineage_payload}
+    return prepare_geometry_component(shape, face_colors=face_colors, identity=identity)
 
 
 def decode_geometry_component(entry: dict[str, Any], payload: bytes, *, native: bool = False) -> Any:
@@ -902,11 +945,9 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
     """Kernel-free verification of a complete encoded geometry input."""
     if type(entry) is not dict or entry.get("kind") not in COMPONENT_KINDS or entry.get("codec") not in GEOMETRY_CODECS:
         raise ValueError("unsupported geometry component")
-    allowed = {"kind", "codec", "brep", "faceColors", "contentHash", "color"}
+    allowed = {"kind", "codec", "brep", "faceColors", "contentHash", "color", "construction", "lineage"}
     if entry["kind"] == "eager-only":
         allowed.add("topology")
-    else:
-        allowed |= {"fingerprint", "faceTokens"}
     if set(entry) - allowed:
         raise ValueError("unknown geometry component field")
     if not isinstance(payload, bytes) or not payload.startswith(_BREP_HEADERS[entry["codec"]]):
@@ -916,23 +957,8 @@ def validate_geometry_component(entry: Any, payload: bytes, *, cid: str | None =
     colors = _normalized_face_colors(entry.get("faceColors"))
     if canonical_json_bytes(colors) != canonical_json_bytes(entry.get("faceColors")):
         raise ValueError("noncanonical intrinsic appearance recipe")
-    if entry["kind"] == "native":
-        # The geometric identity's shape is checked here; its value is the kernel's to
-        # compute, and a reader never recomputes it (README law 20).
-        from cadgen._internal.geometry_fingerprint import is_element_token
-
-        fingerprint = entry.get("fingerprint")
-        if not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(c not in "0123456789abcdef" for c in fingerprint):
-            raise ValueError("native geometry component lacks its fingerprint")
-        tokens = entry.get("faceTokens")
-        if (tokens is None) != (not colors):
-            raise ValueError("face tokens must name exactly the faces with an intrinsic colour")
-        if tokens is not None:
-            if type(tokens) is not dict or {str(key) for key in tokens} != {str(key) for key in colors}:
-                raise ValueError("face tokens must name exactly the faces with an intrinsic colour")
-            if any(not is_element_token(token) or not token.startswith("f:") for token in tokens.values()):
-                raise ValueError("invalid face token")
     full = geometry_component_hash(entry["codec"], payload, colors, kind=entry["kind"],
-                                   topology=entry.get("topology"))
+                                   topology=entry.get("topology"), construction=entry.get("construction"),
+                                   lineage=entry.get("lineage"))
     if entry.get("contentHash") != full or (cid is not None and cid != full[:16]):
         raise ValueError("geometry input identity mismatch")

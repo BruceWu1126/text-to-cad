@@ -49,20 +49,23 @@ class SelectorParityTest(unittest.TestCase):
                 self.assertIsNotNone(parsed)
                 self.assertEqual(case["selectorType"], parsed.selector_type)
                 self.assertEqual(case["occurrenceId"], parsed.occurrence_id)
-                self.assertEqual(case["token"], parsed.token)
+                self.assertEqual(case["element"], parsed.element)
                 self.assertEqual(case["canonical"], parsed.canonical)
                 self.assertEqual(case.get("label", ""), parsed.label)
 
 
 O1, O2 = "o:4b1f9e2a7c03", "o:0a9e8d7c6b5f"
 F, E, V = "f:9d2e8c1b5a70", "e:12ab34cd56ef", "v:fedcba987654"
+# Names by lineage: the feature that made the element, its number there, and a split piece's.
+NAMED = ("f:dial.extrude1.3", "e:dial.extrude1.3.2", "v:lid.2")
 
 
 class TokenPrecedenceTest(unittest.TestCase):
-    """A token form is tried before the label form, so a token is never read as a label, and
-    the retired positional grammar (``o1.2.f7``, ``f7``) is no ref at all."""
+    """Token and name forms are tried before the label form, so neither is read as a label,
+    and the retired positional grammar (``o1.2.f7``, ``f7``) is no ref at all."""
 
-    TOKEN_FORMS = (O1, f"{O1}/{F}", f"{O1}/{E}", f"{O1}/{V}", F, E, V, f"#{O2}/{F}", "m1", "m17")
+    TOKEN_FORMS = (O1, f"{O1}/{F}", f"{O1}/{E}", f"{O1}/{V}", F, E, V, f"#{O2}/{F}", *NAMED,
+                   *(f"{O2}/{name}" for name in NAMED), "m1", "m17")
 
     def test_token_selectors_never_take_the_label_branch(self) -> None:
         for selector in self.TOKEN_FORMS:
@@ -82,6 +85,19 @@ class TokenPrecedenceTest(unittest.TestCase):
         self.assertEqual("label", parse_selector("f45").selector_type, "a bare ordinal is a label spelling")
         self.assertEqual(f"{O1}/{F}", element_ref(O1, F))
         self.assertEqual(("face", "edge", "vertex"), (element_kind(F), element_kind(E), element_kind(V)))
+        self.assertEqual(("face", "edge", "vertex"), tuple(element_kind(name) for name in NAMED))
+
+    def test_an_element_name_names_its_feature(self) -> None:
+        from cadgen.cad_ref_syntax import element_feature, is_element_name, is_feature_name
+
+        self.assertEqual(["dial.extrude1", "dial.extrude1", "lid"], [element_feature(name) for name in NAMED])
+        self.assertIsNone(element_feature(F), "a geometric token names no feature")
+        self.assertTrue(all(is_element_name(name) for name in (F, E, V, *NAMED)))
+        self.assertTrue(is_element_name(NAMED[0], "face") and not is_element_name(NAMED[0], "edge"))
+        for value in (O1, "f7", "f:dial.extrude1", "f:9d2e8c1b5a70.3", "x:dial.extrude1.3", None):
+            self.assertFalse(is_element_name(value), value)
+        self.assertTrue(is_feature_name("dial.extrude1") and is_feature_name("lid"))
+        self.assertFalse(is_feature_name("dial.extrude1.3") or is_feature_name("3d") or is_feature_name(""))
 
     def test_mates_stay_opaque(self) -> None:
         # "m1" matches the label pattern; it must still be opaque so mate handling in the

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.documents import assert_same_document
 from tests.python.support.tmp_root import generated_cad_directory
 from tests.python.support.tree_ids import node_id, node_ids, root_id
 
@@ -33,19 +34,27 @@ class DocumentTreePackagingTest(unittest.TestCase):
         return shape
 
     def assert_warm_and_cold_repackage(self, output, expected_tree):
+        """The build's document tree is what a scene read from it packages again -- its
+        components named as they are, its bounds measured -- and a parse of its bytes,
+        here or as a copy under another name in an empty store, packages the same
+        document, every component read from the file."""
         from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen._internal.step_scene_package import scene_from_render_package
         from cadgen.store.build import build_document_tree
         from cadgen.store.records import note_document_tree
+        from cadgen.store.trees import get_tree
 
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
-        raw_hash, raw_tree, _ = build_document_tree(load_step_scene(output))
-        self.assertEqual(raw_hash, expected_tree)
+        document = get_tree(expected_tree)
         note_document_tree(digest, expected_tree)
         warm_scene = scene_from_render_package(output, step_hash=digest)
         self.assertIsNotNone(warm_scene)
-        warm_hash, warm_tree, _ = build_document_tree(warm_scene)
-        self.assertEqual((warm_hash, warm_tree), (raw_hash, raw_tree))
+        _warm_hash, warm_tree, _ = build_document_tree(warm_scene)
+        self.assertEqual({key: value for key, value in warm_tree.items() if key != "bbox"},
+                         {key: value for key, value in document.items() if key != "bbox"})
+        assert_same_document(self, document, warm_tree)
+        raw_hash, raw_tree, _ = build_document_tree(load_step_scene(output))
+        assert_same_document(self, document, raw_tree)
         copied = self.root / "different-filename.step"
         copied.write_bytes(output.read_bytes())
         # Force extraction in an empty store, not merely a hit of the generated
@@ -53,7 +62,7 @@ class DocumentTreePackagingTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "empty-store")}):
             cold_hash, cold_tree, _ = build_document_tree(load_step_scene(copied))
         self.assertEqual((cold_hash, cold_tree), (raw_hash, raw_tree))
-        return raw_tree
+        return document
 
     def test_single_part_root_wrapper_is_canonical_across_warm_cold_and_file_copies(self):
         from cadgen._internal.source_sidecar import SOURCE_MATERIAL_DEFAULTS

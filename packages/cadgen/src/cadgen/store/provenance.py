@@ -6,32 +6,32 @@ entry per model beside its record, written by the build right after the
 record for the result tree the record names::
 
     {
-      "kind": "provenance", "schemaVersion": 1,
+      "kind": "provenance", "schemaVersion": 2,
       "model": "/abs/src/bracket.py::bracket",
       "tree": "<the record's tree>", "stepHash": "<sha256 of the STEP written>",
-      "features": [{"id": "fe:cut@src/bracket.py:12#1", "op": "cut", "file": "src/bracket.py",
-                    "line": 12, "function": "bracket", "n": 1, "inputs": [0, 1]}, …],
-      "components": {"<fingerprint>": {"made": 2, "faces": {"f:9d2e8c1b5a70": [2, 5]}, "edges": {…}}}
+      "features": [{"name": "bracket.cut1", "op": "cut", "file": "src/bracket.py", "line": 12,
+                    "function": "bracket", "inputs": ["bracket.make_box1", "bracket.make_cylinder1"]}, …],
+      "components": ["<cid>", …]
     }
 
 ``features`` are the kernel constructions the model's code called, in call
-order (``_internal/kernel_trace.py``); ``inputs`` and every value under
-``components`` index that list (null: made outside the run). A component is
-named by its fingerprint and its faces and edges by their tokens, never by an
-ordinal, so an entry written for the body the build held answers for the body
-a document read back; each element has the feature that made it and the one
-that last modified it (null when none has).
+order, by name (``_internal/kernel_trace.py``), each with the frame it ran in
+and the features that made what it was given (null: made outside the run);
+``components`` are the components the build made, whose lineage names their
+elements by those features. A line and a file are here and nowhere else: a name
+holds neither, so an edit that moves code renames nothing.
 
 Readers never open it (STORE.md §2, the two sides). Its one reader is
 ``cadgen store where <document> <ref>``: path → ``index/output`` → the model
 → its record and this entry, the file's hash checked against ``stepHash``,
 then the ref resolved in the document tree the record names (a label as
-``read_scene`` resolves it) to its occurrence and component, the component's
-fingerprint found in this entry or in a pinned child's, and the element's
-token looked up. Without an entry, or with one for other bytes, it says it
-does not know; nothing here finds or renders geometry. The entry goes with
-``store forget`` and is never evicted (§8); like a record, one at a key this
-cadgen does not own is obsolete.
+``read_scene`` resolves it) to its occurrence and component, the entry that
+lists the component found -- the model's, or a pinned child's -- and the
+feature the element's name (or, for an occurrence, its body's lineage) names
+looked up there, with the one the lineage says last modified it. Without an
+entry, or with one for other bytes, it says it does not know; nothing here
+finds or renders geometry. The entry goes with ``store forget`` and is never
+evicted (§8); like a record, one at a key this cadgen does not own is obsolete.
 """
 
 from __future__ import annotations
@@ -43,9 +43,12 @@ from typing import Any, Iterator
 from cadgen.store.index import model_key, read_entry, remove_entry, resolve_model_ref, versioned_key, write_entry
 
 PROVENANCE_KIND = "provenance"
+_PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 # A format change bumps it and lands on new keys; another version's entries are
 # never read, and are retired a week after their last write (gc, STORE.md §8).
-PROVENANCE_SCHEMA_VERSION = 1
+# 2: features by name, and the components the build made, whose lineage names
+# their elements by them.
+PROVENANCE_SCHEMA_VERSION = 2
 
 __all__ = [
     "PROVENANCE_KIND",
@@ -68,7 +71,8 @@ def provenance_key(model: Path | str) -> str:
 def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str, step_hash: str) -> None:
     """The entry for ``model``'s build that published ``tree`` and wrote the
     document whose bytes hash to ``step_hash`` (empty for a model that writes
-    no STEP). Idempotent; atomic."""
+    no STEP): ``payload`` holds its ``features`` and ``components``. Idempotent;
+    atomic."""
     ref = resolve_model_ref(model)
     body = {
         "kind": PROVENANCE_KIND,
@@ -77,7 +81,7 @@ def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str, s
         "tree": str(tree or ""),
         "stepHash": str(step_hash or ""),
         "features": list(payload.get("features") or []),
-        "components": dict(payload.get("components") or {}),
+        "components": list(payload.get("components") or []),
     }
     write_entry(PROVENANCE_KIND, provenance_key(ref), body)
 
@@ -122,8 +126,10 @@ def where(document: Path | str, ref: str) -> Where:
     ``document``. A ref that cannot be read or that names another file raises
     ``ValueError``; a question the store cannot answer is a ``Where`` that is
     not ``known``, with its ``reason``."""
+    from cadgen._internal.component_package import read_lineage
     from cadgen._internal.step_hash import step_file_hash
-    from cadgen.cad_ref_syntax import ensure_ref_file_matches, parse_selector, split_cad_ref
+    from cadgen.cad_ref_syntax import element_feature, ensure_ref_file_matches, parse_selector, split_cad_ref
+    from cadgen.store.objects import read_verified_object
     from cadgen.store.records import model_for_output, read_record
     from cadgen.store.trees import flatten
 
@@ -156,50 +162,54 @@ def where(document: Path | str, ref: str) -> Where:
     if flat is None:
         return answer.unknown("the record names no document tree for this file")
 
-    occurrence_id, token = _resolve(parsed, text, flat)
-    answer.ref = "#" + (f"{occurrence_id}/{token}" if token else occurrence_id)
+    occurrence_id, element = _resolve(parsed, text, flat)
+    answer.ref = "#" + (f"{occurrence_id}/{element}" if element else occurrence_id)
     row = next((occ for occ in flat.get("occurrences") or [] if str(occ.get("id")) == occurrence_id), None)
     if row is None:
         return answer.unknown("a group is made of its occurrences; ask about one of them")
-    component = (flat.get("components") or {}).get(str(row.get("component") or "")) or {}
-    fingerprint = str(component.get("fingerprint") or "")
-    if not fingerprint:
-        return answer.unknown("the component has no fingerprint (its geometry could not be read back)")
-    answer.component = fingerprint
+    cid = str(row.get("component") or "")
+    component = (flat.get("components") or {}).get(cid) or {}
+    answer.component = cid
+    if not component.get("lineage"):
+        return answer.unknown("no feature of a model's run made this body: it was read from a file, or "
+                              "built outside the kernel's constructions")
     found = next(((owner, described) for owner, described in _entries(model, record, entry)
-                  if fingerprint in (described.get("components") or {})), None)
+                  if cid in (described.get("components") or [])), None)
     if found is None:
-        return answer.unknown("no feature of the model or of its children made this body: it was read "
-                              "from a file, or built outside the kernel's constructions")
+        return answer.unknown("no build the store remembers made this body; run the model again")
     answer.model, described = found
-    lineage = (described["components"][fingerprint])
-    features = described.get("features") or []
+    try:
+        lineage = read_lineage(read_verified_object(str(component["lineage"])))
+    except (OSError, ValueError):
+        return answer.unknown("the body's lineage is no longer in the store; run the model again")
+    features = {str(feature.get("name")): feature for feature in described.get("features") or []}
     if answer.kind == "occurrence":
-        made, modified = lineage.get("made"), None
-    elif answer.kind == "vertex":
-        return answer.unknown("provenance names faces and edges; a vertex has no feature of its own")
+        made_by, modified_by = lineage.get("made"), None
     else:
-        element = (lineage.get(answer.kind + "s") or {}).get(token)
-        if element is None:
-            return answer.unknown("the entry does not name this element: the document's body differs "
-                                  "from the one the build held")
-        made, modified = element[0], element[1]
-    answer.made = _feature(features, made)
-    answer.modified = _feature(features, modified)
+        made_by = element_feature(element)
+        if made_by is None:
+            return answer.unknown("no feature of the model's run made this element: it is named by its "
+                                  "geometry, as an element of a file read or of a shape built elsewhere is")
+        if element not in lineage[_PLURAL[answer.kind]]:
+            return answer.unknown("the body has no element of that name: the ref names a build "
+                                  "this document is not")
+        modified_by = (lineage.get("modified") or {}).get(element)
+    answer.made = features.get(str(made_by)) if made_by is not None else None
+    answer.modified = features.get(str(modified_by)) if modified_by is not None else None
     if answer.made is None:
         return answer.unknown("this geometry came from outside the run: a file read, or a shape built "
                               "outside the kernel's constructions" + (
-                                  f"; last modified by {answer.modified['id']}" if answer.modified else ""))
-    answer.inputs = [feature for feature in (_feature(features, index) for index in dict.fromkeys(answer.made.get("inputs") or []))
-                     if feature is not None]
+                                  f"; last modified by {answer.modified['name']}" if answer.modified else ""))
+    answer.inputs = [features[name] for name in dict.fromkeys(answer.made.get("inputs") or [])
+                     if name is not None and name in features]
     answer.known = True
     return answer
 
 
 def _resolve(parsed: Any, text: str, flat: dict[str, Any]) -> tuple[str, str]:
-    """``(occurrence token, element token or "")`` for a parsed ref against the
+    """``(occurrence token, element name or "")`` for a parsed ref against the
     flattened document tree: a label as ``read_scene`` resolves it, a bare
-    element token in a one-leaf document."""
+    element name in a one-leaf document."""
     from cadgen.cad_ref_syntax import parse_selector
     from cadgen.label_refs import build_label_aliases, resolve_label_selectors
 
@@ -214,7 +224,7 @@ def _resolve(parsed: Any, text: str, flat: dict[str, Any]) -> tuple[str, str]:
         occurrence_id = occurrences[0]
     if occurrence_id not in {str(node.get("id")) for node in _nodes(flat)}:
         raise ValueError(f"unknown occurrence: #{occurrence_id}")
-    return occurrence_id, parsed.token
+    return occurrence_id, parsed.element
 
 
 def _nodes(flat: dict[str, Any]) -> list[dict[str, Any]]:
@@ -254,12 +264,6 @@ def _entries(model: str, record: dict[str, Any], entry: dict[str, Any]) -> Itera
             pending.append(child_record)
 
 
-def _feature(features: list[dict[str, Any]], index: Any) -> dict[str, Any] | None:
-    if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(features):
-        return None
-    return features[index]
-
-
 def _frame(feature: dict[str, Any]) -> str:
     return f"{feature.get('file')}:{feature.get('line')} in {feature.get('function')} ({feature.get('op')})"
 
@@ -273,12 +277,12 @@ def describe(answer: Where) -> list[str]:
         lines.append(f"unknown   {answer.reason}")
         return lines
     assert answer.made is not None
-    lines.append(f"{answer.kind:<9} made by {_frame(answer.made)}   {answer.made.get('id')}")
+    lines.append(f"{answer.kind:<9} made by {_frame(answer.made)}   {answer.made.get('name')}")
     if answer.inputs:
-        lines.append("          inputs " + ", ".join(str(feature.get("id")) for feature in answer.inputs))
+        lines.append("          inputs " + ", ".join(str(feature.get("name")) for feature in answer.inputs))
     if answer.kind != "occurrence":
         if answer.modified is not None:
-            lines.append(f"          last modified by {_frame(answer.modified)}   {answer.modified.get('id')}")
+            lines.append(f"          last modified by {_frame(answer.modified)}   {answer.modified.get('name')}")
         else:
             lines.append("          not modified since")
     return lines

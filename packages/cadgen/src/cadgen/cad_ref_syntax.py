@@ -1,15 +1,21 @@
 """The ref grammar: one language, shared with the client (``@text-to-cad/core/lib/cadRefs.js``).
 
-A ref names geometry, never a position (README law 20): an occurrence by its
-token (``o:`` and twelve hexadecimal characters, minted from its place in the
-tree: ``_internal/tree_tokens.py``), an element by the occurrence's token, a
-slash and the element's token (``f:``, ``e:``, ``v:`` and twelve hexadecimal
-characters, minted from the element's geometry within its body:
-``_internal/geometry_fingerprint.py``) -- ``#o:4b1f9e2a7c03/f:9d2e8c1b5a70``. A
-part label stands in for an occurrence token (``#base``, ``#base/f:9d2e8c1b5a70``);
-a bare element token (``#f:9d2e8c1b5a70``) resolves in a document with one leaf.
-Mates (``m1``) are not part of the structured grammar. Both parsers assert the
-cases of ``cadRefs.parity.json``.
+A ref names an occurrence by its token (``o:`` and twelve hexadecimal
+characters, minted from its place in the tree: ``_internal/tree_tokens.py``) and
+an element by the occurrence's token, a slash and the element's **name**
+(README law 20): its kind (``f:``, ``e:``, ``v:``) and its lineage, the feature
+that made it and its number among what that feature made
+(``_internal/kernel_trace.py``) -- ``#o:4b1f9e2a7c03/f:dial.extrude1.3``; a piece
+of an element a later feature split takes its number among the pieces after a
+further dot (``f:dial.extrude1.3.2``), and a feature the author labelled goes by
+the label (``f:lid.2``). An element no construction names -- of an imported file,
+or of a shape the model took from outside its run -- is named by its geometric
+token, twelve hexadecimal characters (``f:9d2e8c1b5a70``,
+``_internal/geometric_tokens.py``). A part label stands in for an occurrence
+token (``#base``, ``#base/f:dial.extrude1.3``); a bare element name
+(``#f:dial.extrude1.3``) resolves in a document with one leaf. Mates (``m1``)
+are not part of the structured grammar. Both parsers assert the cases of
+``cadRefs.parity.json``.
 """
 
 from __future__ import annotations
@@ -29,10 +35,19 @@ from dataclasses import dataclass
 QUOTED_PATH_PATTERN = r'"(?:[^"\\\r\n]|\\.)*"'
 QUOTED_PREFIX_RE = re.compile(rf"^({QUOTED_PATH_PATTERN})#")
 OCCURRENCE_TOKEN_PATTERN = r"o:[0-9a-f]{12}"
-ELEMENT_TOKEN_PATTERN = r"[fev]:[0-9a-f]{12}"
+# A name segment: a function, an operation and its count, or a label (``kernel_trace.identifier``).
+_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_NUMBER = r"[1-9][0-9]*"
+# An element's name: its lineage -- a feature (``label`` or ``function.operationN``), the
+# element's number among what it made and, for a piece, the piece's number -- or its
+# geometric token. Segments start with a letter and numbers with a digit, so the two
+# never read as one another.
+FEATURE_NAME_PATTERN = rf"{_SEGMENT}(?:\.{_SEGMENT})?"
+ELEMENT_NAME_PATTERN = rf"[fev]:(?:[0-9a-f]{{12}}|{FEATURE_NAME_PATTERN}\.{_NUMBER}(?:\.{_NUMBER})?)"
+FEATURE_NAME_RE = re.compile(rf"^{FEATURE_NAME_PATTERN}$")
 OCCURRENCE_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})$")
-OCCURRENCE_ELEMENT_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})/({ELEMENT_TOKEN_PATTERN})$")
-ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_TOKEN_PATTERN})$")
+OCCURRENCE_ELEMENT_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})/({ELEMENT_NAME_PATTERN})$")
+ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_NAME_PATTERN})$")
 
 # A build123d part label used in place of an occurrence token. Deliberately narrow: it must not
 # start with a digit, and it excludes "/" because that separates an occurrence from its element.
@@ -41,7 +56,7 @@ ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_TOKEN_PATTERN})$")
 # are tried first.
 LABEL_PATTERN = r"[A-Za-z_][A-Za-z0-9_:]*"
 LABEL_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})$")
-LABEL_ELEMENT_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})/({ELEMENT_TOKEN_PATTERN})$")
+LABEL_ELEMENT_SELECTOR_RE = re.compile(rf"^({LABEL_PATTERN})/({ELEMENT_NAME_PATTERN})$")
 # Mates are not part of the structured grammar -- consumers handle them -- and "m1" would
 # otherwise be swallowed by LABEL_SELECTOR_RE.
 MATE_SELECTOR_RE = re.compile(r"^m\d+$", re.IGNORECASE)
@@ -54,8 +69,8 @@ _KIND_FOR_TYPE = {"face": "f", "edge": "e", "vertex": "v"}
 class ParsedSelector:
     selector_type: str
     occurrence_id: str
-    # The element's token (``f:…``, ``e:…``, ``v:…``) for a face, edge or vertex selector; "".
-    token: str
+    # The element's name (``f:…``, ``e:…``, ``v:…``) for a face, edge or vertex selector; "".
+    element: str
     canonical: str
     # Set when the occurrence was named by label rather than by token. Resolution against a
     # loaded artifact turns this into an occurrence_id; the parser cannot, because it has no
@@ -63,18 +78,43 @@ class ParsedSelector:
     label: str = ""
 
 
-def element_kind(token: str) -> str:
-    """``"face"``, ``"edge"`` or ``"vertex"`` for an element token."""
-    return _TYPE_FOR_KIND[token[0]]
+def is_element_name(value: object, kind: str | None = None) -> bool:
+    """Whether ``value`` is an element name -- of ``kind`` (``"face"``, ``"edge"`` or
+    ``"vertex"``) when given."""
+    if not isinstance(value, str) or ELEMENT_SELECTOR_RE.match(value) is None:
+        return False
+    return kind is None or _TYPE_FOR_KIND[value[0]] == kind
 
 
-def element_ref(occurrence_id: str, token: str) -> str:
-    """The one composition rule: ``<occurrence token>/<element token>``."""
-    return f"{occurrence_id}/{token}"
+def is_feature_name(value: object) -> bool:
+    """Whether ``value`` is a feature's name: a label, or ``function.operationN``."""
+    return isinstance(value, str) and FEATURE_NAME_RE.match(value) is not None
+
+
+def element_feature(element: str) -> str | None:
+    """The name of the feature that made the element an element name names, or None
+    for a geometric token (``f:dial.extrude1.3.2`` -> ``dial.extrude1``)."""
+    lineage = element[2:]
+    if "." not in lineage:
+        return None
+    segments = lineage.split(".")
+    while segments and segments[-1].isdigit():
+        segments.pop()
+    return ".".join(segments) or None
+
+
+def element_kind(element: str) -> str:
+    """``"face"``, ``"edge"`` or ``"vertex"`` for an element name."""
+    return _TYPE_FOR_KIND[element[0]]
+
+
+def element_ref(occurrence_id: str, element: str) -> str:
+    """The one composition rule: ``<occurrence token>/<element name>``."""
+    return f"{occurrence_id}/{element}"
 
 
 def split_element_ref(selector: object) -> tuple[str, str] | None:
-    """``(owner, token)`` of an element ref -- ``o:…/f:…``, or ``label/f:…`` -- with any
+    """``(owner, element)`` of an element ref -- ``o:…/f:…``, or ``label/f:…`` -- with any
     leading ``#`` dropped; None for anything else. Mirrors ``splitElementRef`` in the JS
     grammar: the one place a ref is taken apart, as :func:`element_ref` is the one place it
     is put together."""
@@ -83,13 +123,13 @@ def split_element_ref(selector: object) -> tuple[str, str] | None:
     slash = text.find("/")
     if slash <= 0:
         return None
-    owner, token = text[:slash], text[slash + 1:]
-    return (owner, token) if ELEMENT_SELECTOR_RE.match(token) else None
+    owner, element = text[:slash], text[slash + 1:]
+    return (owner, element) if ELEMENT_SELECTOR_RE.match(element) else None
 
 
 def is_native_selector(value: object) -> bool:
-    """Whether ``value`` is a ref in the token grammar itself (an occurrence token, an
-    occurrence/element pair, a bare element token or a mate), as opposed to a label or
+    """Whether ``value`` is a ref in the grammar itself (an occurrence token, an
+    occurrence/element pair, a bare element name or a mate), as opposed to a label or
     an opaque string. Mirrors ``isNativeCadSelector`` in the JS grammar."""
     parsed = parse_selector(str(value or ""))
     if parsed is None or parsed.label:
@@ -189,12 +229,12 @@ def parse_selector(raw_selector: str) -> ParsedSelector | None:
 
     occurrence_element = OCCURRENCE_ELEMENT_SELECTOR_RE.match(selector)
     if occurrence_element:
-        occurrence_id, token = occurrence_element.group(1), occurrence_element.group(2)
+        occurrence_id, element = occurrence_element.group(1), occurrence_element.group(2)
         return ParsedSelector(
-            selector_type=element_kind(token),
+            selector_type=element_kind(element),
             occurrence_id=occurrence_id,
-            token=token,
-            canonical=element_ref(occurrence_id, token),
+            element=element,
+            canonical=element_ref(occurrence_id, element),
         )
 
     occurrence_match = OCCURRENCE_SELECTOR_RE.match(selector)
@@ -202,31 +242,31 @@ def parse_selector(raw_selector: str) -> ParsedSelector | None:
         return ParsedSelector(
             selector_type="occurrence",
             occurrence_id=occurrence_match.group(1),
-            token="",
+            element="",
             canonical=occurrence_match.group(1),
         )
 
     element_match = ELEMENT_SELECTOR_RE.match(selector)
     if element_match:
-        token = element_match.group(1)
+        element = element_match.group(1)
         return ParsedSelector(
-            selector_type=element_kind(token),
+            selector_type=element_kind(element),
             occurrence_id="",
-            token=token,
-            canonical=token,
+            element=element,
+            canonical=element,
         )
 
-    # Label forms are tried only after every token form has had its chance, so a token can never
-    # be read as a label. Mates are excluded explicitly: they look like labels.
+    # Label forms are tried only after every token and name form has had its chance, so
+    # neither can be read as a label. Mates are excluded explicitly: they look like labels.
     if not MATE_SELECTOR_RE.match(selector):
         label_element = LABEL_ELEMENT_SELECTOR_RE.match(selector)
         if label_element:
-            label, token = label_element.group(1), label_element.group(2)
+            label, element = label_element.group(1), label_element.group(2)
             return ParsedSelector(
-                selector_type=element_kind(token),
+                selector_type=element_kind(element),
                 occurrence_id="",
-                token=token,
-                canonical=element_ref(label, token),
+                element=element,
+                canonical=element_ref(label, element),
                 label=label,
             )
 
@@ -236,7 +276,7 @@ def parse_selector(raw_selector: str) -> ParsedSelector | None:
             return ParsedSelector(
                 selector_type="label",
                 occurrence_id="",
-                token="",
+                element="",
                 canonical=label,
                 label=label,
             )
@@ -244,6 +284,6 @@ def parse_selector(raw_selector: str) -> ParsedSelector | None:
     return ParsedSelector(
         selector_type="opaque",
         occurrence_id="",
-        token="",
+        element="",
         canonical=selector,
     )

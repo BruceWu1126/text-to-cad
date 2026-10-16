@@ -202,17 +202,17 @@ class StepSceneTests(unittest.TestCase):
             from cadgen.store.objects import put_object
             put_object(saved, repair=True)
 
-    def test_face_and_edge_tokens_match_display_extraction(self):
-        from cadgen._internal.geometry_fingerprint import geometry_identity
+    def test_face_and_edge_names_match_display_extraction(self):
+        from cadgen._internal.geometric_tokens import element_names
         from cadgen._internal.topology_extract import extract_topology_facts
         # Compare using the scene's canonical BREP, before its world placement: the
-        # entities come in the table's ordinal order, each under the token the body's
-        # geometry gives that ordinal.
+        # entities come in the table's ordinal order, each under its name -- for a file no
+        # model run named, the token the body's geometry gives that ordinal.
         scene = read_scene(self.path)
         selection = scene.resolve("#pin_1")
         raw = scene._loaded.prototype_shapes[selection._node.prototype_key]
         facts = extract_topology_facts(raw)
-        tokens = geometry_identity(raw)
+        tokens = element_names(None, raw)
         for kind, plural in (("face", "faces"), ("edge", "edges")):
             entities = list(selection.entities(kind))
             rows = facts[plural]

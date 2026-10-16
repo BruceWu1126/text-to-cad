@@ -83,7 +83,7 @@ if __name__ == "__main__":
 
 # Three distinct components; the mate's axis is a face of the placed, rotated
 # arm, so it resolves through that occurrence's own topology alone. ARM_FACE is the
-# token of the arm cylinder's side (``_arm_face``), written where a person would paste
+# name of the arm cylinder's side (``_arm_face``), written where a person would paste
 # it from `inspect refs`.
 AXIS_MODEL = """
 import cadgen
@@ -109,32 +109,44 @@ if __name__ == "__main__":
 """
 
 
-def _face_of(shape, geom_type=None) -> str:
-    """The token of one face of ``shape`` (its first, or its one face of ``geom_type``). An
-    element token names the geometry of the unplaced body, so it is the same in the model's
-    own solid, in the built component and in the saved document: computed here from the
-    solid the model makes, before any build, as a person would paste it from `inspect refs`."""
-    from cadgen._internal.geometry_fingerprint import geometry_identity
+def _face_of(make, geom_type=None) -> str:
+    """The name a build gives one face of the labelled part ``make`` makes (its first, or its
+    one face of ``geom_type``), as a person would paste it from `inspect refs`: a labelled
+    part's faces go by its label and their number among what its construction made, so the
+    model's build names them as this run does."""
+    from cadgen import build123d as bd
+    from cadgen._internal import kernel_memo
+    from cadgen._internal.entity_ordinals import entity_map
+    from OCP.TopLoc import TopLoc_Location
 
-    tokens = geometry_identity(shape.wrapped)["faces"]
+    with kernel_memo.run(None) as run:
+        part = make()
+        bd.Compound(children=[part])  # the model hands the labelled part on, which pins its label
+    _key, lineage = run.identify(part)
+    faces = entity_map(part.wrapped.Located(TopLoc_Location()), "face")
+    names = [lineage["faces"][faces.FindIndex(face.wrapped.Located(TopLoc_Location())) - 1]
+             for face in part.faces() if geom_type is None or face.geom_type == geom_type]
     if geom_type is None:
-        return tokens[0]
-    (token,) = [token for token, face in zip(tokens, shape.faces()) if face.geom_type == geom_type]
-    return token
+        return names[0]
+    (name,) = names
+    return name
 
 
 def _arm_face() -> str:
-    """The token of AXIS_MODEL's arm cylinder's side."""
+    """The name of AXIS_MODEL's arm cylinder's side."""
     from cadgen import build123d as bd
+    from cadgen import label_shape
 
-    return _face_of(bd.Cylinder(2, 16), bd.GeomType.CYLINDER)
+    return _face_of(lambda: label_shape(bd.Pos(10, 3, 6) * bd.Rot(0, 40, 30) * bd.Cylinder(2, 16), "arm"),
+                    bd.GeomType.CYLINDER)
 
 
 def _hinge_arm_face() -> str:
-    """The token of HINGE_MODEL's arm box's first face."""
+    """The name of HINGE_MODEL's arm box's first face."""
     from cadgen import build123d as bd
+    from cadgen import label_shape
 
-    return _face_of(bd.Box(16, 4, 4))
+    return _face_of(lambda: label_shape(bd.Pos(10, 0, 6) * bd.Box(16, 4, 4), "arm"))
 
 
 class KinematicsBuildTests(unittest.TestCase):

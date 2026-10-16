@@ -41,6 +41,11 @@ class LoadedStepScene:
     # decoded from, where the scene knows it: the facts a scene's edge policy
     # reads are then remembered by that BREP (store.bounds.cached_component_topology).
     prototype_components: dict[int, tuple[str, str]] = field(default_factory=dict)
+    # Prototype key -> what its stored component is named by, where the scene was
+    # read from a tree whose component carries it: the construction key and the
+    # lineage (``component_package.read_lineage``), either None. A tree built from
+    # the scene names the prototype the same (``store.build``).
+    prototype_identity: dict[int, tuple[str | None, dict[str, Any] | None]] = field(default_factory=dict)
     load_elapsed: float = 0.0
     step_hash: str | None = None
     source_kind: str = "step"
@@ -52,8 +57,8 @@ class LoadedStepScene:
     materials: dict[str, Any] | None = None
     animation: dict[str, str] | None = None
     # The model run that made a generated scene's shapes (kernel_memo.run): the
-    # tree build asks it for the provenance of the components it prepared, and
-    # the publish writes that beside the record (STORE.md §3).
+    # tree build asks it what names each component it prepares, and the publish
+    # writes its features beside the record (STORE.md §3).
     kernel_run: Any | None = None
     source_hash: str | None = None
     source_closure_hash: str | None = None

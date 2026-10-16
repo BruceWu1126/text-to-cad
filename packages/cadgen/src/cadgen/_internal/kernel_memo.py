@@ -57,10 +57,20 @@ run, and the operation runs on it again, as it always could. A call that runs
 uncached still captures what it does to a memoized input, and a memoized shape
 embedded in a foreign one that the call changed is forgotten the same way.
 
+**Construction keys.** A key is this process's: its shape inputs are interned
+ids, and an effect is numbered as it happens. ``construction_key`` restates the
+key of whatever made a shape in terms no process owns -- the operation, its
+parameters, and the construction keys of its inputs and of the effects applied
+to them, each effect named by the operation that had it and the input it had it
+on -- and hashes that: the identity of a component's part (STORE.md §2). A
+shape whose making passes through a call the memo could not key (an effect it
+cannot name, a key it no longer holds) has none, and is named by its bytes.
+
 The memo lives in this process's memory for the life of the process,
 LRU-bounded by entries; it never reaches the store and a cold run computes
 everything. ``CADGEN_KERNEL_MEMO=0`` disables the memo and keeps the trace:
-every call still runs, is still a feature, and provenance is still written.
+every call still runs and is still a feature, and no shape has a construction
+key.
 """
 
 from __future__ import annotations
@@ -75,13 +85,14 @@ import numbers
 import os
 import struct
 import threading
+import weakref
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator
 
 from cadgen._internal.kernel_trace import Trace
 
-__all__ = ["CAPACITY", "clear", "enabled", "install", "run", "stats", "uninstall"]
+__all__ = ["CAPACITY", "clear", "construction_key", "enabled", "install", "run", "stats", "uninstall"]
 
 # Entries of live results: a model's intermediate geometry for a few models at
 # once, so an edit loop over a large model keeps every unchanged step.
@@ -96,6 +107,12 @@ _REGISTRY: dict[Any, "_Made"] = {}
 _LEDGER: dict[Any, list["_Row"]] = {}
 _KEY_IDS: "OrderedDict[tuple, int]" = OrderedDict()
 _KEY_IDS_NEXT = itertools.count(1)
+# The key each interned id stands for, and the construction key it restates as
+# (``construction_key``), computed when first asked and forgotten with the id.
+_ID_KEYS: dict[int, tuple] = {}
+_STABLE: dict[int, bytes] = {}
+# The effects by id, while anything holds them: a key names an input's effects by id.
+_EFFECTS: "weakref.WeakValueDictionary[int, _Effect]" = weakref.WeakValueDictionary()
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 _STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0}
 _RUN_IDS = itertools.count(1)
@@ -372,10 +389,16 @@ class _Run:
         parent = shape.__dict__.get("topo_parent") if hasattr(shape, "__dict__") else None
         return self.feature_of(parent) if parent is not None and parent is not shape else None
 
-    def provenance(self, components: Mapping[str, tuple[Any, Mapping[str, Any] | None]]) -> dict[str, Any]:
-        """The provenance payload for the result tree built from this run's
-        shapes (``kernel_trace.Trace.provenance``)."""
-        return self.trace.provenance(components, self.made_by)
+    def identify(self, shape: Any) -> tuple[str | None, dict[str, Any] | None]:
+        """What names one component this run made: its construction key
+        (:func:`construction_key`) and its lineage (``kernel_trace.Trace.lineage``),
+        either None when the run cannot say."""
+        from OCP.TopLoc import TopLoc_Location
+
+        wrapped = _wrapped(shape)
+        if wrapped is None:
+            return None, None
+        return construction_key(shape), self.trace.lineage(wrapped.Located(TopLoc_Location()), self.made_by)
 
 
 @contextlib.contextmanager
@@ -405,6 +428,8 @@ def clear() -> None:
         _REGISTRY.clear()
         _LEDGER.clear()
         _KEY_IDS.clear()
+        _ID_KEYS.clear()
+        _STABLE.clear()
         _MAPS.clear()
 
 
@@ -436,7 +461,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                 _STATS["errors"] += 1
         if key_id is None:
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=enabled())
-        inputs = [(shape, state.feature_of(shape)) for shape in shapes]
+        inputs = state.trace.given(shapes, state.feature_of)
         n = state.count(key_id)
         with _LOCK:
             entry = _MEMO.get((key_id, n))
@@ -480,6 +505,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         if snapshot is None:
             _register(result, None, feature.index, state, None)
             return function_result
+        for index, effect in effects:
+            effect.origin = (key_id, n, index)
         entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
                        in_place=kind != "constructor" and bool(args) and result is args[0])
         entry.made = _register(result, entry.key, feature.index, state, entry)
@@ -499,7 +526,7 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     """Run the call as plain build123d. It is still a feature, its results are
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
-    inputs = [(shape, state.feature_of(shape)) for shape in shapes]
+    inputs = state.trace.given(shapes, state.feature_of)
     try:
         captured = _capture(shapes, embedded=True) if capture else []
     except Exception:  # noqa: BLE001
@@ -605,8 +632,11 @@ def _intern(key: tuple) -> int:
         found = _KEY_IDS.get(key)
         if found is None:
             found = _KEY_IDS[key] = next(_KEY_IDS_NEXT)
+            _ID_KEYS[found] = key
             while len(_KEY_IDS) > _KEYS:
-                _KEY_IDS.popitem(last=False)
+                _old, old_id = _KEY_IDS.popitem(last=False)
+                _ID_KEYS.pop(old_id, None)
+                _STABLE.pop(old_id, None)
         else:
             _KEY_IDS.move_to_end(key)
         return found
@@ -800,6 +830,143 @@ def _sub_map(parent_wrapped: Any, kind: int) -> Any:
         while len(_MAPS) > _SUB_MAPS:
             _MAPS.popitem(last=False)
     return mapped
+
+
+# --- construction keys ----------------------------------------------------------------------
+
+
+class _Unstable(Exception):
+    """No construction key: the making passes through something no key names."""
+
+
+def construction_key(shape: Any) -> str | None:
+    """The construction key of ``shape``: sha256 hex of the key of the memoized
+    call that made its ``TShape`` (or of the sub-shape relation that names it),
+    with every shape input and every effect restated as a construction key of
+    its own, the effects applied to the shape and its sub-shapes since, its
+    orientation, and the cadgen release that built it (the kernel's versions
+    are the part's producer). None when no memoized call of this process made it."""
+    import cadgen
+
+    wrapped = _wrapped(shape)
+    if wrapped is None:
+        return None
+    with _LOCK:
+        made = _REGISTRY.get(wrapped.TShape())
+        if made is None:
+            return None
+        try:
+            material = ("component", getattr(cadgen, "__version__", ""), _made_material(made),
+                        int(wrapped.Orientation()))
+        except _Unstable:
+            return None
+    return hashlib.sha256(repr(material).encode()).hexdigest()
+
+
+def _made_material(made: "_Made") -> tuple:
+    if made.parent is None:
+        if made.key is None:
+            raise _Unstable("a shape no memoized operation made")
+        head: tuple = ("made", _stable_id(made.key[0]), made.key[1])
+    else:
+        head = ("sub", _made_material(made.parent), made.kind, made.index)
+    return (*head, _effects_material(made))
+
+
+def _effects_material(made: "_Made") -> tuple:
+    """The effects applied to a shape, and to each sub-shape of it the memo knows."""
+    subs = tuple((sub.kind, sub.index, _effects_material(sub)) for sub in made.subs)
+    return tuple(_effect_material(effect) for effect in made.effects), subs
+
+
+def _effect_material(effect: "_Effect | None") -> tuple:
+    if effect is None or effect.origin is None:
+        raise _Unstable("an effect no memoized call had")
+    key_id, n, index = effect.origin
+    return ("effect", _stable_id(key_id), n, index)
+
+
+def _stable_id(root: int) -> bytes:
+    """The digest of an interned key restated without process-local ids: an
+    operation's (its label, parameters and keyword parameters, a shape among them
+    by its own) or a shape's (where it came from, its attributes, its children).
+    Every id a key holds was interned before it, so the walk is a DAG; it runs
+    on a stack, as a model's chain of operations can be long."""
+    stack = [root]
+    while stack:
+        key_id = stack[-1]
+        if key_id in _STABLE:
+            stack.pop()
+            continue
+        key = _ID_KEYS.get(key_id)
+        if key is None:
+            raise _Unstable("a key the memo no longer holds")
+        missing = [dependency for dependency in _dependencies(key) if dependency not in _STABLE]
+        if missing:
+            stack.extend(missing)
+            continue
+        if type(key[0]) is str:
+            label, parts, keywords = key
+            material: tuple = ("op", label, _stable_value(parts), _stable_value(keywords))
+        else:
+            placed, attrs, children = key
+            material = ("shape", _stable_placed(placed), attrs, tuple(_STABLE[child] for child in children))
+        _STABLE[key_id] = hashlib.sha256(repr(material).encode()).digest()
+        stack.pop()
+    return _STABLE[root]
+
+
+def _dependencies(key: tuple) -> list[int]:
+    """The interned ids a key holds: shape inputs, the call a shape came from,
+    the calls that had the effects applied to it, its children."""
+    found: list[int] = []
+
+    def value(item: Any) -> None:
+        if type(item) is tuple:
+            if len(item) == 2 and item[0] == "shape" and type(item[1]) is int:
+                found.append(item[1])
+            else:
+                for member in item:
+                    value(member)
+
+    def placed(item: tuple) -> None:
+        base = item[1]
+        if base[0] == "made":
+            found.append(base[1])
+        else:
+            placed(base[1])
+        for effect_id in base[-1]:
+            effect = _EFFECTS.get(effect_id)
+            if effect is None or effect.origin is None:
+                raise _Unstable("an effect no memoized call had")
+            found.append(effect.origin[0])
+
+    if type(key[0]) is str:
+        value(key[1])
+        value(key[2])
+    else:
+        placed(key[0])
+        found.extend(key[2])
+    return found
+
+
+def _stable_value(item: Any) -> Any:
+    if type(item) is tuple:
+        if len(item) == 2 and item[0] == "shape" and type(item[1]) is int:
+            return ("shape", _STABLE[item[1]])
+        return tuple(_stable_value(member) for member in item)
+    return item
+
+
+def _stable_placed(placed: tuple) -> tuple:
+    _tag, base, location, orientation = placed
+    if base[0] == "made":
+        _made, key_id, n, applied = base
+        head: tuple = ("made", _STABLE[key_id], n)
+    else:
+        _sub, parent, kind, index, applied = base
+        head = ("sub", _stable_placed(parent), kind, index)
+    return (*head, tuple(_effect_material(_EFFECTS.get(effect_id)) for effect_id in applied), location, orientation)
 
 
 # --- the registry ---------------------------------------------------------------------------
@@ -1295,11 +1462,15 @@ class _Row:
 class _Effect:
     """One operation's change to one input, as sparse rows, replayable and undoable."""
 
-    __slots__ = ("rows", "id")
+    __slots__ = ("rows", "id", "origin", "__weakref__")
 
     def __init__(self, rows: list[_Row]) -> None:
         self.rows = rows
         self.id = next(_EFFECT_IDS)
+        # ``(key id, n, input index)`` of the memoized call that had this effect;
+        # None for a call that ran plain, which no construction key can name.
+        self.origin: tuple[int, int, int] | None = None
+        _EFFECTS[self.id] = self
 
     def apply(self, run_id: int) -> None:
         for row in self.rows:

@@ -16,16 +16,20 @@ Each native component is privately decoded and validated before publication.
 A part's display data is a separate artifact derivation and never delays native
 geometry readiness. A component without an admitted native codec explicitly
 pins its topology facts; no later producer receives the original live shape.
+A component the model's run made carries what the run names it by -- its
+construction key and its lineage (``kernel_memo``, ``kernel_trace``) -- and
+nothing on the way measures its geometry for a name.
 
 A model's final result contains its authored source geometry, reconstructed
 from canonical BREP bytes, whether it declares STEP or only meshes. A STEP
 writer (``build_tree_through_step``) publishes that complete immutable tree
-before persistence, then assembles the document from those exact pins.
-OCCT's STEP translation is not lossless for every surface, so a separate
-document tree comes entirely from that STEP's
-read-back, through the same builder a cold import uses. Only the latter belongs
-under the document byte digest. Resolved appearance and the occurrence mapping
-are returned as private publication data, never inserted into that tree.
+before persistence, then assembles the document from those exact pins. The
+document tree under the written bytes' digest takes its structure -- products,
+names, placements -- from the STEP's read-back, and each leaf the read-back
+corresponds to one authored occurrence takes that occurrence's component; a cold
+import of the same bytes builds the structure the same way and reads every
+component from the file. Resolved appearance and the occurrence mapping are
+returned as private publication data, never inserted into that tree.
 """
 
 from __future__ import annotations
@@ -48,7 +52,12 @@ from cadgen.store.materialize import (
     materialized_children,
 )
 from cadgen.store.objects import claim_object, put_object, read_verified_object
-from cadgen.store.trees import put_tree
+from cadgen.store.trees import COMPONENT_OBJECTS, put_tree
+
+
+# What a build names a component it prepares by: its construction key and its
+# lineage, either None (``kernel_memo._Run.identify``).
+Namer = Callable[[Any], tuple[str | None, Mapping[str, Any] | None]]
 
 
 def _tagged_intact(node: Any) -> str | None:
@@ -163,9 +172,12 @@ def build_tree_from_compound(
     progress: Any | None = None,
     extra: dict[str, Any] | None = None,
     materials: object = None,
+    namer: Namer | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Return ``(tree_hash, tree, stats)``. ``extra`` are content-pure fields
     recorded on the tree (capabilities, edgeRendering) — never paths or times.
+    ``namer`` names each component the walk prepares from a shape the model's run
+    made: its construction key and lineage (``kernel_memo._Run.identify``).
 
     Packaging follows the RETURN VALUE: a Compound with children is walked into
     occurrences; a single shape is one component (``compound_has_children``).
@@ -176,7 +188,7 @@ def build_tree_from_compound(
     compound IS the document's geometry; a model that writes a STEP builds
     through it (:func:`build_tree_through_step`)."""
     progress = resolve_progress(progress)
-    walk = _walk_compound(compound, root_name=root_name, progress=progress)
+    walk = _walk_compound(compound, root_name=root_name, progress=progress, namer=namer)
     from cadgen._internal.source_sidecar import resolve_materials
     from cadgen.store.trees import flatten_tree
 
@@ -190,10 +202,11 @@ def build_tree_from_compound(
     )
 
 
-def _document_walk(
-    scene: Any, *, progress: Any, force: bool = False,
-) -> tuple[_Walk, Any, dict[str, list[str]], dict[str, str]]:
-    """Walk parsed STEP products, with no filename or authored-result input.
+def _document_walk(scene: Any) -> tuple[_Walk, dict[str, list[str]], dict[str, str]]:
+    """Walk parsed STEP products into the document's structure, with no filename or
+    authored-result input, and no component yet: each leaf occurrence holds the
+    parser's node (``_node``, its prototype and placement) until
+    :func:`_attach_components` gives it one.
 
     A product holding a native compound remains that product, rather than
     acquiring another grouping from a reconstructed Python wrapper. Canonical
@@ -201,26 +214,13 @@ def _document_walk(
     (``_Walk.tokenize``); the maps relate the parser's positional paths to their
     canonical node and descendant leaf tokens, including synthetic wrapping when
     a STEP has several free roots. A product the STEP gives no name is ``part``
-    (a leaf), ``group`` (a product with children) or ``model`` (the root). A
-    prototype whose exact encoded bytes are already published under the same
-    native entry is not decoded again (``prepare_published_component``); a forced
-    build derives every one.
+    (a leaf), ``group`` (a product with children) or ``model`` (the root).
     """
-    from build123d import Compound
-
-    from cadgen._internal.component_package import (
-        _build123d_shape_from_topods, _component_id, prepare_geometry_component,
-        prepare_published_component, _normalized_face_colors,
-    )
     from cadgen._internal.step_scene_loader import _selector_id
-    from cadgen._internal.step_scene_mesh import _face_colors_by_ordinal, scene_occurrence_shape
 
-    prepare = prepare_geometry_component if force else prepare_published_component
     walk = _Walk()
-    prototype_cids: dict[Any, str] = {}
     occurrence_map: dict[str, list[str]] = {}
     node_map: dict[str, str] = {}
-    located_shapes: list[Any] = []
 
     def node_name(node: Any, default: str) -> str:
         return str(node.name or node.source_name or default)
@@ -242,30 +242,7 @@ def _document_walk(
         key = node.prototype_key
         if key is None or key not in scene.prototype_shapes:
             raise RuntimeError(f"STEP product {parsed_id} has no geometry")
-        cid = prototype_cids.get(key)
-        if cid is None:
-            prototype = scene.prototype_shapes[key]
-            raw_colors = scene.prototype_face_colors.get(key)
-            face_colors = _normalized_face_colors(
-                _face_colors_by_ordinal(prototype, raw_colors) if raw_colors else None
-            )
-            prepared = prepare(prototype, face_colors=face_colors)
-            content_hash = prepared["entry"]["contentHash"]
-            cid = _component_id(content_hash)
-            prototype_cids[key] = cid
-            if cid not in walk.shapes:
-                shape = _build123d_shape_from_topods(prototype)
-                if face_colors:
-                    shape.cad_face_ordinal_colors = face_colors
-                walk.shapes[cid] = shape
-                walk.prepared[cid] = prepared
-                walk.brep_bytes_by_cid[cid] = prepared["payload"]
-                meta: dict[str, Any] = dict(prepared["entry"])
-                color = scene.prototype_colors.get(key)
-                if color is not None:
-                    meta["color"] = [float(c) for c in color]
-                walk.components[cid] = meta
-        occurrence = {"id": occurrence_id, "name": name, "component": cid,
+        occurrence = {"id": occurrence_id, "name": name, "_node": node,
                       "transform": [float(value) for value in node.transform]}
         color = node.color if node.color is not None else scene.prototype_colors.get(key)
         if color is not None:
@@ -275,19 +252,11 @@ def _document_walk(
         # location rather than reconstructing one from the serialized matrix,
         # which can re-orthogonalize rotations by a few ulps.
         walk.native_locations[occurrence_id] = node.location
-        located_shapes.append(_build123d_shape_from_topods(scene_occurrence_shape(scene, node)))
         occurrence_map[parsed_id] = [occurrence_id]
-        progress.advance(detail=name)
         return {"id": occurrence_id, "name": name, "nodeType": "part",
                 "leafPartIds": [occurrence_id], "children": []}
 
     roots = list(scene.roots)
-
-    def leaves(node: Any) -> int:
-        return sum(leaves(child) for child in node.children) if node.children else 1
-
-    # Counted, as collect() advances once per leaf: a large assembly's wait has a fraction.
-    progress.phase(PHASE_PACKAGE, total=sum(leaves(root) for root in roots))
     if not roots:
         raise RuntimeError("STEP has no product roots")
     if len(roots) == 1:
@@ -304,23 +273,110 @@ def _document_walk(
     tokens = walk.tokenize(root_name=walk.root["name"])
     occurrence_map = {parsed: [tokens[leaf] for leaf in leaves] for parsed, leaves in occurrence_map.items()}
     node_map = {parsed: tokens[node_id] for parsed, node_id in node_map.items()}
-    return walk, Compound(children=located_shapes), occurrence_map, node_map
+    return walk, occurrence_map, node_map
+
+
+def _attach_components(
+    walk: _Walk, scene: Any, *, progress: Any, force: bool = False,
+    authored: Mapping[str, tuple[str, dict[str, Any]]] | None = None,
+    sources: Mapping[str, dict[str, Any]] | None = None,
+) -> Any:
+    """Give each leaf of a document walk its component, and return the parsed
+    geometry placed as the document places it (the shape an unmeasured document's
+    bounds are taken of).
+
+    A leaf ``authored`` names -- by its token, as a build's read-back maps one
+    written leaf to the one authored occurrence it corresponds to -- takes that
+    authored component: its bytes, construction key and lineage, the source side's
+    identity (``sources``, the authored walk's prepared components, holds the bytes
+    of those it has). Every other leaf takes its parsed prototype, named as the
+    stored component a scene read from a tree says it was
+    (``prototype_identity``), whose exact encoded bytes are not decoded again when
+    they are already published under the same native entry
+    (``prepare_published_component``); a forced build derives every one.
+    """
+    from build123d import Compound
+
+    from cadgen._internal.component_package import (
+        _build123d_shape_from_topods, _component_id, prepare_geometry_component,
+        prepare_published_component, _normalized_face_colors,
+    )
+    from cadgen._internal.step_scene_mesh import _face_colors_by_ordinal, scene_occurrence_shape
+
+    prepare = prepare_geometry_component if force else prepare_published_component
+    prototype_cids: dict[Any, str] = {}
+    located_shapes: list[Any] = []
+    authored = authored or {}
+    progress.phase(PHASE_PACKAGE, total=len(walk.occurrences))
+    for occurrence in walk.occurrences:
+        node = occurrence.pop("_node")
+        key = node.prototype_key
+        taken = authored.get(occurrence["id"])
+        if taken is not None:
+            cid, entry = taken
+            if cid not in walk.components:
+                meta = {name: value for name, value in entry.items() if name != "color"}
+                color = scene.prototype_colors.get(key)
+                if color is not None:
+                    meta["color"] = [float(c) for c in color]
+                walk.components[cid] = meta
+                held = (sources or {}).get(cid)
+                if held is not None:
+                    walk.prepared[cid] = held
+        else:
+            cid = prototype_cids.get(key)
+            if cid is None:
+                prototype = scene.prototype_shapes[key]
+                raw_colors = scene.prototype_face_colors.get(key)
+                face_colors = _normalized_face_colors(
+                    _face_colors_by_ordinal(prototype, raw_colors) if raw_colors else None
+                )
+                prepared = prepare(prototype, face_colors=face_colors, identity=scene.prototype_identity.get(key))
+                cid = _component_id(prepared["entry"]["contentHash"])
+                prototype_cids[key] = cid
+                if cid not in walk.shapes:
+                    shape = _build123d_shape_from_topods(prototype)
+                    if face_colors:
+                        shape.cad_face_ordinal_colors = face_colors
+                    walk.shapes[cid] = shape
+                    walk.prepared[cid] = prepared
+                    walk.brep_bytes_by_cid[cid] = prepared["payload"]
+                    meta: dict[str, Any] = dict(prepared["entry"])
+                    color = scene.prototype_colors.get(key)
+                    if color is not None:
+                        meta["color"] = [float(c) for c in color]
+                    walk.components[cid] = meta
+        occurrence["component"] = cid
+        located_shapes.append(_build123d_shape_from_topods(scene_occurrence_shape(scene, node)))
+        progress.advance(detail=occurrence["name"])
+    return Compound(children=located_shapes)
 
 
 def _publish_document_scene(
     scene: Any, *, force: bool, progress: Any, repair_objects: bool = False,
+    correspond: Callable[[dict[str, list[str]], dict[str, str]], Mapping[str, tuple[str, dict[str, Any]]]] | None = None,
+    sources: Mapping[str, dict[str, Any]] | None = None,
+    bbox: dict[str, list[float]] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, list[str]], dict[str, str]]:
+    """Publish a parsed scene's canonical tree: its structure, and each leaf's
+    component. A build's read-back passes ``correspond``, which joins the parse's
+    structure (its leaves and nodes by the parser's paths) to the authored result
+    and answers the leaves that take an authored component (:func:`_attach_components`);
+    every other leaf is the parse's own."""
     from cadgen._internal.glb_topology import (
         STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES, step_edge_capabilities,
     )
 
-    walk, artifact, occurrence_map, node_map = _document_walk(scene, progress=progress, force=force)
+    walk, occurrence_map, node_map = _document_walk(scene)
+    authored = correspond(occurrence_map, node_map) if correspond is not None else None
+    artifact = _attach_components(walk, scene, progress=progress, force=force, authored=authored, sources=sources)
     digest, tree, stats = _publish_tree(
         walk, bbox_shape=artifact, root_name=walk.root["name"], force=force, progress=progress,
         extra={"capabilities": step_edge_capabilities(),
                "edgeRendering": {"visibilityClasses": list(STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES)}},
         repair_objects=repair_objects,
-        prepared_occurrence_bounds=True,
+        prepared_occurrence_bounds=not authored,
+        bbox_override=bbox,
     )
     return digest, tree, stats, occurrence_map, node_map
 
@@ -331,8 +387,10 @@ def build_document_tree(
     """Canonical ``(digest, tree, stats)`` from a parsed STEP scene.
 
     The scene must describe the saved bytes. No source name, filename, model
-    record, appearance annotation or author options enter this tree. Both cold
-    compilation and generated STEP read-back use this exact packaging path.
+    record, appearance annotation or author options enter this tree. A cold
+    compile publishes exactly this; a build's read-back of the STEP it wrote
+    publishes the same structure with its authored components
+    (:func:`build_tree_through_step`).
     This writes immutable objects and component indexes, never document indexes.
     A compile miss can follow an unreadable indexed object, so canonical
     publication verifies reuse and atomically repairs damaged derived bytes.
@@ -354,7 +412,7 @@ def _own_name(label: object, default: str) -> str:
     return default if not text or is_occurrence_token(text) else text
 
 
-def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
+def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer | None = None) -> _Walk:
     from build123d import Location
 
     single_component = not compound_has_children(compound)
@@ -420,7 +478,8 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any) -> _Walk:
             except TypeError:
                 memo_key, cid = None, None
             if cid is None:
-                prepared = prepare_geometry_component(node, face_colors=face_colors)
+                prepared = prepare_geometry_component(
+                    node, face_colors=face_colors, identity=namer(node) if namer is not None else None)
                 entry_meta = dict(prepared["entry"])
                 cid = _component_id(entry_meta["contentHash"])
                 previous = walk.prepared.setdefault(cid, prepared)
@@ -622,7 +681,7 @@ def _publish_tree(
         payload = prepared["payload"] if prepared is not None else read_verified_object(entry["brep"])
         validate_geometry_component(entry, payload, cid=cid)
         ready = not force
-        for object_key in ("brep", "topology"):
+        for object_key in COMPONENT_OBJECTS:
             if not entry.get(object_key):
                 continue
             try:
@@ -632,15 +691,16 @@ def _publish_tree(
         # Reused bytes are claimed for this publish, so a sweep that started
         # before it cannot take them (STORE.md §8); ones a sweep already took
         # are written again from the bytes in hand.
-        if ready and all(claim_object(entry[key]) for key in ("brep", "topology") if entry.get(key)):
+        if ready and all(claim_object(entry[key]) for key in COMPONENT_OBJECTS if entry.get(key)):
             reused.append(cid)
         else:
             # Capture owns these exact bytes; repair does not ask the live
             # authored shape or a newer child result to replace this input.
             put_object(payload, repair=True)
-            if entry.get("topology"):
-                topology = prepared["topology"] if prepared is not None else read_verified_object(entry["topology"])
-                put_object(topology, repair=True)
+            for object_key in ("topology", "lineage"):
+                if entry.get(object_key):
+                    held = prepared.get(object_key) if prepared is not None else None
+                    put_object(held if held is not None else read_verified_object(entry[object_key]), repair=True)
             built.append(cid)
         write_entry("component", cid, {"schemaVersion": 1, **entry})
         progress.advance()
@@ -705,12 +765,9 @@ def _publish_tree(
         "components_built": len(built),
         "components_reused": len(reused),
         "unannotatedTree": unannotated_hash,
-        # Per own component this walk prepared: the live shape it was prepared
-        # from and the geometric identity that preparation measured (None for
-        # eager-only bytes), what the build's provenance pass (kernel_trace)
-        # reads so nothing is measured twice. In-process only.
-        "ownComponents": {cid: (walk.shapes[cid], walk.prepared[cid].get("identity"))
-                          for cid in walk.prepared if cid in walk.shapes},
+        # The components this walk prepared from the shapes it was handed: what the
+        # model's provenance entry says its build made (STORE.md §3).
+        "ownComponents": sorted(walk.prepared),
     }
     return tree_hash, tree, stats
 
@@ -831,7 +888,7 @@ def _bbox_from_authored_occurrences(walk: _Walk, *, root_name: str) -> dict[str,
 def _bbox_from_prepared_occurrences(walk: _Walk) -> dict[str, list[float]] | None:
     """Exact canonical bounds without serializing every placed occurrence.
 
-    ``_document_walk`` already owns one privately decoded shape per canonical
+    ``_attach_components`` already owns one privately decoded shape per canonical
     component and the exact native location of each parsed STEP occurrence:
     each is measured per leaf through ``placed_prototype_bounds``, which
     remembers every leaf's box under the key a composed reader looks up
@@ -956,6 +1013,55 @@ def _document_correspondence(
     return occurrence_map, appearance, node_map
 
 
+def _authored_leaves(descriptor: dict[str, Any], occurrence_map: dict[str, list[str]]) -> dict[str, tuple[str, dict[str, Any]]]:
+    """The written leaves that take their authored component, by token: each leaf an
+    authored occurrence of a native component was written as when it was written as
+    that one leaf. The source side's identity -- its bytes, construction key and
+    lineage -- is what a view of the saved document then draws and names it by. A
+    component written as several leaves (a compound whose solids XCAF makes products
+    of) and an eager-only one, whose bytes do not stand for its geometry, keep what
+    the parse reads."""
+    components = descriptor.get("components") or {}
+    found: dict[str, tuple[str, dict[str, Any]]] = {}
+    for occurrence in descriptor.get("occurrences") or []:
+        leaves = occurrence_map.get(str(occurrence["id"])) or []
+        cid = str(occurrence.get("component") or "")
+        entry = components.get(cid)
+        if len(leaves) == 1 and isinstance(entry, dict) and entry.get("kind") == "native":
+            found[leaves[0]] = (cid, entry)
+    return found
+
+
+def _with_authored_components(tree_hash: str, authored: Mapping[str, tuple[str, dict[str, Any]]],
+                              bbox: dict[str, list[float]] | None) -> str:
+    """A reused document tree (an indexed or composed read-back) with each leaf
+    ``authored`` names taking its authored component, under the result's ``bbox``:
+    the tree a parse of the same bytes publishes (:func:`_publish_document_scene`
+    given the same leaves)."""
+    from cadgen.store.trees import get_tree
+
+    tree = get_tree(tree_hash)
+    if tree is None:
+        raise RuntimeError(f"document tree {tree_hash} disappeared before its components were joined")
+    components: dict[str, dict[str, Any]] = {}
+    for occurrence in tree["occurrences"]:
+        taken = authored.get(str(occurrence["id"]))
+        if taken is not None:
+            parsed = tree["components"][str(occurrence["component"])]
+            occurrence["component"] = taken[0]
+            meta = {name: value for name, value in taken[1].items() if name != "color"}
+            if "color" in parsed:
+                meta["color"] = parsed["color"]
+            components.setdefault(taken[0], meta)
+        else:
+            cid = str(occurrence["component"])
+            components.setdefault(cid, tree["components"][cid])
+    tree["components"] = components
+    if bbox is not None:
+        tree["bbox"] = bbox
+    return put_tree(tree)
+
+
 def _reread_component(
     scene: Any, node: Any, occurrence: dict[str, Any], step_name: str, *, written: Any
 ) -> tuple[Any, dict[int, tuple] | None]:
@@ -1067,6 +1173,7 @@ def build_tree_through_step(
     child_documents: Callable[[], Mapping[str, str]] | None = None,
     child_steps: Callable[[], Mapping[str, Any]] | None = None,
     kept_document: Callable[[str], dict[str, Any] | None] | None = None,
+    namer: Namer | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """Write STEP and return ``(result_hash, result_tree, stats, step_hash)``.
 
@@ -1099,7 +1206,8 @@ def build_tree_through_step(
     Anything ineligible, and a forced build, exports.
 
     1. Walk the compound (:func:`_walk_compound`): own occurrences, links,
-       grouping — and, for each own component, the returned shape.
+       grouping — and, for each own component, the returned shape and what
+       ``namer`` names it by (its construction key and lineage).
     2. Prepare the document exactly as :func:`cadgen.store.materialize.materialize`
        would from the published tree (the in-memory draft flattened, links
        resolved from the store, own components read back from their BREP
@@ -1115,14 +1223,18 @@ def build_tree_through_step(
        tree mirrors the flattened grouping; ``tree_tokens.positional_paths``).
        Validate own occurrence placement
        and face-color survival without modifying the published source tree.
-    4. Verify complete authored-to-written correspondence. A privately retained
-       canonical readback keeps its exact selected component/tree identities;
-       a raw parse goes through the canonical cold-import builder.
+    4. Verify complete authored-to-written correspondence, and give each leaf
+       written as the one leaf of an authored occurrence that occurrence's
+       component (:func:`_authored_leaves`): the document's structure is the
+       written file's, and its geometry and names the source side's, so the
+       saved document draws with the parts its preview drew with and names
+       every element as the build did. A privately retained canonical readback
+       (indexed or composed) takes them as a raw parse does.
 
     Any own occurrence the re-read does not account for — no node at its id, a
     member without a shape, a placement that moved — is a hard error (law 10).
-    Source and translated component identities may differ; a saved-file reader
-    always resolves the canonical document tree by the file's actual bytes.
+    A saved-file reader always resolves the document tree by the file's actual
+    bytes.
 
     ``stats['writerInput']`` is :func:`writer_input_digest` of the document
     the writer is given. ``kept_document``, called with it before anything is
@@ -1149,7 +1261,7 @@ def build_tree_through_step(
         return logger.timed(label) if logger is not None else nullcontext()
 
     progress = resolve_progress(progress)
-    walk = _walk_compound(compound, root_name=root_name, progress=progress)
+    walk = _walk_compound(compound, root_name=root_name, progress=progress, namer=namer)
 
     # Only cadgen's own source-publication callback opts in. Arbitrary direct
     # on_preview callers retain their original construction/error ordering.
@@ -1332,27 +1444,33 @@ def build_tree_through_step(
                         f"{step_path.name}: occurrence {occ_id} ({occurrence.get('name')}) was "
                         "written with per-face colours the STEP does not carry back"
                     )
+        joined: dict[str, Any] = {}
+
+        def correspond(leaves: dict[str, list[str]], nodes: dict[str, str]) -> dict[str, tuple[str, dict[str, Any]]]:
+            joined["maps"] = _document_correspondence(
+                descriptor, scene, leaves, nodes, root_name=root_name, step_name=step_path.name,
+            )
+            joined["authored"] = _authored_leaves(descriptor, joined["maps"][0])
+            return joined["authored"]
+
         with timed("tree: canonical document"):
             if readback is not None and readback.tree_hash is not None:
                 # Only this internal call owns the verified closure and the scene
                 # decoded from it. Public mutable scenes never acquire authority
                 # to reuse a tree through an attribute, digest, or document index.
                 parsed_leaves, parsed_nodes = readback.canonical_maps()
-            else:
-                document_hash, _document_tree, _document_stats, parsed_leaves, parsed_nodes = _publish_document_scene(
-                    scene, force=force or damaged_document, progress=progress,
-                    repair_objects=True,
-                )
-            occurrence_map, appearance, node_map = _document_correspondence(
-                descriptor, scene, parsed_leaves, parsed_nodes,
-                root_name=root_name, step_name=step_path.name,
-            )
-            if readback is not None and readback.tree_hash is not None:
+                correspond(parsed_leaves, parsed_nodes)
                 # Keep the snapshot until correspondence succeeds. Restore exact
                 # bytes if GC/damage raced the read, without re-encoding native
                 # shapes (a decode/encode need not be a byte fixed point).
-                document_hash = readback.restore()
-        return document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map
+                document_hash = _with_authored_components(readback.restore(), joined["authored"], tree.get("bbox"))
+            else:
+                document_hash, _document_tree, _document_stats, parsed_leaves, parsed_nodes = _publish_document_scene(
+                    scene, force=force or damaged_document, progress=progress, repair_objects=True,
+                    correspond=correspond, sources=walk.prepared, bbox=tree.get("bbox"),
+                )
+            occurrence_map, appearance, node_map = joined["maps"]
+        return document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, joined["authored"]
 
     if document_readback == "composed":
         try:
@@ -1368,12 +1486,12 @@ def build_tree_through_step(
             published = canonical_document(None, scene)
     else:
         published = canonical_document(readback, scene)
-    document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map = published
+    document_hash, parsed_leaves, parsed_nodes, occurrence_map, appearance, node_map, authored = published
     if readback is not None and readback.tree_hash is not None and _verify_readback_requested():
         with timed(f"tree: verify reused document against a parse of {step_path.name}"):
             _verify_reused_readback(
                 step_path, document_hash, parsed_leaves, parsed_nodes,
-                source=document_readback, progress=progress,
+                source=document_readback, progress=progress, authored=authored, bbox=tree.get("bbox"),
             )
     stats["documentTree"] = document_hash
     stats["documentReadback"] = document_readback
@@ -1394,16 +1512,19 @@ def _verify_readback_requested() -> bool:
 
 def _verify_reused_readback(
     step_path: Path, reused_hash: str, reused_leaves: dict[str, list[str]], reused_nodes: dict[str, str],
-    *, source: str, progress: Any,
+    *, source: str, progress: Any, authored: Mapping[str, tuple[str, dict[str, Any]]],
+    bbox: dict[str, list[float]] | None,
 ) -> None:
-    """Parse the written STEP and publish it canonically; raise when the tree
-    hash or the canonical maps differ from what the build reused."""
+    """Parse the written STEP and publish it as the build's read-back does (the same
+    leaves taking the same authored components, under the same bounds); raise when
+    the tree hash or the canonical maps differ from what the build reused."""
     from cadgen._internal.component_package import canonical_json_bytes
     from cadgen._internal.step_scene_loader import load_step_scene
     from cadgen.store.trees import get_tree
 
     parsed_hash, parsed_tree, _stats, parsed_leaves, parsed_nodes = _publish_document_scene(
         load_step_scene(step_path), force=False, progress=progress, repair_objects=True,
+        correspond=lambda _leaves, _nodes: authored, bbox=bbox,
     )
     if parsed_hash == reused_hash and parsed_leaves == reused_leaves and parsed_nodes == reused_nodes:
         return
