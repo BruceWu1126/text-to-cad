@@ -8,14 +8,20 @@ frame that called it (the file, relative to the model's folder, the line and
 the enclosing function) and the features that made the shapes it was given. A
 call with no first-party frame on the stack is cadgen's own and is not a
 feature; a call nested inside another feature's operation belongs to that
-feature. A feature's **name** is ``<function>.<operation><count>`` -- the
-enclosing function, the operation (``extrude``, ``fillet``, ``cut``, a
-constructor's class in lower case) and how many times that function had called
-that operation in the run, this call included: ``dial.extrude1``. An author's
-label pins it instead: a shape the model labels and hands to another
-construction names the feature that made it by that label (``lid``), the first
-feature to claim a label keeping it. Lines and files are not in a name: they are
-where the trace says a feature ran (the provenance entry, ``store where``).
+feature. A feature is named within a part, among the features the part
+descends from -- those that made it and, transitively, whatever they were
+given -- in call order: ``<function>.<operation><count>``, the enclosing
+function, the operation (``extrude``, ``fillet``, ``cut``, a constructor's
+class in lower case) and how many of the part's features before it, this one
+included, that function's calls of that operation were: ``dial.extrude1``. So
+an edit elsewhere in the model -- another part's feature, a call no element of
+this part descends from -- renames nothing here. An author's label pins the
+name instead: a shape the model labels and hands to another construction names
+the feature that made it by that label (``lid``), the part's first feature to
+claim a label keeping it. A function or a label that is not an ASCII identifier
+is written as its ASCII form and a digest of it (``identifier``), so no two are
+written alike. Lines and files are not in a name: they are where the trace
+says a feature ran (the provenance entry, ``store where``).
 
 Lineage is by identity and geometry, not by the kernel's history objects. An
 element is a TShape at one place in its shape (two places of one TShape -- a
@@ -30,9 +36,13 @@ with another extent, was **modified** by the feature; any other element was
 **made** by it. Surfaces, curves and extents are compared in the frame the
 operation saw them (the inputs as they were passed, the result as it was
 returned), rounded absolutely, and only for the elements an operation touched.
-The walk stops at a shape no feature made (a materialized child, an imported
-file, a shape built outside the patched surface): its elements have no
-lineage.
+An input that is a sub-shape of a feature's result (``bar.faces()[i]``) is
+followed to that result, where the feature placed it. The walk stops at a shape
+no feature made (a materialized child, an imported file, a shape built outside
+the patched surface): an element the operation passed on from it as it was
+has no lineage, and one it rebuilt or trimmed is made by the operation -- as is
+one that traces to an input the trace cannot follow, so every element a
+feature produced has a name.
 
 An element's **name** is its lineage: ``<kind>:<feature>.<n>``, the feature that
 made it and its number among the elements of that kind the feature made, in the
@@ -45,12 +55,14 @@ by its geometry (``geometric_tokens``).
 
 ``Trace.lineage`` is a component's whole account, the object its tree entry
 names (``component_package``): the feature that made the body and, per element
-ordinal, its name; ``Trace.feature_rows`` is the run's features, what the
-provenance entry keeps (``cadgen.store.provenance``).
+ordinal, its name; ``Trace.account`` is that and the feature each name of it
+stands for; ``Trace.feature_rows`` is the run's features, what the provenance
+entry keeps with those names (``cadgen.store.provenance``).
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import sys
@@ -97,29 +109,44 @@ KINDS = (("face", TopAbs_FACE, "f", "faces"), ("edge", TopAbs_EDGE, "e", "edges"
          ("vertex", TopAbs_VERTEX, "v", "vertices"))
 _TOPABS = {kind: topabs for kind, topabs, _prefix, _plural in KINDS}
 _NOT_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# What a digest of a name looks like at its end, which a name written as it is never has.
+_DIGESTED = re.compile(r"_[0-9a-f]{8}$")
+# The frames Python names itself, each written as its word; a function of that name
+# is not one of them, and takes a digest.
+_FRAMES = {"<module>": "module", "<lambda>": "lambda", "<genexpr>": "genexpr", "<listcomp>": "listcomp",
+           "<dictcomp>": "dictcomp", "<setcomp>": "setcomp"}
+_FRAME_WORDS = frozenset(_FRAMES.values())
 _IDENTITY = tuple(int(round((1.0 if row == column else 0.0) / DIRECTION_QUANTUM)) if column < 4 else 0
                   for row in (1, 2, 3) for column in (1, 2, 3, 4))
 
 
 def identifier(text: str) -> str:
-    """``text`` as one name segment: an identifier as it is; otherwise its runs of
-    anything but ASCII letters, digits and underscores become one underscore, trimmed
-    at both ends, and a segment never starts with a digit (``<module>`` is ``module``,
-    ``mounting_eye:lower`` is ``mounting_eye_lower``)."""
+    """``text`` as one name segment, no two texts alike: an ASCII identifier as it is,
+    and the frame Python names ``<module>`` (or ``<lambda>``, ``<genexpr>``) as its
+    word. Anything else -- a name beyond ASCII, a label with a colon, an identifier
+    that is one of those words or ends as a digest does -- is its ASCII form (its runs
+    of anything but ASCII letters, digits and underscores one underscore, trimmed)
+    and the first eight hex digits of its sha256 (``корпус`` is ``_9f1c0b2e``,
+    ``mounting_eye:lower`` is ``mounting_eye_lower_`` and its digest), so it is never
+    a name another text is written as."""
     text = str(text)
-    if not _NOT_IDENTIFIER.search(text):
-        segment = text
-    else:
-        segment = _NOT_IDENTIFIER.sub("_", text).strip("_")
-    if not segment:
-        return ""
-    return f"_{segment}" if segment[0].isdigit() else segment
+    word = _FRAMES.get(text)
+    if word is not None:
+        return word
+    if _IDENTIFIER.fullmatch(text) and text not in _FRAME_WORDS and not _DIGESTED.search(text):
+        return text
+    form = _NOT_IDENTIFIER.sub("_", text).strip("_")
+    digest = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()[:8]
+    if not form:
+        return f"_{digest}"
+    return f"{'_' if form[0].isdigit() else ''}{form}_{digest}"
 
 
 def operation_name(op: str) -> str:
     """A feature's operation as its name spells it: the method without its class
     (``Solid.extrude`` is ``extrude``), a constructor's class in lower case."""
-    return identifier(op.rsplit(".", 1)[-1].lower()) or "op"
+    return identifier(op.rsplit(".", 1)[-1].lower())
 
 
 @dataclass
@@ -131,8 +158,6 @@ class Feature:
     file: str
     line: int
     function: str
-    # How many times ``function`` had called this operation in the run, this call included.
-    count: int
     # The feature of each shape the call was given, in call order; None for a
     # shape no feature of this run made.
     inputs: list[int | None]
@@ -151,15 +176,15 @@ class Feature:
     _numbers: dict[str, dict[tuple, int]] = field(default_factory=dict, repr=False)
 
     @property
-    def name(self) -> str:
-        return self.label or f"{identifier(self.function) or 'model'}.{operation_name(self.op)}{self.count}"
+    def stem(self) -> str:
+        """The name without its count: ``<function>.<operation>``, as written."""
+        return f"{identifier(self.function)}.{operation_name(self.op)}"
 
-    def row(self, features: list["Feature"]) -> dict[str, Any]:
+    def row(self) -> dict[str, Any]:
         """The feature as the provenance entry records it: where it ran, and the
-        features that made what it was given."""
-        return {"name": self.name, "op": self.op, "file": self.file, "line": self.line,
-                "function": self.function,
-                "inputs": [None if index is None else features[index].name for index in self.inputs]}
+        features that made what it was given, by their place in the run."""
+        return {"op": self.op, "file": self.file, "line": self.line, "function": self.function,
+                "inputs": list(self.inputs)}
 
 
 class Trace:
@@ -168,8 +193,6 @@ class Trace:
     def __init__(self, model_dir: Path | None) -> None:
         self.model_dir = Path(model_dir).resolve() if model_dir is not None else None
         self.features: list[Feature] = []
-        self._counts: dict[tuple[str, str], int] = {}
-        self._labels: set[str] = set()
         self._first_party: dict[str, str] = {}
         self._display: dict[str, str] = {}
         # id(shape) -> (weakref, feature index): the feature that returned each
@@ -185,6 +208,9 @@ class Trace:
         # (TShape, placement, element kind) -> each element's key where a shape so
         # placed has it (:func:`_placed`), by ordinal.
         self._placed: dict[tuple, list[tuple]] = {}
+        # (feature index, input index) -> where that input came from (:meth:`_source`).
+        self._sources: dict[tuple[int, int], tuple] = {}
+        self._made_by: Callable[[Any], int | None] = lambda _tshape: None
 
     # --- recording ---------------------------------------------------------------------
 
@@ -239,10 +265,8 @@ class Trace:
         ``results`` the live result objects the call returned. A labelled input pins
         the name of the feature that made it."""
         file, line, function = frame
-        counted = (identifier(function), operation_name(op))
-        count = self._counts[counted] = self._counts.get(counted, 0) + 1
         feature = Feature(
-            index=len(self.features), op=op, file=file, line=line, function=function, count=count,
+            index=len(self.features), op=op, file=file, line=line, function=function,
             inputs=[index for _shape, index, _handle in inputs],
             handles=[handle for _shape, _index, handle in inputs],
             results=[handle_of(shape) for shape in results],
@@ -259,19 +283,17 @@ class Trace:
         return feature
 
     def _pin(self, index: int, label: object) -> None:
-        """Name feature ``index`` by the author's ``label``: the first feature to
-        claim a label keeps it, and a label that is an occurrence token (a tree's,
-        not an author's) pins nothing."""
+        """Name feature ``index`` by the author's ``label``, the first one it is
+        handed on with; a label that is an occurrence token (a tree's, not an
+        author's) pins nothing. Of a part's features, the first to claim a label
+        keeps it (:meth:`_names`)."""
         from cadgen._internal.tree_tokens import is_occurrence_token
 
-        if not isinstance(label, str) or is_occurrence_token(label):
+        if not isinstance(label, str) or not label or is_occurrence_token(label):
             return
-        name = identifier(label)
         feature = self.features[self._unwrapped(index)]
-        if not name or feature.label is not None or name in self._labels:
-            return
-        feature.label = name
-        self._labels.add(name)
+        if feature.label is None:
+            feature.label = identifier(label)
 
     def _unwrapped(self, index: int) -> int:
         """The feature that made what feature ``index`` returned, through the features
@@ -306,7 +328,7 @@ class Trace:
 
     def feature_rows(self) -> list[dict[str, Any]]:
         """The run's features in call order, as the provenance entry records them."""
-        return [feature.row(self.features) for feature in self.features]
+        return [feature.row() for feature in self.features]
 
     def lineage(self, body: Any, made_by: Callable[[Any], int | None]) -> dict[str, Any] | None:
         """The lineage of one unlocated component ``body`` (a ``TopoDS_Shape``):
@@ -316,38 +338,83 @@ class Trace:
         and ``modified`` the last feature that modified each named element that
         was. ``made_by`` answers, for a ``TopoDS_TShape``, the feature of this run
         that made it. None when no feature of the run made any of it."""
+        return self.account(body, made_by)[0]
+
+    def account(self, body: Any, made_by: Callable[[Any], int | None]) -> tuple[dict[str, Any] | None, dict[str, int]]:
+        """:meth:`lineage`, and the feature (its index in the run) each feature name it
+        holds stands for, with the features those were given: what ``store where``
+        answers a name of this part with."""
+        self._made_by = made_by
         maker = self._maker(made_by, body)
         owners = self._owners(made_by, body)
         if maker is None and not owners:
-            return None
-        # A body build123d only wrapped or placed was made by what it wraps.
-        payload: dict[str, Any] = {"made": None if maker is None else self.features[self._unwrapped(maker)].name}
-        modified: dict[str, str] = {}
-        named = False
+            return None, {}
+        traced_by_kind = []
         for kind, topabs, prefix, plural in KINDS:
             elements = self._elements(body, topabs)
-            traced = [self._lineage(made_by, owners, elements.FindKey(ordinal), kind)
-                      for ordinal in range(1, elements.Extent() + 1)]
+            traced_by_kind.append([self._lineage(made_by, owners, elements.FindKey(ordinal), kind)
+                                   for ordinal in range(1, elements.Extent() + 1)])
+        # A body build123d only wrapped or placed was made by what it wraps.
+        made_feature = None if maker is None else self._unwrapped(maker)
+        named_features = {made[0] for traced in traced_by_kind for made, _modifier in traced if made is not None}
+        named_features |= {modifier for traced in traced_by_kind for _made, modifier in traced if modifier is not None}
+        if made_feature is not None:
+            named_features.add(made_feature)
+        names = self._names([index for _shape, index in owners] + sorted(named_features))
+        payload: dict[str, Any] = {"made": None if made_feature is None else names[made_feature]}
+        modified: dict[str, str] = {}
+        named = False
+        for (kind, topabs, prefix, plural), traced in zip(KINDS, traced_by_kind):
             pieces = Counter(made for made, _modifier in traced if made is not None)
             seen: Counter = Counter()
-            names: list[str | None] = []
+            element_names: list[str | None] = []
             for made, modifier in traced:
                 if made is None:
-                    names.append(None)
+                    element_names.append(None)
                     continue
-                name = f"{prefix}:{self.features[made[0]].name}.{made[1]}"
+                name = f"{prefix}:{names[made[0]]}.{made[1]}"
                 if pieces[made] > 1:
                     seen[made] += 1
                     name = f"{name}.{seen[made]}"
-                names.append(name)
+                element_names.append(name)
                 if modifier is not None:
-                    modified[name] = self.features[modifier].name
-            named = named or any(name is not None for name in names)
-            payload[plural] = names
+                    modified[name] = names[modifier]
+            named = named or any(name is not None for name in element_names)
+            payload[plural] = element_names
         if maker is None and not named:
-            return None
+            return None, {}
         payload["modified"] = modified
-        return payload
+        stands = set(named_features)
+        for index in named_features:
+            stands.update(given for given in self.features[index].inputs if given is not None)
+        return payload, {names[index]: index for index in sorted(stands)}
+
+    def _names(self, roots: list[int]) -> dict[int, str]:
+        """The name of each feature a part descends from -- ``roots`` and, transitively,
+        every feature that made what one of them was given -- counted among them in
+        call order: a label, the first of the part's features to claim it keeping it,
+        else ``<function>.<operation><count>``, every feature counting in its stem."""
+        seen: set[int] = set()
+        pending = [index for index in roots if index is not None]
+        while pending:
+            index = pending.pop()
+            if index in seen:
+                continue
+            seen.add(index)
+            pending.extend(given for given in self.features[index].inputs if given is not None and given not in seen)
+        counts: Counter = Counter()
+        labels: set[str] = set()
+        names: dict[int, str] = {}
+        for index in sorted(seen):
+            feature = self.features[index]
+            stem = feature.stem
+            counts[stem] += 1
+            if feature.label is not None and feature.label not in labels:
+                labels.add(feature.label)
+                names[index] = feature.label
+            else:
+                names[index] = f"{stem}{counts[stem]}"
+        return names
 
     def _maker(self, made_by: Callable[[Any], int | None], body: Any) -> int | None:
         """The feature that made ``body``, or None: the one its TShape is
@@ -387,32 +454,59 @@ class Trace:
             local = _relative(element, shape)
             if _key(local) not in self._ordinals(shape, element.ShapeType()):
                 continue
-            found = self._result_of(index, shape, local)
+            found = self._located(index, shape)
             if found is None:
                 return None, None
-            position, placed = found
-            return self._chain(made_by, index, position, kind, placed)
+            position, location = found
+            return self._chain(made_by, index, position, kind, local if location is None else local.Moved(location))
         return None, None
 
-    def _result_of(self, index: int, shape: Any, element: Any) -> tuple[int, Any] | None:
-        """Where feature ``index`` returned ``shape`` (an owner of a component):
-        the position of its result and ``element`` (relative to ``shape``) in that
-        result's frame -- the result itself, else the first result holding the
-        shape, the element placed as the shape is there."""
+    def _located(self, index: int, shape: Any) -> tuple[int, Any] | None:
+        """Where feature ``index`` returned ``shape``: ``(position, None)`` for a result
+        that is it, else ``(position, location)`` for the first result holding it --
+        where ``shape`` is placed, if a place of it is, else its first place -- the
+        location of it inside that result (unlocated); None when no result holds it."""
         feature = self.features[index]
         position = _position_of(feature, shape)
         if position is not None:
-            return position, element
+            return position, None
         tshape = shape.TShape()
         for position, result in enumerate(feature.results):
             if result is None:
                 continue
-            held = _map(_local(result), shape.ShapeType())
-            for ordinal in range(1, held.Extent() + 1):
-                found = held.FindKey(ordinal)
-                if found.TShape() == tshape:
-                    return position, element.Moved(found.Location())
+            elements, _ordinals, keys = self._mapped(result, shape.ShapeType())
+            places = [ordinal for ordinal, key in enumerate(keys, 1) if key[0] == tshape]
+            if not places:
+                continue
+            relative = _transform(result.Location().Inverted().Multiplied(shape.Location()).Transformation())
+            ordinal = next((ordinal for ordinal in places if keys[ordinal - 1][1] == relative), places[0])
+            return position, elements.FindKey(ordinal).Location()
         return None
+
+    def _source(self, index: int, j: int) -> tuple:
+        """Where input ``j`` of feature ``index`` came from: ``("followed", feature,
+        position, location)`` -- the feature that made it, where it returned it
+        (:meth:`_located`); ``("foreign",)`` for a shape no other feature made;
+        ``("lost",)`` for one a feature made that the trace cannot find in what it
+        returned."""
+        found = self._sources.get((index, j))
+        if found is not None:
+            return found
+        feature = self.features[index]
+        handle = feature.handles[j]
+        found = ("foreign",)
+        if handle is not None:
+            makers = [up for up in dict.fromkeys((self._made_by(handle.TShape()), feature.inputs[j]))
+                      if up is not None and up != index]
+            if makers:
+                found = ("lost",)
+                for up in makers:
+                    located = self._located(up, handle)
+                    if located is not None:
+                        found = ("followed", up, *located)
+                        break
+        self._sources[(index, j)] = found
+        return found
 
     def _chain(self, made_by: Callable[[Any], int | None], index: int, position: int, kind: str,
                element: Any) -> tuple[tuple[int, int] | None, int | None]:
@@ -440,13 +534,13 @@ class Trace:
                 answer = ((index, number), None) if number is not None else (None, None)
                 break
             _tag, j, k, _modified = entry
-            input_handle = feature.handles[j]
-            up = made_by(input_handle.TShape())
-            up_position = None if up is None else _position_of(self.features[up], input_handle)
-            if up is None or up_position is None:
-                answer = (None, None)
+            source = self._source(index, j)
+            if source[0] != "followed":
+                answer = (None, None)  # passed on as it was from a shape no feature made
                 break
-            current = (up, up_position, self._elements(input_handle, element.ShapeType()).FindKey(k))
+            _followed, up, up_position, location = source
+            given = self._elements(feature.handles[j], element.ShapeType()).FindKey(k)
+            current = (up, up_position, given if location is None else given.Moved(location))
         # Unwind: a node whose entry was "modified" is the last modification seen
         # from above, so it overrides what the chain below it answered.
         for node in reversed(path):
@@ -496,6 +590,7 @@ class Trace:
         inputs = [(j, self._placed_ordinals(handle, topabs), self._ordinals(handle, topabs))
                   for j, handle in enumerate(feature.handles) if handle is not None]
         held: set[tuple[int, int]] = set()
+        same_shape: set[int] = set()
         for ordinal in range(1, len(keys) + 1):
             found = next(((j, at[placed[ordinal - 1]]) for j, at, _local in inputs if placed[ordinal - 1] in at), None)
             if found is None:
@@ -504,6 +599,7 @@ class Trace:
             if found is not None:
                 table[ordinal] = ("from", found[0], found[1], False)
                 held.add(found)
+                same_shape.add(ordinal)
         if len(table) < len(keys):
             # Then by geometry, among what the operation consumed: an input
             # element the result no longer holds is where a new one came from.
@@ -534,6 +630,16 @@ class Trace:
                     continue
                 found = surface.get(signature[0])
                 table[ordinal] = ("from", found[0], found[1], True) if found is not None else ("made",)
+        # An element that came from an input no feature made is that shape's as it was
+        # passed on, and this operation's where it rebuilt or trimmed it; one from an
+        # input the trace cannot follow is this operation's: every element a feature
+        # produced has a name.
+        for ordinal, entry in table.items():
+            if entry[0] != "from":
+                continue
+            source = self._source(feature.index, entry[1])[0]
+            if source == "lost" or (source == "foreign" and ordinal not in same_shape):
+                table[ordinal] = ("made",)
         feature._tables[key] = table
         return table
 

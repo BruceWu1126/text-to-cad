@@ -618,12 +618,15 @@ def _generate_part_outputs(
         if producer is not None:
             _await_display(_request_display(document_tree_hash, producer=producer), progress=progress, logger=logger)
         # The build's account of its code (STORE.md §3): the features its run called,
-        # where each ran, and the components it made, which name their elements by
-        # those features; written beside the record, after it, for a model whose saved
-        # document `store where` can be asked about.
+        # where each ran, and the components it made, each with the feature every name
+        # of its lineage stands for; written beside the record, after it, for a model
+        # whose saved document `store where` can be asked about.
         provenance = None
         if kernel_run is not None and writes_step:
-            provenance = {"features": kernel_run.trace.feature_rows(), "components": stats["ownComponents"]}
+            entries = tree.get("components") or {}
+            provenance = {"features": kernel_run.trace.feature_rows(),
+                          "components": {cid: kernel_run.names_for(entries.get(cid) or {})
+                                         for cid in stats["ownComponents"]}}
 
         model_path = _model_for_spec(spec)
         outputs: dict[str, object] = {}

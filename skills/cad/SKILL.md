@@ -147,15 +147,16 @@ A bare `#o:4b1f9e2a7c03/f:bracket.make_box1.6` belongs to the document the
 conversation is about. A ref names geometry, never a position. An occurrence's
 token comes from its place in the tree (its parent, its name, its placement). An
 element's name is the operation that made it -- the function that called it, the
-operation, and how many times that function had called it in the run
-(`bracket.make_box1`, the first box `bracket` made) -- and the element's number
+operation, and how many times that function had called it in making that part
+(`bracket.make_box1`, the first box `bracket` made for it) -- and the element's number
 among those that operation made: `f:bracket.make_box1.6`. A later operation that
 trims or splits it keeps that name (a split piece adds its number:
 `f:bracket.make_box1.6.2`), and a label on a shape another operation is given
 names the shape's operation (`f:lid.3`). So a ref keeps resolving to the same face
 through a rebuild with other dimensions, code moved to other lines, a sibling
-inserted beside it and the STEP round trip; it names another face when an earlier
-call of the same operation in the same function is added or removed. A face of an
+inserted beside it, an edit to another part and the STEP round trip; it names
+another face when an earlier call of the same operation in the same function is
+added to or removed from that part's making. A face of an
 imported file is named by its geometry instead (`f:9d2e8c1b5a70`, twelve
 hexadecimal characters), and a ref in that form also finds the face with that
 geometry in a rebuilt model. A part label stands in for an occurrence token

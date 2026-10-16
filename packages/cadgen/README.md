@@ -384,9 +384,12 @@ on a hit and undone when a later run no longer runs the operation, so a cold
 run and a hot run write the same bytes; an input changed in a way no replay
 expresses makes its maker forget it. The memo never reaches the store and
 never outlives the worker: a cold run computes everything, and
-`CADGEN_KERNEL_MEMO=0` runs every call plain. The memo's key for the
-construction that made a component, restated stably (`construction_key`), is
-that component's identity (law 20). The same layer records each call from the
+`CADGEN_KERNEL_MEMO=0` turns hits off and nothing else -- every call runs and is
+keyed and traced as ever. The memo's key for the construction that made a
+component -- every setting the call ran with, the output of it the component
+is, the effects later calls had on it -- restated stably (`construction_key`),
+is that component's identity (law 20), the same in a cold worker, a warm one
+and with hits off. The same layer records each call from the
 model's own code as a **feature** (`_internal/kernel_trace.py`), whose lineage
 names the faces, edges and vertices of what the run made, and whose trace is
 what provenance keeps (law 20, `STORE.md` §3). The hooks that
@@ -443,16 +446,18 @@ question with another's name.
 - **Construction names parts and elements.** What the eye and the hand touch
   is named by what made it, not by which bytes happened to carry it or where
   it sat in a list. A **part** is the construction that made its component:
-  the kernel memo's key for it (law 18: the operation, its parameters by
-  value and the keys of the shapes it was given, restated stably with
-  cadgen's release) with the producer that derives its display data -- so one
+  the kernel memo's key for it (law 18: the operation, every setting it ran
+  with, its parameters by value, the keys of the shapes it was given and the
+  output of it the component is, restated stably with cadgen's release) with
+  the producer that derives its display data -- so one
   body is one mesh whether the build holds it or the saved document took it
   back from the STEP it wrote, and a preview's parts are the saved file's. A
   face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): the
-  feature that made it -- `<function>.<operation><count>`, or the label an
-  author gave the shape, which pins it -- and its number among the elements of
-  its kind that feature made, `f:dial.extrude1.3`, with a piece's number after
-  a later split. A ref is the occurrence's **token** (`o:`, from its place in
+  feature that made it -- `<function>.<operation><count>`, counted among the
+  features the part descends from so an edit elsewhere renames nothing, or the
+  label an author gave the shape, which pins it -- and its number among the
+  elements of its kind that feature made, `f:dial.extrude1.3`, with a piece's
+  number after a later split. A ref is the occurrence's **token** (`o:`, from its place in
   the tree: parent token, name, rounded placement) and the element's name:
   `#o:4b1f9e2a7c03/f:dial.extrude1.3`. So a ref survives a STEP round trip, a
   sibling's insertion, a dimension change and code that moves, and a name

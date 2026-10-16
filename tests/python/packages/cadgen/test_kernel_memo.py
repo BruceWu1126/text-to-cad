@@ -347,48 +347,128 @@ class CapacityTest(KernelMemoCase):
 
 
 class KillSwitchTest(KernelMemoCase):
-    def test_the_kill_switch_keeps_the_trace(self) -> None:
+    def test_the_kill_switch_turns_hits_off_and_nothing_else(self) -> None:
+        """``CADGEN_KERNEL_MEMO=0`` computes every call again: the trace, the keys
+        and the names are the ones the memo gives, so identity is the same either way."""
+        (_box, _tool, body), _, run = _run(_bored_plate)
+        # A build names its components before the worker runs anything else.
+        identity = run.identify(body)
+        self.assertRegex(identity[0], r"^[0-9a-f]{64}$")
+        kernel_memo.clear()
         os.environ["CADGEN_KERNEL_MEMO"] = "0"
         (_box, _tool, body), first, run1 = _run(_bored_plate)
+        self.assertEqual(run1.identify(body), identity)
         (_box2, _tool2, body2), second, run2 = _run(_bored_plate)
-        self.assertEqual((first["hits"], first["misses"], second["hits"], second["misses"]), (0, 0, 0, 0))
+        self.assertEqual(run2.identify(body2), identity)
+        self.assertEqual((first["hits"], second["hits"], second["misses"]), (0, 0, 3))
         self.assertIsNot(body2, body)
-        self.assertEqual([feature.name for feature in run1.trace.features], [feature.name for feature in run2.trace.features])
+        self.assertEqual(run1.trace.feature_rows(), run2.trace.feature_rows())
         self.assertEqual([feature.op for feature in run2.trace.features], ["Solid.make_box", "Solid.make_cylinder", "cut"])
         self.assertEqual(run2.trace.features[-1].inputs, [0, 0, 1])
-        # Nothing memoized made the body, so it has no construction key; its lineage stands.
-        key, lineage = run2.identify(body2)
-        self.assertIsNone(key)
-        self.assertEqual(lineage["made"], "_bored_plate.cut1")
+
+
+class SettingsTest(KernelMemoCase):
+    """An operation is every setting it runs with: what build123d sets on the OCC
+    operation object before the call, the class-wide ``SkipClean``, the font file a
+    text reads. A hit that ignored one would hand back another operation's geometry."""
+
+    def test_a_boolean_s_fuzzy_value_and_glue_are_in_its_key(self) -> None:
+        from build123d import Box, Pos
+
+        def fused(tol, gap=10.3, glue=False):
+            a = Box(10, 10, 10)
+            b = Pos(gap, 0, 0) * Box(10, 10, 10)
+            return a.fuse(b, tol=tol, glue=glue) if tol or glue else a.fuse(b)
+
+        apart, _, _ = _run(fused, 0)
+        merged, stats, _ = _run(fused, 0.5)
+        self.assertEqual((len(apart.solids()), len(merged.solids())), (2, 1), "the fuzzy fuse closes the gap")
+        self.assertEqual(stats["misses"], 1, "the boxes hit; the fuse is another operation")
+        self.assertNotEqual(kernel_memo.construction_key(merged), kernel_memo.construction_key(apart))
+        touching, _, _ = _run(fused, 0, 10.0)
+        glued, stats, _ = _run(fused, 0, 10.0, True)
+        self.assertEqual(stats["misses"], 1)
+        self.assertNotEqual(kernel_memo.construction_key(glued), kernel_memo.construction_key(touching))
+
+    def test_skip_clean_is_in_the_key(self) -> None:
+        from build123d import Box, Pos, SkipClean
+
+        def joined():
+            return Box(10, 10, 10).fuse(Pos(10, 0, 0) * Box(10, 10, 10))
+
+        cleaned, _, _ = _run(joined)
+        with SkipClean():
+            raw, _, _ = _run(joined)
+        self.assertEqual((len(cleaned.faces()), len(raw.faces())), (6, 10), "the fuse ran again, uncleaned")
+        self.assertNotEqual(kernel_memo.construction_key(raw), kernel_memo.construction_key(cleaned))
+
+    def test_a_text_is_keyed_by_its_font_file_s_bytes_not_its_path(self) -> None:
+        import shutil
+        import tempfile
+
+        import build123d
+        from build123d import Compound
+        from build123d.text import FontManager
+
+        bundled = Path(build123d.__file__).parent / "data" / "fonts" / "reliefsingleline" / "ReliefSingleLineCAD-Regular.ttf"
+        # The font manager is the kernel's, process-wide: give the bundled face its file back.
+        self.addCleanup(lambda: FontManager().register_font(str(bundled), True, True))
+        with tempfile.TemporaryDirectory() as folder:
+            font = Path(folder) / "face.ttf"
+            shutil.copyfile(bundled, font)
+
+            def text(path):
+                return Compound.make_text("cad", 5, font_path=str(path))
+
+            first, _, _ = _run(text, font)
+            key = kernel_memo.construction_key(first)
+            self.assertRegex(key, r"^[0-9a-f]{64}$")
+            font.write_bytes(font.read_bytes() + bytes(4))  # the same glyphs, other bytes
+            second, stats, _ = _run(text, font)
+            self.assertEqual(stats["hits"], 0, "a font file that changed is another text")
+            changed = kernel_memo.construction_key(second)
+            self.assertNotEqual(changed, key)
+            elsewhere = Path(folder) / "copy.ttf"
+            shutil.copyfile(font, elsewhere)
+            kernel_memo.clear()
+            third, _, _ = _run(text, elsewhere)
+            self.assertEqual(kernel_memo.construction_key(third), changed, "the same bytes at another path are the same font")
 
 
 class TraceTest(KernelMemoCase):
     def test_features_are_named_by_function_operation_and_count(self) -> None:
-        from build123d import Solid
+        """A feature is named among the features its part descends from, in call order:
+        a function's calls of one operation count up, wherever they are; a feature the
+        part does not descend from counts for nothing; a line is no part of a name."""
+        from build123d import Location, Solid
+        from OCP.TopLoc import TopLoc_Location
 
         def model():
             box = Solid.make_box(20, 20, 8)
-            tools = [Solid.make_cylinder(1, 30).moved(Solid.make_box(1, 1, 1).location) for _ in range(2)]
+            Solid.make_box(1, 1, 1)  # a feature no element of the part descends from
+            tools = [Solid.make_cylinder(1, 30).moved(Location((5 + 10 * index, 10, -5))) for index in range(2)]
             return box.cut(*tools)
 
-        _, _, run = _run(model)
-        names = [feature.name for feature in run.trace.features]
+        body, _, run = _run(model)
+        features = run.trace.features
         here = Path(__file__).as_posix()  # the trace names a file the same on every OS
-        self.assertEqual(names[0], "model.make_box1")
-        self.assertTrue(all(feature.file == here for feature in run.trace.features))
-        self.assertEqual(run.trace.features[0].function, "model")
-        # A function's calls of one operation count up, wherever they are; a line is no part of a name.
-        cylinders = [feature for feature in run.trace.features if feature.op == "Solid.make_cylinder"]
-        self.assertEqual([feature.name for feature in cylinders], ["model.make_cylinder1", "model.make_cylinder2"])
-        self.assertEqual(len({feature.line for feature in cylinders}), 1)
-        self.assertEqual(names.count("model.make_box2"), 1, "the boxes the tools are placed by count on")
-        cut = run.trace.features[-1]
-        self.assertEqual((cut.op, cut.name), ("cut", "model.cut1"))
-        moved = [feature.index for feature in run.trace.features if feature.op == "moved"]
+        self.assertTrue(all(feature.file == here for feature in features))
+        self.assertEqual(features[0].function, "model")
+        lineage, names = run.trace.account(body.wrapped.Located(TopLoc_Location()), run.made_by)
+        by_index = {index: name for name, index in names.items()}
+        self.assertEqual(by_index[0], "model.make_box1")
+        self.assertEqual([feature.op for feature in features].count("Solid.make_box"), 2)
+        self.assertNotIn("model.make_box2", names, "the run's other box is no feature of the part")
+        cylinders = [feature.index for feature in features if feature.op == "Solid.make_cylinder"]
+        self.assertEqual([by_index[index] for index in cylinders], ["model.make_cylinder1", "model.make_cylinder2"])
+        self.assertEqual(len({features[index].line for index in cylinders}), 1)
+        cut = features[-1]
+        self.assertEqual((cut.op, lineage["made"], names["model.cut1"]), ("cut", "model.cut1", cut.index))
+        moved = [feature.index for feature in features if feature.op == "moved"]
         self.assertEqual(cut.inputs, [0, 0, *moved], "the cut consumed the box and the two placed tools")
+        self.assertEqual([by_index[index] for index in moved], ["model.moved1", "model.moved2"])
         row = run.trace.feature_rows()[-1]
-        self.assertEqual((row["name"], row["op"], row["function"]), ("model.cut1", "cut", "model"))
-        self.assertEqual(row["inputs"][:2], ["model.make_box1", "model.make_box1"])
+        self.assertEqual((row["op"], row["function"], row["inputs"]), ("cut", "model", [0, 0, *moved]))
 
     def test_elements_are_named_by_the_feature_that_made_them(self) -> None:
         """Unchanged: same surface, same extent, inherited. Modified: same
@@ -492,7 +572,7 @@ class TraceTest(KernelMemoCase):
         [peg] = compound.children
         _key, lineage = run.identify(peg)
         self.assertEqual(sorted(lineage["faces"]), ["f:peg.1", "f:peg.2", "f:peg.3"])
-        self.assertIn("peg", [feature.name for feature in run.trace.features])
+        self.assertEqual(lineage["made"], "peg")
 
     def test_a_shape_no_feature_made_has_no_lineage_even_placed(self) -> None:
         from build123d import Location, Solid
@@ -569,6 +649,97 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(low[0], high[0])
         self.assertNotEqual(low[1], high[1])
 
+    def test_an_edit_elsewhere_renames_nothing(self) -> None:
+        """A name's ordinal counts among the features the part descends from, never
+        across the run: another hole in another part renames nothing in this one."""
+        from build123d import Box, Compound, Cylinder, Pos
+
+        def bore(body, x, radius):
+            return body - Pos(x, 0, 0) * Cylinder(radius, 30)
+
+        def plate(holes):
+            body = Box(40, 10, 2)
+            for index in range(holes):
+                body = bore(body, -15 + 6 * index, 1.0)
+            return body
+
+        def bar():
+            return bore(Box(20, 8, 4), 0, 1.5)
+
+        def model(holes):
+            part, other = plate(holes), bar()
+            Compound(children=[part, other])
+            return part, other
+
+        lineages = []
+        for holes in (1, 2):
+            kernel_memo.clear()
+            (part, other), _, run = _run(model, holes)
+            lineages.append(run.identify(other)[1])
+            plate_lineage = run.identify(part)[1]
+        self.assertEqual(lineages[0], lineages[1])
+        self.assertEqual(lineages[0]["made"], "bore.cut1")
+        self.assertIn("f:bore.make_cylinder1.1", lineages[0]["faces"])
+        # The plate's own two bores count among its own features.
+        self.assertEqual(sorted(name for name in plate_lineage["faces"] if "make_cylinder" in name),
+                         ["f:bore.make_cylinder1.1", "f:bore.make_cylinder2.1"])
+
+    def test_every_element_the_run_produced_is_named_through_a_sub_shape_input(self) -> None:
+        """``Solid.extrude(bar.faces()[i])``: the tab's base is the bar's face, its edges and
+        vertices the bar's, followed from the face to the bar that owns it."""
+        from build123d import Axis, Solid, Vector
+
+        from cadgen._internal.entity_ordinals import entity_map
+
+        def model():
+            bar = Solid.make_box(20, 8, 4)
+            face = bar.faces().sort_by(Axis.X)[-1]
+            return bar, Solid.extrude(face, Vector(5, 0, 0))
+
+        (bar, tab), _, run = _run(model)
+        _key, lineage = run.identify(tab)
+        self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]),
+                        lineage)
+        faces = entity_map(tab.wrapped, "face")
+        by_x = {round(face.center().X, 6): lineage["faces"][faces.FindIndex(face.wrapped) - 1]
+                for face in tab.faces().filter_by(Axis.X)}
+        _bar_key, bar_lineage = run.identify(bar)
+        bar_faces = entity_map(bar.wrapped, "face")
+        end = bar.faces().sort_by(Axis.X)[-1]
+        self.assertEqual(by_x[20.0], bar_lineage["faces"][bar_faces.FindIndex(end.wrapped) - 1],
+                         "the tab's base is the bar's end face, by the bar's name")
+        self.assertRegex(by_x[25.0], r"^f:model\.extrude1\.\d+$", "the cap the extrusion made")
+
+    def test_a_function_named_beyond_ascii_has_a_name_of_its_own(self) -> None:
+        """Normalisation is injective: a name that is not an ASCII identifier is its ASCII
+        form and a digest of it, never another function's name."""
+        namespace: dict = {}
+        source = "def \u043a\u043e\u0440\u043f\u0443\u0441(Solid):\n    return Solid.make_box(2, 2, 2)\n"
+        exec(compile(source, __file__, "exec"), namespace)  # noqa: S102 - a function of the model's file
+        housing = namespace["\u043a\u043e\u0440\u043f\u0443\u0441"]
+
+        def model():
+            from build123d import Location, Solid
+
+            return Solid.make_box(2, 2, 2).fuse(housing(Solid).moved(Location((5, 0, 0))))
+
+        from cadgen._internal.component_package import lineage_bytes
+
+        body, _, run = _run(model)
+        _key, lineage = run.identify(body)
+        lineage_bytes(lineage)  # every name distinct
+        features = sorted({name.split(".")[0] for name in lineage["faces"]})
+        self.assertEqual(len(features), 2)
+        self.assertIn("f:model", features)
+        self.assertRegex(next(name for name in features if name != "f:model"), r"^f:_[0-9a-f]{8}$")
+        names = {kernel_trace.identifier(text) for text in
+                 ("model", "\u043a\u043e\u0440\u043f\u0443\u0441", "<module>", "module", "a:b", "a_b",
+                  "a_b_0123abcd", "")}
+        self.assertEqual(len(names), 8)
+        self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in names))
+        self.assertEqual(kernel_trace.identifier("<module>"), "module")
+        self.assertEqual(kernel_trace.identifier("bracket"), "bracket")
+
     def test_names_and_construction_keys_are_the_same_cold_and_hot(self) -> None:
         def model():
             box, tool, body = _bored_plate()
@@ -596,6 +767,46 @@ class ConstructionKeyTest(KernelMemoCase):
         from build123d import Solid
 
         self.assertIsNone(kernel_memo.construction_key(Solid.make_box(1, 1, 1)), "made outside a run")
+
+    def test_each_output_of_one_construction_is_its_own_construction(self) -> None:
+        """A split kept both ways is one call with two outputs: each output is a
+        construction of its own, and so is what is made from each."""
+        from build123d import Keep, Plane, Solid
+
+        def halves():
+            return Solid.make_torus(10, 2).split(Plane.XZ, keep=Keep.BOTH)
+
+        pieces, _, _ = _run(halves)
+        self.assertEqual(len(pieces), 2)
+        keys = [kernel_memo.construction_key(piece) for piece in pieces]
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{64}", key or "") for key in keys))
+        self.assertNotEqual(keys[0], keys[1])
+
+        def scaled(which):
+            return halves()[which].scale(2.0)
+
+        made = []
+        for which in (0, 1):
+            kernel_memo.clear()
+            made.append(kernel_memo.construction_key(_run(scaled, which)[0]))
+        self.assertNotEqual(made[0], made[1], "the same operation on the other output")
+
+    def test_a_construction_key_is_the_construction_s_whatever_ran_before(self) -> None:
+        """A warm worker's earlier runs leave sub-shapes registered and effects undone:
+        none of it is in a key. A, then B, then A gives A the key a cold run gives."""
+        from build123d import Axis, Solid, Vector
+
+        def bracket(face_index):
+            box = Solid.make_box(10, 10, 10)
+            face = box.faces().sort_by(Axis.Z)[face_index]
+            Solid.extrude(face, Vector(0, 0, 2 if face_index == -1 else -2))
+            return box
+
+        cold = kernel_memo.construction_key(_run(bracket, -1)[0])
+        self.assertRegex(cold, r"^[0-9a-f]{64}$")
+        _run(bracket, 0)  # an edit extrudes the other face
+        warm = kernel_memo.construction_key(_run(bracket, -1)[0])
+        self.assertEqual(warm, cold)
 
     def test_a_construction_key_is_the_same_in_another_process(self) -> None:
         import subprocess

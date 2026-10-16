@@ -1,9 +1,9 @@
 """The provenance entry and ``cadgen store where`` (STORE.md §3; README law 20).
 
-A build writes, beside its record, the features its run called -- each by its
-name, with the line of the model's code it ran at -- and the components it made,
-whose lineage names their faces, edges and vertices by those features; ``store
-where`` answers a ref from it: through the model's own entry, and through a
+A build writes, beside its record, the features its run called -- each with the
+line of the model's code it ran at -- and the components it made, each with the
+feature every name of its lineage stands for (a part names its features among its
+own); ``store where`` answers a ref from it: through the model's own entry, and through a
 pinned child's for a part placed from a child model. It knows the file's bytes
 only while they are the ones it describes, says so otherwise, goes with ``store
 forget``, is never evicted, and a warm rerun writes the same entry a cold run
@@ -173,26 +173,26 @@ class TheEntry(ProvenanceCase):
         self.assertEqual({"pin", "arm"}, set(by_model))
         for name, entry in by_model.items():
             record = self._record(f"src/{name}.py")
-            self.assertEqual(("provenance", 2), (entry["kind"], entry["schemaVersion"]))
+            self.assertEqual(("provenance", 3), (entry["kind"], entry["schemaVersion"]))
             self.assertTrue(_posix(entry["model"]).endswith(f"src/{name}.py::{name}"))
             self.assertEqual(record["tree"], entry["tree"])
             self.assertEqual(record["stepHash"], entry["stepHash"])
             self.assertEqual(step_file_hash(self.root / "STEP" / f"{name}.step"), entry["stepHash"])
         pin = by_model["pin"]
         ops = [feature["op"] for feature in pin["features"]]
-        feature = pin["features"][ops.index("Solid.make_cylinder")]
-        self.assertEqual(("pin.make_cylinder1", "pin.py", "pin", []),
-                         (feature["name"], feature["file"], feature["function"], feature["inputs"]))
+        made = ops.index("Solid.make_cylinder")
+        feature = pin["features"][made]
+        self.assertEqual(("pin.py", "pin", []), (feature["file"], feature["function"], feature["inputs"]))
         self.assertIsInstance(feature["line"], int)
         for position, row in enumerate(pin["features"]):
-            earlier = {other["name"] for other in pin["features"][:position]}
-            self.assertTrue(all(name is None or name in earlier for name in row["inputs"]),
+            self.assertTrue(all(index is None or index < position for index in row["inputs"]),
                             "a feature is given what earlier features made")
         # The component the build made names its elements by the feature that made them.
         from cadgen._internal.component_package import read_lineage
         from cadgen.store.objects import object_path
 
         [cid] = pin["components"]
+        self.assertEqual(made, pin["components"][cid]["pin.make_cylinder1"])
         record = self._record("src/pin.py")
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
             from cadgen.store.trees import get_tree
@@ -214,11 +214,13 @@ class TheEntry(ProvenanceCase):
         # The child's constructions are the child's build's, not this one's.
         self.assertFalse({feature for feature in frames if feature[0] == "pin.py"})
         for position, feature in enumerate(arm["features"]):
-            self.assertRegex(feature["name"], FEATURE_NAME)
-            earlier = {other["name"] for other in arm["features"][:position]}
-            self.assertTrue(all(name is None or name in earlier for name in feature["inputs"]))
-        # The bore's cut counts in the helper that ran it; the author's label names the fillet.
-        names = {(feature["function"], feature["op"]): feature["name"] for feature in arm["features"]}
+            self.assertTrue(all(index is None or index < position for index in feature["inputs"]))
+        # The bar is the arm's own component: the bore's cut counts in the helper that ran
+        # it, and the author's label names the fillet.
+        [stands] = arm["components"].values()
+        self.assertTrue(all(re.fullmatch(FEATURE_NAME, name) for name in stands))
+        names = {(arm["features"][index]["function"], arm["features"][index]["op"]): name
+                 for name, index in stands.items()}
         self.assertEqual("bore.cut1", names[("bore", "cut")])
         self.assertEqual("bar", names[("arm", "fillet")])
 

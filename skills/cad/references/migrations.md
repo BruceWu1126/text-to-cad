@@ -112,8 +112,8 @@ An element ref copied from an earlier 0.8 build names a face by its geometry
 (`f:` and twelve hexadecimal characters). `resolve()` still finds the face with
 that geometry; the viewer and `cadgen store where` give its name now. An
 element's name moves when the code that made it moves to another operation (an
-earlier call of the same operation added in the same function renumbers the
-later ones); a label keeps it, on a shape a later operation is given -- the parts
+earlier call of the same operation added in the same function, in making that
+part, renumbers the later ones; an edit to another part renames nothing); a label keeps it, on a shape a later operation is given -- the parts
 an assembly's `Compound` holds, say: with `lid.label = "lid"`, the faces of the
 operation that made `lid` are `f:lid.1`, `f:lid.2`, ….
 

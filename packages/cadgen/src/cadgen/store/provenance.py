@@ -6,20 +6,22 @@ entry per model beside its record, written by the build right after the
 record for the result tree the record names::
 
     {
-      "kind": "provenance", "schemaVersion": 2,
+      "kind": "provenance", "schemaVersion": 3,
       "model": "/abs/src/bracket.py::bracket",
       "tree": "<the record's tree>", "stepHash": "<sha256 of the STEP written>",
-      "features": [{"name": "bracket.cut1", "op": "cut", "file": "src/bracket.py", "line": 12,
-                    "function": "bracket", "inputs": ["bracket.make_box1", "bracket.make_cylinder1"]}, …],
-      "components": ["<cid>", …]
+      "features": [{"op": "cut", "file": "src/bracket.py", "line": 12, "function": "bracket",
+                    "inputs": [0, 1]}, …],
+      "components": {"<cid>": {"bracket.make_box1": 0, "bracket.cut1": 2, …}, …}
     }
 
 ``features`` are the kernel constructions the model's code called, in call
-order, by name (``_internal/kernel_trace.py``), each with the frame it ran in
-and the features that made what it was given (null: made outside the run);
-``components`` are the components the build made, whose lineage names their
-elements by those features. A line and a file are here and nowhere else: a name
-holds neither, so an edit that moves code renames nothing.
+order (``_internal/kernel_trace.py``), each with the frame it ran in and the
+features, by place, that made what it was given (null: made outside the run);
+``components`` are the components the build made, each with the feature every
+feature name of its lineage stands for and the features those were given (a
+feature is named among the features its part descends from, so one feature may
+have another name in another part). A line and a file are here and nowhere
+else: a name holds neither, so an edit that moves code renames nothing.
 
 Readers never open it (STORE.md §2, the two sides). Its one reader is
 ``cadgen store where <document> <ref>``: path → ``index/output`` → the model
@@ -47,8 +49,10 @@ _PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 # A format change bumps it and lands on new keys; another version's entries are
 # never read, and are retired a week after their last write (gc, STORE.md §8).
 # 2: features by name, and the components the build made, whose lineage names
-# their elements by them.
-PROVENANCE_SCHEMA_VERSION = 2
+# their elements by them. 3: features by place in the run, and each component with
+# the feature each name of its lineage stands for (a part names its features among
+# its own).
+PROVENANCE_SCHEMA_VERSION = 3
 
 __all__ = [
     "PROVENANCE_KIND",
@@ -81,7 +85,7 @@ def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str, s
         "tree": str(tree or ""),
         "stepHash": str(step_hash or ""),
         "features": list(payload.get("features") or []),
-        "components": list(payload.get("components") or []),
+        "components": {str(cid): dict(names) for cid, names in sorted(dict(payload.get("components") or {}).items())},
     }
     write_entry(PROVENANCE_KIND, provenance_key(ref), body)
 
@@ -174,15 +178,23 @@ def where(document: Path | str, ref: str) -> Where:
         return answer.unknown("no feature of a model's run made this body: it was read from a file, or "
                               "built outside the kernel's constructions")
     found = next(((owner, described) for owner, described in _entries(model, record, entry)
-                  if cid in (described.get("components") or [])), None)
+                  if cid in (described.get("components") or {})), None)
     if found is None:
         return answer.unknown("no build the store remembers made this body; run the model again")
     answer.model, described = found
+    rows = described.get("features") or []
+    stands = {str(name): index for name, index in (described["components"][cid] or {}).items()
+              if isinstance(index, int) and 0 <= index < len(rows)}
+    named = {index: name for name, index in stands.items()}
     try:
         lineage = read_lineage(read_verified_object(str(component["lineage"])))
     except (OSError, ValueError):
         return answer.unknown("the body's lineage is no longer in the store; run the model again")
-    features = {str(feature.get("name")): feature for feature in described.get("features") or []}
+
+    def feature(name: Any) -> dict[str, Any] | None:
+        index = stands.get(str(name)) if name is not None else None
+        return None if index is None else {**rows[index], "name": str(name)}
+
     if answer.kind == "occurrence":
         made_by, modified_by = lineage.get("made"), None
     else:
@@ -198,20 +210,20 @@ def where(document: Path | str, ref: str) -> Where:
                 return answer.unknown("the body has no element of that name: the ref names a build "
                                       "this document is not")
             if names[ordinal] is None:
-                return answer.unknown("no feature of the model's run made this element: it is named by its "
-                                      "geometry, as an element of a file read or of a shape built elsewhere is")
+                return answer.unknown("no feature of the model's run made this element: the run took it, as it "
+                                      "was, from a shape no feature made (a child's or a file's)")
             element = names[ordinal]
             answer.ref = f"#{occurrence_id}/{element}"
         made_by = element_feature(element)
         modified_by = (lineage.get("modified") or {}).get(element)
-    answer.made = features.get(str(made_by)) if made_by is not None else None
-    answer.modified = features.get(str(modified_by)) if modified_by is not None else None
+    answer.made = feature(made_by)
+    answer.modified = feature(modified_by)
     if answer.made is None:
         return answer.unknown("this geometry came from outside the run: a file read, or a shape built "
                               "outside the kernel's constructions" + (
                                   f"; last modified by {answer.modified['name']}" if answer.modified else ""))
-    answer.inputs = [features[name] for name in dict.fromkeys(answer.made.get("inputs") or [])
-                     if name is not None and name in features]
+    answer.inputs = [{**rows[index], "name": named[index]} for index in dict.fromkeys(answer.made.get("inputs") or [])
+                     if index in named]
     answer.known = True
     return answer
 

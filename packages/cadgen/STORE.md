@@ -47,7 +47,7 @@ One word per concept; the code uses these words and no others.
 | **claim** | what a write does to an object it finds already present: its mtime becomes now, less two ticks of its clock, so the sweeper's grace window covers it and the claiming process keeps what it verified of it (§8) |
 | **evict** | drop a derived entry to keep the store under its cap; only the derived kinds are ever evicted (§8) |
 | **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3), keyed by the construction that made the component and its lineage, never its bytes |
-| **feature** | one call of a kernel construction from the model's own code, as the run's trace saw it (`_internal/kernel_trace.py`): named `<function>.<operation><count>` -- `dial.extrude1`, the first `extrude` the function `dial` called in the run -- or by the label an author gave its result (§2) |
+| **feature** | one call of a kernel construction from the model's own code, as the run's trace saw it (`_internal/kernel_trace.py`): named, within a part, `<function>.<operation><count>` -- `dial.extrude1`, the first `extrude` of the function `dial` among the features the part descends from -- or by the label an author gave its result (§2) |
 | **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
 | **lineage** | a component's account of its elements: the feature that made the body and, per face, edge and vertex, its **name** -- `f:dial.extrude1.3`, the third face the feature made -- and the feature that last modified it (§2); an object the component's tree entry names |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
@@ -277,10 +277,16 @@ retires that layer's entries alone and never moves a cid.
 
 **A part is the construction that made it** (README law 20). The run's kernel
 memo (README law 18) keys every construction the model's code calls -- the
-operation, its parameters by value and the keys of the shapes it was given --
-and `kernel_memo.construction_key` restates the key of the construction a
-component's body came from as a stable digest, with cadgen's version, so a key
-never outlives a release that might construct differently. A part's key hashes
+operation, every setting it runs with (a boolean's fuzzy value and glue mode,
+build123d's `SkipClean`, the bytes of the font a text reads), its parameters by
+value and the keys of the shapes it was given -- and
+`kernel_memo.construction_key` restates the key of the construction a
+component's body came from as a stable digest: that call, the output of it the
+body is (a split kept both ways is two parts), the effects later calls had on
+it, and cadgen's version, so a key never outlives a release that might
+construct differently. It is a function of the construction alone: nothing the
+worker accumulated -- other models built before, other versions of this one --
+enters it, and `CADGEN_KERNEL_MEMO=0` (hits off) gives the same keys. A part's key hashes
 that construction key, the component's lineage object, its intrinsic face
 colours and the producer (the kernel its display data is derived under). The
 body a build holds and the same body read back from the STEP it wrote --
@@ -295,21 +301,32 @@ the publish rule, the sweeper and every object address stay with bytes.
 
 **An element is its lineage.** The run's trace (`_internal/kernel_trace.py`)
 records each kernel call from the model's own code as a **feature**, named
-`<function>.<operation><count>`: the enclosing function, the operation, and how
-many times that function had called that operation in the run, this call
+within each part among the features the part descends from (those that made
+it and, transitively, whatever they were given), in call order:
+`<function>.<operation><count>`, the enclosing function, the operation, and how
+many of those features were that function's calls of that operation, this one
 included (`dial.extrude1`) -- or by the label an author gave the shape it made,
 once that shape is handed to another construction (an assembly's `Compound` of
-labelled parts), which pins the name (`lid`). A component's lineage follows
+labelled parts), which pins the name (`lid`), the part's first feature to claim
+a label keeping it. A function or label that is not an ASCII identifier is
+written as its ASCII form and the first eight hex digits of its sha256, so no
+two are written alike. A component's lineage follows
 each of its faces, edges and vertices back through the features to the one
-that made it, and names it `<kind>:<feature>.<n>`: the feature and the
-element's number among the elements of its kind the feature made, in the order
-of its result (`f:dial.extrude1.3`); a piece of an element a later feature split
-takes its number among the pieces after a further dot (`f:dial.extrude1.3.2`). A feature
-that trimmed or otherwise modified an element does not rename it: the last
-one is recorded beside the name, for `store where`. A feature's file and line
-are never in a name -- they are the provenance entry's (§3) -- so moving code
-renames nothing; a call of the same operation inserted earlier in the same
-function renumbers the later ones, which a label never is. The grammar:
+that made it -- through an input that is a sub-shape of a feature's result
+(`bar.faces()[i]`) to that result -- and names it `<kind>:<feature>.<n>`: the
+feature and the element's number among the elements of its kind the feature
+made, in the order of its result (`f:dial.extrude1.3`); a piece of an element a
+later feature split takes its number among the pieces after a further dot
+(`f:dial.extrude1.3.2`). A feature that trimmed or otherwise modified an
+element does not rename it: the last one is recorded beside the name, for
+`store where`. Every element a feature produced has a name: one the trace
+cannot follow to an input is the feature's that returned it, as is one it
+rebuilt or trimmed from a shape no feature made; only an element passed on as it
+was from such a shape -- a child's, a file's -- has none. A feature's file and
+line are never in a name -- they are the provenance entry's (§3) -- so moving
+code renames nothing; a call of the same operation inserted earlier in the same
+function, among the part's own features, renumbers the later ones, which a
+label never is, and an edit anywhere else in the model renames nothing. The grammar:
 `[fev]:<feature>.<n>[.<piece>]`, a feature one or two segments
 `[A-Za-z_][A-Za-z0-9_]*` joined by a dot, numbers from 1
 (`cad_ref_syntax.ELEMENT_NAME_PATTERN`, which the client's `cadRefs.js`
