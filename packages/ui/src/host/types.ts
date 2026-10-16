@@ -23,6 +23,7 @@ export interface PromptFiles {
     name: string; input: string;
     views: Array<Record<string, unknown> & { label: string }>;
     annotation: Record<string, unknown> | null;
+    measurements?: Array<{ start: number[]; end: number[]; label: string; color: string }>;
   }): Promise<{ job: string; annotation: string | null; images: Array<{ label: string; path: string }> }>;
   read(path: string): Promise<Blob>;
   /** A Quick Edit chip's copy as a file, written at once: its path (an annotation's annotation, one measurement). */

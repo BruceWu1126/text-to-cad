@@ -15,7 +15,7 @@ import { annotationDocumentOf } from "../tools/annotate/annotation3d.js";
 import { normalizeToolStack } from "../tools/toolStackLayout.js";
 import { normalizePlayback } from "../tools/playbar/playbackPreferences.js";
 import { animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
-import { DisplaySettingsSection } from "../view-settings/DisplaySettingsSection.js";
+import { DisplayModeSettings } from "../view-settings/DisplayModeSettings.jsx";
 import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.js";
 import { useViewSettings } from "../view-settings/useViewSettings.js";
 import { cameraForViewSettings, viewerDisplaySettingsForCamera } from "../view-settings/viewerDisplaySettings.js";
@@ -25,8 +25,7 @@ import { createViewPromptContext, promptDeliveryError } from "./promptContext.js
 import { fileViewsEqual, plainShellCamera, readFileView, readFileViewSlices, scopeShellCamera, shellPresentationKey, writeFileView } from "./fileView.js";
 import { useViewerShortcuts } from "./useViewerShortcuts.js";
 import { DISPLAY_MODE_OPTIONS } from "../view-settings/DisplayModeOptions.js";
-import { viewerDisplaySettingsForMode } from "../view-settings/viewerDisplaySettings.js";
-import { normalizeViewFeatures, viewSettingsAreCustom } from "@text-to-cad/core/common/viewSettings.js";
+import { normalizeViewFeatures } from "@text-to-cad/core/common/viewSettings.js";
 import { useWhenSettled } from "./useWhenSettled.js";
 
 
@@ -616,7 +615,7 @@ export function useRendererShell({
       if (!viewerRef.current?.resetZoom?.()) throw new Error("The viewer camera is unavailable.");
     },
     setDisplaySettings(patch) { viewSettingsStore.patch(patch); },
-    setRenderMode(enabled) { viewSettingsStore.selectPreset(enabled ? "render" : "solid"); },
+    setRenderMode(enabled) { viewSettingsStore.selectMode(enabled ? "render" : "solid"); },
     capture() {
       if (!viewerRef.current?.captureScreenshotBlob) throw new Error("The viewer cannot capture this model yet.");
       return viewerRef.current.captureScreenshotBlob();
@@ -641,27 +640,20 @@ export function useRendererShell({
   }, [liveBinding, commandNames, whenSettled]);
 
   // ---- what the frame and the renderer read ---------------------------------
-  // Display's button is the display mode: the modes the file offers, the one in hand, whether its
-  // settings have been changed, and choosing one. Projection, the camera's, is a button of its own.
+  // The mode on screen and each mode's own settings; editing another mode leaves this one selected.
   const offeredModes = normalizeViewFeatures(features).modes;
-  const customDisplay = viewSettingsAreCustom(displaySettings, { appearance: colorScheme, lightingQuality: "preview", features });
   const displayMode = {
     value: desiredScene.view.mode,
-    custom: customDisplay,
     options: DISPLAY_MODE_OPTIONS.filter(option => offeredModes.includes(option.value)),
-    onChange: viewSettingsStore.selectPreset,
+    onChange: viewSettingsStore.selectMode,
   };
-  // Custom's settings (`DisplayPopover.jsx`'s submenu): every renderer's, built here from its display
-  // settings. Custom starts from Solid: off any other preset, the settings show Solid's, and the
-  // first change applies Solid with it; once custom, they are the view's own.
-  const customBase = customDisplay || desiredScene.view.mode === "solid" ? null : viewerDisplaySettingsForMode(displaySettings, "solid");
-  const fromSolid = write => (...args) => { if (customBase) viewSettingsStore.selectPreset("solid"); return write(...args); };
-  const display = <DisplaySettingsSection features={features} viewSettings={customBase || displaySettings} hostAppearance={colorScheme} lightingQuality="preview"
-    resolvedView={customBase ? undefined : desiredScene.view} onViewSettingsPatch={fromSolid(viewSettingsStore.patch)}
-    onGroupEnabledChange={fromSolid(viewSettingsStore.setEnabled)} onViewReset={viewSettingsStore.reset} />;
+  const display = mode => <DisplayModeSettings mode={mode} features={features} display={displaySettings}
+    appearance={colorScheme} lightingQuality="preview" onPatch={patch => viewSettingsStore.patchMode(mode, patch)}
+    onReset={() => viewSettingsStore.resetMode(mode)} />;
   const projection = {
     value: desiredScene.view.camera.projection,
-    onChange: value => viewSettingsStore.patch({ camera: { ...(desiredScene.view.camera.enabled === false ? { enabled: true } : {}), projection: value } }),
+    disabled: desiredScene.view.mode === "render",
+    onChange: value => viewSettingsStore.patch({ camera: { projection: value } }),
   };
   const stripTool = ({ id, label, icon, ...rest }) => ({
     id, label, icon, active: !previewing && toolMode === id, disabled: idle, onSelect: () => selectTool(id), ...rest

@@ -180,8 +180,8 @@ async function open(options = {}) {
     await pane.getByRole('region', { name: 'Features', exact: true }).waitFor();
     // The world axes are drawn into the same canvas and the X one is the red the
     // arm is authored in, so they would answer to a question about the arm's pixels.
-    await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ axes: { enabled: false } }));
-    await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.axes?.enabled === false);
+    await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ modes: { solid: { axes: { enabled: false } } } }));
+    await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.modes?.solid?.axes?.enabled === false);
     await restingCamera(page);
     await settle(page);
     const box = await pane.locator('[data-cad-surface] canvas').first().boundingBox();
@@ -205,11 +205,11 @@ async function open(options = {}) {
       await pane.getByRole('button', { name: 'Preview', exact: true }).waitFor();
     },
     // Display is not a tool: its button, the mode in hand, sits before Preview at the strip's end,
-    // after a rule; its settings are its menu's Custom submenu.
+    // after a rule; its settings are its per-mode settings submenu.
     openDisplay: async (root = pane.locator('[data-cad-toolbar] [data-view-controls]')) => {
       await root.getByRole('button', { name: /^Display mode: / }).click();
-      await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
-      await page.locator('[data-display-popover]').waitFor();
+      await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+      await page.locator('[data-display-settings="solid"]').waitFor();
     },
     tool: name => name === 'Display' ? pane.locator('[data-cad-toolbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / })
       : pane.locator(name === 'Reset' ? '[data-cad-camera-controls]' : '[data-cad-toolbar]').getByRole('button', { name, exact: true }),
@@ -259,7 +259,7 @@ async function open(options = {}) {
       return card;
     },
     // Display's settings: a dropdown, portaled out of the viewer.
-    displayPanel: () => page.locator('[data-display-popover]'),
+    displayPanel: () => page.locator('[data-display-settings="solid"]'),
     rows: () => pane.locator('[aria-label="Modeling tree"]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))
       .filter(label => label?.startsWith('Select ') || label?.startsWith('Expand ') || label?.startsWith('Collapse '))),
     frame: () => frame(pane),
@@ -283,7 +283,7 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
     'Explode:false', 'Clip:false', 'Animation:false'],
     'Animation because it has a routine. Display is a dropdown, not a tool');
   assert.deepEqual(await pane.locator('[data-cad-toolbar] [data-strip-rule] + [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'the view\'s controls end the strip, after a rule: Display, Projection, then Preview');
+    ['Display mode: Solid', 'Preview'], 'the view\'s controls end the strip, after a rule: Display, then Preview');
   assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: /^Selection filter: / }).count(), 0,
     'Select\'s filter is the strip\'s, not the Features filter row\'s');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
@@ -294,12 +294,13 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   assert.deepEqual([await view.sidebar(), await view.stack()], [['Features', 'Position controls'], []]);
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs anywhere');
   assert.equal(await pane.locator('[data-sidebar-head] [data-pose-menu]').isVisible(), true, 'the Pose menu is in Position\'s heading');
-  // The strip is the top centre's; the sidebar hangs from the top-left corner, level with it.
+  // The strip is centred; at this narrow width the sidebar starts below its controls.
   const sidebar = pane.locator('[data-cad-file-sidebar]');
   const [sidebarBox, toolbar] = await Promise.all([sidebar.boundingBox(), pane.locator('[data-cad-toolbar]').boundingBox()]);
   assert.ok(Math.abs(toolbar.x + toolbar.width / 2 - (view.box.x + view.box.width / 2)) <= 1, 'the strip is centred');
-  assert.ok(Math.abs(sidebarBox.y - toolbar.y) <= 1 && sidebarBox.x < view.box.x + 16 && sidebarBox.x + sidebarBox.width < toolbar.x,
-    `the sidebar is the top-left corner's: ${JSON.stringify({ sidebarBox, toolbar })}`);
+  const controls = await pane.locator('[data-cad-top-controls]').boundingBox();
+  assert.ok(sidebarBox.y >= controls.y + controls.height && sidebarBox.x < view.box.x + 16,
+    `the sidebar clears the toolbar: ${JSON.stringify({ sidebarBox, controls })}`);
   // The sidebar floats over the viewport: the canvas is the viewer's whole width.
   assert.equal(view.box.width, (await pane.locator('[data-cad-scene-backdrop]').boundingBox()).width);
   const opened = await view.frame();
@@ -365,7 +366,8 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
     await page.waitForTimeout(100);
   }
   assert.deepEqual(await selected(), [`${base.id}.${top.localId}`], 'the top face is the table\'s row, under its occurrence');
-  await page.mouse.click(...at([10, 6, 5]));
+  // The same +X rim, at its front end, clear of the floating Quick Edit box.
+  await page.mouse.click(...at([10, -6, 5]));
   await page.waitForFunction(() => /\.e\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
   assert.deepEqual(await selected(), [`${base.id}.${rim.localId}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
@@ -375,7 +377,7 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   // A checkbox item keeps its menu open for the next one; Escape puts it away.
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
-  await page.mouse.click(...at([10, 6, 5]));
+  await page.mouse.click(...at([10, -6, 5]));
   await page.waitForFunction(() => /\.e\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds[0] || ''));
   const chain = edges.filter(edge => edge.chain === rim.chain).map(edge => `${base.id}.${edge.localId}`);
   assert.deepEqual((await selected()).sort(), chain.sort(), 'the grown selection is the table\'s chain');
@@ -415,7 +417,7 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   assert.deepEqual(await view.chips(), [`base · face ${pickedFace.replace(/^.*\.f/, '')}`]);
   assert.equal(await quickEdit.locator('[data-quick-edit-chip="references"]').count(), 0, 'chips name the references: nothing counts them');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Describe your changes');
-  await page.mouse.click(...at([10, 6, 5]));
+  await page.mouse.click(...at([10, -6, 5]));
   await page.waitForFunction(() => { const ids = window.cadHarness.a.controller.readState().selectedReferenceIds;
     return ids.length === 1 && /\.e\d+$/.test(ids[0]); });
   // Collapsing the part unloads its faces, and the pick with them.
@@ -712,8 +714,8 @@ test('a library picture is the model on its own, on transparency: the grid and a
   });
   const bare = await picture();
   assert.equal(PNG.sync.read(Buffer.from(bare)).data[3], 0, 'its corner is transparent');
-  await view.display({ grid: { enabled: true }, axes: { enabled: true } });
-  await page.waitForFunction(() => { const { display } = window.cadHarness.a.controller.readState(); return display.grid?.enabled === true && display.axes?.enabled === true; });
+  await view.display({ modes: { solid: { grid: { enabled: true }, axes: { enabled: true } } } });
+  await page.waitForFunction(() => { const { display } = window.cadHarness.a.controller.readState(); return display.modes?.solid?.grid?.enabled === true && display.modes?.solid?.axes?.enabled === true; });
   assert.deepEqual(await picture(), bare, 'the same picture with the grid and the axes up');
   assert.deepEqual(errors, []);
 });
@@ -744,9 +746,8 @@ test('the context menu\'s Zoom to selection frames the selection', async () => {
   assert.deepEqual(errors, []);
 });
 
-// How much of the model band each preset repaints against Solid, at the least: a tenth of it,
-// but Grid, which only rules lines over Solid's own surfaces.
-const MIN_REDRAWN = { render: 30_000, xray: 30_000, 'hidden-line': 30_000, wireframe: 30_000, grid: 6_000 };
+// Each display mode repaints at least a tenth of the model band against Solid.
+const MIN_REDRAWN = { render: 30_000, xray: 30_000, 'hidden-line': 30_000, wireframe: 30_000 };
 test('every Display preset reaches the drawn frame, on the live canvas', async () => {
   const view = await open();
   const { page, errors } = view;
@@ -756,7 +757,7 @@ test('every Display preset reaches the drawn frame, on the live canvas', async (
 
   // Each preset draws a different picture, and none of them replaces the canvas.
   const frames = { solid };
-  for (const [mode, label] of [['render', 'Render'], ['xray', 'X-ray'], ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe'], ['grid', 'Grid']]) {
+  for (const [mode, label] of [['render', 'Render'], ['xray', 'X-ray'], ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe']]) {
     await view.tool('Display').click();
     const menu = page.locator('[role=menu][aria-label="Display mode"]');
     await menu.locator(`[data-display-mode-option="${mode}"]`).click();
@@ -769,7 +770,7 @@ test('every Display preset reaches the drawn frame, on the live canvas', async (
     frames[mode] = await frameWhen(view, shot => differing(solid, shot) > MIN_REDRAWN[mode], `redrew the model for ${label}`);
   }
   // Each is its own picture, not merely "not Solid".
-  for (const [left, right] of [['render', 'xray'], ['xray', 'hidden-line'], ['hidden-line', 'wireframe'], ['wireframe', 'grid']]) {
+  for (const [left, right] of [['render', 'xray'], ['xray', 'hidden-line'], ['hidden-line', 'wireframe']]) {
     assert.ok(differing(frames[left], frames[right]) > 10_000, `${left} and ${right} are different pictures`);
   }
   assert.ok(coverage(frames['hidden-line']) < 0.1 && coverage(solid) > 0.3,
@@ -782,8 +783,8 @@ test('every Display preset reaches the drawn frame, on the live canvas', async (
 test('Position drives the mate and repaints, a named pose jumps, Select\'s knob is never the camera nor a pick, and the grid keeps the size the rest pose gave it', async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  // The grid is only the Grid preset's by default; this compares its lines, so it is turned on.
-  await view.display({ grid: { enabled: true } });
+  // The grid starts off; this compares its lines, so it is turned on.
+  await view.display({ modes: { solid: { grid: { enabled: true } } } });
   // The model's own tool ends the strip: Animation where it has routines. Position is no tool: its
   // knobs are Select's while its filter picks Position, as it does when the file opens.
   const strip = await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons
@@ -931,11 +932,11 @@ test('preview opens paused, its playbar plays and pauses the routine without mov
   const boxes = names => Promise.all(names.map(name => pane.getByRole('button', { name, exact: true }).boundingBox()));
   await view.enterPreview();
   // Preview has the page to itself: the navbar goes, and its own row, at the top centre of the view,
-  // holds Orbit, Display, Projection, then the way out, side by side.
+  // holds Orbit, Display, then the way out, side by side.
   await pane.locator('[data-viewer-navbar]').waitFor({ state: 'detached' });
-  const [orbitBox, displayBox, projectionBox, exitBox] = await boxes(['Orbit', /^Display mode: /, /^Projection: /, 'Exit preview']);
-  assert.ok([displayBox, projectionBox, exitBox].every(box => box.y === orbitBox.y) && orbitBox.x < displayBox.x && displayBox.x < projectionBox.x && projectionBox.x < exitBox.x,
-    'one row: Orbit, Display, Projection, Exit preview');
+  const [orbitBox, displayBox, exitBox] = await boxes(['Orbit', /^Display mode: /, 'Exit preview']);
+  assert.ok([displayBox, exitBox].every(box => box.y === orbitBox.y) && orbitBox.x < displayBox.x && displayBox.x < exitBox.x,
+    'one row: Orbit, Display, Exit preview');
   const row = await pane.locator('[data-preview-corner]').boundingBox();
   const surface = await pane.locator('[data-cad-surface]').boundingBox();
   assert.ok(Math.abs(row.x + row.width / 2 - (surface.x + surface.width / 2)) <= 1 && row.y - surface.y <= 12, `the row is the top centre's: ${JSON.stringify({ row, surface })}`);
@@ -951,20 +952,22 @@ test('preview opens paused, its playbar plays and pauses the routine without mov
   // edit there draws in the preview, and Escape puts it away, preview kept.
   const edged = await restingFrame(view);
   await view.openDisplay(pane.locator('[data-preview-corner]'));
-  await view.displayPanel().getByRole('button', { name: 'Disable Edges', exact: true }).click();
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.edges?.enabled === false);
+  await view.displayPanel().getByRole('menuitemcheckbox', { name: 'Edges', exact: true }).click();
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.modes?.solid?.edges?.enabled === false);
   await frameWhen(view, shot => differing(edged, shot) > 100, 'drew the preview without its edges');
   await page.keyboard.press('Escape');
   await view.displayPanel().waitFor({ state: 'detached' });
+  await page.keyboard.press('Escape');
+  await page.locator('[role=menu][aria-label="Display mode"]').waitFor({ state: 'detached' });
   assert.equal(await pane.getByRole('button', { name: 'Exit preview', exact: true }).isVisible(), true, 'Escape closes Display before preview');
-  await view.display({ edges: { enabled: true } });
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.edges?.enabled === true);
+  await view.display({ modes: { solid: { edges: { enabled: true } } } });
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.modes?.solid?.edges?.enabled === true);
   const rest = await restingFrame(view);
   // Preview puts away prompt actions, leaving only playback controls: one routine has no list of
   // routines, and the routine's settings end the playbar. The view's own are the corner's.
   assert.deepEqual(await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Play animation', 'Playback settings']);
   assert.deepEqual(await pane.locator('[data-preview-corner]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label').split(':')[0])),
-    ['Orbit', 'Display mode', 'Projection', 'Exit preview']);
+    ['Orbit', 'Display mode', 'Exit preview']);
   assert.equal(await bar.getByRole('slider', { name: 'Animation time', exact: true }).count(), 1);
   assert.equal(await pane.getByRole('button', { name: 'Quick Edit' }).count(), 0);
 
@@ -1367,8 +1370,8 @@ test('a pose pass React re-runs while a routine plays draws the clock, never the
     // held.
     await new Promise(resolve => window.__releaseFrames.call(window, resolve));
     const beforeRerun = arm();
-    const edges = window.cadHarness.a.controller.readState().display.edges?.enabled !== false;
-    window.cadHarness.a.controller.setDisplaySettings({ edges: { enabled: !edges } });
+    const edges = window.cadHarness.a.controller.readState().display.modes?.solid?.edges?.enabled !== false;
+    window.cadHarness.a.controller.setDisplaySettings({ modes: { solid: { edges: { enabled: !edges } } } });
     await new Promise(resolve => setTimeout(resolve, 600));
     return [beforeRerun, arm()];
   });
@@ -1745,7 +1748,8 @@ test('a click selects at once, and a double-click ends where it did when a click
   await page.waitForFunction(previous => window.__cadCamera().position.some((value, index) => Math.abs(value - previous[index]) > 1e-3), camera);
   await settle(page);
   assert.deepEqual(await selection(), before, 'a drag is not a click');
-  await page.mouse.click(x + 120, y + 40, { button: 'right' });
+  // The orbit endpoint can lie under Quick Edit; open the viewport menu in clear space.
+  await page.mouse.click(...empty, { button: 'right' });
   await page.getByRole('menu').waitFor();
   await settle(page);
   assert.deepEqual(await selection(), before, 'a right-click is not a click');

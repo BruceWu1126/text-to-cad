@@ -101,7 +101,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
         cases = [
             (stl_door, [self.stl, self.out, "--display", "wireframe"], r"applies to STEP models only"),
             (stl_door, [self.stl, self.out, "--display", '{"clip":{"axis":"x"}}'], r"display\.clip applies to STEP"),
-            (stl_door, [self.stl, self.out, "--display", '{"lighting":{"fill":9}}'], r"display\.lighting\.fill"),
+            (stl_door, [self.stl, self.out, "--display", '{"modes":{"render":{"lighting":{"fill":9}}}}'], r"display\.modes\.render\.lighting\.fill"),
             (step_door, [self.stl, self.out], r"does not render \.stl inputs"),
             (step_door, [script, self.out], r"a model script is a program"),
             (stl_door, [self.stl, self.out, "--mode", "orbit"], r"Unsupported render mode: orbit"),
@@ -193,16 +193,16 @@ class CrossKindOptionsAreRefusedByName(_Workspace):
         """S12: `--display Wireframe` on an STL used to list all five presets."""
         code, said = run_door(stl_door, [self.stl, self.out, "--display", "Wireframe"])
         self.assertEqual(1, code)
-        self.assertIn("Supported modes: grid, render, solid", said)
+        self.assertIn("Supported modes: render, solid", said)
         for step_only in ("xray", "hidden-line", "wireframe"):
             self.assertNotIn(step_only, said)
         with self.assertRaises(SnapshotError) as caught:
             self.resolve(self.stl_job(display={"mode": "Wireframe"}))
-        self.assertIn("display.mode must be one of: grid, render, solid;", str(caught.exception))
+        self.assertIn("display.mode must be one of: render, solid;", str(caught.exception))
         # A STEP door still offers every preset.
         step = self.write("part.step", "ISO-10303-21;\nEND-ISO-10303-21;\n")
         code, said = run_door(step_door, [step, self.out, "--display", "Wireframe"])
-        self.assertIn("grid, hidden-line, render, solid, wireframe, xray", said)
+        self.assertIn("hidden-line, render, solid, wireframe, xray", said)
 
 
 class SrdfPairingTests(_Workspace):
@@ -505,7 +505,7 @@ class DisplayIsValidatedOncePerJob(_Workspace):
         return validate.call_count
 
     def test_whichever_way_the_display_arrives(self) -> None:
-        display = {"mode": "render", "lighting": {"fill": 0.4}}
+        display = {"mode": "render", "modes": {"render": {"lighting": {"fill": 0.4}}}}
         self.write("stage.json", json.dumps(display))
         packet = self.write("packet.json", json.dumps({"jobs": [self.stl_job(), self.stl_job(display="solid")]}))
         ways = {
@@ -699,7 +699,7 @@ class AnnotationAndTargetTests(_Workspace):
         options = SnapshotOptions(**fields)
         return resolve_render_job_packet(load_job_from_options(options, cwd=self.root), cwd=self.root)
 
-    def test_a_sketch_file_or_object_reaches_the_page_as_the_object(self) -> None:
+    def test_an_annotation_file_or_object_reaches_the_page_as_the_object(self) -> None:
         by_file = self.resolve(self.stl_job(annotation="ink.annotation.json"))["jobs"][0]
         self.assertEqual((by_file["annotation"], by_file["resolved"]["annotationSource"]), (ANNOTATION, str(self.annotation)))
         inline = self.resolve(self.stl_job(annotation=ANNOTATION))["jobs"][0]
@@ -724,7 +724,16 @@ class AnnotationAndTargetTests(_Workspace):
         self.assertEqual(code, 2)
         self.assertIn("--annotation", said)
 
-    def test_a_sketch_that_is_not_one_is_refused_and_a_drawing_or_a_list_takes_none(self) -> None:
+    def test_annotation_has_no_legacy_flag_or_job_key(self) -> None:
+        with self.assertRaisesRegex(SnapshotError, r"unknown render job key\(s\): sketch"):
+            self.resolve(self.stl_job(sketch=ANNOTATION))
+        for door in (step_door, stl_door, urdf_door, any_door):
+            with self.subTest(door=door.__name__):
+                code, said = run_door(door, [self.stl, self.out, "--sketch", "ink.annotation.json"])
+                self.assertEqual(code, 2)
+                self.assertIn("--sketch", said)
+
+    def test_an_annotation_that_is_not_one_is_refused_and_a_drawing_or_a_list_takes_none(self) -> None:
         self.write("list.json", "[]")
         self.write("panel.dxf", "0\nEOF\n")
         for job, said in (
@@ -760,7 +769,7 @@ class AnnotationAndTargetTests(_Workspace):
             with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
                 self.resolve(job)
 
-    def test_the_pages_refusal_of_a_mark_names_the_sketch_file(self) -> None:
+    def test_the_pages_refusal_of_a_mark_names_the_annotation_file(self) -> None:
         async def refused():
             raise RuntimeError("Page.evaluate: Error: annotation: marks[0].color must be a #rrggbb colour\n    at nn (x.js:1)")
 

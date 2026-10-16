@@ -1,5 +1,4 @@
 import { normalizeExplodedViewSettings } from "@text-to-cad/core/lib/displaySettings.js";
-import { normalizeViewSettings } from "@text-to-cad/core/common/viewSettings.js";
 import { clipAmount, clipAtForAmount, clipAxisBounds, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
 import { ArrowLeftRight, ChevronDown } from "lucide-react";
 import {
@@ -18,6 +17,8 @@ function formatNumber(value, digits = 2) {
   return Number.isFinite(number) ? number.toFixed(digits) : "0";
 }
 
+// These controls read the resolved scene's Clip and Explode groups. Public display
+// validation belongs to the settings store; resolved scene groups are not a saved display.
 // Persistent model effects are separate from Display and its presets. Clip and Explode are drawn
 // alike: the amount in the panel's heading, one row for a body — Explode's a slider, Clip's the
 // axis it cuts along and then its slider.
@@ -25,7 +26,7 @@ function formatNumber(value, digits = 2) {
 // Clip's view holds where its plane stands (`at`, millimetres); the panel shows the share of the
 // model it cuts away, measured on `bounds` — the model at rest, the box the plane is placed in.
 function clipState(viewSettings, bounds) {
-  const clip = normalizeStepClipSettings(normalizeViewSettings(viewSettings).clip);
+  const clip = normalizeStepClipSettings(viewSettings?.clip);
   const { min, max } = clipAxisBounds(bounds, clip.axis);
   return { clip, range: max - min, amount: clipAmount(clip, bounds) * 100 };
 }
@@ -94,7 +95,7 @@ export function CrossSectionControls({ viewSettings, onViewSettingsPatch, bounds
 // Explode's control: one slider, which applies the effect as it leaves zero and removes it at zero.
 // `className` draws it where it sits (its sub-toolbar's slider).
 export function ExplodeControls({ viewSettings, onViewSettingsPatch, className = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
-  const exploded = normalizeExplodedViewSettings(normalizeViewSettings(viewSettings).exploded);
+  const exploded = normalizeExplodedViewSettings(viewSettings?.exploded);
   return <Slider thumbProps={{ "aria-label": "Explode amount" }}
     value={[exploded.enabled ? exploded.amount * 100 : 0]} min={0} max={100} step={1}
     onValueChange={([amount]) => onViewSettingsPatch({ exploded: { amount: amount / 100, enabled: amount > 0 } })}

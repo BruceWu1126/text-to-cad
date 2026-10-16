@@ -955,10 +955,7 @@ def prepare_render_job(
     validate_display_for_kind(display, kind=kind, input_label=input_path.name)
     job["display"] = display
     mode = normalize_render_mode(job.get("mode"))
-    lighting = display.get("lighting")
-    lighting_enabled = (
-        lighting.get("enabled", True) if is_plain_object(lighting) else display.get("mode") == "render"
-    )
+    lighting_enabled = display.get("mode") == "render"
     if lighting_enabled and mode != "view":
         raise SnapshotError("Render display supports only view mode")
 

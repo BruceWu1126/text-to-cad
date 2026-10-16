@@ -58,44 +58,51 @@ anything else is refused with this list:
 with a whole number of pixels from 1 to 8192; a larger request is refused rather
 than clamped. With `--job` they size every output in the packet.
 
-`--display` accepts a preset name, inline JSON, or a JSON file path. The six
-presets are `solid` (the default: shaded, with edge linework), `render`
+`--display` accepts a mode name, inline JSON, or a JSON file path. The five
+modes are `solid` (the default: shaded, with edge linework), `render`
 (perspective projection and photographic lighting), `xray` (translucent surfaces
 with occluded edges visible), `hidden-line` (linework with occluded edges
-suppressed), `wireframe` (edges only) and `grid` (Solid on a finer, plainer
-measuring grid; the only preset that draws the grid). Every preset but Render
-starts with orthographic projection. `appearance` is `light` (the CLI default) or
-`dark`. The Viewer and CLI accept the same grouped display object:
+suppressed), and `wireframe` (edges only). Render uses perspective; other modes
+use the shared projection, orthographic by default. `appearance` is `light`
+(the CLI default) or `dark`. The Viewer and CLI accept the same sparse display
+object, with settings stored separately for each mode:
 
 ```bash
 cadgen step snapshot STEP/part.step tmp/review.png --display render
-cadgen step snapshot STEP/part.step tmp/review.png --display '{"mode":"render","floor":{"enabled":false},"background":{"opacity":0.5}}'
+cadgen step snapshot STEP/part.step tmp/review.png --display '{"mode":"render","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
 cadgen step snapshot STEP/part.step tmp/review.png --display display.json --camera front
 ```
 
-Omitted groups inherit the chosen preset. A supplied group merges its parameters
-with those defaults and implies `enabled: true`, unless `enabled: false` is
-explicit. Every group below supports boolean `enabled`; opacity is 0 for fully
+Omitted parameters inherit their mode's defaults. Supplying a group does not
+enable it; use `enabled: true` on a toggleable group. Opacity is 0 for fully
 transparent and 1 for opaque.
 
-| Group | Parameters |
+| Location | Parameters |
 | --- | --- |
 | `camera` | `projection`: `orthographic` or `perspective`; `focalLength`: 20–200 mm |
-| `surfaces` | `style`: `shaded`, `flat`, `hidden`, `off`; `colorMode`: `original`, `single`, `by-part`; hex `color`; 1–50 hex `colors`; `opacity`: 0–1 |
-| `edges` | `visibility`: `visible` or `all`; hex `color` |
-| `lighting` | `quality`: `preview` or `final`; `exposure`: -5–5; `rotation`: -180–180 degrees; `size`: 0.25–3; `fill`: 0–1 |
-| `background` | hex `color`; `opacity`: 0–1, including partial PNG alpha |
-| `floor` | `placement`: `lowest` or `origin`; `finish`: `matte` or `glossy`; hex `color`; `opacity`: 0–1 |
-| `grid`, `axes` | hex `color`; `opacity`: 0–1 |
+| `modes.solid` | `parts`, boolean `flat`, `edges` (`enabled`, hex `color`), `grid`, `axes` |
+| `modes.render` | `parts`, `lighting`, `background`, `floor` |
+| `modes.xray` | `parts`, `opacity`: 0–1 (default 0.22), `edges` (hex `color`), `grid`, `axes` |
+| `modes.hidden-line`, `modes.wireframe` | `edges` (hex `color`), `grid`, `axes` |
 
-Render's floor sits at the model's lowest point; `placement: "origin"` moves it to
-Z=0. `--camera` (or a job's top-level or per-output `camera`) sets pose and
+Within those modes, `parts` accepts `colorMode` (`original`, `single`, `by-part`),
+hex `color`, and 1–50 hex `colors`. `lighting` accepts `quality` (`preview` or
+`final`), `exposure` (-5–5), `rotation` (-180–180 degrees), `size` (0.25–3), and
+`fill` (0–1). `background` accepts hex `color` and `opacity` (0–1). `floor`
+accepts boolean `enabled`, `placement` (`lowest` or `origin`), `finish` (`matte`
+or `glossy`), hex `color`, and `opacity` (0–1). `grid` and `axes` accept boolean
+`enabled`, hex `color`, and `opacity` (0–1); `grid` also accepts `density`
+(0.25–4). Grid and axes start off in every mode that offers them.
+
+Render's floor sits at the model's lowest point; `placement: "origin"` moves it
+to Z=0. `--camera` (or a job's top-level or per-output `camera`) sets pose and
 framing (`preset`, `position`, `target`, `up`, `direction`, `zoom`,
 `orthographicHalfHeight`); projection and focal length belong in
-`display.camera`. `clip` and `exploded` are further `display` tools. `edges`,
-`clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets and the
-`hidden`/`off` surface styles are STEP-only; meshes, drawings and robot
-descriptions take `solid` or `render`.
+`display.camera`. `clip` and `exploded` are shared `display` tools. `edges`,
+`clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes are
+STEP-only; meshes and robot descriptions take `solid` or `render`. DXF uses
+`--appearance` and has no scene display modes. Retired top-level style groups
+and the old `grid` mode are refused.
 
 `camera` is a preset (`front`, `back`, `left`, `right`, `top`, `bottom`, `iso`),
 an `azimuth:elevation` pair, or a camera object. `output` takes `sizeProfile`,
@@ -150,8 +157,10 @@ over the model as they drew it in the CAD Viewer: each mark sits on its part,
 follows it when the view explodes or poses the model, and is cut by a clip.
 A DXF and `--mode list` take none.
 
-A Quick Edit prompt names the views the person looked at as a job file, the PNGs
-it rendered, and their annotation file when they drew. The job's `measurements` are
+A Quick Edit prompt names the views the person looked at as a `.job.json` file,
+the PNGs it rendered, and their `.annotation.json` file when they drew. Every
+path in the prompt and job is absolute, so the saved job can be replayed from
+another working folder without copying the annotation into the model directory. The job's `measurements` are
 the distances they measured, each `{start, end, label, color}`, drawn over every
 view as the viewer drew them. `cadgen snapshot --job <job
 file>` renders those views again: after an edit, run it to see the change from

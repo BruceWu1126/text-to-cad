@@ -1,23 +1,28 @@
 # Snapshots
 
-## Display presets
+## Display modes
 
 `--display` accepts `solid` (the default), `render`, `xray`, `hidden-line`,
-`wireframe`, `grid`, a JSON object, or a JSON file path. Only `grid` draws the
-grid: Solid on a finer, plainer measuring grid. The CLI defaults to
-`appearance: "light"`; use `"dark"` to request dark appearance. Presets supply
-all group defaults. An omitted group inherits its preset; a supplied group
-merges its parameters and implies `enabled: true` unless explicitly false.
+`wireframe`, a JSON object, or a JSON file path. The CLI defaults to
+`appearance: "light"`; use `"dark"` to request dark appearance. Settings are
+sparse: omitted parameters inherit the active mode's defaults. Each mode keeps
+its own settings under `modes`; editing an inactive mode does not select it.
 
 ```bash
 cadgen step snapshot part.step review.png --display render
-cadgen step snapshot part.step review.png --display '{"mode":"render","appearance":"dark","floor":{"enabled":false},"background":{"opacity":0.5}}'
+cadgen step snapshot part.step review.png --display '{"mode":"render","appearance":"dark","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
 cadgen step snapshot part.step review.png --display display.json --camera front
 ```
 
-The public groups are `camera`, `surfaces`, `edges`, `lighting`, `background`,
-`floor`, `grid`, and `axes`. `clip` and `exploded` remain independent inspection
-tools. A clip keeps the part of a STEP model on the lower side of a plane across
+Shared settings are `appearance`, `camera`, `clip` and `exploded`. Solid has
+`parts`, `flat`, `edges`, `grid` and `axes`; Render has `parts`, `lighting`,
+`background` and `floor`; X-ray has `parts`, `opacity`, `edges`, `grid` and
+`axes`; Hidden Line and Wireframe have `edges`, `grid` and `axes`. The grid and
+axes start off. Enable them explicitly in a mode, for example
+`{"modes":{"solid":{"grid":{"enabled":true}}}}`. The retired `grid` mode,
+top-level style groups and unknown keys are refused.
+
+A clip keeps the part of a STEP model on the lower side of a plane across
 `axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
 faces. The plane stands at `at`, its coordinate on the axis in millimetres in the
 model's own frame (the numbers `--mode list` prints as bounds), or, without
@@ -25,21 +30,20 @@ model's own frame (the numbers `--mode list` prints as bounds), or, without
 the cut (`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a
 section view. `--camera` or a job/output `camera` specifies pose and framing;
 `display.camera` specifies projection and focal length (20–200 mm). Render
-defaults to perspective; other presets use orthographic projection. Opacity is
-0 for transparent and 1 for opaque, including partially transparent PNG
-backgrounds. Unknown keys and retired modes are refused.
+uses perspective; the other modes use the shared projection, orthographic by
+default. Opacity is 0 for transparent and 1 for opaque, including partially
+transparent PNG backgrounds.
 
 A STEP model with no surfaces -- empty, or only curves and points -- has nothing a
 view draws. Its snapshot is still written, with a warning that says the model has
 no surfaces, decided from the face counts the parts' records give before any
 browser starts (`snapshot_parts.has_surfaces`).
 
-`edges`, `clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets and
-the `hidden` and `off` surface styles describe a CAD model: its topology edges,
-its parts and its solids. They apply to STEP/STP inputs only. A mesh or a robot
-description (STL, 3MF, GLB, URDF, SRDF, SDF) takes `solid` or `render`, the
-`shaded` or `flat` surface style and the remaining groups, and refuses the rest
-by name before anything is rendered.
+`edges`, `clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes
+describe a CAD model: its topology edges, its parts and its solids. They apply
+to STEP/STP inputs only. A mesh or a robot description (STL, 3MF, GLB, URDF,
+SRDF, SDF) takes `solid` or `render` with their other settings, and refuses
+unsupported settings by name before anything is rendered.
 
 ## Meshes and robot descriptions
 
@@ -309,11 +313,11 @@ translucent floor stands at the model's lowest point. To place it at the
 document's Z=0 plane instead:
 
 ```bash
-cadgen step snapshot part.step review.png --display '{"mode":"render","floor":{"placement":"origin"}}'
+cadgen step snapshot part.step review.png --display '{"mode":"render","modes":{"render":{"floor":{"placement":"origin"}}}}'
 ```
 
-`display.floor.placement` accepts `lowest` (Render's default) or `origin` (where
-a floor turned on in another preset starts); it moves only the floor, never the
-model or lighting. `display.floor.finish` accepts
-`matte` (the default) or `glossy`, the Viewer's Floor finish: a glossy floor also
-reflects the model. `display.floor.enabled: false` removes the floor.
+`display.modes.render.floor.placement` accepts `lowest` (the default) or
+`origin`; it moves only the floor, never the model or lighting.
+`display.modes.render.floor.finish` accepts `matte` (the default) or `glossy`,
+the Viewer's Floor finish: a glossy floor also reflects the model.
+`display.modes.render.floor.enabled: false` removes the floor.

@@ -21,8 +21,7 @@ const NAVBAR_LOGO_CENTRE_PX = 8 + 24 / 2;
 const SHOW_TOGGLE_LEFT_PX = NAVBAR_LOGO_CENTRE_PX - VIEWPORT_INSET_PX - TOGGLE_PX / 2;
 /**
  * The file's sidebar: one solid floating bar at the viewer's top-left, holding what there is to
- * read of the file — an assembly's Features, a robot's Links, its joints' Position, an SDF's
- * metadata — whatever tool is in hand. The toolbar is for using tools; this is for the file. Each
+ * read of the file, its hierarchy, properties and controls, whatever tool is in hand. The toolbar is for using tools; this is for the file. Each
  * of its sections is a `ToolPanel` drawn as a section (`ToolStackContext`'s `sidebar`): a heading
  * row that folds it at a press anywhere on it (a tree row in shape), then its body. It is read for as long as a file is
  * open, so it has the opaque surface (`FLOATING_SURFACE_CLASS`).
@@ -212,7 +211,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     settle(FILE_SIDEBAR_ID, change);
   };
 
-  return <div ref={room} hidden={hidden} className="pointer-events-none absolute z-20" style={style} data-file-sidebar-room="">
+  return <div ref={room} hidden={hidden} className="pointer-events-none absolute z-20 @max-5xl/cad-viewport:top-[var(--cad-tools-bottom,3.125rem)]! @max-5xl/cad-viewport:w-[calc(50%-0.75rem)]" style={style} data-file-sidebar-room="">
     {/* Put away, the bar leaves its toggle in the corner it hung from, under the navbar's logo, bare
         and the same size; it fades in as the bar slides out. */}
     <button type="button" aria-label="Show file sidebar" inert={open} data-file-sidebar-open=""

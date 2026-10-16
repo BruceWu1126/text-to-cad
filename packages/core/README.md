@@ -65,15 +65,13 @@ protocol relationship never imports Python or discovers an interpreter.
   reports a typed miss rather than turning a cheap decoded-mesh request into
   unbudgeted work in the page: cadgen derives what the store lacks. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §5.
-- **One grouped view state**: `common/viewSettings.js` validates the public
-  Solid, Render, X-ray, Hidden line and Wireframe presets. Every preset exposes
-  the same independent camera, surfaces, edges, lighting, background, floor,
-  grid and axes groups. `resolveViewSceneSettings()` in `common/sceneSettings.js`
-  is the Viewer/snapshot policy boundary: enabled capabilities select scene
-  resources, never the preset name. Disabled lighting retains neutral CAD
-  illumination; disabled background restores the workbench canvas. Camera pose,
-  clipping and explode remain model tools, outside preset selection and Custom
-  comparison. View Reset clears display overrides and disables those tools. The grouped contract and the rig it drives:
+- **One per-mode view state**: `common/viewSettings.js` validates Solid, Render,
+  X-ray, Hidden line and Wireframe and each mode's own settings. Appearance,
+  camera, clipping and explode are shared; selecting or resetting a mode keeps
+  them and the other modes' settings. `resolveViewSceneSettings()` maps the active
+  mode into renderer groups, preserving the Viewer/snapshot policy boundary.
+  Format capabilities are injected. There are no legacy display aliases or
+  saved-shape migrations. The contract and rendering mechanism:
   [docs/render-pipeline.md](docs/render-pipeline.md).
 - **Kinematics and choreography are data, independently**: the articulation
   player (`articulation.js`) plays cadgen's articulation — controls with their

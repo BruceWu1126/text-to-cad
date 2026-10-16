@@ -1,14 +1,15 @@
 import React from 'react';
+import { resolveViewSettings } from '@text-to-cad/core/common/viewSettings.js';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enabled: false, axis: 'x', invert: false } });
+const neutral = () => resolveViewSettings({});
 
 it('only the tool in hand has its row under the strip, an applied effect leaving none behind; taken up again it is as it was, unset it starts neutral; only the tool in hand is lit', () => {
-  const props = { view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
+  const props = { view: neutral(), features: { settings: ['exploded', 'clip'] }, store: { patch: vi.fn() },
     mesh: null, disabled: false, selectedTool: 'references', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const active = () => result.current.tools.filter(tool => tool.active).map(tool => tool.id);
@@ -35,7 +36,7 @@ it('only the tool in hand has its row under the strip, an applied effect leaving
 
 it('a clip at zero keeps its row while in hand, and no tool leaves one behind', () => {
   const props = { view: { ...neutral(), clip: { ...neutral().clip, enabled: true, at: 5 } },
-    features: { sections: ['clip'] }, store: { patch: vi.fn() }, mesh: null, disabled: false, selectedTool: 'clip', onSelect: vi.fn() };
+    features: { settings: ['clip'] }, store: { patch: vi.fn() }, mesh: null, disabled: false, selectedTool: 'clip', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const kept = () => { const view = render(<>{result.current.subToolbar}</>); const count = view.container.querySelectorAll('[role=toolbar][data-cad-sub-toolbar]').length; view.unmount(); return count; };
   expect(kept()).toBe(1);
@@ -47,7 +48,7 @@ it('a clip at zero keeps its row while in hand, and no tool leaves one behind', 
 
 it('offers Explode only where there are parts to separate, and idles it while that is unknown', () => {
   const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [1, 1, 1] } });
-  const props = { view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
+  const props = { view: neutral(), features: { settings: ['exploded', 'clip'] }, store: { patch: vi.fn() },
     mesh: null as null | object, disabled: true, selectedTool: 'references', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const offered = () => result.current.tools.map(tool => `${tool.id}:${tool.disabled}`);

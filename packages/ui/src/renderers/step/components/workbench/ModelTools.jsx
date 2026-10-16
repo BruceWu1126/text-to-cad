@@ -47,7 +47,7 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
       controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds}
         className="flex min-w-0 flex-1 items-center gap-1" sliderClassName={SUB_TOOLBAR_SLIDER_CLASS} />,
       actions: <ClipFlipButton viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds} /> }
-  ].filter(tool => features.sections.includes(tool.id));
+  ].filter(tool => features.settings.includes(tool.id));
   const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false, axis: "x", invert: false } };
   const tool = definitions.find(value => value.id === selectedTool);
   return {

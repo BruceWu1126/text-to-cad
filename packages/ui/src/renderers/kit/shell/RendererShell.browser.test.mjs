@@ -134,7 +134,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   // Display's settings are a dropdown from its button at the strip's end, its menu's Custom
   // submenu (`DisplayPopover.jsx`), portaled out of the pane: a file never opens with it, and it is not a tool.
   const displayButton = pane => pane.locator('[data-cad-toolbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
-  const display = page.locator('[data-display-popover]');
+  const display = page.locator('[data-display-settings="solid"]');
   const cameraZoom = id => page.evaluate(pane => window.cadHarness[pane].controller?.readState().camera?.zoom ?? null, id);
   await displayButton(first).waitFor().catch(async (error) => { throw new Error(`${error.message}; page errors: ${errors.join('; ')}; body: ${await page.locator("body").innerText()}; requests: ${requests.join(", ")}`); });
   await page.waitForFunction(() => Object.keys(window.cadHarness.state.renderers || {}).length > 0);
@@ -164,7 +164,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
 
   // The file goes with its Display settings open.
   await displayButton(first).click();
-  await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
+  await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
   await display.waitFor();
   await page.evaluate(() => window.cadHarness.mounted(false));
   await display.waitFor({ state: 'detached' });
@@ -590,7 +590,7 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.ok(offRight >= 0 && offRight < 20, `the view cube stays against the right edge: ${offRight}px`);
   assert.ok(stackBox.y + stackBox.height <= cubeBox.y, 'the tool stack stops above the cube');
   assert.deepEqual(await pane.locator('[data-cad-toolbar] [data-strip-rule] + [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'Projection, Display then Preview, after the strip\'s rule');
+    ['Display mode: Solid', 'Preview'], 'Display then Preview, after the strip\'s rule');
   assert.equal(await pane.locator('[data-viewer-navbar] button[aria-label^="Display mode"], [data-viewer-navbar] button[aria-label="Preview"]').count(), 0, 'nothing of them in the navbar');
 
   // FINDING: the wait before the file is even located covers the viewport, and says
@@ -694,8 +694,9 @@ test('a renderer says more about its load than a download: finding the file, edi
   await quickEdit.waitFor();
   await quickEdit.evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)));
   const opened = await quickEdit.boundingBox();
-  assert.ok(opened.x + opened.width > frameBox.x + frameBox.width - 20 && opened.y < frameBox.y + 20,
-    `Quick Edit takes the top-right corner: ${JSON.stringify([opened, frameBox])}`);
+  const topControls = await pane.locator('[data-cad-top-controls]').boundingBox();
+  assert.ok(opened.x + opened.width > frameBox.x + frameBox.width - 20 && opened.y >= topControls.y + topControls.height,
+    `Quick Edit clears the top controls at the right: ${JSON.stringify([opened, frameBox])}`);
   assert.equal(Math.round(opened.width), 240);
   const note = quickEdit.getByRole('textbox', { name: 'Describe your changes', exact: true });
   const noteHeight = (await note.boundingBox()).height;

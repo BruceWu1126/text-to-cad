@@ -35,8 +35,8 @@ async function open(server) {
   await pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Select', exact: true }).waitFor();
-  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ axes: { enabled: false } }));
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.axes?.enabled === false);
+  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ modes: { solid: { axes: { enabled: false } } } }));
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.modes?.solid?.axes?.enabled === false);
   // The opening fit at rest, the same camera two frames running: `at` projects from it.
   await page.waitForFunction(() => {
     const camera = JSON.stringify(window.__cadCamera());

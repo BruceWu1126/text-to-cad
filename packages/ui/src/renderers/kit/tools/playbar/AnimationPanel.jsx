@@ -8,8 +8,7 @@ import { AnimationTimeControl } from "./ViewportAnimationBar.js";
  * The Animation tool's sub-toolbar (`kit/tools/SubToolbar.jsx`), one compact row under the strip
  * while it is up, as preview's playbar is: the routines (a playlist, for a file with several), Play
  * or Pause, the scrubber, the Playback settings (Speed, Loop, Autoplay) — the playbar's own
- * menus (`PlaybackMenu.jsx`), opening down from the row — and Reset, last as Explode's and Clip's
- * is: it stops the routine and puts the model back at rest, idle while it is there already. There is no playbar under the model in
+ * menus (`PlaybackMenu.jsx`), opening down from the row — and Reset, last in the row: it stops the routine and puts the model back at rest, idle while it is there already. There is no playbar under the model in
  * the tools view; preview has its own.
  *
  * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void, disabled?: boolean }} props

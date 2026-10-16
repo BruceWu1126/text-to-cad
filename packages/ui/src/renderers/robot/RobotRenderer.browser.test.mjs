@@ -140,15 +140,15 @@ async function open(t, file, { panel = true } = {}) {
     },
     // A selection is React state: it is on screen a render after whatever changed it.
     waitPressed: count => page.waitForFunction(wanted => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === wanted, count),
-    // Display: its button at the strip's end, before Preview, the mode in hand; its settings, its menu's Custom submenu.
+    // Display: its button at the strip's end, before Preview, the mode in hand; its settings, its per-mode settings submenu.
     displayButton: () => tools.locator('[data-view-controls]').getByRole('button', { name: /^Display mode: / }),
     async openDisplay() {
       await robot.displayButton().click();
-      await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
+      await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
       await robot.displayPanel().waitFor();
     },
     // Display's settings: a dropdown from the strip, portaled out of the viewer.
-    displayPanel: () => page.locator('[data-display-popover]'),
+    displayPanel: () => page.locator('[data-display-settings="solid"]'),
     // The tool stack's panels on screen, top to bottom, by their accessible names.
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
@@ -220,7 +220,7 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.equal(await robot.tool('Annotate').count(), 0, 'Annotate is a STEP tool; a robot description has none');
   // Display and Preview are the view's controls, ending the strip after its tools, for a robot as for any 3D file.
   assert.deepEqual(await robot.tools.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Projection: Orthographic', 'Preview']);
+    ['Display mode: Solid', 'Preview']);
   // Display is the button beside Preview, shut as the file opens.
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs');
@@ -353,9 +353,10 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
 
   // Posing a joint far past the rest box never resizes the grid or the studio floor, and never
   // moves the camera: the arm swung straight up stands well above anything the rest pose reached.
-  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ floor: { enabled: true } }));
+  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ mode: 'render', modes: { render: { floor: { enabled: true } } } }));
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
   const floored = await page.evaluate(() => window.__cadStage());
+  const flooredCamera = await robot.camera();
   await robot.type('shoulder', -90);
   await page.waitForFunction(top => window.__cadStage().bounds.max[2] > top + 0.1, floored.bounds.max[2]);
   const swung = await page.evaluate(() => window.__cadStage());
@@ -363,7 +364,7 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.ok(restStage.gridRadius > 0);
   assert.equal(swung.gridRadius, restStage.gridRadius, 'the ground keeps the size the rest pose gave it');
   assert.deepEqual(swung.studioGround, floored.studioGround, 'so does the studio floor');
-  assert.ok(sameCamera(await robot.camera(), framed), 'a pose never re-frames');
+  assert.ok(sameCamera(await robot.camera(), flooredCamera), 'a pose never re-frames');
 
   // Anywhere else the press is the camera's, and no joint moves.
   const posed = await robot.handles();
@@ -746,20 +747,18 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   assert.equal(round6(translation(links.arm)[2]), round6(0.2 - 0.05 * Math.sin((40 * Math.PI) / 180)));
   // Display offers no mode, and no setting, made of Edges, Cross-section or Explode.
   await robot.displayButton().click();
-  assert.deepEqual(await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option]:not([data-display-mode-option="custom"])').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
-    ['solid', 'render', 'grid']);
-  await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
+  assert.deepEqual(await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
+    ['solid', 'render']);
+  await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
   const displayMenu = robot.displayPanel();
   await displayMenu.waitFor();
   for (const absent of ['Edges', 'Cross-section', 'Explode']) assert.equal(await displayMenu.getByRole('heading', { name: absent, exact: true }).count(), 0, absent);
-  assert.equal(await displayMenu.getByRole('combobox', { name: 'Projection', exact: true }).count(), 0, 'Projection is the strip\'s, not Display\'s');
-  await robot.displayButton().click();
-  await displayMenu.waitFor({ state: 'detached' });
-  // Projection is a tile of its own before Display, its dropdown the two projections.
-  await robot.tools.getByRole('button', { name: 'Projection: Orthographic', exact: true }).click();
-  assert.deepEqual(await page.locator('[role=menu][aria-label="Projection"]').getByRole('menuitemradio').allInnerTexts(), ['Orthographic', 'Perspective']);
   await page.keyboard.press('Escape');
-  await page.locator('[role=menu][aria-label="Projection"]').waitFor({ state: 'detached' });
+  await displayMenu.waitFor({ state: 'detached' });
+  const rootMenu = page.locator('[role=menu][aria-label="Display mode"]');
+  assert.deepEqual(await rootMenu.getByRole('group', { name: 'Projection', exact: true }).getByRole('menuitemradio').allInnerTexts(), ['Orthographic', 'Perspective']);
+  await page.keyboard.press('Escape');
+  await rootMenu.waitFor({ state: 'detached' });
   // Display was never the tool: Select was in hand throughout, picking links, and still is.
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Links']);
 

@@ -322,12 +322,12 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       return value;
     } } : chip));
   }, [annotationChip, measurements?.chips, chips]);
-  return <div ref={root} className={cn("pointer-events-none flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
+  return <div ref={root} className={cn("pointer-events-none shrink-0 flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
     {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
-      // A narrow viewer (a phone) gets it across its whole width, over the tool stack rather than beside it.
+      // The side column caps the box on a narrow view, clear of the toolbar and sidebar.
       // It opens in 150ms, animate-in's own: a `duration-*` class would also ease every width a drag
       // writes (the transition is of `all`), and the box would trail its corner.
-      className={cn("pointer-events-auto relative flex w-[min(15rem,100%)] max-w-full origin-top-right flex-col gap-2 rounded-lg p-2.5 text-tiny animate-in fade-in-0 zoom-in-95 @max-md/cad-viewport:!w-full",
+      className={cn("pointer-events-auto relative flex w-[min(15rem,100%)] max-w-full origin-top-right flex-col gap-2 rounded-lg p-2.5 text-tiny animate-in fade-in-0 zoom-in-95",
         FLOATING_SURFACE_CLASS)}>
       <div className="flex min-h-5 min-w-0 items-center gap-2">
         <h3 className="shrink-0 pl-0.5 text-xs font-medium leading-5 text-foreground">Quick Edit</h3>

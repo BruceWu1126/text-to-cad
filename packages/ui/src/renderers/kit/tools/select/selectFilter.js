@@ -1,7 +1,6 @@
 // What Select picks, as the person filters it from the dropdown on its chevron
 // (`SelectFilterMenu.jsx`), as a CAD tool's selection filter is: a checkbox per kind of thing it
-// can pick (a STEP's parts, faces, edges, Position's knobs, the annotations, measurements; a
-// robot's links and knobs), each on its own, all ticked when a file opens, and Select all above
+// can pick, each on its own, all ticked when a file opens, and Select all above
 // them. A filter is the list of ticked ids.
 //
 // Importing this module has no environmental effects.

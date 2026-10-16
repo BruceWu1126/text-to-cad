@@ -17,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from cadgen.snapshot_cli import prepare_render_job_packet, read_job_file
 from cadgen.snapshot_core import SnapshotError
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app
@@ -38,6 +39,7 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.release = threading.Event()
         self.failure: Exception | None = None
         self.rendered: list[Path] = []
+        self.prepared = []
         app = create_cad_app(host="127.0.0.1", port=0)
         app.prompt_files = PromptFiles(render=self.render, directory=self.files, retry_ms=5)
         server = handler_module.serve(app, "127.0.0.1", 0)
@@ -55,8 +57,12 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.rendered.append(job_path)
         if self.failure is not None:
             raise self.failure
-        for job in json.loads(job_path.read_text(encoding="utf-8"))["jobs"]:
-            for output in job["outputs"]:
+        # Exercise the same validation and annotation-file loading as snapshot's render,
+        # replacing only the expensive browser stage with a tiny PNG.
+        _, prepared = prepare_render_job_packet(read_job_file(str(job_path), cwd=job_path.parent), cwd=job_path.parent)
+        self.prepared.extend(prepared)
+        for entry in prepared:
+            for output in entry.job["outputs"]:
                 Path(output["path"]).write_bytes(PNG)
         return SimpleNamespace(ok=True, warnings=())
 
@@ -82,7 +88,7 @@ class PromptFilesRouteTest(unittest.TestCase):
             if status != 202:
                 return status, json.loads(body)
 
-    def test_a_prompt_writes_its_sketch_and_a_job_snapshot_renders_then_answers_its_images(self) -> None:
+    def test_a_prompt_writes_its_annotation_and_a_job_snapshot_renders_then_answers_its_images(self) -> None:
         status, body, _ = self.call("POST", "/__cad/prompt-files", self.request())
         accepted = json.loads(body)
         self.assertEqual((status, set(accepted)), (202, {"ok", "id", "retryMs"}))
@@ -96,6 +102,14 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual((status, answer), (200, {"ok": True, "job": str(job_path), "annotation": str(annotation_path), "images": [
             {"label": "current", "path": str(current)}, {"label": "View 1", "path": str(view_1)}]}))
         self.assertEqual(self.rendered, [job_path])
+        self.assertEqual([entry.job["annotation"] for entry in self.prepared], [ANNOTATION, ANNOTATION])
+        self.assertEqual([entry.annotation_source for entry in self.prepared], [str(annotation_path)] * 2)
+        self.assertTrue(all(Path(path).is_absolute() for path in
+                            [answer["job"], answer["annotation"], *(image["path"] for image in answer["images"])]))
+        # The persisted packet can be replayed after the request, from another working folder:
+        # every dependency names an absolute path, including the annotation beside the job.
+        _, replayed = prepare_render_job_packet(read_job_file(str(job_path), cwd=self.tmp), cwd=self.tmp)
+        self.assertEqual([entry.job for entry in replayed], [entry.job for entry in self.prepared])
         self.assertEqual(json.loads(annotation_path.read_text(encoding="utf-8")), ANNOTATION)
         common = {"input": str(self.model), "annotation": str(annotation_path)}
         settings = {"output": {"padding": 0, "tightFrame": False}}
@@ -118,7 +132,7 @@ class PromptFilesRouteTest(unittest.TestCase):
         jobs = json.loads((self.files / "part-1.job.json").read_text(encoding="utf-8"))["jobs"]
         self.assertEqual([job["measurements"] for job in jobs], [[mark], [mark]])
 
-    def test_a_prompt_without_a_sketch_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
+    def test_a_prompt_without_an_annotation_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
         self.release.set()
         _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))
         _, second, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))
@@ -131,6 +145,7 @@ class PromptFilesRouteTest(unittest.TestCase):
             ([], "requested as an object"),
             (self.request(views=[]), "at least one"),
             (self.request(extra=1), "unknown field(s): extra"),
+            (self.request(sketch=ANNOTATION), "unknown field(s): sketch"),
             (self.request(input="part.stl"), "absolute path"),
             (self.request(input=str(self.tmp / "gone.step")), "no file at"),
             (self.request(views=[{"camera": "iso"}]), "views[0].label"),
@@ -161,6 +176,7 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(json.loads(Path(json.loads(body)["path"]).read_text(encoding="utf-8")), [mark])
         for request, said in (
             ({"name": "part.stl", "kind": "image", "data": {}}, "annotation or measurement"),
+            ({"name": "part.stl", "kind": "sketch", "data": ANNOTATION}, "annotation or measurement"),
             ({"name": "part.stl", "kind": "annotation", "data": {"marks": {}}}, "marks (a list)"),
             ({"name": "part.stl", "kind": "measurement", "data": {**mark, "start": [0, 0]}}, "start"),
         ):

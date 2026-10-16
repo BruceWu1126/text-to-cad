@@ -150,7 +150,7 @@ function Workbench() {
   const store = { patch: (patch: any) => setView(current => ({
     exploded: { ...current.exploded, ...patch.exploded },
     clip: { ...current.clip, ...patch.clip } })) };
-  const modelTools = useModelTools({ view, features: { sections: ['exploded', 'clip'] }, store,
+  const modelTools = useModelTools({ view, features: { settings: ['exploded', 'clip'] }, store,
     mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool });
   const own = (id: string, label: string) => ({ id, label, active: selectedTool === id, icon: <span>{label[0]}</span>, onSelect: () => setTool(id) });
   return <>

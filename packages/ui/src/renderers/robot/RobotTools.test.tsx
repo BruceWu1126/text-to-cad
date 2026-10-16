@@ -175,14 +175,14 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   expect([robot.filter(), robot.knobs(), picks.latest!.enabled]).toEqual(['Selection filter: Position', 1, false]);
   expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // Display is not a tool: its settings (its menu's Custom), from the strip's end, open over Select
+  // Display is not a tool: its settings (each mode's submenu), from the strip's end, open over Select
   // and leave it the tool, with its knobs; Escape puts them away.
   await user.click(within(within(robot.pane).getByRole('group', { name: 'Interaction tools' })).getByRole('button', { name: /^Display mode: / }));
-  await user.click(document.querySelector<HTMLElement>('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]')!);
-  await waitFor(() => expect(document.querySelector('[data-display-popover]')).not.toBeNull());
+  await user.click(screen.getByRole('menuitem', { name: 'Solid settings' }));
+  await waitFor(() => expect(document.querySelector('[data-display-settings]')).not.toBeNull());
   expect([robot.toolNames(), robot.knobs()]).toEqual([['Select:true'], 1]);
   fireEvent.keyDown(document.activeElement || document.body, { key: 'Escape' });
-  await waitFor(() => expect(document.querySelector('[data-display-popover]')).toBeNull());
+  await waitFor(() => expect(document.querySelector('[data-display-settings]')).toBeNull());
   expect(robot.toolNames()).toEqual(['Select:true']);
 
   // A pose off its default stays in the section when the filter puts the knobs away; its heading is
@@ -199,10 +199,10 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   robot.client.dispose();
 });
 
-it('a robot is a 3D view: Display, Projection and Preview end its strip', async () => {
+it('a robot is a 3D view: Display and Preview end its strip', async () => {
   const robot = await openRobot();
   const actions = within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector<HTMLElement>('[data-view-controls]')!;
-  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Projection: Orthographic', 'Preview']);
+  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Preview']);
   robot.client.dispose();
 });
 

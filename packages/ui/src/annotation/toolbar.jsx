@@ -61,7 +61,7 @@ export function annotationColors(colorScheme) {
   return ANNOTATION_COLORS.filter(option => option.value !== (neutral === WHITE ? BLACK : WHITE));
 }
 
-// A shape's stroke in px; the pen draws a little heavier at the same weight (`inkGeometry.js`).
+// A shape's stroke in px; the pen draws a little heavier at the same weight (`geometry.js`).
 /** @type {readonly { value: number, label: string }[]} */
 export const ANNOTATION_STROKE_WIDTHS = [
   { value: 1, label: 'Thin' },
@@ -240,9 +240,9 @@ export function AnnotationToolbar({ annotation, history, colorScheme = 'light' }
   // Seven tools, then seven settings and actions: one row, or — in a view too narrow for it — the
   // two halves as two rows of seven, one over the other, their buttons column for column.
   return <SubToolbar label="Annotation controls" data-annotation-controls=""
-    className="text-to-cad-annotation-toolbar flex-nowrap @max-lg/cad-viewport:flex-col @max-lg/cad-viewport:items-stretch">
+    className="text-to-cad-annotation-toolbar flex-nowrap @max-5xl/cad-viewport:flex-col @max-5xl/cad-viewport:items-stretch">
     <div role="group" aria-label="Annotation tools" className="flex items-center gap-1">{[PEN, ...ANNOTATION_SHAPE_TOOLS, ERASER].map(toolButton)}</div>
-    <span className="contents @max-lg/cad-viewport:hidden"><SubToolbarSeparator /></span>
+    <span className="contents @max-5xl/cad-viewport:hidden"><SubToolbarSeparator /></span>
     <div className="flex items-center gap-1">
       <AnnotationStylePickers label="Annotation style" className="contents" disabled={disabled} colors={annotationColors(colorScheme)}
         color={annotation.color} width={annotation.strokeWidth ?? 2} dash={annotation.strokeStyle ?? 'solid'} placement={annotation.placement ?? 'surface'}

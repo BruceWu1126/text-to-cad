@@ -156,7 +156,7 @@ Declarations are owned here; apps need no ambient shims or aliases into this
 source tree.
 
 The viewer's Annotate tool is native ink projected into the model, with no drawing
-SDK and no persistent storage. Read [drawing](docs/drawing.md) before extending it.
+SDK and no persistent storage. Read [annotation](docs/annotation.md) before extending it.
 
 The required host contract, typed prompt bundles, delivery receipts and host
 chrome slots are documented in [viewer host](docs/viewer-host.md). Clipboard

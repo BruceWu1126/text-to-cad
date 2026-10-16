@@ -1,5 +1,5 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
@@ -10,7 +10,6 @@ import { modelUpdateStatus, ViewUpdateStatus } from "../status/ViewUpdateStatus.
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import DisplayPopover from "./DisplayPopover.jsx";
-import ProjectionMenu from "./ProjectionMenu.jsx";
 import { withGroups } from "../../../annotation/geometry.js";
 import PlaybackMenu, { OrbitMenu, RoutineMenu } from "../tools/PlaybackMenu.jsx";
 import FloatingToolBar, { STRIP_BUTTON_CLASS } from "../tools/FloatingToolBar.js";
@@ -77,7 +76,7 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  *   effects a person keeps. The stack is one column under the strip, gone in preview. The
  *   shell's own tools' panels lead it: Annotate's, and the Animation tool's.
  *   `subToolbar`: the renderer's tool in hand's own row under the strip (`kit/tools/SubToolbar.jsx`:
- *   Explode's, Clip's); the shell's own tools' rows (Annotate's, Animation's) take its place while theirs is up.
+ *   the active tool); the shell's own tools' rows (Annotate's, Animation's) take its place while theirs is up.
  *   `sidebar`: the file sidebar's sections, top to bottom — each a `ToolPanel`, drawn as a
  *   section (`kit/tools/FileSidebar.jsx`): a tree, joints, metadata. None (null): no sidebar.
  *   Gone in preview, kept mounted, so a tree keeps its expansion and scroll.
@@ -222,7 +221,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // panel: it is Quick Edit's chip (its X clears it, a click copies it).
   const colorScheme = view.appearance?.colorScheme === "dark" ? "dark" : "light";
   // Animation's, while it is up: the transport and its settings; there is no playbar under the model
-  // in the tools view. Otherwise the renderer's tool's row (Explode's, Clip's).
+  // in the tools view. Otherwise the renderer supplies its active tool's row.
   const toolRow = frame.annotateToolActive
     ? <AnnotationToolbar annotation={frame.annotation} history={frame.history} colorScheme={colorScheme} />
     : frame.animateToolActive && hasAnimation ? <AnimationToolbar key={frame.modelKey} runtime={playbackRuntime} disabled={viewerLoading || !scene}
@@ -245,6 +244,20 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // alone, not the tools, Quick Edit, the view actions or the cube; shown full size, all return.
   const compact = Boolean(view.appearance?.compact);
   const toolsHidden = chromeHidden || compact;
+  // On a narrow view the side columns start under all the controls, including a wrapped
+  // strip and Annotate's two rows. Measure that actual height; tool changes and resizing
+  // update one CSS variable without redrawing the model or changing saved panel sizes.
+  const topControls = useRef(null);
+  useLayoutEffect(() => {
+    const controls = topControls.current;
+    const viewport = controls?.closest("[data-cad-scene-backdrop]");
+    if (!controls || !viewport) return undefined;
+    const measure = () => viewport.style.setProperty("--cad-tools-bottom", `${VIEWPORT_INSET_PX * 2 + controls.offsetHeight}px`);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(controls);
+    return () => { observer?.disconnect(); viewport.style.removeProperty("--cad-tools-bottom"); };
+  }, [toolsHidden]);
   const copyAction = () => {
     if (previewing) return false;
     if (frame.annotateToolActive) { frame.copyAnnotation(); return true; }
@@ -365,7 +378,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
               </div>
 
               {/* Preview: fullscreen, the navbar and the tools put away and the model orbiting, its
-                  routines playing. Its row in the strip's place: Orbit, the display mode, Projection, then the way
+                  routines playing. Its row in the strip's place: Orbit, Display, then the way
                   out, where Preview was. Under the model, a
                   file with routines has its playbar, its Routines at its left end and its Playback
                   settings at its right; a static file has nothing there at all. */}
@@ -373,10 +386,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 corner={menu => <>
                   <OrbitMenu orbit={orbitPlaying} onOrbitChange={setOrbitPlaying} onOpenChange={menu("orbit")}
                     speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed} />
-                  <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} tooltipSide="bottom" mode={frame.displayMode}
+                  <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} tooltipSide="bottom" mode={frame.displayMode} projection={frame.projection}
                     onOpenChange={menu("display")}>{frame.display}</DisplayPopover>
-                  <ProjectionMenu value={frame.projection.value} onChange={frame.projection.onChange} disabled={shell.idle}
-                    tooltipSide="bottom" onOpenChange={menu("projection")} />
                   <ViewControl label="Exit preview" tooltipSide="bottom" onClick={leavePreview}><Minimize2 aria-hidden="true" /></ViewControl>
                 </>}
                 playbar={menu => hasAnimation ? <ViewportAnimationBar key={frame.modelKey} runtime={animation}
@@ -390,16 +401,17 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{sidebar}</FileSidebar>}
               {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={TOOLBAR_POSITION}
                 data-mobile={mobile ? "" : undefined} data-cad-tool-groups="">
-                {/* The view's controls end the strip: the display mode, Projection, then Preview, for a 3D view
+                {/* The view's controls end the strip: Display, then Preview, for a 3D view
                     (`useRendererShell`'s `previewable`); another has neither. */}
-                <FloatingToolBar tools={tools} trailing={shell.previewable && !previewing ? <>
-                  <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode}>{frame.display}</DisplayPopover>
-                  <ProjectionMenu value={frame.projection.value} onChange={frame.projection.onChange} disabled={shell.idle} />
-                  <ViewControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Maximize2 aria-hidden="true" /></ViewControl>
-                </> : null} />
-                {/* The tool in hand's own row, then the view catching up, under the strip. */}
-                {previewing ? null : toolRow}
-                {previewing ? null : updateStatus}
+                <div ref={topControls} className="flex max-w-full shrink-0 flex-col items-center gap-2" data-cad-top-controls="">
+                  <FloatingToolBar tools={tools} trailing={shell.previewable && !previewing ? <>
+                    <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}>{frame.display}</DisplayPopover>
+                    <ViewControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Maximize2 aria-hidden="true" /></ViewControl>
+                  </> : null} />
+                  {/* The tool in hand's own row, then the view catching up, under the strip. */}
+                  {previewing ? null : toolRow}
+                  {previewing ? null : updateStatus}
+                </div>
                 <ToolStack hidden={previewing} layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>{toolPanels}</ToolStack>
               </div>}
               {/* The top-right: the host's notice once a model is on screen (`view.notice`), and Quick Edit

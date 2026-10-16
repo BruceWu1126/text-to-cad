@@ -244,7 +244,7 @@ Every way it goes carries the same: its words, its references, and the files
 (the view on screen as it goes, and each its annotations were drawn in; one such view
 the same as the one on screen stands for it), those views as a snapshot job file
 (`cadgen snapshot --job <file>` renders them again, over the model or an edit of
-it), and the annotations as an annotation file, `.annotation.json` ([drawing](drawing.md)). The server renders
+it), and the annotations as an annotation file, `.annotation.json` ([annotation](annotation.md)). The server renders
 the pictures with the snapshot's own code and its own look — solid, light,
 orthographic — whatever the viewer showed (`createHttpPromptFiles` asks until
 they are made). **Copy Prompt** is always there: the message goes through
@@ -259,16 +259,19 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 (copied, queued or sent: no `failed` or `cancelled` receipt) tells the host once,
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
 
-`ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, sketch })`
-answers where the job, the sketch and each view's picture were made, `read(path)`
+`ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, annotation, measurements })`
+answers where the job, the annotation and each view's picture were made, `read(path)`
 fetches one, and the optional `save({ name, kind, data })` writes a Quick Edit chip's
-copy as a file at once and answers its path, which the chip copies (`kind` "sketch", the
-drawing; "measurement", one measurement). `createHttpPromptFiles({ origin, fetch })` from `@text-to-cad/core/client`
+copy as a file at once and answers its path, which the chip copies (`kind` "annotation", the
+annotation; "measurement", one measurement). `createHttpPromptFiles({ origin, fetch })` from `@text-to-cad/core/client`
 is the viewer server's: it posts the request to `POST /__cad/prompt-files`, which
 answers at once and renders off the request, then asks `GET /__cad/prompt-files?id=<id>`
 until they are made, reads a file at `GET /__cad/prompt-files/<name>`, and saves at
 `POST /__cad/prompt-files/save`. The files
-are scratch in the system's temporary directory. Both apps pass one; the MCP app's
+are scratch in the system's temporary directory and outlive the viewer until the
+system clears them. The response and the persisted job name every file by
+absolute path, including the annotation, so replay works from another working
+folder. Both apps pass one; the MCP app's
 reaches the server through its tunnel.
 
 ## App-specific interfaces
@@ -303,15 +306,15 @@ picture's size — one model at a time, each once per visit, and only a model wh
 artifact status is already `compiled`, and keeps the picture through `onThumbnail`
 as it keeps the file on screen's. The home never builds anything: an unbuilt model
 keeps its placeholder until a view shows it.
-`readState().display` and `setDisplaySettings(patch)` use the same sparse grouped
+`readState().display` and `setDisplaySettings(patch)` use the same sparse per-mode
 schema as snapshots: `mode` selects `solid`, `render`, `xray`, `hidden-line`, or
-`wireframe`; camera, surfaces, edges, lighting, background, floor, grid and axes
-are independent groups. Patches merge fields within a group. A mode patch
-reapplies that preset before its explicit group overrides; clipping and exploded
-view remain independent tools. Custom is derived from the effective overrides,
-not a sixth mode. `setRenderMode(true/false)` selects Render/Solid through that
-same state. Grouped camera projection/lens changes preserve the viewport's pose
-and zoom. Display Reset restores the selected preset and disables both tools.
+`wireframe`; `modes.<mode>` holds that mode's settings, while appearance, camera,
+clip and exploded are shared. Patches merge supplied fields within each mode's
+groups. A mode patch selects its remembered overrides without clearing anything.
+Reset removes only the named mode's overrides. There is no Custom state or legacy
+shape migration. `setRenderMode(true/false)` selects Render/Solid through that same
+state. Camera projection/lens changes preserve viewport pose and zoom; Render
+resolves to perspective while retaining the shared projection for the other modes.
 `resetCamera` frames the model again without turning the camera — exactly what
 STEP's context-menu "Zoom to fit" does. Cube shortcuts change only orientation.
 

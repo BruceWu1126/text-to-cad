@@ -225,10 +225,10 @@ def step_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: a preset name, grouped display JSON, or JSON file path. Presets
-            are solid (default), render, xray, hidden-line, wireframe and grid.
-            Omitted groups inherit the preset; group objects imply enabled unless
-            explicitly false. appearance is light (default) or dark.
+        display: a mode name, sparse display JSON, or JSON file path. Modes
+            are solid (default), render, xray, hidden-line and wireframe.
+            Per-mode settings live under modes; omitted parameters inherit the
+            mode's defaults. appearance is light (default) or dark.
         kinematics: pose values — a declared preset name or {dof: value}
             JSON, validated against the model's kinematics declaration;
             available in every display mode.
@@ -479,11 +479,11 @@ def mesh_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, grouped display JSON, or a JSON file
-            path. Omitted groups inherit the preset; appearance defaults to
-            light. Projection belongs in display.camera. edges, clip, exploded,
-            the xray, hidden-line and wireframe modes and the hidden/off surface
-            styles describe a STEP model and are refused here.
+        display: solid (default) or render, sparse display JSON, or a JSON file
+            path. Per-mode settings live under modes and inherit that mode's
+            defaults; appearance defaults to light. Projection belongs in
+            display.camera; Render uses perspective. edges, clip, exploded,
+            xray, hidden-line and wireframe are STEP-only and refused here.
         measurements: dimensions drawn over the picture, as the CAD Viewer's
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
@@ -559,11 +559,11 @@ def robot_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, grouped display JSON, or a JSON file
-            path. Omitted groups inherit the preset; appearance defaults to
-            light. Projection belongs in display.camera. edges, clip, exploded,
-            the xray, hidden-line and wireframe modes and the hidden/off surface
-            styles describe a STEP model and are refused here.
+        display: solid (default) or render, sparse display JSON, or a JSON file
+            path. Per-mode settings live under modes and inherit that mode's
+            defaults; appearance defaults to light. Projection belongs in
+            display.camera; Render uses perspective. edges, clip, exploded,
+            xray, hidden-line and wireframe are STEP-only and refused here.
         measurements: dimensions drawn over the picture, as the CAD Viewer's
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
@@ -645,12 +645,12 @@ def polymorphic_snapshot_verb():
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
             A DXF is drawn flat and head on, and refuses a camera.
-        display: solid (default), render, xray, hidden-line, wireframe or grid, grouped
+        display: solid (default), render, xray, hidden-line or wireframe, sparse
             display JSON, or a JSON file path. appearance defaults to light.
-            Omitted groups inherit the preset. edges, clip, exploded, the xray,
-            hidden-line and wireframe modes and the hidden/off surface styles
-            describe a STEP model; every other input takes solid or render. A
-            DXF takes appearance alone (`cadgen dxf snapshot --appearance`).
+            Per-mode settings live under modes and inherit that mode's defaults.
+            edges, clip, exploded, xray, hidden-line and wireframe describe a STEP
+            model; every other scene input takes solid or render. A DXF takes
+            appearance alone (`cadgen dxf snapshot --appearance`).
         kinematics: pose values for a STEP model's kinematics — a preset
             name or {dof: value} JSON; available in every display mode.
         animation: one still frame of a STEP model's clip — the clip name

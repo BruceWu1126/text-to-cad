@@ -18,7 +18,7 @@ export default function SubToolbar({ label, className, children, ...props }) {
 }
 
 /**
- * The width of a slider tool's sub-toolbar (Explode's, Clip's, Animation's): one width for all of
+ * The width of a slider tool's sub-toolbar: one width for all of
  * them, their slider taking whatever their buttons leave (`min-w-0 flex-1`), so a conditional
  * button (Animation's Routines) shortens the slider rather than the row.
  */

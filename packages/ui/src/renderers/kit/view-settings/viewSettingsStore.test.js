@@ -1,85 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveViewSettings, viewSettingsAreCustom, VIEW_GROUP_KEYS } from "@text-to-cad/core/common/viewSettings.js";
 import { createViewSettingsStore } from "./viewSettingsStore.js";
 import { createViewerRenderStateResolver } from "./renderState.js";
 
-test("successive control and agent actions compose atomically without writing resolved defaults", () => {
-  const store = createViewSettingsStore({ mode: "render" });
-  store.patch({ surfaces: { opacity: 0.65 } });
-  store.setEnabled("clip", true);
-  store.patch({ lighting: { exposure: 0.7 } });
-  store.patch({ surfaces: { colorMode: "single", color: "#abcdef" } });
-  const display = store.getSnapshot().display;
-  assert.deepEqual(display.surfaces, { opacity: 0.65, colorMode: "single", color: "#abcdef" });
-  assert.deepEqual(display.lighting, { exposure: 0.7 });
-  assert.equal(display.clip.enabled, true);
-  assert.equal(Object.hasOwn(display, "floor"), false);
-  assert.equal(display.mode, "render");
-  assert.equal(viewSettingsAreCustom(display), true);
-  const restored = createViewSettingsStore(display);
-  assert.deepEqual(restored.getSnapshot(), store.getSnapshot());
+test("per-mode edits compose, survive mode switches and reset without changing shared state", () => {
+  const store = createViewSettingsStore({ camera: { focalLength: 80 }, clip: { enabled: true, at: 4 }, exploded: { enabled: true, amount: 0.4 } });
+  store.patchMode("solid", { grid: { enabled: true, color: "#abcdef" } });
+  store.patchMode("solid", { grid: { opacity: 0.8 } });
+  store.patchMode("render", { lighting: { exposure: 1 } });
+  const before = store.getSnapshot();
+  assert.equal(before.display.mode, "solid");
+  assert.equal(before.scene.view.lighting.exposure, 0);
+  store.selectMode("render");
+  assert.equal(store.getSnapshot().scene.view.lighting.exposure, 1);
+  store.selectMode("solid");
+  assert.deepEqual(store.getSnapshot(), before);
+  store.resetMode("render");
+  assert.deepEqual(store.getSnapshot().display.modes, { solid: { grid: { enabled: true, color: "#abcdef", opacity: 0.8 } } });
+  for (const key of ["camera", "clip", "exploded"]) assert.deepEqual(store.getSnapshot().display[key], before.display[key]);
+  assert.deepEqual(createViewSettingsStore(before.display).getSnapshot(), before);
 });
 
-test("enable is idempotent, and every gate discards its old values including Clip", () => {
-  const store = createViewSettingsStore({ floor: { opacity: 0.8 }, clip: { enabled: true, at: 0.4, invert: true } });
+test("inactive mode edits preserve the scene and no-op mode/reset actions publish nothing", () => {
+  const store = createViewSettingsStore();
+  const scene = store.getSnapshot().scene;
+  store.patchMode("xray", { opacity: 0.5 });
+  assert.equal(store.getSnapshot().scene, scene);
   let updates = 0;
   store.subscribe(() => updates++);
-  store.setEnabled("floor", true);
-  store.setEnabled("clip", true);
+  store.selectMode("solid");
+  store.resetMode("render");
+  store.patchMode("xray", { opacity: 0.5 });
   assert.equal(updates, 0);
-  store.setEnabled("floor", false);
-  assert.deepEqual(store.getSnapshot().display.floor, { enabled: false });
-  store.setEnabled("floor", true);
-  assert.equal(store.getSnapshot().scene.view.floor.opacity, 0.6);
-  store.setEnabled("clip", false);
-  store.setEnabled("clip", true);
-  assert.equal(store.getSnapshot().scene.view.clip.at, undefined, "through the middle again");
-  assert.equal(store.getSnapshot().scene.view.clip.invert, false);
-});
-
-test("every disabled group reopens with preset defaults, including restored stale values", () => {
-  const edits = {
-    camera: { projection: "perspective", focalLength: 90 },
-    surfaces: { colorMode: "single", color: "#abcdef", opacity: 0.4 },
-    edges: { visibility: "all", color: "#abcdef" },
-    lighting: { exposure: 2, rotation: 45, fill: 0.8 },
-    background: { color: "#abcdef", opacity: 0.3 },
-    floor: { placement: "lowest", color: "#abcdef", opacity: 0.9 },
-    grid: { color: "#abcdef", opacity: 0.9 },
-    axes: { color: "#abcdef", opacity: 0.9 },
-    clip: { axis: "z", at: 0.7, invert: true },
-    exploded: { amount: 0.7 }
-  };
-  for (const mode of ["solid", "render"]) {
-    for (const group of [...VIEW_GROUP_KEYS, "clip", "exploded"]) {
-      const store = createViewSettingsStore({ mode, [group]: { ...edits[group], enabled: true } });
-      store.setEnabled(group, false);
-      assert.deepEqual(store.getSnapshot().display[group], { enabled: false });
-      assert.equal(store.getSnapshot().scene.view[group].enabled, false);
-      store.setEnabled(group, true);
-      const expected = resolveViewSettings({ mode, [group]: { enabled: true } })[group];
-      assert.deepEqual(store.getSnapshot().scene.view[group], expected, `${mode}/${group}`);
-      store.restore({ mode, [group]: { ...edits[group], enabled: false } });
-      store.setEnabled(group, true);
-      assert.deepEqual(store.getSnapshot().scene.view[group], expected, `restored ${mode}/${group}`);
-    }
-  }
-});
-
-test("preset selection preserves tools; Reset disables them", () => {
-  const store = createViewSettingsStore({ clip: { enabled: true, axis: "z", at: 0.3 }, exploded: { enabled: true, amount: 0.4 } });
-  const tools = store.getSnapshot().display;
-  store.patch({ camera: { projection: "perspective" }, surfaces: { opacity: 0.5 } });
-  store.selectPreset("solid");
-  assert.equal(store.getSnapshot().scene.camera.projection, "orthographic");
-  assert.equal(viewSettingsAreCustom(store.getSnapshot().display), false);
-  assert.deepEqual(store.getSnapshot().display, tools);
-  store.selectPreset("render");
-  store.patch({ lighting: { exposure: 1 } });
-  store.reset();
-  assert.deepEqual(store.getSnapshot().display, { mode: "render" });
-  assert.equal(store.getSnapshot().scene.camera.projection, "perspective");
 });
 
 test("Clip edits preserve all unrelated renderer inputs through both resolution stages", () => {
@@ -102,13 +54,13 @@ test("Clip edits preserve all unrelated renderer inputs through both resolution 
 test("lighting and floor edits do not invalidate geometry settings, and no-op edits publish nothing", () => {
   const store = createViewSettingsStore({ mode: "render" });
   const before = store.getSnapshot();
-  store.patch({ lighting: { exposure: 0.7 }, floor: { opacity: 0.8 } });
+  store.patchMode("render", { lighting: { exposure: 0.7 }, floor: { opacity: 0.8 } });
   const after = store.getSnapshot();
   assert.equal(after.scene.display, before.scene.display);
   assert.equal(after.scene.camera, before.scene.camera);
   let updates = 0;
   store.subscribe(() => updates++);
-  store.patch({ lighting: { exposure: 0.7 } });
+  store.patchMode("render", { lighting: { exposure: 0.7 } });
   store.configure({ appearance: "light" });
   assert.equal(updates, 0);
   assert.equal(store.getSnapshot(), after);

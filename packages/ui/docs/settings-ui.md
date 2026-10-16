@@ -137,7 +137,7 @@ none.
   control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
   room that control takes from the bottom edge. Preview omits it.
 - **Display and Preview** end the tool strip, after its rule, for a 3D file: **Display**
-  (the perspective box: see [Display settings](#display-settings-and-section-primitives))
+  (the active mode's sphere: see [Display settings](#display-settings-and-section-primitives))
   and **Preview** (two diagonal arrows, outward), the strip's tiles, hinted above them
   (`data-view-controls`). They are no tools: pressing one leaves the tool in hand as it is.
   Display's dropdown opens down from its button, centred, never taller than the viewer
@@ -337,7 +337,7 @@ borderless button reading the axis in hand, "X ⌄", whose dropdown lists X, Y a
 slider, the amount, **Flip clip** (which side of the plane is cut away, the cut keeping its
 share; disabled while nothing is cut), **Reset clip**. Explode opens at 0%, Clip at no
 cut; an edit applies the effect, and the slider back at zero removes it. An axis alone is not
-an effect. The view settings own both effects, so a Display Reset removes them and a restored
+an effect. The view settings own both effects, so a mode reset preserves them and a restored
 effect reappears on the model. Clip's slider, left to right, cuts deeper through the original
 bounding box; pose, animation and Explode never redefine the range. It shows the share cut
 away, while the view stores where the plane stands (`clip.at`, in millimetres), so a model
@@ -477,58 +477,45 @@ pick.
 
 ## Display settings and section primitives
 
-Display is not a tool. It is a 3D view's dropdown (`kit/shell/DisplayPopover.jsx`) from its
-tile at the tool strip's end, after the rule and before Preview — and in preview from
-preview's own row in the strip's place, before its way out: the perspective box
-(`PerspectiveProjectionIcon`), hinted "Display", pressed while the dropdown is open. A view
-that is not 3D (a DXF) has no Display button, not a disabled one. It opens an ordinary
-popover down from the button, centred on it, 304px wide — the width its settings are laid
-out for, two a row — and never taller than the viewer below it: its sections scroll
-inside it. Opening it leaves the tool in hand as
-it is: a selection, an Annotate session or Position stay. It goes with Escape, a press outside
-it (on the model, say), its button again, or the X at the end of its first heading
-("Display", its Reset, then its X); setting changes leave it up. It is idle while the file
-is, as the tools are. Another file opens with it closed, and entering or leaving preview
-puts it away. In preview it holds the same settings, the file's: what is set there the
-preview draws at once, and the tools view has it on the way back.
+Display is not a tool. Its tile at the strip's end shows the current mode's sphere icon and
+opens a menu labelled **Display mode**. The strip order is Display, Preview. Below the **Display Mode** section, a **Projection** section
+contains Orthographic and Perspective radio choices, disabled while Render forces perspective.
+Preview uses this same menu over the same file settings. Opening it leaves the active tool
+and its controls in place. A 2D view has no Display or Preview button.
 
-One scroller (the dropdown's body), shared section primitives, no sticky headings
-and no nested cards. Nested dropdowns and color pickers own their dismissal:
-Escape closes the innermost popup first, the dropdown only on a later press.
+The modes are Solid, Render, X-ray, Hidden line and Wireframe, filtered by the view's injected
+capabilities. Each row has a radio item with the mode's sphere and name, a settings trigger
+(`Settings2`) immediately left of the check at the right edge, and that mode's submenu.
+Clicking the name selects its remembered settings. Opening or editing another mode's submenu
+does not select it. There is no Custom state and Grid is a setting, not a mode.
 
-| Section | Contents |
+| Mode | Settings |
 | --- | --- |
-| Display | Full-width render Mode; Projection beneath, one column; a small gray Reset icon at top-right |
-| Surfaces | Style and part-color mode; color or palette and opacity below |
-| Edges | Visibility and color, where the format has topology |
-| Grid / Axes | Two color/opacity controls, left and right in title order, no visible labels |
-| Lighting | Quality, exposure, rotation, softbox size and fill |
-| Background | Color and opacity |
-| Floor | Color/opacity; position and finish side by side |
+| Solid | Part colours, Flat shading, Edges and edge colour, Grid, Axes |
+| Render | Part colours, Lighting, Background, Floor |
+| X-ray | Part colours, Surface opacity, edge colour, Grid, Axes |
+| Hidden line / Wireframe | Edge colour, Grid, Axes |
 
-Display holds the file's view alone: the person's settings are the [app menu](#settings)'s.
-Display and Surfaces are always open. Every other section is a feature gate
-with plus/minus: expanded means enabled, collapsed means disabled. Grid / Axes
-gates both groups; their settings stay separate in the core/CLI contract. Never
-add an "Enabled" checkbox inside a gated section. Enabling starts at defaults;
-disabling removes overrides. A heading click reveals enabled content without
-disabling it; only minus disables. Hover, focus and rendering never write
-settings.
+On/off controls are menu checkboxes that keep the menu open. Choices use radio submenus.
+Continuous values use compact label/slider/value rows whose keyboard input stays with the
+slider. Colours use swatch grids and a custom colour wheel; By part keeps an editable palette.
+Lighting has its own submenu. Grid and Axes are independent, off by default; each enabled
+guide exposes its appearance. Floor is on by default in Render, at the model's lowest point.
+Settings the view does not offer are absent. Nested submenus own Escape before their parent.
 
-Mode presets are shortcuts over the same controls; manual overrides show
-Custom, which is not selectable. Reset keeps the chosen Mode and clears
-everything else, Explode and Clip included; it never reframes, and it leaves the
-pose, the colour scheme and orbit preferences alone. Light and dark are not Display's: they
-are the host's colour scheme control, at the navbar's end (above). The Projection
-value carries its icon and truncates with an ellipsis.
+The last item is **Reset <Mode>**, disabled at that mode's defaults. It removes only that
+mode's overrides, preserving every other mode, the shared camera and appearance, Clip and
+Explode. Per-file storage remembers each mode independently. Old-shaped stored display
+settings are dropped, never migrated. Projection is shared, orthographic by default; Render
+resolves to perspective while preserving the shared choice for the other modes.
 
-Every section but the first has a top border. A press on an open gate's title
-scrolls it into view within the natural range, never adding blank space to
-force it to the top; ordinary edits do not scroll.
+Other inspector sections still use shared FileSheet primitives; Display uses menu-native
+controls rather than collapsible settings sections. Hover, focus and rendering never write
+settings. Light and dark remain the host's colour scheme control.
 
 Type comes from the token scale only (`text-micro` 10px, `text-tiny` 11px,
 `text-xs` 12px, `text-ui` 13px); no pixel font sizes. Settings controls and the
-Display's headings use `text-tiny`, regular weight, with shared 28px controls;
+menu labels use `text-tiny`, regular weight;
 panel headings use 12px. Sections use 8px gutters and bottom insets
 and 4px row and column gaps. `FileSheetFieldGrid` owns horizontal spacing; its
 children never pad again. Menu, select and context-menu typography comes from
@@ -634,7 +621,13 @@ annotations a note can carry has it (a STEP's, a robot's); a compact host gets n
 preview puts it away with the tools. While the view loads it is out of sight, its note
 and its state kept. It is essential, so no setting turns it off.
 
-The box opens 15rem wide, its note growing with what is written up to 10rem. Its
+Below 64rem, the sidebar and Quick Edit start beneath the full tool strip and
+sub-toolbar, including Annotate's two rows. Each side column is capped at half
+the view minus the gutter, so neither covers the other; the sidebar keeps its
+collapse button and corner resizer. Quick Edit stays within its right column,
+which scrolls above the view cube when space is short.
+
+The box opens 15rem wide, capped to its column, its note growing with what is written up to 10rem. Its
 bottom-left corner — the grip every resizable box over the viewport has
 (`kit/tools/ResizeGrip.jsx`) — drags it wider to the left and its note taller, for as long as the
 box is open: once it closes, however it closes, the next box opens at 15rem again, and

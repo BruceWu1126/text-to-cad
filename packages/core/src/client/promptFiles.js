@@ -10,7 +10,7 @@ import { cadApiUrl } from './client.js';
  * answers its path, which the chip copies. It speaks to the server over `fetch` at `origin` as the CAD
  * client does, whatever carries that fetch.
  *
- * @typedef {{ name: string, input: string, views: object[], annotation: object | null }} PromptFilesRequest
+ * @typedef {{ name: string, input: string, views: object[], annotation: object | null, measurements?: object[] }} PromptFilesRequest
  * @typedef {{ job: string, annotation: string | null, images: { label: string, path: string }[] }} PromptFiles
  * @param {{ origin?: string, fetch?: typeof globalThis.fetch, wait?: (ms: number) => Promise<void> }} [options]
  * @returns {{ create(request: PromptFilesRequest): Promise<PromptFiles>, read(path: string): Promise<Blob>,

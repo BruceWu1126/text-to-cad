@@ -51,7 +51,7 @@ test('a superseded reconciliation is restored without presenting the stale recip
 
 test('live edits skip preparation and capture waits for the actual presented frame', async () => {
   const frame = deferred(), h = harness({ present: () => frame.promise });
-  h.request(scene({ grid: { color: '#ffffff' }, clip: { enabled: false } }));
+  h.request(scene({ modes: { solid: { grid: { enabled: true, color: '#ffffff' } } }, clip: { enabled: false } }));
   let ready = false; const capture = h.whenReady().then(() => { ready = true; });
   await tick(); assert.equal(ready, false);
   assert.deepEqual(h.calls.map(c => c[0]), ['apply']);
@@ -79,11 +79,11 @@ test('unmount aborts preparation and rejects pending captures', async () => {
 test('only resource boundaries prepare; clip motion, exposure, rotation and color stay live', () => {
   const render = scene({ mode: 'render', clip: { enabled: true } });
   for (const patch of [
-    { lighting: { exposure: 1, rotation: 35 } }, { clip: { enabled: true, at: 0.7 } },
-    { floor: { color: '#abcabc', opacity: 0.7 } }, { surfaces: { color: '#abcdef' } },
+    { modes: { render: { lighting: { exposure: 1, rotation: 35 } } } }, { clip: { enabled: true, at: 0.7 } },
+    { modes: { render: { floor: { color: '#abcabc', opacity: 0.7 } } } }, { modes: { render: { parts: { color: '#abcdef' } } } },
     { camera: { projection: 'orthographic' } },
   ]) assert.equal(viewPreparationKey(scene({ mode: 'render', clip: { enabled: true }, ...patch })), viewPreparationKey(render));
-  for (const patch of [ { clip: { enabled: false } }, { lighting: { quality: 'final' } }, { surfaces: { opacity: 0.5 } }, { lighting: { size: 2 } } ]) {
+  for (const patch of [ { clip: { enabled: false } }, { modes: { render: { lighting: { quality: 'final' } } } }, { modes: { render: { lighting: { size: 2 } } } } ]) {
     assert.notEqual(viewPreparationKey(scene({ mode: 'render', clip: { enabled: true }, ...patch })), viewPreparationKey(render));
   }
 });
