@@ -916,10 +916,16 @@ def vertex_signature(vertex: Any) -> tuple[tuple, tuple]:
 def edge_signature(edge: Any) -> tuple[tuple, tuple]:
     """``(curve, extent)`` of an edge in world coordinates: the curve it lies on
     (its class and parameters, or sample points of a freeform curve) and its
-    end points, rounded absolutely."""
+    end points, rounded absolutely -- its vertices', or, for an edge the kernel built
+    without vertices (a closed edge of a loft or sweep), its curve's ends."""
     topods_edge = TopoDS.Edge_s(edge)
-    first_point = _point(BRep_Tool.Pnt_s(TopExp.FirstVertex_s(topods_edge, True)))
-    last_point = _point(BRep_Tool.Pnt_s(TopExp.LastVertex_s(topods_edge, True)))
+    first, last = TopExp.FirstVertex_s(topods_edge, True), TopExp.LastVertex_s(topods_edge, True)
+    if first.IsNull() or last.IsNull():
+        ends = BRepAdaptor_Curve(topods_edge)
+        first_point, last_point = (_point(ends.Value(ends.FirstParameter())),
+                                   _point(ends.Value(ends.LastParameter())))
+    else:
+        first_point, last_point = _point(BRep_Tool.Pnt_s(first)), _point(BRep_Tool.Pnt_s(last))
     extent = tuple(sorted((first_point, last_point)))
     if BRep_Tool.Degenerated_s(topods_edge):
         return ("degenerate", first_point), extent

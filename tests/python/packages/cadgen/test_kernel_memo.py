@@ -687,6 +687,23 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(low[0], high[0])
         self.assertNotEqual(low[1], high[1])
 
+    def test_an_edge_the_kernel_built_without_vertices_is_signed_by_its_curve(self) -> None:
+        """A closed edge made straight from its curve has no vertices (a loft or sweep
+        leaves such edges, as the hypercar's chassis does): its ends are its curve's, the
+        same as the edge with vertices on that curve -- not a null vertex's point, which
+        the kernel refuses."""
+        from OCP.BRep import BRep_Builder
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
+        from OCP.Geom import Geom_Circle
+        from OCP.TopoDS import TopoDS_Edge
+        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+
+        circle = Geom_Circle(gp_Ax2(gp_Pnt(1, 2, 3), gp_Dir(0, 0, 1)), 5.0)
+        bare = TopoDS_Edge()
+        BRep_Builder().MakeEdge(bare, circle, 1e-7)
+        self.assertEqual(kernel_trace.edge_signature(bare),
+                         kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(circle).Edge()))
+
     def test_an_edit_elsewhere_renames_nothing(self) -> None:
         """A name's ordinal counts among the features the part descends from, never
         across the run: another hole in another part renames nothing in this one."""
