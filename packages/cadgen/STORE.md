@@ -533,9 +533,10 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   and `--mode list` (`store/view.py`), a mesh export -- reads what the build
   derived. A part the store lacks (a cleared, evicted or older store) is derived
   by ONE build-pool job for the request (`kind: display`,
-  `daemon/artifacts.py`): one request, one job, one worker. No server or
-  snapshot process derives in its own process, and correctness never depends on
-  a store hit. A part that job cannot derive is left out of a view, which names
+  `daemon/artifacts.py`): one request, one job, one worker -- a daemon
+  worker's, or with no daemon (§9) a thread of the process that asks, the
+  server's or the snapshot's own, never a request's thread -- and correctness
+  never depends on a store hit. A part that job cannot derive is left out of a view, which names
   it by the occurrences that place it, as a build's warning does: the CAD
   Viewer draws the rest under a warning, a snapshot and a list draw and list
   the rest and warn (the snapshot view's component carries why, `failure`,
@@ -1945,8 +1946,10 @@ The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
 are themselves dispatched through the daemon when one is reachable, so they
 run on warm kernels; the subject-less commands (`store`, `doctor`, `daemon
 status`, all snapshot orchestration) run in-process. STEP snapshots delegate
-missing document compilation and part derivation to the artifact build pool;
-their request resolution and browser orchestration never import the CAD kernel.
+missing document compilation and part derivation to the build pool -- a daemon
+worker's job, or with no daemon a compile process of its own and an artifact
+job on a thread of the snapshot's process (above) -- so their request
+resolution and browser orchestration import no kernel themselves.
 
 When the daemon's runtime changes, a request carrying the new version is told
 to restart. With nothing running, the old daemon releases its address and lock
