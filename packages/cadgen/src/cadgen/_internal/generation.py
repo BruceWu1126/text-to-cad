@@ -1154,11 +1154,15 @@ def _produce_declared_mesh_exports(
     A declaration's own tolerances are the only ones: one that names none is
     written at the display tolerance, from the very meshes the viewer draws.
 
-    The meshes are cut from the model's result, ``source_tree`` (else its record's),
-    and keyed on its STEP's bytes as its record names them -- the build's own knowledge
-    of the file it just wrote, or its current record's: no door's lookup of the file, and
-    no wait on its verify (STORE.md §3, *Exports*). A mesh-only model writes no
-    document: its tree IS the geometry the meshes are cut from, so the ledger keys on that.
+    A STEP model's meshes are keyed on its STEP's bytes as its record names them -- the
+    build's own knowledge of the file it just wrote, or its current record's -- and cut
+    from the tree those bytes map to (`index/document`): the result they were written
+    from, pending their verify, or, after a verify found the file its own content or an
+    annotation refresh re-keyed the record, the tree the entry names, which the bare mesh
+    doors cut from too. No door's lookup of the file, so no wait on its verify (STORE.md
+    §3, *Exports*). A mesh-only model writes no document: its result, ``source_tree``
+    (else its record's), IS the geometry the meshes are cut from, so the ledger keys on
+    that.
     """
     if not spec.mesh_exports or spec.entry_path is None or spec.step_path is None:
         return ()
@@ -1169,15 +1173,16 @@ def _produce_declared_mesh_exports(
         record_mesh_export,
         run_mesh_exporter,
     )
-    from cadgen.store.records import read_record
+    from cadgen.store.records import read_record, tree_for_document_hash
 
     model = _model_for_spec(spec)
     record = (read_record(model) if model is not None else None) or {}
-    tree_hash = source_tree or str(record.get("tree") or "") or None
     if spec.step_output:
         output = (record.get("outputs") or {}).get(str(spec.step_path.expanduser().resolve())) or {}
         document_hash = str(output.get("sha256") or "") or None
+        tree_hash = tree_for_document_hash(document_hash) if document_hash else None
     else:
+        tree_hash = source_tree or str(record.get("tree") or "") or None
         document_hash = tree_hash
     if document_hash is None or tree_hash is None or model is None:
         return ()
