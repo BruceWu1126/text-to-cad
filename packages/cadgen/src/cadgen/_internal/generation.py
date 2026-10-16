@@ -288,27 +288,31 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
         saved={"output": str(step_path), "tree": tree, "documentHash": digest},
     ))
     if export is not None:
-        _verify_saved(spec, tree, step_path, digest, producer=export["producer"])
+        _verify_saved(tree, step_path, digest, producer=export["producer"])
     return plan.kept is not None
 
 
-def _verify_saved(spec: EntrySpec, tree: str, step_path: Path, digest: str, *, producer: dict | None) -> None:
+def _verify_saved(tree: str, step_path: Path, digest: str, *, producer: dict | None) -> None:
     """Have the build pool verify the saved STEP against the result it was written from
-    (``store/exports.py``). With no daemon the build waits for it and warns here when the
-    file does not hold the result; on the daemon the build returns first, and a mismatch
-    reaches the next touch of the file: a door, ``store why``, the next run."""
+    (``store/exports.py``) and hear its answer (``exports.verify_warnings``): a file that
+    does not hold the result, or a verify that could not answer, is a warning. With no
+    daemon the build waits for it and warns here; on the daemon the build returns first,
+    the answer reaches the daemon's log, and a mismatch the next touch of the file: a door,
+    ``store why``, the next run."""
     from cadgen.daemon.artifacts import submit_artifact
     from cadgen.daemon.executors import use_daemon
+    from cadgen.store.exports import verify_warnings
 
     job = submit_artifact({"kind": "verify", "tree": tree, "document": str(step_path), "sha256": digest,
                            "producer": producer})
-    if use_daemon():
-        return
-    answer = job.result()
-    if answer.get("differ"):
-        from cadgen.store.exports import file_warning
 
-        _note_warnings([file_warning(step_path, answer["differ"], plain=producer is None)])
+    def heard(done: object) -> None:
+        _note_warnings(verify_warnings(done, step_path, plain=producer is None))
+
+    if use_daemon():
+        job.add_done_callback(heard)
+    else:
+        heard(job)
 
 
 def _edge_visibility_classes_match_manifest(
@@ -363,15 +367,16 @@ def _package_descriptor_matches_spec(
     and source closure; artifact readers never do. Edge visibility policy, when
     explicitly requested, remains descriptor metadata rather than a mesh job.
     """
-    from cadgen.catalog import artifact_file_hash, result_descriptor_for
+    from cadgen.catalog import result_descriptor_for, result_snapshot_for
 
     if spec.source != "generated" and spec.entry_path is not None and spec.entry_path.is_file():
-        # A compile's current-check is a door's: an export's pending entry, confirmed first.
+        # A compile's current-check is a door's: an export's pending entry, confirmed first;
+        # one whose verify could not answer is compiled again from the bytes.
         from cadgen.store.exports import confirm_document
 
-        digest = artifact_file_hash(spec.entry_path)
-        if digest:
-            confirm_document(spec.entry_path, digest)
+        snapshot = result_snapshot_for(spec.entry_path)
+        if snapshot is None or confirm_document(spec.entry_path, *snapshot) is None:
+            return False
     manifest = result_descriptor_for(spec.entry_path)
     if not isinstance(manifest, dict):
         return None
