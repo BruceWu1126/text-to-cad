@@ -17,6 +17,7 @@ from unittest import mock
 
 from cadgen.daemon import artifacts, broker, client, server, transport, worker
 from cadgen.daemon.jobs import JobLedger
+from tests.python.support.broker import PrivateBroker
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -196,13 +197,12 @@ print('kernel-free')
     def test_ledger_never_parses_source_or_advertises_declared_outputs(self):
         ledger = JobLedger()
         with mock.patch("cadgen.daemon.jobs.declared_outputs", side_effect=AssertionError("source scan")):
-            job = ledger.start_artifact(display_request(), store_root="/store/a", root_id="root", dependency=True)
+            job = ledger.start_artifact(display_request(), store_root="/store/a", dependency=True)
             legacy = ledger.start(tool="artifact", subject="/readable/source.py", argv=[])
         self.assertEqual(job["outputs"], [])
         self.assertEqual(legacy["subject"], "")
         self.assertFalse(job["editingProducer"])
         self.assertTrue(job["dependency"])
-        self.assertEqual(job["rootId"], "root")
         ledger.record_artifact_result(job, {"result": {"x": 1}})
         ledger.finish(job, 0)
         self.assertEqual(ledger.snapshot()[0]["artifactResult"]["result"], {"x": 1})
@@ -238,7 +238,7 @@ class ArtifactCoalescing(unittest.TestCase):
         pool = mock.Mock()
         pool.acquire.return_value = running
         request = {"tool": "artifact", "argv": [], "artifact": display_request(), "store_root": "/store/a",
-                   "root_id": "root", "dependency": True, "cwd": "/unrelated/source"}
+                   "dependency": True, "cwd": "/unrelated/source"}
         first, second = Connection(), Connection()
         with contextlib.ExitStack() as stack:
             for name, value in (("_BROKER", registry), ("_JOBS", ledger), ("_POOL", pool)):
@@ -562,12 +562,13 @@ class ArtifactStartup(unittest.TestCase):
 
 class ArtifactLeases(unittest.TestCase):
     def setUp(self):
-        self.private = broker.PrivateBroker(1)
+        self.private = PrivateBroker(1)
         self.addCleanup(self.private.close)
         temp = generated_cad_directory(prefix="artifact-jobs-")
         self.addCleanup(temp.cleanup)
         self.root = str(Path(temp.name).resolve())
-        env = mock.patch.dict(os.environ, {**self.private.env(), "CADGEN_CACHE_DIR": self.root, "CADGEN_DAEMON": "0"})
+        self.enterContext(self.private.served())
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": self.root, "CADGEN_DAEMON": "0"})
         env.start()
         self.addCleanup(env.stop)
         self.fake = types.ModuleType("cadgen.store.parts")
@@ -631,14 +632,19 @@ class ArtifactLeases(unittest.TestCase):
         self.assertEqual(snapshot["peakRunning"], 1)
         self.assertEqual(snapshot["granted"], 3)
 
-    def test_with_no_daemon_a_job_runs_here_in_a_slot_its_waiting_caller_yields(self):
-        # One slot: the job's thread takes it only once the caller waiting on the job
-        # gives it back, and the caller takes it back once the job is done.
-        threads, leases = [], []
+    def test_with_no_daemon_a_job_runs_here_on_its_own_thread_while_its_caller_yields(self):
+        # The job's thread holds no slot (with no daemon there is no broker to take one
+        # from); the caller waiting on it gives its own slot back for the wait -- the job
+        # sees the slot free -- and takes it back once the job is done.
+        threads, leases, free = [], [], []
 
         def identity():
             threads.append(threading.current_thread())
             leases.append(broker.current_lease())
+            deadline = time.monotonic() + 5
+            while self.private.broker.snapshot()["running"] and time.monotonic() < deadline:
+                time.sleep(.005)
+            free.append(self.private.broker.snapshot()["running"])
             return dict(PRODUCER)
 
         self.fake.producer_identity.side_effect = identity
@@ -647,9 +653,10 @@ class ArtifactLeases(unittest.TestCase):
             self.assertEqual(artifacts.resolve_artifact({"kind": "producer"}), PRODUCER)
             self.assertIsNotNone(broker.current_lease())
         self.assertNotEqual(threads, [threading.current_thread()])
-        self.assertIsNotNone(leases[0])
+        self.assertIsNone(leases[0])
+        self.assertEqual(free, [0], "the caller kept its slot while it waited")
         snapshot = self.settled()
-        self.assertEqual((snapshot["peakRunning"], snapshot["granted"]), (1, 3))
+        self.assertEqual((snapshot["peakRunning"], snapshot["granted"]), (1, 2))
 
     def test_with_no_daemon_a_job_for_another_store_is_refused_before_it_runs(self):
         with self.assertRaisesRegex(ValueError, "runs in this process"):
@@ -678,6 +685,9 @@ class ArtifactLeases(unittest.TestCase):
         with self.assertRaises(artifacts.ArtifactDetached):
             future.result()
         release.set()
+        deadline = time.monotonic() + 5
+        while len(asked) < 2 and time.monotonic() < deadline:
+            time.sleep(.005)
         self.settled()
         self.assertEqual(asked, [True, False])
 
@@ -774,12 +784,13 @@ class SupervisedDerivation(unittest.TestCase):
     def test_a_daemon_job_asks_before_each_derivation_and_ends_at_the_first_no(self):
         # The worker's half of the question the supervisor answers above, on real derivations:
         # told yes then no, the job derives one component and ends with it, exit 0.
-        private = broker.PrivateBroker(1)
+        private = PrivateBroker(1)
         self.addCleanup(private.close)
         temp = generated_cad_directory(prefix="artifact-asks-")
         self.addCleanup(temp.cleanup)
         root = str(Path(temp.name).resolve())
-        self.enterContext(mock.patch.dict(os.environ, {**private.env(), "CADGEN_CACHE_DIR": root, "CADGEN_DAEMON": "0"}))
+        self.enterContext(private.served())
+        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": root, "CADGEN_DAEMON": "0"}))
         from build123d import Box, Compound, Pos
         from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound

@@ -20,7 +20,7 @@ right.
 | [7](#7-concurrency) | Why there is no lock | concurrent builds, publish races |
 | [8](#8-gc-eviction-and-the-cap) | The sweeper: retired kinds, eviction to the cap, unreachable objects, a store two cadgens share, and why a pass needs no lock | anything that deletes |
 | [9](#9-the-daemon) | The build pool, job ledger and slots | daemon, workers, jobs |
-| [9a](#9a-lazy-children) | Lazy children: pins at the call, forcing, exact-`Compound` reference preservation | a decorated call's return, parallel child builds |
+| [9a](#9a-children) | Children: a child call decodes the stored result or builds the child, serially, in the caller's process; its scopes, once per run, failure | a decorated call's return, a child's build |
 | [9b](#9b-editing-previews-and-explicit-saves) | Announced preview trees, the build feed, explicit saves | what the viewer says while a build runs |
 | [10](#10-debugging) | `store why`, resolving a tree, resets smallest first | diagnosing staleness |
 | [11](#11-never) | The explicit prohibitions | before proposing any of them |
@@ -64,8 +64,7 @@ They name nothing in the store, in its code or in its documentation.
 One word is NOT retired, and it has exactly one meaning:
 
 - **descriptor** — a render/export-side word: the owned descriptor an
-  appearance is applied to (README law 17), and the bounded pinned-link
-  descriptors of [§9a](#9a-lazy-children). It is never a synonym for a tree,
+  appearance is applied to (README law 17). It is never a synonym for a tree,
   a component or a record; those three have their own words above.
 
 ## 2. Layout
@@ -514,10 +513,9 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   probe per part, no kernel import), so a no-op build of a model whose display
   data is stored starts no job; one whose store was cleared has it derived
   again. While the build waits, its progress shows `Meshing parts`, and the
-  time counts as cadgen's in the model's time line. Sibling models' jobs run in
-  parallel as their builds do, and a parent's tree holds its children's
-  components, whose builds had them derived before they reported done, so a
-  parent normally finds nothing missing. A part that fails to derive is a
+  time counts as cadgen's in the model's time line. A child's build has its
+  components derived before it reports done, and a parent's tree holds its
+  children's components, so a parent normally finds nothing missing. A part that fails to derive is a
   warning on the build, never its failure: the geometry is published, and a
   view goes on without that part, saying so (below). A build that fails after
   its preview waits for the job before it reports the failure, so the preview
@@ -1759,8 +1757,12 @@ automatically; `cadgen store gc --max-size` runs a pass by hand.
 
 ## 9. The daemon
 
-Every build goes through one interface, `cadgen.daemon.executors.submit(model)
--> job`, with two executors that behave identically:
+A build is one job: the request that names the model (`python model.py`,
+`cadgen step build`), warm on a daemon worker or cold in the process that
+asked. A child a parent's body calls is no job: it is decoded from its stored
+result or built serially inside the parent's own process (§9a). What a build
+hands to the pool is a document compile (`cadgen.daemon.executors.submit_compile`)
+and its artifact jobs (above), with two executors that behave identically:
 
 - **Daemon executor (default).** Workers are persistent and warm. The routing
   key is the model (`script::function` — two models in one file are two
@@ -1794,8 +1796,9 @@ Every build goes through one interface, `cadgen.daemon.executors.submit(model)
   exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600). The
   first client that needs the daemon starts it, and `cadgen viewer` starts it as
   soon as its URL is announced, so a session's first build finds warm spares.
-  Inside a worker, `submit` is the same client call back to the daemon, so a
-  parent's children land on their own workers while the parent's body runs.
+  Inside a worker, a compile or an artifact job is the same client call back to
+  the daemon; a parent's children build in the parent's worker, in the slot it
+  holds (§9a).
   **A job runs in its caller's environment**, as it would cold: every request
   carries the client's whole environment and the worker applies it for that
   job -- a name the caller has is set, a name it lacks is unset, which also
@@ -1805,13 +1808,11 @@ Every build goes through one interface, `cadgen.daemon.executors.submit(model)
   job this way, and so does every variable a model reads (§3). Only the names
   the daemon's machinery sets for itself are neither sent nor replaced
   (`client.INTERNAL_ENV_VARS`: the worker's own daemon, address and state
-  directory, the request's root and job ids, the job-slot broker, the
-  install channel). Nothing else a job sees comes from the process that
-  started the daemon.
-- **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per build job, alive
-  for this build only. Each imports build123d once, concurrently with its
-  siblings. It inherits the environment, so a test's `CADGEN_CACHE_DIR`
-  isolates its store; tests and CI run this way. An artifact job (`kind:
+  directory, the request's job id, the install channel). Nothing else a job
+  sees comes from the process that started the daemon.
+- **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per job -- a
+  document compile -- alive for that job only. It inherits the environment, so
+  a test's `CADGEN_CACHE_DIR` isolates its store; tests and CI run this way. An artifact job (`kind:
   display` and the rest, `daemon/artifacts.py`) is no process of its own: it
   runs in the process that asks, on a thread of its own, in a slot of that
   process's pool where it has one, against that process's store -- a process
@@ -2069,92 +2070,47 @@ ownership are process state, never persistent geometry or cache identity. Such b
 do not change exact objects, canonical tree hashes or export tolerances, do
 not delete the disk cache, and must preserve a usable view on denied work.
 
-## 9a. Lazy children
+## 9a. Children
 
-Inside a body, a child call returns at once with a `LazyCompound`
-(`cadgen.store.lazy`) — a `build123d.Compound` whose `.wrapped` is a property.
-The gate runs at the call: a stale child is submitted to the pool and the
-promise carries the job; a current child is a promise with no job. Geometry
-arrives on the first read of `.wrapped` or of the child list — usually at the closing
-`Compound(children=[...])`, after every sibling has been submitted — so
-siblings build in parallel and the parent waits only for children it
-submitted itself. Deferred without forcing: `Pos/Rot/Location * child`,
-`.moved()`, `.label =`, `.color =`. Everything else (`.faces()`,
-`.bounding_box()`, `.children` and the node views over it, booleans,
-`copy.copy`) forces. Most compound constructors
-also force; the exact-reference case below postpones native reconstruction:
-a body that reads a child before placing the next forces it there, and
-parallelism follows the dependencies the author wrote. Forcing waits for the
-job's complete final source result, materializes the pinned tree (§6), applies the deferred placement, label
-and color, and tags the result exactly as an eager materialize would, so the
-link/component decision is unchanged. **Pins are taken at the call**: a
-current child's record is read when the parent calls it and its tree is pinned
-then, so a rebuild of that child between the call and the force cannot change
-what this build composes; a stale child's pin is its job's result, fixed when
-that particular job produces it. A `sourceResult` event carries the exact model
-reference and tree hash. The job captures it directly; forcing never rereads
-the mutable model record. Daemon and transient coalesced consumers receive the
-same event, including subscribers attaching after source publication.
-Coalescing is scoped by store, model and source closure. The same stale child
-called twice shares one job. A failed child without a result raises `ChildBuildError` at the forcing site,
-naming the call site in the parent and carrying the worker's output.
+A child is a decorated model a parent's body calls. The call goes through the
+one pipeline every model goes through (`generation.build_model`), in the
+caller's own process, there and then:
 
-Within a model body, an exact `Compound(obj=list_or_tuple)` of lazy children can
-prepare later already-pinned inputs before the first pending input yields its
-execution slot. This constructs fresh private geometry from a verified tree
-snapshot; it does not force another job, publish a wrapper, or apply authored
-placement or metadata early. Ordinary forcing still checks the exact pin and
-rereads/verifies every prepared object before consuming its own private result.
-Preparation errors are retried in the original force order at the same pin.
-The constructor hook installs once, and active state belongs to that constructor
-and build frame on its thread; exit or failure releases unused preparations.
-A plain `Compound(children=list_or_tuple)` also qualifies when `obj` and `parent`
-are absent or `None`, and the exact lazy inputs are distinct and unparented.
-The original attachment-triggered force starts preparation; anytree still
-performs its own validation, attachment and error rollback. Nested constructors,
-arbitrary iterators, subclasses and child reparenting keep ordinary forcing.
-Admission permits at most eight small unlinked trees,
-with 768 KiB of verified BREP bytes and 4 MiB of pinned eager-only topology facts in total;
-tree size and component/occurrence counts are also bounded. These limit extra
-work and retention, not native allocator RSS. No native cache or thread is added.
-
-An exact plain `Compound(children=list_or_tuple)` with absent/None `obj` and
-`parent` can instead preserve references through source publication. It accepts
-2–64 distinct, unparented, unforced exact `LazyCompound` inputs from one active
-build frame, with ordinary `Location`, `Pos` or `Rot` placements, string labels
-and ordinary colors. Custom material, face or tree overrides, mixed inputs and
-nested constructors use ordinary forcing. The original constructor validates
-arguments and performs attachment and rollback; queued pins resolve in that
-same attachment order. Each unique tree is verified once within that private
-constructor snapshot. Labels, inherited colors and placement values are captured
-when attachment ordinarily consumed them.
-
-The root temporarily has an internal `_ReferenceCompound` subtype. It remains
-an `isinstance(..., Compound)`, but exact `type(...) is Compound` introspection
-changes until native access. Reading, writing or deleting its native wrapper,
-copying, native operations and hierarchy edits install the ordinary native
-container and restore its plain Compound class. A child's native escape or
-hierarchy edit forces the parent first, preserving the difference between
-wrapper replacement and in-place shared-topology mutation. Unexposed inputs
-may be packaged as exact links after their frame exits; a different active
-frame cannot adopt them. A later packaging/native consumer verifies its pin
-again, and final publication still validates the entire required disk closure.
-
-No build constructs an XCAF document of its result: a result's tree is built
-from the compound the body returned, its edge classes from that walk (§3),
-and the saved STEP is written from the published tree by the pool. No native
-object is retained across builds or shared with an independent authored
-consumer.
-
-Every called child still owes all declared outputs, including a call whose
-geometry was discarded. A parent publishes its complete source result and
-preview, then waits for all child outputs before its own save. The run retains
-these handles and drains every child even if the parent's body or packaging
-fails. A child save failure leaves the parent's previous saved document intact;
-the attempted source preview may remain visible with failure status. Waiting
-for source or saves yields the CPU slot and reacquires it before kernel work;
-a one-slot nested build progresses, although it cannot overlap persistence.
-Missing pinned objects fail the request rather than substituting a newer tree.
+- **The gate runs at the call.** A child whose record is current is decoded
+  from its stored result (§6, `store.materialize`) and the call returns that
+  geometry. A stale child is built -- a build of its own, with scopes of its
+  own (below), publishing its own record and exporting its own files -- and the
+  call returns its result decoded. Either way the parent's features see the
+  child the same way: a stored result, decoded. A child is never a job of the
+  pool and never another process's; `--force` and `--profile` are the root's
+  flags and never reach a child.
+- **Serial.** Children build one at a time, in the order the body calls them,
+  in the slot the parent holds (§9). A body waits for each call as it would for
+  any function.
+- **Once per run.** However often a run calls a child -- twice from one body,
+  once from each of two parents -- it is decoded or built once
+  (`authoring.BuildRun`), and every call composes the same tree.
+- **Recorded from the calls.** The parent's record lists every child the body
+  called with the tree the call composed, a discarded call included: the body
+  called it, so its result is this build's dependency, and its declared outputs
+  are owed -- a child whose geometry the parent threw away still writes its
+  STEP.
+- **Scopes of its own.** A child's build inside its parent's body opens its own
+  trace capture, execution-hash scope and kernel-memo run, each nested
+  exclusively: what the child's body reads, lists, imports and constructs is
+  the child's and not the parent's, and the parent's capture sees none of the
+  child's pipeline either -- its gate, its export, the hashing of what it read
+  run under the trace's pause (`filetrace.paused`). So a child's closure is the
+  same built alone or inside its parent, and a parent's closure is the same
+  whether its child was decoded or built: a child is its parent's input by its
+  result, never by what it read (§5). What importing the child's module ran in
+  the parent's process is the parent's, as ever (§3).
+- **Failure.** A child's build that fails raises in the parent's body as the
+  exception the child's body raised: no wrapper. The body may catch it, but the
+  run still fails with the child (`authoring.BuildFrame.failed`): a parent never
+  publishes over a child it could not build, and its previous document stays.
+- **Cycles.** A model called while it is itself being built is an error: a
+  model may not depend on itself.
 
 The top-level call renders the graph these calls reveal as a build tree on
 stderr (`cadgen.cli_tree`): a TTY gets one refreshed block — `submitted`,
@@ -2164,9 +2120,9 @@ JSON line per model transition; any other non-TTY gets no transitions, only each
 built model's time line and an already-stale notice. Every mode prints, once per
 built model, the warning that its code started a program (§5, every read is
 seen), from the `started` list its `done` event carries as it carries its
-`timings`. Child events reach the root
-through the pool, tagged with the root request's id, identically for both
-executors. After publishing, the root runs its gate once more and says
+`timings`. A child's events are the parent's process's own, so they reach the
+root as the parent's do: directly in a cold build, in the worker's frames in a
+warm one. After publishing, the root runs its gate once more and says
 `already stale: …; rerun` if a child changed during the build.
 
 After a successful top-level build, the caller waits for the checked source

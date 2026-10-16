@@ -36,8 +36,11 @@ are) is noted: the files it reads are invisible here, so the build warns.
 Captures nest, and a nested one is its own: a child model built inside its
 parent's body opens a capture of its own, which takes its stretch of the log
 and the listings, programs and environment reads made while it is the
-innermost, and the parent's capture sees none of them. A child is its parent's
-input by its result, never by what it read.
+innermost, and the parent's capture sees none of them. The rest of the child's
+pipeline -- its gate, its export, the hashing of what its body read -- runs
+under ``paused()``, cadgen's own reading as far as the parent's capture is
+concerned, and the child's capture records through that pause. A child is its
+parent's input by its result, never by what it read.
 """
 
 from __future__ import annotations
@@ -256,11 +259,16 @@ def capture() -> Iterator[Trace]:
     log = _LOG
     assert log is not None
     open_capture = _Capture(trace, os.stat(log).st_size)
+    # Opened under ``paused()`` -- a child's body, inside the pipeline that builds the
+    # child in its parent's process -- the capture records all the same: the pause is
+    # over the child's pipeline, and it resumes once the body is done.
+    suspended = _suspend_pause(tracer)
     _OPEN.append(open_capture)
     try:
         yield trace
     finally:
         _OPEN.pop()
+        _resume_pause(tracer, suspended)
         if outermost:
             tracer.cadgen_filetrace_end()
             _LOG = None
@@ -282,8 +290,9 @@ def capture() -> Iterator[Trace]:
 @contextlib.contextmanager
 def paused() -> Iterator[None]:
     """cadgen's own reading on this thread -- the gate hashing a child's files
-    and outputs, importing a model file for its constants -- unseen by the
-    capture: a child is an input by its result. Nests."""
+    and outputs, importing a model file for its constants, the pipeline that
+    builds a child inside its parent's body -- unseen by the capture: a child is
+    an input by its result. Nests, and a capture opened inside it records."""
     depth = getattr(_LOCAL, "paused", 0)
     _LOCAL.paused = depth + 1
     tracer = _TRACER
@@ -292,12 +301,30 @@ def paused() -> Iterator[None]:
             yield
         else:
             tracer.cadgen_filetrace_pause(1)
+            _LOCAL.held = getattr(_LOCAL, "held", 0) + 1  # the pauses this thread holds on the tracer
             try:
                 yield
             finally:
+                _LOCAL.held -= 1
                 tracer.cadgen_filetrace_pause(0)
     finally:
         _LOCAL.paused = depth
+
+
+def _suspend_pause(tracer: ctypes.CDLL) -> tuple[int, int]:
+    """Lift every pause this thread holds, for a capture opened under one; returns
+    what :func:`_resume_pause` puts back."""
+    suspended = (getattr(_LOCAL, "paused", 0), getattr(_LOCAL, "held", 0))
+    for _ in range(suspended[1]):
+        tracer.cadgen_filetrace_pause(0)
+    _LOCAL.paused = _LOCAL.held = 0
+    return suspended
+
+
+def _resume_pause(tracer: ctypes.CDLL, suspended: tuple[int, int]) -> None:
+    for _ in range(suspended[1]):
+        tracer.cadgen_filetrace_pause(1)
+    _LOCAL.paused, _LOCAL.held = suspended
 
 
 def _install_hooks() -> None:

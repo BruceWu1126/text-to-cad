@@ -1,10 +1,10 @@
 """The build tree: how a top-level build shows the model graph as its bodies reveal it.
 
-Every model transition — submitted, building (with the phase), current, done, failed —
-is an EVENT (``cadgen.daemon.executors.emit_event``). Child builds run in other
-processes, so their events travel back to the top-level call through the pool: as
-``{"event": ...}`` frames from a daemon worker, as ``CADGEN_EVENT`` stderr lines from a
-transient worker. Both arrive here identically, tagged with the root request's id.
+Every model transition — building (with the phase), current, done, failed — is an
+EVENT (``cadgen.daemon.executors.emit_event``), the root's and those of each child
+built inside its body alike. A daemon worker's travel back to the top-level call as
+``{"event": ...}`` frames; a build with no daemon emits them in the process that
+renders them.
 
 Three renderings, chosen once per process:
 
@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import sys
 import threading
 import time
@@ -103,18 +102,18 @@ class _Model:
 
 
 class BuildTree:
-    """Renders model events for one root request. Thread-safe: events arrive from job
+    """Renders model events for one root request: every event this process's sink
+    hears is its own, the root's and its children's, which build in the root's process
+    or in the one worker that builds the root. Thread-safe: events arrive from job
     threads while the body runs on the main thread."""
 
     def __init__(
         self,
         *,
-        root_id: str | None,
         stream: TextIO | None = None,
         json_lines: bool = False,
     ) -> None:
         self._stream = stream if stream is not None else sys.stderr
-        self._root_id = root_id
         self._json = bool(json_lines)
         self._tty = (not self._json) and bool(getattr(self._stream, "isatty", lambda: False)())
         self._guard = threading.RLock()
@@ -136,9 +135,6 @@ class BuildTree:
     def handle(self, event: dict) -> None:
         if not isinstance(event, dict):
             return
-        root = event.get("root")
-        if self._root_id and root and root != self._root_id:
-            return  # someone else's tree
         model = event.get("model")
         state = event.get("state")
         if not isinstance(model, str) or not isinstance(state, str):
@@ -421,27 +417,18 @@ def build_tree(*, json_lines: bool = False, stream: TextIO | None = None) -> Ite
     """Own this process's event sink for the length of a top-level build.
 
     Installs nothing when a sink is already present (a daemon worker relays events as
-    frames; a transient worker writes them as ``CADGEN_EVENT`` lines — see
-    ``cadgen.daemon.executors``): the tree belongs to the ROOT request only. Mints the
-    root id when this process is the root, so every child job inherits it.
+    frames — see ``cadgen.daemon.executors``): the tree belongs to the ROOT request
+    only.
     """
     from cadgen.daemon import executors
 
-    if executors.sink_installed() or os.environ.get("CADGEN_EVENTS") == "1":
+    if executors.sink_installed():
         yield None
         return
-    minted = False
-    if not os.environ.get("CADGEN_ROOT_ID"):
-        import uuid
-
-        os.environ["CADGEN_ROOT_ID"] = uuid.uuid4().hex
-        minted = True
-    tree = BuildTree(root_id=os.environ["CADGEN_ROOT_ID"], stream=stream, json_lines=json_lines)
+    tree = BuildTree(stream=stream, json_lines=json_lines)
     executors.set_event_sink(tree.handle)
     try:
         yield tree
     finally:
         executors.set_event_sink(None)
         tree.close()
-        if minted:
-            os.environ.pop("CADGEN_ROOT_ID", None)

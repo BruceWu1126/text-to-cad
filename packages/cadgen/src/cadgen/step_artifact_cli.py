@@ -234,8 +234,6 @@ def build_step_artifact(
                 scene = load_step_scene_exact(step_path)
             _generate_part_outputs(
                 spec,
-                # A document compile has no source dependencies to discover.
-                entries_by_step_path={spec.step_path.resolve(): spec},
                 preloaded_scene=scene,
                 require_step_file=True,
                 force=force,

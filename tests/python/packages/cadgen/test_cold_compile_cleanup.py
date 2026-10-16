@@ -227,7 +227,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
                 spec = replace(artifact._build_entry_spec(self.root, document), source=source)
                 with mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=Reached) as composed:
                     with self.assertRaises(Reached):
-                        generation._generate_part_outputs(spec, entries_by_step_path={}, preloaded_scene=scene, force=True)
+                        generation._generate_part_outputs(spec, preloaded_scene=scene, force=True)
                 composed.assert_called_once_with(scene)
 
     def test_public_reader_still_constructs_private_return_geometry(self):

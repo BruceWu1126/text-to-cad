@@ -87,7 +87,7 @@ def main() -> int:
             variant_kinds[name] = kind
             novel_variants.append(name)
     store.mkdir(parents=True, exist_ok=True)
-    os.environ.update(CADGEN_CACHE_DIR=str(store), CADGEN_DAEMON="0", CADGEN_EVENTS="1", PYTHONDONTWRITEBYTECODE="1")
+    os.environ.update(CADGEN_CACHE_DIR=str(store), CADGEN_DAEMON="0", PYTHONDONTWRITEBYTECODE="1")
     if args.child_daemon_socket:
         os.environ.update(CADGEN_DAEMON="1", CADGEN_DAEMON_SOCKET=str(Path(args.child_daemon_socket).expanduser().resolve()))
     from cadgen.cli._run_model import run_model_argv

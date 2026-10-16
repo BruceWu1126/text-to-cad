@@ -137,9 +137,10 @@ sub-shape) becomes the parent's own components. `located()` replaces the
 placement and also makes a copy the parent owns. Each `moved()` copies the shape
 and all under it.
 
-Child calls return lazy shapes: placements, labels and colours can be set
-before the geometry is ready, geometry queries wait for it, and independent
-children build in parallel.
+A child call returns the child's geometry: its stored result, decoded, or --
+when the child is stale -- the result of building it there and then, in the
+parent's process, before the call returns. Children build one at a time, in
+the order the body calls them.
 
 **Dependency is pull.** A parent's record pins each child's tree hash, so a
 child edit that yields identical geometry leaves the parent current. A parent
@@ -176,9 +177,8 @@ cadgen never caches work inside a model: a model whose inputs changed runs from
 scratch, and one whose inputs did not is skipped whole.
 
 - A part in its own model (a thin entry file whose `@step` function calls a
-  factory in `lib/`) rebuilds alone: its parent relinks, its siblings stay
-  current, and stale children build in parallel. One heavy casing among many
-  light parts gains most.
+  factory in `lib/`) rebuilds alone: its parent relinks and its siblings stay
+  current. One heavy casing among many light parts gains most.
 - A model reruns only when code it reaches changes, so an edit to one `lib/`
   factory leaves the models that never call it current.
 

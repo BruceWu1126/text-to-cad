@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -637,42 +638,29 @@ class TraceTest(KernelMemoCase):
         self.assertEqual([feature.op for feature in run.trace.features], ["moved"])
         self.assertEqual(run.identify(placed), (None, None))
 
-    def test_a_child_model_promise_is_placed_not_read(self) -> None:
-        """A body places a child's promise (``Pos * child()``, then
-        ``Compound(children=...)``) without reading it, and so must the memo:
-        the feature that placed it has no handle for it and the run registers
-        nothing for it. Reading it would force the child inside the parent's
-        body, which the reference-scene path must never see
-        (test_reference_assemblies builds the real thing). The same goes for
-        any shape whose geometry is a property that forces, like a reference
-        assembly: the memo reads a shape's own state and nothing else."""
-        from build123d import Compound
+    def test_a_decoded_child_is_made_by_no_feature(self) -> None:
+        """A body composes a child as its stored result, decoded (``cadgen.store.materialize``):
+        a shape no feature of this run made. The feature that places it has no input
+        feature for it, the run names it by nothing, and the parent's own features are
+        the same on a hit and on a miss, since the child is decoded on both."""
+        from build123d import Compound, Pos, Solid
 
-        from cadgen.store.lazy import LazyCompound
+        from cadgen.store.build import build_tree_from_compound
+        from cadgen.store.materialize import materialize
 
-        promise = LazyCompound.__new__(LazyCompound)
-        promise.__dict__.update({"_lazy_shape": None, "_lazy_forcing": False})
-        Compound.__init__(promise, None, label="child")
-        self.assertFalse(promise._forced)
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": tempfile.mkdtemp(prefix="memo-child-")}):
+            tree = build_tree_from_compound(Solid.make_box(1, 2, 3), root_name="child")[0]
 
-        class Assembly(Compound):
-            @property
-            def _wrapped(self):
-                raise AssertionError("the memo forced the assembly")
+            def parent():
+                child = materialize(tree, label="child")
+                return Compound(children=[Pos(5, 0, 0) * child, Solid.make_box(4, 4, 4)])
 
-            @_wrapped.setter
-            def _wrapped(self, shape):
-                self.__dict__["_promised"] = shape
-
-        assembly = Assembly(None, label="assembly")
-        with kernel_memo.run(None) as run:
-            for shape in (promise, assembly):
-                given = run.trace.given([shape], lambda _shape: None)
-                feature = run.trace.record("Compound", ("parent.py", 1, "parent"), given, [shape])
-                self.assertEqual((feature.handles, feature.results), ([None], [None]))
-                self.assertEqual(kernel_memo._register(shape, None, feature.index, run, None), [])
-            self.assertEqual(run.transient, {})
-        self.assertFalse(promise._forced, "the memo read the promise")
+            assembly, _, run = _run(parent)
+        placed, own = assembly.children
+        self.assertEqual([feature.op for feature in run.trace.features], ["moved", "Solid.make_box", "Compound"])
+        self.assertEqual(run.trace.features[0].inputs, [None], "the child it placed was made by no feature of this run")
+        self.assertEqual(run.identify(placed), (None, None), "a decoded child has no construction key and no lineage")
+        self.assertIsNotNone(run.identify(own)[0])
 
     def test_an_element_the_kernel_leaves_unbounded_is_signed_in_a_window(self) -> None:
         """A hyperbola's natural bounds are the kernel's infinity, the finite

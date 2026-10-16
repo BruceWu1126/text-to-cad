@@ -61,7 +61,7 @@ export CADGEN_DAEMON_STATE_DIR="$project/daemon-state"
 # The model library every Viewer writes: the test's own, never the user's.
 export CADGEN_STATE_DIR="$project/state"
 export CADGEN_VIEWER_DIST="$RUNTIME"
-unset CADGEN_BROKER CADGEN_BROKER_KEY CADGEN_BROKER_STATS CADGEN_DAEMON_CHILD CADGEN_ROOT_ID
+unset CADGEN_DAEMON_CHILD
 server_pid=""
 
 cleanup() {

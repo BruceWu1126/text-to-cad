@@ -9,8 +9,9 @@ daemon.
 The frames here are deliberately the same shape the daemon sends its client
 (``{"stream": ..., "data": ...}`` then ``{"exit": ...}``), so the supervisor is a pure
 relay and the client's wire protocol is untouched. A third frame, ``{"event": ...}``,
-carries build-tree events (STORE.md §Lazy children): a child a model's body submits
-from inside this worker reports through the same channel as the worker's own output.
+carries build-tree events (STORE.md §9a): the model's own transitions and those of
+every child it builds inside its body, through the same channel as the worker's own
+output.
 A fourth, ``{"heartbeat": {"phase": ..., "cpu": ...}}``, is the worker's liveness
 while a job runs (``_heartbeat``); the supervisor consumes it and never relays it.
 A fifth, ``{"artifactNext": true}``, is an artifact job asking before each derivation
@@ -58,10 +59,8 @@ def _apply_request_env(request: dict) -> None:
     model code exported. The names the daemon's machinery sets for itself
     (``client.INTERNAL_ENV_VARS``) are left as they are. A request that carries
     no environment changes none of it. The store root is an explicit request
-    field and wins.
-
-    ``root_id`` names the build tree this job belongs to; a child this job
-    submits inherits it through the environment so its events tag the same tree.
+    field and wins. ``job_id`` names the ledger's row for this job: its events
+    carry it.
     """
     env = request.get("env")
     if isinstance(env, dict):
@@ -76,11 +75,6 @@ def _apply_request_env(request: dict) -> None:
     store_root = request.get("store_root")
     if isinstance(store_root, str) and store_root:
         os.environ["CADGEN_CACHE_DIR"] = store_root
-    root_id = request.get("root_id")
-    if isinstance(root_id, str) and root_id:
-        os.environ["CADGEN_ROOT_ID"] = root_id
-    else:
-        os.environ.pop("CADGEN_ROOT_ID", None)
     job_id = request.get("job_id")
     if isinstance(job_id, str) and job_id:
         os.environ["CADGEN_JOB_ID"] = job_id
@@ -388,7 +382,7 @@ def serve() -> int:
     sys.stdout.flush()
     _FRAMES[0] = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8",
                            errors="backslashreplace", newline="\n")
-    # Child-build events from this worker's jobs ride the frame channel; the
+    # The build-tree events of this worker's jobs ride the frame channel; the
     # supervisor relays them to the requesting client verbatim.
     from cadgen.daemon import executors
 

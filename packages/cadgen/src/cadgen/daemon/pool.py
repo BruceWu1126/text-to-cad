@@ -11,9 +11,8 @@ configured: it starts at the seed and is recalibrated on every accounting pass
 from the RSS of workers that are idle and have run nothing, which is what a
 worker costs before geometry (``memory.worker_baseline``). The dependency
 headroom follows from the same number. Exhaustion waits for the
-builds in flight to finish (a parent fanning out its children submits them all
-at once, and only a core's worth can run) and fails explicitly only when nothing
-is running that could release memory. These are soft RSS and
+builds in flight to finish and fails explicitly only when nothing is running
+that could release memory. These are soft RSS and
 reservation bounds, not a hard limit on a native operation's allocations.
 Publication ordering remains the publish rule's concern.
 
@@ -299,11 +298,11 @@ class Worker:
         # The broker a worker's jobs take slots from is the daemon itself; name the
         # address explicitly so a worker never guesses it from its identity.
         env["CADGEN_DAEMON_SOCKET"] = daemon_address()
-        # A daemon's worker submits its children to the daemon, whatever the process
-        # that started the daemon had in its environment.
+        # A daemon's worker submits its compiles and pool jobs to the daemon, whatever
+        # the process that started the daemon had in its environment.
         env.pop("CADGEN_DAEMON", None)
         # Guards against a worker's own top-level call routing back into the daemon
-        # as a fresh request; nested SUBMITS ignore this on purpose (client.run_nested).
+        # as a fresh request; a nested compile ignores this on purpose (client.run_nested).
         env["CADGEN_DAEMON_CHILD"] = "1"
         python, launched = interpreter()
         env.update(launched)

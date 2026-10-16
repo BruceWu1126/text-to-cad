@@ -204,12 +204,12 @@ FAILURES = frozenset({"no_path", "relative_path", "no_file", "not_cad", "no_view
 # own code raised (``model_error``), or the CAD kernel or library it called refused what it asked (``kernel_error``:
 # a fillet or a boolean that failed); cadgen refused what the model declared or returned, or what a command was
 # given (``refused``: raised on purpose in cadgen's code); the script did not compile (``script_error``); its
-# arguments were refused (``arguments``); a model it composes failed (``child_failed``). The machine's: a module
+# arguments were refused (``arguments``). The machine's: a module
 # that is not installed (``missing_module``), a file that is not there (``missing_file``), another file error -- a
 # file locked or unwritable, a full disk (``io_error``) -- or out of time (``timeout``) or memory (``memory``).
 # cadgen's: the kernel failed under cadgen's own code, writing or meshing what the model made (``export_error``),
 # or a mistake in cadgen's code (``bug``, reported as an ``exception`` too). ``other``: none of these.
-BUILD_FAILURES = frozenset({"model_error", "kernel_error", "refused", "script_error", "arguments", "child_failed",
+BUILD_FAILURES = frozenset({"model_error", "kernel_error", "refused", "script_error", "arguments",
                             "missing_module", "missing_file", "io_error", "timeout", "memory", "export_error", "bug",
                             "other"})
 # Why a snapshot failed (``snapshot_failure``), decided as it failed: its request was refused (``bad_request``), a
@@ -810,7 +810,7 @@ _BECAUSE = "__cadgen_failure__"
 # asked for the name, decided below.
 _BUILD_ERRORS: tuple[tuple[type[BaseException] | str, str], ...] = (
     (SyntaxError, "script_error"), (ModuleNotFoundError, "missing_module"), (FileNotFoundError, "missing_file"),
-    ("cadgen.assets.AssetMissing", "missing_file"), ("cadgen.store.lazy.ChildBuildError", "child_failed"),
+    ("cadgen.assets.AssetMissing", "missing_file"),
     (TimeoutError, "timeout"), (MemoryError, "memory"), (OSError, "io_error"))
 
 

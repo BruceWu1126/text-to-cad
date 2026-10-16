@@ -29,10 +29,12 @@ Semantics:
   shape. A failed build raises ``SystemExit`` with the pipeline's exit code, so
   ``python model.py`` exits the way a build should.
 - **A call inside a build composes.** While a build is running (any model's,
-  any thread of this process), calling a decorated name runs its body and
-  returns the shape (or drawing) — this is how an assembly uses its children.
-  A model called from inside another model's build is a CHILD: it is built (or
-  loaded from the store when current) and its tree is linked into the parent.
+  any thread of this process), calling a decorated name is how an assembly uses
+  its children: the call is a CHILD, decoded from its stored result when the
+  store holds one for its inputs as they are, else run -- serially, in this
+  process, as its own build with its own record and outputs -- and the shape
+  handed back is its stored result, decoded (STORE.md §9a). A drawing's body
+  runs inline. The root model is only the first call.
 - **A model is ``script::function``.** A file may hold several models; each is
   its own record, output and job (``cadgen.store.index.model_ref``), and they
   share the file's closure. ``__main__`` builds the ones it calls -- there is no
@@ -135,81 +137,50 @@ _BUILD_STATE = threading.local()
 class BuildFrame:
     """One model body in flight on this thread.
 
-    ``children`` is recorded from the CALLS the body makes — every child wrapper
-    entered — never from what the geometry became; ``pins`` is the resolution
-    map: the first tree a child resolved to is the tree every later call in this
-    build composes (snapshot isolation)."""
+    ``children`` is recorded from the CALLS the body makes -- every child decoded
+    or run for it -- never from what the geometry became."""
 
-    def __init__(self, script_path: Path | None, function: str | None = None) -> None:
+    def __init__(self, script_path: Path | None, function: str | None = None, parent: str | None = None) -> None:
         self.script_path = script_path
         # The decorated function this frame is building; None when unknown (a
         # caller that entered ``building()`` for a whole file).
         self.function = function
         # The model's identity, ``script::fn`` (cadgen.store.index.model_ref).
         self.model: str | None = model_ref(script_path, function) if script_path is not None else None
-        # (child model ref, the LazyCompound the call returned) — one entry per CALL.
-        self.children: list[tuple[str, Any]] = []
-        # The resolution map: child model ref -> the tree this build composes.
-        self.pins: dict[str, str] = {}
-        # One job per stale child per build, however many times it is called.
-        self.jobs: dict[str, Any] = {}
-        # The root request this build belongs to (for the build tree's events).
-        self.root_id: str | None = os.environ.get("CADGEN_ROOT_ID") or None
+        # The model whose body called this one, for the build tree's events.
+        self.parent = parent
+        # (child model ref, the tree the call composed) -- one entry per CALL.
+        self.children: list[tuple[str, str]] = []
+        # A child whose build failed inside this body: the run fails with it even
+        # when the body caught the exception (STORE.md §9a).
+        self.failed: list[BaseException] = []
 
-    def pin(self, child: str, tree: str) -> str:
-        return self.pins.setdefault(str(child), tree)
 
-    def child_trees(self) -> list[tuple[str, str]]:
-        """Every child call with its final source result; saves may still be pending."""
-        return [(child, lazy.tree_hash()) for child, lazy in self.children]
+class BuildRun:
+    """One top-level build in this process, shared by every frame nested in it:
+    the models decoded or run so far, each once per run (``results``: model ->
+    tree), and what the root command owns for the run (its logger)."""
 
-    def wait_children(self) -> None:
-        failure = None
-        seen = set()
-        for child, lazy in self.children:
-            if child in seen:
-                continue
-            seen.add(child)
-            try:
-                lazy.wait_outputs()
-                # Discarded calls are dependencies too: absent pinned objects
-                # cannot be admitted merely because their output files exist.
-                lazy.tree_hash()
-            except Exception as exc:
-                if failure is None:
-                    failure = exc
-        if failure is not None:
-            raise failure
+    def __init__(self, logger: Any = None) -> None:
+        self.logger = logger
+        self.results: dict[str, str] = {}
+
+
+def current_run() -> BuildRun | None:
+    return getattr(_BUILD_STATE, "run", None)
 
 
 @contextlib.contextmanager
-def settle_child_builds(*, only_if_unowned: bool = False):
-    """A run retains and drains all child jobs, including after its own failure."""
-    frames = []
-    previous = getattr(_BUILD_STATE, "completion_frames", None)
-    if only_if_unowned and previous is not None:
-        yield
-        return
-    _BUILD_STATE.completion_frames = frames
-    error = None
+def build_run(logger: Any = None) -> Iterator[BuildRun]:
+    """The run a top-level command owns (``generation``): every decorated call made
+    inside it, at any depth, belongs to this run. Nests for a build started inside a
+    build (a test's), each its own."""
+    previous = current_run()
+    run = _BUILD_STATE.run = BuildRun(logger)
     try:
-        yield
-    except BaseException as exc:
-        error = exc
-        raise
+        yield run
     finally:
-        _BUILD_STATE.completion_frames = previous
-        failure = None
-        for frame in frames:
-            try:
-                frame.wait_children()
-            except Exception as exc:
-                if failure is None:
-                    failure = exc
-        if failure is not None:
-            if error is None:
-                raise failure
-            error.add_note(str(failure))
+        _BUILD_STATE.run = previous
 
 
 def _same_file(left: Path, right: Path) -> bool:
@@ -227,14 +198,12 @@ def current_frame() -> BuildFrame | None:
 @contextlib.contextmanager
 def building(script_path: Path | None = None, function: str | None = None) -> Iterator[BuildFrame]:
     """Mark this thread as executing a model body (the pipeline's call site).
-    Yields the frame that collects the body's child pins."""
+    Yields the frame that collects the body's children."""
     frames = getattr(_BUILD_STATE, "frames", None)
     if frames is None:
         frames = _BUILD_STATE.frames = []
-    frame = BuildFrame(script_path, function)
-    completion = getattr(_BUILD_STATE, "completion_frames", None)
-    if completion is not None:
-        completion.append(frame)
+    enclosing = frames[-1] if frames else None
+    frame = BuildFrame(script_path, function, parent=enclosing.model if enclosing is not None else None)
     frames.append(frame)
     try:
         yield frame
@@ -544,13 +513,12 @@ def _decorator(
                     return func()
                 if fmt == "dxf":
                     # A drawing composes models, never the reverse: called inside
-                    # another build it is just its body (2D geometry), nothing to pin.
+                    # another build it is just its body (2D geometry), no result of its own.
                     return func()
-                # Composition: a parent's body asked for this child. Same rule as the
-                # top level — stale → build, then hand back its geometry — except the
-                # geometry is materialized from the child's tree and the call is
-                # pinned into the parent's record.
-                return _compose_child(_REGISTRY.get(defn.ref, defn))
+                # Composition: a parent's body asked for this child. The same rule as
+                # the top level -- decode its stored result, or run it -- and the
+                # geometry handed back is that result, decoded.
+                return _child(_REGISTRY.get(defn.ref, defn), frame)
             if args or kwargs:
                 raise TypeError(
                     f"{func.__name__}() takes no arguments: a model is one configuration "
@@ -767,57 +735,48 @@ def _maybe_hint_eager_imports(defn: ModelDef) -> None:
     )
 
 
-def _compose_child(defn: ModelDef) -> Any:
-    """A parent's body called a child: submit it if stale, hand back a promise.
+def _child(defn: ModelDef, frame: BuildFrame) -> Any:
+    """A parent's body called a child: its stored result, decoded, or the result
+    of running it now, serially, in this process (STORE.md §9a).
 
-    ``stale → submit → lazy`` — the same gate as the top level, but the call
-    returns at once with a :class:`cadgen.store.lazy.LazyCompound`: a stale
-    child's build is running on the pool (its own worker, or a transient
-    subprocess) while this body keeps calling its other children; a current
-    child is a promise with no job. Geometry arrives when the parent first reads
-    it — normally at the closing ``Compound(children=[...])`` — so siblings
-    build in parallel. The first tree a child resolves to in this build is
-    pinned (snapshot isolation); the same stale child called twice shares one
-    job; children are recorded from the CALLS, never from the geometry.
+    The same gate as the top level, in the caller's own process: the child's
+    record is read, and its body runs here -- its own build, publishing its own
+    record and exporting its own files -- only when the store holds no result
+    for its inputs as they are. Either way the geometry handed back is the
+    stored result decoded (``store.materialize``), so the parent's own features
+    see a child the same way on a hit and on a miss, a child runs once per run
+    however often it is called, and children are recorded from the CALLS, never
+    from the geometry. A child's failure fails the run even when the body
+    catches it: the run notes it on the frame.
+
+    To the parent's capture the child's pipeline is cadgen's own reading
+    (``filetrace.paused``): what the child's gate hashes, what its export writes
+    and reads back, what its body read -- its body records in a capture of its
+    own -- is the child's, and the child is the parent's input by its result.
     """
-    from cadgen.store.gate import stale
-    from cadgen.store.lazy import LazyCompound
+    from cadgen._internal.build_timing import cadgen_work, child_build
+    from cadgen._internal.filetrace import paused
+    from cadgen._internal.generation import build_child
+    from cadgen.daemon import telemetry
+    from cadgen.store.materialize import materialize
 
-    frame = current_frame()
     child = defn.ref
-    if frame is not None and any(f.model == child for f in _frames() if f.model is not None):
+    if any(f.model == child for f in _frames() if f.model is not None):
         raise RuntimeError(
             f"{defn.script_path.name}::{defn.name} is called while it is itself being built: "
             "a model may not depend on itself"
         )
-    from cadgen.daemon import telemetry
-    from cadgen.daemon.executors import emit_event, model_event, submit
-
     telemetry.job_child()  # an assembly, for a build this process counts itself (``cold_build``)
-    parent = frame.model if frame is not None else None
-    job = None
-    tree: str | None = frame.pins.get(child) if frame is not None else None
-    if frame is not None and child in frame.jobs:
-        job = frame.jobs[child]
-    elif tree is None:
-        verdict = stale(child)
-        if verdict.stale:
-            job = submit(
-                child, force=False, root_id=getattr(frame, "root_id", None), parent=parent,
-                closure=verdict.closure,
-            )
-            if frame is not None:
-                frame.jobs[child] = job
-        else:
-            # Current: pin its tree NOW, at the call. A rebuild of this child between
-            # here and the force must not change what this build composes.
-            tree = verdict.tree
-            # No work: the tree summarizes current children on the parent's line.
-            emit_event(model_event(child, "current", parent=parent))
-    lazy = LazyCompound(child, job, frame=frame, label=defn.name, tree=tree)
-    if frame is not None:
-        frame.children.append((child, lazy))
-    return lazy
+    try:
+        with child_build(), paused():
+            tree = build_child(defn)
+    except BaseException as exc:
+        frame.failed.append(exc)
+        raise
+    frame.children.append((child, tree))
+    # Loading the child's geometry is cadgen's time, not the parent's model code.
+    with cadgen_work():
+        return materialize(tree, label=defn.name)
 
 
 def _frames() -> list[BuildFrame]:
@@ -888,7 +847,8 @@ def _built_geometry(defn: ModelDef, *, tree: str | None) -> Any:
     None for a drawing (no tree). Never resolves a mutable model record."""
     if defn.fmt != "step":
         return None
-    from cadgen.store.lazy import materialize_model
+    from cadgen.store.materialize import materialize
+
     if not tree:
         raise RuntimeError(f"{defn.ref}: successful build supplied no source result")
-    return materialize_model(tree, label=defn.name)
+    return materialize(tree, label=defn.name)

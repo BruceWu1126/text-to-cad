@@ -659,8 +659,7 @@ class CadGenerationTests(unittest.TestCase):
         second_path = self._generator_script("second")
         calls: list[str] = []
 
-        def fake_generate(spec, *, entries_by_step_path, **_extra):
-            self.assertIn(spec.step_path.resolve(), entries_by_step_path)
+        def fake_generate(spec, **_extra):
             calls.append(spec.cad_ref)
             return self._generated_result(spec)
 
@@ -748,7 +747,7 @@ class CadGenerationTests(unittest.TestCase):
         )
         calls: list[str] = []
 
-        def fake_generate(spec, *, entries_by_step_path, **_extra):
+        def fake_generate(spec, **_extra):
             calls.append(spec.script_path.resolve())
             return self._generated_result(spec)
 
@@ -779,14 +778,14 @@ class CadGenerationTests(unittest.TestCase):
         step_path = script_path.with_suffix(".step")
         observed_scene = None
 
-        def fake_outputs(spec_arg, *, entries_by_step_path, preloaded_scene=None, force=False, **_extra):
+        def fake_outputs(spec_arg, *, preloaded_scene=None, force=False, **_extra):
             nonlocal observed_scene
             observed_scene = preloaded_scene
             self.assertIs(spec, spec_arg)
             return self._generated_result(spec, preloaded_scene)
 
         with mock.patch.object(cad_generation, "_generate_part_outputs", side_effect=fake_outputs):
-            cad_generation._generate_step_outputs(spec, entries_by_step_path={spec.step_path.resolve(): spec})
+            cad_generation._generate_step_outputs(spec)
 
         self.assertIsNotNone(observed_scene)
         self.assertEqual(step_path.resolve(), observed_scene.step_path)
@@ -810,11 +809,7 @@ class CadGenerationTests(unittest.TestCase):
             mock.patch.object(cad_generation, "run_script_generator") as run_generator,
             mock.patch.object(cad_generation, "_generate_part_outputs") as package,
             ):
-            result = cad_generation._generate_step_outputs(
-                spec,
-                entries_by_step_path={spec.step_path.resolve(): spec},
-                force=False,
-            )
+            result = cad_generation._generate_step_outputs(spec, force=False)
 
         run_generator.assert_not_called()
         package.assert_not_called()
@@ -883,7 +878,7 @@ class CadGenerationTests(unittest.TestCase):
         package_patch, package_calls = self._patch_package_build()
 
         with mock.patch.object(cad_generation, "load_step_scene_cached", return_value=scene) as load_scene, package_patch:
-            cad_generation._generate_part_outputs(spec, entries_by_step_path={spec.step_path.resolve(): spec})
+            cad_generation._generate_part_outputs(spec)
 
         load_scene.assert_called_once_with(step_path)
         # An imported STEP packages the parsed document itself.
@@ -903,11 +898,7 @@ class CadGenerationTests(unittest.TestCase):
 
         package_patch, package_calls = self._patch_package_build()
         with mock.patch.object(cad_generation, "load_step_scene_cached") as load_scene, package_patch:
-            cad_generation._generate_part_outputs(
-                spec,
-                entries_by_step_path={spec.step_path.resolve(): spec},
-                preloaded_scene=scene,
-            )
+            cad_generation._generate_part_outputs(spec, preloaded_scene=scene)
 
         load_scene.assert_not_called()
         self.assertEqual(1, len(package_calls))

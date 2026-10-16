@@ -72,7 +72,7 @@ export CADGEN_DAEMON=0
 export CADGEN_DAEMON_STATE_DIR="$DAEMON_STATE"
 # What the CAD app remembers (its library, release checks) stays in the throwaway directory too.
 export CADGEN_STATE_DIR="$WORK/state"
-unset CADGEN_BROKER CADGEN_BROKER_KEY CADGEN_BROKER_STATS CADGEN_DAEMON_CHILD CADGEN_ROOT_ID
+unset CADGEN_DAEMON_CHILD
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }

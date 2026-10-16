@@ -91,7 +91,6 @@ class PublishRuleTest(unittest.TestCase):
             "CADGEN_CACHE_DIR": str(self.root / "store"),
             "CADGEN_DAEMON_STATE_DIR": str(self.root / "state"),
         })
-        self.env.pop("CADGEN_ROOT_ID", None)
         self.env.pop("CADGEN_DAEMON_CHILD", None)
         # The model scripts run from a temp dir: a relative PYTHONPATH entry would resolve
         # there and the scripts would import whatever cadgen is installed, not this one.

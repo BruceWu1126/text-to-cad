@@ -240,7 +240,7 @@ def submit_artifact(request, *, store_root=None):
     """Start a typed artifact operation as ONE build-pool job, on a thread of its own,
     without importing the CAD kernel on the caller's thread: a daemon worker's, or with no
     daemon this process's (:func:`_run_here`), against the store it names, which must then
-    be this process's."""
+    be this process's. A caller that waits for it yields the slot it holds (``result``)."""
     request = normalize_request(request)
     root = store_path(store_root)
     future = ArtifactFuture()
@@ -274,11 +274,14 @@ def submit_artifact(request, *, store_root=None):
 
 
 def _run_here(request, *, keep_going):
-    """The job in this process, with no daemon to run it: holding a slot of the caller's
-    broker where there is one (a transient build's), ahead of jobs not yet started, as a
-    worker's job does; asking ``keep_going`` before each derivation, which stops once its
-    one subscriber has left. The result is what a worker's would be: plain JSON."""
-    with broker.held(f"artifact:{request['kind']}", first=True):
+    """The job in this process, with no daemon to run it and no broker to take a slot
+    from; asking ``keep_going`` before each derivation, which stops once its one
+    subscriber has left. The result is what a worker's would be: plain JSON. What the
+    job reads on its thread -- the document an export wrote, read back by its verify --
+    is cadgen's own, never an input of a build in progress (``filetrace.paused``)."""
+    from cadgen._internal.filetrace import paused
+
+    with paused():
         return result_frame(request, execute(request, keep_going=keep_going))["result"]
 
 

@@ -470,6 +470,23 @@ class FileTraceTests(unittest.TestCase):
         self.assertEqual(nested.environment, {"CADGEN_NESTED_INPUT": "yes"})
         self.assertEqual(nested.programs, [Path(sys.executable).name])
 
+    def test_a_capture_opened_under_a_pause_records_and_the_pause_resumes_after_it(self) -> None:
+        """A child's pipeline runs under its parent's pause -- cadgen's own reading --
+        and the child's body, a capture inside that pause, records all the same."""
+        from cadgen._internal import filetrace
+        from cadgen._internal.source_hash import _sha256_file
+
+        gate, body, export, parent = (self._file(name, "1") for name in ("gate.json", "body.json", "export.json", "parent.json"))
+        with filetrace.capture() as outer:
+            with filetrace.paused():
+                gate.read_text(encoding="utf-8")
+                with filetrace.capture() as nested:
+                    body.read_text(encoding="utf-8")
+                export.read_text(encoding="utf-8")
+            parent.read_text(encoding="utf-8")
+        self.assertEqual(outer.inputs(), ({parent: _sha256_file(parent)}, set()))
+        self.assertEqual(nested.inputs(), ({body: _sha256_file(body)}, set()))
+
     def test_the_daemon_key_read_on_a_job_thread_is_not_an_input(self) -> None:
         """A parent submitting a child connects to the daemon on a job thread,
         reading its key; that is cadgen's, on any thread."""

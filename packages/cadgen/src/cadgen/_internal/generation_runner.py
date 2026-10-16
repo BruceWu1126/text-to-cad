@@ -268,20 +268,10 @@ def _normalize_step_payload(
 
 def _empty_shape(shape: object) -> str | None:
     """What in the returned tree is empty (build123d's ``is_null``), named for the
-    person: the shape itself, or a child by its label or position; else None.
-
-    A stored child (``LazyCompound``) and an assembly of them (the reference
-    compound) are promises: reading ``is_null`` would load the one and turn the
-    other native, undoing what lets an assembly of stored children skip both. Each
-    was a build of its own, which this same check refused if it was empty."""
-    from cadgen.store._references import _ReferenceCompound
-    from cadgen.store.lazy import LazyCompound
-
+    person: the shape itself, or a child by its label or position; else None."""
     pending: list[tuple[object, str]] = [(shape, "an empty shape")]
     while pending:
         node, name = pending.pop()
-        if isinstance(node, (LazyCompound, _ReferenceCompound)):
-            continue
         if getattr(node, "is_null", False):
             return name
         for index, child in enumerate(getattr(node, "children", None) or ()):
@@ -307,7 +297,6 @@ def _write_shape_step_payload(
     output_path: Path,
     script_path: Path,
     logger: CliLogger,
-    defer_reference_scene: bool = False,
 ) -> LoadedStepScene:
     shape = payload.get("shape")
     from build123d import Shape as Build123dShape
@@ -322,14 +311,8 @@ def _write_shape_step_payload(
     # stored tree by the build pool (``store/exports.py``), so no XCAF document is
     # assembled before the preview. The scene carries what the pipeline reads of the run.
     source_identity = python_source_hash(script_path)
-    scene = None
-    if defer_reference_scene:
-        from cadgen.store._references import source_scene
-
-        scene = source_scene(shape, output_path)
-    if scene is None:
-        scene = LoadedStepScene(output_path.expanduser().resolve(), [], {}, source_kind="python",
-                                source_hash=source_identity.source_hash)
+    scene = LoadedStepScene(output_path.expanduser().resolve(), [], {}, source_kind="python",
+                            source_hash=source_identity.source_hash)
     _mark_scene_python_backed(scene, source_identity=source_identity, source_path=script_path)
     _mark_scene_step_payload(scene, payload_kind="shape")
     # Stash the compound: the tree build introspects its located
@@ -354,11 +337,11 @@ def _mark_scene_python_backed(
 
 
 def _write_drawing_record(
-    spec: EntrySpec, output_path: Path, *, source_closure, child_trees
+    spec: EntrySpec, output_path: Path, *, source_closure, children
 ) -> None:
     """The drawing's model record: ``tree: null``, its ``.dxf`` as the one output,
-    children pinned from the body's calls. Published under the same rule as a
-    @step record (never replace a current record with a stale one)."""
+    children from the body's calls. Published under the same rule as a @step
+    record (never replace a current record with a stale one)."""
     import hashlib
 
     from cadgen.store.publish import decide
@@ -384,7 +367,7 @@ def _write_drawing_record(
             "static": False,
         },
         "constants": dict(getattr(source_closure, "constants", None) or {}),
-        "children": [{"model": str(child), "tree": tree} for child, tree in child_trees],
+        "children": [{"model": str(child), "tree": tree} for child, tree in children],
         "outputs": {str(written): {"sha256": hashlib.sha256(written.read_bytes()).hexdigest()}},
     }
     from cadgen._internal.build_timing import record_fields
@@ -432,14 +415,18 @@ def run_script_generator(
     spec: EntrySpec,
     model_format: str,
     *,
+    generator: Callable[[], object] | None = None,
     logger: CliLogger | None = None,
     force: bool = False,
     progress: object | None = None,
     intent: str = "write",
     model_prints_to_stdout: bool = False,
-    _defer_reference_scene: bool = False,
 ) -> LoadedStepScene | None:
-    """Run a model script's decorated entry (``@step``/``@dxf``) and return its scene.
+    """Run a model's decorated entry (``@step``/``@dxf``) and return its scene.
+
+    ``generator`` is the model's function when its module is loaded already -- a
+    child a parent's body called, whose import ran in the parent's process -- and
+    None for the root model, whose script is loaded here, under the run's scopes.
 
     ``intent`` says whether this run will rewrite the model's outputs (``"write"``, the
     default) or merely occupy its generator (``"generate"`` -- an export, a topology
@@ -477,11 +464,7 @@ def run_script_generator(
     # and said nothing on any surface. So the generator run becomes the reporter when
     # nobody above us is one.
     owns_reporting = progress is None
-    from cadgen.authoring import settle_child_builds
-
-    # The normal build owns these handles through source publication and save.
-    # A standalone generator caller still settles its children before returning.
-    with settle_child_builds(only_if_unowned=True), _generator_progress_line(spec, logger=logger, active=owns_reporting) as sink:
+    with _generator_progress_line(spec, logger=logger, active=owns_reporting) as sink:
         with _track_spec_generation(
             spec, model_format, intent=intent, sink=sink
         ) as generator_run:
@@ -493,13 +476,10 @@ def run_script_generator(
                 else contextlib.redirect_stdout(sys.stderr)
             )
             with redirect:
-                return _run_script_generator_inner(
-                    spec,
-                    model_format,
-                    logger=logger,
-                    force=force,
-                    progress=active,
-                    _defer_reference_scene=_defer_reference_scene,
+                # Worker-pool admission owns memory policy; this call adds no second
+                # guard. The pool reports an OS-killed worker with its exit status.
+                return _run_script_generator_body(
+                    spec, model_format, generator=generator, logger=logger, force=force, progress=active,
                 )
 
 
@@ -520,31 +500,14 @@ def _generator_progress_line(
         yield sink
 
 
-def _run_script_generator_inner(
-    spec: EntrySpec,
-    model_format: str,
-    *,
-    logger: CliLogger,
-    force: bool = False,
-    progress: object | None = None,
-    _defer_reference_scene: bool = False,
-) -> LoadedStepScene | None:
-    # Worker-pool admission owns memory policy; this inner call adds no second
-    # guard. The pool reports an OS-killed worker with its exit status.
-    return _run_script_generator_body(
-        spec, model_format, logger=logger, force=force, progress=progress,
-        _defer_reference_scene=_defer_reference_scene,
-    )
-
-
 def _run_script_generator_body(
     spec: EntrySpec,
     model_format: str,
     *,
+    generator: Callable[[], object] | None = None,
     logger: CliLogger,
     force: bool = False,
     progress: object | None = None,
-    _defer_reference_scene: bool = False,
 ) -> LoadedStepScene | None:
     # Order-stable shape de-duplication (see determinism.py): a re-executed model
     # script should produce the SAME geometry it produced last time, and component
@@ -558,38 +521,42 @@ def _run_script_generator_body(
     determinism.install()
     kernel_memo.install()
     generated_scene: LoadedStepScene | None = None
-    # Deterministic closure capture: start from a clean first-party module space, so
-    # every first-party file the generator loads and runs executes inside the window
-    # and is hashed as it runs (ExecutionHashes), from the source it was compiled from
-    # (_first_party_from_source). Alongside it, the trace: every file the build opened,
-    # whoever opened it, and the folders its code listed.
-    evict_first_party_modules()
+    metadata = spec.generator_metadata
+    entry_name = getattr(metadata, "entry_function", None) if metadata is not None else None
+    if not entry_name:
+        raise RuntimeError(f"{_display_path(spec.script_path)} declares no decorated model entry function")
+    # Deterministic closure capture. The root model starts from a clean first-party
+    # module space, so every first-party file the generator loads and runs executes
+    # inside the window and is hashed as it runs (ExecutionHashes), from the source it
+    # was compiled from (_first_party_from_source); a child's module ran in its parent's
+    # window, which its own scope takes its executions from. Alongside it, the trace:
+    # every file the build opened, whoever opened it, and the folders its code listed.
+    # Each scope nests exclusively, so a child's build leaves its parent's untouched.
+    if generator is None:
+        evict_first_party_modules()
     from cadgen.store.closure import ExecutionHashes
 
     with (
         filetrace.capture() as trace,
         _first_party_from_source(),
-        ExecutionHashes() as executed_hashes,
+        ExecutionHashes(imported=None if generator is None else spec.script_path) as executed_hashes,
         # The model run the memo and the trace see: the script's top level and
         # the body, every kernel construction called from its own code.
         kernel_memo.run(spec.script_path) as kernel_run,
     ):
-        with logger.timed(f"load generator {spec.source_ref}"):
-            module = _load_generator_module(spec.script_path)
-        # `model_format` is the DISPATCH kind ("step"/"dxf" decides which payload
-        # contract applies below); the attribute looked up is the decorated entry
-        # — the module is imported under a loader name, never __main__, so its
-        # `__main__` block does not run and this call is the one execution. The
-        # call happens inside `building()`, which is what makes the decorated
-        # name run its body (and lets the children it calls compose) instead of
-        # starting a build of its own.
-        metadata = spec.generator_metadata
-        entry_name = getattr(metadata, "entry_function", None) if metadata is not None else None
-        if not entry_name:
-            raise RuntimeError(f"{_display_path(spec.script_path)} declares no decorated model entry function")
-        generator = getattr(module, entry_name, None)
-        if not callable(generator):
-            raise RuntimeError(f"{_display_path(spec.script_path)} does not define callable {entry_name}()")
+        if generator is None:
+            with logger.timed(f"load generator {spec.source_ref}"):
+                module = _load_generator_module(spec.script_path)
+            # `model_format` is the DISPATCH kind ("step"/"dxf" decides which payload
+            # contract applies below); the attribute looked up is the decorated entry
+            # — the module is imported under a loader name, never __main__, so its
+            # `__main__` block does not run and this call is the one execution. The
+            # call happens inside `building()`, which is what makes the decorated
+            # name run its body (and lets the children it calls compose) instead of
+            # starting a build of its own.
+            generator = getattr(module, entry_name, None)
+            if not callable(generator):
+                raise RuntimeError(f"{_display_path(spec.script_path)} does not define callable {entry_name}()")
         # Bind the run as the ambient reporter for the generator's own code: the entry
         # function takes no arguments and so cannot be handed the run,
         # and without this the longest phase of most builds reports nothing at all. Silent
@@ -608,6 +575,10 @@ def _run_script_generator_body(
             # all that --profile profiles (cadgen._internal.build_timing).
             with model_body(spec.script_path.parent):
                 raw_payload = generator()
+    if frame.failed:
+        # A child's build failed inside the body, which went on without it: the run
+        # fails with the child, whatever the body made of the exception (STORE.md §9a).
+        raise RuntimeError(f"{spec.source_ref}: a child model failed to build: {frame.failed[0]}") from frame.failed[0]
 
     # A model's own outputs are never its inputs: reading one back reads the
     # previous run, so a read the trace saw is dropped here, and a folder its
@@ -627,17 +598,16 @@ def _run_script_generator_body(
     # are relative to the GENERATOR's folder, never
     # the output's: `out=` routes the output anywhere, and basing the closure
     # there would hash the same source differently depending on where its
-    # document is written. Every child the body called, with the tree it resolved
-    # to: this waits for any child job the body never forced (called and
-    # discarded), whose result is still this build's dependency.
-    child_trees = frame.child_trees()
+    # document is written. Every child the body called, with the tree it composed,
+    # a discarded call included: its result is this build's dependency.
+    children = list(frame.children)
     store_closure = build_closure(
         spec.script_path,
         executed=executed_hashes.hashes,
         inputs=read_files,
         listings=listed,
         outputs=own_outputs,
-        children=[child for child, _tree in child_trees],
+        children=[child for child, _tree in children],
         sources=executed_hashes.sources,
         environment=trace.environment,
     )
@@ -661,7 +631,6 @@ def _run_script_generator_body(
             output_path=spec.step_path,
             script_path=spec.script_path,
             logger=logger,
-            defer_reference_scene=_defer_reference_scene,
         )
         # The run's trace rides the scene to the tree build, which computes the
         # provenance of the components it prepares (STORE.md §3).
@@ -670,30 +639,26 @@ def _run_script_generator_body(
             generated_scene.kinematics = declared.block
         generated_scene.materials = declared.materials
         generated_scene.animation = declared.animation
-        # Children pinned by the body's calls — recorded from the CALLS, never
-        # derived from the tree's links (a modified child is still a dependency).
+        # The children the body called -- recorded from the CALLS, never derived
+        # from the tree's links (a modified child is still a dependency).
         generated_scene.store_children = [
-            {"model": str(child), "tree": tree} for child, tree in child_trees
+            {"model": str(child), "tree": tree} for child, tree in children
         ]
-        # Runtime handles never enter objects/records. Source-ready children may
-        # still owe their own files; the parent drains these after its preview.
-        generated_scene.wait_child_outputs = frame.wait_children
     elif model_format == "dxf":
         if spec.dxf_path is None:
             raise RuntimeError(f"{spec.source_ref} has no configured DXF output")
         # The product IS the .dxf: the run always writes it — the sibling by
         # default, `-o` renames — and the viewer parses that file directly.
         output_path = spec.dxf_path
-        frame.wait_children()
         _write_dxf_payload(
             raw_payload, output_path=output_path, script_path=spec.script_path, logger=logger
         )
         # A drawing is a model in the graph (STORE.md §3): the same record, gate and
-        # pins as a @step model, with the .dxf as its output and NO tree (gate
+        # children as a @step model, with the .dxf as its output and NO tree (gate
         # clause 4 is vacuous). The children its body composed -- a flat pattern of
-        # `bracket()` -- are pinned from the calls, so a child's new geometry makes
+        # `bracket()` -- are recorded from the calls, so a child's new geometry makes
         # the drawing stale like any parent.
-        _write_drawing_record(spec, output_path, source_closure=source_closure, child_trees=child_trees)
+        _write_drawing_record(spec, output_path, source_closure=source_closure, children=children)
     if generated_scene is not None and source_closure is not None:
         generated_scene.source_closure_hash = source_closure.closure_hash
         generated_scene.source_closure_files = source_closure.files

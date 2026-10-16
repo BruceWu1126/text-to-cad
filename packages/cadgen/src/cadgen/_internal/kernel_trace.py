@@ -104,11 +104,8 @@ _HERE = Path(__file__).resolve().parent
 # A kernel call reached through cadgen's own machinery before any model frame
 # (a child's materialization, the store's own constructions) is cadgen's, not
 # the model's: no feature. Its public helpers (``cadgen.geometry``,
-# ``cadgen.assembly``) are called by the model and count as build123d does, and
-# so does the store's hook on ``Compound.__init__`` (``store/_ready_children``),
-# which passes the model's own construction through.
+# ``cadgen.assembly``) are called by the model and count as build123d does.
 _OWN = tuple(_HERE.parent / name for name in ("store", "_internal", "daemon"))
-_PASS_THROUGH = (_HERE.parent / "store" / "_ready_children.py",)
 # The element kinds a component names, each with its ref prefix and plural.
 KINDS = (("face", TopAbs_FACE, "f", "faces"), ("edge", TopAbs_EDGE, "e", "edges"),
          ("vertex", TopAbs_VERTEX, "v", "vertices"))
@@ -749,7 +746,7 @@ def _classify(filename: str) -> str:
         path = Path(filename).resolve()
     except (OSError, RuntimeError):
         return "other"
-    if path.parent == _HERE or path in _PASS_THROUGH:
+    if path.parent == _HERE:
         return "other"
     if any(root in path.parents for root in _OWN):
         return "own"
