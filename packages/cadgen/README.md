@@ -132,11 +132,16 @@ declarations, and the child's sidecar is unchanged by the parent's build.
 Intrinsic finishes travel with the pinned geometry and are rebound to the
 parent document's occurrences when it is saved.
 
-### 4. Zero metadata in written artifacts
+### 4. A written artifact carries its identity, never its context
 
-A STEP or DXF is pure geometry. Provenance, kinematics, and context ride
-the sidecar; the artifact separated from everything else is a plain
-importable file.
+A STEP or DXF is geometry, and a STEP written named also carries what
+names it (law 20): each part's key as its product's description, and each
+face's and edge's name as the name of the entity written for it
+(`_internal/step_names.py`), so any reader of the file gets the names from
+the file alone. Those are ordinary STEP names and descriptions, and a STEP
+written plain carries none. Provenance, kinematics, and context ride the
+sidecar; the artifact separated from everything else is a plain importable
+file.
 
 ### 5. Byte determinism is the writers' promise, not the kernel's
 
