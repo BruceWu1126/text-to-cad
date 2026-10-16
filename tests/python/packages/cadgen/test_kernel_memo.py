@@ -612,7 +612,7 @@ class ConstructionKeyTest(KernelMemoCase):
         with tempfile.TemporaryDirectory() as folder:
             # The model's own code is a file of its own: a feature needs a first-party frame.
             path = Path(folder) / "model.py"
-            path.write_text(script)
+            path.write_text(script, encoding="utf-8")
             env = {**os.environ, "PYTHONPATH": str(Path(kernel_memo.__file__).resolve().parents[2])}
             there = subprocess.run([sys.executable, str(path)], env=env, capture_output=True, text=True, check=True)
         (_box, _tool, body), _, _run1 = _run(_bored_plate)
