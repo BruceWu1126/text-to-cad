@@ -31,7 +31,7 @@ file.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 
 from cadgen._internal.tree_tokens import is_occurrence_token
 from cadgen.coordination import PHASE_COMPONENTS, PHASE_FINALIZE, PHASE_PACKAGE
@@ -49,9 +49,16 @@ from cadgen.store.objects import claim_object, put_object, read_verified_object
 from cadgen.store.trees import COMPONENT_OBJECTS, put_tree
 
 
-# What a build names a component it prepares by: its construction key and its
-# lineage, either None (``kernel_memo._Run.identify``).
-Namer = Callable[[Any], tuple[str | None, Mapping[str, Any] | None]]
+class Namer(Protocol):
+    """What a build names the components it prepares by, and tells the calls that made
+    them by: the model's run (``kernel_memo._Run``)."""
+
+    def account(self, shape: Any) -> tuple[str | None, Mapping[str, Any] | None, Mapping[str, int]]:
+        """A component's construction key and lineage, either None, and the feature of the
+        run each feature name of the lineage stands for."""
+
+    def placed_by(self, shape: Any) -> int | None:
+        """The feature whose call made the shape a leaf places, or None."""
 
 
 def _tagged_intact(node: Any) -> str | None:
@@ -117,6 +124,12 @@ class _Walk:
     prepared: dict[str, dict[str, Any]] = field(default_factory=dict)
     native_locations: dict[str, Any] = field(default_factory=dict)
     root: dict[str, Any] = field(default_factory=dict)
+    # What the model's run says of what it made (``Namer``): per component the walk
+    # prepared from its shapes, the feature each name of its lineage stands for (its
+    # first leaf's); per occurrence of one, the feature whose call made the shape it
+    # places. The build's provenance (STORE.md §3).
+    names: dict[str, dict[str, int]] = field(default_factory=dict)
+    placed: dict[str, int | None] = field(default_factory=dict)
 
     def draft_tree(self, *, root_name: str) -> dict[str, Any]:
         """The tree these parts describe, minus the object hashes publishing adds."""
@@ -155,6 +168,7 @@ class _Walk:
         self.links[:] = tree["links"]
         self.root = tree["assembly"]["root"]
         self.native_locations = {mapping[key]: value for key, value in self.native_locations.items()}
+        self.placed = {mapping[key]: value for key, value in self.placed.items()}
         return mapping
 
 
@@ -171,8 +185,10 @@ def build_tree_from_compound(
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Return ``(tree_hash, tree, stats)``. ``extra`` are content-pure fields
     recorded on the tree (capabilities, edgeRendering) — never paths or times.
-    ``namer`` names each component the walk prepares from a shape the model's run
-    made: its construction key and lineage (``kernel_memo._Run.identify``).
+    ``namer``, the model's run, names each component the walk prepares from a shape
+    the run made -- its construction key and lineage -- and says which call made each
+    leaf's shape: ``stats["account"]`` (``{"components", "occurrences"}``) is what the
+    build's provenance records of them (``Namer``).
     ``live``, when given, is filled with the shape, unlocated, of every component
     the store cannot decode (an eager-only one's), by cid: what the build's own
     process writes its STEP with (``store/exports.py``).
@@ -437,19 +453,25 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
             except TypeError:
                 memo_key, cid = None, None
             if cid is None:
+                construction, lineage, names = namer.account(node) if namer is not None else (None, None, {})
                 prepared = prepare_geometry_component(
-                    node, face_colors=face_colors, identity=namer(node) if namer is not None else None)
+                    node, face_colors=face_colors,
+                    identity=(construction, lineage) if namer is not None else None)
                 entry_meta = dict(prepared["entry"])
                 cid = _component_id(entry_meta["contentHash"])
                 previous = walk.prepared.setdefault(cid, prepared)
                 if previous["entry"]["contentHash"] != entry_meta["contentHash"]:
                     raise ValueError("short component ID collision")
+                if lineage is not None:
+                    walk.names.setdefault(cid, dict(names))
                 brep_bytes_by_cid.setdefault(cid, prepared["payload"])
                 if memo_key is not None:
                     hash_memo[memo_key] = cid
             else:
                 entry_meta = dict(walk.prepared[cid]["entry"])
         shapes.setdefault(cid, node)
+        if namer is not None and cid in walk.names:
+            walk.placed[occ_id] = namer.placed_by(node)
         node_color = getattr(node, "color", None)
         if node_color is not None:
             try:
@@ -720,9 +742,10 @@ def _publish_tree(
         "components_built": len(built),
         "components_reused": len(reused),
         "unannotatedTree": unannotated_hash,
-        # The components this walk prepared from the shapes it was handed: what the
-        # model's provenance entry says its build made (STORE.md §3).
-        "ownComponents": sorted(walk.prepared),
+        # What the model's run says of what this walk prepared from its shapes: what
+        # the model's provenance entry says its build made (STORE.md §3).
+        "account": {"components": {cid: walk.names[cid] for cid in sorted(walk.names)},
+                    "occurrences": dict(sorted(walk.placed.items()))},
     }
     return tree_hash, tree, stats
 

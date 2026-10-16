@@ -1151,48 +1151,55 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
 ### Provenance
 
 The build's account of its own code: `index/provenance/<sha256(model
-ref)>-v<schema>` (`store/provenance.py`, schema 2), one entry per model beside
-its record, on the code side (§2), written by the build after the record for
+ref)>-v<schema>` (`store/provenance.py`, schema 5), one entry per model beside
+its record, on the code side (§2), written by the build with the record for
 the result tree the record names, and never read by a reader, a view or the
 viewer. It is the run's trace as the kernel boundary saw it
 (`_internal/kernel_trace.py`, the trace the kernel memo keeps, README law 18),
 kept rather than computed: no pass of the build measures anything for it. It
-holds the **features** the body ran, in call order and by name (§2) -- each
-one's operation, the source frame in the model's own code that called it
-(file, line and the enclosing function) and the features that made the shapes
-it was given -- and the **components** the build made. Each of those names its
-elements by those features through its lineage object (§2, §3), which is how
-an element finds the feature that made it and the one that last modified it:
-lineage is found from what each feature was given and returned, with no
-history object from the kernel (an element of a result whose TShape an input
-holds, or that an input holds with the same surface and extent, is unchanged
-there and inherits its lineage; one an input held on the same surface with
-another extent was modified by the feature; any other was made by it), and the
-walk stops at a shape no feature made (a child's geometry, an imported file),
-whose elements are of unknown origin. A file and a line are here and nowhere
-else, so an edit that moves code renames nothing. The entry carries the hashes
-of the tree and the document it describes (`tree`, `stepHash`); a document
-whose bytes have moved past them is behind its entry, and `store where` says
-so rather than guessing.
+holds the **features** the body ran, in call order (§2) -- each one's
+operation, the source frame in the model's own code that called it (file, line
+and the enclosing function) and the features that made the shapes it was
+given -- the **components** the build made, each with the feature every name
+of its lineage stands for, and the **occurrences** of those components in the
+result, each with the feature whose call made the shape it places. A component
+names its elements by those features through its lineage object (§2, §3),
+which is how an element finds the feature that made it and the one that last
+modified it: lineage is found from what each feature was given and returned,
+with no history object from the kernel (an element of a result whose TShape
+an input holds, or that an input holds with the same surface and extent, is
+unchanged there and inherits its lineage; one an input held on the same
+surface with another extent was modified by the feature; any other was made by
+it), and the walk stops at a shape no feature made (a child's geometry, an
+imported file), whose elements are of unknown origin. A part one construction
+made twice is one part (§3), named by its first making; each of its
+occurrences keeps the call that made it, so each answers with its own line.
+A file and a line are here and nowhere else, so an edit that moves code
+renames nothing. The entry carries the hash of the tree it describes (`tree`);
+an entry for another tree than the record's is behind it, and `store where`
+says so rather than guessing.
 
 `cadgen store where <document> <ref>` is the one reader: path →
-`index/output` → the model → its record and its provenance entry, the
-document's hash checked against `stepHash`, the ref resolved in the document
-tree the record names (a label as `read_scene` resolves it) to its occurrence
-and its component, whose lineage names the feature the element's name holds
-(a ref in geometric-token form is matched to its element by geometry first,
-§2), looked up in the model's entry or in a pinned child's (through the
+`index/output` → the model → its record and its provenance entry, the file's
+hash checked against the record's output entry (the bytes the model's build
+wrote, which hold its result unless the document entry lists what differs), the
+ref resolved in the tree the record names (by the one resolver every ref goes
+through, `cadgen.refs`; a ref in geometric-token form is matched to its element
+by geometry first, §2) to its occurrence and its component, whose lineage
+names the feature the element's name holds -- looked up in the entry that
+describes that occurrence: the model's, or, for an occurrence a link placed, the
+pinned child's, by the occurrence's token in the child's own tree (through the
 record's pins, while the child's record and entry still describe the pinned
-tree) -- a code-side walk, like `store why`'s, that no door, view or render
-path takes (§2, property 2). It answers with the feature that made what the
-ref names, as `file:line in function (operation)` with the features it was
-given, and for a face, an edge or a vertex the one that last modified it.
-Without an entry, or with one for other bytes, or for an element no feature
-made, it says it does not know, and the ref still resolves to its geometry:
-provenance is never how a ref is found. The entry's key is versioned like the
-record's, and a record a cadgen does not own (§2) has an entry it does not
-own: both are obsolete together; `store forget` drops the entry with the
-record, and nothing evicts it (§8).
+tree), among the calls that made that occurrence. It is a code-side walk, like
+`store why`'s, that no door, view or render path takes (§2, property 2). It
+answers with the feature that made what the ref names, as `file:line in
+function (operation)` with the features it was given, and for a face, an edge or
+a vertex the one that last modified it. Without an entry, or with one for other
+bytes, or for an element no feature made, it says it does not know, and the ref
+still resolves to its geometry: provenance is never how a ref is found. The
+entry's key is versioned like the record's, and a record a cadgen does not own
+(§2) has an entry it does not own: both are obsolete together; `store forget`
+drops the entry with the record, and nothing evicts it (§8).
 
 ## 4. The gate
 

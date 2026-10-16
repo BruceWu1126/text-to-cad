@@ -702,7 +702,7 @@ def _generate_part_outputs(
         # The model's run, which names each component it made by its construction key
         # and its lineage (README law 20); a document compiled from its bytes has none.
         kernel_run = getattr(scene, "kernel_run", None) if generated else None
-        namer = kernel_run.identify if kernel_run is not None else None
+        namer = kernel_run
         # The build's own live shapes for the components the store cannot decode, which
         # its STEP is written from in this process (store/exports.py).
         live: dict[str, object] = {}
@@ -726,15 +726,13 @@ def _generate_part_outputs(
             # mapped to them, so a view only reads.
             _await_display(_request_display(tree_hash, producer=producer), progress=progress, logger=logger)
         # The build's account of its code (STORE.md §3): the features its run called,
-        # where each ran, and the components it made, each with the feature every name
-        # of its lineage stands for; written beside the record, after it, for a model
+        # where each ran, the components it made, each with the feature every name of
+        # its lineage stands for, and each occurrence of one with the feature whose call
+        # made the shape it places; written beside the record, after it, for a model
         # whose saved document `store where` can be asked about.
         provenance = None
         if kernel_run is not None and writes_step:
-            entries = tree.get("components") or {}
-            provenance = {"features": kernel_run.trace.feature_rows(),
-                          "components": {cid: kernel_run.names_for(entries.get(cid) or {})
-                                         for cid in stats["ownComponents"]}}
+            provenance = {"features": kernel_run.trace.feature_rows(), **stats["account"]}
 
         model_path = _model_for_spec(spec)
         outputs: dict[str, object] = {}

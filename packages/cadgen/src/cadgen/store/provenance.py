@@ -6,12 +6,13 @@ entry per model beside its record, written by the build right after the
 record for the result tree the record names::
 
     {
-      "kind": "provenance", "schemaVersion": 3,
+      "kind": "provenance", "schemaVersion": 5,
       "model": "/abs/src/bracket.py::bracket",
-      "tree": "<the record's tree>", "stepHash": "<sha256 of the STEP written>",
+      "tree": "<the record's tree>",
       "features": [{"op": "cut", "file": "src/bracket.py", "line": 12, "function": "bracket",
                     "inputs": [0, 1]}, …],
-      "components": {"<cid>": {"bracket.make_box1": 0, "bracket.cut1": 2, …}, …}
+      "components": {"<cid>": {"bracket.make_box1": 0, "bracket.cut1": 2, …}, …},
+      "occurrences": {"<token>": 2, …}
     }
 
 ``features`` are the kernel constructions the model's code called, in call
@@ -20,21 +21,24 @@ features, by place, that made what it was given (null: made outside the run);
 ``components`` are the components the build made, each with the feature every
 feature name of its lineage stands for and the features those were given (a
 feature is named among the features its part descends from, so one feature may
-have another name in another part). A line and a file are here and nowhere
-else: a name holds neither, so an edit that moves code renames nothing.
+have another name in another part); ``occurrences`` are the result's occurrences
+of those components, each with the feature whose call made the shape it places
+(null: none of the run's) -- a part one construction made twice is one part, and
+each of its occurrences was made by its own call. A line and a file are here and
+nowhere else: a name holds neither, so an edit that moves code renames nothing.
 
 Readers never open it (STORE.md §2, the two sides). Its one reader is
 ``cadgen store where <document> <ref>``: path → ``index/output`` → the model
-→ its record and this entry, the file's hash checked against ``stepHash``,
-then the ref resolved in the document tree the record names (by the one
-resolver every ref goes through, ``cadgen.refs``) to its occurrence and
-component, the entry that
-lists the component found -- the model's, or a pinned child's -- and the
-feature the element's name (or, for an occurrence, its body's lineage) names
-looked up there, with the one the lineage says last modified it. Without an
-entry, or with one for other bytes, it says it does not know; nothing here
-finds or renders geometry. The entry goes with ``store forget`` and is never
-evicted (§8); like a record, one at a key this cadgen does not own is obsolete.
+→ its record and this entry, the file's hash checked against the record's output
+entry, then the ref resolved in the tree the record names (by the one resolver every
+ref goes through, ``cadgen.refs``) to its occurrence and component, and the entry
+that describes that occurrence -- the model's, or, through each link it sits under,
+a pinned child's -- where the feature the element's name (or, for an occurrence, its
+body's lineage) names is looked up, among the calls that made that occurrence, with
+the one the lineage says last modified it. Without an entry, or with one for other
+bytes, it says it does not know; nothing here finds or renders geometry. The entry
+goes with ``store forget`` and is never evicted (§8); like a record, one at a key
+this cadgen does not own is obsolete.
 """
 
 from __future__ import annotations
@@ -53,8 +57,9 @@ _PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 # their elements by them. 3: features by place in the run, and each component with
 # the feature each name of its lineage stands for (a part names its features among
 # its own). 4: no document digest: the entry is written with the record, before the
-# file exists, and the record's output entry says which bytes are the model's.
-PROVENANCE_SCHEMA_VERSION = 4
+# file exists, and the record's output entry says which bytes are the model's. 5: each
+# occurrence of a component the build made, with the feature whose call made its shape.
+PROVENANCE_SCHEMA_VERSION = 5
 
 __all__ = [
     "PROVENANCE_KIND",
@@ -76,7 +81,7 @@ def provenance_key(model: Path | str) -> str:
 
 def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str) -> None:
     """The entry for ``model``'s build that published ``tree``: ``payload`` holds its
-    ``features`` and ``components``. Idempotent; atomic."""
+    ``features``, ``components`` and ``occurrences``. Idempotent; atomic."""
     ref = resolve_model_ref(model)
     body = {
         "kind": PROVENANCE_KIND,
@@ -85,6 +90,7 @@ def write_provenance(model: Path | str, payload: dict[str, Any], *, tree: str) -
         "tree": str(tree or ""),
         "features": list(payload.get("features") or []),
         "components": {str(cid): dict(names) for cid, names in sorted(dict(payload.get("components") or {}).items())},
+        "occurrences": {str(token): index for token, index in sorted(dict(payload.get("occurrences") or {}).items())},
     }
     write_entry(PROVENANCE_KIND, provenance_key(ref), body)
 
@@ -196,18 +202,25 @@ def where(document: Path | str, ref: str) -> Where:
     if not component.get("lineage"):
         return answer.unknown("no feature of a model's run made this body: it was read from a file, or "
                               "built outside the kernel's constructions")
-    found = _described(model, record, entry, cid, component)
+    found = _described(model, record, entry, occurrence_id, cid)
     if found is None:
         return answer.unknown("no build the store remembers made this body; run the model again")
-    answer.model, described, listed = found
+    answer.model, described, placed = found
     feature_rows = described.get("features") or []
-    stands = {str(name): index for name, index in (described["components"][listed] or {}).items()
+    stands = {str(name): index for name, index in (described["components"][cid] or {}).items()
               if isinstance(index, int) and 0 <= index < len(feature_rows)}
-    named = {index: name for name, index in stands.items()}
     try:
         lineage = lineages[occurrence_id] = read_lineage(read_verified_object(str(component["lineage"])))
     except (OSError, ValueError):
         return answer.unknown("the body's lineage is no longer in the store; run the model again")
+    # A part one construction made twice is named by its first making; this occurrence
+    # was made by its own calls, called as those were.
+    first = stands.get(str(lineage.get("made")))
+    if isinstance(placed, int) and first is not None and placed != first:
+        counterparts = _parallel(feature_rows, first, placed)
+        if counterparts is not None:
+            stands = {name: counterparts.get(index, index) for name, index in stands.items()}
+    named = {index: name for name, index in stands.items()}
 
     def feature(name: Any) -> dict[str, Any] | None:
         index = stands.get(str(name)) if name is not None else None
@@ -242,51 +255,106 @@ def where(document: Path | str, ref: str) -> Where:
     return answer
 
 
-def _described(model: str, record: dict[str, Any], entry: dict[str, Any], cid: str,
-               component: dict[str, Any]) -> tuple[str, dict[str, Any], str] | None:
-    """The entry that lists the component ``cid`` (a flattened document tree's
-    ``component``), its model and the component it lists: ``cid`` itself, else the
-    component of the same construction and lineage in its build's tree -- a saved file
-    keeps an earlier build's leaf for the same bytes where the two are named alike
-    (``store.build._check_reused_document``)."""
-    from cadgen.store.trees import flatten
+def _described(model: str, record: dict[str, Any], entry: dict[str, Any], token: str,
+               cid: str) -> tuple[str, dict[str, Any], int | None] | None:
+    """The build that made the occurrence ``token`` of the model's flattened result, whose
+    component is ``cid``: its model, its entry, and the feature whose call made the shape
+    the occurrence places (None where the entry does not say). An occurrence the model's
+    run placed is in its entry; one a link placed is followed into the pinned child's
+    entry, through each link it sits under (``trees.flatten_tree``'s origins), by its
+    token there. Else the first entry listing the component answers."""
+    from cadgen.store.trees import flatten_tree, get_tree
 
-    entries = list(_entries(model, record, entry))
-    for owner, described in entries:
+    current = (model, record, entry, token)
+    while True:
+        owner, owner_record, described, node = current
+        occurrences = described.get("occurrences") or {}
+        if node in occurrences and cid in (described.get("components") or {}):
+            placed = occurrences[node]
+            return owner, described, placed if isinstance(placed, int) else None
+        tree = get_tree(str(owner_record.get("tree") or ""))
+        origins: dict[str, tuple[str, str]] = {}
+        if tree is not None:
+            try:
+                flatten_tree(tree, origins=origins)
+            except (OSError, ValueError, TypeError, KeyError):
+                origins = {}
+        if node not in origins:
+            break
+        linked, child_token = origins[node]
+        child = next(((child_model, child_record, child_entry)
+                      for child_model, child_record, child_entry in _pinned(owner_record)
+                      if child_record.get("tree") == linked), None)
+        if child is None:
+            break
+        current = (*child, child_token)
+    for owner, described in _entries(model, record, entry):
         if cid in (described.get("components") or {}):
-            return owner, described, cid
-    names = (component.get("construction"), component.get("lineage"))
-    for owner, described in entries:
-        listed = described.get("components") or {}
-        tree = flatten(str(described.get("tree") or "")) if described.get("tree") else None
-        for other, built in ((tree or {}).get("components") or {}).items():
-            if other in listed and (built.get("construction"), built.get("lineage")) == names:
-                return owner, described, other
+            return owner, described, None
     return None
 
 
-def _entries(model: str, record: dict[str, Any], entry: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
-    """The model's entry, then each pinned child's while the child's record and
-    entry still describe the pinned tree, children first-called first, their
-    own children after them."""
+def _parallel(rows: list[dict[str, Any]], first: int, other: int) -> dict[int, int] | None:
+    """Each feature the feature ``first`` descends from (itself included) mapped to its
+    counterpart among those ``other`` descends from, where the two were called alike --
+    the same operations of the same functions, each given its counterpart's
+    counterparts, in call order -- as the calls of a part one construction made twice
+    are; None where they were not."""
+    def descent(index: int) -> list[int]:
+        seen: set[int] = set()
+        pending = [index]
+        while pending:
+            current = pending.pop()
+            if current in seen or not 0 <= current < len(rows):
+                continue
+            seen.add(current)
+            pending.extend(given for given in rows[current].get("inputs") or [] if isinstance(given, int))
+        return sorted(seen)
+
+    ours, theirs = descent(first), descent(other)
+    if len(ours) != len(theirs):
+        return None
+    counterparts = dict(zip(ours, theirs))
+    for one, two in counterparts.items():
+        mine, yours = rows[one], rows[two]
+        if (mine.get("op"), mine.get("function")) != (yours.get("op"), yours.get("function")):
+            return None
+        if [counterparts.get(given) if isinstance(given, int) else None for given in mine.get("inputs") or []] \
+                != list(yours.get("inputs") or []):
+            return None
+    return counterparts
+
+
+def _pinned(record: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any], dict[str, Any]]]:
+    """Each child ``record`` pins, with its record and entry, while both still describe
+    the pinned tree."""
     from cadgen.store.records import read_record
 
+    for child in record.get("children") or []:
+        child_model, pin = str(child.get("model") or ""), str(child.get("tree") or "")
+        if not child_model:
+            continue
+        child_record = read_record(child_model)
+        child_entry = read_provenance(child_model)
+        if child_record is None or child_entry is None:
+            continue
+        if child_record.get("tree") != pin or child_entry.get("tree") != pin:
+            continue
+        yield child_model, child_record, child_entry
+
+
+def _entries(model: str, record: dict[str, Any], entry: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """The model's entry, then each pinned child's (``_pinned``), children first-called
+    first, their own children after them."""
     yield model, entry
     seen = {model}
     pending = [record]
     while pending:
         current = pending.pop(0)
-        for child in current.get("children") or []:
-            child_model, pin = str(child.get("model") or ""), str(child.get("tree") or "")
-            if not child_model or child_model in seen:
+        for child_model, child_record, child_entry in _pinned(current):
+            if child_model in seen:
                 continue
             seen.add(child_model)
-            child_record = read_record(child_model)
-            child_entry = read_provenance(child_model)
-            if child_record is None or child_entry is None:
-                continue
-            if child_record.get("tree") != pin or child_entry.get("tree") != pin:
-                continue
             yield child_model, child_entry
             pending.append(child_record)
 

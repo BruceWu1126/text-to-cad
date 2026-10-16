@@ -513,7 +513,7 @@ class SavedFileVerifyTest(unittest.TestCase):
         with kernel_memo.run(Path(__file__)) as run:
             body = block()
         body.label = "block"
-        self.assertEqual({"ok": True}, self.build(body, "block", namer=run.identify)[3])
+        self.assertEqual({"ok": True}, self.build(body, "block", namer=run)[3])
         named = read_scene(self.root / "block.step")
         [leaf] = named.leaves()
         refs = [face.ref for face in leaf.entities("face")]
@@ -550,7 +550,7 @@ class SavedFileVerifyTest(unittest.TestCase):
         self.addCleanup(kernel_memo.clear)
         with kernel_memo.run(Path(__file__)) as run:
             assembly = screws()
-        tree_hash, tree, document, verify = self.build(assembly, "screws", namer=run.identify)
+        tree_hash, tree, document, verify = self.build(assembly, "screws", namer=run)
         self.assertEqual(sorted(occurrence["name"] for occurrence in tree["occurrences"]),
                          ["screw:0", "screw:1", "screw:2"])
         [(_cid, entry)] = tree["components"].items()

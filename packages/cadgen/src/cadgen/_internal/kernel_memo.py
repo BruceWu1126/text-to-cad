@@ -374,8 +374,6 @@ class _Run:
         self.counts: dict[int, int] = {}
         self.depth = 0
         self.transient: dict[Any, _Made] = {}
-        # (construction key, lineage object) -> {feature name: feature index} (``identify``).
-        self.names: dict[tuple[str | None, str], dict[str, int]] = {}
 
     def count(self, key_id: int) -> int:
         n = self.counts.get(key_id, 0) + 1
@@ -406,29 +404,37 @@ class _Run:
         parent = shape.__dict__.get("topo_parent") if hasattr(shape, "__dict__") else None
         return self.feature_of(parent) if parent is not None and parent is not shape else None
 
-    def identify(self, shape: Any) -> tuple[str | None, dict[str, Any] | None]:
+    def account(self, shape: Any) -> tuple[str | None, dict[str, Any] | None, dict[str, int]]:
         """What names one component this run made: its construction key
         (:func:`construction_key`) and its lineage (``kernel_trace.Trace.account``),
-        either None when the run cannot say. The feature each name of the lineage
-        stands for is kept for :meth:`names_for`: the first leaf's, for a part the run
-        made more than once (identical constructions are one part)."""
+        either None when the run cannot say, and the feature of the run, by index, each
+        feature name of the lineage stands for -- the body's own, so two bodies named
+        alike (made by constructions the memo cannot key) never answer for each other."""
         from OCP.TopLoc import TopLoc_Location
-
-        from cadgen._internal.component_package import lineage_bytes
 
         wrapped = _wrapped(shape)
         if wrapped is None:
-            return None, None
+            return None, None, {}
         key = construction_key(shape)
         lineage, names = self.trace.account(wrapped.Located(TopLoc_Location()), self.made_by)
-        if lineage is not None:
-            self.names.setdefault((key, hashlib.sha256(lineage_bytes(lineage)).hexdigest()), names)
+        return key, lineage, names
+
+    def identify(self, shape: Any) -> tuple[str | None, dict[str, Any] | None]:
+        """:meth:`account`'s construction key and lineage: what names a component."""
+        key, lineage, _names = self.account(shape)
         return key, lineage
 
-    def names_for(self, entry: dict[str, Any]) -> dict[str, int]:
-        """For a component entry this run named (``construction``, ``lineage``), the
-        feature of the run, by index, each feature name of its lineage stands for."""
-        return dict(self.names.get((entry.get("construction"), entry.get("lineage")), {}))
+    def placed_by(self, shape: Any) -> int | None:
+        """The feature whose call made the shape a leaf places -- the one that first
+        returned the object, else the maker of its geometry -- through the features that
+        only place or hold another's (``Trace.unwrapped``): for a part one construction
+        made twice (one part, the second call the memo's hit), the call that made this
+        occurrence of it. None where no feature of the run made it."""
+        index = self.trace.made(shape)
+        if index is None:
+            wrapped = _wrapped(shape)
+            index = self.made_by(wrapped.TShape()) if wrapped is not None else None
+        return None if index is None else self.trace.unwrapped(index)
 
 
 @contextlib.contextmanager
@@ -503,7 +509,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                     entry = None
         if entry is not None:
             result = _hit(state, entry, kind, function, args, kwargs, shapes)
-            feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+            feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
             entry.refresh(feature.index, state.id)
             _STATS["hits"] += 1
             return None if kind == "constructor" else result
@@ -518,7 +524,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
-        feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+        feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
         snapshot = None
         try:
             effects, sound = _effects(captured, state)
@@ -570,7 +576,7 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
         captured = []
     function_result = function(*args, **kwargs)
     result = args[0] if kind == "constructor" else function_result
-    feature = state.trace.record(op, frame, inputs, _result_shapes(result))
+    feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
     if captured:
         try:
             _effects(captured, state)
@@ -1239,6 +1245,22 @@ def _taint(made: _Made | None, state: _Run) -> None:
                 state.transient.pop(item.tshape, None)
                 _REGISTRY.pop(item.tshape, None)
                 pending.extend(item.subs)
+
+
+def _returned_shapes(result: Any) -> list:
+    """The shape objects a call returned itself: the result, or the members of a list or
+    tuple it returned -- not the children they hold."""
+    from build123d.topology import Shape
+
+    found: list = []
+    pending = [result]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, Shape):
+            found.append(value)
+        elif isinstance(value, (list, tuple)):
+            pending.extend(reversed(value))
+    return found
 
 
 def _result_shapes(result: Any) -> list:

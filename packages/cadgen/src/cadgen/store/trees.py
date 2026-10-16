@@ -294,6 +294,7 @@ def flatten_tree(
     *,
     tree_hash: str | None = None,
     memo: dict[str, dict[str, Any]] | None = None,
+    origins: dict[str, tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """:func:`flatten` of a tree held in memory — one not (yet) in the store.
 
@@ -306,7 +307,9 @@ def flatten_tree(
     provisional ids, then every id of the flattened tree is minted again from
     its structure, names and composed placements (``tree_tokens.assign_tokens``),
     which gives the parent's own nodes the tokens they already had and the
-    child's the tokens the saved document gives them."""
+    child's the tokens the saved document gives them. ``origins``, when given, is
+    filled with where each node a link placed came from: its token here mapped to the
+    linked tree and the node's token in that tree flattened."""
     from cadgen._internal.tree_tokens import assign_tokens, retoken
 
     memo = memo if memo is not None else {}
@@ -370,6 +373,10 @@ def flatten_tree(
             key = link_id if occurrence_id == child_root_id else provisional(link_id, occurrence_id)
             inherited_assignments[key] = remapped[material_id]
 
+    # Each node a link placed, under its provisional id (or the link's own): the linked
+    # tree and the node's token in it (``origins``).
+    placed_from: dict[str, tuple[str, str]] = {}
+
     def expand(node: dict[str, Any]) -> dict[str, Any] | None:
         node_type = str(node.get("nodeType") or "")
         node_id = str(node.get("id") or "")
@@ -391,6 +398,8 @@ def flatten_tree(
             child_is_part = str(child.get("entryKind") or "") == "part"
             child_root = (child.get("assembly") or {}).get("root")
             child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
+            if child_root_id:
+                placed_from[node_id] = (child_hash, child_root_id)
             for occ in child.get("occurrences") or []:
                 placed = dict(occ)
                 occ_id = str(occ.get("id") or "")
@@ -414,6 +423,7 @@ def flatten_tree(
             def rebase(sub: dict[str, Any]) -> dict[str, Any]:
                 out = dict(sub)
                 out["id"] = provisional(node_id, str(sub.get("id") or ""))
+                placed_from[out["id"]] = (child_hash, str(sub.get("id") or ""))
                 if sub.get("children"):
                     out["children"] = [rebase(c) for c in sub["children"]]
                     out["leafPartIds"] = [leaf for c in out["children"] for leaf in c.get("leafPartIds", [c["id"]])]
@@ -461,6 +471,8 @@ def flatten_tree(
         )
         occurrences, expanded_root = retokened["occurrences"], retokened["assembly"]["root"]
         inherited_assignments = retokened["appearance"]["assignments"]
+        if origins is not None:
+            origins.update({mapping[node]: source for node, source in placed_from.items() if node in mapping})
     for occurrence_id, material_id in inherited_assignments.items():
         appearance_assignments.setdefault(occurrence_id, material_id)
     descriptor["occurrences"] = occurrences

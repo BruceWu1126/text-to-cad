@@ -206,6 +206,9 @@ class Trace:
         # id(shape) -> (weakref, feature index): the feature that returned each
         # live result object. A dead reference, or a recycled id, answers nothing.
         self._by_object: dict[int, tuple[weakref.ref, int]] = {}
+        # The same for the call that made each live object: the first feature that
+        # returned it itself, never one that only held it (a compound it was attached to).
+        self._made_object: dict[int, tuple[weakref.ref, int]] = {}
         self._signatures_by_body: dict[tuple, dict[int, tuple]] = {}
         self._chains: dict[tuple[int, int, str, int], tuple[tuple[int, int] | None, int | None]] = {}
         # (TShape, element kind) -> the map of a body's elements of that kind in
@@ -261,6 +264,15 @@ class Trace:
         reference, index = found
         return index if reference() is shape else None
 
+    def made(self, shape: Any) -> int | None:
+        """The feature whose call made this very object -- the first that returned it
+        itself -- or None."""
+        found = self._made_object.get(id(shape))
+        if found is None:
+            return None
+        reference, index = found
+        return index if reference() is shape else None
+
     def given(self, shapes: list[Any], feature_of: Callable[[Any], int | None]) -> list[tuple[Any, int | None, Any]]:
         """The inputs of a call as it is given them, taken before it runs: each shape,
         the feature that made it (``feature_of``) and a handle of its ``TopoDS`` then --
@@ -268,10 +280,11 @@ class Trace:
         return [(shape, feature_of(shape), handle_of(shape)) for shape in shapes]
 
     def record(self, op: str, frame: tuple[str, int, str], inputs: list[tuple[Any, int | None, Any]],
-               results: list[Any]) -> Feature:
+               results: list[Any], made: list[Any] = ()) -> Feature:
         """One feature: ``inputs`` are the call's, as :meth:`given` took them,
-        ``results`` the live result objects the call returned. A labelled input pins
-        the name of the feature that made it."""
+        ``results`` the live result objects the call returned and the children they hold,
+        ``made`` the objects it returned itself. A labelled input pins the name of the
+        feature that made it."""
         file, line, function = frame
         feature = Feature(
             index=len(self.features), op=op, file=file, line=line, function=function,
@@ -288,6 +301,13 @@ class Trace:
                 self._by_object[id(shape)] = (weakref.ref(shape), feature.index)
             except TypeError:
                 pass
+        for shape in made:
+            try:
+                found = self._made_object.get(id(shape))
+                if found is None or found[0]() is not shape:
+                    self._made_object[id(shape)] = (weakref.ref(shape), feature.index)
+            except TypeError:
+                pass
         return feature
 
     def _pin(self, index: int, label: object, *, at: int) -> None:
@@ -300,11 +320,11 @@ class Trace:
 
         if not isinstance(label, str) or not label or is_occurrence_token(label):
             return
-        feature = self.features[self._unwrapped(index)]
+        feature = self.features[self.unwrapped(index)]
         if feature.label is None:
             feature.label, feature.pinned_at = identifier(label), at
 
-    def _unwrapped(self, index: int) -> int:
+    def unwrapped(self, index: int) -> int:
         """The feature that made what feature ``index`` returned, through the features
         that only place or hold another's: a placement (``moved``, ``located``, a copy
         that keeps the shape) returns the very shape it was given, and a compound built
@@ -361,7 +381,7 @@ class Trace:
             traced_by_kind.append([self._lineage(made_by, owners, elements.FindKey(ordinal), kind)
                                    for ordinal in range(1, elements.Extent() + 1)])
         # A body build123d only wrapped or placed was made by what it wraps.
-        made_feature = None if maker is None else self._unwrapped(maker)
+        made_feature = None if maker is None else self.unwrapped(maker)
         named_features = {made[0] for traced in traced_by_kind for made, _modifier in traced if made is not None}
         named_features |= {modifier for traced in traced_by_kind for _made, modifier in traced if modifier is not None}
         if made_feature is not None:

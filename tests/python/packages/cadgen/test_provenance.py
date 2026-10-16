@@ -173,7 +173,7 @@ class TheEntry(ProvenanceCase):
         self.assertEqual({"pin", "arm"}, set(by_model))
         for name, entry in by_model.items():
             record = self._record(f"src/{name}.py")
-            self.assertEqual(("provenance", 4), (entry["kind"], entry["schemaVersion"]))
+            self.assertEqual(("provenance", 5), (entry["kind"], entry["schemaVersion"]))
             self.assertTrue(_posix(entry["model"]).endswith(f"src/{name}.py::{name}"))
             self.assertEqual(record["tree"], entry["tree"])
             # Written with the record, before the file: the record says which bytes are the model's.
@@ -195,6 +195,8 @@ class TheEntry(ProvenanceCase):
 
         [cid] = pin["components"]
         self.assertEqual(made, pin["components"][cid]["pin.make_cylinder1"])
+        # Its one occurrence, the shape that call made.
+        self.assertEqual([made], list(pin["occurrences"].values()))
         record = self._record("src/pin.py")
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
             from cadgen.store.trees import get_tree
@@ -318,6 +320,109 @@ class StoreWhere(ProvenanceCase):
         self.assertIn("unknown", missing.stdout)
         never = self._store("where", "src/arm.py", "#bar")
         self.assertEqual(1, never.returncode, never.stdout + never.stderr)
+
+
+TWINS = """
+    from cadgen import build123d as bd, label_shape, step
+
+
+    @step(out="../STEP/twins.step")
+    def twins():
+        a = label_shape(bd.Box(10, 10, 10), "a")
+        b = label_shape(bd.Pos(30, 0, 0) * bd.Box(10, 10, 10), "b")
+        return bd.Compound(children=[a, b])
+
+
+    if __name__ == "__main__":
+        twins()
+"""
+
+# The twins, placed from the child's build.
+PAIR = """
+    from cadgen import build123d as bd, step
+    from twins import twins
+
+
+    @step(out="../STEP/pair.step")
+    def pair():
+        placed = bd.Pos(0, 50, 0) * twins()
+        placed.label = "twins"
+        return bd.Compound(children=[placed, bd.Pos(0, -50, 0) * bd.Box(4, 4, 4)])
+
+
+    if __name__ == "__main__":
+        pair()
+"""
+
+# A construction the memo cannot key (a NumPy argument): its parts are told apart by their
+# content alone, and named alike.
+UNKEYED = """
+    import numpy as np
+
+    from cadgen import build123d as bd, label_shape, step
+
+
+    @step(out="../STEP/unkeyed.step")
+    def unkeyed():
+        small = label_shape(bd.Solid.make_box(np.array(10.0), 10, 10), "small")
+        large = label_shape(bd.Pos(30, 0, 0) * bd.Solid.make_box(np.array(20.0), 20, 20), "large")
+        return bd.Compound(children=[small, large])
+
+
+    if __name__ == "__main__":
+        unkeyed()
+"""
+
+
+class EachOccurrence(unittest.TestCase):
+    """``store where`` answers per occurrence: two occurrences of one part, made at two
+    lines, each answer with their own line, and so do two parts made by constructions the
+    memo cannot key, which are named alike."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = generated_cad_directory(prefix="provenance-occurrences-")
+        cls.root = Path(cls._tmp.name) / "proj"
+        (cls.root / "src").mkdir(parents=True)
+        cls.cache = Path(cls._tmp.name) / "store"
+        cls.lines = {}
+        for name, text in (("twins.py", TWINS), ("unkeyed.py", UNKEYED), ("pair.py", PAIR)):
+            source = textwrap.dedent(text).lstrip()
+            (cls.root / "src" / name).write_text(source, encoding="utf-8")
+            for number, line in enumerate(source.splitlines(), start=1):
+                for label in ("a", "b", "small", "large"):
+                    if f'"{label}")' in line:
+                        cls.lines[label] = number
+            result = _run(f"src/{name}", cwd=cls.root, cache=cls.cache)
+            assert result.returncode == 0, result.stdout + result.stderr
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def _where(self, document: str, ref: str) -> dict:
+        result = _run("-m", "cadgen.cli", "store", "where", document, ref, "--json", cwd=self.root, cache=self.cache)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return json.loads(result.stdout.strip())
+
+    def test_one_part_made_at_two_lines_answers_each_occurrence_with_its_own(self) -> None:
+        for label in ("a", "b"):
+            with self.subTest(label):
+                for ref in (f"#{label}", f"#{label}/f:twins.make_box1.1"):
+                    self.assertEqual(self.lines[label], self._where("STEP/twins.step", ref)["made"]["line"], ref)
+
+    def test_an_occurrence_a_link_places_answers_from_the_childs_build(self) -> None:
+        for label in ("a", "b"):
+            with self.subTest(label):
+                answer = self._where("STEP/pair.step", f"#{label}/f:twins.make_box1.1")
+                self.assertEqual(("twins.py", self.lines[label]), (answer["made"]["file"], answer["made"]["line"]))
+                self.assertTrue(_posix(answer["model"]).endswith("src/twins.py::twins"), answer)
+
+    def test_parts_the_memo_cannot_key_answer_each_with_its_own(self) -> None:
+        for label in ("small", "large"):
+            with self.subTest(label):
+                for ref in (f"#{label}", f"#{label}/f:unkeyed.make_box1.1"):
+                    self.assertEqual(self.lines[label], self._where("STEP/unkeyed.step", ref)["made"]["line"], ref)
 
 
 class TheEntryAndTheStore(unittest.TestCase):
