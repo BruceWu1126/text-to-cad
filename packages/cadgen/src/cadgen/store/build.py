@@ -460,8 +460,9 @@ def _attach_components(
 ) -> Callable[[], Any]:
     """Give each leaf of a document walk its component, and return how to place
     them as the document places them: the shape an unmeasured document's bounds are
-    taken of, each leaf the geometry of the component it takes, so every path
-    measures a tree alike.
+    taken of, each leaf as the file holds it (a leaf that verifies is its component
+    within the display tolerance, and the file's prototype is in hand where the
+    component may be a child's, held only as bytes).
 
     A leaf ``authored`` names -- by its token, as a build's read-back maps one
     written leaf to the one authored occurrence it was written from -- takes that
@@ -483,7 +484,6 @@ def _attach_components(
         _build123d_shape_from_topods, _component_id, _shape_brep_bytes, prepare_geometry_component,
         prepare_published_component, _normalized_face_colors,
     )
-    from cadgen._internal.step_scene_loader import _located_shape
     from cadgen._internal.step_scene_mesh import _face_colors_by_ordinal, scene_occurrence_shape
 
     written: dict[Any, tuple[bytes, str]] = {}
@@ -506,8 +506,8 @@ def _attach_components(
             candidate, "bintools-v4", digest, face_colors, lambda: prototype, force=force)
         if candidate is not None and not verified and differs is not None:
             differs.append(str(occurrence["name"]))
+        placed.append(lambda node=node: scene_occurrence_shape(scene, node))
         if verified:
-            placed.append(lambda shape=candidate.shape, location=node.location: _located_shape(shape(), location))
             if candidate.color is not None and "color" not in occurrence:
                 occurrence["color"] = list(candidate.color)
             cid = candidate.cid
@@ -520,7 +520,6 @@ def _attach_components(
                 if candidate.prepared is not None:
                     walk.prepared[cid] = candidate.prepared
         else:
-            placed.append(lambda node=node: scene_occurrence_shape(scene, node))
             cid = parsed_cids.get(key)
             if cid is None:
                 identity = scene.prototype_identity.get(key)
