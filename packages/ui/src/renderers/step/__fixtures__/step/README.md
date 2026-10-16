@@ -21,13 +21,13 @@ one revolute mate. Every property is there for a test:
 | file | bytes | the request it answers |
 | --- | ---: | --- |
 | `assembly.json` | 3,380 | `GET /__cad/store?file=<tree>/assembly.json&documentHash=…` — the view descriptor. Carries `kind: "assembly-package"`, the `tree`, the `viewId`, the attested `producer`, two components (each naming its `part`), two occurrences and the model box. Every id is one the build minted: the root `o:895cdc947985`, the base `o:cec517897e79`, the arm `o:5da881c8dcfe`. |
-| `components/ec7b31f67285c5f1.selectors.json` | 8,181 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table (schema 3): each face's, edge's and vertex's name (its lineage: `f:hinge_block.make_box1.1`, the bore `f:hinge_block.make_cylinder1.1`, the cut's new rims `e:base.1` and `e:base.2`), the facts, adjacency, chains and tangent groups picking and measuring join to the mesh by ordinal. |
-| `components/453b45b958ac1a06.selectors.json` | 5,907 | the same, for the arm, whose label names its box's elements (`f:arm.1` … `f:arm.6`). |
+| `components/c410026346e522a2.selectors.json` | 8,229 | `GET /__tess_cache/<part>.selectors.json?object=…&maxBytes=…` for the base: its part record's `selectors`. cadgen's selector table (schema 3): each face's, edge's and vertex's name (its lineage: `f:hinge_block.make_box1.1`, the bore `f:hinge_block.make_cylinder1.1`, the cut's new rims `e:hinge_block.cut1.1` and `e:hinge_block.cut1.2`), the facts, adjacency, chains and tangent groups picking and measuring join to the mesh by ordinal. |
+| `components/d4c6d71a49842756.selectors.json` | 6,375 | the same, for the arm: its own box's elements (`f:hinge_block.make_box1.1` … `.6`), its label naming the occurrence. |
 | `components/<cid>.glb` | 2,604–9,292 | the parts' display meshes (GLB bodies), one per component, each its part record's `glb`: what the harness's part store serves (`/__tess_cache/` probe, batch and single reads, by each component's `part`). |
 | `hinge_block.step.json` | 2,247 | **no request at all.** The harness puts its `animation` section inline on the catalog entry, which is what the real scanner does, and the renderer plays the routine's keyframes straight from there; its tracks name the arm by its token. |
 | `hinge_block.articulation.json` | 554 | **no request at all.** cadgen's articulation of the sidecar's kinematics (`cadgen.articulation.step_articulation` over `assembly.json` and the sidecar), which the harness puts inline on the catalog entry as `articulation`, as the real scanner does; the Position tool plays it. `tests/python/packages/cadgen/test_articulation.py` asserts it is what cadgen writes today. |
 
-Total 32,165 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
+Total 32,681 bytes with the meshes and tables. No Git attribute applies here (`git check-attr -a` on these
 paths prints nothing), and the repository carries no LFS. Keep it that way — an
 LFS pointer would be rejected by name at `renderAssetClient.js`'s readers.
 

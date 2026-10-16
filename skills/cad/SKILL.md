@@ -151,8 +151,9 @@ operation, and how many times that function had called it in making that part
 (`bracket.make_box1`, the first box `bracket` made for it) -- and the element's number
 among those that operation made: `f:bracket.make_box1.6`. A later operation that
 trims or splits it keeps that name (a split piece adds its number:
-`f:bracket.make_box1.6.2`), and a label on a shape another operation is given
-names the shape's operation (`f:lid.3`). So a ref keeps resolving to the same face
+`f:bracket.make_box1.6.2`), and a label on a shape a later operation makes
+something of names the shape's operation there (`f:boss.3`; a part placed as it
+is keeps its own names, its label naming the occurrence). So a ref keeps resolving to the same face
 through a rebuild with other dimensions, code moved to other lines, a sibling
 inserted beside it, an edit to another part and the STEP round trip; it names
 another face when an earlier call of the same operation in the same function is

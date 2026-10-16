@@ -74,7 +74,9 @@ construction alone: nothing the process accumulated enters it -- not the
 sub-shapes earlier runs extracted, which a hit leaves registered (only those
 some operation of this run changed are named, by kind and index), not a change
 of flags alone (a compound taking its children leaves them no longer free,
-which changes nothing a part is made of) -- so a warm worker that built other
+which changes nothing a part is made of), not the count that tells a run's
+identical calls apart (identical constructions are one part, however many
+identical calls any part made before them) -- so a warm worker that built other
 models, or other versions of this one, gives the key a cold run gives. A shape
 whose making passes through a call the memo could not key (an effect it cannot
 name, a key it no longer holds) has none, and is named by its bytes.
@@ -408,7 +410,8 @@ class _Run:
         """What names one component this run made: its construction key
         (:func:`construction_key`) and its lineage (``kernel_trace.Trace.lineage``),
         either None when the run cannot say. The feature each name of the lineage
-        stands for is kept for :meth:`names_for`."""
+        stands for is kept for :meth:`names_for`: the first leaf's, for a part the run
+        made more than once (identical constructions are one part)."""
         from OCP.TopLoc import TopLoc_Location
 
         from cadgen._internal.component_package import lineage_bytes
@@ -419,7 +422,7 @@ class _Run:
         key = construction_key(shape)
         lineage, names = self.trace.account(wrapped.Located(TopLoc_Location()), self.made_by)
         if lineage is not None:
-            self.names[(key, hashlib.sha256(lineage_bytes(lineage)).hexdigest())] = names
+            self.names.setdefault((key, hashlib.sha256(lineage_bytes(lineage)).hexdigest()), names)
         return key, lineage
 
     def names_for(self, entry: dict[str, Any]) -> dict[str, int]:
@@ -961,7 +964,8 @@ def _made_material(made: "_Made") -> tuple:
     if made.parent is None:
         if made.key is None:
             raise _Unstable("a shape no memoized operation made")
-        head: tuple = ("made", _stable_id(made.key[0]), made.key[1], made.position)
+        # The count of identical calls before this one is the memo's, never the key's.
+        head: tuple = ("made", _stable_id(made.key[0]), made.position)
     else:
         head = ("sub", _made_material(made.parent), made.kind, made.index)
     return (*head, _effects_material(made))
@@ -997,8 +1001,8 @@ def _effects_named(effects: Any) -> tuple:
 def _effect_material(effect: "_Effect | None") -> tuple:
     if effect is None or effect.origin is None:
         raise _Unstable("an effect no memoized call had")
-    key_id, n, index = effect.origin
-    return ("effect", _stable_id(key_id), n, index)
+    key_id, _n, index = effect.origin
+    return ("effect", _stable_id(key_id), index)
 
 
 def _stable_id(root: int) -> bytes:
@@ -1078,8 +1082,8 @@ def _stable_value(item: Any) -> Any:
 def _stable_placed(placed: tuple) -> tuple:
     _tag, base, location, orientation = placed
     if base[0] == "made":
-        _made, key_id, n, position, applied = base
-        head: tuple = ("made", _STABLE[key_id], n, position)
+        _made, key_id, _n, position, applied = base
+        head: tuple = ("made", _STABLE[key_id], position)
     else:
         _sub, parent, kind, index, applied = base
         head = ("sub", _stable_placed(parent), kind, index)

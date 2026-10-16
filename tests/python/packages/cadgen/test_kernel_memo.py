@@ -556,21 +556,37 @@ class TraceTest(KernelMemoCase):
         self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
         self.assertEqual(len(set(lineage["edges"])), len(lineage["edges"]), "a top edge is not its bottom twin")
 
-    def test_a_label_pins_the_name_of_what_the_author_labelled(self) -> None:
-        """A shape the model labels and hands on names the feature that made it,
-        through build123d's part wrapper and through a placement."""
-        from build123d import Compound, Cylinder, Pos
+    def test_a_label_pins_the_name_in_what_is_made_of_the_labelled_shape(self) -> None:
+        """A shape the model labels and gives another construction names the feature
+        that made it -- through build123d's part wrapper and through a placement -- in
+        what that construction makes. Placed in an assembly, a labelled shape is an
+        occurrence the label names: its own elements keep its construction's names, so
+        identical constructions labelled apart are one part, named alike."""
+        from build123d import Box, Compound, Cylinder, Pos
 
         def model():
-            peg = Pos(40, 0, 0) * Cylinder(3, 10)
-            peg.label = "peg"
-            return Compound(children=[peg], label="pair")
+            pegs = []
+            for index in range(2):
+                peg = Pos(40 * index, 0, 0) * Cylinder(3, 10)
+                peg.label = f"peg:{index}"
+                pegs.append(peg)
+            boss = Cylinder(2, 4)
+            boss.label = "boss"
+            plate = Box(20, 20, 2) + Pos(0, 0, 3) * boss
+            return Compound(children=[*pegs, plate], label="pair")
 
         compound, _, run = _run(model)
-        [peg] = compound.children
-        _key, lineage = run.identify(peg)
-        self.assertEqual(sorted(lineage["faces"]), ["f:peg.1", "f:peg.2", "f:peg.3"])
-        self.assertEqual(lineage["made"], "peg")
+        first, second, plate = compound.children
+        identity = run.identify(first)
+        self.assertEqual(run.identify(second), identity, "one construction, labelled apart: one part")
+        _key, lineage = identity
+        self.assertEqual(lineage["made"], "model.make_cylinder1")
+        self.assertEqual(sorted(lineage["faces"]),
+                         ["f:model.make_cylinder1.1", "f:model.make_cylinder1.2", "f:model.make_cylinder1.3"])
+        _key, plate_lineage = run.identify(plate)
+        bosses = [name for name in plate_lineage["faces"] if name.startswith("f:boss.")]
+        self.assertTrue(bosses, plate_lineage["faces"])
+        self.assertFalse([name for name in plate_lineage["faces"] if "cylinder" in name], plate_lineage["faces"])
 
     def test_a_shape_no_feature_made_has_no_lineage_even_placed(self) -> None:
         from build123d import Location, Solid
@@ -805,6 +821,26 @@ class ConstructionKeyTest(KernelMemoCase):
         _run(bracket, 0)  # an edit extrudes the other face
         warm = kernel_memo.construction_key(_run(bracket, -1)[0])
         self.assertEqual(warm, cold)
+
+    def test_identical_constructions_are_one_construction_whatever_ran_before(self) -> None:
+        """Two identical constructions in one run are two objects (HitTest) but one
+        construction: the memo tells the calls apart by how many identical ones the run
+        made before, and that count -- grown by any part's calls -- is in no key."""
+        from build123d import Pos, Solid
+
+        def screws(earlier):
+            if earlier:
+                Solid.make_cylinder(0.5, 2)  # an identical call another part made first
+            return [Pos(4 * index, 0, 0) * Solid.make_cylinder(0.5, 2).fuse(Pos(0, 0, 2) * Solid.make_cylinder(1, 0.5))
+                    for index in range(2)]
+
+        first, second = _run(screws, False)[0]
+        self.assertFalse(first.wrapped.IsPartner(second.wrapped), "two objects, two bodies")
+        key = kernel_memo.construction_key(first)
+        self.assertRegex(key or "", r"^[0-9a-f]{64}$")
+        self.assertEqual(kernel_memo.construction_key(second), key)
+        kernel_memo.clear()
+        self.assertEqual([kernel_memo.construction_key(screw) for screw in _run(screws, True)[0]], [key, key])
 
     def test_a_construction_key_is_the_same_in_another_process(self) -> None:
         import subprocess

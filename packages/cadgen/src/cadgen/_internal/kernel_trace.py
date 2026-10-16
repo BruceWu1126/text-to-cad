@@ -16,9 +16,13 @@ class in lower case) and how many of the part's features before it, this one
 included, that function's calls of that operation were: ``dial.extrude1``. So
 an edit elsewhere in the model -- another part's feature, a call no element of
 this part descends from -- renames nothing here. An author's label pins the
-name instead: a shape the model labels and hands to another construction names
-the feature that made it by that label (``lid``), the part's first feature to
-claim a label keeping it. A function or a label that is not an ASCII identifier
+name instead, in what is made of the labelled shape: a shape the model labels
+and hands to another construction names the feature that made it by that label
+(``lid``) in every part that feature is an ancestor of, the part's first
+feature to claim a label keeping it -- but not in the part that shape is itself:
+there (an assembly's leaf) the label names the occurrence, and the elements keep
+their construction's names, so identical constructions labelled apart are one
+part. A function or a label that is not an ASCII identifier
 is written as its ASCII form and a digest of it (``identifier``), so no two are
 written alike. Lines and files are not in a name: they are where the trace
 says a feature ran (the provenance entry, ``store where``).
@@ -284,9 +288,9 @@ class Trace:
 
     def _pin(self, index: int, label: object) -> None:
         """Name feature ``index`` by the author's ``label``, the first one it is
-        handed on with; a label that is an occurrence token (a tree's, not an
-        author's) pins nothing. Of a part's features, the first to claim a label
-        keeps it (:meth:`_names`)."""
+        handed on with, in what is made of the shape it made (:meth:`_names`); a
+        label that is an occurrence token (a tree's, not an author's) pins nothing.
+        Of a part's features, the first to claim a label keeps it."""
         from cadgen._internal.tree_tokens import is_occurrence_token
 
         if not isinstance(label, str) or not label or is_occurrence_token(label):
@@ -360,7 +364,7 @@ class Trace:
         named_features |= {modifier for traced in traced_by_kind for _made, modifier in traced if modifier is not None}
         if made_feature is not None:
             named_features.add(made_feature)
-        names = self._names([index for _shape, index in owners] + sorted(named_features))
+        names = self._names([index for _shape, index in owners] + sorted(named_features), made_feature)
         payload: dict[str, Any] = {"made": None if made_feature is None else names[made_feature]}
         modified: dict[str, str] = {}
         named = False
@@ -389,11 +393,14 @@ class Trace:
             stands.update(given for given in self.features[index].inputs if given is not None)
         return payload, {names[index]: index for index in sorted(stands)}
 
-    def _names(self, roots: list[int]) -> dict[int, str]:
+    def _names(self, roots: list[int], body: int | None) -> dict[int, str]:
         """The name of each feature a part descends from -- ``roots`` and, transitively,
         every feature that made what one of them was given -- counted among them in
         call order: a label, the first of the part's features to claim it keeping it,
-        else ``<function>.<operation><count>``, every feature counting in its stem."""
+        else ``<function>.<operation><count>``, every feature counting in its stem.
+        ``body`` is the feature that made the part's body, whose own label names the
+        occurrence and pins nothing here: identical constructions labelled apart are
+        one part, named alike."""
         seen: set[int] = set()
         pending = [index for index in roots if index is not None]
         while pending:
@@ -409,7 +416,7 @@ class Trace:
             feature = self.features[index]
             stem = feature.stem
             counts[stem] += 1
-            if feature.label is not None and feature.label not in labels:
+            if feature.label is not None and index != body and feature.label not in labels:
                 labels.add(feature.label)
                 names[index] = feature.label
             else:

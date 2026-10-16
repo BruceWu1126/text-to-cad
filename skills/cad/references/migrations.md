@@ -113,9 +113,12 @@ An element ref copied from an earlier 0.8 build names a face by its geometry
 that geometry; the viewer and `cadgen store where` give its name now. An
 element's name moves when the code that made it moves to another operation (an
 earlier call of the same operation added in the same function, in making that
-part, renumbers the later ones; an edit to another part renames nothing); a label keeps it, on a shape a later operation is given -- the parts
-an assembly's `Compound` holds, say: with `lid.label = "lid"`, the faces of the
-operation that made `lid` are `f:lid.1`, `f:lid.2`, ….
+part, renumbers the later ones; an edit to another part renames nothing); a
+label keeps it in what a later operation makes of the labelled shape: with
+`boss.label = "boss"`, the faces `boss` brings to `plate + boss` are `f:boss.1`,
+`f:boss.2`, …. A labelled part placed in an assembly keeps its own names, its
+label naming the occurrence (`#lid`), so parts made alike and labelled apart are
+one part.
 
 ## Meshes come from cadgen in 0.8
 

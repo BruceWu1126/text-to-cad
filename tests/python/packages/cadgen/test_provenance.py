@@ -216,13 +216,14 @@ class TheEntry(ProvenanceCase):
         for position, feature in enumerate(arm["features"]):
             self.assertTrue(all(index is None or index < position for index in feature["inputs"]))
         # The bar is the arm's own component: the bore's cut counts in the helper that ran
-        # it, and the author's label names the fillet.
+        # it, and the author's label names the occurrence (``#bar``), not the fillet that
+        # made the bar's own body.
         [stands] = arm["components"].values()
         self.assertTrue(all(re.fullmatch(FEATURE_NAME, name) for name in stands))
         names = {(arm["features"][index]["function"], arm["features"][index]["op"]): name
                  for name, index in stands.items()}
         self.assertEqual("bore.cut1", names[("bore", "cut")])
-        self.assertEqual("bar", names[("arm", "fillet")])
+        self.assertEqual("arm.fillet1", names[("arm", "fillet")])
 
 
 class StoreWhere(ProvenanceCase):

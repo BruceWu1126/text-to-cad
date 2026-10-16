@@ -56,7 +56,8 @@ made it, and its number among the elements of its kind that operation made:
 `f:bracket.make_box1.6` is the sixth face of the first `make_box` the function
 `bracket` called for that part. The operation is the function, then the build123d
 operation and how many times that function had called it in making the part, or the label of a
-shape the model labelled and handed to another operation (`f:lid.3`). An element
+shape the model labelled and made something else of (`f:boss.3`, in `plate + boss`;
+a part placed as it is keeps its own names, its label naming the occurrence). An element
 a later operation split adds its piece's number (`f:bracket.make_box1.6.2`); an
 operation that only trims or moves it does not rename it. Lines are never in a
 name, so moving code renames nothing, and the viewer, the build's warnings and

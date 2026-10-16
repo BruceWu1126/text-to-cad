@@ -455,9 +455,11 @@ question with another's name.
   face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): the
   feature that made it -- `<function>.<operation><count>`, counted among the
   features the part descends from so an edit elsewhere renames nothing, or the
-  label an author gave the shape, which pins it -- and its number among the
-  elements of its kind that feature made, `f:dial.extrude1.3`, with a piece's
-  number after a later split. A ref is the occurrence's **token** (`o:`, from its place in
+  label an author gave the shape, which pins it in what is made of that shape
+  (on a part placed as it is, a label names the occurrence: parts made alike
+  and labelled apart are one part) -- and its number among the elements of its
+  kind that feature made, `f:dial.extrude1.3`, with a piece's number after a
+  later split. A ref is the occurrence's **token** (`o:`, from its place in
   the tree: parent token, name, rounded placement) and the element's name:
   `#o:4b1f9e2a7c03/f:dial.extrude1.3`. So a ref survives a STEP round trip, a
   sibling's insertion, a dimension change and code that moves, and a name

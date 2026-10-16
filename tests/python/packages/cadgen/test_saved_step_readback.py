@@ -836,6 +836,42 @@ class ReadBackVerificationTest(unittest.TestCase):
         self.assertEqual(parsed["documentReadback"], "parsed")
         self.assertNotEqual(parsed["documentTree"], named_otherwise)
 
+    def test_screws_made_alike_and_labelled_apart_are_one_product_in_the_file(self):
+        """A part is the construction that made it: screws made alike one by one and
+        labelled apart are one component placed three times, written as one product with
+        an instance per screw, and every leaf of the file is that component."""
+        import re
+
+        from build123d import Compound, Pos, Solid
+
+        from cadgen._internal import kernel_memo
+        from cadgen.store.build import build_tree_through_step
+        from cadgen.store.trees import get_tree
+
+        def screws():
+            made = []
+            for index in range(3):
+                screw = Solid.make_cylinder(0.5, 2).fuse(Pos(0, 0, 2) * Solid.make_cylinder(1, 0.5))
+                screw = Pos(4 * index, 0, 0) * screw
+                screw.label = f"screw:{index}"
+                made.append(screw)
+            return Compound(children=made, label="screws")
+
+        self.addCleanup(kernel_memo.clear)
+        with kernel_memo.run(Path(__file__)) as run:
+            assembly = screws()
+        _tree_hash, tree, stats, _step_hash = build_tree_through_step(
+            assembly, self.root / "screws.step", root_name="screws", namer=run.identify)
+        self.assertEqual(sorted(occurrence["name"] for occurrence in tree["occurrences"]),
+                         ["screw:0", "screw:1", "screw:2"])
+        [(cid, entry)] = tree["components"].items()
+        self.assertIn("construction", entry)
+        step = (self.root / "screws.step").read_text(encoding="utf-8", errors="replace")
+        self.assertEqual(len(re.findall(r"= PRODUCT\(", step)), 2, "the assembly and one screw")
+        document = get_tree(stats["documentTree"])
+        self.assertEqual({occurrence["component"] for occurrence in document["occurrences"]}, {cid})
+        self.assertEqual([], stats["documentDiffers"])
+
     def test_a_placements_colour_read_back_on_its_faces_is_the_result(self):
         """A coloured compound's colour comes back on each of its faces: drawn alike, the
         leaf is the result's, coloured as the result's occurrence is."""
