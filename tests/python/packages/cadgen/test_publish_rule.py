@@ -141,10 +141,10 @@ class PublishRuleTest(unittest.TestCase):
 
         self.assertFalse(stale(script).stale)
 
-    def test_reading_back_a_step_a_peer_is_replacing_waits_it_out(self):
+    def test_hashing_a_step_a_peer_is_replacing_waits_it_out(self):
         # The race above, pinned without a second process: Windows refuses an open of a
         # file another build is renaming over with EACCES and no winerror, and the
-        # publish's read-back of the .step must wait that out rather than fail the save.
+        # publish's hash of the .step must wait that out rather than fail the save.
         import errno
         import hashlib
 

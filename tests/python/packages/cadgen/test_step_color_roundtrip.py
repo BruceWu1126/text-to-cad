@@ -20,7 +20,7 @@ from tests.python.support.tmp_root import generated_cad_directory
 
 
 class StepColorRoundTripTest(unittest.TestCase):
-    def test_written_colour_is_the_intended_srgb_and_reads_back_as_the_channel(self) -> None:
+    def test_written_colour_is_the_intended_srgb_and_a_reader_takes_the_channel(self) -> None:
         import build123d as bd
         from cadgen._internal.component_package import _occurrence_color
         from cadgen._internal.step_scene_loader import load_step_scene

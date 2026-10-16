@@ -136,7 +136,7 @@ def main() -> int:
             child = read_record(pin["model"]) or {}
             children.append({"model": pin["model"], "pinnedTree": pin.get("tree"), "currentTree": child.get("tree"),
                              # The tree its file's bytes map to: its result once verified.
-                             "documentTree": tree_for_document_hash(child.get("stepHash") or ""),
+                             "fileTree": tree_for_document_hash(child.get("stepHash") or ""),
                              "documentHash": child.get("stepHash"),
                              "outputs": child.get("outputs"), "closure": child.get("closure"),
                              "actualOutputSha256": {path: sha256(Path(path).read_bytes())
@@ -180,7 +180,7 @@ def main() -> int:
                "measured": measured, "milliseconds": elapsed, "exit": code,
                "events": events, "stages": stages, "tree": record.get("tree"), "documentHash": record.get("stepHash"),
                "actualOutputSha256": actual_outputs,
-               "documentTree": tree_for_document_hash(record.get("stepHash") or ""), "children": children,
+               "fileTree": tree_for_document_hash(record.get("stepHash") or ""), "children": children,
                "modelMilestones": milestones, "changedChildPins": changed_pins,
                "childPinCheckPassed": pin_check if args.assert_child_pins else None,
                "components": sorted((tree.get("components") or {}).keys()), "occurrences": len(tree.get("occurrences") or []),

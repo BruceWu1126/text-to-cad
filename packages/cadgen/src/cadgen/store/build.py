@@ -376,8 +376,9 @@ def _own_name(label: object, default: str) -> str:
     whitespace as one space, a shape kind, digits alone or a blank as no name), unless
     that is an occurrence token. A name enters the node's token, so a result and the
     files written from it name every node alike. A label that is a token came from a
-    tree, not an author (a node read back from a document or a materialized tree
-    carries one), and a token names nothing at its place here. ``default`` is what an
+    tree, not an author (a node of a scene read from a document's tree, or of a
+    materialized tree, carries one), and a token names nothing at its place here.
+    ``default`` is what an
     unlabelled node is called: ``part`` for a leaf, ``group`` for a group -- never
     anything positional."""
     from cadgen._internal.step_scene_loader import _normalize_label_name

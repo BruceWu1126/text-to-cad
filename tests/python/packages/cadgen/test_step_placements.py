@@ -70,7 +70,7 @@ class ReadablePlacementTest(unittest.TestCase):
         for trsf, read in zip(placements, _read(placements, None)):
             self.assertEqual(list(read_back(trsf)), read)
 
-    def test_a_translation_reads_back_as_stated_so_it_never_moves(self) -> None:
+    def test_a_translation_is_read_as_stated_so_it_never_moves(self) -> None:
         from OCP.gp import gp_Trsf, gp_Vec
 
         from cadgen._internal.step_placements import readable_placement

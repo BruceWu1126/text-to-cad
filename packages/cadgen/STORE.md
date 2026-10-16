@@ -51,7 +51,9 @@ One word per concept; the code uses these words and no others.
 | **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
 | **lineage** | a component's account of its elements: the feature that made the body and, per face, edge and vertex, its **name** -- `f:dial.extrude1.3`, the third face the feature made -- and the feature that last modified it (§2); an object the component's tree entry names |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
-| **preview revision** | what a build announces the moment its result exists (§9b): its result tree, the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place |
+| **export** | a model's STEP written from its stored result tree by the build pool (`store/exports.py`): with the names writer -- each part's key and each face's and edge's name in the file -- or plain, without them; spliced from its children's saved files where an all-link parent is eligible (§3, *Exports*) |
+| **verify** | a parse of an exported file compared with the tree it was written from, by the build pool (`store/exports.py`): every occurrence by token, every part's faces and edges named and placed within the display tolerance, drawn in the same colours; a file that verifies maps to that tree, one that does not to its own content (§3, *Exports*) |
+| **preview revision** | what a build announces the moment its result exists (§9b): its result tree -- the tree its STEP is then written from -- the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place, every part kept |
 | **provenance** | where a build's features ran: the run's trace, kept as a code-side entry per model, `index/provenance` (§3) -- each feature's name, operation, file, line and inputs, and the components the run made -- read by `store where` and by nothing on a render path |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, or a record or document entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
 | **worker / spare / extra**, **job** | daemon vocabulary (the daemon's own documentation) |
@@ -71,7 +73,7 @@ One word is NOT retired, and it has exactly one meaning:
 ```
 ~/.cache/cadgen/                      (CADGEN_CACHE_DIR overrides; else the platform cache dir)
   objects/ab/cdef…                    immutable, content-addressed, sharded like git
-  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, producer?, meshes?} for a file's bytes
+  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, producer?, meshes?, verified?, plain?, differ?} for a file's bytes
   index/model/<sha256(script::function)>-v<schema>  records (input-addressed, mutable, atomic)
   index/output/<sha256(output path)>  {model}: which script wrote the file at this path
   index/provenance/<sha256(script::function)>-v<schema>  CODE side: which operation at which source frame made each component and element of the model's current result (§3)
@@ -134,13 +136,11 @@ that key, so a hit can never differ from a measurement, and an unknown kernel
 build just measures. Beside the boxes, keyed the same way by a component's
 codec and BREP object, it holds that component's **leaf layout** — how many
 leaves the encoded shape has and where each sits inside it — which a
-publication records as it measures those leaves, and which tree composition
-(§3) and the animation bake read to name the per-leaf box keys without
-decoding the shape (composition takes only a leaf at the prototype's own
-placement, whose box is the remembered one shifted exactly; the bake, which
-wants a centre and a reach, composes the rest). For an all-link result past the bounded
-capture it holds each link's bounds (§6): the merge of the leaf boxes the link
-places, keyed by the child tree it links and its exact placement. Keyed like
+publication records as it measures those leaves, and which a parent's bounds
+over its children's components (§6) and the animation bake read to name the
+per-leaf box keys without decoding the shape (a parent's bounds take only a
+leaf at the prototype's own placement, whose box is the remembered one shifted
+exactly; the bake, which wants a centre and a reach, composes the rest). Keyed like
 the leaf layout, it holds each component's **topology** — its face and edge
 counts, how many of each are curved, and its loose box — the facts the
 adaptive edge policy classifies a scene's prototypes by
@@ -220,15 +220,18 @@ test:
    A build's preview revision (§9b) is artifact-side like everything a viewer
    reads -- the result tree and the parts the build pool derived for it, named
    by the build feed and read as objects -- and a viewer draws it labelled as a
-   preview, never as the file: nothing maps saved bytes to it, and a parent
-   pins its tree as it pins any child's.
+   preview until the file is written: then the file's bytes map to that very
+   tree (§3, *Exports*), and a parent pins its tree as it pins any child's.
 3. **Records are deletable.** `rm -rf index/model index/output
    index/provenance` loses no artifact: every reader still works from objects;
    a rebuild re-creates the records without rebuilding a tree whose objects
    exist, and only `store where` knew anything that is gone.
 
 `index/document` is written whenever a tree is published for a document — by
-a model's build for its `.step`, by a compile job for the file it compiled.
+a model's build for the bytes its export wrote (the tree they were written
+from, pending until their verify answers), by a verify that finds a file does
+not hold its tree (the compile of its bytes), by a compile job for the file it
+compiled.
 `index/output` is written beside it for `store why` and `store where`, which
 follow it to the record and the provenance entry (§3); nothing in the viewer
 or on a render path reads any of the three.
@@ -291,9 +294,8 @@ worker accumulated -- other models built before, other versions of this one --
 enters it, and `CADGEN_KERNEL_MEMO=0` (hits off) gives the same keys. A part's key hashes
 that construction key, the component's lineage object, its intrinsic face
 colours and the producer (the kernel its display data is derived under). The
-body a build holds and the same body read back from the STEP it wrote --
-different bytes -- are therefore one part, the saved document's leaf taking the
-component it was written from wherever the file verifies as it (§3), and a build's preview names the saved
+saved document of a file that holds its result is that result (§3,
+*Exports*), so its parts are the build's, and a build's preview names the saved
 document's parts (§9b). A construction the memo cannot key (an argument it
 cannot hash) has no construction key, and neither has a shape no construction
 of the run made (a child's decoded result, a file read): such a component's
@@ -370,8 +372,8 @@ under the scheme string (`bounds.cached_tokens`), so they are measured once.
 
 Until cadgen 0.5.1 a global `CACHE_SCHEMA_VERSION` number salted the cid and
 was bumped for producer fixes as well as geometry changes (17: mesh section
-removed from `assembly.json`; 18: periodic spline domains; 19: components are
-the re-read STEP bytes, not the script's shapes; 20: distinct occurrence
+removed from `assembly.json`; 18: periodic spline domains; 19: components were
+the parsed STEP's bytes, not the script's shapes; 20: distinct occurrence
 colours on a shared TShape). It stopped being hashed when geometry and
 derived display assets were separated, and it is retired; do not reintroduce
 a salt of that kind.
@@ -433,9 +435,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   placements. A model result contains the exact authored source geometry,
   reconstructed from canonical BREP bytes. It is the same result on a miss,
   RAM/disk reuse, a top-level return, and a child call, independent of STEP
-  declarations or an attached UI. OCCT's STEP translation can change geometry,
-  so a saved document always has a separate tree read back from its bytes
-  (`cadgen.store.build.build_tree_through_step`). `occurrences`
+  declarations or an attached UI, and a model's STEP is written from it
+  (*Exports*, below). `occurrences`
   place components; `links` place children's
   trees. Two placements of one child are two links to one tree. Transforms
   are 16 numbers, row-major, translation in the fourth column, in the
@@ -465,13 +466,14 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   component's content hash and of no native component's; this cadgen's
   eager-only hashes moved with the pin. Native access raises
   `NativeUnavailable`; a saved-file reader may privately reparse its exact
-  selected STEP bytes. Authored child pins never substitute a saved document.
-  A saved-document read-back skips that private decode for a parsed prototype
-  whose exact bintools-v4 bytes already exist as an object under a component
-  entry declaring the same native recipe: the fence was proven for those bytes
-  by the build that published them, and the parsed prototype — private to its
-  parse, measured but never meshed — stands in as the prepared native input.
-  A forced build derives and fences every component again.
+  selected STEP bytes, and the build exports the file in its own process from
+  the live shape (*Exports*). Authored child pins never substitute a saved
+  document. A compile skips that private decode for a parsed prototype whose
+  exact bintools-v4 bytes already exist as an object under a component entry
+  declaring the same native recipe: the fence was proven for those bytes by the
+  build that published them, and the parsed prototype — private to its parse,
+  measured but never meshed — stands in as the prepared native input. A forced
+  compile derives and fences every component again.
 
   A view of a tree (`store/view.py`, `parts.view_from_geometry`) names a
   runtime producer separately from the tree: the loaded build123d, OCP
@@ -479,9 +481,10 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   key its display data is stored and read by, `<digest>-v<version>`
   (`parts.part_key`). The digest hashes what made the component -- its
   `construction` key (§2), or its `contentHash` for geometry no construction
-  made -- its `lineage` object, its face colours and the producer: the body a
-  build holds and the same body in the saved document it wrote are one part,
-  and the preview revision's parts are the saved document's (§9b). The version
+  made -- its `lineage` object, its face colours and the producer: the saved
+  document of a file that holds its result is that result, so its parts are the
+  build's, and the preview revision's parts are the saved document's (§9b).
+  The version
   (`parts.PART_VERSION`) is bumped by any change to the extractor, the selector
   table, the mesher, the verifier, the mesh payload or the geometric token
   scheme, and by any change in how the digest is hashed, so the parts at every
@@ -497,12 +500,11 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   parts of its own components the store lacks (`parts.request_display`): one
   job (`kind: display`, `daemon/artifacts.py`), or, for a batch past half a
   megabyte of BREP, one job per such share, balanced by size, a pool slot each
-  but the build's own, which pool workers derive while the build saves its
+  but the build's own, which pool workers derive while the build exports its
   STEP -- with no daemon, threads of the build's own process, each in a slot of
-  its pool -- and the
-  build waits for them, as one, before it publishes its saved file and record, then asks for any part of the saved document's tree the
-  result did not have (a leaf the STEP did not verify as the body it was
-  written from: none, as a rule).
+  its pool -- and the build waits for them, as one, before it reports done. A
+  saved file that does not hold its result shows its own content, whose parts
+  a view derives like any part the store lacks (below).
   Every other build job (`_internal/generation.py`: a no-op build that reuses
   its tree, a compile of an imported STEP, a re-emit) asks for the parts of
   the tree a view of its output reads -- the saved document's, a mesh-only
@@ -621,9 +623,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   writes the stored display meshes; one at any other tolerance meshes each part
   in the exporting process the way its display mesh was made -- from the BREP,
   its face colours and a selector table built for that BREP (`parts.mesh_at`;
-  the stored table may be another decode's of the same part, the body a build
-  held where the export decodes the file's read-back, listing the elements in
-  its own order) -- and stores nothing (the file is the output;
+  the stored table may be another decode's of the same part, listing the
+  elements in its own order) -- and stores nothing (the file is the output;
   `_internal/mesh_export.py`). A mesh of one BREP at one tolerance is the same
   bytes whichever body derived the part (README law 5). Tolerances outside the tessellation policy's
   bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No
@@ -633,124 +634,108 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
 - `assembly.root` is the grouping the author's compound expressed; a link
   appears in it as a node of type `link`.
 
-  The model result and saved document are separate trees. `record.tree` keeps
-  authored grouping and intrinsic appearance for exact child pins. A generated
-  save also records `documentTree`, built by the same canonical parsed-scene
-  path as a cold import, from the hierarchy, names, colors and geometry in the
-  STEP bytes. Only this tree is entered in `index/document`.
+  **A model's STEP is an export of its result.** `record.tree` is the result,
+  and a model that declares a STEP has it written from that stored tree after
+  it is published (*Exports*, below): the file is a function of the tree and
+  the writer. Its bytes map in `index/document` to the tree they were written
+  from, so the saved document's tree is the result itself -- its parts the
+  build's, its names the result's -- wherever the file holds it, which a parse
+  of the file checks (*verify*, below). OCCT's STEP translation is not lossless
+  (a trimmed body can come back from the file as its complement, with as many
+  faces and the same overall box): a file that does not verify is its own
+  content. Its bytes
+  map to the tree a compile of them publishes -- its structure, names and
+  placements as the file has them, each component read from the file with no
+  construction key, its elements named by their geometric tokens -- and the
+  entry lists what differs; the build warns, naming the occurrences, and the
+  model's next run writes the file plain (*Exports*). A document compiled from
+  its bytes alone, with no build to pair it with, is read the same way.
 
-  **What a file shows is the result where it verifies, and its own content
-  where it does not.** The saved document's identity is not measured: the
-  authored-to-written correspondence (below) pairs each of the document's
-  leaves with the authored leaf that was written there, and a leaf that
-  verifies as the body it was written from takes that body's component -- its
-  BREP, construction key and lineage, and the authored occurrence's colour
-  where the file put it on the faces instead -- so the document names its
-  parts and elements as the result does. Verifying is a check of the
-  read-back, not an identity: drawn in the same colours (the same face
-  colours, or every face in the colour of a placement that had none, which
-  is how a reader returns a placement's colour), and the same body face by
-  face -- as many faces and edges, each face's tight box within the display
-  chord tolerance of its counterpart's, in order or as a set
-  (`store.build._same_body`) -- remembered per pair of components in
-  `index/bounds` (§2), so a parent writing the same body again finds the
-  verdict its child's save reached. OCCT's STEP translation is not lossless (a
-  trimmed body can read back as its complement, with as many faces and the
-  same overall box): a leaf that does not verify is the file's own content, a
-  component of its own with no construction key, its elements named by their
-  geometric tokens, whose part the build derives like any other (above), and
-  the build warns, naming each such leaf. A document compiled from its bytes
-  alone, with no build to pair it with, names its elements by their geometric
-  tokens.
-
-  **Names are in the store, not yet in the file.** The lineage names a saved
-  document's elements by are the store's: the build that wrote the file put
-  its document tree there, and every reader with that store finds it by the
-  file's hash. A store that never held that build -- another machine, an
-  emptied cache, a document tree lost to damage -- compiles the file as it
-  compiles any foreign file, and its elements go by their geometric tokens: a
-  ref by name resolves only where the store of the build that wrote the file
-  is (or once the model is built again), and says so elsewhere; a ref by token
-  resolves in either (the fallback matcher, §2).
+  **Names are in the file; what they stand for is in the store.** The names
+  writer puts each part's key and each element's name in the file (README law
+  4), for any reader; a compile takes none of them. A store that never held
+  the build that wrote a file -- another machine, an emptied cache, a result
+  lost to damage -- compiles the file as it compiles any foreign file, and its
+  elements go by their geometric tokens: a ref by name resolves where the store
+  of the build that wrote the file is (or once the model is built again), and
+  says so elsewhere; a ref by token resolves in either (the fallback matcher,
+  §2).
 
   Raw-document compilation does not discover neighboring model sources. It
-  passes the parsed scene directly to this canonical builder, whose fixed edge
-  classes also govern saved readback; it does not construct a discarded Python
-  compound or calculate source-only adaptive metadata. Generated models,
-  annotated re-emits and public `read_step` geometry retain their existing
-  preparation paths. Compilation leaves the STEP and its sidecar untouched;
-  declaration consumers retain their normal binding and schema checks.
+  passes the parsed scene directly to the canonical builder
+  (`store.build.build_document_tree`), whose fixed edge classes govern every
+  compiled document; it does not construct a discarded Python compound or
+  calculate source-only adaptive metadata. Generated models, annotated re-emits
+  and public `read_step` geometry retain their existing preparation paths.
+  Compilation leaves the STEP and its sidecar untouched; declaration consumers
+  retain their normal binding and schema checks. It verifies indexed component
+  objects before reuse and derives failed entries again; a known damaged
+  closure and a forced compile derive every canonical component.
 
-  Saved readback may reconstruct a private scene from that document index
-  when the freshly emitted STEP has an already-seen exact digest. It verifies
-  one snapshot of the root tree and every required BREP and pinned topology object
-  against its content address; document trees containing source links are rejected.
-  Missing, unreadable or damaged objects cause a raw STEP parse. New output
-  bytes and forced builds also use the raw parser. Both paths retain the same
-  placement, face-color and complete authored-to-written correspondence checks.
-  The internal saved-build call retains the selected immutable object bytes
-  beside its independently decoded scene until correspondence succeeds. It
-  then reuses that exact canonical tree and component identities: native
-  decode/re-encode is not assumed to preserve BREP byte identity. Publication
-  verifies existing objects and atomically restores missing or damaged bytes
-  from this captured closure, required components before the tree. No native
-  object or capture survives the call or is attached to a public scene; generic
-  scene publication always derives the current mutable geometry and metadata,
-  regardless of scene hashes or attributes. Eager-only readback parses the
-  selected STEP bytes and uses ordinary canonical publication. Raw publication
-  verifies indexed component objects before reuse and derives failed entries
-  again; known damaged closures and forced builds derive all canonical
-  components. Current authored PBR is rebound after readback, without consulting
-  source records, output indexes or staged sidecars.
+  **Exports.** A build writes its STEP after it publishes its result and its
+  record (§5, publish order), by the build pool (`store/exports.py`, artifact
+  kind `export`, §9): the job names the stored tree and a staged path, never a
+  script, materializes the tree (`store.materialize`) and writes it with the
+  names writer -- or plain, without part keys and element names, so its bytes
+  claim nothing about the store they came from. An all-link parent may instead
+  be spliced from its children's saved files (*Spliced documents*, below);
+  anything ineligible, and a forced build, is exported whole. A component the
+  store cannot decode (an eager-only one, above) exists only as the build's
+  live shape, so a result holding one is exported in the build's own process
+  with that shape, by the same function. The build then publishes the file:
+  the staged copy and its sidecar moved into place (each atomically, the
+  expected pair checked first, §7), the bytes mapped to the tree in
+  `index/document` pending their verify (`verified: false`, and `plain` for a
+  file written plain), the record's output entry filled (`{sha256, writer,
+  plain?}`, empty until then, which the gate reads as never written), and the
+  `STEP saved` event. `--verbose` relays the job's steps, and says why a parent
+  was not spliced.
 
-  **Tree composition.** A child's read-back is context-free. The parent's
-  STEP places each child's prototypes from the same bytes the child's own save
-  emitted, every group at the identity and every leaf at its flattened world
-  transform, so the components, hierarchy, names, colours and the linear part
-  of every leaf placement the parent's STEP reads back are exactly those in
-  the child's own document tree; only each leaf's translation is new, and it
-  is the number the parent's descriptor handed the writer, as its STEP text
-  round trip (`store/_compose_readback.py`, `written_real`). A saved build of
-  a parent whose fresh bytes have no indexed tree therefore composes its
-  document tree from its children's document trees instead of parsing the
-  STEP it just wrote, when all of this holds, checked exactly: the result is
-  links only (no geometry of its own); every link is a pure translation (its
-  linear part exactly the identity) with no link colour, and every link and
-  group name survives the label round trip; every link's child record still
-  pins the tree the parent used, with a complete `documentTree` whose root is
-  an assembly, whose components are all native and whose every node is named
-  by a name the label round trip keeps;
-  every leaf box the canonical bounds path would take is already in
-  `index/bounds` from the child's publication, under a leaf layout (§2); and
-  the writer emulation
-  reproduces every translation in each child's own document from that
-  child's descriptor. Anything else — a rotated or coloured link, a part
-  child, a parent with geometry of its own, a child rebuilt since the parent
-  called it, a missing object or box — takes the ordinary read-back of the
-  written bytes, as does a composed tree that fails the authored-to-written
-  correspondence. The composed tree is published and captured exactly as an
-  indexed read-back of already-seen bytes is, so the correspondence check,
-  the canonical maps and the restore are the same code, and `index/document`
-  receives the tree a parse of the bytes gives, paired with the bodies written
-  (above). Under `--verbose` a
-  composed tree shows as the stage `tree: compose document from children`;
-  `CADGEN_VERIFY_READBACK=1` (§10) proves a corpus by parsing as well and
-  failing the build on any difference. This adds no staleness class: the gate
-  decides whether the parent runs by its sources, and what it publishes for
-  its bytes is the same tree either way.
+  The **verify** job (kind `verify`, keyed by the bytes and the tree, never
+  the path) parses the file's exact bytes and compares them with the tree
+  (`_internal/step_verify.py`): every occurrence a compile of the file names,
+  by token, each holding the tree's part (by its key, or, in a plain file, by
+  occurrence); every part's faces and edges by name and place, within the
+  display chord tolerance of the part and each element's own tolerance (a body
+  without faces by its edges' places); and the colour each face is drawn in. A
+  file that verifies is its tree: its entry is written again without
+  `verified`. One that does not maps to its own content as above, the
+  differences listed (`differ`). A build with no daemon waits for its verify
+  and warns; a daemon's build returns once its files are written, and the
+  verify finishes on the pool, so a mismatch reaches the next touch of the
+  file -- a door, `store why`, the next run. A door given an entry still
+  pending (`read_step`/`read_scene`, a snapshot, the mesh doors, `step
+  compile`'s current check) has that verify answered first and answers with
+  what the entry says after it (`exports.confirm_document`); a view draws a
+  pending entry at once. When two models write equal bytes, the last export's
+  entry stands.
 
-  **Spliced documents.** The same parent's STEP is almost entirely its
+  **The kept rule.** A rebuild keeps its STEP -- writes and verifies nothing
+  -- when its record's last build had the same tree, wrote the file with this
+  writer (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on
+  disk when the build started still has the bytes recorded, and those bytes
+  held the result (their entry lists no differences); `--force` always writes.
+  A kept file's entry is written again where the store lost it, and its
+  sidecar only where its bytes changed: viewers version a sidecar by its
+  stamp, and a new one reloads the model. The run says `kept STEP`. A rebuild
+  that exports the bytes the file already has leaves the file, and its stamp,
+  in place. A file that did not hold its result is exported plain by the
+  model's next run, even one whose model is current, with no body run
+  (`generation._reexport`). Bump `STEP_WRITER_SCHEME` with any change to the
+  bytes cadgen writes for the same tree.
+
+  **Spliced documents.** An all-link parent's STEP is almost entirely its
   children's: OCCT writes the root's product tree, then every child's products
-  and geometry exactly as the child's own save emitted them. A saved build
-  therefore writes it from those files instead of exporting its whole document
-  (`store/_splice_step.py`). It generates the parent's own records, OCCT's
-  layout record for record: the header the children share, renamed for the
-  file; the root and group products; one instance block per link. It then
-  copies each child's DATA section verbatim, with its entity ids under a
-  fixed-width prefix and its literals untouched. NAUO instance ids run 1..N in
-  file order. A translated link rewrites its leaf placements' points to the
-  text the writer prints for the parent's leaf translations, once the emulation
-  reproduces each child's own text.
+  and geometry exactly as the child's own save emitted them. The export job
+  therefore writes such a parent from those files instead of exporting its
+  whole document (`store/_splice_step.py`). It generates the parent's own
+  records, OCCT's layout record for record: the header the children share,
+  renamed for the file; the root and group products; one instance block per
+  link. It then copies each child's DATA section verbatim, with its entity ids
+  under a fixed-width prefix and its literals untouched. NAUO instance ids run
+  1..N in file order. A translated link rewrites its leaf placements' points to
+  the text the writer prints for the parent's leaf translations, once the
+  emulation reproduces each child's own text.
 
   It splices only when all of this holds, and exports otherwise:
   - no geometry of its own;
@@ -764,87 +749,62 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   - ids below 10^9;
   - OCCT's layout is recognised at every record the splice reads.
 
-  A forced build exports. Under `--verbose` the stage names which ran:
-  `tree: splice STEP <file>` or `tree: assemble STEP <file>`. A parent that
-  will splice assembles no private document before its callback: its bounds
-  merge from its links' (§6), and it assembles a document only for a link
-  whose bounds miss (that link's part alone) or once the splice proves
-  ineligible, after the callback; a pin deleted meanwhile then fails the build
-  before anything is saved.
+  A forced build, and a plain export, exports. The build's own process
+  assembles no document for its STEP: the export job does, and only for a
+  parent it cannot splice.
 
-  The spliced file's cold compile is the exported file's, and the composed
-  tree binds to it as to any other bytes; `CADGEN_VERIFY_READBACK=1` proves
-  that on a corpus. Its bytes differ from OCCT's:
+  The spliced file's cold compile is the exported file's, and it is verified
+  like any export. Its bytes differ from OCCT's:
   - ids are numbered differently;
   - geometry that two children share is written once per child;
   - the root context's uncertainty is the first child's.
 
-  Hence `STEP_WRITER_SCHEME` 2. Those bytes are a function of the children's
-  saved bytes. The parent's writer input fixes those, except for the writer
-  that saved a child: a child kept from an earlier writer is spliced as saved,
-  which is a valid document of the same tree.
+  Those bytes are a function of the children's saved bytes, which their
+  records pin: a child kept from an earlier writer is spliced as saved, which
+  is a valid document of the same tree.
 
-  **Kept documents.** A rebuild may keep its saved document instead of writing
-  the same bytes again. The record's `writerInput` is the sha256 of everything
-  the saved STEP's bytes are a function of
-  (`cadgen.store.build.writer_input_digest`): the flattened descriptor the
-  writer is given — geometry by BREP object hash with intrinsic face colours,
-  placements, names, colours and grouping — the file name,
-  `STEP_WRITER_SCHEME`, the cadgen release and the loaded kernel, with the
-  root under the name the document gives it (its label; unlabelled, an
-  assembly's root is `o1` and a single part takes the file's name). It leaves
-  out only finishes (README law 16). When a rebuild's writer input equals its
-  record's, the STEP on disk when the build started still has the recorded
-  `stepHash`, and that document's tree is complete, the build publishes its
-  result and writes only the record, and the sidecar if its bytes changed: no
-  export, no read-back, no correspondence. An unchanged sidecar keeps its file
-  as the document does, because viewers version it by its stamp and a new one
-  reloads the model. The recorded `documentTree` and maps carry over, the
-  result takes the recorded result's bounds, which the input pins, and the run
-  says `kept STEP`. The writer is pure (README law 5), so those bytes are what
-  a write would produce. A forced build always
-  writes; so does any rebuild whose record lacks `writerInput`. Bump
-  `STEP_WRITER_SCHEME` with any change to the bytes cadgen writes for the same
-  descriptor.
+  Finishes that STEP does not carry persist in the sidecar's named
+  `appearance.materials` library and `appearance.assignments` map, keyed by the
+  result's leaf tokens -- the file's own, which a compile of it mints again --
+  and resolved kinematics name the result's nodes by token the same way.
+  Finishes always come from the file's sidecar, never from a tree's
+  `appearance`: saved readers compose appearance into private descriptors, and
+  files with identical STEP bytes share geometry while retaining their own
+  finishes. Appearance-sensitive exports include the normalized appearance
+  digest in their variant, including absence.
 
-  Finishes that STEP does not carry persist in the schema-10 sidecar's named
-  `appearance.materials` library and `appearance.assignments` map, keyed by
-  verified canonical leaf IDs. Resolved
-  kinematics are remapped to exact written product nodes, with independent
-  descendant validation so nested single-child groups retain their identity.
-  Saved readers compose
-  appearance into private descriptors; files with identical STEP bytes share
-  geometry while retaining their own finishes. Appearance-sensitive exports
-  include the normalized appearance digest in their variant, including absence.
-
-  Model records use payload schema 11: the tree a record names is geometry
-  schema 6, whose leaves' tokens round a translation as the STEP file states
-  it; schema 10 named schema-5 trees, whose components carry their
-  construction keys and lineage, as 6 does; schema 9 named schema-4 trees,
-  whose ids are tokens, and keyed the correspondence maps and appearance
-  assignments by them, as 10 and 11 do; schema 8 (reach slices, import-time
-  slices, absent, roots and listing entries) keyed them by position. Earlier
-  records are misses: the next source run rebuilds outputs whose input hashes
-  may have been captured after a mid-build edit, as
-  well as outputs predating distinct occurrence colours.
-  This is one source rebuild; existing geometry objects remain reusable.
-  A record with no `closure.own` leaves nothing out of its listings, which is
-  how it hashed them, so it needs no new schema.
-  Document mappings use payload schema 11 (the tree an entry names is geometry
-  schema 6, and the hint is `producer`; schema 10 named schema-5 trees, 9
-  schema-4 trees, 8 schema-3 trees, 7 schema-2 trees): saved bytes stay
-  authoritative and are reparsed without guessing colours that the document
-  does not contain. There are no directory or document-byte-key salts. Trees
-  use only geometry schema 6; there is no optional old-tree decoder. Schema 6
-  mints a leaf's token rounding its translation as the STEP file states it
-  (`_internal/tree_tokens.py`), so a leaf within a stated digit of a rounding
-  boundary has another id than in 5; 5 names a component made by a
-  construction of its run by its `construction` key and `lineage` object
-  (§2), which 6 keeps; 4 named every occurrence, link and node by its `o:`
-  token, which 5 and 6 keep; 3 admitted resolved named intrinsic appearance on
-  authored trees and pinned an eager-only component's topology facts as
-  `topology`, which 4, 5 and 6 keep. Document indexes may carry an optional
-  exact loaded `producer` hint outside the tree. A same-tree
+  Model records use payload schema 12: a model's STEP is an export of the tree
+  the record names, its output entry pending (an empty sha256) until the export
+  lands, then `{sha256, writer, plain?}`, and nothing else of the file
+  recorded beside it; schema 11 named schema-6 trees, whose
+  leaves' tokens round a translation as the STEP file states it; 10 named
+  schema-5 trees, whose components carry their construction keys and lineage,
+  as 6 does; 9 named schema-4 trees, whose ids are tokens, and keyed
+  appearance assignments by them, as 10 to 12 do; schema 8 (reach slices,
+  import-time slices, absent, roots and listing entries) keyed them by
+  position. Earlier records are misses: the next source run rebuilds outputs
+  whose input hashes may have been captured after a mid-build edit, as well
+  as outputs predating distinct occurrence colours. This is one source
+  rebuild; existing geometry objects remain reusable. A record with no
+  `closure.own` leaves nothing out of its listings, which is how it hashed
+  them, so it needs no new schema.
+  Document mappings use payload schema 12: an exported file's bytes map to the
+  result tree they were written from, pending (`verified: false`, `plain` for a
+  plain file) until their verify answers, or to the compile of the file with
+  what differs (`differ`); 11 named schema-6 trees, with the hint `producer`;
+  10 named schema-5 trees, 9 schema-4 trees, 8 schema-3 trees, 7 schema-2
+  trees. Saved bytes stay authoritative and are reparsed without guessing
+  colours that the document does not contain. There are no directory or
+  document-byte-key salts. Trees use only geometry schema 6; there is no
+  optional old-tree decoder. Schema 6 mints a leaf's token rounding its
+  translation as the STEP file states it (`_internal/tree_tokens.py`), so a
+  leaf within a stated digit of a rounding boundary has another id than in 5;
+  5 names a component made by a construction of its run by its `construction`
+  key and `lineage` object (§2), which 6 keeps; 4 named every occurrence, link
+  and node by its `o:` token, which 5 and 6 keep; 3 admitted resolved named
+  intrinsic appearance on authored trees and pinned an eager-only component's
+  topology facts as `topology`, which 4, 5 and 6 keep. Document indexes may
+  carry an optional exact loaded `producer` hint outside the tree. A same-tree
   rewrite preserves a valid hint and external mesh ledger; a tree replacement
   drops both unless an attested producer is supplied. A reader selects tree and
   hint from one atomic record snapshot. Geometry ignores absent or invalid
@@ -873,22 +833,20 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
 ```json
 {
   "kind": "record",
-  "schemaVersion": 9,
+  "schemaVersion": 12,
   "model": "/abs/models/assemblies/src/link_robot/link_robot.py::link_robot",
   "script": "/abs/models/assemblies/src/link_robot/link_robot.py",
   "function": "link_robot",
   "entryKind": "assembly",
   "sourceKind": "python",
   "tree": "64429167…",
-  "documentTree": "b291420a…",
   "closure": {"hash": "e341ac84…", "files": ["link_robot.py", "lib/frame.py"], "shas": {"link_robot.py": "ast1:…", "lib/frame.py": "slice4:…"}, "names": {"lib/frame.py": ["WIDTH", "bar"]}, "wholes": {"lib/frame.py": "ast1:…"}, "own": {}, "static": false},
   "children": [
     {"model": "/abs/models/assemblies/src/link_robot/link_arm.py::link_arm", "tree": "c161092b…"},
     {"model": "/abs/models/assemblies/src/link_robot/link_pin.py::link_pin", "tree": "265aee57…"}
   ],
-  "outputs": {"/abs/models/assemblies/STEP/link_robot/link_robot.step": {"sha256": "823699b0…"}},
+  "outputs": {"/abs/models/assemblies/STEP/link_robot/link_robot.step": {"sha256": "823699b0…", "writer": "cadgen-step-writer-4"}},
   "stepHash": "823699b0…",
-  "writerInput": "5f0c27d1…",
   "modelSeconds": 1.84
 }
 ```
@@ -1146,7 +1104,11 @@ A real one (`link_robot`: a base, two placements of `link_arm`, one of
   — `outputs` simply lists no document and `stepHash` is empty.
 - `outputs` may carry per-output facts a door needs (`declared`, the
   tessellation `chord`/`angle`); those are the door's, the store only keeps
-  them beside the sha.
+  them beside the sha. A STEP's entry says which writer wrote it (`writer`,
+  and `plain` for a file written without names), and is pending -- an empty
+  sha256, which clause 5 reads as never written -- from the record written at
+  the result until its export lands (§3, *Exports*). `stepHash` is the STEP's
+  sha256 once written.
 
 ### Provenance
 
@@ -1321,11 +1283,13 @@ Each with the failure it prevents.
   a file a third-party library caches for the life of a warm worker, after
   the first build that reads it.
 - **Publish order.** Objects first (components, then the complete tree), the
-  document-byte mapping, the outputs (`.step` moved into place atomically;
-  digest-bound sidecar), output mappings, then the record. STEP export and
-  read-back use a private sibling staging directory outside the store.
-  Prevents: a record pointing at a tree that does not exist yet, or a `.step`
-  whose sha the record has not seen.
+  record (its STEP output pending), output mappings and the provenance entry;
+  then, per export, the file (staged in a private sibling directory outside the
+  store, moved into place atomically), its digest-bound sidecar, the
+  document-byte mapping (pending), the record's output entry; then the verify
+  (§3, *Exports*). Prevents: a record pointing at a tree that does not exist
+  yet, a `.step` whose sha the record has not seen, and a document entry
+  naming a tree its bytes were not written from.
 - **Canonical STEP bytes.** Before a written STEP is published, the writer
   canonicalizes what OCCT emitted: NAUO instance ids, presentation-style
   order, and the sign of zero — `-0.` is rewritten `0.`, because which IEEE
@@ -1334,16 +1298,16 @@ Each with the failure it prevents.
   are, it numbers NAUO instances 1..N, adds no styles and prints no `-0.`.
   Prevents: one model writing two documents, so the packages and index
   entries keyed by the other spelling's bytes are orphaned.
-- **Names read back.** OCCT's STEP reader ends a string at an escaped quote
+- **Names a reader reads.** OCCT's STEP reader ends a string at an escaped quote
   (`''`) followed by spaces and `,` or `)`. A part named `post (6')` or
   `x('',y)` then lost its product or came back renamed, in every OCCT-based
-  reader, and failed the build's read-back. The writer spells every quote in
+  reader, and the file failed verify. The writer spells every quote in
   such a literal as Part 21's `\X\27` instead, which readers decode to the
   same name (`step_export.respell_misread_quotes`, which the splice applies
   to the names it writes). OCCT also writes a non-ASCII name as its UTF-8 read
   as Latin-1 and encoded again, trimming any byte its C library takes for a
   space from either end, so `Bügel_ä` came back `BÃ¼gel_Ã¤` and `à` lost a
-  byte, and both failed every build. A non-ASCII name therefore reaches OCCT in
+  byte, and both failed verify. A non-ASCII name therefore reaches OCCT in
   ASCII, each run of non-ASCII characters as a Part 21 `\X2\` (basic plane)
   or `\X4\` directive (`step_export.ascii_name`); the name pass restores the
   single backslashes OCCT doubles, the splice spells names the same way
@@ -1516,60 +1480,23 @@ Decided mechanically from the returned geometry and occurrence metadata.
   control-polygon bounds are not substituted. Measured, memory-hit and disk-hit
   boxes come from the same origin-normalized function, and cached numeric
   arrays are never mutated.
-- Canonical saved-document publication already owns each verified component's
-  encoded BREP and each parsed occurrence's exact native placement. Its tight
-  bounds key uses that BREP identity, codec, the leaf's ordinal and the
-  leaf's rotation in `index/bounds`, then shifts the six native bounds by
-  the leaf's translation. A source result's own occurrences are measured the
-  same way, through the one function
-  (`component_package.placed_prototype_bounds`), so the animation bake's leaf
-  boxes find for the result what they find for the saved file. A miss measures every native leaf
-  with the same optimal extrema operation; it never transforms a component
-  AABB. Incomplete private inputs -- a child's component whose leaf the
-  component places itself, which no remembered box composes exactly -- fall
-  back to the ordinary composed native document, each leaf as the file holds
-  it (the parse's prototype, which a leaf that took its authored component
-  verified as), after the same component validation and closure checks.
-- A bounded descriptor composed entirely of pinned links may instead measure
-  exact component bounds from verified canonical BREP objects. `index/bounds`
-  stores only six finite numbers, keyed by BREP digest, all 16
-  placement doubles without rounding, the bounds algorithm and the kernel's
-  versions. It uses the same private reconstruction, placement,
-  native leaf traversal and final numeric extrema merge as the whole document;
-  rotated local AABBs and raw native-box merges are not substitutes. Missing,
-  corrupt, unsupported or invalid inputs use the ordinary whole-document path;
-  forced builds bypass this reuse.
-- An all-link result past that bound takes its bounds from its links. The
-  whole document's bounds are its links' leaf boxes merged, and one link's
-  merge is a function of the child tree it links and its exact placement
-  alone, so it is remembered in `index/bounds` under those two, the algorithm
-  and the kernel's versions (`store.build._bbox_from_links`). Links merge in
-  the order the document's leaf traversal visits them, keeping the first of
-  equal values as it does, so the six numbers, signed zeros included, are the
-  whole document's. A link that misses measures its own part of the document;
-  any failure measures the whole document; forced builds bypass this.
-- The internal source publisher may capture that complete descriptor and its
-  verified tree/BREP bytes plus normalized intrinsic face-color recipes before its
-  callback. Every unique BREP and exact native placement is validated privately
-  before publication even when numeric bounds hit; scalar cache entries never
-  certify native validity. These same owned prototypes supply bounds misses and
-  the later ordinary occurrence/group assembly. Geometry, names, placement,
-  grouping, face colors and occurrence PBR remain the captured values; no live
-  authored shape, latest child record or store object is read after the callback
-  to construct that private document. The normal prepublication disk-closure
-  check and declared-child output waits remain in place. Already captured
-  ownership survives subsequent cache deletion just as an already materialized
-  document does. Arbitrary direct preview callbacks retain the ordinary order.
-- Admission allows at most 64 occurrences, 16 components, 32 trees and depth 32;
-  aggregate tree bytes and the flattened descriptor each have a 64 KiB limit.
-  BREP bytes are limited to 768 KiB, pinned eager-only topology facts to 4 MiB, and retained appearance
-  recipes to 256 KiB. This bounds additional encoded payload/recipe retention to
-  5.125 MiB, plus bounded Python structures and invocation-owned native shapes;
-  it is not a native allocator RSS guarantee. No native shape enters a
-  cache. A failed optional preparation releases its private owners before
-  falling back. Larger, new-own-component and unsupported results keep the
-  ordinary preparation/publication order. STEP correspondence checks and the
-  separate canonical readback of newly emitted saved bytes are unchanged.
+- A compile already owns each verified component's encoded BREP and each
+  parsed occurrence's exact native placement. Its tight bounds key uses that
+  BREP identity, codec, the leaf's ordinal and the leaf's rotation in
+  `index/bounds`, then shifts the six native bounds by the leaf's translation.
+  A result's leaves are measured the same way, through the one function
+  (`component_package.placed_prototype_bounds`), each component placed by the
+  transform the tree records: the prototype the build holds for its own
+  components; a linked child's component from the boxes the store remembers
+  for it at the kernel's own placement of each leaf (`bounds.composed_bounds`),
+  else decoded from the store -- so no child is assembled for its parent's
+  bounds, and the box is the same function of the tree whichever way it is
+  found. The animation bake's leaf boxes find for a result what its
+  publication measured. A miss measures every native leaf with the same
+  optimal extrema operation; it never transforms a component AABB. A
+  component that cannot be measured so (an eager-only child's) falls back to
+  the whole composed native shape, after the same component validation and
+  closure checks.
 
 A tree's bounds (`_bbox_from_shape`) walk the native leaves of one composed
 document with no Python callback between leaves, so within that call a
@@ -1624,11 +1551,12 @@ are not cancelled merely because a newer editing request exists.
   — safe by the two invariants above, wasteful, and a debugging mode.
 
 Before a generated body runs, the build captures its target STEP and sidecar
-digests (absence counts too). It prepares the result once, exports and reads
-back a private STEP, publishes complete immutable objects, and checks source
-freshness and the expected output pair. A concurrently written byte-identical
+digests (absence counts too). It publishes its result's complete immutable
+objects and its record, has the STEP exported to a private staging folder
+(§3, *Exports*), and checks source freshness and the expected output pair
+before it moves the file into place. A concurrently written byte-identical
 pair is idempotent; a different pair makes the save fail. After the final
-renames it verifies the written digests before recording success. A STEP
+renames it checks the written digests before recording the output. A STEP
 re-emission has an explicit immutable input/annotation digest, not a Python
 closure; its output-pair check still applies.
 
@@ -1676,8 +1604,8 @@ kinds of thing:
    **Records, document entries, output entries and provenance entries are
    never evicted.**
 3. **Unreachable objects.** Kept: every object in the closure, through links,
-   of a current-schema record's `tree` or `documentTree` or a current-schema
-   document entry's tree, and of those trees of a record or document entry at
+   of a current-schema record's `tree` or a current-schema document entry's
+   tree, and of those trees of a record or document entry at
    a key this cadgen does not own while it is younger than a week, as far as
    this cadgen reads their format (the *protected* set); every object a surviving
    derived entry names; anything written or claimed within the grace window
@@ -1842,7 +1770,7 @@ Every build goes through one interface, `cadgen.daemon.executors.submit(model)
   job -- a name the caller has is set, a name it lacks is unset, which also
   clears what a previous job's model code exported (`worker._apply_request_env`).
   The store root, `PYTHONPATH` (absolutized against the caller's folder),
-  `CADGEN_STORE_MAX`, `CADGEN_VERIFY_READBACK` and the telemetry switches reach a
+  `CADGEN_STORE_MAX` and the telemetry switches reach a
   job this way, and so does every variable a model reads (§3). Only the names
   the daemon's machinery sets for itself are neither sent nor replaced
   (`client.INTERNAL_ENV_VARS`: the worker's own daemon, address and state
@@ -2186,8 +2114,9 @@ adapter without constructing the initial XCAF document. It decodes each distinct
 geometry once for that scene and retains separate occurrence/prototype keys so
 adaptive topology counts stay unchanged. Ordinary STEP preparation owns its
 own private native document. No native object is retained across builds or
-shared with an independent authored consumer, and saved STEP read-back remains
-separate from the source tree. This is a constructor optimization within the
+shared with an independent authored consumer, and the saved STEP is written
+from the published tree, never from these adapters. This is a constructor
+optimization within the
 existing object/index model, not a second assembly store.
 
 Every called child still owes all declared outputs, including a call whose
@@ -2222,9 +2151,9 @@ not shorten source publication, declared-output completion or failure paths.
 
 ## 9b. Editing previews and explicit saves
 
-Running existing decorated code publishes a complete preview before the root's
-own STEP export/read-back, then continues that same build until its declared
-outputs finish. No model author imports a session, cache or ownership helper.
+Running existing decorated code publishes a complete preview before any of the
+root's exports, then continues that same build until its declared outputs
+finish. No model author imports a session, cache or ownership helper.
 Source files remain the durable authored inputs. The active worker owns the
 prepared geometry and frozen child pins for the pending save; a worker crash
 fails that request. There is no crash-resumable save queue hidden in the cache.
@@ -2268,10 +2197,10 @@ parts the store holds -- at once those it held already, the rest the moment the
 build pool's jobs for them (§3) are done, while the build saves its STEP.
 Those are artifact-side objects the viewer reads as it reads any tree and any
 part, and it draws them as they are named, labelled as a preview of the build
-in progress -- the picture is on screen before the STEP is written, read back
-and published -- then replaces them in place with the saved file when the
-catalog names it, keeping every component whose part the two share, which is
-all of them when every leaf verifies as the body it was written from (§3). What the sidecar
+in progress -- the picture is on screen before the STEP is written -- then
+replaces them in place with the saved file when the catalog names it, keeping
+every part: the file's bytes map to the very tree the preview drew, wherever
+the file holds it (§3, *Exports*). What the sidecar
 will carry travels with the preview too, as its **annotations**: the build
 resolves the model's declarations against the result tree as soon as it exists
 -- the mates into the articulation a page plays, `materials=` into finishes on
@@ -2319,11 +2248,12 @@ itself (a host relays every call through a few slots all its views share).
 
 The preview is the model's final immutable source result. Parents may pin and
 materialize that result before the child's STEP save finishes. It becomes
-`record.tree` only after the model's publication checks and dependent saves
-succeed; it is never replaced by translated STEP geometry and never used as a
-document-byte mapping. Successful explicit saves require all declared outputs;
-publishing a preview alone is not success. No saved byte hash is mapped to a
-preview tree.
+`record.tree` once the model's publication checks pass, before its exports
+(its STEP output pending until written, §3); it is never replaced by translated
+STEP geometry. The bytes an export writes from it map to it once they exist,
+pending their verify: no bytes are mapped to a tree before they are written
+from it. Successful explicit saves require all declared outputs; publishing a
+preview alone is not success.
 
 An interactive viewer can retain a complete displayed component across a
 replacement when its part (its key) and origin agree. Tree-specific placements and appearance are
@@ -2387,14 +2317,12 @@ supersession does not cancel their exports.
   complete verification.
   Components carry `brep`, `codec` and `faceColors`; display data resolves
   separately, by each component's part, through `store.parts` and `index/part`.
-- `CADGEN_VERIFY_READBACK=1` makes every saved build that reuses a document
-  tree — composed from its children's (§3) or taken from the document index
-  for already-seen bytes — parse the written STEP as well, pair it with the
-  bodies written as a parsed save does, and fail with the first difference: the tree hashes, the top-level keys that differ, the
-  first differing occurrence, the canonical maps. It is for a maintainer's
-  manual check over a corpus; it doubles the read-back's cost and nothing in
-  cadgen sets it. Like the store root, it travels with each build to the warm
-  daemon, so it applies to exactly the builds started with it.
+- Whether a saved STEP holds its result: `cadgen store why <model.py>` says
+  so beside the output -- `verify pending`, or `shows its own content:` and the
+  occurrences that differ (§3, *Exports*) -- and the document entry lists the
+  differences (`differ`); a build with no daemon warns in the same words, a
+  daemon's build at the next touch of the file. The model's next run writes
+  such a file plain.
 - `cadgen store info` sizes the store against its cap, names any retired
   kind still present and any `index/` folder it does not know, and says when
   a newer cadgen's writes keep passes off the store. `cadgen store gc
@@ -2451,8 +2379,9 @@ supersession does not cancel their exports.
 - Carry a frame or a line in an object, a part, a document entry, a sidecar or a
   written file, or read `index/provenance` from anything but `store where` and
   `store why` (§3).
-- Show a preview as the saved file, bind a sidecar to one, or map saved bytes
-  to a preview tree (§9b).
+- Show a preview as the saved file, or bind a sidecar to one (§9b); map bytes
+  to a tree before they are written from it, or let a door answer an exact read
+  from an entry whose verify has not answered (§3, *Exports*).
 - Store a mesh no face of which was verified, or let a clock decide which faces
   are (§3; README law 1).
 - Memoize a kernel operation anywhere but in the warm worker's memory, or

@@ -593,7 +593,7 @@ class TheBakedSection(unittest.TestCase):
             TARGETS, BOUNDS,
         )
 
-    def test_a_baked_section_reads_back_as_itself_in_its_declared_order(self) -> None:
+    def test_a_baked_section_parses_as_itself_in_its_declared_order(self) -> None:
         section = self._section()
         self.assertEqual(["spin", "fade"], [clip["id"] for clip in section["clips"]])
         self.assertEqual(section, normalize_baked_animation(json.loads(json.dumps(section))))
