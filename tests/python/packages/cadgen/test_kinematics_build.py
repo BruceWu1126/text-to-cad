@@ -110,18 +110,17 @@ if __name__ == "__main__":
 
 
 def _face_of(make, geom_type=None) -> str:
-    """The name a build gives one face of the labelled part ``make`` makes (its first, or its
-    one face of ``geom_type``), as a person would paste it from `inspect refs`: a labelled
-    part's faces go by its label and their number among what its construction made, so the
-    model's build names them as this run does."""
-    from cadgen import build123d as bd
+    """The name a build gives one face of the part ``make`` makes (its first, or its one face
+    of ``geom_type``), as a person would paste it from `inspect refs`: a part placed as it is
+    names its faces by the function and the operation that made them and their number among
+    what that construction made (its label names the occurrence), so ``make``, named as the
+    model's function is, names them as the model's build does."""
     from cadgen._internal import kernel_memo
     from cadgen._internal.entity_ordinals import entity_map
     from OCP.TopLoc import TopLoc_Location
 
     with kernel_memo.run(None) as run:
         part = make()
-        bd.Compound(children=[part])  # the model hands the labelled part on, which pins its label
     _key, lineage = run.identify(part)
     faces = entity_map(part.wrapped.Located(TopLoc_Location()), "face")
     names = [lineage["faces"][faces.FindIndex(face.wrapped.Located(TopLoc_Location())) - 1]
@@ -137,8 +136,10 @@ def _arm_face() -> str:
     from cadgen import build123d as bd
     from cadgen import label_shape
 
-    return _face_of(lambda: label_shape(bd.Pos(10, 3, 6) * bd.Rot(0, 40, 30) * bd.Cylinder(2, 16), "arm"),
-                    bd.GeomType.CYLINDER)
+    def pivot():  # the model's function, whose name its features take
+        return label_shape(bd.Pos(10, 3, 6) * bd.Rot(0, 40, 30) * bd.Cylinder(2, 16), "arm")
+
+    return _face_of(pivot, bd.GeomType.CYLINDER)
 
 
 def _hinge_arm_face() -> str:
@@ -146,7 +147,10 @@ def _hinge_arm_face() -> str:
     from cadgen import build123d as bd
     from cadgen import label_shape
 
-    return _face_of(lambda: label_shape(bd.Pos(10, 0, 6) * bd.Box(16, 4, 4), "arm"))
+    def hinge():  # the model's function, whose name its features take
+        return label_shape(bd.Pos(10, 0, 6) * bd.Box(16, 4, 4), "arm")
+
+    return _face_of(hinge)
 
 
 class KinematicsBuildTests(unittest.TestCase):
