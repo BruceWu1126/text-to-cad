@@ -51,9 +51,9 @@ const DISPLAYS = {
   "solid light": { mode: "solid", appearance: "light" },
   "solid dark": { mode: "solid", appearance: "dark" },
   render: { mode: "render" },
-  "by part": { mode: "solid", surfaces: { colorMode: "by-part" } },
-  single: { mode: "render", surfaces: { colorMode: "single", color: "#ff8800" } },
-  "flat 50%": { mode: "solid", surfaces: { style: "flat", opacity: 0.5 } }
+  "by part": { mode: "solid", modes: { solid: { parts: { colorMode: "by-part" } } } },
+  single: { mode: "render", modes: { render: { parts: { colorMode: "single", color: "#ff8800" } } } },
+  flat: { mode: "solid", modes: { solid: { flat: true } } }
 };
 function materialState(object3D) {
   const rows = [];
@@ -231,11 +231,11 @@ test("the still's tight frame fits a skinned and morphed GLB where it is drawn; 
 
 test("a family scene takes none of a CAD model's steps: no edges or explode, and --mode list lists what it drew", async () => {
   const context = renderJobContext({ bounds: { min: [0, 0, 0], max: [1, 1, 1] } }, job("glb", {
-    display: { mode: "solid", edges: { enabled: true }, exploded: { enabled: true, amount: 1 }, clip: { enabled: true } }
+    display: { mode: "solid", modes: { solid: { edges: { enabled: true } } }, exploded: { enabled: true, amount: 1 }, clip: { enabled: true } }
   }));
   assert.deepEqual([context.stepDisplayEnabled, context.edgesVisible, context.topologyDisplayEdgesVisible,
     context.displaySettings.exploded.enabled, context.displaySettings.clip.enabled], [false, false, false, false, false]);
-  assert.deepEqual(resolveViewSceneSettings({ display: { mode: "solid", edges: { enabled: true } }, features: EDGELESS_VIEW_FEATURES }).view.edges.enabled, false);
+  assert.deepEqual(resolveViewSceneSettings({ display: { mode: "solid", modes: { solid: { edges: { enabled: true } } } }, features: EDGELESS_VIEW_FEATURES }).view.edges.enabled, false);
 
   const model = headlessSceneModel(THREE, headlessSceneFamily(job("glb")).build(THREE, await buildGlbDocumentFromBuffer(glbBytes())),
     headlessSceneDress(context.sceneSettings));

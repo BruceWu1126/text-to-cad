@@ -1,51 +1,32 @@
-import {
-  DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator
-} from "@text-to-cad/ui/primitives/dropdown-menu";
-import { SpeedSubmenu } from "../PlaybackMenu.jsx";
-import { ToolSettingsMenu } from "../ToolModeMenu.jsx";
-import ToolPanel from "../ToolPanel.jsx";
-import { PLAYBACK_SPEEDS, formatSeconds } from "./ViewportAnimationBar.js";
+import { Pause, Play, RotateCcw } from "lucide-react";
+import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import PlaybackMenu, { RoutineMenu } from "../PlaybackMenu.jsx";
+import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS } from "../SubToolbar.jsx";
+import { AnimationTimeControl } from "./ViewportAnimationBar.js";
 
 /**
- * The Animation tool's menu, its chevron on the strip: the file's routines when it has more than one
- * (choosing one plays it next and takes the tool up), then its settings — Speed, Loop and Autoplay,
- * the file's (Autoplay is preview's Playback settings' too, `PlaybackMenu.jsx`; their Speed and
- * Loop are preview's own). Ticking a checkbox leaves the menu open. The tool's button plays and
- * pauses; its playbar is the viewport's, at the bottom centre while the tool is up.
+ * The Animation tool's sub-toolbar (`kit/tools/SubToolbar.jsx`), one compact row under the strip
+ * while it is up, as preview's playbar is: the routines (a playlist, for a file with several), Play
+ * or Pause, the scrubber, the Playback settings (Speed, Loop, Autoplay) — the playbar's own
+ * menus (`PlaybackMenu.jsx`), opening down from the row — and Reset, last as Explode's and Clip's
+ * is: it stops the routine and puts the model back at rest, idle while it is there already. There is no playbar under the model in
+ * the tools view; preview has its own.
  *
- * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void,
- *   onRoutine(id: string): void, disabled?: boolean }} props  `runtime` is the playbar runtime, its
- *   Speed and Loop already writing the file's choice.
+ * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void, disabled?: boolean }} props
+ *   `runtime` is the playbar runtime, its Speed and Loop already writing the file's choice.
  */
-export function AnimationToolMenu({ runtime, autoplay, onAutoplayChange, onRoutine, disabled = false }) {
-  const clips = runtime.clips;
-  const keepOpen = event => event.preventDefault();
-  return <ToolSettingsMenu label="Animation settings" trigger="chevron" disabled={disabled}>
-    {clips.length > 1 ? <>
-      <DropdownMenuLabel>Routine</DropdownMenuLabel>
-      <DropdownMenuRadioGroup value={runtime.activeClipId} onValueChange={onRoutine}>
-        {clips.map(clip => <DropdownMenuRadioItem key={clip.id} value={clip.id}>
-          <span className="min-w-0 truncate">{clip.label}</span>
-        </DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>
-      <DropdownMenuSeparator />
-    </> : null}
-    <SpeedSubmenu label="Speed" name="Animation speed" value={Number(runtime.speed) || 1} values={PLAYBACK_SPEEDS} onChange={runtime.onSpeedChange} />
-    <DropdownMenuCheckboxItem checked={runtime.loopEnabled !== false} onSelect={keepOpen}
-      onCheckedChange={checked => runtime.onLoopToggle(checked === true)}>Loop</DropdownMenuCheckboxItem>
-    <DropdownMenuCheckboxItem checked={autoplay === true} onSelect={keepOpen}
-      onCheckedChange={checked => onAutoplayChange(checked === true)}>Autoplay</DropdownMenuCheckboxItem>
-  </ToolSettingsMenu>;
-}
-
-/**
- * A routine's frame kept while the Animation tool is not up: one line in the stack, as a kept pose
- * is, headed "Animation" with the time it paused at, and an X ("Reset animation") that puts the
- * model back at rest. A press on the Animation tool takes it up again as it was.
- *
- * @param {{ runtime: object }} props  `runtime` is the playbar runtime, paused past its start.
- */
-export function KeptAnimationPanel({ runtime }) {
-  return <ToolPanel id="animation-kept" title="Animation" summary={formatSeconds(runtime.elapsedSec)} label="Animation kept"
-    collapsible={false} closeLabel="Reset animation" onClose={() => runtime.onRelease()} />;
+export function AnimationToolbar({ runtime, autoplay, onAutoplayChange, disabled = false }) {
+  const playing = runtime?.playing === true;
+  const atRest = !playing && !(Number(runtime?.elapsedSec) > 0);
+  return <SubToolbar label="Animation controls" className={SLIDER_SUB_TOOLBAR_CLASS} data-animation-toolbar="">
+    <RoutineMenu animation={runtime} side="bottom" disabled={disabled} />
+    <ToolbarButton tooltip={false} disabled={disabled} label={`${playing ? "Pause" : "Play"} animation`} onClick={() => runtime?.onPlayToggle?.()}>
+      {playing ? <Pause className="size-3" strokeWidth={2} aria-hidden="true" /> : <Play className="size-3" strokeWidth={2} aria-hidden="true" />}
+    </ToolbarButton>
+    <AnimationTimeControl runtime={runtime} disabled={disabled} className={SUB_TOOLBAR_SLIDER_CLASS} />
+    <PlaybackMenu animation={runtime} side="bottom" disabled={disabled} autoplay={autoplay} onAutoplayChange={onAutoplayChange} />
+    <ToolbarButton label="Reset animation" disabled={disabled || atRest} onClick={() => runtime?.onRelease?.()}>
+      <RotateCcw className="size-3" strokeWidth={2} aria-hidden="true" />
+    </ToolbarButton>
+  </SubToolbar>;
 }

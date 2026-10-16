@@ -33,11 +33,11 @@ const restingCamera = async page => {
   }, null, { polling: 'raf' });
 };
 /** The last thing the viewport actually DREW. */
-const frame = async (pane) => { await settle(pane.page()); return PNG.sync.read(await pane.locator('[aria-busy] > div > canvas').first().screenshot({ style: '[data-slot=popover-content], [data-slot=dropdown-menu-content], [data-slot=dropdown-menu-sub-content], [data-cad-tool-groups], [aria-label="View cube"] { visibility: hidden !important; }' })); };
+const frame = async (pane) => { await settle(pane.page()); return PNG.sync.read(await pane.locator('[aria-busy] > div > canvas').first().screenshot({ style: '[data-slot=popover-content], [data-slot=dropdown-menu-content], [data-slot=dropdown-menu-sub-content], [data-cad-tool-groups], [data-file-sidebar-room], [aria-label="View cube"] { visibility: hidden !important; }' })); };
 // A canvas screenshot also catches what is drawn OVER the canvas: the tool strip
-// along the top, the tool stack's panels under it (hidden for the shot: they change with
-// every tool and selection) and the top-right view cube (also hidden for the shot). None is the
-// model. Measurements keep the original model band of the 800 × 600 harness
+// along the top, the tool stack's panels under it and the file sidebar down the left (hidden for
+// the shot: they change with every tool, hover and selection) and the view cube (also hidden for
+// the shot). None is the model. Measurements keep the original model band of the 800 × 600 harness
 // (an 800 × 564 canvas), so control placement cannot affect part-color counts. Pixel
 // counts below are for this band, 385 × 800: half what the tests once measured at 1200 × 720.
 const MODEL = { y0: 55, y1: 440 };
@@ -120,18 +120,6 @@ const restingLayout = (page, from, still = 5) => page.evaluate(({ from, still })
   requestAnimationFrame(frame);
 }), { from, still });
 /**
- * A label and its control on one line, measured where they are drawn: the label to the left of
- * its control, their centres level, and the control running to the panel's right edge.
- */
-async function assertPairedRow(section, label, control) {
-  const [sectionBox, labelBox, controlBox] = await Promise.all([
-    section.locator('[data-tool-panel-body]').boundingBox(), section.getByText(label, { exact: true }).boundingBox(), control.boundingBox()]);
-  assert.ok(labelBox.x + labelBox.width <= controlBox.x, 'the label sits beside its control');
-  assert.ok(Math.abs((labelBox.y + labelBox.height / 2) - (controlBox.y + controlBox.height / 2)) <= 2, 'on one line');
-  assert.ok(sectionBox.x + sectionBox.width - (controlBox.x + controlBox.width) <= 12,
-    `and the control is right-aligned: ${JSON.stringify({ sectionBox, controlBox })}`);
-}
-/**
  * The drawn frame once it satisfies `reached`, or a failure naming what it never
  * did. A repaint can land a frame or two after the state that asked for it, so a
  * single shot is a race; a poll that runs out is still the missing-repaint bug.
@@ -187,8 +175,8 @@ async function open(options = {}) {
   const ready = async () => {
     await pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
     await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
-    // A STEP opens in Select, so its Features panel is in the tool stack before anything is
-    // located on screen. The stack floats over the viewport: it never narrows it.
+    // An assembly's Features are the file sidebar's, there before anything is located on screen.
+    // The sidebar floats over the viewport: it never narrows it.
     await pane.getByRole('region', { name: 'Features', exact: true }).waitFor();
     // The world axes are drawn into the same canvas and the X one is the red the
     // arm is authored in, so they would answer to a question about the arm's pixels.
@@ -206,7 +194,7 @@ async function open(options = {}) {
     reload: async () => { await page.reload(); Object.assign(opened, await ready()); },
     state: () => page.evaluate(() => window.cadHarness.a.controller.readState()),
     display: patch => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch),
-    // Preview: its button, last in the navbar; its X back. The file's view was seeded with Orbit
+    // Preview: its button, last on the strip; its way out back. The file's view was seeded with Orbit
     // off: a still camera, so what moves in a frame is the model.
     enterPreview: async () => {
       await pane.getByRole('button', { name: 'Preview', exact: true }).click();
@@ -216,20 +204,41 @@ async function open(options = {}) {
       await pane.getByRole('button', { name: 'Exit preview', exact: true }).click();
       await pane.getByRole('button', { name: 'Preview', exact: true }).waitFor();
     },
-    // Display is not a tool: its button sits before Preview at the navbar's right end.
-    tool: name => name === 'Display' ? pane.locator('[data-view-controls]').getByRole('button', { name, exact: true })
+    // Display is not a tool: its button, the mode in hand, sits before Preview at the strip's end,
+    // after a rule; its settings are its menu's Custom submenu.
+    openDisplay: async (root = pane.locator('[data-cad-toolbar] [data-view-controls]')) => {
+      await root.getByRole('button', { name: /^Display mode: / }).click();
+      await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
+      await page.locator('[data-display-popover]').waitFor();
+    },
+    tool: name => name === 'Display' ? pane.locator('[data-cad-toolbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / })
       : pane.locator(name === 'Reset' ? '[data-cad-camera-controls]' : '[data-cad-toolbar]').getByRole('button', { name, exact: true }),
     tools: () => pane.locator('[data-cad-toolbar]').getByRole('button')
-      .evaluateAll(buttons => buttons.map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
+      .evaluateAll(buttons => buttons.filter(button => !button.closest('[data-view-controls]')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
     // The tool stack's panels on screen, top to bottom, by their accessible names.
     stack: () => pane.locator('[data-cad-tool-stack] [data-tool-panel]').evaluateAll(panels => panels
       .filter(panel => panel.getClientRects().length > 0).map(panel => panel.getAttribute('aria-label'))),
-    // Select's modes are the chevron right after its button on the strip (`SelectionModes.jsx`).
-    chooseSelectMode: async name => {
-      await pane.locator('[data-cad-toolbar]').getByRole('button', { name: /^Select mode: / }).click();
-      await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio', { name, exact: true }).click();
-      await page.locator('[role=menu]').waitFor({ state: 'detached' });
+    // The file sidebar's sections, top to bottom, the same way. A section draws no box of its own
+    // (`display: contents`): one not hidden is on screen.
+    sidebar: () => pane.locator('[data-cad-file-sidebar] [data-tool-panel]').evaluateAll(panels => panels
+      .filter(panel => !panel.closest('[hidden]')).map(panel => panel.getAttribute('aria-label'))),
+    // Select's selection filter is the chevron right after its button on the strip
+    // (`SelectionModes.jsx`): a checkbox per kind. `ticks` names those to tick (true) or untick
+    // (false); a kind the menu does not offer (Parts in a part file) is passed over.
+    setFilter: async ticks => {
+      await pane.locator('[data-cad-toolbar] [data-select-filter-trigger]').click();
+      const menu = page.locator('[role=menu][aria-label="Selection filter"]');
+      for (const [id, wanted] of Object.entries(ticks)) {
+        const item = menu.locator(`[data-select-filter="${id}"]`);
+        if (await item.count() && (await item.getAttribute('aria-checked') === 'true') !== wanted) await item.click();
+      }
+      await page.keyboard.press('Escape');
+      await menu.waitFor({ state: 'detached' });
     },
+    // The geometry Select picks, as the old modes named it: All of it, or Parts, Faces or Edges alone.
+    chooseSelectMode: name => opened.setFilter({ parts: name === 'All' || name === 'Parts', faces: name === 'All' || name === 'Faces',
+      edges: name === 'All' || name === 'Edges' }),
+    selectFilter: () => pane.locator('[data-cad-toolbar] [data-select-filter-trigger]').getAttribute('aria-label'),
     // A part is a leaf of the tree: its row's menu Expands it, which loads its faces and edges for
     // a pick under All, and Collapses it again.
     partMenu: async (name, item) => {
@@ -265,30 +274,33 @@ async function open(options = {}) {
 }
 
 
-test('a STEP opens in Select with the tools its sidecar earns, its Features in the tool stack and the Select modes on the strip, Display and Preview in the navbar, and paints both authored colours', async () => {
+test('a STEP opens in Select with the tools its sidecar earns, its Features in the file sidebar and Select\'s selection filter on the strip, Display and Preview ending it, and paints both authored colours', async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  // Select's modes are a chevron of their own right after its
-  // button, never pressed as a tool is.
-  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Draw:false', 'Measure:false',
-    'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Animation settings:null'],
-    'Position because the sidecar bound, Animation because it has a routine. Display is a dropdown from the navbar, not a tool');
-  assert.deepEqual(await pane.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display', 'Preview'], 'the view\'s controls at the navbar\'s right end: Display, then Preview');
-  assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: /^Select mode: / }).count(), 0,
-    'Select\'s modes are the strip\'s, not the Features filter row\'s');
+  // Select's selection filter is a chevron of its own right after its button, never pressed as a
+  // tool is, picking everything as the file opens. Position is no tool: its knobs are Select's.
+  assert.deepEqual(await view.tools(), ['Select:true', 'Selection filter: everything:null', 'Annotate:false', 'Measure:false',
+    'Explode:false', 'Clip:false', 'Animation:false'],
+    'Animation because it has a routine. Display is a dropdown, not a tool');
+  assert.deepEqual(await pane.locator('[data-cad-toolbar] [data-strip-rule] + [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'the view\'s controls end the strip, after a rule: Display, Projection, then Preview');
+  assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByRole('button', { name: /^Selection filter: / }).count(), 0,
+    'Select\'s filter is the strip\'s, not the Features filter row\'s');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
-  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
-    'a STEP is 3D: Preview sits in its navbar');
-  // Select is the tool, so the stack shows its Features — an assembly's tree starts open — with no
-  // tabs, and nothing of Position's.
-  assert.deepEqual(await view.stack(), ['Features']);
+  assert.equal(await pane.locator('[data-viewer-navbar]').getByRole('button', { name: 'Preview', exact: true }).count(), 0,
+    'nothing of the view\'s controls in the navbar');
+  // The file sidebar holds the Features — an assembly's tree starts open — then Position's controls,
+  // whatever the tool, with no tabs; Select has nothing in the tool stack.
+  assert.deepEqual([await view.sidebar(), await view.stack()], [['Features', 'Position controls'], []]);
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs anywhere');
-  assert.equal(await pane.getByRole('combobox', { name: 'Pose', exact: true }).isVisible(), false);
-  const [stack, toolbar] = await Promise.all([pane.getByRole('region', { name: 'Features', exact: true }).boundingBox(),
-    pane.locator('[data-cad-toolbar]').boundingBox()]);
-  assert.ok(Math.abs(stack.x - toolbar.x) <= 1 && stack.y >= toolbar.y + toolbar.height, 'Features hangs under the toolbar, at its left edge');
-  // The stack floats over the viewport: the canvas is the viewer's whole width.
+  assert.equal(await pane.locator('[data-sidebar-head] [data-pose-menu]').isVisible(), true, 'the Pose menu is in Position\'s heading');
+  // The strip is the top centre's; the sidebar hangs from the top-left corner, level with it.
+  const sidebar = pane.locator('[data-cad-file-sidebar]');
+  const [sidebarBox, toolbar] = await Promise.all([sidebar.boundingBox(), pane.locator('[data-cad-toolbar]').boundingBox()]);
+  assert.ok(Math.abs(toolbar.x + toolbar.width / 2 - (view.box.x + view.box.width / 2)) <= 1, 'the strip is centred');
+  assert.ok(Math.abs(sidebarBox.y - toolbar.y) <= 1 && sidebarBox.x < view.box.x + 16 && sidebarBox.x + sidebarBox.width < toolbar.x,
+    `the sidebar is the top-left corner's: ${JSON.stringify({ sidebarBox, toolbar })}`);
+  // The sidebar floats over the viewport: the canvas is the viewer's whole width.
   assert.equal(view.box.width, (await pane.locator('[data-cad-scene-backdrop]').boundingBox()).width);
   const opened = await view.frame();
   assert.ok(coverage(opened) > 0.2, `the opening frame is the model: ${coverage(opened)}`);
@@ -296,36 +308,36 @@ test('a STEP opens in Select with the tools its sidecar earns, its Features in t
   assert.ok(boxes.base?.count > 2000 && boxes.arm?.count > 1000, `both parts are drawn, each in its own colour: ${JSON.stringify(boxes)}`);
   // A part is a leaf: nothing opens under it.
   assert.deepEqual(await view.rows(), ['Select base', 'Select arm']);
-  // Its cap is the stack's own height (the area under the strip): as tall as its rows need, up to
-  // all the room there is. A cap is never a floor: two rows are two rows tall.
+  // The sidebar opens a tool panel's width and as tall as its sections, up to all the room there
+  // is; a section has no size of its own. A cap is never a floor: two rows are two rows tall.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
-  const stackHeight = await pane.locator('[data-cad-tool-stack]').evaluate(node => node.clientHeight);
-  const fit = await featuresPanel.evaluate(node => ({ cap: node.style.maxHeight, height: node.getBoundingClientRect().height,
-    rows: node.querySelector('[data-tool-panel-body]').scrollHeight, filter: node.querySelector('[data-slot=tree-filter]').getBoundingClientRect().height }));
-  assert.equal(fit.cap, `${stackHeight}px`, 'the tree opens capped at the whole stack');
-  assert.ok(Math.abs(fit.height - (fit.filter + fit.rows + 2)) <= 1, `and is its filter row and its rows: ${JSON.stringify(fit)}`);
-  // An assembly's tree is always there under Select: no X, no fold, and Select pressed again
-  // changes nothing.
-  assert.equal(await featuresPanel.getByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ }).count(), 0, 'the tree has no X and does not fold');
+  const scroller = pane.locator('[data-file-sidebar-scroller]');
+  const overflow = () => scroller.evaluate(node => [node.scrollWidth - node.clientWidth, node.scrollHeight - node.clientHeight]);
+  assert.equal(Math.round(sidebarBox.width), 164, 'a tool panel\'s width');
+  assert.equal(await featuresPanel.evaluate(node => node.style.maxHeight), '', 'the tree has no cap of its own');
+  assert.deepEqual(await overflow(), [0, 0], 'the sidebar is as tall as its sections: nothing to scroll');
+  // With another section beside it, the tree folds by its heading (its name the fold's button), its
+  // Find opens a filter, and the first heading ends with the sidebar's own button; nothing closes
+  // it, and Select pressed again changes nothing.
+  assert.deepEqual(await featuresPanel.locator('[data-tool-panel-heading]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label') || button.textContent.trim())),
+    ['Features', 'Find in model', 'Hide file sidebar'], 'the tree has no X; it folds, finds, and the sidebar hides');
   const openedRows = await view.rows();
   await view.tool('Select').click();
-  assert.deepEqual([await view.stack(), await view.rows()], [['Features'], openedRows]);
+  assert.deepEqual([await view.sidebar(), await view.stack(), await view.rows()], [['Features', 'Position controls'], [], openedRows]);
   assert.deepEqual(await page.evaluate(() => window.cadHarness.preferences.getSnapshot().toolStack), { panels: {}, collapsed: {} },
-    'nothing is stored until a person sizes a panel');
-  // One grip, Quick Edit's, in the bottom-right corner and inside the panel's border: it alone sizes the panel.
-  assert.deepEqual(await featuresPanel.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize features']);
-  const [grip, panelBox] = await Promise.all([featuresPanel.getByRole('separator', { name: 'Resize features', exact: true }).boundingBox(), featuresPanel.boundingBox()]);
-  assert.ok(Math.abs(grip.x + grip.width - (panelBox.x + panelBox.width - 1)) <= 1 && Math.abs(grip.y + grip.height - (panelBox.y + panelBox.height - 1)) <= 1,
-    `the grip fills the corner inside the border: ${JSON.stringify([grip, panelBox])}`);
-  // The stack itself never scrolls while its panels fit — nothing reaches past its column — so a
-  // wheel over it moves no border. Held shorter than its rows, the tree scrolls inside its own
-  // border instead.
-  const stackOverflow = () => pane.locator('[data-tool-stack-scroller]').evaluate(node => [node.scrollWidth - node.clientWidth, node.scrollHeight - node.clientHeight]);
-  assert.deepEqual(await stackOverflow(), [0, 0], 'the stack has nothing to scroll');
-  await pane.getByRole('separator', { name: 'Resize features', exact: true }).press('Home');
-  await pane.locator('section[aria-label="Features"][style*="max-height: 64px"]').waitFor();
-  assert.equal(await featuresPanel.locator('[data-tool-panel-body]').evaluate(node => node.scrollHeight > node.clientHeight), true, 'the tree scrolls its rows');
-  assert.deepEqual(await stackOverflow(), [0, 0], 'and the stack still has nothing to scroll');
+    'nothing is stored until a person sizes the sidebar');
+  // One grip, Quick Edit's, in the sidebar's bottom-right corner and inside its border: it alone
+  // sizes the sidebar, and no section has one of its own.
+  assert.deepEqual(await sidebar.getByRole('separator').evaluateAll(handles => handles.map(handle => handle.getAttribute('aria-label'))), ['Resize file sidebar']);
+  const grip = await sidebar.getByRole('separator', { name: 'Resize file sidebar', exact: true }).boundingBox();
+  assert.ok(Math.abs(grip.x + grip.width - (sidebarBox.x + sidebarBox.width - 1)) <= 1 && Math.abs(grip.y + grip.height - (sidebarBox.y + sidebarBox.height - 1)) <= 1,
+    `the grip fills the corner inside the border: ${JSON.stringify([grip, sidebarBox])}`);
+  // Held shorter than its sections, the whole bar scrolls, as one: the tree does not scroll inside it.
+  await sidebar.getByRole('separator', { name: 'Resize file sidebar', exact: true }).press('Home');
+  await pane.locator('aside[data-cad-file-sidebar][style*="max-height: 64px"]').waitFor();
+  const [across, down] = await overflow();
+  assert.ok(across === 0 && down > 0, `the sidebar scrolls its sections: ${JSON.stringify([across, down])}`);
+  assert.equal(await featuresPanel.locator('[data-tool-panel-body]').evaluate(node => node.scrollHeight > node.clientHeight), false, 'and the tree has nothing of its own to scroll');
   assert.deepEqual(errors, []);
 });
 
@@ -358,8 +370,8 @@ test('a pick names its face or edge by the id cadgen minted in the selector tabl
   assert.deepEqual(await selected(), [`${base.id}.${rim.localId}`], 'the rim edge is the table\'s row');
   // Group edges: the pick grows to the edges of the table's chain, which for a box edge is itself
   // alone (its ends each meet two edges at a right angle), however close the neighbours lie.
-  await pane.locator('[data-cad-toolbar]').getByRole('button', { name: /^Select mode: / }).click();
-  await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemcheckbox', { name: 'Group edges', exact: true }).click();
+  await pane.locator('[data-cad-toolbar] [data-select-filter-trigger]').click();
+  await page.locator('[role=menu][aria-label="Selection filter"]').getByRole('menuitemcheckbox', { name: 'Group edges', exact: true }).click();
   // A checkbox item keeps its menu open for the next one; Escape puts it away.
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
@@ -410,13 +422,14 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   await view.partMenu('base', 'Collapse');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 0);
 
-  // Nothing joins Features in the stack, with a selection or without: what is picked is Quick
+  // Nothing joins the sidebar or the stack, with a selection or without: what is picked is Quick
   // Edit's, a chip each.
-  assert.deepEqual(await view.stack(), ['Features']);
+  const panels = async () => [await view.sidebar(), await view.stack()];
+  assert.deepEqual(await panels(), [['Features', 'Position controls'], []]);
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.1']);
-  assert.deepEqual(await view.stack(), ['Features'], 'no Reference panel comes with the selection');
+  assert.deepEqual(await panels(), [['Features', 'Position controls'], []], 'no Reference panel comes with the selection');
   assert.deepEqual(await view.chips(), ['base'], 'the part\'s chip, by its name');
   // Its card, once the pointer rests on the chip: the part's name, its id, then its key
   // measurements — no type, position or material rows.
@@ -436,10 +449,16 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   assert.ok(rowHeights.length >= 2 && rowHeights.every(height => height <= 19 * 2), `compact rows, a line or two each: ${rowHeights}`);
   assert.equal(await partCard.locator('[data-slot=scroll-area-viewport]').evaluate(node => node.scrollHeight <= node.clientHeight), true,
     'the card has nothing to scroll to');
-  // The Features filter row is dense: its box at the panels' 11px.
+  // Features' find field takes its heading's place, part of its head: a tree row's height, its box
+  // at the panels' 11px; Close find gives the heading back.
   const featuresPanel = pane.getByRole('region', { name: 'Features', exact: true });
-  const filterRowHeight = Math.round((await featuresPanel.locator('[data-slot=tree-filter]').boundingBox()).height);
+  await featuresPanel.getByRole('button', { name: 'Find in model', exact: true }).click();
+  const findField = featuresPanel.locator('[data-sidebar-head] [data-slot=tree-filter]');
+  assert.equal(Math.round((await findField.boundingBox()).height), 24, 'the find field is a tree row\'s height, part of the head');
+  assert.equal(await featuresPanel.locator('[data-tool-panel-heading]').count(), 0, 'in the heading\'s place');
   assert.equal(await pane.getByRole('textbox', { name: 'Filter model', exact: true }).evaluate(node => getComputedStyle(node).fontSize), '11px');
+  await featuresPanel.getByRole('button', { name: 'Close find', exact: true }).click();
+  await featuresPanel.locator('[data-tool-panel-heading]').waitFor();
   assert.equal(await pane.getByRole('button', { name: 'Select base', exact: true }).getAttribute('aria-pressed'), 'true', 'the tree row follows the viewport');
   await page.keyboard.down('Shift');
   await page.mouse.click(...at([15, 0, 4]));
@@ -458,20 +477,17 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
   await quickEditBox.waitFor({ state: 'detached' });
 
-  // A selection outlives Select: another tool shows its own panel in place of Select's, and the
-  // selection stays, its chip in Quick Edit; Select brings the tree back as it was.
+  // A selection outlives Select: another tool shows its own panel, if it has one, and the
+  // selection stays, its chip in Quick Edit; the tree stays as it was, whatever the tool.
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   await view.tool('Measure').click();
-  assert.deepEqual(await view.stack(), [], 'Measure has no panel (its results are Quick Edit\'s chips): no Features');
+  assert.deepEqual(await panels(), [['Features', 'Position controls'], []], 'Measure has no panel (its results are Quick Edit\'s chips); the sidebar stays');
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.1'], 'the selection stays under Measure');
   assert.deepEqual(await view.chips(), ['base'], 'and Quick Edit still carries it');
-  // The Features filter row is a heading's height, as Clip's heading is.
   await view.tool('Clip').click();
-  const clipHeading = await pane.getByRole('region', { name: 'Clip controls', exact: true }).locator('[data-tool-panel-heading]').boundingBox();
-  assert.equal(filterRowHeight, Math.round(clipHeading.height), 'the filter row is a heading\'s height');
   await view.tool('Select').click();
-  assert.deepEqual(await view.stack(), ['Features']);
+  assert.deepEqual(await panels(), [['Features', 'Position controls'], []], 'Clip\'s panel goes with the tool');
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 1);
   assert.deepEqual((await view.state()).selectedPartIds, ['o1.2']);
@@ -479,7 +495,7 @@ test('Select picks parts and faces, a selection outlives Select, and Quick Edit\
   await view.quickEdit().getByRole('button', { name: 'Remove arm', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.length === 0);
   await quickEditBox.waitFor({ state: 'detached' });
-  assert.deepEqual(await view.stack(), ['Features']);
+  assert.deepEqual(await panels(), [['Features', 'Position controls'], []]);
 
   // What the host can drive: selectors in, selection out, and a clear.
   await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.2'] }));
@@ -512,6 +528,7 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   const selected = () => page.evaluate(() => window.cadHarness.a.controller.readState().selectedReferenceIds);
   // The tree loads a part's faces as its row comes on screen. With a filter that matches
   // nothing, no row is on screen, so under Faces no part has its faces loaded.
+  await pane.getByRole('button', { name: 'Find in model', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Filter model', exact: true }).fill('zzz');
   await mode('Faces');
   assert.deepEqual([(await view.state()).selectedPartIds, await view.rows()], [[], []]);
@@ -555,7 +572,7 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   assert.doesNotMatch(edgeText, /\bType\b/);
   // An update of the model keeps the mode, and drops what was picked in the revision before it.
   await view.update();
-  assert.equal(await view.tool('Select').locator('[data-select-mode]').getAttribute('data-select-mode'), 'edges');
+  assert.equal(await view.selectFilter(), 'Selection filter: Edges, Position, Annotations, Measurement');
   assert.deepEqual(await selected(), []);
   assert.deepEqual(errors, []);
 });
@@ -605,17 +622,18 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   await away();
   await frameWhen(view, shot => differing(opened, shot) === 0, 'came back to what hiding the arm took away');
   // Hover runs the other way too: resting on a tree row lights its part. These frames keep the
-  // tool stack on screen and are read to its right: hiding it for a screenshot is the pointer
-  // leaving the row, which on a slow (software) renderer lands before the hover is drawn.
+  // file sidebar on screen and are read to its right: hiding it for a screenshot is the pointer
+  // leaving the row, which on a slow (software) renderer lands before the hover is drawn. (The
+  // strip at the top centre is hidden: it is not under the pointer.)
   const canvas = pane.locator('[aria-busy] > div > canvas').first();
-  const withStack = async () => { await settle(page); return PNG.sync.read(await canvas.screenshot()); };
-  const [canvasBox, stackBox] = [await canvas.boundingBox(), await pane.locator('[data-cad-tool-stack]').boundingBox()];
-  const rest = await withStack();
-  const rightOfStack = { x0: Math.ceil(stackBox.x + stackBox.width - canvasBox.x) + 4, y0: 0, x1: rest.width, y1: rest.height };
+  const withSidebar = async () => { await settle(page); return PNG.sync.read(await canvas.screenshot({ style: '[data-cad-tool-groups] { visibility: hidden !important; }' })); };
+  const [canvasBox, sidebarBox] = [await canvas.boundingBox(), await pane.locator('[data-cad-file-sidebar]').boundingBox()];
+  const rest = await withSidebar();
+  const rightOfSidebar = { x0: Math.ceil(sidebarBox.x + sidebarBox.width - canvasBox.x) + 4, y0: 0, x1: rest.width, y1: rest.height };
   await pane.getByRole('button', { name: 'Select arm', exact: true }).hover();
   let lit = 0;
   for (let attempt = 0; attempt < 16 && lit <= 2000; attempt += 1) {
-    lit = differing(rest, await withStack(), rightOfStack);
+    lit = differing(rest, await withSidebar(), rightOfSidebar);
     if (lit <= 2000) await page.waitForTimeout(200);
   }
   assert.ok(lit > 2000, `the drawn frame lit the part under the hovered row: ${lit} pixels changed`);
@@ -628,9 +646,9 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
     'the node menu: what can be done to the part under the pointer, then the tree');
   await page.keyboard.press('Escape');
   await page.getByRole('menu').waitFor({ state: 'detached' });
-  // Empty space asks about the model as a whole. Nothing is hidden here, so besides
+  // Empty space (the bottom centre, clear of the cube) asks about the model as a whole. Nothing is hidden here, so besides
   // the framing group all it can offer is the tree.
-  await page.mouse.click(box.x + box.width - 30, box.y + box.height - 30, { button: 'right' });
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height - 30, { button: 'right' });
   await page.getByRole('menu').waitFor();
   assert.deepEqual(await page.getByRole('menuitem').allTextContents(), ['Expand all', 'Collapse all', ...ZOOM_SECTION]);
   await page.keyboard.press('Escape');
@@ -643,13 +661,13 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
   await page.keyboard.press('Escape');
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await away();
-  for (const tool of ['Measure', 'Position', 'Animation', 'Draw']) {
+  for (const tool of ['Measure', 'Animation', 'Annotate']) {
     await view.tool(tool).click();
     // A menu opens in the render the press causes: two frames on, it would be there.
     await page.mouse.click(...at([6, 6, 5]), { button: 'right' });
     await settle(page);
     assert.equal(await page.getByRole('menu').count(), 0, `${tool} opens no viewport menu over a part`);
-    await page.mouse.click(box.x + box.width - 30, box.y + box.height - 30, { button: 'right' });
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height - 30, { button: 'right' });
     await settle(page);
     assert.equal(await page.getByRole('menu').count(), 0, `${tool} opens no viewport menu over empty space`);
     // The browser's own menu is still kept off the canvas, and a secondary drag still pans.
@@ -660,9 +678,9 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
       document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').dispatchEvent(event);
       return event.defaultPrevented;
     }), true, `${tool} still suppresses the native menu`);
-    // And a secondary DRAG is still a pan. (Not under Draw: that tool locks the
+    // And a secondary DRAG is still a pan. (Not under Annotate: that tool locks the
     // view on purpose and the editor takes the drag, which its own test asserts.)
-    if (tool === 'Draw') continue;
+    if (tool === 'Annotate') continue;
     const before = await page.evaluate(() => window.__cadCamera().target);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down({ button: 'right' });
@@ -671,17 +689,16 @@ test('hiding a part takes it off the screen, and the viewport menus offer what t
     await page.waitForFunction(target => window.__cadCamera().target.some((value, index) => Math.abs(value - target[index]) > 1e-3), before,
       { timeout: 5000 });
   }
-  // The tree is Select's: under another tool it is off screen, and Select brings it back to act
-  // from — Isolate, which has no selection of its own to make.
-  assert.deepEqual(await view.tools(), ['Select:false', 'Select mode: All:null', 'Draw:true', 'Measure:false', 'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Animation settings:null']);
-  assert.equal(await pane.getByRole('button', { name: 'Select arm', exact: true }).isVisible(), false);
-  await view.tool('Select').click();
+  // The tree is the sidebar's, under any tool, and acted from it goes back to Select first —
+  // Isolate, which has no selection of its own to make.
+  assert.deepEqual(await view.tools(), ['Select:false', 'Selection filter: everything:null', 'Annotate:true', 'Measure:false', 'Explode:false', 'Clip:false', 'Animation:false']);
+  assert.equal(await pane.getByRole('button', { name: 'Select arm', exact: true }).isVisible(), true);
   // A menu goes when the camera moves, and the last pan is still coasting: it opens at rest.
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Isolate', exact: true }).click();
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().isolatedPartIds.join() === 'o1.2');
-  assert.deepEqual(await view.tools(), ['Select:true', 'Select mode: All:null', 'Draw:false', 'Measure:false', 'Explode:false', 'Clip:false', 'Position:false', 'Animation:false', 'Animation settings:null']);
+  assert.deepEqual(await view.tools(), ['Select:true', 'Selection filter: everything:null', 'Annotate:false', 'Measure:false', 'Explode:false', 'Clip:false', 'Animation:false']);
   await page.keyboard.press('Escape');
   assert.deepEqual(errors, []);
 });
@@ -733,20 +750,18 @@ const MIN_REDRAWN = { render: 30_000, xray: 30_000, 'hidden-line': 30_000, wiref
 test('every Display preset reaches the drawn frame, on the live canvas', async () => {
   const view = await open();
   const { page, errors } = view;
-  // Display is a dropdown from its button in the navbar, over the viewport.
-  await view.tool('Display').click();
-  const panel = view.displayPanel();
-  await panel.waitFor();
+  // Display is the mode in hand, chosen from its button's menu at the strip's end.
   const solid = await restingFrame(view);
   await page.evaluate(() => { window.openingCanvas = document.querySelector('[data-testid="one"] [aria-busy] > div > canvas'); });
 
   // Each preset draws a different picture, and none of them replaces the canvas.
   const frames = { solid };
   for (const [mode, label] of [['render', 'Render'], ['xray', 'X-ray'], ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe'], ['grid', 'Grid']]) {
-    if (!await panel.isVisible()) await view.tool('Display').click();
-    await panel.getByRole('combobox', { name: 'Mode', exact: true }).click();
-    await page.getByRole('option', { name: label, exact: true }).click();
-    assert.equal(await panel.isVisible(), true, 'choosing a preset keeps the dropdown');
+    await view.tool('Display').click();
+    const menu = page.locator('[role=menu][aria-label="Display mode"]');
+    await menu.locator(`[data-display-mode-option="${mode}"]`).click();
+    await menu.waitFor({ state: 'detached' });
+    assert.equal(await view.tool('Display').getAttribute('aria-label'), `Display mode: ${label}`);
     await page.waitForFunction(wanted => {
       const state = window.cadHarness.a.controller.readState();
       return state.display.mode === wanted && !state.loading;
@@ -764,34 +779,33 @@ test('every Display preset reaches the drawn frame, on the live canvas', async (
   assert.deepEqual(errors, []);
 });
 
-test('Position drives the mate and repaints, a named pose jumps, the Position knob is never the camera, and the grid keeps the size the rest pose gave it', async () => {
+test('Position drives the mate and repaints, a named pose jumps, Select\'s knob is never the camera nor a pick, and the grid keeps the size the rest pose gave it', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   // The grid is only the Grid preset's by default; this compares its lines, so it is turned on.
   await view.display({ grid: { enabled: true } });
-  // The model's own tools end the strip: Position where the file has movable joints, then Animation
-  // where it has routines.
-  assert.deepEqual((await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))).slice(-3),
-    ['Position', 'Animation', 'Animation settings']);
-  // Position shows its panel in the tool stack, in place of Select's, and enables the joint handles.
-  await view.tool('Position').click();
+  // The model's own tool ends the strip: Animation where it has routines. Position is no tool: its
+  // knobs are Select's while its filter picks Position, as it does when the file opens.
+  const strip = await pane.getByRole('group', { name: 'Interaction tools' }).locator('button').evaluateAll(buttons => buttons
+    .filter(button => !button.closest('[data-view-controls]')).map(button => button.getAttribute('aria-label')));
+  assert.deepEqual([strip.at(-1), strip.includes('Position')], ['Animation', false]);
+  // Position's controls are the file sidebar's, whatever the tool, and add no panel to the stack.
   const panel = pane.getByRole('region', { name: 'Position controls', exact: true });
-  assert.deepEqual(await view.stack(), ['Position controls']);
+  assert.deepEqual([await view.sidebar(), await view.stack()], [['Features', 'Position controls'], []]);
   assert.deepEqual(await panel.getByRole('heading').allInnerTexts(), ['Position'], 'headed Position');
   const slider = page.getByLabel('hinge slider value', { exact: true });
-  const preset = panel.getByRole('combobox', { name: 'Pose', exact: true });
-  // ONE panel, whose first row is the named pose — a label beside its dropdown — then the joint.
-  // The pose and the joints are no sections of their own.
-  await assertPairedRow(panel, 'Pose', preset);
+  const preset = panel.locator('[data-pose-menu]');
+  // ONE section: its heading holds the Pose menu, beside its name; its body the joint. The pose and
+  // the joints are no sections of their own.
+  assert.equal(await panel.locator('[data-sidebar-head] [data-pose-menu]').count(), 1);
   for (const heading of ['Pose', 'Joints', 'Kinematics']) {
     assert.equal(await panel.getByRole('heading', { name: heading, exact: true }).count(), 0, `no ${heading} heading inside Position`);
   }
-  // Sized like the tree: its content's height, capped at the whole stack, with its corner grip.
-  const positionFit = await panel.evaluate(node => ({ cap: node.style.maxHeight, stack: node.closest('[data-cad-tool-stack]').clientHeight,
+  // A section, as the tree is: its content's height, no cap, scroller or grip of its own.
+  const positionFit = await panel.evaluate(node => ({ cap: node.style.maxHeight,
     scrolls: node.querySelector('[data-tool-panel-body]').scrollHeight > node.querySelector('[data-tool-panel-body]').clientHeight }));
-  assert.equal(positionFit.cap, `${positionFit.stack}px`);
-  assert.equal(positionFit.scrolls, false);
-  assert.equal(await pane.getByRole('separator', { name: 'Resize position controls', exact: true }).count(), 1);
+  assert.deepEqual(positionFit, { cap: '', scrolls: false });
+  assert.equal(await pane.getByRole('separator', { name: 'Resize position controls', exact: true }).count(), 0);
   // A compact value field: 24px tall and about five characters wide.
   const field = await slider.boundingBox();
   assert.ok(field.height <= 24 && field.width <= 60, `a compact value field: ${JSON.stringify(field)}`);
@@ -818,10 +832,12 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
 
   // A named pose is a full configuration, applied as a jump.
   await preset.click();
-  await page.getByRole('option', { name: 'open', exact: true }).click();
+  await page.locator('[role=menu][aria-label="Pose"]').getByRole('menuitemradio', { name: 'open', exact: true }).click();
   await page.waitForFunction(() => /^90(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   assert.equal((await preset.innerText()).trim(), 'open');
-  await panel.getByRole('button', { name: 'Reset position', exact: true }).click();
+  // Default is the way back.
+  await preset.click();
+  await page.locator('[role=menu][aria-label="Pose"]').getByRole('menuitemradio', { name: 'Default', exact: true }).click();
   await page.waitForFunction(() => /^0(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
     .catch(() => {});
@@ -829,7 +845,7 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   await page.mouse.move(view.box.x + view.box.width - 20, view.box.y + view.box.height - 20);
   await frameWhen(view, shot => differing(rest, shot) === 0, 'came back to the rest pose after Reset');
 
-  // The Position tool: one knob, on the mate's axis, and dragging it is never the camera.
+  // Select's knob: one, on the mate's axis, and dragging it is never the camera, nor a pick.
   await page.waitForFunction(() => window.__cadJointHandles().length === 1);
   const [knob] = await page.evaluate(() => window.__cadJointHandles());
   assert.equal(knob.id, 'hinge');
@@ -858,6 +874,18 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   }
   await frameWhen(view, shot => differing(rest, shot) > 10_000, 'showed the pose the knob dragged to');
   assert.equal(Number.parseFloat(await slider.inputValue()), Math.round(held * 10) / 10, 'the Position slider follows the knob');
+  const picked = async () => (({ selectedPartIds, selectedReferenceIds, isolatedPartIds }) => [selectedPartIds, selectedReferenceIds, isolatedPartIds])(await view.state());
+  assert.deepEqual(await picked(), [[], [], []], 'a press on the knob picks nothing under it');
+  // Two quick presses on it are the knob's too, never a double-click on the part under it.
+  const [dragged] = await page.evaluate(() => window.__cadJointHandles());
+  await page.mouse.dblclick(view.box.x + dragged.x, view.box.y + dragged.y);
+  await settle(page);
+  assert.deepEqual(await picked(), [[], [], []], 'a double-click on the knob isolates nothing');
+  // With Position unticked from the filter the knob goes; ticked again it is back.
+  await view.setFilter({ position: false });
+  await page.waitForFunction(() => window.__cadJointHandles().length === 0);
+  await view.setFilter({ position: true });
+  await page.waitForFunction(() => window.__cadJointHandles().length === 1);
 
   // The Render studio's floor is the same ground as the grid: sized and centred
   // from the REST placement. Entering Render builds the studio against the scene
@@ -875,7 +903,8 @@ test('Position drives the mate and repaints, a named pose jumps, the Position kn
   await slider.press('Enter');
   await page.waitForFunction(() => Math.abs(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[13]) > 1);
   const posedStage = await studioFloor();
-  await panel.getByRole('button', { name: 'Reset position', exact: true }).click();
+  await preset.click();
+  await page.locator('[role=menu][aria-label="Pose"]').getByRole('menuitemradio', { name: 'Default', exact: true }).click();
   await page.waitForFunction(() => /^0(\.0+)?°$/.test(document.querySelector('input[aria-label="hinge slider value"]').value));
   const restStage = await studioFloor();
   const boxShift = Math.max(...[0, 1, 2].flatMap(axis => [
@@ -900,14 +929,16 @@ test('preview opens paused, its playbar plays and pauses the routine without mov
   // Under Select the tools view carries nothing of the routine's: no transport.
   assert.equal(await pane.locator('[data-animation-transport]').count(), 0);
   const boxes = names => Promise.all(names.map(name => pane.getByRole('button', { name, exact: true }).boundingBox()));
-  const viewControls = await boxes(['Display', 'Preview']);
   await view.enterPreview();
-  // Preview has the page to itself: the navbar goes, and its corner holds Orbit, then Display and the
-  // way out exactly where Display and Preview sat in the navbar.
+  // Preview has the page to itself: the navbar goes, and its own row, at the top centre of the view,
+  // holds Orbit, Display, Projection, then the way out, side by side.
   await pane.locator('[data-viewer-navbar]').waitFor({ state: 'detached' });
-  const [orbitBox, ...cornerBoxes] = await boxes(['Orbit', 'Display', 'Exit preview']);
-  assert.deepEqual(cornerBoxes, viewControls);
-  assert.ok(orbitBox.y === viewControls[0].y && orbitBox.x + orbitBox.width < viewControls[0].x, 'Orbit sits just before Display');
+  const [orbitBox, displayBox, projectionBox, exitBox] = await boxes(['Orbit', /^Display mode: /, /^Projection: /, 'Exit preview']);
+  assert.ok([displayBox, projectionBox, exitBox].every(box => box.y === orbitBox.y) && orbitBox.x < displayBox.x && displayBox.x < projectionBox.x && projectionBox.x < exitBox.x,
+    'one row: Orbit, Display, Projection, Exit preview');
+  const row = await pane.locator('[data-preview-corner]').boundingBox();
+  const surface = await pane.locator('[data-cad-surface]').boundingBox();
+  assert.ok(Math.abs(row.x + row.width / 2 - (surface.x + surface.width / 2)) <= 1 && row.y - surface.y <= 12, `the row is the top centre's: ${JSON.stringify({ row, surface })}`);
   // The tools are put away, and the playbar is under the model.
   assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).isVisible(), false);
   const bar = pane.getByRole('toolbar', { name: 'Animation playback' });
@@ -919,7 +950,7 @@ test('preview opens paused, its playbar plays and pauses the routine without mov
   // Display is preview's too: its dropdown opens from the corner over the file's own settings, an
   // edit there draws in the preview, and Escape puts it away, preview kept.
   const edged = await restingFrame(view);
-  await pane.locator('[data-preview-corner]').getByRole('button', { name: 'Display', exact: true }).click();
+  await view.openDisplay(pane.locator('[data-preview-corner]'));
   await view.displayPanel().getByRole('button', { name: 'Disable Edges', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.edges?.enabled === false);
   await frameWhen(view, shot => differing(edged, shot) > 100, 'drew the preview without its edges');
@@ -932,8 +963,8 @@ test('preview opens paused, its playbar plays and pauses the routine without mov
   // Preview puts away prompt actions, leaving only playback controls: one routine has no list of
   // routines, and the routine's settings end the playbar. The view's own are the corner's.
   assert.deepEqual(await bar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Play animation', 'Playback settings']);
-  assert.deepEqual(await pane.locator('[data-preview-corner]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Orbit', 'Display', 'Exit preview']);
+  assert.deepEqual(await pane.locator('[data-preview-corner]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label').split(':')[0])),
+    ['Orbit', 'Display mode', 'Projection', 'Exit preview']);
   assert.equal(await bar.getByRole('slider', { name: 'Animation time', exact: true }).count(), 1);
   assert.equal(await pane.getByRole('button', { name: 'Quick Edit' }).count(), 0);
 
@@ -999,15 +1030,13 @@ test('preview and the tools view are two states: preview draws the model as auth
   const authored = await restingFrame(view);
   await view.exitPreview();
 
-  // Work in the tools view: the arm swung on Position, the base hidden, the arm picked, the model
-  // clipped, and a camera of the person's own.
-  await view.tool('Position').click();
+  // Work in the tools view: the arm swung on Position's slider, the base hidden, the arm picked, the
+  // model clipped, and a camera of the person's own.
   const slider = page.getByLabel('hinge slider value', { exact: true });
   await slider.fill('60');
   await slider.press('Enter');
   await page.waitForFunction(() => Math.abs(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[13]) > 1);
   const posedArm = await arm();
-  await view.tool('Select').click();
   await pane.getByRole('button', { name: 'Hide base', exact: true }).click();
   await pane.getByRole('button', { name: 'Select arm', exact: true }).click();
   await view.display({ clip: { enabled: true, axis: 'z', invert: false } });
@@ -1047,7 +1076,6 @@ test('preview and the tools view are two states: preview draws the model as auth
   assert.deepEqual([back.hiddenPartIds, back.selectedPartIds, back.display.clip], [work.hiddenPartIds, work.selectedPartIds, work.display.clip]);
   for (const key of ['position', 'target', 'up']) work.camera[key].forEach((value, index) => assert.ok(Math.abs(value - back.camera[key][index]) < 1e-6, `the tools view's camera comes back: ${key}`));
   assert.equal(back.camera.zoom, work.camera.zoom);
-  await view.tool('Position').click();
   assert.match(await slider.inputValue(), /^60(\.0+)?°$/);
 
   // An isolated part is the tools view's too: preview draws the whole model, and leaving finds the part isolated.
@@ -1065,7 +1093,7 @@ test('preview and the tools view are two states: preview draws the model as auth
   assert.deepEqual(errors, []);
 });
 
-test("the Animation tool's button plays and pauses the routine in the tools view, over a playbar at the bottom centre; preview leaves its routine as it was, and putting the tool down keeps the frame it paused at, which the other tools work on", async () => {
+test("the Animation tool's button takes it up, paused, its controls a row under the strip whose button plays and pauses the routine, and no playbar; preview leaves its routine as it was, and putting the tool down keeps the frame it paused at, which the other tools work on", async () => {
   const view = await open();
   const { page, pane, errors } = view;
   const arm = () => page.evaluate(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix);
@@ -1074,19 +1102,38 @@ test("the Animation tool's button plays and pauses the routine in the tools view
   const away = () => page.mouse.move(view.box.x + view.box.width - 20, view.box.y + 100);
   await away();
   const restBox = partBoxes(await restingFrame(view)).arm;
+  // Preview's playbar, and the tool's row of controls in the tools view.
   const bar = pane.getByRole('toolbar', { name: 'Animation playback' });
+  const row = pane.getByRole('toolbar', { name: 'Animation controls', exact: true });
   const tool = view.tool('Animation');
-  assert.equal(await bar.count(), 0, 'no playbar before the tool is up');
-  // A press takes it up and plays: no panel in the stack, the playbar at the bottom centre.
+  assert.equal(await row.count(), 0, 'no controls before the tool is up');
+  // A press takes it up, paused: no panel in the stack, its row hung under the strip, and no
+  // playbar under the model. A second press on the tool in hand does nothing.
   await tool.click();
-  await bar.getByRole('button', { name: 'Pause animation' }).waitFor();
+  await row.getByRole('button', { name: 'Play animation' }).waitFor();
+  await tool.click();
+  assert.deepEqual([await view.stack(), await bar.count(), await row.getByRole('button', { name: 'Play animation' }).count()], [[], 0, 1]);
+  const [stripBox, rowBox] = await Promise.all([pane.locator('[data-cad-toolbar]').boundingBox(), row.boundingBox()]);
+  assert.ok(rowBox.y >= stripBox.y + stripBox.height, 'the row hangs under the strip');
+  // The row: Play or Pause, the scrubber, the Playback settings (one routine: no Routines), then Reset.
+  assert.deepEqual(await row.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Play animation', 'Playback settings', 'Reset animation']);
+  assert.equal(await row.getByRole('slider', { name: 'Animation time' }).count(), 1);
+  // Its settings open down from the row: Speed, Loop and Autoplay.
+  const settingsButton = row.getByRole('button', { name: 'Playback settings', exact: true });
+  await settingsButton.click();
+  const settingsMenu = page.getByRole('menu', { name: 'Playback settings', exact: true });
+  assert.deepEqual(await settingsMenu.getByRole('menuitemcheckbox').allInnerTexts(), ['Loop', 'Autoplay']);
+  await settingsMenu.getByRole('menuitem', { name: /^Animation speed: / }).waitFor();
+  const [menuBox, buttonBox] = await Promise.all([settingsMenu.boundingBox(), settingsButton.boundingBox()]);
+  assert.ok(menuBox.y >= buttonBox.y + buttonBox.height, 'opening down from its button');
+  await page.keyboard.press('Escape');
+  await settingsMenu.waitFor({ state: 'detached' });
+  // Its Play plays the routine, and Pause pauses it mid-way.
+  await row.getByRole('button', { name: 'Play animation' }).click();
   await page.waitForFunction(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] > 0.2);
-  assert.deepEqual(await view.stack(), []);
-  const [barBox] = await Promise.all([bar.boundingBox()]);
-  assert.ok(Math.abs(barBox.x + barBox.width / 2 - (view.box.x + view.box.width / 2)) <= 2, 'the playbar is centred');
-  // Another press pauses.
-  await tool.click();
-  await bar.getByRole('button', { name: 'Play animation' }).waitFor();
+  await row.getByRole('button', { name: 'Pause animation' }).click();
+  await row.getByRole('button', { name: 'Play animation' }).waitFor();
   const paused = await translations(page);
   // Preview's routine is its own: it opens at rest and waits (Autoplay is off), whatever the tool's is doing.
   const atRest = () => page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
@@ -1097,28 +1144,26 @@ test("the Animation tool's button plays and pauses the routine in the tools view
   assert.deepEqual((await translations(page))['o1.2'], restArm, 'preview opens on the model at rest');
   // Leaving hands the tool's routine back where it was: paused mid-way...
   await view.exitPreview();
-  await bar.getByRole('button', { name: 'Play animation' }).waitFor();
+  await row.getByRole('button', { name: 'Play animation' }).waitFor();
   await page.waitForFunction(at => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(at), paused['o1.2'])
     .catch(() => {});
   assert.deepEqual(await translations(page), paused);
-  // ...or playing, once it plays (the playbar's own button plays too).
-  await bar.getByRole('button', { name: 'Play animation' }).click();
+  // ...or playing, once it plays (the row's own button plays too).
+  await row.getByRole('button', { name: 'Play animation' }).click();
   await view.enterPreview();
   await bar.getByRole('button', { name: 'Play animation', exact: true }).waitFor();
   await atRest();
   assert.deepEqual((await translations(page))['o1.2'], restArm, 'preview opens at rest while the tool plays');
   await view.exitPreview();
-  await bar.getByRole('button', { name: 'Pause animation' }).waitFor();
+  await row.getByRole('button', { name: 'Pause animation' }).waitFor();
   const playing = (await arm())[1];
   await page.waitForFunction(previous => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] !== previous, playing);
 
-  // Select puts it down: the routine pauses where it is and its frame is KEPT, one line in the
-  // stack, the model staying there, the playbar gone.
+  // Select puts it down: the routine pauses where it is and its frame is KEPT on the model, its row
+  // gone, and nothing of it in the stack.
   await view.tool('Select').click();
-  const kept = pane.getByRole('region', { name: 'Animation kept', exact: true });
-  await kept.waitFor();
-  assert.equal(await bar.count(), 0);
-  assert.deepEqual((await view.stack()).sort(), ['Animation kept', 'Features']);
+  await row.waitFor({ state: 'detached' });
+  assert.deepEqual([await view.sidebar(), await view.stack()], [['Features', 'Position controls'], []]);
   const frozen = await arm();
   assert.notDeepEqual(frozen, restMatrix, 'the frame kept is not the rest pose');
   await page.waitForTimeout(300);
@@ -1141,34 +1186,31 @@ test("the Animation tool's button plays and pauses the routine in the tools view
   await page.mouse.click(view.box.x + spot[0], view.box.y + spot[1]);
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedPartIds.join() === 'o1.2');
   assert.deepEqual(await arm(), frozen, 'and picking leaves the frame where it is');
-  // The kept panel's X puts the model back at rest, and the panel goes.
-  await kept.getByRole('button', { name: 'Reset animation', exact: true }).click();
-  await kept.waitFor({ state: 'detached' });
+  // Reaching for Position's controls in the sidebar is another motion, which puts the model back at
+  // rest; the tool stays Select, its knob on the model.
+  await page.getByLabel('hinge slider value', { exact: true }).click();
+  await page.waitForFunction(() => window.__cadJointHandles?.().length === 1);
+  assert.deepEqual((await view.tools()).filter(name => name.endsWith(':true')), ['Select:true']);
   await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix)) === JSON.stringify(rest), restMatrix)
     .catch(() => {});
   assert.deepEqual(await arm(), restMatrix);
-
-  // Its chevron's menu holds its settings: Speed, Loop and Autoplay.
-  await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Animation settings', exact: true }).click();
-  const menu = page.getByRole('menu', { name: 'Animation settings', exact: true });
-  assert.deepEqual(await menu.getByRole('menuitemcheckbox').allInnerTexts(), ['Loop', 'Autoplay']);
-  await menu.getByRole('menuitem', { name: /^Animation speed: / }).waitFor();
-  await page.keyboard.press('Escape');
-  await menu.waitFor({ state: 'detached' });
+  // The tool has no chevron of its own: its settings are its row's.
+  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Animation settings', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
 });
 
-test('one motion at a time: Explode, Position and the routine\'s frame replace each other, taking up one of their tools putting the others back at rest at once', async () => {
+test('one motion at a time: Explode, Position and the routine\'s frame replace each other, taking up Explode or Animation, or reaching for Position, putting the others back at rest at once', async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  const stack = async () => (await view.stack()).sort();
+  const arm = () => page.evaluate(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix);
+  const restMatrix = await arm();
   const exploded = () => page.evaluate(() => window.cadHarness.a.controller.readState().display.exploded.enabled === true);
+  // A pose off its default or not: what the sidebar's Position section says, whatever the tool.
+  const poseReads = text => page.waitForFunction(value => document.querySelector('section[aria-label="Position controls"] [data-pose-menu]')?.textContent.trim() === value, text);
+  const slider = page.getByLabel('hinge slider value', { exact: true });
   const pose = async value => {
-    await view.tool('Position').click();
-    const slider = page.getByLabel('hinge slider value', { exact: true });
     await slider.fill(String(value));
     await slider.press('Enter');
-    await view.tool('Select').click();
   };
   const explode = async () => {
     await view.tool('Explode').click();
@@ -1178,45 +1220,63 @@ test('one motion at a time: Explode, Position and the routine\'s frame replace e
   };
   // A pose, kept: Select, another tool, leaves it.
   await pose(60);
-  assert.deepEqual(await stack(), ['Features', 'Position kept']);
+  await poseReads('Custom');
+  assert.deepEqual(await view.stack(), []);
   // Explode taken up puts it back at its default at once, before its amount moves.
   await view.tool('Explode').click();
-  await pane.getByRole('region', { name: 'Position kept', exact: true }).waitFor({ state: 'detached' });
+  await poseReads('Default');
   await view.tool('Select').click();
+  // An explosion, kept: its panel goes with the tool, and the parts stay apart.
   await explode();
-  assert.deepEqual(await stack(), ['Explode controls', 'Features']);
-  // Position taken up takes Explode off at once, and leaves the pose as it is (its default).
-  await view.tool('Position').click();
+  assert.deepEqual([await view.stack(), await exploded()], [[], true]);
+  // Position reached for — its section's slider pressed — takes Explode off at once, and leaves the
+  // pose as it is (its default).
+  await slider.click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
-  await view.tool('Select').click();
+  await poseReads('Default');
   await explode();
-  // Animation's button plays the routine, which takes the explosion off.
+  // So does its knob, dragged on the model under Select.
+  await page.waitForFunction(() => window.__cadJointHandles?.().length === 1);
+  const [knob] = await page.evaluate(() => window.__cadJointHandles());
+  await page.mouse.move(view.box.x + knob.x, view.box.y + knob.y);
+  await page.mouse.down();
+  for (const [x, y] of knob.travel.slice(1, 5)) await page.mouse.move(view.box.x + x, view.box.y + y);
+  await page.mouse.up();
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
+  await poseReads('Custom');
+  await explode();
+  // Animation taken up takes the explosion off; its row's Play plays the routine.
   await view.tool('Animation').click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.exploded.enabled === false);
+  await pane.getByRole('toolbar', { name: 'Animation controls' }).getByRole('button', { name: 'Play animation' }).click();
   await page.waitForFunction(() => window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[1] > 0.2);
+  // Put down, its frame is kept on the model.
   await view.tool('Select').click();
-  await pane.getByRole('region', { name: 'Animation kept', exact: true }).waitFor();
-  assert.deepEqual(await stack(), ['Animation kept', 'Features']);
+  assert.deepEqual(await view.stack(), []);
+  assert.notDeepEqual(await arm(), restMatrix, 'the routine\'s frame is kept');
   // Explode taken up puts the kept frame back at rest at once.
   await view.tool('Explode').click();
-  await pane.getByRole('region', { name: 'Animation kept', exact: true }).waitFor({ state: 'detached' });
+  await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix)) === JSON.stringify(rest), restMatrix);
   await view.tool('Select').click();
   // Position used keeps a pose; Explode used puts it back to its default.
   await pose(30);
-  assert.deepEqual(await stack(), ['Features', 'Position kept']);
+  await poseReads('Custom');
   await explode();
-  assert.deepEqual(await stack(), ['Explode controls', 'Features']);
+  await poseReads('Default');
+  assert.deepEqual(await view.stack(), []);
   // And Position used takes Explode off.
   await pose(20);
   assert.equal(await exploded(), false);
-  assert.deepEqual(await stack(), ['Features', 'Position kept']);
+  await poseReads('Custom');
+  assert.deepEqual(await view.stack(), []);
   assert.deepEqual(errors, []);
 });
 
 test('preview\'s Speed and Loop are its own, forgotten on the way out, while Orbit is the file\'s in both', async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  const toolSettings = pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: 'Animation settings', exact: true });
+  // The Animation tool's row's Playback settings in the tools view, preview's playbar's in preview.
+  const toolSettings = pane.getByRole('toolbar', { name: 'Animation controls' }).getByRole('button', { name: 'Playback settings' });
   const previewSettings = pane.getByRole('toolbar', { name: 'Animation playback' }).getByRole('button', { name: 'Playback settings' });
   // A menu's Speed and Loop, as it shows them.
   const settings = async (button, name) => {
@@ -1242,9 +1302,9 @@ test('preview\'s Speed and Loop are its own, forgotten on the way out, while Orb
   };
   // The tools view's own: the Animation tool at 2×, its routine not looping.
   await view.tool('Animation').click();
-  assert.deepEqual(await settings(toolSettings, 'Animation settings'), ['Animation speed: 1×', 'true'], 'the routine\'s own Speed and Loop');
-  await choose(toolSettings, 'Animation settings', 2);
-  assert.deepEqual(await settings(toolSettings, 'Animation settings'), ['Animation speed: 2×', 'false']);
+  assert.deepEqual(await settings(toolSettings, 'Playback settings'), ['Animation speed: 1×', 'true'], 'the routine\'s own Speed and Loop');
+  await choose(toolSettings, 'Playback settings', 2);
+  assert.deepEqual(await settings(toolSettings, 'Playback settings'), ['Animation speed: 2×', 'false']);
 
   // Preview opens on the routine's own, never the tools view's; what is chosen there is preview's.
   await view.enterPreview();
@@ -1265,7 +1325,7 @@ test('preview\'s Speed and Loop are its own, forgotten on the way out, while Orb
   await view.exitPreview();
 
   // The tools view's settings are as it left them, and preview's are gone.
-  assert.deepEqual(await settings(toolSettings, 'Animation settings'), ['Animation speed: 2×', 'false'], 'preview never writes the tools view\'s');
+  assert.deepEqual(await settings(toolSettings, 'Playback settings'), ['Animation speed: 2×', 'false'], 'preview never writes the tools view\'s');
   await view.enterPreview();
   assert.deepEqual(await settings(previewSettings, 'Playback settings'), ['Animation speed: 1×', 'true'], 'preview forgot its own');
   assert.equal(await orbitChecked(), 'false', 'Orbit off stays off');
@@ -1541,8 +1601,9 @@ test('a click selects at once, and a double-click ends where it did when a click
   const cleared = () => page.waitForFunction(() => { const state = window.cadHarness.a.controller.readState();
     return state.selectedPartIds.length + state.selectedReferenceIds.length === 0; });
   const copies = () => page.evaluate(() => window.__clipboardWrites.length);
-  // Empty space: the bottom-right, the one corner with nothing of the viewer's own in it.
-  const empty = [box.x + box.width - 30, box.y + box.height - 30];
+  // Empty space: the bottom centre, under the model, with nothing of the viewer's own in it (the
+  // view cube is the bottom-right's, the file sidebar runs down the left).
+  const empty = [box.x + box.width / 2, box.y + box.height - 30];
   const opening = (await view.state()).camera;
   await page.evaluate(() => {
     window.__clipboardWrites = [];
@@ -1716,15 +1777,13 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   const view = await open({ store: 'session' });
   const { page, pane, at, errors } = view;
   const rest = await translations(page);
-  // The tree: expanded; the pose: posed, then Select again.
+  // The tree: expanded; the pose: posed from the sidebar.
   await view.partMenu('base', 'Expand');
-  await view.tool('Position').click();
   const position = pane.locator('[data-tool-panel][aria-label="Position controls"]');
   const input = position.getByLabel('hinge slider value', { exact: true });
   await input.fill('60'); await input.press('Enter');
   await page.waitForFunction(y => Math.abs(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[13] - y) > 1, rest['o1.2'][1]);
   const posed = await translations(page);
-  await view.tool('Select').click();
   // A measurement, kept under Select; a part selected in the tree.
   await view.tool('Measure').click();
   const measurements = pane.locator('[data-quick-edit-ref^="measure-"]');
@@ -1773,11 +1832,10 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   assert.deepEqual([back.selectedPartIds, back.selectedReferenceIds], [[], []], 'the selection does not');
   assert.equal(await measurements.count(), 0, 'nor the measurement');
   // The tool in hand is Select, the default, and it alone is lit: Explode's and Clip's restored
-  // effects are kept panels in the stack, not lit tools.
+  // effects stay on the model, not lit tools.
   assert.deepEqual((await view.tools()).filter(tool => tool.endsWith(':true')), ['Select:true'], 'and the tool is the default');
   // Explode replaced the pose (one motion at a time): it came back at its default. A pose set now
   // takes Explode off, and comes back on the next reload.
-  await view.tool('Position').click();
   await input.waitFor({ state: 'attached' });
   assert.equal(await input.inputValue(), '0.00°', 'Explode put the pose back to its default');
   await input.fill('60'); await input.press('Enter');
@@ -1785,7 +1843,6 @@ test('a reload of the tab brings back the view — camera, Display, Clip, Explod
   // Once the tab's record holds it.
   await page.waitForFunction(() => /"hinge":60\b/.test(sessionStorage.getItem('text-to-cad:tab:harness') || ''));
   await view.reload();
-  await view.tool('Position').click();
   await input.waitFor({ state: 'attached' });
   assert.equal(await input.inputValue(), '60.0°', 'the pose comes back');
   assert.equal((await view.state()).display.exploded.enabled, false);

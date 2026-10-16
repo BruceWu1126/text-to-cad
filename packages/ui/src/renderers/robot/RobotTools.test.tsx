@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { createCadClient } from '@text-to-cad/core/client';
@@ -99,7 +100,7 @@ async function openRobot() {
   }
   render(<Pane />);
   const pane = screen.getByTestId('one');
-  // A robot opens in Select, so its Links panel is in the stack once the robot has loaded.
+  // Its Links are in the file sidebar once the robot has loaded.
   await waitFor(() => expect(pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull());
   const tools = () => within(pane).getByRole('group', { name: 'Interaction tools' });
   const robot = {
@@ -111,9 +112,23 @@ async function openRobot() {
       await act(async () => { await client.refresh(); });
     },
     tool: (name: string) => within(tools()).getByRole('button', { name }),
-    toolNames: () => within(tools()).getAllByRole('button').map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`),
-    // The tool stack's panels on screen, top to bottom.
+    // The strip's tools (its buttons pressed or not, before the view's controls), and what Select's chevron says it picks.
+    toolNames: () => within(tools()).getAllByRole('button').filter(button => button.hasAttribute('aria-pressed') && !button.closest('[data-view-controls]'))
+      .map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`),
+    filter: () => tools().querySelector('[data-select-filter-trigger]')!.getAttribute('aria-label'),
+    /** Tick or untick each of `ids` in Select's filter menu, then put the menu away. */
+    async tick(...ids: string[]) {
+      const user = userEvent.setup();
+      await user.click(tools().querySelector<HTMLElement>('[data-select-filter-trigger]')!);
+      for (const id of ids) await user.click(document.querySelector<HTMLElement>(`[data-select-filter="${id}"]`)!);
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(document.querySelector('[data-select-filter]')).toBeNull());
+    },
+    menuItems: () => [...document.querySelectorAll('[data-select-filter]')].map(item => `${item.textContent}:${item.getAttribute('aria-checked')}`),
+    // The tool stack's panels on screen, top to bottom, and the file sidebar's sections.
     stack: () => [...pane.querySelectorAll('[data-cad-tool-stack] [data-tool-panel]')]
+      .filter(panel => !panel.closest('[hidden]')).map(panel => panel.getAttribute('aria-label')),
+    sidebar: () => [...pane.querySelectorAll('[data-cad-file-sidebar] [data-tool-panel]')]
       .filter(panel => !panel.closest('[hidden]')).map(panel => panel.getAttribute('aria-label')),
     knobs: () => pane.querySelectorAll('[data-cad-joint-handles]').length,
     jointField: (name: string) => within(pane).getByLabelText(`${name} value in deg`) as HTMLInputElement,
@@ -142,92 +157,88 @@ async function openRobot() {
   return robot;
 }
 
-it('robot Select defaults match Links and Position remains an explicit tool', async () => {
+it('robot Select is the one tool: it opens picking links and dragging the knobs, and its filter picks either alone', async () => {
   const robot = await openRobot();
-  expect(robot.toolNames()).toEqual(['Select:true', 'Position:false']);
-  expect(robot.stack()).toEqual(['Links']);
+  expect([robot.toolNames(), robot.filter()]).toEqual([['Select:true'], 'Selection filter: everything']);
+  expect([robot.sidebar(), robot.stack()]).toEqual([['Links', 'Position controls'], []]);
   expect(robot.tool('Select').querySelectorAll('svg.lucide-mouse-pointer-2')).toHaveLength(1);
-  expect(robot.knobs()).toBe(0);
+  expect([robot.knobs(), picks.latest!.enabled]).toEqual([1, true]);
 
-  robot.open('Position');
-  expect(robot.tool('Position').getAttribute('aria-pressed')).toBe('true');
-  expect(robot.stack()).toEqual(['Position controls']);
-  expect(robot.knobs()).toBe(1);
+  // The chevron's menu: Select all, then the links and the knobs, each on its own.
+  const user = userEvent.setup();
+  await user.click(robot.pane.querySelector<HTMLElement>('[data-select-filter-trigger]')!);
+  expect(robot.menuItems()).toEqual(['Select all:true', 'Links:true', 'Position:true']);
+  await user.keyboard('{Escape}');
+  await robot.tick('position');
+  expect([robot.filter(), robot.knobs(), picks.latest!.enabled]).toEqual(['Selection filter: Links', 0, true]);
+  await robot.tick('position', 'links');
+  expect([robot.filter(), robot.knobs(), picks.latest!.enabled]).toEqual(['Selection filter: Position', 1, false]);
+  expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // Display is not a tool: its dropdown, from the navbar's right end, opens over Position and leaves
-  // it the tool, with its knobs and panel; Escape puts it away.
-  fireEvent.click(within(robot.pane.querySelector<HTMLElement>('[data-view-controls]')!).getByRole('button', { name: 'Display' }));
+  // Display is not a tool: its settings (its menu's Custom), from the strip's end, open over Select
+  // and leave it the tool, with its knobs; Escape puts them away.
+  await user.click(within(within(robot.pane).getByRole('group', { name: 'Interaction tools' })).getByRole('button', { name: /^Display mode: / }));
+  await user.click(document.querySelector<HTMLElement>('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]')!);
   await waitFor(() => expect(document.querySelector('[data-display-popover]')).not.toBeNull());
-  expect(robot.toolNames()).toEqual(['Select:false', 'Position:true']);
-  expect(robot.stack()).toEqual(['Position controls']);
-  expect(robot.knobs()).toBe(1);
+  expect([robot.toolNames(), robot.knobs()]).toEqual([['Select:true'], 1]);
   fireEvent.keyDown(document.activeElement || document.body, { key: 'Escape' });
   await waitFor(() => expect(document.querySelector('[data-display-popover]')).toBeNull());
-  expect(robot.toolNames()).toEqual(['Select:false', 'Position:true']);
+  expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // The Position panel has Reset and no X: Select puts Position down. A pose off its default is
-  // kept as one line in the stack, its X the Reset; Position itself is not lit.
-  expect(within(robot.position().getByRole('heading').parentElement!).queryByRole('button', { name: /^Close/ })).toBeNull();
+  // A pose off its default stays in the section when the filter puts the knobs away; its heading is
+  // its name and its Pose menu, which says the joints were set by hand.
+  const heading = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Position controls"] [data-sidebar-head]')!;
   robot.type('shoulder', '25');
+  await robot.tick('links', 'position');
+  expect([robot.filter(), robot.knobs()]).toEqual(['Selection filter: Links', 0]);
+  expect(robot.jointField('shoulder').value).toBe('25°');
+  expect([within(heading()).getByRole('heading').textContent, heading().querySelector('[data-pose-menu]')!.getAttribute('aria-label')]).toEqual(['Position', 'Pose: Custom']);
+  // Select is the only tool: pressing it again leaves it the tool, and its filter as it was.
   robot.open('Select');
-  await waitFor(() => expect(robot.stack()).toEqual(['Links', 'Position kept']));
-  expect(robot.toolNames()).toEqual(['Select:true', 'Position:false']);
-  expect(robot.knobs()).toBe(0);
-  fireEvent.click(within(robot.pane).getByRole('button', { name: 'Reset position' }));
-  await waitFor(() => expect(robot.stack()).toEqual(['Links']));
-  // A press on the tool in hand does nothing; Select pressed again leaves it the tool.
-  // Select is the default tool: pressing it again leaves it the tool.
-  robot.open('Select');
-  expect(robot.tool('Select').getAttribute('aria-pressed')).toBe('true');
-  expect(robot.knobs()).toBe(0);
+  expect([robot.toolNames(), robot.filter(), robot.knobs()]).toEqual([['Select:true'], 'Selection filter: Links', 0]);
   robot.client.dispose();
 });
 
-it('a robot is a 3D view: Display and Preview sit at the navbar\'s right end', async () => {
+it('a robot is a 3D view: Display, Projection and Preview end its strip', async () => {
   const robot = await openRobot();
-  const actions = robot.pane.querySelector<HTMLElement>('[data-viewer-navbar] [data-view-controls]')!;
-  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display', 'Preview']);
+  const actions = within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector<HTMLElement>('[data-view-controls]')!;
+  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Projection: Orthographic', 'Preview']);
   robot.client.dispose();
 });
 
-it('robot Links and Position are each their tool\'s panel, and no pick or tool opens or turns the host\'s column', async () => {
+it('robot Links and Position are the file sidebar\'s whatever Select picks, a Position control leaves the tool and its filter, and no pick opens or turns the host\'s column', async () => {
   const robot = await openRobot();
-  expect(robot.stack()).toEqual(['Links']);
   expect(within(robot.pane).queryAllByRole('tab')).toHaveLength(0);
-  robot.open('Position');
-  expect(robot.stack()).toEqual(['Position controls']);
+  // With the knobs put away, Position's section is on screen and drives the joints all the same.
+  await robot.tick('position');
+  expect(robot.sidebar()).toEqual(['Links', 'Position controls']);
   robot.type('shoulder', '30');
-  // Putting Position down hides its panel; picking it up again shows the pose it was left in.
-  robot.open('Select');
-  expect(robot.jointField('shoulder').closest('[hidden]')).not.toBeNull();
-  robot.open('Position');
   expect(robot.jointField('shoulder').closest('[hidden]')).toBeNull();
   expect(robot.jointField('shoulder').value).toBe('30°');
 
-  // A visual picked in the viewport and the Position tool show their panels in the stack.
-  robot.open('Select');
+  // A visual picked in the viewport is Quick Edit's chip, not a panel; the sidebar is as it was.
   robot.tapUpperArm();
   await waitFor(() => expect(robot.pressedRows()).toHaveLength(1));
-  // The pick is Quick Edit's chip, not a panel; the pose left off its default is kept, one line under Links.
   expect(robot.pane.querySelectorAll('[data-quick-edit-ref]')).toHaveLength(1);
-  expect(robot.stack()).toEqual(['Links', 'Position kept']);
-  robot.open('Position');
-  expect(robot.stack()).toEqual(['Position controls']);
+  expect([robot.sidebar(), robot.stack()]).toEqual([['Links', 'Position controls'], []]);
+  // Reaching for a Position control changes neither the tool nor what it picks.
+  fireEvent.pointerDown(robot.jointField('shoulder'));
+  expect([robot.toolNames(), robot.filter(), robot.knobs()]).toEqual([['Select:true'], 'Selection filter: Links', 0]);
   robot.client.dispose();
 });
 
-it('robot Links is on screen whenever Select is the tool, with no X to close it: a press on Select changes nothing', async () => {
+it('robot Links is on screen whatever Select picks, with no X to close it, folding at a press on its heading', async () => {
   const robot = await openRobot();
   const links = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Links"]')!;
-  expect(robot.stack()).toEqual(['Links']);
   expect(within(links()).queryByRole('button', { name: /^Close/ })).toBeNull();
-  robot.open('Select');
-  expect([robot.stack(), robot.toolNames()]).toEqual([['Links'], ['Select:true', 'Position:false']]);
-  // Back from Position, Links is there again, as it was.
-  robot.open('Position');
-  robot.open('Select');
-  expect(robot.stack()).toEqual(['Links']);
+  expect([robot.sidebar(), robot.toolNames()]).toEqual([['Links', 'Position controls'], ['Select:true']]);
+  await robot.tick('links');
+  expect([robot.filter(), robot.sidebar()]).toEqual(['Selection filter: Position', ['Links', 'Position controls']]);
   expect(robot.pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull();
+  fireEvent.click(within(links()).getByRole('heading', { name: 'Links' }));
+  expect(links().hasAttribute('data-collapsed')).toBe(true);
+  fireEvent.click(within(links()).getByRole('heading', { name: 'Links' }));
+  expect(links().hasAttribute('data-collapsed')).toBe(false);
   robot.client.dispose();
 });
 
@@ -236,26 +247,26 @@ it('on a phone robot Links is on screen from the open, as on a desktop', async (
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
   const robot = await openRobot();
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
-  expect(robot.stack()).toEqual(['Links']);
+  expect(robot.sidebar()).toEqual(['Links', 'Position controls']);
   robot.client.dispose();
 });
 
 it('a new revision of the robot keeps its pose while its controls and named poses are the same, and opens at its opening pose when they changed', async () => {
   const robot = await openRobot();
-  robot.open('Position');
+  await robot.tick('links');
   robot.type('shoulder', '25');
   await waitFor(() => expect(robot.jointField('shoulder').value).toBe('25°'));
   // The robot on screen is the scene the viewport's pick is handed: a new revision is a new one.
   const scene = () => picks.latest!.scene;
   const before = scene();
 
-  // Saved again with the same articulation (the upper arm grew): the pose stays, and Position with it.
+  // Saved again with the same articulation (the upper arm grew): the pose stays, and Select's filter with it.
   const longer = payload();
   longer.links.find((link: any) => link.name === 'upper_arm').visuals[0].size = [1, 0.08, 0.08];
   await robot.publish(longer);
   await waitFor(() => expect(scene()).not.toBe(before));
   expect(robot.jointField('shoulder').value).toBe('25°');
-  expect(robot.toolNames()).toEqual(['Select:false', 'Position:true']);
+  expect([robot.toolNames(), robot.filter(), robot.knobs()]).toEqual([['Select:true'], 'Selection filter: Position', 1]);
 
   // The shoulder's range changed: the robot opens at its opening pose, though 25° would still fit.
   const kept = scene();

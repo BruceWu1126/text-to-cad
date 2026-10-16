@@ -8,11 +8,11 @@ import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.j
 
 // The transport owns play/pause and scrubbing; the routines and the routine's speed, loop and
 // autoplay are the playbar's two menus at either end of it (`PlaybackMenu.jsx`), which the shell
-// hands it, and the Animation tool's chevron menu (`AnimationPanel.jsx`'s `AnimationToolMenu`).
+// hands it; the Animation tool's row has them inline (`AnimationPanel.jsx`'s `AnimationToolbar`).
 //
 // Every animation source shares this transport UI. It only edits the clip and clock state of
 // the runtime it is handed; evaluating a clip is its owner's. Routines play in preview, where
-// the playbar under the model is the transport, and under the Animation tool, whose panel
+// the playbar under the model is the transport, and under the Animation tool, whose row
 // carries the same scrubber (`AnimationTimeControl`).
 //
 // runtime: { clips: [{ id, label, duration }], activeClipId, playing, elapsedSec,
@@ -37,7 +37,7 @@ export function formatSeconds(value) {
  * the runtime snapshot only moves when playback stops, because a playing clip publishes through the
  * clock store instead of React state. Preview's playbar and the Animation tool's panel both draw it.
  */
-export function AnimationTimeControl({ runtime, disabled = false }) {
+export function AnimationTimeControl({ runtime, disabled = false, className = FILE_SHEET_PRECISION_SLIDER_CLASSES }) {
   const activeClip = runtime?.clips?.find(clip => clip.id === runtime?.activeClipId);
   const duration = Math.max(Number(activeClip?.duration) || 1, 0.001);
   const liveElapsedSec = useAnimationClockValue(runtime?.clock);
@@ -45,7 +45,7 @@ export function AnimationTimeControl({ runtime, disabled = false }) {
   const value = Math.min(Math.max(Number(rawElapsedSec) || 0, 0), duration);
   return (
     <Slider
-      className={FILE_SHEET_PRECISION_SLIDER_CLASSES}
+      className={className}
       disabled={disabled}
       value={[value]}
       min={0}

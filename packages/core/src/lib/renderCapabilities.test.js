@@ -129,18 +129,18 @@ test("every viewport format gets the whole toolbar: the tools act on the viewpor
   // buttons that have nothing to do with what the file contains. Select is inert
   // without `topology` — it stays visible so the toolbar keeps one shape.
   for (const format of VIEWPORT_FORMATS) {
-    for (const tool of ["select", "draw", "orbit", "screenshot"]) {
+    for (const tool of ["select", "annotate", "orbit", "screenshot"]) {
       assert.equal(supportsTool(format, tool), true, `${format} is missing the ${tool} tool`);
     }
   }
   // ...and the one format that is not a viewport claims none of them, rather than
   // advertising four buttons its pane does not have.
-  for (const tool of ["select", "draw", "orbit", "screenshot"]) {
+  for (const tool of ["select", "annotate", "orbit", "screenshot"]) {
     assert.equal(supportsTool(RENDER_FORMAT.DXF, tool), false, `DXF still claims ${tool}`);
   }
   // An unrecognised format still gets the viewport tools: they cannot misbehave without
   // geometry-level capabilities behind them.
-  assert.equal(supportsTool("totally-unknown", "draw"), true);
+  assert.equal(supportsTool("totally-unknown", "annotate"), true);
 });
 
 test("no format advertises export capabilities: the CLIs own exporting", () => {

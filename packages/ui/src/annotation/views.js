@@ -1,6 +1,6 @@
 /**
  * The views a prompt carries: how the viewer stood when the person sent it, and how it stood when
- * each part of their drawing was drawn. A view is said in a snapshot job's own words (`camera`,
+ * each part of their annotation was drawn. A view is said in a snapshot job's own words (`camera`,
  * `display.clip` and `display.exploded`, `kinematics` or `jointValues`, `animation`, `selection.hide`
  * and `selection.focus`, and the picture's `width` and `height`), so the prompt's views file is a job
  * `cadgen snapshot --job` renders as it was, and how the view looked is the snapshot's own.
@@ -52,7 +52,7 @@ export function promptView(viewport, { display = {}, state = null } = {}) {
   return view;
 }
 
-// A camera moved less than this is the view it was: a nudge mid-drawing is not a new view.
+// A camera moved less than this is the view it was: a nudge mid-annotation is not a new view.
 const SAME_TURN_DEGREES = 2;
 const SAME_SCALE = 0.05;
 
@@ -85,7 +85,7 @@ export function sameView(a, b) {
 }
 
 /**
- * A prompt's views: the one on screen as it is sent ("current"), then each view the drawing was
+ * A prompt's views: the one on screen as it is sent ("current"), then each view the annotation was
  * drawn in that still has ink, in the order they were drawn. A drawn view the same as the current
  * one stands for it — its ink was drawn there, and nothing of it is lost — so the usual prompt,
  * drawn and sent without moving, has one view.
@@ -95,8 +95,8 @@ export function sameView(a, b) {
  * @param {readonly { view?: string }[]} ink
  * @returns {LabelledView[]}
  */
-export function promptViews(current, drawn, ink) {
-  const used = new Set(ink.map(item => item.view).filter(Boolean));
+export function promptViews(current, drawn, items) {
+  const used = new Set(items.map(item => item.view).filter(Boolean));
   const views = drawn.filter(view => used.has(view.label));
   if (!current || views.some(view => sameView(view, current))) return views;
   return [{ ...current, label: "current" }, ...views];

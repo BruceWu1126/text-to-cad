@@ -131,9 +131,9 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   });
   await page.goto(`${origin}/`);
   const first = page.getByTestId('one');
-  // Display's settings are a dropdown from its button at the navbar's right end (`DisplayPopover.jsx`),
-  // portaled out of the pane: a file never opens with it, and it is not a tool.
-  const displayButton = pane => pane.locator('[data-view-controls]').getByRole('button', { name: 'Display', exact: true });
+  // Display's settings are a dropdown from its button at the strip's end, its menu's Custom
+  // submenu (`DisplayPopover.jsx`), portaled out of the pane: a file never opens with it, and it is not a tool.
+  const displayButton = pane => pane.locator('[data-cad-toolbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
   const display = page.locator('[data-display-popover]');
   const cameraZoom = id => page.evaluate(pane => window.cadHarness[pane].controller?.readState().camera?.zoom ?? null, id);
   await displayButton(first).waitFor().catch(async (error) => { throw new Error(`${error.message}; page errors: ${errors.join('; ')}; body: ${await page.locator("body").innerText()}; requests: ${requests.join(", ")}`); });
@@ -164,6 +164,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
 
   // The file goes with its Display settings open.
   await displayButton(first).click();
+  await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
   await display.waitFor();
   await page.evaluate(() => window.cadHarness.mounted(false));
   await display.waitFor({ state: 'detached' });
@@ -176,7 +177,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   // Whether Display is open is transient, not file state.
   await displayButton(first).waitFor();
   assert.equal(await display.count(), 0, 'the remounted file opens with its Display settings shut');
-  assert.equal(await displayButton(first).getAttribute('aria-pressed'), 'false');
+  assert.equal(await displayButton(first).getAttribute('data-variant'), 'ghost', 'and its button unlit');
   // The pane remounts before the viewport adopts the mesh and publishes its restored
   // camera. Wait for the actual presented frame, not an arbitrary settling delay.
   await page.waitForFunction(() => {
@@ -358,9 +359,10 @@ test('a file opens framed at 100% of its own ruler: the open fit is the fit, wha
   // Home resets the complete view; cube faces keep the current zoom and target.
   const canvas = pane.locator('[aria-busy] > div > canvas').first();
   // The share of the drawn frame that is the model: read the middle/upper canvas region,
-  // clear of the bottom prompt action and the viewport controls at the right edge.
+  // clear of the bottom prompt action and the viewport controls at the right edge, with the strip
+  // (the view's controls, over the top centre) hidden: the canvas's own pixels.
   const inkFraction = async () => {
-    const png = PNG.sync.read(await canvas.screenshot());
+    const png = PNG.sync.read(await canvas.screenshot({ style: '[data-cad-tool-groups] { visibility: hidden !important; }' }));
     const background = [png.data[0], png.data[1], png.data[2]];
     const columns = Math.floor(png.width * 0.8);
     const rows = Math.floor(png.height * 0.8);
@@ -575,20 +577,21 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.equal(await overlay.count(), 0, 'a plain load covers nothing');
   assert.equal(await card.count(), 0, 'and raises nothing');
 
-  // THE CUBE IS THE BOTTOM-LEFT CORNER'S, far enough off the bottom that its axes stay inside the
-  // view, and the tool stack stops above it. The view's controls, Display then Preview, are the
-  // navbar's last. The right of the view is Quick Edit's, and the bottom middle the host's (a
+  // THE CUBE IS THE BOTTOM-RIGHT CORNER'S, far enough off the bottom that its axes stay inside the
+  // view, and the tool stack stops above it. The view's controls, Display then Preview, end the
+  // strip, after a rule; the navbar holds none. The right of the view is Quick Edit's, and the bottom middle the host's (a
   // composer, on some) and preview's playbar.
   const frameBox = await canvasElement.boundingBox();
   const cubeBox = await pane.getByLabel('View cube', { exact: true }).boundingBox();
   const stackBox = await pane.locator('[data-cad-tool-groups]').boundingBox();
   const offBottom = frameBox.y + frameBox.height - cubeBox.y - cubeBox.height;
-  assert.ok(offBottom >= 6 && offBottom < 16, `the view cube sits just off the bottom-left corner: ${offBottom}px`);
-  assert.ok(cubeBox.x < frameBox.x + 20, 'the view cube stays against the left edge');
+  assert.ok(offBottom >= 6 && offBottom < 16, `the view cube sits just off the bottom-right corner: ${offBottom}px`);
+  const offRight = frameBox.x + frameBox.width - cubeBox.x - cubeBox.width;
+  assert.ok(offRight >= 0 && offRight < 20, `the view cube stays against the right edge: ${offRight}px`);
   assert.ok(stackBox.y + stackBox.height <= cubeBox.y, 'the tool stack stops above the cube');
-  assert.deepEqual(await pane.locator('[data-viewer-navbar] > div button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display', 'Preview'], 'Display then Preview, at the navbar\'s right end');
-  assert.equal(await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Display', exact: true }).count(), 0, 'nothing of Display on the strip');
+  assert.deepEqual(await pane.locator('[data-cad-toolbar] [data-strip-rule] + [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'Projection, Display then Preview, after the strip\'s rule');
+  assert.equal(await pane.locator('[data-viewer-navbar] button[aria-label^="Display mode"], [data-viewer-navbar] button[aria-label="Preview"]').count(), 0, 'nothing of them in the navbar');
 
   // FINDING: the wait before the file is even located covers the viewport, and says
   // so as such rather than as a phase of reading it.
@@ -605,11 +608,13 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.equal(await card.count(), 0);
   await updating.waitFor();
   assert.match(await updating.innerText(), /Updating model/);
+  // The strip is the top centre's, and the status sits under it, centred on it.
   const updateBox = await updating.boundingBox();
   const toolsBox = await pane.getByRole('group', { name: 'Interaction tools' }).boundingBox();
-  const middleY = box => box.y + box.height / 2;
-  assert.ok(Math.abs(middleY(updateBox) - middleY(toolsBox)) < 1,
-    `model update status is vertically centred with the tool strip: ${JSON.stringify({ updateBox, toolsBox })}`);
+  const middleX = box => box.x + box.width / 2;
+  assert.ok(Math.abs(middleX(toolsBox) - middleX(frameBox)) < 1, `the tool strip is at the top centre: ${JSON.stringify({ toolsBox, frameBox })}`);
+  assert.ok(updateBox.y >= toolsBox.y + toolsBox.height && Math.abs(middleX(updateBox) - middleX(toolsBox)) < 1,
+    `model update status sits under the tool strip, centred on it: ${JSON.stringify({ updateBox, toolsBox })}`);
 
   // THE BUILD ENDING ENDS IT: the saved file is on screen, so the wait is over.
   await stage('idle');
@@ -720,10 +725,10 @@ test('an alert the model survives is drawn over the tools, where it meets the pa
   await page.addInitScript(() => { window.Worker = undefined; });
   await page.goto(`${origin}/?file=panel.harness`);
   const pane = page.getByTestId('one');
-  const tree = pane.getByRole('region', { name: 'Harness tree', exact: true });
-  await tree.waitFor();
-  // The tree as wide and tall as it goes, as a model's long part names take it.
-  await pane.getByRole('separator', { name: 'Resize harness tree', exact: true }).press('End');
+  await pane.getByRole('region', { name: 'Harness tree', exact: true }).waitFor();
+  // The tree is the file sidebar's, made as wide and tall as it goes, as a model's long part names take it.
+  const tree = pane.locator('[data-cad-file-sidebar]');
+  await pane.getByRole('separator', { name: 'Resize file sidebar', exact: true }).press('End');
   // A failed update keeps the model, and with it the tools: the card stands over both.
   await pane.locator('[data-harness-stage="failed"]').click();
   const card = pane.getByRole('alert');

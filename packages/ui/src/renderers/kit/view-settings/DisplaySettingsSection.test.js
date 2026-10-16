@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createElement } from "react";
 import { EDGELESS_VIEW_FEATURES, resolveViewSettings, viewSettingsAreCustom } from "@text-to-cad/core/common/viewSettings.js";
 import { elements, render } from "../../../../scripts/reactHarness.mjs";
 import { DISPLAY_MODE_OPTIONS } from "./DisplayModeOptions.js";
@@ -20,6 +19,10 @@ function panel(input = {}) {
 }
 const sections = tree => elements(tree).find(node => node.type?.name === "DisplaySections")?.props.sections.filter(Boolean) ?? [];
 const controls = tree => sections(tree).length ? sections(tree).flatMap(section => elements(section.content)) : elements(tree);
+// A section's title as text: the Display section's is the mode it customizes, its icon and name.
+const text = node => node == null || typeof node === "boolean" ? "" : typeof node === "string" || typeof node === "number" ? String(node)
+  : Array.isArray(node) ? node.map(text).join("") : text(node.props?.children);
+const titles = tree => sections(tree).map(section => text(section.title));
 const labelled = (tree, label) => controls(tree).find(node => node.props.label === label);
 
 test("View has the same feature groups for every preset, with Render second", () => {
@@ -28,11 +31,13 @@ test("View has the same feature groups for every preset, with Render second", ()
     const view = panel({ mode });
     assert.deepEqual(sections(view.tree).filter(section => section.onEnabledChange).map(section => section.title),
       ["Edges", "Grid / Axes", "Lighting", "Background", "Floor"]);
-    // Projection shares Display with Mode.
-    assert.equal(labelled(view.tree, "Projection").props.value, resolveViewSettings({ mode }).camera.projection);
+    // Mode stands alone: Projection is the strip's tile, not Display's.
+    assert.equal(labelled(view.tree, "Projection"), undefined);
     assert.equal(labelled(view.tree, "Lens"), undefined);
-    assert.deepEqual(sections(view.tree).filter(section => !section.onEnabledChange).map(section => section.title),
-      ["Display", "Surfaces"]);
+    assert.deepEqual(sections(view.tree).filter(section => !section.onEnabledChange).map(section => section.id), ["display", "surfaces"]);
+    // Its first section is a heading alone, "Custom display": the strip's Display menu chooses the mode.
+    assert.deepEqual([text(sections(view.tree)[0].title), sections(view.tree)[0].content], ["Custom display", null]);
+    assert.equal(labelled(view.tree, "Mode"), undefined);
     assert.deepEqual(labelled(view.tree, "Surface style").props.options.map(option => option.value), ["shaded", "flat", "hidden", "off"]);
     assert.equal(labelled(view.tree, "Surface style").props.value, resolveViewSettings({ mode }).surfaces.style);
     view.unmount();
@@ -116,8 +121,7 @@ test("a file that is not a CAD model has no Edges section and only the presets n
   assert.deepEqual(sections(view.tree).filter(section => section.onEnabledChange).map(section => section.title),
     ["Grid / Axes", "Lighting", "Background", "Floor"]);
   assert.equal(elements(view.tree).some(node => node.type?.name === "ClipSettings"), false);
-  const mode = labelled(view.tree, "Mode");
-  assert.deepEqual(mode.props.options.map(option => option.value), ["solid", "render", "grid"]);
+  assert.equal(titles(view.tree)[0], "Custom display");
   // Hidden and Off leave a STEP model its edges; here they would leave nothing.
   assert.deepEqual(labelled(view.tree, "Surface style").props.options.map(option => option.value), ["shaded", "flat"]);
   assert.equal(elements(view.tree).some(node => node.props?.label === "Edge visibility" || node.props?.label === "Edge color"), false);
@@ -132,19 +136,12 @@ test("a file that is not a CAD model has no Edges section and only the presets n
   assert.equal(later.getSnapshot().scene.view.edges.enabled, false);
 });
 
-test("Display holds the file's view alone, its first heading ending in the X its dropdown hands it; the host's settings are Settings', not Display's", () => {
+test("Display holds the file's view alone, its first heading \"Custom display\" with its Reset and nothing else; the host's settings are Settings', not Display's", () => {
   const view = panel();
-  assert.deepEqual(sections(view.tree).map(section => section.title), ["Display", "Surfaces", "Edges", "Grid / Axes", "Lighting", "Background", "Floor"]);
+  assert.deepEqual(titles(view.tree), ["Custom display", "Surfaces", "Edges", "Grid / Axes", "Lighting", "Background", "Floor"]);
   const named = tree => elements(sections(tree)[0].headingAction).map(node => node.props?.["aria-label"]).filter(Boolean);
-  // Drawn alone, its first heading has its Reset and nothing else.
   assert.deepEqual(named(view.tree), ["Reset"]);
+  // Its Reset says where it goes: back to Solid.
+  assert.equal(elements(sections(view.tree)[0].headingAction).find(node => node.props?.content)?.props.content, "Reset to Solid");
   view.unmount();
-  // In its dropdown, Reset then the dropdown's X (`close`: `DisplayPopoverClose`): the dropdown has no heading of its own.
-  const store = createViewSettingsStore({});
-  const { display: settings, scene } = store.getSnapshot();
-  const close = createElement("button", { "aria-label": "Close display settings" });
-  const dropdown = render(DisplaySettingsSection, { viewSettings: settings, resolvedView: scene.view,
-    onViewSettingsPatch: store.patch, onGroupEnabledChange: store.setEnabled, close });
-  assert.deepEqual(named(dropdown.tree), ["Reset", "Close display settings"]);
-  dropdown.unmount();
 });

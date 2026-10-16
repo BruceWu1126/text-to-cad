@@ -88,10 +88,10 @@ SUPPORTED_JOB_KEYS = frozenset(
         # {fps, seconds, start, quality, loop}, encoded to the .mp4/.gif the
         # output names. Meaningless without `animation` (cadgen.snapshot_video).
         "video",
-        # Ink drawn over the model: a sketch JSON file's path, or the sketch object
-        # (SNAPSHOTS.md, "Sketches"). The file is read here and the object handed to
+        # Ink drawn over the model: an annotation JSON file's path, or the annotation object
+        # (SNAPSHOTS.md, "Annotations"). The file is read here and the object handed to
         # the page, which draws each mark on its part with the viewer's own code.
-        "sketch",
+        "annotation",
         # Measure's results drawn over the picture: [{start, end, label, color}], the
         # dimension between two world points, labelled and coloured as the viewer drew it
         # (SNAPSHOTS.md, "Measurements"). The page draws them with the viewer's own code.
@@ -1632,24 +1632,24 @@ async def with_snapshot_timeout(awaitable: Any, timeout_seconds: object, label: 
         return await asyncio.wait_for(awaitable, timeout=timeout)
     except asyncio.TimeoutError as exc:
         raise SnapshotError(f"{label} timed out after {timeout_seconds}s") from exc
-_SKETCH_REFUSAL = re.compile(r"\bError: (sketch: [^\n]*)")
+_ANNOTATION_REFUSAL = re.compile(r"\bError: (annotation: [^\n]*)")
 
 
-async def _refusing_sketch(job: Mapping[str, object], evaluation: Any) -> object:
-    """``evaluation``'s answer, with the page's refusal of the job's sketch as a SnapshotError.
+async def _refusing_annotation(job: Mapping[str, object], evaluation: Any) -> object:
+    """``evaluation``'s answer, with the page's refusal of the job's annotation as a SnapshotError.
 
-    The page checks every mark (``normalizeSketch``) and throws ``sketch: marks[2].color
+    The page checks every mark (``normalizeAnnotation``) and throws ``annotation: marks[2].color
     ...``, which reaches here inside the driver's stack trace. It is the request's fault,
-    not a crash: answered as one sentence, naming the file the sketch was read from.
+    not a crash: answered as one sentence, naming the file the annotation was read from.
     """
     try:
         return await evaluation
-    except Exception as error:  # noqa: BLE001 - re-raised unless it is the sketch's refusal
-        match = _SKETCH_REFUSAL.search(str(error)) if job.get("sketch") is not None else None
+    except Exception as error:  # noqa: BLE001 - re-raised unless it is the annotation's refusal
+        match = _ANNOTATION_REFUSAL.search(str(error)) if job.get("annotation") is not None else None
         if match is None:
             raise
         resolved = job.get("resolved") if is_plain_object(job.get("resolved")) else {}
-        source = str(resolved.get("sketchSource") or "")
+        source = str(resolved.get("annotationSource") or "")
         raise SnapshotError(f"{source}: {match.group(1)}" if source else match.group(1)) from None
 
 
@@ -1802,7 +1802,7 @@ class BatchSnapshotRenderer:
         await self.page.set_viewport_size({"width": width, "height": height})
         timeout_seconds = job.get("timeoutSeconds") or DEFAULT_TIMEOUT_SECONDS
         result = await with_snapshot_timeout(
-            _refusing_sketch(job, self.page.evaluate("(renderJob) => window.__snapshotRender(renderJob)", dict(job))),
+            _refusing_annotation(job, self.page.evaluate("(renderJob) => window.__snapshotRender(renderJob)", dict(job))),
             timeout_seconds,
         )
         if not is_plain_object(result) or not result.get("ok"):
@@ -1865,7 +1865,7 @@ class BatchSnapshotRenderer:
         report.detail(f"{job.get('input') or ''} (preparing)")
         say(f"video: preparing {job.get('input') or ''}")
         prepared = await with_snapshot_timeout(
-            _refusing_sketch(job, self.page.evaluate("(renderJob) => window.__snapshotRenderSequence(renderJob)", dict(job))),
+            _refusing_annotation(job, self.page.evaluate("(renderJob) => window.__snapshotRenderSequence(renderJob)", dict(job))),
             timeout_seconds,
             "video preparation",
         )

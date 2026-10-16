@@ -1,35 +1,35 @@
 import { getStrokePoints } from "perfect-freehand";
-import { FILL_ANALYSIS_MAX_DIMENSION, FILL_CONNECT_GAP_PX, findFillRegion, pairNearbyBoundaryEndpoints } from "@text-to-cad/core/lib/drawing/fillRegion.js";
+import { FILL_ANALYSIS_MAX_DIMENSION, FILL_CONNECT_GAP_PX, findFillRegion, pairNearbyBoundaryEndpoints } from "@text-to-cad/core/lib/annotation/fillRegion.js";
 
-// Ink on the screen: what each Draw tool puts down, as marks in CSS pixels from the viewport's
+// Ink on the screen: what each Annotate tool puts down, as marks in CSS pixels from the viewport's
 // top-left — a stroke (a polyline of a width, solid, dashed or dotted), an area (a filled polygon:
-// a fill), or a text mark (words, on a flat rectangle) — before `kit/tools/draw/ink3d.js` projects them
+// a fill), or a text mark (words, on a flat rectangle) — before `kit/tools/annotate/annotation3d.js` projects them
 // into the model; and the ink already in the model, projected back onto the screen, to hit-test
 // (the eraser, select) and to bound a fill. Pure: no DOM, no WebGL.
 
 /** Strokes are split so no segment is longer than this, so a projected one can follow a curved surface. */
-export const INK_SEGMENT_PX = 6;
+export const ANNOTATION_SEGMENT_PX = 6;
 const ELLIPSE_SEGMENTS = 72;
 /** A fill is translucent, so it marks an area without hiding the model or the ink under it. */
 export const FILL_OPACITY = 0.35;
 
 /**
  * @typedef {{ x: number, y: number }} ScreenPoint
- * @typedef {{ color: string, width: number, dash: "solid" | "dashed" | "dotted" }} InkStyle  `width`: the
+ * @typedef {{ color: string, width: number, dash: "solid" | "dashed" | "dotted" }} AnnotationStyle  `width`: the
  *   stroke's weight (1, 2, 4), in CSS pixels on screen.
  * @typedef {{ kind: "stroke", id: string, points: ScreenPoint[], closed: boolean, color: string,
- *   width: number, opacity: number, dash: "solid" | "dashed" | "dotted", widths?: number[], group?: string }} InkStroke
+ *   width: number, opacity: number, dash: "solid" | "dashed" | "dotted", widths?: number[], group?: string }} ScreenStroke
  *   `widths`: the pen's, each point's width as a share of `width` (its pressure). `group`: the
  *   marks drawn as one thing (an arrow's line and its head), which are erased, picked and moved together.
- * @typedef {{ kind: "area", id: string, outline: ScreenPoint[], color: string, opacity: number }} InkArea
- * @typedef {{ kind: "text", id: string, corners: ScreenPoint[], text: string, color: string, fontPx: number }} InkText
- * @typedef {(InkStroke | InkArea | InkText) & { placement?: "surface" | "space" }} InkMark  `placement`:
- *   where it lies once put down — on the model (the default) or in space (`ink3d.js`).
+ * @typedef {{ kind: "area", id: string, outline: ScreenPoint[], color: string, opacity: number }} ScreenArea
+ * @typedef {{ kind: "text", id: string, corners: ScreenPoint[], text: string, color: string, fontPx: number }} ScreenText
+ * @typedef {(ScreenStroke | ScreenArea | ScreenText) & { placement?: "surface" | "space" }} ScreenMark  `placement`:
+ *   where it lies once put down — on the model (the default) or in space (`annotation3d.js`).
  */
 
 let made = 0;
 /** A new mark's id: unique for the page's life, which is as long as any ink lasts. */
-export const inkId = () => `ink-${Date.now().toString(36)}-${(made += 1).toString(36)}`;
+export const annotationId = () => `ink-${Date.now().toString(36)}-${(made += 1).toString(36)}`;
 
 /** The pen draws a little heavier than a shape at the same weight, as a felt tip does next to a ruler. */
 export const penWidth = width => Math.max(1, width * 1.5);
@@ -55,7 +55,7 @@ function penPath(points, pressures) {
 }
 
 /** A polyline with no segment longer than `step` pixels; a closed one comes back to its start. */
-export function densify(points, closed = false, step = INK_SEGMENT_PX) {
+export function densify(points, closed = false, step = ANNOTATION_SEGMENT_PX) {
   const path = closed && points.length > 2 ? [...points, points[0]] : points;
   const out = [];
   for (let index = 0; index < path.length; index += 1) {
@@ -87,7 +87,7 @@ export function arrowWings(from, tip, width) {
 }
 
 // A stroke mark of a style: its points, open or closed, at the style's weight.
-const stroke = (points, closed, { color, width, dash }, { id = inkId(), weight = width, opacity = 1 } = {}) =>
+const stroke = (points, closed, { color, width, dash }, { id = annotationId(), weight = width, opacity = 1 } = {}) =>
   ({ kind: "stroke", id, points: densify(points, closed), closed, color, width: weight, opacity, dash });
 
 /**
@@ -99,7 +99,7 @@ export function penMark(points, style, pressures = null) {
   const path = penPath(points.length === 1 ? [points[0], { x: points[0].x + 0.01, y: points[0].y }] : points,
     pressures && pressures.length === points.length ? pressures : null);
   if (path.length < 2) path.push({ ...path[0], x: path[0].x + 0.01 });
-  return { kind: "stroke", id: inkId(), points: path.map(({ x, y }) => ({ x, y })), closed: false, color: style.color,
+  return { kind: "stroke", id: annotationId(), points: path.map(({ x, y }) => ({ x, y })), closed: false, color: style.color,
     width: penWidth(style.width), opacity: 1, dash: "solid", widths: path.map(point => point.width) };
 }
 
@@ -121,13 +121,13 @@ function roundedRectangle(left, top, right, bottom) {
  * drag too short to mean a shape.
  *
  * @param {"line" | "arrow" | "rectangle" | "ellipse"} tool
- * @returns {InkStroke[]}
+ * @returns {ScreenStroke[]}
  */
 export function shapeMarks(tool, from, to, style) {
   if (Math.hypot(to.x - from.x, to.y - from.y) < 2) return [];
   if (tool === "line") return [stroke([from, to], false, style)];
   if (tool === "arrow") {
-    const group = inkId();
+    const group = annotationId();
     return [stroke([from, to], false, style), ...arrowWings(from, to, style.width).map(wing => stroke(wing, false, { ...style, dash: "solid" }))]
       .map(mark => ({ ...mark, group }));
   }
@@ -145,7 +145,7 @@ export function shapeMarks(tool, from, to, style) {
 export function textMark(text, at, { width, height }, { color, fontPx }) {
   const value = String(text || "").trim();
   if (!value) return null;
-  return { kind: "text", id: inkId(), text: value, color, fontPx,
+  return { kind: "text", id: annotationId(), text: value, color, fontPx,
     corners: [at, { x: at.x + width, y: at.y }, { x: at.x + width, y: at.y + height }, { x: at.x, y: at.y + height }] };
 }
 
@@ -157,7 +157,7 @@ export const markPoints = mark => (mark.kind === "stroke" ? mark.points : mark.k
 /**
  * Ink already in the model as it falls on the screen now: each item's points projected (`screen`),
  * a stroke's at its on-screen width, an area and a text mark as the polygon they cover.
- * @typedef {{ id: string, kind: "stroke" | "area" | "text", points: ScreenPoint[], closed: boolean, width: number }} ScreenInk
+ * @typedef {{ id: string, kind: "stroke" | "area" | "text", points: ScreenPoint[], closed: boolean, width: number }} ScreenAnnotation
  */
 
 function segmentDistance(point, a, b) {
@@ -194,7 +194,7 @@ export function interiorPoint(polygon) {
 }
 
 /** How far a point is from a piece of ink on the screen: 0 inside an area or a text mark. */
-export function inkDistance(point, ink) {
+export function annotationDistance(point, ink) {
   if (ink.kind !== "stroke" && ink.points.length >= 3 && inside(point, ink.points)) return 0;
   const path = ink.closed || ink.kind !== "stroke" ? [...ink.points, ink.points[0]] : ink.points;
   let best = Infinity;
@@ -211,13 +211,13 @@ export function withGroups(ids, items) {
 }
 
 /** The ink within `radius` pixels of `point`, nearest last-drawn first: what a press there takes. */
-export function inkAt(point, inks, radius = 6) {
-  return inks.filter(ink => inkDistance(point, ink) <= radius).reverse();
+export function annotationAt(point, inks, radius = 6) {
+  return inks.filter(ink => annotationDistance(point, ink) <= radius).reverse();
 }
 
 /**
  * The area a fill pressed at `seed` covers: the region the ink on the screen closes around it
- * (stroke ends near each other joined, as a sketch rarely closes exactly), as an area mark — or
+ * (stroke ends near each other joined, as an annotation rarely closes exactly), as an area mark — or
  * `null` when no ink bounds it. The ink is rasterised at most `FILL_ANALYSIS_MAX_DIMENSION` pixels
  * a side, around the ink there is.
  */
@@ -257,5 +257,5 @@ export function fillMarkAt(seed, inks, color) {
   if (!region) return null;
   // The region's points come back normalised to the mask's size (`normalizePolygonPoints`).
   const outline = region.points.map(point => ({ x: minX + (point.x * width) / scale, y: minY + (point.y * height) / scale }));
-  return outline.length >= 3 ? { kind: "area", id: inkId(), outline, color, opacity: FILL_OPACITY } : null;
+  return outline.length >= 3 ? { kind: "area", id: annotationId(), outline, color, opacity: FILL_OPACITY } : null;
 }

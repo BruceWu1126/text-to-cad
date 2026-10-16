@@ -77,12 +77,12 @@ pickers include opacity, with an opaque checkerboard behind the color swatch:
 0% is transparent, 100% opaque. The background's fractional alpha reaches the
 actual canvas and PNG, not just the preview.
 
-Display's first section, **Display**, holds Mode, the host's
-Appearance and Projection; **Surfaces** follows; both are always open. Grid and
+Display's first section, **Display**, holds Mode and
+Projection (light and dark are the host's, never Display's); **Surfaces** follows; both are always open. Grid and
 Axes are one gated section, **Grid / Axes**, over two independent groups. The
 panel's order is Display, Surfaces, Edges, Grid / Axes, Lighting, Background,
 Floor. Preset changes never reorder controls. Clip and Explode are not Display
-sections: they are STEP toolbar tools with their own panels, and their settings
+sections: they are STEP toolbar tools with their own sub-toolbars, and their settings
 live in this same store (`clip`, `exploded`). A tool opens neutral — Explode at
 0%, Clip at no cut — and an edit enables its group; removing the tool discards
 its amount, axis and Flip. Preset selection preserves Clip/Explode; Display
@@ -209,15 +209,15 @@ unchanged after a runtime replacement does not.
 
 ## Where the controls live
 
-Display settings are a dropdown from the Display button at the navbar's right end
-(the perspective box, before Preview: `kit/shell/DisplayPopover.jsx`), which opens down from
-it — in preview from the same place in preview's corner — present for every 3D file, never
-a panel of the tool stack. A
-file's model tree, its Reference and Position are panels of the tool stack (see
-[settings-ui.md](./settings-ui.md#the-tool-stack)); nothing in them is a display
-setting.
+Display settings are a dropdown from the Display button at the tool strip's end
+(the perspective box, after the tools' rule and before Preview:
+`kit/shell/DisplayPopover.jsx`), which opens down from it — in preview from preview's own
+row in the strip's place — present for every 3D file. A file's model tree and Position are
+sections of the file sidebar (see
+[settings-ui.md](./settings-ui.md#the-file-sidebar-and-the-tool-stack)); nothing in them is
+a display setting.
 
-Display and Preview, the view's controls in the navbar, are offered by a 3D view
+Display and Preview, the view's controls at the strip's end, are offered by a 3D view
 alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`):
 
 | Renderer | Files | Display and Preview |

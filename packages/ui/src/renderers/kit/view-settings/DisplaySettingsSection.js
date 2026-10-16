@@ -1,21 +1,15 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { useMemo, useRef } from "react";
 import { Blend, Expand, Plus, RotateCcw, RotateCw, Sun, SunDim, X } from "lucide-react";
-import { ALL_VIEW_FEATURES, normalizeViewFeatures, normalizeViewSettings, resolveViewSettings, viewSettingsAreCustom } from "@text-to-cad/core/common/viewSettings.js";
+import { ALL_VIEW_FEATURES, normalizeViewFeatures, normalizeViewSettings, resolveViewSettings } from "@text-to-cad/core/common/viewSettings.js";
 import { MAX_THEME_FILL_COLORS } from "@text-to-cad/core/lib/themeSettings.js";
 import { Button } from "@text-to-cad/ui/primitives/button";
-import { DISPLAY_MODE_OPTIONS } from "./DisplayModeOptions.js";
 import {
   FileSheetColorPicker, FileSheetColorProperty,
   FileSheetControlRow, FileSheetSelectRow, FileSheetSettingsSection,
   FileSheetFieldGrid, FileSheetNumberProperty, parseFileSheetNumberInput
 } from "../inspector/FileSheet.js";
-import { OrthographicProjectionIcon, PerspectiveProjectionIcon } from "../camera/ProjectionModeIcons.js";
 
-const PROJECTIONS = Object.freeze({
-  orthographic: { label: "Orthographic", icon: <OrthographicProjectionIcon className="size-3 shrink-0" /> },
-  perspective: { label: "Perspective", icon: <PerspectiveProjectionIcon className="size-3 shrink-0" /> }
-});
 const PART_COLOR_OPTIONS = [
   { value: "original", label: "Original" }, { value: "single", label: "Single color" }, { value: "by-part", label: "Color by part" }
 ];
@@ -107,24 +101,19 @@ function DisplaySections({ sections }) {
 }
 
 export function DisplaySettingsSection({
-  viewSettings = {}, resolvedView, hostAppearance = "light", lightingQuality = "final", onViewSettingsPatch, onGroupEnabledChange, onModeChange, onViewReset,
-  features = ALL_VIEW_FEATURES, appearanceControl = null, close = null
+  viewSettings = {}, resolvedView, hostAppearance = "light", lightingQuality = "final", onViewSettingsPatch, onGroupEnabledChange, onViewReset,
+  features = ALL_VIEW_FEATURES
 }) {
   const settings = useMemo(() => normalizeViewSettings(viewSettings), [viewSettings]);
   const view = resolvedView || resolveViewSettings(settings, { appearance: hostAppearance, lightingQuality, features });
   // The panel is built from what its caller opted into: sections it mounts, presets and surface styles it lists.
   const offered = useMemo(() => normalizeViewFeatures(features), [features]);
   const offers = id => offered.sections.includes(id);
-  const modeOptions = DISPLAY_MODE_OPTIONS.filter(option => offered.modes.includes(option.value));
   const surfaceStyleOptions = SURFACE_STYLE_OPTIONS.filter(option => offered.surfaceStyles.includes(option.value));
   // Sparse writes stay in the canonical settings store; the renderer never owns UI state.
   const setGroup = (group, patch) => onViewSettingsPatch({ [group]: {
     ...(group === "surfaces" || view[group]?.enabled === false ? { enabled: true } : {}), ...patch
   } });
-  const custom = viewSettingsAreCustom(settings, { appearance: hostAppearance, lightingQuality, features });
-  const selectedMode = modeOptions.find(option => option.value === view.mode) || modeOptions[0];
-  const ModeIcon = selectedMode.Icon;
-  const presetLabel = selectedMode.label;
   const section = (group, title, content) => !offers(group) ? null : ({
     id: group, title, content, enabled: view[group].enabled,
     onEnabledChange: enabled => onGroupEnabledChange(group, enabled),
@@ -142,22 +131,9 @@ export function DisplaySettingsSection({
         {view.surfaces.colorMode !== "single" ? <FileSheetFieldGrid columns={1}><NumberProperty label="Surface opacity" Icon={Blend} value={view.surfaces.opacity * 100} min={0} max={100} unit="%" digits={0} onChange={value => setGroup("surfaces", { opacity: value / 100 })} /></FileSheetFieldGrid> : null}
   </>;
   const sections = [
-      offers("mode") && { id: "display", title: "Display", headingAction: <TooltipHint content="Reset display"><Button type="button" variant="ghost" size="icon-xs" aria-label="Reset"  className="size-5 text-muted-foreground" onClick={onViewReset}><RotateCcw className="size-3" aria-hidden="true" /></Button></TooltipHint>, content: <>
-        <FileSheetFieldGrid columns={1}>
-          <FileSheetSelectRow hideLabel className="px-0" label="Mode" value={custom ? "" : selectedMode.value} placeholder="Custom" onValueChange={onModeChange}
-            triggerContent={custom ? undefined : <span className="flex min-w-0 items-center gap-1"><ModeIcon className="size-3 shrink-0" aria-hidden="true" /><span className="truncate">{presetLabel}</span></span>}
-            triggerClassName="gap-1 px-1.5 [&_svg]:size-3"
-            options={modeOptions.map(({ Icon, ...option }) => ({ ...option, icon: <Icon className="size-3.5" aria-hidden="true" /> }))} />
-        </FileSheetFieldGrid>
-        <FileSheetFieldGrid columns={appearanceControl ? 2 : 1}>
-          {appearanceControl}
-          <FileSheetSelectRow hideLabel className="px-0" label="Projection" value={view.camera.projection}
-            onValueChange={projection => setGroup("camera", { projection })}
-            // Its own trigger content, like Mode's: a narrow column ends the label in an ellipsis.
-            triggerContent={<span className="flex min-w-0 items-center gap-1">{PROJECTIONS[view.camera.projection]?.icon}<span className="truncate">{PROJECTIONS[view.camera.projection]?.label}</span></span>}
-            options={Object.entries(PROJECTIONS).map(([value, { label, icon }]) => ({ value, label, icon }))} />
-        </FileSheetFieldGrid>
-      </> },
+      // Custom's heading: Reset, back to Solid, the default. Choosing a mode is the menu's (`DisplayPopover.jsx`).
+      offers("mode") && { id: "display", title: "Custom display",
+        headingAction: <TooltipHint content="Reset to Solid"><Button type="button" variant="ghost" size="icon-xs" aria-label="Reset"  className="size-5 text-muted-foreground" onClick={onViewReset}><RotateCcw className="size-3" aria-hidden="true" /></Button></TooltipHint>, content: null },
       offers("surfaces") && { id: "surfaces", title: "Surfaces", content: surfaces },
       section("edges", "Edges", <FileSheetFieldGrid>
         <FileSheetSelectRow hideLabel className="px-0" label="Edge visibility" value={view.edges.visibility} onValueChange={visibility => setGroup("edges", { visibility })}
@@ -189,10 +165,6 @@ export function DisplaySettingsSection({
         </FileSheetFieldGrid>
       </>),
   ];
-  // Its dropdown has no heading: the first always-open section's heading row is its first row, and
-  // carries the dropdown's X (`close`: `DisplayPopoverClose`) after its own action.
-  const lead = sections.findIndex(item => item && typeof item.onEnabledChange !== "function");
-  if (lead >= 0 && close) sections[lead] = { ...sections[lead], headingAction: <>{sections[lead].headingAction}{close}</> };
   return <div className="[&_[data-settings-section-heading]_.text-xs]:text-tiny">
     <DisplaySections sections={sections} />
   </div>;

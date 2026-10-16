@@ -17,8 +17,8 @@ the keyboard `platform` (`darwin` shows ⌘, anything else Ctrl), the app's own
 of sight), where a CAD renderer draws the model alone — no tools, view actions,
 view cube or Quick Edit — and FileViewer draws no navbar. A view shown small in a
 conversation is not compact: it is the whole viewer, and its host hands it a way
-to full size as `fullSize` (`CadViewerProps.fullSize`), the last of the navbar's own
-controls (the view's follow it) and the home's. CAD is a separate registration supplied with a
+to full size as `fullSize` (`CadViewerProps.fullSize`), among the last of the navbar's
+controls and the home's, before the host's colour scheme control. CAD is a separate registration supplied with a
 `CadWorkspaceService`; the generic FileViewer does not import CAD. The HTTP CAD
 adapter can serve both apps, while desktop owns native runtime startup/recovery.
 See [workspace resources](../../core/docs/workspace-resources.md) for resource
@@ -41,7 +41,7 @@ are for reading and maintaining the contracts.
 
 | Contract | Definition | Public entry point |
 | --- | --- | --- |
-| `ViewerHost`, `ClipboardPort`, `PromptFiles` (a Quick Edit's views, sketch and pictures, made as files), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
+| `ViewerHost`, `ClipboardPort`, `PromptFiles` (a Quick Edit's views, annotations and pictures, made as files), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
 | `FileSource` (`stat`, and `list` and `search` where the host has them), `FileActions`, `FileViewerState` | [File viewer types](../src/file-viewer/types.ts) | `@text-to-cad/ui/file-viewer` |
 | `PromptContextPort` (`deliver`, `send`), bundles, references, delivery receipts and `formatPromptMessage` (the one message a Quick Edit is) | [Prompt types](../../core/src/prompt/types.ts) | `@text-to-cad/core/prompt` |
 | `CadWorkspaceService` (the catalog of the files on screen, `folder`, `search`), `createCadClient` (`{ origin, fetch, … }`), `isMissingFileError`, `CadResourceProvider`, worker tickets | [CAD service types](../../core/src/client/types.ts) | `@text-to-cad/core/client` |
@@ -70,11 +70,12 @@ use the [explicit fake host](../src/host/testing/host.ts).
 
 ## A CAD renderer's controls
 
-The controls of a CAD renderer (STEP, GLB, mesh, robot, DXF) are panels of its own tool
-stack over the viewport (`settings-ui.md#the-tool-stack`), and nothing it does opens or
-closes the explorer (only the file's name opens that). The tool stack's layout — the
-sizes a person dragged the tree, the Reference and Position panels to, the folded panels
-and whether the tree is closed — is one
+The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the viewport: its
+tool strip, the view's controls at the strip's end (Display, Preview), the tool in hand's
+sub-toolbar and its file sidebar (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
+DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
+file's name opens that). The layout a person gives the file sidebar — its size, whether it
+is put away, its folded sections — and the tool stack's panels is one
 of the tab's settings (`settings.toolStack` of the tab record, `@text-to-cad/ui/tab-store`),
 beside the appearance and the home's layout.
 
@@ -112,7 +113,7 @@ while a person has put away an alert card the model survives: the card's own ico
 colour, named after the alert, which brings the card back (`useAlertDismissal`,
 `kit/status/ViewerAlertCard.jsx`). The
 shared navbar shows these at its right, after the host's update button and before the
-host's Full size and the view's own controls. Each action declares its icon, accessible label, an
+host's Full size and colour scheme control. Each action declares its icon, accessible label, an
 optional shorter hover `hint`, disabled state and invocation callback. Registration belongs to the mounted
 file generation: publish an empty list on cleanup; departing renderers cannot
 replace a new file's actions. Publish only when action metadata changes; stable
@@ -120,13 +121,11 @@ commands should read the current viewport through a ref, avoiding parent/child
 render loops. These actions use existing host capabilities for effects. What a
 person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
-A renderer's controls for the view are the renderer's own, drawn into the navbar: FileViewer
-hands it the box at the row's right end (`RendererViewProps.navbarSlot`, null where no navbar
-is drawn), and the CAD viewer's controls for a 3D view (Display and Preview) are portaled there, last.
-A renderer that shows its file fullscreen (the CAD viewer's Preview) says so through
-`onFullscreenChange(true)`, and `false` when it stops: the navbar, the box with it, steps
-aside while it lasts, and the renderer draws its own controls where they sat (preview's
-corner: Orbit, Display, Exit preview). The host's `captureRequest`
+A renderer's controls for the view are the renderer's own, never the navbar's: the CAD
+viewer's for a 3D view (Display and Preview) end its tool strip. A renderer that shows its
+file fullscreen (the CAD viewer's Preview) says so through `onFullscreenChange(true)`, and
+`false` when it stops: the navbar steps aside while it lasts, and the renderer draws its own
+controls (preview's row, in the strip's place: Orbit, Display, Exit preview). The host's `captureRequest`
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
 
@@ -195,7 +194,7 @@ The portable types and validators live at `@text-to-cad/core/prompt`. One versio
 bundle contains ordered text, reference and attachment parts with unique IDs.
 An attachment has a MIME type, name and Blob or Promise of Blob. Its optional
 `about` array names reference-part IDs, so a screenshot and several selections
-can travel together, its optional `label` ("Sketch") says what it is for a
+can travel together, its optional `label` ("Annotation") says what it is for a
 message that names it by path, and its optional `path` (a path, or the promise of
 one) is where it is already saved: `resolveAttachmentPaths(context)` waits for
 them all. Producers freeze resource and selection identity before
@@ -213,7 +212,7 @@ references do not promise to survive edits. Shared serialization handles quoting
 message a Quick Edit is, whether sent, queued or copied: what the person wrote;
 then `File: <path>`; then `References:` and one reference per line; then each
 file that travels as a file by its label and path (`Current view: <png>`,
-`View 1: <png>`, `Views (cadgen snapshot --job): <job.json>`, `Sketch: <sketch.json>`),
+`View 1: <png>`, `Views (cadgen snapshot --job): <job.json>`, `Annotation: <file.annotation.json>`),
 where `attachmentPath` says where it was saved. A picture sent beside the text
 as an image block is not named.
 
@@ -242,10 +241,10 @@ Quick Edit is the shared, host-neutral note to the agent
 ([the design system](settings-ui.md#quick-edit)), and its buttons are what the host can carry out.
 Every way it goes carries the same: its words, its references, and the files
 `host.promptFiles` makes for it at the press — a picture of each view it carries
-(the view on screen as it goes, and each its drawing was drawn in; one drawn view
+(the view on screen as it goes, and each its annotations were drawn in; one such view
 the same as the one on screen stands for it), those views as a snapshot job file
 (`cadgen snapshot --job <file>` renders them again, over the model or an edit of
-it), and the drawing as a sketch file ([drawing](drawing.md)). The server renders
+it), and the annotations as an annotation file, `.annotation.json` ([drawing](drawing.md)). The server renders
 the pictures with the snapshot's own code and its own look — solid, light,
 orthographic — whatever the viewer showed (`createHttpPromptFiles` asks until
 they are made). **Copy Prompt** is always there: the message goes through
@@ -351,7 +350,7 @@ the defaults), thrown out with the tab and kept across a reload. The host suppli
 lives through one adapter, `TabRecordStorage` — a synchronous read and write of the
 whole record: the web over `sessionStorage`, the CAD app over memory
 (`memoryTabRecord`) — and the package owns the record's shape, version and normalization. `settings` is
-`{ toolStack, appearance, library }`: tab-wide (the tool stack's layout, the
+`{ toolStack, appearance, library }`: tab-wide (the file sidebar's and tool stack's layout, the
 appearance, the home's layout), and what every renderer reads as its preferences;
 `files` holds the view of the file on screen, under `[absolute path, renderer id]`, and no
 other: a write keeps the newest alone (`TAB_FILE_LIMIT`), and `CadViewer` drops the view
@@ -392,7 +391,7 @@ tests remain required for resource changes.
 Viewer shortcuts consume only events from their own viewer, or from the page
 background after a pointer press in it, so another viewer or the composer never
 receives Escape, copy or orbit keys on its behalf
-([settings-ui.md](settings-ui.md#keyboard)). Draw's surface reads the host's
+([settings-ui.md](settings-ui.md#keyboard)). Annotate's surface reads the host's
 keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 ## Host chrome slots
@@ -410,9 +409,9 @@ manager, each where `fileActions` can do it, and is absent where it can do none 
 right-click on the name). Right, only what a host or a file adds: the host's update button
 first (`update`, while its install is behind), the renderer's navigation actions, the
 host's Full size where it shows the view small
-(`fullSize`, the inline card's way to full size, in the home's row too) and, last, the
-renderer's view controls in their box (`navbarSlot`: a 3D view's own, then Display and Preview). The
-navbar holds no settings.
+(`fullSize`, the inline card's way to full size, in the home's row too), and last the host's
+colour scheme control (`colorSchemeControl`), where it has one. The navbar holds no
+settings and no view controls.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
@@ -442,9 +441,12 @@ directory in anything else is `~/`. A label is a suggestion: GitHub applies a UR
 for someone with triage access to the repository and drops them for everyone else. A link opens
 the ordinary way unless the host supplies
 `links.open` (a page in a sandboxed frame hands it to its host), which every link of the
-menu follows. `displayActions`
-passes host-owned appearance controls into the Display section beside Projection
-via `RendererViewProps`. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
+menu follows. `colorSchemeControl` (a `CadViewer` prop, a React node) is the host's own
+light/dark control, where it has one: `CadViewer` passes it to FileViewer, whose navbar
+draws it last, after `fullSize`, in the page's top-right corner, and to the home
+(`ModelLibrary`), last in its links row. The web viewer passes `ViewerAppearance` (System,
+Light, Dark); the CAD app passes none, since it takes its host's theme. Display holds no
+appearance control. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
 a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
 order they come (Share anonymous usage data, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
@@ -477,10 +479,10 @@ A file that will not open leaves the navbar over a page of the host's
 when it is missing (`isMissingFileError`), and "Could not open that file" and the
 reason otherwise, each with a Go home button where the host has a home.
 
-The viewport's corners are the shell's, never the host's: the tool strip and its
-stack at the top-left, Quick Edit at the top-right, and the view cube at the
-bottom-left; the view's own controls (Display and Preview, a 3D view's) are the navbar's
-last. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
+The viewport's edges and corners are the shell's, never the host's: the tool strip at the
+top centre, ending in the view's own controls (Display and Preview, a 3D view's), the tool in
+hand's sub-toolbar under it, the file sidebar down the left edge, Quick Edit at the
+top-right, and the view cube at the bottom-right. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
 it while it stands; the home never shows it. Neither app has one now.
 What Quick Edit offers follows the subscribed destination capability and
@@ -488,8 +490,8 @@ the ports, never an app name: Copy Prompt always, Queue for a composer
 destination, Send where the prompt port has `send`. Native clipboard effects
 remain in the host implementation.
 
-STEP's Reference panel (Copy References) and Draw's
-copy shortcut (the view with its ink) use `ClipboardPort` directly, including on
+A STEP's selection copy (a chip's click, the copy shortcut) and Annotate's
+copy shortcut (the view with its annotations) use `ClipboardPort` directly, including on
 desktop: the references as text, the view with its ink as a PNG through
 `writeImage`. Their copy shortcut and double-click topology copy follow the same
 path. Double-clicking a component or subassembly isolates it instead; only
@@ -509,12 +511,14 @@ A copied reference names its file by its absolute path (`<path>#<selector>`), an
 does a copied Quick Edit: every view spells a file the same way, so a reference pasted
 into a chat or a tool says exactly which file it means.
 
-The playback bars — preview's, and the Animation tool's while it is up — centre on one
-line, `3.5rem` above the viewport's bottom edge; nothing else sits at the bottom centre. A host whose own control floats over
+Preview's playbar centres on one line, `1.75rem` above the viewport's bottom edge; nothing
+else sits at the bottom centre. A host whose own control floats over
 that edge (a chat's composer) sets `--cad-viewport-bottom-center` on an ancestor
 to put the line on its control's, and `--cad-host-bottom-inset` to the height it
-covers: the model library scrolls its last rows clear of it. Both are lengths, like
-any design token, and say nothing about which host it is.
+covers: the model library scrolls its last rows clear of it. A host whose own control
+floats over the view's bottom-right corner sets `--cad-viewport-corner-bottom` to the room
+it takes from the bottom edge, and the view cube sits that much higher. All three are
+lengths, like any design token, and say nothing about which host it is.
 
-A renderer's update status is its own: the CAD renderers show it centred at the
-top of the viewport, level with the tool strip. The navbar carries none.
+A renderer's update status is its own: the CAD renderers show it centred under the tool
+strip and its sub-toolbar. The navbar carries none.

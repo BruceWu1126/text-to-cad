@@ -84,6 +84,14 @@ it('a tab host gets the page it always had, down to its bottom: the home, with n
   expect([frame.style.paddingTop, frame.style.paddingBottom]).toEqual(['4px', '0px']);
   expect(frame.style.getPropertyValue('--cad-viewport-bottom-center')).toBe('40px');
   expect(frame.style.getPropertyValue('--cad-host-bottom-inset')).toBe('72px');
+  // The sidebar's chat button floats in its bottom-right corner: the cube is lifted clear of it.
+  expect(frame.style.getPropertyValue('--cad-viewport-corner-bottom')).toBe('52px');
+});
+
+it("a thread's tab has no chat button in its corner, so its cube keeps its place", () => {
+  const { bridge, server } = host({ displayMode: 'fullscreen' });
+  const { container } = render(<App bridge={bridge as any} server={server as any} launch={{ ...home, surface: 'tab' }} />);
+  expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--cad-viewport-corner-bottom')).toBe('');
 });
 
 it('a model opened from the home is shown in place, joins the library with its picture, and leads back home; the navbar\'s links and file menu go through the host', async () => {

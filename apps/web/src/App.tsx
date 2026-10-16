@@ -47,7 +47,7 @@ export default function App({ client, server, tabStore, notice = null }: { clien
   // server runs on, labeled for its platform.
   const fileActions = useMemo(() => createCadFileActions({ platform: server.platform, clipboard: browserClipboard,
     reveal: path => client.reveal(path) }), [server.platform, client]);
-  // A copied Quick Edit's sketch, saved by the server beside it on this machine.
+  // A copied Quick Edit's annotation, saved by the server beside it on this machine.
   const promptFiles = useMemo(() => createHttpPromptFiles({ origin: client.origin }), [client]);
   // The view on screen, for the library's pictures of what was opened.
   const live = useMemo(() => createLiveRegistry(), []);
@@ -121,6 +121,6 @@ export default function App({ client, server, tabStore, notice = null }: { clien
     <CadViewer client={client} host={host} tabStore={tabStore} live={live} file={file} onShow={show} onShown={shown}
       library={library} onThumbnail={client.keepThumbnail} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} copy={prompt => browserClipboard.writeText(prompt)} onLink={openTab} /> : null}
-      displayActions={<ViewerAppearance colorSchemePreference={appearance.preference} resolvedColorSchemeMode={appearance.colorScheme} onColorSchemePreferenceChange={changeColorScheme} />} />
+      colorSchemeControl={<ViewerAppearance colorSchemePreference={appearance.preference} resolvedColorSchemeMode={appearance.colorScheme} onColorSchemePreferenceChange={changeColorScheme} />} />
   </div></div>;
 }

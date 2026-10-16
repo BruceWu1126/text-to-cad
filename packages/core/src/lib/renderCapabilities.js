@@ -58,13 +58,13 @@ export const ENTRY_ICON_KIND = Object.freeze({
 // that exist nowhere.
 const VIEWPORT_TOOLS = Object.freeze({
   select: true,
-  draw: true,
+  annotate: true,
   orbit: true,
   screenshot: true
 });
 const NO_VIEWPORT_TOOLS = Object.freeze({
   select: false,
-  draw: false,
+  annotate: false,
   orbit: false,
   screenshot: false
 });

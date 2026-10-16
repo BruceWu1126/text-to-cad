@@ -74,16 +74,16 @@ it('past the first few, the rest are one "+N more" chip: a narrow list whose row
   expect(onRemove).toHaveBeenCalledOnce();
 });
 
-it('a chip that makes what it copies (the Drawing: its sketch file) copies it at the click, and has no card', async () => {
+it('a chip that makes what it copies (the Annotation: its annotation file) copies it at the click, and has no card', async () => {
   const copied: string[] = [];
   const made = vi.fn(() => '{"units":"mm","parts":{},"marks":[]}');
   const host = testHost({ clipboard: { writeText: async (text: unknown) => { copied.push(String(await text)); }, readText: async () => '', writeImage: async () => {} } });
-  render(<ViewerHostContext.Provider value={host}><ReferenceChips chips={[{ key: 'sketch', label: 'Drawing', copy: made }]} /></ViewerHostContext.Provider>);
+  render(<ViewerHostContext.Provider value={host}><ReferenceChips chips={[{ key: 'annotation', label: 'Annotation', copy: made }]} /></ViewerHostContext.Provider>);
   expect(made).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Drawing' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Annotation' }));
   await settle();
   expect(copied).toEqual(['{"units":"mm","parts":{},"marks":[]}']);
-  expect(document.querySelector('[data-quick-edit-ref-card="sketch"]')).toBeNull();
+  expect(document.querySelector('[data-quick-edit-ref-card="annotation"]')).toBeNull();
 });
 
 it('without a host clipboard nothing offers a copy', () => {

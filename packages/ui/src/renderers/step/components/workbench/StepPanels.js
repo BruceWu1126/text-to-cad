@@ -3,10 +3,8 @@ import { buildPositionSection } from './MotionControlsSection.js';
 import { useStepReferenceChips } from './StepReferenceSection.js';
 import ModelingTree from './ModelingTree.jsx';
 import ToolPanel from '../../../kit/tools/ToolPanel.jsx';
-import { KeptPositionPanel } from '../../../kit/inspector/kinematicsControls.jsx';
 import { stepGeometryMeasurements } from '../../workbench/stepGeometryMeasurements.js';
 const EMPTY = [];
-// What a part file's Select card asks for, by the Select mode in hand.
 
 /**
  * `fn` behind one identity for the life of the panels, calling whatever `fn` is now: the tree's
@@ -51,19 +49,20 @@ export function useStepSelectionChips({ stepTreeRoot, selectedMeshData = null, g
 }
 
 /**
- * A STEP's panels in the tool stack, top to bottom: while Select is the tool, an assembly's
+ * A STEP's sections in the file sidebar, top to bottom, whatever the tool: an assembly's
  * **Features** (the filter and the model tree; a part file, whose tree would be its one row, has
- * none, and Select's modes are the chevron after its button on the strip); what is picked is Quick
- * Edit's to show, as chips (`useStepSelectionChips`); while Position is the tool, **Position**. Each stays
- * mounted while its tool is not up, so the tree keeps its expansion, filter and scroll. The kept
- * effects' panels follow them (`ModelTools.jsx`); the stack itself is the shell's
+ * none, and Select's filter is the chevron after its button on the strip), then **Position**, its
+ * joints, where it has any. What is picked is Quick Edit's to show, as chips
+ * (`useStepSelectionChips`). Null where there is neither: no sidebar. The kept effects' panels are
+ * the tool stack's (`ModelTools.jsx`); the sidebar itself is the shell's
  * (`kit/shell/RendererShell.jsx`).
  *
  * `selectActive`: Features is on screen, which is when a pick is scrolled to. `selectMode` is the
- * Select tool's mode, which the tree's disclosure follows.
+ * Select tool's geometry, which the tree's disclosure follows. Reaching for a Position control
+ * (`onReachPosition`) puts any other motion at rest.
  */
 export function useStepPanels({
-  selectActive, positionActive, selectedEntry, viewerLoading,
+  selectActive, selectedEntry, viewerLoading,
   geometryInspection = null, stepTreeRoot, isAssemblyView = false,
   selectedPartIds = EMPTY, selectedReferences = EMPTY,
   hiddenPartIds = EMPTY, focusedNodeIds = EMPTY, selectableNodeIds = null,
@@ -74,7 +73,7 @@ export function useStepPanels({
   // The menu a tree row carries: a node's part menu descriptor, and the actions behind it.
   menuForNode = null, partMenuActions = null,
   treeSelectionDisabled = false, selectMode = 'all', loadingGeometry = false,
-  positionRuntime = null,
+  positionRuntime = null, onReachPosition = null,
   // The viewport's hover (`workbench/hoverStore.js`): a large tree under Faces or Edges asks for the
   // topology of the part the pointer rests on.
   hoverStore = null,
@@ -97,9 +96,12 @@ export function useStepPanels({
     exitAllIsolate, togglePartVisibility, showAll, hoverTreeNode, nodeMenu, menuActions]);
   const loadTopology = useLatestCallback(geometryInspection?.onLoadTopology);
   const clearSelection = useLatestCallback(onClearSelection);
+  const reachPosition = useLatestCallback(onReachPosition);
   if (!selectedEntry) return null;
   const position = buildPositionSection({ poseRuntime: positionRuntime });
+  if (!isAssemblyView && !position) return null;
   const disabled = treeSelectionDisabled || viewerLoading;
+  const reach = () => reachPosition?.();
   return <>
     {isAssemblyView ? <ModelingTree key={`${selectedEntry.file}:${geometryInspection?.revision}`}
       stepRoot={stepTreeRoot} active={selectActive} mode={selectMode} loading={loadingGeometry} disabled={disabled}
@@ -107,14 +109,10 @@ export function useStepPanels({
       onLoadTopology={loadTopology} onClearSelection={clearSelection}
       partControls={partControls} hoverStore={hoverStore}
     /> : null}
-    {/* Headed "Position", and its X while the pose is off its default (the X resets it); sized like
-        every resizable panel: its content's height, up to the stack's. Another tool puts Position
+    {/* Headed "Position"; its Pose row's Default puts the joints back. Another tool puts Position
         down, and the values stay. */}
-    {position ? <ToolPanel id="position" title={position.title} label="Position controls" fit="details" resizable collapsible={false}
-      hidden={!positionActive} lead={positionActive} closeLabel="Reset position"
-      onClose={position.custom && position.onReset ? position.onReset : null}>{position.content}</ToolPanel> : null}
-    {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}
-    {position?.custom && !positionActive && position.onReset ? <KeptPositionPanel summary={position.summary} onReset={position.onReset}
-      poseRow={position.poseRow} /> : null}
+    {position ? <ToolPanel id="position" title={position.title} label="Position controls" fit="details">
+      <div onPointerDownCapture={reach} onFocusCapture={reach}>{position.content}</div>
+    </ToolPanel> : null}
   </>;
 }

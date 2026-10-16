@@ -55,9 +55,9 @@ export function noteMeasurement(mark, document = globalThis.document) {
   return notePill(document, { token: JSON.stringify(mark), kind: "ruler", color: mark.color, text: mark.label });
 }
 
-/** A drawing (its sketch file's JSON, as its chip copies it) as the note shows it. */
-export function noteDrawing(sketch, document = globalThis.document) {
-  return notePill(document, { token: JSON.stringify(sketch), kind: "pencil", text: "Drawing" });
+/** An annotation (its annotation file's JSON, as its chip copies it) as the note shows it. */
+export function noteAnnotation(annotation, document = globalThis.document) {
+  return notePill(document, { token: JSON.stringify(annotation), kind: "pencil", text: "Annotation" });
 }
 
 /** The note as text: its words as written, each chip its reference's token, line breaks kept. */
@@ -135,7 +135,7 @@ export function insertAtCaret(root, nodes) {
 
 /**
  * A paste as the note's nodes: each line that is a chip's copy alone (`pastedLines`: a reference, a
- * measurement, the drawing) its pill, followed by a space to type on after it; every other line
+ * measurement, the annotation) its pill, followed by a space to type on after it; every other line
  * text, the lines' breaks kept.
  */
 export function pasteNodes(lines, document = globalThis.document, nameReference = null) {
@@ -146,7 +146,7 @@ export function pasteNodes(lines, document = globalThis.document, nameReference 
     const pill = line.chip ? notePill(document, { token: line.token, kind: line.chip.glyph ?? line.chip.compact?.kind,
       color: line.chip.glyphColor, text: line.chip.text ?? line.chip.label })
       : line.measurement ? noteMeasurement(line.measurement, document)
-      : line.drawing ? noteDrawing(line.drawing, document)
+      : line.annotation ? noteAnnotation(line.annotation, document)
         : noteChip(line, document, nameReference?.(line) || "");
     nodes.push(pill, document.createTextNode(" "));
   });

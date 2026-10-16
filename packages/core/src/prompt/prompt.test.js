@@ -13,12 +13,12 @@ test('one context retains image/reference relationships and formats canonical re
 });
 test('a message says what the person wrote, then the file, its references and a picture saved as a file', () => {
   const file = { resource: reference.resource, target: { kind: 'whole-resource' } };
-  const sketch = { id: 'sketch', kind: 'attachment', name: 'part-sketch.png', mimeType: 'image/png', content: new Blob(), about: ['file'], label: 'Sketch' };
-  const context = createPromptContext([textPart('Round this edge.\n'), referencePart(file, 'file'), referencePart(reference, 'face'), sketch]);
+  const annotation = { id: 'annotation', kind: 'attachment', name: 'part-annotation.png', mimeType: 'image/png', content: new Blob(), about: ['file'], label: 'Annotation' };
+  const context = createPromptContext([textPart('Round this edge.\n'), referencePart(file, 'file'), referencePart(reference, 'face'), annotation]);
   assert.equal(formatPromptMessage(context, { attachmentPath: part => `/tmp/${part.name}` }),
-    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#o1.2.f45\nSketch: /tmp/part-sketch.png');
+    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#o1.2.f45\nAnnotation: /tmp/part-annotation.png');
   // A picture sent beside the text is not named in it.
-  assert.equal(formatPromptMessage(createPromptContext([textPart('Why?'), referencePart(file, 'file'), sketch])), 'Why?\n\nFile: "/work/STEP/my part.step"');
+  assert.equal(formatPromptMessage(createPromptContext([textPart('Why?'), referencePart(file, 'file'), annotation])), 'Why?\n\nFile: "/work/STEP/my part.step"');
 });
 
 test('a file already saved says where, as soon as it is; one that never will be fails the context', async () => {

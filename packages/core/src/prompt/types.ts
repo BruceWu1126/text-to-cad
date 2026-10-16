@@ -12,7 +12,7 @@ export interface PromptReference { resource: ResourceRef; target: ReferenceTarge
 export type PromptPart =
   | { id: string; kind: 'text'; text: string }
   | { id: string; kind: 'reference'; reference: PromptReference }
-  /** `label` says what it is in a word or two ("Sketch"), for a message that names it by path; `path`, where it is already saved. */
+  /** `label` says what it is in a word or two ("Annotation"), for a message that names it by path; `path`, where it is already saved. */
   | { id: string; kind: 'attachment'; name: string; mimeType: string; content: Blob | PromiseLike<Blob>; about?: readonly string[]; label?: string; path?: string | PromiseLike<string> };
 export interface PromptContext { schemaVersion: 1; operationId: string; parts: readonly PromptPart[] }
 export interface PromptDestinationState {

@@ -1,11 +1,11 @@
 import { createScreenSpaceLineStrip } from "@text-to-cad/core/common/renderEdges.js";
 import {
-  SKETCH_RENDER_ORDER, disposeSketchObject, placeSketchObject, sketchDocument, sketchMarkObject, sketchObjectShown as shown, sketchPartObjects
-} from "@text-to-cad/core/common/sketch.js";
-import { markPoints } from "../../../../drawing/inkGeometry.js";
+  ANNOTATION_RENDER_ORDER, disposeAnnotationObject, placeAnnotationObject, annotationDocument, annotationMarkObject, annotationObjectShown as shown, annotationPartObjects
+} from "@text-to-cad/core/common/annotation.js";
+import { markPoints } from "../../../../annotation/geometry.js";
 import { requestSceneFrame } from "../../viewport/sceneFrames.js";
 
-// The drawing in the model: each mark Draw puts down (`drawing/inkGeometry.js`), drawn over the view
+// The annotation in the model: each mark Annotate puts down (`annotation/geometry.js`), drawn over the view
 // as the camera stood then, projected into 3D so it stays where it was drawn from every angle — the
 // way a grease pencil's "surface" strokes do. Each mark belongs to the part most of it lies on (`part`),
 // in that part's own frame, so whatever moves the part — spreading the model apart, posing it —
@@ -13,14 +13,14 @@ import { requestSceneFrame } from "../../viewport/sceneFrames.js";
 // hides it; ink over empty space carries on in the air at the model's depth beside it. A mark drawn
 // in space (`placement: "space"`) lies instead on a plane facing the view in front of the model,
 // on no part. What lies under the marks is read from one render of the parts' depth, not a ray per point. The projected
-// ink is plain data (`InkItem`), kept across scene rebuilds; `mountInk` draws it in a viewer runtime
+// ink is plain data (`AnnotationItem`), kept across scene rebuilds; `mountAnnotations` draws it in a viewer runtime
 // and follows its parts each frame.
 
 /**
- * A mark as Draw keeps it: a sketch mark (`@text-to-cad/core/common/sketch.js`, the shape a prompt's
- * sketch file and a snapshot job read), its points a Float32Array, with `frame`: where its part was
- * in the world when it was drawn (a 4×4 matrix, column order), for the sketch file's `parts`.
- * @typedef {import("@text-to-cad/core/common/sketch.js").SketchMark & { points: Float32Array, frame?: number[] }} InkItem
+ * A mark as Annotate keeps it: an annotation mark (`@text-to-cad/core/common/annotation.js`, the shape a prompt's
+ * annotation file and a snapshot job read), its points a Float32Array, with `frame`: where its part was
+ * in the world when it was drawn (a 4×4 matrix, column order), for the annotation file's `parts`.
+ * @typedef {import("@text-to-cad/core/common/annotation.js").AnnotationMark & { points: Float32Array, frame?: number[] }} AnnotationItem
  */
 
 // What a ray from the view can land on: the model's part meshes, as a pick sees them.
@@ -34,7 +34,7 @@ function pickTargets(runtime) {
 const partIdOf = hit => (Array.isArray(hit.object.userData?.partIds) && hit.instanceId != null
   ? hit.object.userData.partIds[hit.instanceId] : hit.object.userData?.partId) ?? null;
 // A part's own object (not an instanced draw of several): what its ink hangs on.
-export const partObjects = runtime => sketchPartObjects(runtime.modelGroup);
+export const partObjects = runtime => annotationPartObjects(runtime.modelGroup);
 
 // A fill's triangles, split until none has an edge longer than `limit` pixels — every one at once,
 // so neighbours never meet at a crack — for the fill to follow a curved surface as a stroke does.
@@ -84,12 +84,12 @@ void main() {
 #endif
 }`;
 const SURFACE_FRAGMENT = `#include <clipping_planes_pars_fragment>
-uniform float inkObject;
+uniform float annotationObject;
 varying float vInkDepth;
 flat varying float vInkInstance;
 void main() {
 #include <clipping_planes_fragment>
-  gl_FragColor = vec4(vInkDepth, inkObject, vInkInstance, 1.0);
+  gl_FragColor = vec4(vInkDepth, annotationObject, vInkInstance, 1.0);
 }`;
 // One per renderer, kept: a material disposed with each stroke would take its program with it.
 const surfaceMaterials = new WeakMap();
@@ -101,13 +101,13 @@ function renderSurface(runtime, targets, box, size) {
   if (!renderer?.readRenderTargetPixels || !renderer.capabilities?.isWebGL2 || !renderer.extensions?.has?.("EXT_color_buffer_float")) return null;
   let material = surfaceMaterials.get(renderer);
   if (!material) {
-    material = new THREE.ShaderMaterial({ uniforms: { inkObject: { value: 0 } }, vertexShader: SURFACE_VERTEX, fragmentShader: SURFACE_FRAGMENT,
+    material = new THREE.ShaderMaterial({ uniforms: { annotationObject: { value: 0 } }, vertexShader: SURFACE_VERTEX, fragmentShader: SURFACE_FRAGMENT,
       side: THREE.DoubleSide, clipping: true });
     surfaceMaterials.set(renderer, material);
   }
   const index = new Map(targets.map((object, position) => [object, position + 1]));
   material.onBeforeRender = (_renderer, _scene, _camera, _geometry, object) => {
-    material.uniforms.inkObject.value = index.get(object) || 0;
+    material.uniforms.annotationObject.value = index.get(object) || 0;
     material.uniformsNeedUpdate = true;
   };
   material.clippingPlanes = Array.isArray(runtime.activeClipPlanes) && runtime.activeClipPlanes.length ? runtime.activeClipPlanes : null;
@@ -236,7 +236,7 @@ function bridgeDepths(depths, fallback) {
 }
 
 /**
- * The marks of a drawing projected into the model from the camera they were drawn under.
+ * The marks of an annotation projected into the model from the camera they were drawn under.
  *
  * Each point stays on the ray through where it was drawn, so from that view the ink is exactly what
  * was drawn; its depth along the ray is the model's there. A stroke lies over the nearest of what is
@@ -252,11 +252,11 @@ function bridgeDepths(depths, fallback) {
  * coordinates on no part. Marks all in space need no render of the parts.
  *
  * @param {object} runtime  The viewer runtime (`THREE`, `camera`, `controls`, `modelGroup`, `renderer`, `scene`, `activeClipPlanes`).
- * @param {import("../../../../drawing/inkGeometry.js").InkMark[]} marks
+ * @param {import("../../../../annotation/geometry.js").ScreenMark[]} marks
  * @param {{ width: number, height: number }} size  The viewport's CSS size, which the marks' pixels are of.
- * @returns {InkItem[]}
+ * @returns {AnnotationItem[]}
  */
-export function projectInk(runtime, marks, size) {
+export function projectAnnotations(runtime, marks, size) {
   const { THREE, camera } = runtime;
   const { width, height } = size;
   if (!THREE || !camera || !(width > 0) || !(height > 0) || !marks.length) return [];
@@ -364,19 +364,19 @@ export function projectInk(runtime, marks, size) {
 }
 
 /**
- * The drawing as a sketch file says it (`@text-to-cad/core/common/sketch.js`): its marks, and where
+ * The annotation as an annotation file says it (`@text-to-cad/core/common/annotation.js`): its marks, and where
  * each part they hang on was when they were drawn.
- * @param {readonly InkItem[]} items
+ * @param {readonly AnnotationItem[]} items
  * @param {string} [units]
  */
-export function inkSketch(items, units = "mm") {
+export function annotationDocumentOf(items, units = "mm") {
   const placements = new Map();
   for (const item of items) if (item.part != null && item.frame && !placements.has(item.part)) placements.set(item.part, item.frame);
-  return sketchDocument({ units, placements, marks: items.map(({ frame: _frame, ...mark }) => mark) });
+  return annotationDocument({ units, placements, marks: items.map(({ frame: _frame, ...mark }) => mark) });
 }
 
 /** Each item's points where they are in the world now: its part's frame as the scene has it. */
-export function inkWorldPoints(runtime, item, parts = partObjects(runtime)) {
+export function annotationWorldPoints(runtime, item, parts = partObjects(runtime)) {
   const { THREE } = runtime;
   const part = item.part != null ? parts.get(String(item.part)) : null;
   if (part) part.updateWorldMatrix(true, false);
@@ -389,10 +389,10 @@ export function inkWorldPoints(runtime, item, parts = partObjects(runtime)) {
 }
 
 /**
- * The ink as it falls on the screen now (`drawing/inkGeometry.js`'s `ScreenInk`): to hit-test with
+ * The ink as it falls on the screen now (`annotation/geometry.js`'s `ScreenAnnotation`): to hit-test with
  * the eraser and Select, and to bound a fill. Ink behind the eye, or on a hidden part, is not there.
  */
-export function inkOnScreen(runtime, items, { width, height }) {
+export function annotationsOnScreen(runtime, items, { width, height }) {
   const { THREE, camera } = runtime;
   camera.updateMatrixWorld();
   const parts = partObjects(runtime);
@@ -401,7 +401,7 @@ export function inkOnScreen(runtime, items, { width, height }) {
   return items.flatMap(item => {
     const part = item.part != null ? parts.get(String(item.part)) : null;
     if (item.part != null && (!part || !shown(part))) return [];
-    const all = inkWorldPoints(runtime, item, parts);
+    const all = annotationWorldPoints(runtime, item, parts);
     // A fill's outline: its first points (the rest are inside it).
     const world = item.kind === "area" && item.outline ? all.slice(0, item.outline) : all;
     if (world.some(point => point.clone().sub(eye).dot(view) <= 0)) return [];
@@ -426,7 +426,7 @@ function haloObject(runtime, item, lineScale, opacity) {
   const points = closed && item.kind !== "stroke" ? Float32Array.from([...outline, ...outline.subarray(0, 3)]) : outline;
   const width = item.kind === "stroke" ? item.width * Math.max(1, ...(item.widths || [1])) : 2;
   const halo = createScreenSpaceLineStrip(runtime, points, { color: SELECTION_COLOR, opacity,
-    lineWidth: (width + HALO_PX) * lineScale, renderOrder: SKETCH_RENDER_ORDER - 1, depthTest: true, depthWrite: false });
+    lineWidth: (width + HALO_PX) * lineScale, renderOrder: ANNOTATION_RENDER_ORDER - 1, depthTest: true, depthWrite: false });
   if (halo) {
     halo.matrixAutoUpdate = false;
     halo.matrixWorldAutoUpdate = false;
@@ -438,21 +438,21 @@ function haloObject(runtime, item, lineScale, opacity) {
 
 /**
  * Draws projected ink in a viewer runtime until `dispose()`: `update(items, selected)` draws a
- * drawing's ink as it is now, making objects only for items it has not drawn yet and dropping those
+ * annotation's ink as it is now, making objects only for items it has not drawn yet and dropping those
  * it no longer has (an item is never changed in place: a changed one is a new item), and halos the
  * ink Select has picked (`selected`, ids) and, fainter, what the pointer rests on (`hovered`). Every frame, before anything is
  * drawn, each mark takes its part's place (its frame as the scene has it then: spread apart, posed),
  * hides with it, and takes the clip planes the model has. A part rebuilt under it is found again by id.
  *
  * @param {object} runtime
- * @returns {{ group: import("three").Group, update(items: InkItem[], selected?: readonly string[], hovered?: readonly string[]): void, dispose(): void }}
+ * @returns {{ group: import("three").Group, update(items: AnnotationItem[], selected?: readonly string[], hovered?: readonly string[]): void, dispose(): void }}
  */
-export function mountInk(runtime) {
+export function mountAnnotations(runtime) {
   const { THREE, scene } = runtime;
   // Ink casts no shadow: a frame that keeps the shadow maps it has (`viewport/sceneFrames.js`).
   const redraw = () => requestSceneFrame(runtime, false);
   const group = new THREE.Group();
-  group.name = "drawing-ink";
+  group.name = "annotations";
   scene.add(group);
   const radius = Number(runtime.modelRadius) || 1;
   // A stroke's width is in CSS pixels; the line's in device pixels.
@@ -467,7 +467,7 @@ export function mountInk(runtime) {
     const planes = Array.isArray(runtime.activeClipPlanes) ? runtime.activeClipPlanes : [];
     for (const [item, object] of [...entries, ...halos]) {
       // A part the scene has lost (it is rebuilding) hides its ink until it is back.
-      placeSketchObject(object, item, parts, { planes, visible: item.part == null || parts.has(String(item.part)) });
+      placeAnnotationObject(object, item, parts, { planes, visible: item.part == null || parts.has(String(item.part)) });
     }
   };
   let previous = scene.onBeforeRender;
@@ -487,7 +487,7 @@ export function mountInk(runtime) {
     ran = false;
   };
   group.add(sentinel);
-  const release = disposeSketchObject;
+  const release = disposeAnnotationObject;
   return {
     group,
     update(items, selected = [], hovered = []) {
@@ -495,7 +495,7 @@ export function mountInk(runtime) {
       for (const item of items) {
         let object = entries.get(item);
         if (!object) {
-          object = sketchMarkObject(runtime, item, { radius, lineScale });
+          object = annotationMarkObject(runtime, item, { radius, lineScale });
           if (!object) continue;
           group.add(object);
         }

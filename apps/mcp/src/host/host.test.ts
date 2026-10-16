@@ -367,7 +367,7 @@ function servingInParts(bytes: Uint8Array, {
 describe('a Quick Edit in the chat', () => {
   const file = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'whole-resource' } }, 'file');
   const face = referencePart({ resource: { kind: 'workspace-file', path: '/project/parts/a.step' }, target: { kind: 'cad-selector', selectors: ['o1.f2'] } }, 'face');
-  const sketch = () => ({ id: 'sketch', kind: 'attachment' as const, name: 'a-current.png', label: 'Current view', mimeType: 'image/png', about: ['file'],
+  const annotation = () => ({ id: 'annotation', kind: 'attachment' as const, name: 'a-current.png', label: 'Current view', mimeType: 'image/png', about: ['file'],
     content: new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }), path: Promise.resolve('/tmp/p/a-1-current.png') });
   // The views job: a file, never an image, always named by where it was made.
   const views = () => ({ id: 'views', kind: 'attachment' as const, name: 'a.job.json', label: 'Views', mimeType: 'application/json', about: ['file'],
@@ -380,7 +380,7 @@ describe('a Quick Edit in the chat', () => {
     expect(chatReach({ updateModelContext: {}, message: { text: {}, image: {} } }, 'inline')).toEqual({ queue: true, send: true, sendImages: true });
   });
 
-  it('queues into the composer as one titled message and its sketch, keeping what it queued until the host clears it', async () => {
+  it('queues into the composer as one titled message and its annotation, keeping what it queued until the host clears it', async () => {
     const updates: any[] = [];
     let context: (value: any) => void = () => {};
     const port = createChatPromptContext({
@@ -389,7 +389,7 @@ describe('a Quick Edit in the chat', () => {
       request: async (method: string, params: any) => { updates.push({ method, params }); return {}; },
     } as any, { reach: { queue: true, send: false, sendImages: false } });
     expect([port.getSnapshot().kind, port.send]).toEqual(['composer', undefined]);
-    expect((await port.deliver(edit(face, sketch()))).status).toBe('added');
+    expect((await port.deliver(edit(face, annotation()))).status).toBe('added');
     const [text, image] = updates[0].params.content;
     expect(updates[0].method).toBe('ui/update-model-context');
     expect(text).toEqual({ type: 'text', text: 'Round it.\n\nFile: /project/parts/a.step\nReferences:\n/project/parts/a.step#o1.f2', _meta: { 'openai/title': 'Quick edit · a.step' } });
@@ -425,13 +425,13 @@ describe('a Quick Edit in the chat', () => {
     } as any;
     const port = createChatPromptContext(bridge, { reach: { queue: false, send: true, sendImages: true } });
     expect(port.getSnapshot().kind).toBe('unavailable');
-    expect((await port.send!(edit(sketch(), views()))).status).toBe('sent');
+    expect((await port.send!(edit(annotation(), views()))).status).toBe('sent');
     expect(sent[0].method).toBe('ui/message');
     expect(sent[0].params.role).toBe('user');
     expect(sent[0].params.content.map((block: any) => block.type)).toEqual(['text', 'image']);
     expect(sent[0].params.content[0].text).toBe('Round it.\n\nFile: /project/parts/a.step\nViews: /tmp/p/a-1.job.json');
     refuse = true;
-    expect((await port.send!(edit(sketch(), views()))).status).toBe('sent');
+    expect((await port.send!(edit(annotation(), views()))).status).toBe('sent');
     expect(sent.at(-1).params.content).toEqual([{ type: 'text',
       text: 'Round it.\n\nFile: /project/parts/a.step\nCurrent view: /tmp/p/a-1-current.png\nViews: /tmp/p/a-1.job.json' }]);
   });

@@ -10,7 +10,7 @@ FileViewer over a CAD client, with the five CAD renderers, the home (the model
 library) and the standard loading and missing-file pages. `apps/web` and `apps/mcp` consume both through the package's compiled
 exports; a host's own project, session and window layout remains application code.
 
-The viewer's tools, tool stack, settings, tooltips and keyboard follow one
+The viewer's tools, file sidebar, settings, tooltips and keyboard follow one
 binding [design system](docs/settings-ui.md), the same in both apps. A change to
 that chrome changes the design system first. Desktop's surrounding app controls
 remain local where their appearance differs.
@@ -56,18 +56,18 @@ File-tab chrome uses normal-weight type. The navbar's file name, the explorer's 
 the model tree's rows, and filter matches use muted/primary text color for emphasis,
 never bold weight. The explorer's rows are compact 24px lines in 12px text, the size of
 the section titles and the filter above them, a folder opening inline under itself; the
-tool stack's trees (Features, Links) are 24px lines in the panels' smaller 11px text
-([the tool stack](docs/settings-ui.md#the-tool-stack)). Both inset
+file sidebar's trees (Features, Links) are 24px lines in its smaller 11px text
+([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
 row backgrounds 4px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
 The file explorer is a popover under the navbar's file name (`FolderExplorer.jsx`):
 18rem wide, no taller than 28rem or the room below it, with no resize handle. It
 floats over the view and never resizes it or moves its tools. A file's controls are
-panels of the viewer's own tool stack under the toolbar, one width for every panel
-until a person sizes one, bounded by the viewer's height. FileViewer is mobile below
-720px of its own width; progress indicators use this same breakpoint. Panels never
-scroll sideways: a Position panel's labels truncate to preserve its sliders and
-inputs.
+the viewer's own: the tool strip at the view's top centre, the tool in hand's sub-toolbar
+under it, and the file sidebar down its left edge, bounded by the viewer's height.
+FileViewer is mobile below 720px of its own width; progress indicators use this same
+breakpoint. The sidebar never scrolls sideways: Position's labels truncate to preserve its
+sliders and inputs.
 
 React, ReactDOM, Three.js and Lucide are host-supplied peers. React 18 and 19
 are supported: web and desktop use React 19.3.0. Each
@@ -78,7 +78,7 @@ these peers are not bundled into UI.
 ```text
 src/
   host/              explicit host ports, prompt actions and React binding
-  drawing/           Draw's session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/draw)
+  annotation/        Annotate's session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/annotate)
   cad-viewer/        CadViewer (FileViewer + the five CAD renderers + the home), and a CAD client as a FileSource
   file-viewer/       FileViewer, typed source/renderer contracts, the document lifecycle hook
     navigation/     the navbar, the app menu and its links, the folder explorer, the file menu
@@ -155,7 +155,7 @@ const host = { files: createCadFileSource(client), clipboard, promptContext, env
 Declarations are owned here; apps need no ambient shims or aliases into this
 source tree.
 
-The viewer's Draw tool is native ink projected into the model, with no drawing
+The viewer's Annotate tool is native ink projected into the model, with no drawing
 SDK and no persistent storage. Read [drawing](docs/drawing.md) before extending it.
 
 The required host contract, typed prompt bundles, delivery receipts and host
@@ -243,28 +243,28 @@ names without expanding anything. Contextual measurements remain available in Re
 too. See [the model tree](docs/cad-renderer.md#step-panels) for selection, isolation
 and demand.
 
-A CAD file's controls are `ToolPanel`s in the tool stack, shown by the tool they
-belong to. Select shows Features (an assembly's tree, its modes a menu at its filter row's
-end) — in a part file, a Select card with its modes and "Select a face or edge", which the
-Reference takes the place of while something is picked — or a robot's Links, and, with a
-selection, the Reference. Position shows Position; Display and Draw show their own panels; kept
-effects (Explode, Clip, Measure's results) follow. A panel whose tool is not up stays
-mounted, hidden, so a tree keeps its scroll and expansion; only what is on screen does
-background work. A tree has no X: an assembly's Features and a robot's Links show whenever
-Select is up, on a phone too. The tree, the Reference and
-Position each open as tall as their content needs, up to the whole stack, and are each sized
-by their own bottom-right grip, Quick Edit's. SDF metadata is a Select panel
-too. Links is the description's link tree, with the Model tree's rows, filter
-and Reference panel; see [robot links](docs/cad-renderer.md#robot-links).
+A CAD file's controls are the shell's chrome over the viewport. The tool strip at the top
+centre holds the file's tools — a STEP's Select (its selection filter the chevron after it),
+Annotate, Measure, Explode, Clip and Animation; a robot's Select — then, after a thin rule, a
+3D view's Display (its settings, a dropdown that opens down) and Preview. The tool in hand's
+controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
+Annotate's tools, style and history; Explode's, Clip's and the Animation tool's slider rows.
+What there is to read of the file is the file sidebar down the left edge, whatever the tool
+(`kit/tools/FileSidebar.jsx`): an assembly's Features, a robot's Links, Position, an SDF's
+metadata, one scroll, each section folding where there are several, a tree's find a
+magnifier in its heading; it is sized from its bottom-right grip, Quick Edit's, and put away
+by its panel button. Sidebar sections stay mounted, so a tree keeps its scroll and expansion;
+only what is on screen does background work. What is picked is Quick Edit's chips. Links is
+the description's link tree, with the Model tree's rows and find; see
+[robot links](docs/cad-renderer.md#robot-links).
 The binding [viewer design system](docs/settings-ui.md) defines tool lifecycle,
-the tool stack, mobile layout, section density, keyboard scope, tooltips
-and preview. RendererShell owns the top-left toolbar, Quick Edit at the top-right, the
-bottom-left cube, and a 3D view's controls, which it draws at the navbar's right end: Display
-(its settings, a dropdown that opens down), then Preview. Preview is the shell's own
-mode, where routines play and the model orbits, and takes the whole page, the navbar with
-it; its own controls sit at the view's top-right, on the navbar's geometry — Orbit, then
-Display where it sat in the navbar, then Exit preview where Preview sat — and its playbar
-holds the routines at its left end and their settings at its right. Preview and the tools
+the file sidebar, mobile layout, section density, keyboard scope, tooltips
+and preview. RendererShell owns the strip and its sub-toolbar at the top centre, the file
+sidebar, Quick Edit at the top-right and the cube at the bottom-right. Preview is the
+shell's own mode, where routines play and the model orbits, and takes the whole page, the
+navbar and the strip with it; its own row stands at the view's top centre where the strip
+was — Orbit, Display, then Exit preview — and its playbar holds the routines at its left end
+and their settings at its right. Preview and the tools
 view are two states: preview starts from the model as authored and leaves the tools view's
 state untouched, and leaving it throws preview's away and gives the tools view back exactly
 as it was ([preview](docs/settings-ui.md#camera-animation-and-preview)). Keep app-specific
@@ -289,7 +289,8 @@ app's views), Back and Forward follow, disabled where they have nowhere to go. I
 file — the name opens the explorer — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
-and, last, a 3D view's controls: Display and Preview.
+and, last, the host's colour scheme control (`colorSchemeControl`, the web viewer's System,
+Light and Dark), where it has one. A 3D view's Display and Preview are its tool strip's.
 With no file a view shows the host's home, the model library: the models opened before,
 pinned first, with their pictures, and Open where the host has a file chooser, under its
 wordmark and GitHub, Discord and X. A file that

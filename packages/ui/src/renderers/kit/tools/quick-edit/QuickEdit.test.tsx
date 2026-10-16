@@ -82,23 +82,23 @@ it('follows what it would carry while the note is empty: open for the person wit
   expect(escape.mock.calls.length).toBe(1);
 });
 
-it('opens with a sketch while there is ink, taking the keyboard once the pen lifts, and closes when the ink goes', () => {
-  const drawing = (ink: boolean) => ({ ink });
+it('opens with an annotation while there is ink, taking the keyboard once the pen lifts, and closes when the ink goes', () => {
+  const annotation = (present: boolean) => ({ present });
   const view = () => document.querySelector('[data-slot="cad-file-view"]')!;
   const { update } = mount();
-  update({ sketch: drawing(false) });
+  update({ annotation: annotation(false) });
   expect(box()).toBeNull();
   fireEvent.pointerDown(view());
-  update({ sketch: drawing(true) });
-  expect(box()!.querySelector('[data-quick-edit-ref="sketch"]')!.textContent).toBe('Drawing');
+  update({ annotation: annotation(true) });
+  expect(box()!.querySelector('[data-quick-edit-ref="annotation"]')!.textContent).toBe('Annotation');
   expect(document.activeElement).not.toBe(field());
   fireEvent.pointerUp(view(), { button: 0 });
   expect(document.activeElement).toBe(field());
-  update({ sketch: drawing(false) });
+  update({ annotation: annotation(false) });
   expect(box()).toBeNull();
-  update({ sketch: drawing(true) });
+  update({ annotation: annotation(true) });
   write('A boss here.');
-  update({ sketch: null });
+  update({ annotation: null });
   expect(note()).toBe('A boss here.');
 });
 
@@ -124,22 +124,22 @@ it('offers the buttons the host can carry out, the rightmost primary and pressed
   expect(used.mock.calls).toEqual([['quickEdit']]);
 });
 
-it('copies the note with its references by their files\' absolute paths, and the files made for it — each view\'s picture, the views as a job, the sketch — by theirs, keeping it all in the box', async () => {
+it('copies the note with its references by their files\' absolute paths, and the files made for it — each view\'s picture, the views as a job, the annotation — by theirs, keeping it all in the box', async () => {
   let copied: Promise<string> | string = '';
   const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
-  const sketch = { ink: true };
+  const annotation = { present: true };
   const views = [{ label: 'current' }, { label: 'view 1' }];
   const prompt = {
     views: () => views,
-    files: vi.fn(async () => ({ job: '/tmp/p/bracket-1.job.json', sketch: '/tmp/p/bracket-1.sketch.json',
+    files: vi.fn(async () => ({ job: '/tmp/p/bracket-1.job.json', annotation: '/tmp/p/bracket-1.annotation.json',
       images: [{ label: 'current', path: '/tmp/p/bracket-1-current.png' }, { label: 'view 1', path: '/tmp/p/bracket-1-view-1.png' }] })),
     read: vi.fn(async () => new Blob()),
-    sketch: () => ({ units: 'mm', parts: {}, marks: [] }),
+    annotation: () => ({ units: 'mm', parts: {}, marks: [] }),
   };
   const clear = vi.fn();
-  mount(host, { references: [face], sketch, prompt, onClear: clear });
-  // The sketch is a chip of its own, Drawing; without a way to wipe it, it has no X.
-  expect(buttons()).toEqual(['Close Quick Edit', 'Drawing', 'Copy Prompt']);
+  mount(host, { references: [face], annotation, prompt, onClear: clear });
+  // The annotation is a chip of its own, Annotation; without a way to wipe it, it has no X.
+  expect(buttons()).toEqual(['Close Quick Edit', 'Annotation', 'Copy Prompt']);
   write('Round this edge.');
   fireEvent.click(within(box()!).getByRole('button', { name: 'Copy Prompt' }));
   // Copied, nothing has gone yet: the note and what it carries stay, and the button says so.
@@ -147,29 +147,29 @@ it('copies the note with its references by their files\' absolute paths, and the
   expect([note(), clear.mock.calls.length]).toEqual(['Round this edge.', 0]);
   expect(await copied).toBe('Round this edge.\n\nFile: /models/parts/bracket.step\nReferences:\n/models/parts/bracket.step#o1.f2'
     + '\nCurrent view: /tmp/p/bracket-1-current.png\nView 1: /tmp/p/bracket-1-view-1.png'
-    + '\nViews (cadgen snapshot --job): /tmp/p/bracket-1.job.json\nSketch: /tmp/p/bracket-1.sketch.json');
+    + '\nViews (cadgen snapshot --job): /tmp/p/bracket-1.job.json\nAnnotation: /tmp/p/bracket-1.annotation.json');
   expect(prompt.files).toHaveBeenCalledWith(views);
   // Copied as text, no file's bytes were read.
   expect(prompt.read).not.toHaveBeenCalled();
-  // The Drawing chip copies the drawing as its sketch file's JSON, where the host keeps no files.
-  fireEvent.click(within(box()!).getByRole('button', { name: 'Drawing' }));
-  await waitFor(() => expect(copied).toBe(JSON.stringify(prompt.sketch(), null, 2)));
+  // The Annotation chip copies the annotation as its annotation file's JSON, where the host keeps no files.
+  fireEvent.click(within(box()!).getByRole('button', { name: 'Annotation' }));
+  await waitFor(() => expect(copied).toBe(JSON.stringify(prompt.annotation(), null, 2)));
 });
 
-it('the Drawing chip copies the path of a file it saves, and that path pasted in the note is its pill', async () => {
+it('the Annotation chip copies the path of a file it saves, and that path pasted in the note is its pill', async () => {
   let copied = '';
   const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
-  const prompt = { views: () => [], files: vi.fn(), read: vi.fn(), sketch: () => ({ units: 'mm', parts: {}, marks: [] }),
-    save: vi.fn(async () => '/tmp/p/bracket-1.sketch.json') };
-  mount(host, { sketch: { ink: true }, prompt });
-  fireEvent.click(within(box()!).getByRole('button', { name: 'Drawing' }));
-  await waitFor(() => expect(copied).toBe('/tmp/p/bracket-1.sketch.json'));
-  expect(prompt.save).toHaveBeenCalledWith('sketch', prompt.sketch());
-  fireEvent.paste(field(), { clipboardData: { getData: () => '/tmp/p/bracket-1.sketch.json' } });
+  const prompt = { views: () => [], files: vi.fn(), read: vi.fn(), annotation: () => ({ units: 'mm', parts: {}, marks: [] }),
+    save: vi.fn(async () => '/tmp/p/bracket-1.annotation.json') };
+  mount(host, { annotation: { present: true }, prompt });
+  fireEvent.click(within(box()!).getByRole('button', { name: 'Annotation' }));
+  await waitFor(() => expect(copied).toBe('/tmp/p/bracket-1.annotation.json'));
+  expect(prompt.save).toHaveBeenCalledWith('annotation', prompt.annotation());
+  fireEvent.paste(field(), { clipboardData: { getData: () => '/tmp/p/bracket-1.annotation.json' } });
   const pill = field().querySelector('[data-quick-edit-note-ref]')!;
-  expect([pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]).toEqual(['pencil', 'Drawing']);
+  expect([pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]).toEqual(['pencil', 'Annotation']);
   // It goes as the path it stands for.
-  expect((pill as HTMLElement).dataset.quickEditNoteRef).toBe('/tmp/p/bracket-1.sketch.json');
+  expect((pill as HTMLElement).dataset.quickEditNoteRef).toBe('/tmp/p/bracket-1.annotation.json');
 });
 
 it('a click on a pill in the note selects it whole, highlighted as selected text, so a Backspace takes it', () => {
@@ -209,7 +209,7 @@ it('a pasted reference is a chip in the note, where it was pasted, and goes as t
   expect([note(), field().childNodes.length]).toEqual(['', 0]);
 });
 
-it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, the drawing, a named part', async () => {
+it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, the annotation, a named part', async () => {
   let copied: Promise<string> | string = '';
   const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
   const nameReference = () => ({ name: 'base', kind: 'solid' });
@@ -218,16 +218,16 @@ it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, 
   const pills = () => [...field().querySelectorAll('[data-quick-edit-note-ref]')]
     .map(pill => [pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]);
   const mark = { start: [0, 0, 0], end: [10, 0, 0], label: '10.00 mm', color: '#d59090' };
-  const sketch = { units: 'mm', parts: {}, marks: [{ id: 'a', kind: 'stroke' }] };
+  const annotation = { units: 'mm', parts: {}, marks: [{ id: 'a', kind: 'stroke' }] };
   paste(JSON.stringify(mark));
-  paste(JSON.stringify(sketch, null, 2));
+  paste(JSON.stringify(annotation, null, 2));
   paste('/models/parts/bracket.step#o1.2');
-  expect(pills()).toEqual([['ruler', '10.00 mm'], ['pencil', 'Drawing'], ['solid', 'base']]);
-  // Each goes as what was copied: the measurement and the drawing as their JSON.
+  expect(pills()).toEqual([['ruler', '10.00 mm'], ['pencil', 'Annotation'], ['solid', 'base']]);
+  // Each goes as what was copied: the measurement and the annotation as their JSON.
   fireEvent.click(within(box()!).getByRole('button', { name: 'Copy Prompt' }));
   const text = await waitFor(() => copied);
   expect(text).toContain(JSON.stringify(mark));
-  expect(text).toContain(JSON.stringify(sketch));
+  expect(text).toContain(JSON.stringify(annotation));
 });
 
 it('keeps the note and says why when it did not go, and counts no use', async () => {

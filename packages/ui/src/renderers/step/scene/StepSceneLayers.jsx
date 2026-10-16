@@ -257,7 +257,8 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     onMeasureHoverPoint: handleMeasureHoverPoint,
     viewerReadyTick,
     // Nothing under the pointer is picked or hovered while a routine plays, in preview, or under Animation or Position.
-    suppressTopologyPicking: animateMode || Array.isArray(jointHandles) || stepAnimationPlaying
+    // Position's knobs are Select's and leave its picks alone: a press is the knob's only on a knob.
+    suppressTopologyPicking: animateMode || stepAnimationPlaying
   });
 
   // Read-only debug/test seams. `__cadCamera` and `__cadStage` are the viewport's.

@@ -1,61 +1,61 @@
 import { createScreenSpaceLineStrip } from "./renderEdges.js";
 
-// A sketch: ink drawn over a model in the CAD Viewer's Draw tool, in 3D. The viewer draws it live
-// and writes it with a prompt; a snapshot job draws it over the model it renders (`job.sketch`),
+// An annotation: ink drawn over a model in the CAD Viewer's Annotate tool, in 3D. The viewer draws it live
+// and writes it with a prompt; a snapshot job draws it over the model it renders (`job.annotation`),
 // with this same code, so what an agent renders is what the person drew.
 //
 // Each mark is fixed to one part (`part`, an occurrence id) and its points are in that part's own
 // frame, so it follows the part wherever the scene puts it — exploded, posed — hides when the part
 // is hidden and is cut by the same clip planes. A part the scene no longer has falls back to where
-// it was when the sketch was made (`parts[id].placement`). A mark on no part (`part: null`) is in
+// it was when the annotation was made (`parts[id].placement`). A mark on no part (`part: null`) is in
 // model coordinates and stays where it was drawn.
 
 /**
- * @typedef {"stroke" | "area" | "text"} SketchMarkKind
+ * @typedef {"stroke" | "area" | "text"} AnnotationMarkKind
  * @typedef {{
- *   id: string, kind: SketchMarkKind, part: string | null, placement?: "surface" | "space", view?: string,
+ *   id: string, kind: AnnotationMarkKind, part: string | null, placement?: "surface" | "space", view?: string,
  *   points: ArrayLike<number>, color: string, opacity?: number,
  *   width?: number, widths?: ArrayLike<number>, dash?: "solid" | "dashed" | "dotted", closed?: boolean, group?: string,
  *   outline?: number, triangles?: ArrayLike<number>,
  *   text?: string, fontPx?: number,
  *   touches?: { part: string }[]
- * }} SketchMark
+ * }} AnnotationMark
  *   `points`: x, y, z triples, in the frame of `part` (model coordinates for a mark on no part). A
  *   stroke's are its line; an area's (a fill) its outline (the first `outline`) then the points inside
  *   it its `triangles` index; a text mark's its label's four corners. `width`: a stroke's thickness in
  *   screen pixels, at any zoom; `widths`: the pen's, each point's share of it. `fontPx`: a text mark's
  *   size on screen as it was written. `placement`: drawn on the model, or in space. `view`: the label
  *   of the view it was drawn in. `touches`: the parts under it as it was drawn.
- * @typedef {{ units: string, parts: Record<string, { placement: number[] }>, marks: SketchMark[] }} Sketch
- *   `parts[id].placement`: where the part was in the model when the sketch was made, a 4×4 matrix
+ * @typedef {{ units: string, parts: Record<string, { placement: number[] }>, marks: AnnotationMark[] }} Annotation
+ *   `parts[id].placement`: where the part was in the model when the annotation was made, a 4×4 matrix
  *   in column order.
  */
 
-export const SKETCH_MARK_KINDS = Object.freeze(["stroke", "area", "text"]);
+export const ANNOTATION_MARK_KINDS = Object.freeze(["stroke", "area", "text"]);
 const DASHES = new Set(["solid", "dashed", "dotted"]);
 const PLACEMENTS = new Set(["surface", "space"]);
 const COLOR = /^#[0-9a-f]{6}$/i;
 // A capture's ink is as heavy against its height as it was on a viewer this tall.
-export const SKETCH_REFERENCE_HEIGHT_PX = 900;
+export const ANNOTATION_REFERENCE_HEIGHT_PX = 900;
 // Ink is drawn after the model and everything that marks it (a highlighted or ghosted part draws at
 // 23–30): it writes no depth, so a part drawn after it would paint over it. Its own depth test still
 // hides it behind the model.
-export const SKETCH_RENDER_ORDER = 40;
+export const ANNOTATION_RENDER_ORDER = 40;
 
-const fail = message => { throw new Error(`sketch: ${message}`); };
+const fail = message => { throw new Error(`annotation: ${message}`); };
 const numbers = (value, label) => {
   if (!(Array.isArray(value) || ArrayBuffer.isView(value)) || !Array.from(value).every(Number.isFinite)) fail(`${label} must be an array of numbers`);
   return Array.from(value);
 };
 
 /**
- * A sketch as it is read from a file or a job: checked field by field, each refusal naming what is
+ * An annotation as it is read from a file or a job: checked field by field, each refusal naming what is
  * wrong. Unknown fields are refused too, so a misspelt one never passes for a default.
  * @param {unknown} raw
- * @returns {Sketch}
+ * @returns {Annotation}
  */
-export function normalizeSketch(raw) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("a sketch is an object with units, parts and marks");
+export function normalizeAnnotation(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("an annotation is an object with units, parts and marks");
   for (const key of Object.keys(raw)) if (!["units", "parts", "marks"].includes(key)) fail(`unknown field "${key}"`);
   const units = String(raw.units ?? "mm");
   const parts = {};
@@ -76,7 +76,7 @@ export function normalizeSketch(raw) {
     const id = String(mark.id ?? "");
     if (!id || ids.has(id)) fail(`${at}.id must be a unique, non-empty string`);
     ids.add(id);
-    if (!SKETCH_MARK_KINDS.includes(mark.kind)) fail(`${at}.kind must be one of ${SKETCH_MARK_KINDS.join(", ")}`);
+    if (!ANNOTATION_MARK_KINDS.includes(mark.kind)) fail(`${at}.kind must be one of ${ANNOTATION_MARK_KINDS.join(", ")}`);
     if (mark.part != null && typeof mark.part !== "string") fail(`${at}.part must be an occurrence id or null`);
     if (mark.placement != null && !PLACEMENTS.has(mark.placement)) fail(`${at}.placement must be "surface" or "space"`);
     if (!COLOR.test(String(mark.color ?? ""))) fail(`${at}.color must be a #rrggbb colour`);
@@ -126,11 +126,11 @@ export function normalizeSketch(raw) {
 
 const rounded = values => Array.from(values, value => Math.round(value * 1e4) / 1e4);
 /**
- * A sketch as it is written: plain JSON, points to a ten-thousandth of a unit.
- * @param {{ units: string, marks: readonly SketchMark[], placements?: Map<string, ArrayLike<number>> | Record<string, ArrayLike<number>> }} sketch
- * @returns {Sketch}
+ * An annotation as it is written: plain JSON, points to a ten-thousandth of a unit.
+ * @param {{ units: string, marks: readonly AnnotationMark[], placements?: Map<string, ArrayLike<number>> | Record<string, ArrayLike<number>> }} annotation
+ * @returns {Annotation}
  */
-export function sketchDocument({ units, marks, placements = {} }) {
+export function annotationDocument({ units, marks, placements = {} }) {
   const entries = placements instanceof Map ? [...placements] : Object.entries(placements);
   const used = new Set(marks.map(mark => mark.part).filter(part => part != null));
   const parts = Object.fromEntries(entries.filter(([id]) => used.has(id)).map(([id, placement]) => [id, { placement: rounded(placement) }]));
@@ -146,14 +146,14 @@ export function sketchDocument({ units, marks, placements = {} }) {
 }
 
 /** Whether an object and every parent of it is shown. */
-export const sketchObjectShown = object => { for (let node = object; node; node = node.parent) if (!node.visible) return false; return true; };
+export const annotationObjectShown = object => { for (let node = object; node; node = node.parent) if (!node.visible) return false; return true; };
 
 /**
  * A part's own object under `root` (not an instanced draw of several), by occurrence id: what its
  * ink hangs on. The viewer's scene and a snapshot's both mark them `userData.partId`.
  * @returns {Map<string, import("three").Object3D>}
  */
-export function sketchPartObjects(root) {
+export function annotationPartObjects(root) {
   const objects = new Map();
   root?.traverse?.(object => {
     if (object.isMesh && !object.isInstancedMesh && object.userData?.partId != null && !objects.has(String(object.userData.partId))) {
@@ -200,20 +200,20 @@ function textCanvas(mark) {
 
 /**
  * One mark's object: a stroke a screen-width line along its points, an area a flat mesh of its
- * triangles, a text mark its picture on a quad. Positioned by `placeSketchObject`.
+ * triangles, a text mark its picture on a quad. Positioned by `placeAnnotationObject`.
  *
  * @param {{ THREE: typeof import("three"), Line2: any, LineGeometry: any, LineMaterial: any }} context
- * @param {SketchMark} mark
+ * @param {AnnotationMark} mark
  * @param {{ radius: number, lineScale: number }} options  `radius`: the model's, which dashes are
  *   sized from. `lineScale`: device pixels per screen pixel of `width`.
  */
-export function sketchMarkObject(context, mark, { radius, lineScale }) {
+export function annotationMarkObject(context, mark, { radius, lineScale }) {
   const { THREE } = context;
   const positions = mark.points instanceof Float32Array ? mark.points : new Float32Array(mark.points);
   let object;
   if (mark.kind === "stroke") {
     object = createScreenSpaceLineStrip(context, positions, { color: mark.color, opacity: mark.opacity ?? 1,
-      lineWidth: Math.max(1, mark.width * lineScale), renderOrder: SKETCH_RENDER_ORDER, depthTest: true, depthWrite: false });
+      lineWidth: Math.max(1, mark.width * lineScale), renderOrder: ANNOTATION_RENDER_ORDER, depthTest: true, depthWrite: false });
     if (object && mark.widths?.length === positions.length / 3) {
       const segments = mark.widths.length - 1;
       object.geometry.setAttribute("instanceWidthStart", new THREE.InstancedBufferAttribute(new Float32Array(Array.from(mark.widths).slice(0, segments)), 1));
@@ -249,10 +249,10 @@ export function sketchMarkObject(context, mark, { radius, lineScale }) {
       }
       object = new THREE.Mesh(geometry, material);
     }
-    object.renderOrder = SKETCH_RENDER_ORDER;
+    object.renderOrder = ANNOTATION_RENDER_ORDER;
   }
   if (object) {
-    // Its world matrix is its part's, set by `placeSketchObject`: never recomputed from its parent.
+    // Its world matrix is its part's, set by `placeAnnotationObject`: never recomputed from its parent.
     object.matrixAutoUpdate = false;
     object.matrixWorldAutoUpdate = false;
     object.frustumCulled = false;
@@ -262,17 +262,17 @@ export function sketchMarkObject(context, mark, { radius, lineScale }) {
 
 /**
  * Puts a mark's object where its part is now: the part's frame as the scene has it, shown with it
- * and cut by `planes`; the part's placement when the sketch was made if the scene has no such part;
+ * and cut by `planes`; the part's placement when the annotation was made if the scene has no such part;
  * the model's own frame for a mark on no part.
  * @param {import("three").Object3D} object
- * @param {SketchMark} mark
- * @param {Map<string, import("three").Object3D>} parts  `sketchPartObjects`
+ * @param {AnnotationMark} mark
+ * @param {Map<string, import("three").Object3D>} parts  `annotationPartObjects`
  * @param {{ placements?: Record<string, { placement: ArrayLike<number> }>, planes?: import("three").Plane[], visible?: boolean }} [options]
  */
-export function placeSketchObject(object, mark, parts, { placements = {}, planes = [], visible = true } = {}) {
+export function placeAnnotationObject(object, mark, parts, { placements = {}, planes = [], visible = true } = {}) {
   const part = mark.part != null ? parts.get(String(mark.part)) : null;
   const fallback = mark.part != null && !part ? placements[mark.part]?.placement : null;
-  object.visible = visible && (mark.part == null || (part ? sketchObjectShown(part) : true));
+  object.visible = visible && (mark.part == null || (part ? annotationObjectShown(part) : true));
   if (part) object.matrixWorld.copy(part.matrixWorld);
   else if (fallback?.length === 16) object.matrixWorld.fromArray(Array.from(fallback));
   else object.matrixWorld.identity();
@@ -282,7 +282,7 @@ export function placeSketchObject(object, mark, parts, { placements = {}, planes
 }
 
 /** Frees a mark's object. */
-export function disposeSketchObject(object) {
+export function disposeAnnotationObject(object) {
   object.removeFromParent();
   object.userData?.beforeDispose?.();
   object.geometry?.dispose?.();
@@ -291,28 +291,28 @@ export function disposeSketchObject(object) {
 }
 
 /**
- * A whole sketch drawn into a scene once, for a still: every mark's object under one group, placed
+ * A whole annotation drawn into a scene once, for a still: every mark's object under one group, placed
  * by its part under `partsRoot` as the scene has it when `place()` runs.
  *
- * @param {object} context  `THREE` and the screen-space line classes (`sketchMarkObject`).
- * @param {Sketch} sketch  `normalizeSketch`'s.
+ * @param {object} context  `THREE` and the screen-space line classes (`annotationMarkObject`).
+ * @param {Annotation} annotation  `normalizeAnnotation`'s.
  * @param {{ radius: number, lineScale: number }} options
  */
-export function createSketchLayer(context, sketch, options) {
+export function createAnnotationLayer(context, annotation, options) {
   const { THREE } = context;
   const group = new THREE.Group();
-  group.name = "sketch";
-  const entries = sketch.marks.map(mark => ({ mark, object: sketchMarkObject(context, mark, options) })).filter(entry => entry.object);
+  group.name = "annotation";
+  const entries = annotation.marks.map(mark => ({ mark, object: annotationMarkObject(context, mark, options) })).filter(entry => entry.object);
   for (const { object } of entries) group.add(object);
   return {
     group,
     place(partsRoot, planes = []) {
-      const parts = sketchPartObjects(partsRoot);
+      const parts = annotationPartObjects(partsRoot);
       partsRoot?.updateMatrixWorld?.(true);
-      for (const { mark, object } of entries) placeSketchObject(object, mark, parts, { placements: sketch.parts, planes });
+      for (const { mark, object } of entries) placeAnnotationObject(object, mark, parts, { placements: annotation.parts, planes });
     },
     dispose() {
-      for (const { object } of entries) disposeSketchObject(object);
+      for (const { object } of entries) disposeAnnotationObject(object);
       group.removeFromParent();
     },
   };

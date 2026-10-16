@@ -143,19 +143,19 @@ the files:
 cadgen snapshot STEP/bracket_v2.step --job views.job.json
 ```
 
-### Sketches and Quick Edit views
+### Annotations and Quick Edit views
 
-`--sketch FILE` (a job's `sketch`: a path or the object) draws a person's ink
+`--annotation FILE` (a job's `annotation`: a path or the object) draws a person's ink
 over the model as they drew it in the CAD Viewer: each mark sits on its part,
 follows it when the view explodes or poses the model, and is cut by a clip.
 A DXF and `--mode list` take none.
 
 A Quick Edit prompt names the views the person looked at as a job file, the PNGs
-it rendered, and their sketch file when they drew. The job's `measurements` are
+it rendered, and their annotation file when they drew. The job's `measurements` are
 the distances they measured, each `{start, end, label, color}`, drawn over every
 view as the viewer drew them. `cadgen snapshot --job <job
 file>` renders those views again: after an edit, run it to see the change from
-where the person looked, with their sketch still on it. Add a TARGET to aim the
+where the person looked, with their annotation still on it. Add a TARGET to aim the
 same views at another document.
 
 ## Cross-sections

@@ -1,52 +1,67 @@
-import { X } from "lucide-react";
-import { Button } from "@text-to-cad/ui/primitives/button";
-import { Popover, PopoverClose, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
+import { Check, SlidersHorizontal } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger
+} from "@text-to-cad/ui/primitives/dropdown-menu";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
-import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
+import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
-import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
-import { PerspectiveProjectionIcon } from "../camera/ProjectionModeIcons.js";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
-import { TOOL_PANEL_BUTTON_CLASS } from "../tools/ToolPanel.jsx";
+import { STRIP_BUTTON_CLASS } from "../tools/FloatingToolBar.js";
 
-// Inside the viewer, 8px clear of its sides and bottom. Its top is the navbar's bottom edge, which
-// the dropdown starts on: no room is kept above it.
-const COLLISION_PADDING = Object.freeze({ top: 0, right: 8, bottom: 8, left: 8 });
+// Inside the viewer, 8px clear of its edges.
+const COLLISION_PADDING = 8;
 
 /**
- * Display: a 3D view's settings (`children`: `useRendererShell`'s `frame.display`), a dropdown from
- * its button at the navbar's right end, before Preview — and, in preview, from the same place in
- * preview's corner, before its way out. Its icon is the perspective box. It is not a tool: opening
- * it leaves the tool in hand as it is. It opens down from its button, end-aligned, as wide as its
- * two-a-row settings need (19rem: Projection's "Orthographic" in full beside the host's appearance
- * control), and never taller than the viewer below it (`boundary`, the viewer): its sections scroll
- * inside it. It goes as any popover does: Escape, a press outside it, its button again, or the X at
- * the end of its first heading (`DisplayPopoverClose`). It closes with no exit animation, so a quick
- * second press always reaches the button.
- * @param {{ open: boolean, onOpenChange(open: boolean): void, disabled?: boolean, boundary?: Element | null,
+ * Display: the display mode, a tile at the tool strip's end before Projection (and of preview's row
+ * in the strip's place), its icon the mode in hand — Custom's sliders while the settings are the
+ * person's own. A press opens the modes: Solid, Render, X-ray, Hidden line, Wireframe, Grid, each
+ * its icon and name, the one in hand checked; choosing one applies it at once (the one in hand
+ * too: back as it comes). Last, **Custom**, checked while the settings are the person's, opens
+ * a submenu that is the settings themselves (`children`: `useRendererShell`'s `frame.display`),
+ * starting from Solid's. It is not a tool: opening it leaves the tool in hand as it is.
+ *
+ * The settings are a menu's content but not its items: keys typed in them stay theirs (a menu
+ * would take them for its typeahead), and they scroll inside the submenu, never taller than the
+ * viewer (`boundary`).
+ * @param {{ disabled?: boolean, boundary?: Element | null, tooltipSide?: "top" | "bottom", onOpenChange?(open: boolean): void,
+ *   mode: { value: string, custom: boolean, options: { value: string, label: string, Icon: import("react").ComponentType<any> }[],
+ *     onChange(value: string): void },
  *   children: import("react").ReactNode }} props
  */
-export default function DisplayPopover({ open, onOpenChange, disabled = false, boundary = null, children }) {
-  return <Popover open={open && !disabled} onOpenChange={onOpenChange} modal={false}>
-    <TooltipHint content="Display">
-      <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" size="icon-xs" aria-label="Display" aria-pressed={open} disabled={disabled}
-          className={NAVBAR_CONTROL_CLASS}>
-          <PerspectiveProjectionIcon className="size-3.5" />
-        </Button>
-      </PopoverTrigger>
-    </TooltipHint>
-    <PopoverContent side="bottom" align="end" sideOffset={6} collisionPadding={COLLISION_PADDING} collisionBoundary={boundary || undefined}
-      aria-label="Display settings" data-display-popover=""
-      className={cn(FLOATING_SURFACE_CLASS, "flex w-76 max-h-[var(--radix-popover-content-available-height)] flex-col overflow-hidden p-0 text-tiny data-[state=closed]:animate-none!")}>
-      <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
-    </PopoverContent>
-  </Popover>;
-}
-
-/** The X at the end of Display's first heading, after its Reset: it closes the dropdown it is drawn in. */
-export function DisplayPopoverClose() {
-  return <PopoverClose aria-label="Close display settings" className={TOOL_PANEL_BUTTON_CLASS}>
-    <X className="size-3" aria-hidden="true" />
-  </PopoverClose>;
+export default function DisplayPopover({ disabled = false, boundary = null, tooltipSide = "top", onOpenChange, mode, children }) {
+  const current = mode.options.find(option => option.value === mode.value) || mode.options[0];
+  const Icon = mode.custom ? SlidersHorizontal : current?.Icon;
+  const label = mode.custom ? "Custom" : current?.label || "Solid";
+  return <DropdownMenu modal={false} onOpenChange={onOpenChange}>
+    <DropdownMenuTrigger asChild>
+      <ToolbarButton label={`Display mode: ${label}`} tooltipSide={tooltipSide} disabled={disabled} className={STRIP_BUTTON_CLASS}
+        data-display-mode={mode.custom ? "custom" : current?.value}>
+        {Icon ? <Icon /> : null}
+      </ToolbarButton>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="center" sideOffset={6} collisionPadding={COLLISION_PADDING} aria-label="Display mode"
+      className={cn(FLOATING_SURFACE_CLASS, "min-w-44 data-[state=closed]:animate-none!")}>
+      <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Display mode</DropdownMenuLabel>
+      <DropdownMenuRadioGroup value={mode.custom ? "" : current?.value}>
+        {mode.options.map(({ value, label: name, Icon: OptionIcon }) => <DropdownMenuRadioItem key={value} value={value}
+          data-display-mode-option={value} onSelect={() => mode.onChange(value)}>
+          <OptionIcon className="size-3.5" aria-hidden="true" />{name}
+        </DropdownMenuRadioItem>)}
+      </DropdownMenuRadioGroup>
+      <DropdownMenuSeparator />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger data-display-mode-option="custom" aria-checked={mode.custom} className="[&>svg:last-child]:size-3">
+          <SlidersHorizontal className="size-3.5" aria-hidden="true" />Custom
+          {mode.custom ? <Check className="ml-auto size-3.5" aria-label="Current" /> : null}
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent sideOffset={4} collisionPadding={COLLISION_PADDING} collisionBoundary={boundary || undefined}
+          aria-label="Display settings" data-display-popover=""
+          className={cn(FLOATING_SURFACE_CLASS, "flex w-76 max-h-[var(--radix-dropdown-menu-content-available-height)] flex-col overflow-hidden p-0 text-tiny data-[state=closed]:animate-none!")}>
+          {/* The settings keep their keys (a menu's typeahead and arrows would take them). */}
+          <ScrollArea className="min-h-0 flex-1" onKeyDown={event => { if (event.key !== "Escape") event.stopPropagation(); }}>{children}</ScrollArea>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </DropdownMenuContent>
+  </DropdownMenu>;
 }

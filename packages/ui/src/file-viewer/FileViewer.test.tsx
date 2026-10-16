@@ -1,5 +1,4 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { createPortal } from 'react-dom';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { isMissingFileError } from '@text-to-cad/core/client';
@@ -45,27 +44,26 @@ it('draws the navbar over every file, named by its name, and never over the home
   expect(navbar()).toBeNull();
 });
 
-it('keeps the right of the navbar for the host\'s update button and Full size, then the renderer\'s view controls in the box it hands it, and steps the navbar aside while the renderer shows its file fullscreen', async () => {
-  // A renderer that draws its view controls into the navbar's box for them, and shows its file
-  // fullscreen (the CAD viewer's Display and Preview).
-  const slots: (HTMLElement | null)[] = [];
+it('keeps the right of the navbar for the host\'s update button and Full size, hands a renderer no box of its own there, and steps the navbar aside while the renderer shows its file fullscreen', async () => {
+  // A renderer that draws its view controls itself (the CAD viewer's Display and Preview end its
+  // tool strip), and shows its file fullscreen.
+  const handed: string[][] = [];
   const fullscreen = defineFileRenderer({
     id: 'full', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
-    load: async () => ({ default: ({ onFullscreenChange, navbarSlot }: any) => { slots.push(navbarSlot); return <>
-      {navbarSlot ? createPortal(<button type="button" aria-label="Preview" onClick={() => onFullscreenChange(true)} />, navbarSlot) : null}
-      <button type="button" onClick={() => onFullscreenChange(false)}>Back</button>
+    load: async () => ({ default: (props: any) => { handed.push(Object.keys(props)); return <>
+      <button type="button" aria-label="Preview" onClick={() => props.onFullscreenChange(true)} />
+      <button type="button" onClick={() => props.onFullscreenChange(false)}>Back</button>
     </>; } }),
   });
   render(<FileViewer file={FILE} host={host as any} renderers={[fullscreen]} state={{}} onStateChange={() => {}}
     update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />} />);
   await screen.findByRole('button', { name: 'Preview' });
-  expect(labels()).toEqual(['Update to 0.7.5', 'Full size', 'Preview']);
-  expect(slots.at(-1)!.matches('[data-viewer-navbar] [data-view-controls]')).toBe(true);
+  expect([labels(), handed.at(-1)!.includes('navbarSlot'), document.querySelector('[data-view-controls]')]).toEqual([['Update to 0.7.5', 'Full size'], false, null]);
   act(() => screen.getByRole('button', { name: 'Preview' }).click());
-  // Fullscreen, there is no navbar, and so no box: the renderer draws its controls itself.
-  expect([navbar(), slots.at(-1)]).toEqual([null, null]);
+  // Fullscreen, there is no navbar.
+  expect(navbar()).toBeNull();
   act(() => screen.getByRole('button', { name: 'Back' }).click());
-  expect(labels()).toEqual(['Update to 0.7.5', 'Full size', 'Preview']);
+  expect(labels()).toEqual(['Update to 0.7.5', 'Full size']);
 });
 
 it('draws Back and Forward between the logo and the file\'s name where the host keeps the view\'s own history, each disabled where it has nowhere to go', async () => {

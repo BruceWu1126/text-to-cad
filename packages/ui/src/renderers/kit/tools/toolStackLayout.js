@@ -2,11 +2,11 @@
 // keeps it (`settings.toolStack` of the tab record) and it holds across files. Two things, and
 // nothing else (any other key a stored record carries is dropped):
 //
-//   panels     for each panel a person can size (`ToolPanel.jsx`'s `resizable`: the tree, the
-//              Reference and Position), the width and the height cap they dragged it to, by panel
-//              id — only what they set; a panel opens at its defaults otherwise (`TOOL_PANEL_WIDTH`,
+//   panels     for each panel a person can size (`ToolPanel.jsx`'s `resizable`), the width and
+//              the height cap they dragged it to, by panel id, and the file sidebar's
+//              (`FILE_SIDEBAR_ID`) — only what they set; a panel opens at its defaults otherwise (`TOOL_PANEL_WIDTH`,
 //              and `toolPanelDefaultHeight`: the stack's height);
-//   collapsed  which panels are folded to their first row, by panel id.
+//   collapsed  which panels and sidebar sections are folded to their first row, by id.
 //
 // Importing this module has no environmental effects.
 
@@ -16,6 +16,11 @@
 // exactly this wide; a resizable one opens this wide and is only ever made wider.
 const STRIP_TOOLS = 6, BUTTON_PX = 24, GAP_PX = 2, PADDING_PX = 4, BORDER_PX = 1;
 export const TOOL_PANEL_WIDTH = STRIP_TOOLS * BUTTON_PX + (STRIP_TOOLS - 1) * GAP_PX + 2 * PADDING_PX + 2 * BORDER_PX;
+// The file sidebar (`FileSidebar.jsx`): its size kept under this id among the panels'; it opens a
+// tool panel's width, as tall as its sections, and may be made narrower, down to room for a
+// heading's name, its chevron and the bar's toggle (a tree's names truncate).
+export const FILE_SIDEBAR_ID = "sidebar";
+export const FILE_SIDEBAR_MIN_WIDTH = 120;
 // The shortest a person can drag a panel's cap: its first row and a row of content under it.
 export const TOOL_PANEL_MIN_HEIGHT = 64;
 // A stored size is kept whatever the viewer it was chosen in; what is drawn is bounded by the
@@ -47,16 +52,20 @@ export function normalizeToolStack(value) {
   const panels = {};
   for (const [id, size] of record(value?.panels)) {
     if (!PANEL_ID.test(id) || !size || typeof size !== "object") continue;
-    const width = bounded(size.width, TOOL_PANEL_WIDTH), height = bounded(size.height, TOOL_PANEL_MIN_HEIGHT);
+    const width = bounded(size.width, id === FILE_SIDEBAR_ID ? FILE_SIDEBAR_MIN_WIDTH : TOOL_PANEL_WIDTH), height = bounded(size.height, TOOL_PANEL_MIN_HEIGHT);
     if (width !== undefined || height !== undefined) panels[id] = { ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}) };
   }
   return { panels, collapsed: flags(value?.collapsed) };
 }
 
-/** A resizable panel's width in a viewer `viewerWidth` wide: never under `TOOL_PANEL_WIDTH`, never over half the viewer. */
-export function clampToolPanelWidth(width, viewerWidth) {
+/**
+ * A resizable panel's width in a viewer `viewerWidth` wide: never under `narrowest` (a tool panel's
+ * width, unless the panel may be narrower), never over half the viewer.
+ */
+export function clampToolPanelWidth(width, viewerWidth, narrowest = TOOL_PANEL_WIDTH) {
   const widest = Math.max(TOOL_PANEL_WIDTH, Math.floor(Number(viewerWidth) / 2) || TOOL_PANEL_WIDTH);
-  return Math.round(Math.min(widest, Math.max(TOOL_PANEL_WIDTH, Number(width) || TOOL_PANEL_WIDTH)));
+  const wanted = Number(width);
+  return Math.round(Math.min(widest, Math.max(narrowest, Number.isNaN(wanted) ? TOOL_PANEL_WIDTH : wanted)));
 }
 
 /** A panel's cap in a stack `stackHeight` tall: never under the minimum, never over the stack. */

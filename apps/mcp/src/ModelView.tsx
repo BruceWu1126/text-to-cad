@@ -83,7 +83,7 @@ export default function ModelView({ launch, sequence, alone = false, bridge, cli
     current.index < current.entries.length - 1 ? { ...current, index: current.index + 1, home: false } : current), []);
   const showing = useRef(file);
   showing.current = file;
-  // A Quick Edit's views, sketch and pictures are made by the server, which is on this machine.
+  // A Quick Edit's views, annotation and pictures are made by the server, which is on this machine.
   const promptFiles = useMemo(() => createHttpPromptFiles({ origin: TUNNEL_ORIGIN, fetch: tunnel }), [tunnel]);
   const chatContext = useMemo(() => chat.queue || chat.send ? createChatPromptContext(bridge, { reach: chat }) : null,
     [chat.queue, chat.send, chat.sendImages, bridge]);

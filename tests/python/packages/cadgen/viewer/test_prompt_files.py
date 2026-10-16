@@ -1,4 +1,4 @@
-"""A Quick Edit prompt's files: its views as a snapshot job, its sketch, and their renders.
+"""A Quick Edit prompt's files: its views as a snapshot job, its annotation, and their renders.
 
 The route over a real server, with the render stubbed (snapshot's own rendering is
 the snapshot suites'): what is written, the 202 -> 200 flow, the refusals, and that
@@ -23,7 +23,7 @@ from cadgen.viewer.http_app import create_cad_app
 from cadgen.viewer.prompt_files import PromptFiles, WarmSnapshotSession
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-SKETCH = {"units": "mm", "parts": {}, "marks": [
+ANNOTATION = {"units": "mm", "parts": {}, "marks": [
     {"id": "1", "kind": "stroke", "part": None, "points": [0, 0, 0, 1, 1, 1], "color": "#ff2d55", "width": 2}]}
 CAMERA = {"position": [10, -10, 10], "target": [0, 0, 0], "up": [0, 0, 1]}
 
@@ -71,7 +71,7 @@ class PromptFilesRouteTest(unittest.TestCase):
             connection.close()
 
     def request(self, **overrides) -> dict:
-        return {"name": "part.stl", "input": str(self.model), "sketch": SKETCH, "views": [
+        return {"name": "part.stl", "input": str(self.model), "annotation": ANNOTATION, "views": [
             {"label": "current", "camera": CAMERA, "display": {"mode": "render"}, "width": 640, "height": 480},
             {"label": "View 1", "camera": "iso"},
         ], **overrides}
@@ -91,13 +91,13 @@ class PromptFilesRouteTest(unittest.TestCase):
 
         self.release.set()
         status, answer = self.finished(accepted["id"])
-        job_path, sketch_path = self.files / "part-1.job.json", self.files / "part-1.sketch.json"
+        job_path, annotation_path = self.files / "part-1.job.json", self.files / "part-1.annotation.json"
         current, view_1 = self.files / "part-1-current.png", self.files / "part-1-view-1.png"
-        self.assertEqual((status, answer), (200, {"ok": True, "job": str(job_path), "sketch": str(sketch_path), "images": [
+        self.assertEqual((status, answer), (200, {"ok": True, "job": str(job_path), "annotation": str(annotation_path), "images": [
             {"label": "current", "path": str(current)}, {"label": "View 1", "path": str(view_1)}]}))
         self.assertEqual(self.rendered, [job_path])
-        self.assertEqual(json.loads(sketch_path.read_text(encoding="utf-8")), SKETCH)
-        common = {"input": str(self.model), "sketch": str(sketch_path)}
+        self.assertEqual(json.loads(annotation_path.read_text(encoding="utf-8")), ANNOTATION)
+        common = {"input": str(self.model), "annotation": str(annotation_path)}
         settings = {"output": {"padding": 0, "tightFrame": False}}
         self.assertEqual(json.loads(job_path.read_text(encoding="utf-8")), {"jobs": [
             {**common, "camera": CAMERA, "display": {"mode": "render"}, **settings,
@@ -113,18 +113,18 @@ class PromptFilesRouteTest(unittest.TestCase):
     def test_a_prompts_measurements_are_drawn_over_every_view_its_job_renders(self) -> None:
         self.release.set()
         mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
-        _, body, _ = self.call("POST", "/__cad/prompt-files", self.request(sketch=None, measurements=[mark]))
+        _, body, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None, measurements=[mark]))
         self.finished(json.loads(body)["id"])
         jobs = json.loads((self.files / "part-1.job.json").read_text(encoding="utf-8"))["jobs"]
         self.assertEqual([job["measurements"] for job in jobs], [[mark], [mark]])
 
     def test_a_prompt_without_a_sketch_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
         self.release.set()
-        _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(sketch=None))
-        _, second, _ = self.call("POST", "/__cad/prompt-files", self.request(sketch=None))
-        self.assertIsNone(self.finished(json.loads(first)["id"])[1]["sketch"])
+        _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))
+        _, second, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))
+        self.assertIsNone(self.finished(json.loads(first)["id"])[1]["annotation"])
         self.assertEqual(self.finished(json.loads(second)["id"])[1]["job"], str(self.files / "part-2.job.json"))
-        self.assertNotIn("sketch", json.loads((self.files / "part-1.job.json").read_text(encoding="utf-8"))["jobs"][0])
+        self.assertNotIn("annotation", json.loads((self.files / "part-1.job.json").read_text(encoding="utf-8"))["jobs"][0])
 
     def test_a_request_snapshot_would_refuse_is_refused_before_anything_renders(self) -> None:
         for request, said in (
@@ -135,7 +135,7 @@ class PromptFilesRouteTest(unittest.TestCase):
             (self.request(input=str(self.tmp / "gone.step")), "no file at"),
             (self.request(views=[{"camera": "iso"}]), "views[0].label"),
             (self.request(views=[{"label": "a", "camera": "iso", "width": 0}]), "views[0].width"),
-            (self.request(sketch={"marks": {}}), "sketch is null or an object"),
+            (self.request(annotation={"marks": {}}), "annotation is null or an object"),
             # snapshot's own preparation: a camera key it does not take, a pose a mesh does not have
             (self.request(views=[{"label": "a", "camera": {"projection": "perspective"}}]), "display.camera"),
             (self.request(views=[{"label": "a", "camera": "iso", "kinematics": {"x": 1}}]), "kinematics"),
@@ -154,14 +154,14 @@ class PromptFilesRouteTest(unittest.TestCase):
 
     def test_a_chips_copy_is_saved_as_the_file_snapshot_reads_and_answered_with_its_path(self) -> None:
         mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
-        status, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "sketch", "data": SKETCH})
-        self.assertEqual((status, json.loads(body)), (200, {"ok": True, "path": str(self.files / "part-1.sketch.json")}))
-        self.assertEqual(json.loads((self.files / "part-1.sketch.json").read_text(encoding="utf-8")), SKETCH)
+        status, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "annotation", "data": ANNOTATION})
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True, "path": str(self.files / "part-1.annotation.json")}))
+        self.assertEqual(json.loads((self.files / "part-1.annotation.json").read_text(encoding="utf-8")), ANNOTATION)
         _, body, _ = self.call("POST", "/__cad/prompt-files/save", {"name": "part.stl", "kind": "measurement", "data": mark})
         self.assertEqual(json.loads(Path(json.loads(body)["path"]).read_text(encoding="utf-8")), [mark])
         for request, said in (
-            ({"name": "part.stl", "kind": "image", "data": {}}, "sketch or measurement"),
-            ({"name": "part.stl", "kind": "sketch", "data": {"marks": {}}}, "marks (a list)"),
+            ({"name": "part.stl", "kind": "image", "data": {}}, "annotation or measurement"),
+            ({"name": "part.stl", "kind": "annotation", "data": {"marks": {}}}, "marks (a list)"),
             ({"name": "part.stl", "kind": "measurement", "data": {**mark, "start": [0, 0]}}, "start"),
         ):
             status, body, _ = self.call("POST", "/__cad/prompt-files/save", request)

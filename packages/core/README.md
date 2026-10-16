@@ -219,11 +219,11 @@ cache generations and the standalone static-HTTP default. No client reads model
 source or starts a source build.
 
 `createHttpPromptFiles({ origin, fetch })` is the viewer server's maker of a Quick
-Edit's files: `create(request)` posts its views and sketch to `POST /__cad/prompt-files`,
+Edit's files: `create(request)` posts its views and annotation to `POST /__cad/prompt-files`,
 asks again until the server has rendered them, and answers where the views job, the
-sketch and each view's picture are; `read(path)` fetches one. The sketch format, and
-the code that draws a sketch in a scene for the viewer and for a snapshot alike, is
-`common/sketch.js`.
+annotation and each view's picture are; `read(path)` fetches one. The annotation format, and
+the code that draws an annotation in a scene for the viewer and for a snapshot alike, is
+`common/annotation.js`.
 
 Inspect and Render each resolve their fixed scene base. Legacy host theme input
 cannot replace either base.
@@ -253,7 +253,7 @@ person wrote, then `File:`, `References:` and, for a picture that travels as a f
 its label and path. Text, typed resource
 references and attachments travel in one ordered, immutable snapshot with an
 operation ID; attachment relationships name reference parts, and an attachment's
-optional `label` ("Sketch") names it in that message. Text ranges use
+optional `label` ("Annotation") names it in that message. Text ranges use
 zero-based UTF-16 coordinates with an exclusive end. CAD targets retain the
 existing selector grammar and document revision, without interpreting a code
 range as a CAD fragment. Apps own clipboard/draft delivery, MIME/size limits and

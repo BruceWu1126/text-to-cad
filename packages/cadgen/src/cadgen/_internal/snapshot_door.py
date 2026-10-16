@@ -90,7 +90,7 @@ def _run(
     time: float | None = None,
     video: object = None,
     joint_values: object = None,
-    sketch: object = None,
+    annotation: object = None,
     measurements: object = None,
     focus: tuple[str, ...] = (),
     hide: tuple[str, ...] = (),
@@ -148,8 +148,8 @@ def _run(
         options.video, options.video_specified = video, True
     if joint_values is not None:
         options.joint_values, options.joint_values_specified = joint_values, True
-    if sketch is not None:
-        options.sketch, options.sketch_specified = sketch, True
+    if annotation is not None:
+        options.annotation, options.annotation_specified = annotation, True
     if measurements is not None:
         options.measurements, options.measurements_specified = measurements, True
     options.focus = _refs(focus, "focus")
@@ -193,7 +193,7 @@ def step_snapshot_verb(door: str):
         animation: str | dict | None = None,
         time: float | None = None,
         video: str | dict | None = None,
-        sketch: str | dict | None = None,
+        annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         focus: tuple[str, ...] = (),
         hide: tuple[str, ...] = (),
@@ -245,8 +245,8 @@ def step_snapshot_verb(door: str):
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
             to it. A Quick Edit job carries them; with --job it draws over every job.
-        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
-            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
             mark is drawn on its part wherever the view puts it; with --job it
             draws over every job.
         focus: occurrence ref rendered at full opacity (repeatable); the rest
@@ -267,7 +267,7 @@ def step_snapshot_verb(door: str):
             kinds,
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, sketch=sketch, measurements=measurements,
+            animation=animation, time=time, video=video, annotation=annotation, measurements=measurements,
             focus=focus, hide=hide, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -452,7 +452,7 @@ def mesh_snapshot_verb(door: str):
         mode: str = "view",
         camera: str | dict | None = None,
         display: str | dict | None = None,
-        sketch: str | dict | None = None,
+        annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
@@ -488,8 +488,8 @@ def mesh_snapshot_verb(door: str):
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
             to it. A Quick Edit job carries them; with --job it draws over every job.
-        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
-            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
             mark is drawn on its part wherever the view puts it; with --job it
             draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
@@ -506,7 +506,7 @@ def mesh_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, sketch=sketch, measurements=measurements, width=width, height=height,
+            camera=camera, display=display, annotation=annotation, measurements=measurements, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
 
@@ -529,7 +529,7 @@ def robot_snapshot_verb(door: str):
         joint_values: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
-        sketch: str | dict | None = None,
+        annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
@@ -568,8 +568,8 @@ def robot_snapshot_verb(door: str):
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
             to it. A Quick Edit job carries them; with --job it draws over every job.
-        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
-            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
             mark is drawn on its part wherever the view puts it; with --job it
             draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
@@ -586,7 +586,7 @@ def robot_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            joint_values=joint_values, camera=camera, display=display, sketch=sketch, measurements=measurements,
+            joint_values=joint_values, camera=camera, display=display, annotation=annotation, measurements=measurements,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )
@@ -614,7 +614,7 @@ def polymorphic_snapshot_verb():
         time: float | None = None,
         video: str | dict | None = None,
         joint_values: str | dict | None = None,
-        sketch: str | dict | None = None,
+        annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         focus: tuple[str, ...] = (),
         hide: tuple[str, ...] = (),
@@ -666,8 +666,8 @@ def polymorphic_snapshot_verb():
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
             to it. A Quick Edit job carries them; with --job it draws over every job.
-        sketch: ink drawn over the model -- a sketch JSON file (the CAD Viewer
-            writes one with a Quick Edit prompt) or the sketch JSON itself. Each
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
             mark is drawn on its part wherever the view puts it; with --job it
             draws over every job. Not a DXF: a drawing is flat.
         focus: occurrence ref rendered at full opacity (STEP only,
@@ -689,7 +689,7 @@ def polymorphic_snapshot_verb():
             target=target, out=out, job=job, mode=mode,
             camera=camera, display=display, kinematics=kinematics,
             animation=animation, time=time, video=video,
-            joint_values=joint_values, sketch=sketch, measurements=measurements, focus=focus, hide=hide,
+            joint_values=joint_values, annotation=annotation, measurements=measurements, focus=focus, hide=hide,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )

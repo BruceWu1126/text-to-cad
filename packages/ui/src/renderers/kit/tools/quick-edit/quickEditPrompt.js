@@ -16,20 +16,20 @@ const lazy = start => {
  * A paste into the note, line by line: each line that is a reference and nothing else — a file's
  * absolute path and the ids in it, `/models/base.step#o1.f2`, as Copy References and a chip's click
  * write one — is that reference (into any file); a line that is a measurement as its chip copies it
- * (a snapshot job's `measurements` entry) is `{ measurement }`; a paste that is the drawing as its
- * chip copies it (its sketch JSON, whole) is `[{ drawing }]`; every other line stays text. A
+ * (a snapshot job's `measurements` entry) is `{ measurement }`; a paste that is the annotation as its
+ * chip copies it (its annotation JSON, whole) is `[{ annotation }]`; every other line stays text. A
  * reference within a sentence is the sentence's. A line that is what one of the box's chips copied
- * (`copied`: what it copied, to the chip — a drawing's or a measurement's file path) is
+ * (`copied`: what it copied, to the chip — an annotation's or a measurement's file path) is
  * `{ chip, token }`.
  *
  * @param {string} pasted
- * @returns {Array<string | import("@text-to-cad/core/prompt").PromptReference | { measurement: object } | { drawing: object }>}
+ * @returns {Array<string | import("@text-to-cad/core/prompt").PromptReference | { measurement: object } | { annotation: object }>}
  */
 export function pastedLines(pasted, copied = null) {
   const text = String(pasted || "");
-  // The drawing, as its chip copies it: its sketch file's JSON, over several lines.
+  // The annotation, as its chip copies it: its annotation file's JSON, over several lines.
   const whole = parsedJson(text);
-  if (whole && !Array.isArray(whole) && Array.isArray(whole.marks) && whole.parts && typeof whole.parts === "object") return [{ drawing: whole }];
+  if (whole && !Array.isArray(whole) && Array.isArray(whole.marks) && whole.parts && typeof whole.parts === "object") return [{ annotation: whole }];
   return text.split(/\r?\n/).map(line => (copied?.has(line.trim()) ? { chip: copied.get(line.trim()), token: line.trim() } : null)
     ?? parsePromptReference(line) ?? pastedMeasurement(line) ?? line);
 }
@@ -56,16 +56,16 @@ export const quickEditSelection = references => references.filter(reference => r
  * A Quick Edit as one prompt context: what the person wrote, the file on screen (always), the
  * selection in it (`references`, in the prompt grammar), and — once the host has made them
  * (`files`, which may still be rendering) — a picture of each view it carries (`views`: the one on
- * screen as it went, and each its drawing was drawn in), those views as a snapshot job file
- * (`cadgen snapshot --job` renders them again), and the drawing as a sketch file (`sketch`). Each
+ * screen as it went, and each its annotation was drawn in), those views as a snapshot job file
+ * (`cadgen snapshot --job` renders them again), and the annotation as an annotation file (`annotation`). Each
  * file says where it was saved (`path`); its bytes are read (`read`) only by a host that carries
  * them. Built at the press, from what is live then.
  *
  * @param {{ resource: object, references?: object[], text: string, views?: { label: string }[],
- *   files?: Promise<{ job: string, sketch: string | null, images: { label: string, path: string }[] }> | null,
- *   read?: (path: string) => Promise<Blob>, sketch?: boolean }} quickEdit
+ *   files?: Promise<{ job: string, annotation: string | null, images: { label: string, path: string }[] }> | null,
+ *   read?: (path: string) => Promise<Blob>, annotation?: boolean }} quickEdit
  */
-export function createQuickEditContext({ resource, references = [], text, views = [], files = null, read = null, sketch = false }) {
+export function createQuickEditContext({ resource, references = [], text, views = [], files = null, read = null, annotation = false }) {
   const parts = [
     textPart(String(text || "").trim(), "text"),
     referencePart({ resource: { ...resource }, target: { kind: "whole-resource" } }, "file"),
@@ -80,14 +80,14 @@ export function createQuickEditContext({ resource, references = [], text, views 
     };
     views.forEach((view, index) => file(`view-${index}`, viewTitle(view.label), `${name}-${slug(view.label)}.png`, "image/png", result => result.images[index].path));
     file("views", "Views (cadgen snapshot --job)", `${name}.job.json`, "application/json", result => result.job);
-    if (sketch) file("sketch", "Sketch", `${name}.sketch.json`, "application/json", result => result.sketch);
+    if (annotation) file("annotation", "Annotation", `${name}.annotation.json`, "application/json", result => result.annotation);
   }
   return createPromptContext(parts);
 }
 
 /**
  * A Quick Edit as the person copies it: its references by their files' absolute paths, and its
- * pictures, views and sketch by the paths they were saved at, since text carries no file.
+ * pictures, views and annotation by the paths they were saved at, since text carries no file.
  * @returns {Promise<string>}
  */
 export async function copiedQuickEdit(context) {

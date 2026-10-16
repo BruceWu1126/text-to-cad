@@ -1,11 +1,11 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { inkAt, penMark, shapeMarks, textMark, withGroups } from "../../../../drawing/inkGeometry.js";
-import { DEFAULT_OVERLAY_DRAWING_COLOR } from "../../../../drawing/toolbar.jsx";
+import { annotationAt, penMark, shapeMarks, textMark, withGroups } from "../../../../annotation/geometry.js";
+import { DEFAULT_OVERLAY_ANNOTATION_COLOR } from "../../../../annotation/toolbar.jsx";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
-import { inkOnScreen, projectInk } from "./ink3d.js";
+import { annotationsOnScreen, projectAnnotations } from "./annotation3d.js";
 
-// Someone who pressed Draw came to draw: Draw opens on the pen.
-export const CAD_DRAWING_DEFAULTS = Object.freeze({ tool: "freedraw", color: DEFAULT_OVERLAY_DRAWING_COLOR });
+// Someone who pressed Annotate came to draw: Annotate opens on the pen.
+export const CAD_ANNOTATION_DEFAULTS = Object.freeze({ tool: "freedraw", color: DEFAULT_OVERLAY_ANNOTATION_COLOR });
 
 const SHAPES = new Set(["line", "arrow", "rectangle", "ellipse"]);
 const ERASER_RADIUS = 8;
@@ -59,21 +59,21 @@ function paintOutline(context, ink, { color }) {
 }
 
 /**
- * Draw's surface over the viewport: every tool's gesture, its ink previewed as it is made (on a
- * canvas of its own, in screen space) and put into the model as it ends (`ink3d.js`): the pen, the
+ * Annotate's surface over the viewport: every tool's gesture, its ink previewed as it is made (on a
+ * canvas of its own, in screen space) and put into the model as it ends (`annotation3d.js`): the pen, the
  * line, the arrow, the rectangle and the ellipse drawn; text written in place; the eraser dragged
  * over ink. Each mark lies on the model or in space, as the session's
- * placement was when it was put down. All of it works on the whole drawing, whatever view each piece
- * was drawn from. Picking ink is the viewer's Select's, not Draw's (`RendererShell.jsx`); ink Select
+ * placement was when it was put down. All of it works on the whole annotation, whatever view each piece
+ * was drawn from. Picking ink is the viewer's Select's, not Annotate's (`RendererShell.jsx`); ink Select
  * picked is restyled on its selection's bar, and Delete deletes it here too.
  * The camera is the person's between strokes: the wheel zooms, a right or middle drag orbits (the
  * press goes on to the view as its own), and while Space is held the pointer is the view's. ⌘Z / ⇧⌘Z are the viewer's (its one history). Each mark names
  * the view it was put down in (`viewOf`, the session's `noteView`): a prompt carries every view its
  * ink was drawn in.
  *
- * @param {{ drawing: import("../../../../drawing/session.js").DrawingSession, runtimeRef: { current: any } }} props
+ * @param {{ annotation: import("../../../../annotation/session.js").AnnotationSession, runtimeRef: { current: any } }} props
  */
-export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
+export default function AnnotationOverlay({ annotation, runtimeRef, viewOf = null }) {
   const root = useRef(null);
   const canvas = useRef(null);
   const gesture = useRef(null);
@@ -84,9 +84,9 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
   const [passing, setPassing] = useState(false);
   const textRef = useRef(text);
   textRef.current = text;
-  const drawingRef = useRef(drawing);
-  drawingRef.current = drawing;
-  const style = { color: drawing.color, width: drawing.strokeWidth, dash: drawing.strokeStyle };
+  const annotationRef = useRef(annotation);
+  annotationRef.current = annotation;
+  const style = { color: annotation.color, width: annotation.strokeWidth, dash: annotation.strokeStyle };
   const styleRef = useRef(style);
   styleRef.current = style;
 
@@ -95,17 +95,17 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     const rect = root.current.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
-  const onScreen = () => inkOnScreen(runtimeRef.current, drawingRef.current.ink, size());
+  const onScreen = () => annotationsOnScreen(runtimeRef.current, annotationRef.current.items, size());
   const viewOfRef = useRef(viewOf);
   viewOfRef.current = viewOf;
   // The view ink is going down in, as the session labels it.
-  const viewNow = () => drawingRef.current.noteView?.(viewOfRef.current?.() ?? null);
+  const viewNow = () => annotationRef.current.noteView?.(viewOfRef.current?.() ?? null);
   // Each mark put down lies where the session's placement says: on the model, or in space.
   const put = marks => {
-    const runtime = runtimeRef.current, session = drawingRef.current;
+    const runtime = runtimeRef.current, session = annotationRef.current;
     if (!runtime || !marks.length) return;
     const placement = session.placement ?? "surface", view = viewNow();
-    session.add(projectInk(runtime, marks.map(mark => ({ ...mark, placement, ...(view ? { view } : {}) })), size()));
+    session.add(projectAnnotations(runtime, marks.map(mark => ({ ...mark, placement, ...(view ? { view } : {}) })), size()));
   };
   // A mark drawn stays on the preview until the frame after the one that draws it in the model,
   // so it never blinks out between the two.
@@ -133,7 +133,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     if (!context) return;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
-    const current = gesture.current, session = drawingRef.current;
+    const current = gesture.current, session = annotationRef.current;
     for (const mark of landing.current || []) paintMark(context, mark);
     if (!current) return;
     if (current.kind === "pen") {
@@ -142,7 +142,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     } else if (current.kind === "shape") {
       for (const mark of shapeMarks(current.tool, current.from, current.to, styleRef.current)) paintMark(context, mark);
     } else if (current.kind === "erase") {
-      const erasing = new Set(withGroups([...current.hits], session.ink));
+      const erasing = new Set(withGroups([...current.hits], session.items));
       for (const ink of current.screen.filter(item => erasing.has(item.id))) paintOutline(context, ink, { color: "#ffffff" });
       const last = current.path[current.path.length - 1];
       context.save();
@@ -154,7 +154,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
       context.restore();
     }
   }, [runtimeRef]);
-  useLayoutEffect(() => { paint(); }, [paint, drawing.ink]);
+  useLayoutEffect(() => { paint(); }, [paint, annotation.items]);
 
   // The text being written closes: kept (put down) or dropped (Escape). Closed by a key or a press on
   // the surface, the keyboard goes back to the surface, for Space and ⌘Z; closed by focus going elsewhere, it
@@ -190,7 +190,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
   const onPointerDown = event => {
     if (event.button === 1 || event.button === 2) { handToView(event); return; }
     if (event.button !== 0) return;
-    const session = drawingRef.current, at = point(event);
+    const session = annotationRef.current, at = point(event);
     if (textRef.current) { closeText(true); return; }
     root.current.focus({ preventScroll: true });
     capturePointer(event.currentTarget, event.pointerId);
@@ -199,7 +199,7 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     else if (SHAPES.has(session.tool)) gesture.current = { kind: "shape", tool: session.tool, from: at, to: at };
     else if (session.tool === "eraser") {
       const screen = onScreen();
-      gesture.current = { kind: "erase", screen, path: [at], hits: new Set(inkAt(at, screen, ERASER_RADIUS).map(ink => ink.id)) };
+      gesture.current = { kind: "erase", screen, path: [at], hits: new Set(annotationAt(at, screen, ERASER_RADIUS).map(ink => ink.id)) };
     } else if (session.tool === "text") {
       setText({ at, value: "", color: session.color, fontPx: FONT_PX[session.strokeWidth] ?? 20 });
     }
@@ -215,38 +215,38 @@ export default function InkOverlay({ drawing, runtimeRef, viewOf = null }) {
     } else if (current.kind === "shape") current.to = at;
     else if (current.kind === "erase") {
       current.path.push(at);
-      for (const ink of inkAt(at, current.screen, ERASER_RADIUS)) current.hits.add(ink.id);
+      for (const ink of annotationAt(at, current.screen, ERASER_RADIUS)) current.hits.add(ink.id);
     }
     paint();
   };
   const onPointerUp = () => {
-    const current = gesture.current, session = drawingRef.current;
+    const current = gesture.current, session = annotationRef.current;
     gesture.current = null;
     if (current?.kind === "pen") { const mark = penMark(current.points, styleRef.current, current.pressures); if (mark) land([mark]); }
     else if (current?.kind === "shape") land(shapeMarks(current.tool, current.from, current.to, styleRef.current));
-    else if (current?.kind === "erase") session.remove(withGroups([...current.hits], session.ink));
+    else if (current?.kind === "erase") session.remove(withGroups([...current.hits], session.items));
     paint();
   };
   // The surface takes the keyboard itself, on the press: the mousedown after it would focus the
   // surface again and blur the text just opened there, closing it before a key is typed.
   const onMouseDown = event => { if (event.target === event.currentTarget) event.preventDefault(); };
   const onKeyDown = event => {
-    const session = drawingRef.current;
+    const session = annotationRef.current;
     if ((event.key === "Delete" || event.key === "Backspace") && session.selected.length) { event.preventDefault(); session.remove(session.selected); }
     else if (event.key === "Escape" && session.selected.length) { event.preventDefault(); session.select([]); }
     else if (event.key === " " && !event.repeat && !gesture.current) { event.preventDefault(); setPassing(true); }
   };
   const onKeyUp = event => { if (event.key === " ") setPassing(false); };
-  // The wheel is the camera's, as it is outside Draw.
+  // The wheel is the camera's, as it is outside Annotate.
   const onWheel = event => {
     const target = runtimeRef.current?.renderer?.domElement;
     target?.dispatchEvent(new WheelEvent("wheel", { deltaX: event.deltaX, deltaY: event.deltaY, deltaZ: event.deltaZ, deltaMode: event.deltaMode,
       clientX: event.clientX, clientY: event.clientY, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, metaKey: event.metaKey, bubbles: true, cancelable: true }));
   };
 
-  return <div ref={root} tabIndex={-1} data-cad-drawing-overlay="" data-ink-tool={drawing.tool} data-passing={passing ? "" : undefined}
+  return <div ref={root} tabIndex={-1} data-cad-annotation-overlay="" data-annotation-tool={annotation.tool} data-passing={passing ? "" : undefined}
     className="absolute inset-0 z-10 outline-none"
-    style={{ pointerEvents: passing ? "none" : "auto", cursor: drawing.tool === "text" ? "text" : "crosshair", touchAction: "none" }}
+    style={{ pointerEvents: passing ? "none" : "auto", cursor: annotation.tool === "text" ? "text" : "crosshair", touchAction: "none" }}
     onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
     onMouseDown={onMouseDown} onKeyDown={onKeyDown} onKeyUp={onKeyUp} onBlur={() => setPassing(false)} onWheel={onWheel}
     onContextMenu={event => event.preventDefault()}>

@@ -74,7 +74,7 @@ import {
 } from "./photographicStudio.js";
 import { PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
-import { createSketchLayer, normalizeSketch, SKETCH_REFERENCE_HEIGHT_PX } from "./sketch.js";
+import { createAnnotationLayer, normalizeAnnotation, ANNOTATION_REFERENCE_HEIGHT_PX } from "./annotation.js";
 import { drawMeasurementMark, measurementMarkLayout, normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 
 const DEFAULT_RENDER_SCALE = 1;
@@ -186,12 +186,12 @@ function rendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay = 
 
 // The job's measurements (`job.measurements`, Measure's results as Quick Edit hands them on), drawn
 // over the picture with the viewer's own code (`drawMeasurementMark`), every one labelled: each line
-// as heavy against this output's height as it was against a viewer `SKETCH_REFERENCE_HEIGHT_PX` tall.
+// as heavy against this output's height as it was against a viewer `ANNOTATION_REFERENCE_HEIGHT_PX` tall.
 function measurementsOverlay(job, camera) {
   if (!Array.isArray(job.measurements) || !job.measurements.length) return null;
   const marks = normalizeMeasurementMarks(job.measurements);
   return (context, width, height) => {
-    const scale = height / SKETCH_REFERENCE_HEIGHT_PX;
+    const scale = height / ANNOTATION_REFERENCE_HEIGHT_PX;
     const rect = { left: 0, top: 0, width: width / scale, height: height / scale };
     camera.updateMatrixWorld?.();
     context.save();
@@ -704,8 +704,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
-      viewport.sketchLayer?.layer.dispose();
-      viewport.sketchLayer = null;
+      viewport.annotationLayer?.layer.dispose();
+      viewport.annotationLayer = null;
       if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
       model.dispose?.();
       scene.remove?.(model.root);
@@ -836,27 +836,27 @@ function boundsRadius(bounds) {
   return Number.isFinite(radius) && radius > 0 ? radius : 1;
 }
 
-// The job's sketch (`job.sketch`, the ink a person drew in the viewer's Draw tool), drawn over this
-// output with the viewer's own code (`sketch.js`): each mark on its part as the scene now has it,
+// The job's annotation (`job.annotation`, the ink a person drew with the viewer's Annotate tool), drawn over this
+// output with the viewer's own code (`annotation.js`): each mark on its part as the scene now has it,
 // cut by the same clip planes. Its ink is as heavy against this output's height as it was against a
-// viewer `SKETCH_REFERENCE_HEIGHT_PX` tall, so one layer serves every output of that height and is
+// viewer `ANNOTATION_REFERENCE_HEIGHT_PX` tall, so one layer serves every output of that height and is
 // rebuilt only for an output of another.
-function syncViewportSketch(viewport, job, { height }) {
-  if (job.sketch == null) return;
-  const lineScale = (height / SKETCH_REFERENCE_HEIGHT_PX) * (viewport.renderer.getPixelRatio?.() || 1);
-  if (viewport.sketchLayer?.lineScale !== lineScale) {
-    viewport.sketchLayer?.layer.dispose();
+function syncViewportAnnotation(viewport, job, { height }) {
+  if (job.annotation == null) return;
+  const lineScale = (height / ANNOTATION_REFERENCE_HEIGHT_PX) * (viewport.renderer.getPixelRatio?.() || 1);
+  if (viewport.annotationLayer?.lineScale !== lineScale) {
+    viewport.annotationLayer?.layer.dispose();
     const { model } = viewport;
-    const layer = createSketchLayer(
+    const layer = createAnnotationLayer(
       { THREE, Line2, LineGeometry, LineMaterial },
-      normalizeSketch(job.sketch),
+      normalizeAnnotation(job.annotation),
       { radius: model.runtime?.modelRadius || boundsRadius(model.restBounds || model.bounds || viewport.context?.bounds), lineScale }
     );
     viewport.scene.add(layer.group);
-    viewport.sketchLayer = { layer, lineScale };
+    viewport.annotationLayer = { layer, lineScale };
   }
   if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
-  viewport.sketchLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || []);
+  viewport.annotationLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || []);
 }
 
 export async function captureModel(viewport, captureOptions = {}) {
@@ -995,7 +995,7 @@ export async function captureModel(viewport, captureOptions = {}) {
       fitDepth();
       if (outputTimings) outputTimings.prepareStudioMs = Math.round(performance.now() - stageStarted);
     }
-    syncViewportSketch(viewport, job, { height });
+    syncViewportAnnotation(viewport, job, { height });
     stageStarted = performance.now();
     viewport.renderer.render(viewport.scene, renderCamera);
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);

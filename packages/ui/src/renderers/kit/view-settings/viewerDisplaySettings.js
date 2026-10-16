@@ -2,40 +2,43 @@ import { normalizeViewSettings, resolveViewSettings } from "@text-to-cad/core/co
 
 import { buildStepClipPatch } from "@text-to-cad/core/lib/viewer/clipPlane.js";
 
-const GROUPS = ["camera", "surfaces", "edges", "lighting", "background", "floor", "grid", "axes", "clip", "exploded"];
-const normalizeViewerDisplayMode = value => normalizeViewSettings({ mode: value }).mode;
+const object = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-// Patches merge groups, while a preset selection clears visual overrides. Tools
-// remain outside the preset so changing the view never moves a clipping plane.
+// A patch merges into what is there, in the same shape: `mode` picks the mode and keeps every
+// mode's settings; the shared groups merge field by field; `modes.<mode>` merges each of its
+// groups field by field and replaces a plain value (Solid's `flat`, X-ray's `opacity`).
 export function mergeViewerDisplaySettings(current, patch) {
   const normalized = normalizeViewSettings(patch);
-  const base = Object.hasOwn(patch, "mode")
-    ? viewerDisplaySettingsForMode(current, normalized.mode) : normalizeViewSettings(current);
-  const next = { ...base, ...normalized };
-  if (!Object.hasOwn(patch, "mode")) next.mode = base.mode;
-  for (const group of GROUPS) {
-    if (Object.hasOwn(patch, group)) next[group] = { ...base[group], ...normalized[group] };
-  }
+  const base = normalizeViewSettings(current);
+  const next = { ...base };
+  if (Object.hasOwn(patch, "mode")) next.mode = normalized.mode;
+  if (normalized.appearance) next.appearance = normalized.appearance;
+  if (normalized.camera) next.camera = { ...base.camera, ...normalized.camera };
+  if (normalized.exploded) next.exploded = { ...base.exploded, ...normalized.exploded };
   if (normalized.clip) next.clip = buildStepClipPatch(base.clip, normalized.clip);
+  if (normalized.modes) {
+    const modes = { ...base.modes };
+    for (const [mode, settings] of Object.entries(normalized.modes)) {
+      const own = { ...modes[mode] };
+      for (const [key, value] of Object.entries(settings)) own[key] = object(value) ? { ...own[key], ...value } : value;
+      modes[mode] = own;
+    }
+    next.modes = modes;
+  }
   return normalizeViewSettings(next);
 }
 
-export function viewerDisplaySettingsForMode(current, mode) {
-  const source = normalizeViewSettings(current);
-  return { mode: normalizeViewerDisplayMode(mode),
-    ...(source.clip ? { clip: source.clip } : {}),
-    ...(source.exploded ? { exploded: source.exploded } : {}) };
-}
-
 // A camera command carries both pose and optional View controls. Explicit lens
-// or projection edits activate their group; a pose-only command leaves it alone.
+// or projection edits change the shared camera; a pose-only command leaves it alone. Render is
+// always in perspective, so a projection sent under it is no edit of the other modes' camera.
 export function viewerDisplaySettingsForCamera(current, camera) {
+  const rendering = normalizeViewSettings(current).mode === "render";
   const controls = {
-    ...(camera?.projection ? { projection: camera.projection } : {}),
+    ...(camera?.projection && !rendering ? { projection: camera.projection } : {}),
     ...(camera?.focalLength != null ? { focalLength: camera.focalLength } : {})
   };
   return Object.keys(controls).length
-    ? mergeViewerDisplaySettings(current, { camera: { ...controls, enabled: true } })
+    ? mergeViewerDisplaySettings(current, { camera: controls })
     : normalizeViewSettings(current);
 }
 

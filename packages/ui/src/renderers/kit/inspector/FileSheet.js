@@ -90,7 +90,7 @@ export function FileSheetSettingsSection({ title, children, open = true, onOpenC
           : <span id={titleId} className={FILE_SHEET_SECTION_HEADING_CLASSES}>{title}</span>}</h2>}
       {headingAction && <div className="absolute right-1 top-0 flex h-7 items-center gap-0.5">{headingAction}</div>}
     </div>
-    <div id={contentId} hidden={!open} data-settings-section-body="" className="space-y-1 pb-2">{!gated || open ? children : null}</div>
+    {children == null ? null : <div id={contentId} hidden={!open} data-settings-section-body="" className="space-y-1 pb-2">{!gated || open ? children : null}</div>}
   </section>;
 }
 

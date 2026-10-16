@@ -7,13 +7,14 @@ import RendererShell from "../kit/shell/RendererShell.jsx";
 import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { createToolModes } from "../kit/tools/toolModes.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
+import { TreeFindButton } from "@text-to-cad/ui/primitives/tree-filter";
 
 // TEST SCAFFOLDING. This renderer is never registered in a product: it exists so
 // the shell's own tools can be driven in a real browser under a frame that is
-// nothing else. The only shipping tool the shell owns is Draw, and the only
+// nothing else. The only shipping tool the shell owns is Annotate, and the only
 // format that has it is STEP, which is still the pre-shell renderer — so without
-// this there is nowhere to exercise shell-level Draw behaviour (a fullscreen drag
-// while a sketch is open, say) that STEP cannot reach yet. It draws one triangle,
+// this there is nowhere to exercise shell-level Annotate behaviour (a fullscreen drag
+// while an annotation is open, say) that STEP cannot reach yet. It draws one triangle,
 // reads no bytes and talks to no backend.
 //
 // It also stands in for a renderer that USES the shell surfaces STEP will need
@@ -29,13 +30,13 @@ import ToolPanel from "../kit/tools/ToolPanel.jsx";
 // COMPILED package. When STEP moves onto the shell, delete this and drive those
 // cases through STEP.
 
-// Draw and nothing else: with no tool taken up, "" is the mode, exactly as the
+// Annotate and nothing else: with no tool taken up, "" is the mode, exactly as the
 // shell records for a renderer that hands over no tools at all.
-const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.DRAW]: {} } });
+const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.ANNOTATE]: {} } });
 // A file with a tool stack (`panel*.harness`) opens in Select, as STEP and robots do: the tool
 // whose tree a person can close, and whose press while it is up opens it again.
 const SELECT_TOOL = "select";
-const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.DRAW]: {} } });
+const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.ANNOTATE]: {} } });
 const LIVE = Object.freeze({ declined: {
   select: "The shell harness has nothing to select: it draws one triangle and reads no file.",
   clearSelection: "The shell harness has no selection to clear."
@@ -187,6 +188,8 @@ function HarnessSurface({ view, data }) {
   // like the tree.
   const [kept, setKept] = useState(false);
   const [posing, setPosing] = useState(false);
+  // The tree's filter, as a model tree's: a find field its heading's magnifier opens in the heading's place.
+  const [finding, setFinding] = useState(false);
   // `panel-short.harness` turns the heights round: a tree of two rows and a Reference of many.
   const short = view.file.name.startsWith("panel-short");
   const [treeRows, referenceRows] = short ? [2, 40] : [120, 8];
@@ -197,22 +200,24 @@ function HarnessSurface({ view, data }) {
     onSelect: () => setPosing(value => !value) };
   const rows = (count, name) => <ul className="px-2 py-1">{Array.from({ length: count }, (_, index) =>
     <li key={index} className="flex h-6 items-center">{name} {index + 1}</li>)}</ul>;
-  const toolPanels = <>
-    {withPanel ? <>
+  // The file sidebar: a tree, a Reference and, while posing, Position; the tool stack: the kept panel.
+  const sidebar = withPanel ? <>
       <ToolPanel id="tree" label="Harness tree" fit="tree" resizable collapsible={false}
-        header={<p className="flex h-9 items-center border-b px-2"><span className="flex-1">Filter</span></p>}>{rows(treeRows, "Row")}</ToolPanel>
+        actions={<TreeFindButton label="Find in tree" onClick={() => setFinding(true)} />}
+        header={finding ? <p className="flex h-6 items-center px-2"><span className="flex-1">Filter</span>
+          <button type="button" aria-label="Close find" onClick={() => setFinding(false)}>×</button></p> : null}>{rows(treeRows, "Row")}</ToolPanel>
       <ToolPanel id="reference" title="Reference" label="Harness reference" fit="details" resizable onClose={() => {}}>{rows(referenceRows, "Fact")}</ToolPanel>
       {posing ? <ToolPanel id="position" title="Position" label="Harness position" fit="details" resizable collapsible={false} onClose={() => setPosing(false)}>{rows(30, "Joint")}</ToolPanel> : null}
-    </> : null}
-    {kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null}
-  </>;
+    </> : null;
+  const toolPanels = kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null;
 
-  return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.draw, keepTool, poseTool] : [shell.tools.draw]}
-    toolPanels={toolPanels} references={references} onClearReferences={() => setPicked("")}
+  // Its test controls sit at the bottom centre, clear of the view cube (bottom-right) and the file sidebar (down the left).
+  return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.annotate, keepTool, poseTool] : [shell.tools.annotate]}
+    toolPanels={toolPanels} sidebar={sidebar} references={references} onClearReferences={() => setPicked("")}
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}
     onCanvasPointerDown={() => setPutDown(`put down @${stage}`)}
-    viewportOverlay={viewport => <div className="pointer-events-none absolute bottom-2 right-2 z-30 text-xs" data-harness-overlay>
+    viewportOverlay={viewport => <div className="pointer-events-none absolute bottom-2 left-1/2 z-30 -translate-x-1/2 text-xs" data-harness-overlay>
       <span data-harness-camera-settles>{settleLabel}</span>
       <span data-harness-menu-note>{picked}</span>
       <span data-harness-menu-open>{menuUp ? "up" : ""}</span>

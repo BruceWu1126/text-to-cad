@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import LinksSection from '../../../dist/renderers/robot/LinksSection.js';
 import { useLinkSelection } from '../../../dist/renderers/robot/useLinkSelection.js';
 import { useRobotReferences } from '../../../dist/renderers/robot/robotReferences.js';
+import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
 
 Object.assign(globalThis, { React });
 afterEach(cleanup);
@@ -69,7 +70,10 @@ function Harness({ spy = {} as Record<string, (...args: any[]) => void>, payload
   };
   const { references, chips } = useRobotReferences({ robot: payload, components, selection: observed, resource: { kind: 'workspace-file', path: '/work/arm.urdf' }, onOpenFile });
   return <>
-    <LinksSection robot={payload} components={components} parts={parts} selection={observed} hiddenPartIds={hiddenPartIds} onVisibilityChange={onVisibilityChange}/>
+    {/* In the file sidebar, as it ships: headed "Links", with its Find button. */}
+    <FileSidebar layout={{ panels: {}, collapsed: {} }} onLayoutChange={() => {}}>
+      <LinksSection robot={payload} components={components} parts={parts} selection={observed} hiddenPartIds={hiddenPartIds} onVisibilityChange={onVisibilityChange}/>
+    </FileSidebar>
     {chips.length ? <section aria-label="Reference details" data-references={JSON.stringify(references.map((reference: any) => reference.target.selectors))}>
       {chips.map((chip: any) => <div key={chip.key} aria-label={`Chip ${chip.label}`} data-copy={chip.copy}>
         {chip.card}<button type="button" onClick={chip.onRemove}>Remove {chip.label}</button>
@@ -81,10 +85,18 @@ const chipLabels = () => within(screen.getByRole('region', { name: 'Reference de
   .map(chip => chip.getAttribute('aria-label'));
 const rows = () => within(screen.getByRole('list', { name: 'Robot links' })).getAllByRole('button', { name: /^Select / }).map(row => row.getAttribute('aria-label'));
 const filter = () => screen.getByRole('textbox', { name: 'Filter links' });
+// The filter is a find field that takes the Links heading's place once its magnifier is pressed.
+const openFind = () => { fireEvent.click(screen.getByRole('button', { name: 'Find in links' })); return filter(); };
 
 it('draws the kinematic tree collapsed below the first real choice, with each link’s joint beside it', () => {
   render(<Harness/>);
-  expect(filter().getAttribute('placeholder')).toBe('Filter…');
+  // No filter until Find is pressed; then it is the field, focused, in the heading's place.
+  expect(screen.queryByRole('textbox', { name: 'Filter links' })).toBeNull();
+  expect(within(document.querySelector<HTMLElement>('[data-tool-panel-heading]')!).getByRole('heading').textContent).toBe('Links');
+  const find = openFind();
+  expect([find.getAttribute('placeholder'), document.activeElement, document.querySelector('[data-tool-panel-heading]')]).toEqual(['Find…', find, null]);
+  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
+  expect(screen.queryByRole('textbox', { name: 'Filter links' })).toBeNull();
   // base_footprint is only a frame (no geometry, no mass, base_link fixed to it): it has nothing
   // to select or read back, so it gets no row and base_link leads the tree.
   expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
@@ -194,7 +206,7 @@ it('reads a link’s inertial and geometry back, opens the mesh files it names b
 
 it('filters to a flat ranked list by link, joint or object name without expanding anything', () => {
   render(<Harness/>);
-  fireEvent.change(filter(), { target: { value: 'wrist' } });
+  fireEvent.change(openFind(), { target: { value: 'wrist' } });
   expect(screen.queryByRole('list', { name: 'Robot links' })).toBeNull();
   const results = within(screen.getByRole('list', { name: 'Link search results' }));
   expect(screen.getByText('1 match').getAttribute('role')).toBe('status');
@@ -214,7 +226,7 @@ it('filters to a flat ranked list by link, joint or object name without expandin
   expect(screen.getByText('No link matches “nothing here”')).toBeTruthy();
 
   // Typing never touched the tree's expansion.
-  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
   expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
 });
 
@@ -222,7 +234,7 @@ it('reveals a selected hit with its ancestors expanded when the filter is cleare
   const scrollIntoView = vi.fn();
   Element.prototype.scrollIntoView = scrollIntoView;
   render(<Harness/>);
-  fireEvent.change(filter(), { target: { value: 'wrist_roll' } });
+  fireEvent.change(openFind(), { target: { value: 'wrist_roll' } });
   fireEvent.keyDown(filter(), { key: 'Enter' });
   expect(drawn()).toBe('[["wrist_link"],[]]');
   expect(within(screen.getByRole('region', { name: 'Reference details' })).getByLabelText('Parent joint').textContent).toContain('continuous');
@@ -291,10 +303,10 @@ it('a row that draws something has the Hide/Reveal eye: a link hides its own vis
   fireEvent.click(screen.getByRole('button', { name: 'Reveal wrist_link' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0', 'wrist_link:v1/object/1'], true);
   // A search hit carries the eye too, and a visual's eye is its own.
-  fireEvent.change(filter(), { target: { value: 'flange' } });
+  fireEvent.change(openFind(), { target: { value: 'flange' } });
   fireEvent.click(within(screen.getByRole('list', { name: 'Link search results' })).getByRole('button', { name: 'Reveal flange' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0'], true);
-  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
   // Two visuals selected: a chip each, and one reference, to the link they share.
   fireEvent.click(screen.getByRole('button', { name: 'Expand wrist_link' }));
   fireEvent.click(screen.getByRole('button', { name: 'Select flange' }));
@@ -303,7 +315,7 @@ it('a row that draws something has the Hide/Reveal eye: a link hides its own vis
   expect(screen.getByRole('region', { name: 'Reference details' }).getAttribute('data-references')).toBe('[["wrist_link"]]');
   // Without a handler there is no eye at all.
   rerender(<Harness/>);
-  expect(screen.queryByRole('button', { name: /^(Hide|Reveal) / })).toBeNull();
+  expect(within(screen.getByRole('list', { name: 'Robot links' })).queryByRole('button', { name: /^(Hide|Reveal) / })).toBeNull();
 });
 
 it('a modified click adds a link to the selection, as it adds an object, and a plain one goes back to one', () => {

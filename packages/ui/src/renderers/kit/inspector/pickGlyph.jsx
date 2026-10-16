@@ -3,7 +3,7 @@ import { createElement } from "react";
 // What a Quick Edit chip carries, as a glyph: a reference's pick drawn as Select's modes draw them
 // (`SelectionModes.jsx`), on the 24-unit grid — a face as a faint cube with its top face solid, an
 // edge as a faint cube with its front edge heavy, a solid as the cube whole, a vertex as a dot in a
-// ring — and a measurement's ruler and the drawing's pen (lucide's). One drawing, for React
+// ring — and a measurement's ruler and the annotation's pen (lucide's). One drawing, for React
 // (`PickGlyph`) and for a plain DOM node (`pickGlyphNode`, Quick Edit's note), so a chip and its
 // pill in the note are the same.
 

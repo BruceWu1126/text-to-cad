@@ -1,12 +1,12 @@
 import { createToolModes } from "../kit/tools/toolModes.js";
 
-export const ROBOT_TOOL = Object.freeze({ POSE: "pose", SELECT: "select" });
+export const ROBOT_TOOL = Object.freeze({ SELECT: "select" });
 
-// A robot opens in Select, with its Links panel: the tool in hand is never saved. Joint values
-// come back with the file (`RobotRenderer.jsx`); only the pointer tool starts over.
+// A robot's one tool is Select: it picks links and drags the joints' knobs, as its filter says
+// (`RobotRenderer.jsx`). The tool in hand is never saved; joint values come back with the file.
 export const ROBOT_TOOL_MODES = createToolModes({
   defaultMode: ROBOT_TOOL.SELECT,
-  modes: { [ROBOT_TOOL.POSE]: {}, [ROBOT_TOOL.SELECT]: {} }
+  modes: { [ROBOT_TOOL.SELECT]: {} }
 });
 
 /** What a host command a robot cannot carry out is told. Its references are its links, picked by a person. */

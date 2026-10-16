@@ -7,39 +7,37 @@ beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserv
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enabled: false, axis: 'x', invert: false } });
 
-it('retains only applied effects after leaving and follows external resets and file changes; only the tool in hand is lit', () => {
-  const props = { modelKey: 'one', view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
+it('only the tool in hand has its row under the strip, an applied effect leaving none behind; taken up again it is as it was, unset it starts neutral; only the tool in hand is lit', () => {
+  const props = { view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
     mesh: null, disabled: false, selectedTool: 'references', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const active = () => result.current.tools.filter(tool => tool.active).map(tool => tool.id);
-  // The panels on screen, by their names: what is kept.
-  const kept = () => { const view = render(<>{result.current.panels}</>); const names = [...view.container.querySelectorAll('section[data-tool-panel]')]
-    .map(panel => panel.getAttribute('aria-label')); view.unmount(); return names; };
+  // The tool's row on screen, by its name.
+  const shown = () => { const view = render(<>{result.current.subToolbar}</>); const names = [...view.container.querySelectorAll('[role=toolbar][data-cad-sub-toolbar]')]
+    .map(row => row.getAttribute('aria-label')); view.unmount(); return names; };
   act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
   expect(props.onSelect).toHaveBeenCalledWith('exploded');
+  expect(props.store.patch).toHaveBeenLastCalledWith({ exploded: { enabled: false, amount: 0 } });
   rerender({ ...props, selectedTool: 'exploded' });
-  expect([active(), kept()]).toEqual([['exploded'], ['Explode controls']]);
+  expect([active(), shown()]).toEqual([['exploded'], ['Explode controls']]);
   // A second press on the tool in hand does nothing.
   act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
   expect(props.onSelect).toHaveBeenCalledOnce();
-  rerender({ ...props, selectedTool: 'references' });
-  expect([active(), kept()]).toEqual([[], []]);
-  const applied = { ...props, selectedTool: 'references', view: { ...neutral(), exploded: { enabled: true, amount: .4 } } };
-  rerender(applied);
-  // Kept: its panel stays, and its tool is not lit.
-  expect([active(), kept()]).toEqual([[], ['Explode controls']]);
-  rerender({ ...applied, view: neutral() });
-  expect(kept()).toEqual([]);
-  rerender(applied);
-  rerender({ ...props, modelKey: 'two', selectedTool: 'references' });
-  expect(kept()).toEqual([]);
+  // Applied, then put down: the effect stays on the model, and nothing of it on screen.
+  const applied = { ...props, view: { ...neutral(), exploded: { enabled: true, amount: .4 } } };
+  rerender({ ...applied, selectedTool: 'references' });
+  expect([active(), shown()]).toEqual([[], []]);
+  // Taken up again it is as it was: nothing is patched.
+  props.store.patch.mockClear();
+  act(() => result.current.tools.find(tool => tool.id === 'exploded').onSelect());
+  expect(props.store.patch).not.toHaveBeenCalled();
 });
 
-it('returning a clip to zero removes its panel when another tool is chosen', () => {
-  const props = { modelKey: 'one', view: { ...neutral(), clip: { ...neutral().clip, enabled: true, at: 5 } },
+it('a clip at zero keeps its row while in hand, and no tool leaves one behind', () => {
+  const props = { view: { ...neutral(), clip: { ...neutral().clip, enabled: true, at: 5 } },
     features: { sections: ['clip'] }, store: { patch: vi.fn() }, mesh: null, disabled: false, selectedTool: 'clip', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
-  const kept = () => { const view = render(<>{result.current.panels}</>); const count = view.container.querySelectorAll('section[data-tool-panel]').length; view.unmount(); return count; };
+  const kept = () => { const view = render(<>{result.current.subToolbar}</>); const count = view.container.querySelectorAll('[role=toolbar][data-cad-sub-toolbar]').length; view.unmount(); return count; };
   expect(kept()).toBe(1);
   rerender({ ...props, view: neutral() });
   expect(kept()).toBe(1);
@@ -49,7 +47,7 @@ it('returning a clip to zero removes its panel when another tool is chosen', () 
 
 it('offers Explode only where there are parts to separate, and idles it while that is unknown', () => {
   const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [1, 1, 1] } });
-  const props = { modelKey: 'one', view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
+  const props = { view: neutral(), features: { sections: ['exploded', 'clip'] }, store: { patch: vi.fn() },
     mesh: null as null | object, disabled: true, selectedTool: 'references', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const offered = () => result.current.tools.map(tool => `${tool.id}:${tool.disabled}`);

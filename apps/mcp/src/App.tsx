@@ -37,6 +37,9 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
 // A tab host's composer floats over the bottom of the page, its middle this far above the edge: the
 // viewer's playback bars sit on that same line (Codex: a 45px box, 17px up).
 const TAB_BOTTOM_CENTER = '40px';
+// Codex's sidebar page has its own chat's button floating in its bottom-right corner, where the
+// viewer's cube sits: the cube is lifted this far clear of it (`--cad-viewport-corner-bottom`).
+const SIDEBAR_CORNER_BOTTOM = '52px';
 
 // What to do once this view's server has gone: the host started it, and only the host starts it again.
 const LOST: Record<Presentation, string> = {
@@ -55,10 +58,14 @@ export function inlineHeight(width: number, maxHeight?: number): number {
  * Room for what the host draws over the page (`insets`). Inline, a card whose height the host is
  * told. The one element either way, so going full size keeps the view (and its model) as it is.
  */
-function Frame({ bridge, context, insets, inline = false, bottomCenter, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; bottomCenter?: string; overlay?: ReactNode; children: ReactNode }) {
+function Frame({ bridge, context, insets, inline = false, bottomCenter, cornerBottom, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; bottomCenter?: string; cornerBottom?: string; overlay?: ReactNode; children: ReactNode }) {
   // Where the host's composer floats over the page instead of taking room from it: the line the
-  // viewer's playback bars sit on, and the strip lists scroll clear of.
-  const floating = bottomCenter ? { '--cad-viewport-bottom-center': bottomCenter, '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } as CSSProperties : {};
+  // viewer's playback bars sit on, and the strip lists scroll clear of; and the room a control of
+  // the host's takes from the bottom-right corner, which the cube keeps clear of.
+  const floating = {
+    ...(bottomCenter ? { '--cad-viewport-bottom-center': bottomCenter, '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } : {}),
+    ...(cornerBottom ? { '--cad-viewport-corner-bottom': cornerBottom } : {}),
+  } as CSSProperties;
   const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
     if (!inline) return;
@@ -121,6 +128,7 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const insets = presentation === 'inline' ? context.safeAreaInsets || {} : { ...context.safeAreaInsets, bottom: 0 };
   const chat = useMemo(() => chatReach(bridge.hostCapabilities, presentation), [bridge, presentation]);
   const bottomCenter = presentation === 'tabs' ? TAB_BOTTOM_CENTER : undefined;
+  const cornerBottom = presentation === 'tabs' && surface === 'sidebar' ? SIDEBAR_CORNER_BOTTOM : undefined;
   // Once a newer view of this chat is up: this one's last frame (or null), and nothing else.
   const [still, setStill] = useState<string | null | undefined>(undefined);
   const superseded = still !== undefined;
@@ -205,9 +213,9 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     [bridge]);
   const { launch } = showing;
   if (superseded) {
-    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter}><Superseded still={still} /></Frame>;
+    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}><Superseded still={still} /></Frame>;
   }
-  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter}
+  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}
     overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}

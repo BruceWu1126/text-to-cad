@@ -29,17 +29,18 @@ test('one global Reset calls the coordinated host command', () => {
   const header = elements(PoseControlsSection(controls.props)).find(node => node.type === KinematicsPoseRow);
   header.props.onReset();
   assert.deepEqual(calls, ['both']);
-  // The panel's X is the same reset (`StepPanels.js`): the section hands it over, and no heading button.
-  assert.equal(section.onReset, pose.onResetMotion);
+  // The Pose row's Default is the only way back: no X to hand the panel, and no heading button.
+  assert.equal('onReset' in section, false, 'no X of its own');
   assert.equal('actions' in section, false, 'no Reset button of its own');
 });
 
-test("the pose row and the joints are ONE section's rows, with no section of their own; either can exist alone", () => {
+test("the pose row and the joints are ONE section's rows, with no section of their own; the pose row, with Default, leads any joints", () => {
   const rows = def => elements(PoseControlsSection({ runtime: { definition: def } }));
   const kinds = def => rows(def).filter(node => [KinematicsPoseRow, FileSheetSliderField].includes(node.type)).map(node => node.type);
   assert.deepEqual(kinds(definition), [KinematicsPoseRow, FileSheetSliderField]);
   assert.deepEqual(kinds({ ...definition, articulation: { ...articulation, controls: [] } }), [KinematicsPoseRow]);
-  assert.deepEqual(kinds({ ...definition, articulation: { ...articulation, poses: {} } }), [FileSheetSliderField]);
+  // With no named pose, the row still offers Default: the way back to the opening pose.
+  assert.deepEqual(kinds({ ...definition, articulation: { ...articulation, poses: {} } }), [KinematicsPoseRow, FileSheetSliderField]);
 });
 
 test('animation-owned authored values do not claim a named position, and parameters stay editable', () => {

@@ -1,42 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sameView } from './views.js';
 import { useViewerHistory } from '../renderers/kit/shell/useViewerHistory.js';
-import { penWidth } from './inkGeometry.js';
+import { penWidth } from './geometry.js';
 
 /**
- * The drawing: one sketch, its ink in the model (`renderers/kit/tools/draw/ink3d.js`'s items), what
- * Draw's tools put down next (`tool`, `color`, `strokeWidth`, `strokeStyle`, `placement`) and its history. It
- * outlives Draw being put down — the ink stays in the model, and the next time Draw is taken up it
+ * The annotation: one annotation, its ink in the model (`renderers/kit/tools/annotate/annotation3d.js`'s items), what
+ * Annotate's tools put down next (`tool`, `color`, `strokeWidth`, `strokeStyle`, `placement`) and its history. It
+ * outlives Annotate being put down — the ink stays in the model, and the next time Annotate is taken up it
  * draws on it — and goes when the person clears it or the model it was drawn on changes (`discard`).
  * Each change to the ink is a step in the file view's one history (`useViewerHistory`), which
  * Undo and Redo walk whatever tool took the step.
  *
- * @typedef {object} DrawingSession
+ * @typedef {object} AnnotationSession
  * @property {boolean} ready  Always: the toolbar's tools are the session's own.
- * @property {import('./toolbar.jsx').DrawingTool} tool
+ * @property {import('./toolbar.jsx').AnnotationTool} tool
  * @property {string} color
  * @property {number} strokeWidth
- * @property {import('./toolbar.jsx').DrawingStrokeStyle} strokeStyle
- * @property {import('./toolbar.jsx').DrawingPlacement} placement  Where what is drawn next lies: on
+ * @property {import('./toolbar.jsx').AnnotationStrokeStyle} strokeStyle
+ * @property {import('./toolbar.jsx').AnnotationPlacement} placement  Where what is drawn next lies: on
  *   the model, or in space on a plane facing the view.
- * @property {readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]} ink
+ * @property {readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]} items
  * @property {readonly string[]} selected  The ink the viewer's Select has picked: what the selection's bar
- *   (`restyle`, `fill`) and Delete act on. Draw's tools never pick ink.
+ *   (`restyle`, `fill`) and Delete act on. Annotate's tools never pick ink.
  * @property {boolean} canUndo
  * @property {boolean} canRedo
  * @property {boolean} hasContent  There is ink.
- * @property {boolean} hasDrawing  The same: there is a drawing.
- * @property {(tool: import('./toolbar.jsx').DrawingTool) => void} selectTool
+ * @property {boolean} hasAnnotation  The same: there is an annotation.
+ * @property {(tool: import('./toolbar.jsx').AnnotationTool) => void} selectTool
  * @property {(color: string) => void} selectColor  What is drawn next.
  * @property {(width: number) => void} selectStrokeWidth  What is drawn next.
- * @property {(style: import('./toolbar.jsx').DrawingStrokeStyle) => void} selectStrokeStyle  What is drawn next.
- * @property {(placement: import('./toolbar.jsx').DrawingPlacement) => void} selectPlacement  What is drawn next: ink already down stays where it lies.
- * @property {(style: { color?: string, width?: number, dash?: import('./toolbar.jsx').DrawingStrokeStyle }) => void} restyle
+ * @property {(style: import('./toolbar.jsx').AnnotationStrokeStyle) => void} selectStrokeStyle  What is drawn next.
+ * @property {(placement: import('./toolbar.jsx').AnnotationPlacement) => void} selectPlacement  What is drawn next: ink already down stays where it lies.
+ * @property {(style: { color?: string, width?: number, dash?: import('./toolbar.jsx').AnnotationStrokeStyle }) => void} restyle
  *   The ink selected, as one step: its colour, a stroke's weight (a shape's at that width, the pen's
  *   heavier, as each draws), a shape's line style.
- * @property {(shape: string, areas: readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]) => void} fill
+ * @property {(shape: string, areas: readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]) => void} fill
  *   A closed shape filled, as one step: the fill joins the shape's group, picked and deleted with it.
- * @property {(items: readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]) => void} add  Ink put down: one step.
+ * @property {(items: readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]) => void} add  Ink put down: one step.
  * @property {(ids: readonly string[]) => void} remove  Ink erased or deleted: one step.
  * @property {(ids: readonly string[]) => void} select
  * @property {() => void} undo
@@ -51,18 +51,18 @@ import { penWidth } from './inkGeometry.js';
  */
 
 const DEFAULTS = Object.freeze({ tool: 'freedraw', color: '#ff2d55', strokeWidth: 2, strokeStyle: 'solid', placement: 'surface' });
-const NO_INK = Object.freeze([]);
+const NO_ANNOTATIONS = Object.freeze([]);
 
 /**
- * @param {boolean} [active]  Draw is the tool. Put down, it goes back to its first tool (the pen);
+ * @param {boolean} [active]  Annotate is the tool. Put down, it goes back to its first tool (the pen);
  *   the ink, its selection, the colour, the weight, the line style and the placement stay.
- * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').DrawingStrokeStyle,
- *   placement?: import('./toolbar.jsx').DrawingPlacement }} [initial]
+ * @param {{ tool?: string, color?: string, strokeWidth?: number, strokeStyle?: import('./toolbar.jsx').AnnotationStrokeStyle,
+ *   placement?: import('./toolbar.jsx').AnnotationPlacement }} [initial]
  * @param {import('../renderers/kit/shell/useViewerHistory.js').ViewerHistory | null} [history]  The file
  *   view's; without one the session keeps its own.
- * @returns {DrawingSession}
+ * @returns {AnnotationSession}
  */
-export function useDrawingSession(active = true, initial = {}, history = null) {
+export function useAnnotationSession(active = true, initial = {}, history = null) {
   const start = useMemo(() => ({ ...DEFAULTS, ...Object.fromEntries(Object.entries(initial).filter(([, value]) => value != null)) }),
     [initial.tool, initial.color, initial.strokeWidth, initial.strokeStyle, initial.placement]);
   const [tool, setTool] = useState(start.tool);
@@ -75,8 +75,8 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
   const logRef = useRef(log);
   logRef.current = log;
   // The ink; each step records the ink before and after it, so Undo and Redo put either back.
-  const [ink, setInk] = useState(/** @type {readonly import('../renderers/kit/tools/draw/ink3d.js').InkItem[]} */ (NO_INK));
-  const inkRef = useRef(ink);
+  const [items, setItems] = useState(/** @type {readonly import('../renderers/kit/tools/annotate/annotation3d.js').AnnotationItem[]} */ (NO_ANNOTATIONS));
+  const itemsRef = useRef(items);
   const [selected, setSelected] = useState(/** @type {string[]} */ ([]));
   // The views ink was drawn in. Not a step to undo: a label a mark names stays, whatever is undone.
   const viewsRef = useRef(/** @type {import('./views.js').LabelledView[]} */ ([]));
@@ -93,19 +93,19 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
   useEffect(() => {
     if (!active) setTool(start.tool);
   }, [active, start.tool]);
-  const put = useCallback(next => { inkRef.current = next; setInk(next); }, []);
+  const put = useCallback(next => { itemsRef.current = next; setItems(next); }, []);
   const step = useCallback(change => {
-    const before = inkRef.current;
+    const before = itemsRef.current;
     const after = change(before);
     if (after === before) return;
     put(after);
-    logRef.current.record({ source: 'drawing', undo: () => put(before), redo: () => put(after) });
+    logRef.current.record({ source: 'annotation', undo: () => put(before), redo: () => put(after) });
   }, [put]);
   // Ink an undo took away takes its pick with it.
   useEffect(() => {
-    setSelected(current => (current.every(id => ink.some(item => item.id === id)) ? current
-      : current.filter(id => ink.some(item => item.id === id))));
-  }, [ink]);
+    setSelected(current => (current.every(id => items.some(item => item.id === id)) ? current
+      : current.filter(id => items.some(item => item.id === id))));
+  }, [items]);
   const add = useCallback(items => { if (items.length) step(current => [...current, ...items]); }, [step]);
   const remove = useCallback(ids => {
     const gone = new Set(ids);
@@ -159,17 +159,17 @@ export function useDrawingSession(active = true, initial = {}, history = null) {
     select: ids => setSelected([...ids]),
     undo: () => { logRef.current.undo(); },
     redo: () => { logRef.current.redo(); },
-    clear: () => { step(current => (current.length ? NO_INK : current)); setSelected([]); },
+    clear: () => { step(current => (current.length ? NO_ANNOTATIONS : current)); setSelected([]); },
     discard: () => {
-      put(NO_INK);
-      logRef.current.forget('drawing');
+      put(NO_ANNOTATIONS);
+      logRef.current.forget('annotation');
       setSelected([]);
       viewsRef.current = [];
       setViews([]);
     },
   }), [step, put]);
-  const hasContent = ink.length > 0;
-  return { ready: true, tool, color, strokeWidth, strokeStyle, placement, ink, selected, views,
-    canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasDrawing: hasContent,
+  const hasContent = items.length > 0;
+  return { ready: true, tool, color, strokeWidth, strokeStyle, placement, items, selected, views,
+    canUndo: log.canUndo, canRedo: log.canRedo, hasContent, hasAnnotation: hasContent,
     add, remove, noteView, forget: actions.clear, ...actions };
 }

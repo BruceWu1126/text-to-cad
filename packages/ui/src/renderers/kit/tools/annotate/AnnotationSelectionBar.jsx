@@ -3,9 +3,9 @@ import { PaintBucket, Trash2 } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_CHROME_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
-import { DRAWING_STROKE_WIDTHS, InkStylePickers } from "../../../../drawing/toolbar.jsx";
-import { fillMarkAt, interiorPoint, penWidth } from "../../../../drawing/inkGeometry.js";
-import { inkOnScreen, inkWorldPoints, partObjects, projectInk } from "./ink3d.js";
+import { ANNOTATION_STROKE_WIDTHS, AnnotationStylePickers, annotationColors } from "../../../../annotation/toolbar.jsx";
+import { fillMarkAt, interiorPoint, penWidth } from "../../../../annotation/geometry.js";
+import { annotationsOnScreen, annotationWorldPoints, partObjects, projectAnnotations } from "./annotation3d.js";
 
 // How far the bar keeps from the ink it is about, and from the viewport's edges, in px.
 const GAP = 10;
@@ -14,7 +14,7 @@ const EDGE = 8;
 // The setting a stroke was drawn at: the pen's ink is heavier than a shape's at the same one.
 const strokeSetting = item => {
   const drawn = item.widths ? item.width / penWidth(1) : item.width;
-  return DRAWING_STROKE_WIDTHS.reduce((best, option) => (Math.abs(option.value - drawn) < Math.abs(best.value - drawn) ? option : best)).value;
+  return ANNOTATION_STROKE_WIDTHS.reduce((best, option) => (Math.abs(option.value - drawn) < Math.abs(best.value - drawn) ? option : best)).value;
 };
 const closedShape = item => item.kind === "stroke" && item.closed && !item.widths;
 
@@ -22,17 +22,17 @@ const closedShape = item => item.kind === "stroke" && item.closed && !item.width
  * The ink Select has picked, its bar: a small floating toolbar just above it (below it where there
  * is no room above), following it as the camera and its parts move — the tool strip's surface, a
  * size smaller. Colour, and for strokes their weight, and for shapes their line style
- * (`InkStylePickers`' dropdowns, each choice one step); Fill for a closed
+ * (`AnnotationStylePickers`' dropdowns, each choice one step); Fill for a closed
  * shape (its interior, as it falls on the screen now, lying where the shape does, one step; again
  * to take it away); and Delete, which deletes everything Select has picked (`onDelete`), a
  * measurement too.
  *
- * @param {{ drawing: import("../../../../drawing/session.js").DrawingSession, runtimeRef: { current: object | null },
+ * @param {{ annotation: import("../../../../annotation/session.js").AnnotationSession, runtimeRef: { current: object | null },
  *   viewerReadyTick?: number, onDelete(): void, disabled?: boolean }} props
  */
-export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick = 0, onDelete, disabled = false }) {
-  const picked = new Set(drawing.selected);
-  const items = drawing.ink.filter(item => picked.has(item.id));
+export default function AnnotationSelectionBar({ annotation, colorScheme = "light", runtimeRef, viewerReadyTick = 0, onDelete, disabled = false }) {
+  const picked = new Set(annotation.selected);
+  const items = annotation.items.filter(item => picked.has(item.id));
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const [box, setBox] = useState(/** @type {{ left: number, top: number, right: number, bottom: number, width: number, height: number } | null} */ (null));
@@ -56,7 +56,7 @@ export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick =
       const width = canvas.clientWidth, height = canvas.clientHeight;
       let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
       for (const item of itemsRef.current) {
-        for (const point of inkWorldPoints(runtime, item, parts)) {
+        for (const point of annotationWorldPoints(runtime, item, parts)) {
           const ndc = point.project(runtime.camera);
           if (ndc.z > 1) continue;
           const x = ((ndc.x + 1) / 2) * width, y = ((1 - ndc.y) / 2) * height;
@@ -79,12 +79,12 @@ export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick =
   const strokes = items.filter(item => item.kind === "stroke");
   const shapes = strokes.filter(item => !item.widths);
   const closed = items.filter(closedShape);
-  const filledGroups = new Set(drawing.ink.filter(item => item.kind === "area" && item.group).map(item => item.group));
+  const filledGroups = new Set(annotation.items.filter(item => item.kind === "area" && item.group).map(item => item.group));
   const filled = closed.length > 0 && closed.every(item => item.group && filledGroups.has(item.group));
   const toggleFill = () => {
     if (filled) {
       const groups = new Set(closed.map(item => item.group));
-      drawing.remove(drawing.ink.filter(item => item.kind === "area" && groups.has(item.group)).map(item => item.id));
+      annotation.remove(annotation.items.filter(item => item.kind === "area" && groups.has(item.group)).map(item => item.id));
       return;
     }
     const runtime = runtimeRef.current, canvas = runtime?.renderer?.domElement;
@@ -92,11 +92,11 @@ export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick =
     const view = { width: canvas.clientWidth, height: canvas.clientHeight };
     for (const shape of closed) {
       if (shape.group && filledGroups.has(shape.group)) continue;
-      const [outline] = inkOnScreen(runtime, [shape], view);
+      const [outline] = annotationsOnScreen(runtime, [shape], view);
       const seed = outline && interiorPoint(outline.points);
       const mark = seed && fillMarkAt(seed, [outline], shape.color);
       if (!mark) continue;
-      drawing.fill(shape.id, projectInk(runtime, [{ ...mark, placement: shape.placement ?? "surface", ...(shape.view ? { view: shape.view } : {}) }], view));
+      annotation.fill(shape.id, projectAnnotations(runtime, [{ ...mark, placement: shape.placement ?? "surface", ...(shape.view ? { view: shape.view } : {}) }], view));
     }
   };
 
@@ -104,12 +104,12 @@ export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick =
   const left = Math.max(EDGE, Math.min(box.width - EDGE - size.width, centre - size.width / 2));
   const above = box.top - GAP - size.height;
   const top = above >= EDGE ? above : Math.min(box.bottom + GAP, box.height - EDGE - size.height);
-  return <div ref={bar} role="toolbar" aria-label="Selected drawing"
+  return <div ref={bar} role="toolbar" aria-label="Selected annotation"
     className={cn(FLOATING_CHROME_SURFACE_CLASS, "pointer-events-auto absolute z-20 rounded-md p-0.5", size.width ? null : "invisible")}
-    style={{ left, top }} data-ink-selection-bar="" onPointerDown={event => event.stopPropagation()}>
-    <InkStylePickers label="Selected drawing style" className="flex items-center gap-0.5" disabled={disabled} color={items[0].color}
+    style={{ left, top }} data-annotation-selection-bar="" onPointerDown={event => event.stopPropagation()}>
+    <AnnotationStylePickers label="Selected annotation style" className="flex items-center gap-0.5" disabled={disabled} color={items[0].color} colors={annotationColors(colorScheme)}
       width={strokes.length ? strokeSetting(strokes[0]) : null} dash={shapes.length ? shapes[0].dash ?? "solid" : null}
-      onColor={color => drawing.restyle({ color })} onWidth={width => drawing.restyle({ width })} onDash={dash => drawing.restyle({ dash })}>
+      onColor={color => annotation.restyle({ color })} onWidth={width => annotation.restyle({ width })} onDash={dash => annotation.restyle({ dash })}>
       {closed.length ? <ToolbarButton tooltip={false} label="Fill" disabled={disabled} active={filled} aria-pressed={filled} onClick={toggleFill}>
         <PaintBucket className="size-3" strokeWidth={2} aria-hidden="true" />
       </ToolbarButton> : null}
@@ -117,6 +117,6 @@ export default function InkSelectionBar({ drawing, runtimeRef, viewerReadyTick =
       <ToolbarButton tooltip={false} label="Delete" disabled={disabled} onClick={onDelete}>
         <Trash2 className="size-3" strokeWidth={2} aria-hidden="true" />
       </ToolbarButton>
-    </InkStylePickers>
+    </AnnotationStylePickers>
   </div>;
 }

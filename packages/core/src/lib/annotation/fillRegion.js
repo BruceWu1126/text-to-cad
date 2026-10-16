@@ -1,5 +1,5 @@
 /**
- * Flood fill for a sketch: the region around a point, bounded by drawn ink,
+ * Flood fill for an annotation: the region around a point, bounded by drawn ink,
  * as a polygon. A person indicating "this area" rarely closes the outline, so
  * an open region is retried with nearby stroke ends joined, and finally guessed
  * from what the ink does enclose.

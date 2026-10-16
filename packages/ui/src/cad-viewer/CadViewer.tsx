@@ -46,8 +46,12 @@ export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   library?: ModelLibrarySource<Model>;
   /** Keep the library's picture of a model: the file on screen once it has settled, and on the home a card's. */
   onThumbnail?(png: Blob, file: string): Promise<unknown>;
-  /** The host's controls in the Display panel (the web's appearance). */
-  displayActions?: ReactNode;
+  /**
+   * The host's light/dark control, where the host keeps its own appearance (the web viewer; a host
+   * whose page inherits its app's, as the CAD app does, has none): last at the navbar's right end,
+   * the page's top-right corner, over every file, and last in the home's row.
+   */
+  colorSchemeControl?: ReactNode;
   /** The host's on/off settings, in the app menu the navbar's logo opens over every file (analytics). */
   appSettings?: readonly AppSetting[];
   /** The host's notice: a file's viewport, top-right, once the file is on screen; never the home. */
@@ -83,7 +87,7 @@ const reportError = (error: Error) => console.error(error);
  * navigates: showing a file, or the home, is the host's `onShow`.
  */
 export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, host, tabStore, live, file, onShow, onShown,
-  library, onThumbnail, displayActions, appSettings, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
+  library, onThumbnail, colorSchemeControl, appSettings, notice, update, fullSize, history, onError = reportError }: CadViewerProps<Model>) {
   const preferences = tabStore.settings;
   // One viewer renderer per file family, sharing one client and the tab's preferences; each
   // lazy-loads only its own code.
@@ -167,15 +171,15 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const goHome = useMemo(() => homed ? <Button size="sm" variant="outline" onClick={home}>Go home</Button> : null, [homed, home]);
   const presentation = useMemo(() => ({
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
-      links={host.links} update={update} fullSize={fullSize} onError={onError} /> : undefined,
+      links={host.links} update={update} fullSize={fullSize} colorSchemeControl={colorSchemeControl} onError={onError} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     error: ({ message, missing }: { message: string; missing: boolean }) => missing
       ? <EmptyState icon={FileX} title="File does not exist" description={path} tone="warn" action={goHome} />
       : <EmptyState icon={FileWarning} title="Could not open that file" description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, onError, goHome]);
+  }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, colorSchemeControl, onError, goHome]);
   return <>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
-      displayActions={displayActions} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />
+      colorSchemeControl={colorSchemeControl} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />
     {drawing && !path ? <OffscreenPicture key={drawing.source.file} source={drawing.source} host={host} preferences={preferences} onDone={drawn} /> : null}
   </>;
 }

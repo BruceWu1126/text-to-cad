@@ -18,7 +18,7 @@ function Harness({ initial = { mode: 'solid' } }: { initial?: any }) {
   current = settings;
   return <DisplaySettingsSection viewSettings={settings} resolvedView={scene.view}
     onViewSettingsPatch={store.patch} onGroupEnabledChange={store.setEnabled}
-    onViewReset={store.reset} onModeChange={store.selectPreset}
+    onViewReset={store.reset}
     clipBounds={{ min: [0, 0, 0], max: [100, 100, 100] }} />;
 }
 
@@ -43,7 +43,6 @@ it.each(['Edges', 'Grid / Axes'])('Render remains a preset when the pointer rest
   fireEvent.pointerEnter(heading, { pointerType: 'mouse' });
   act(() => vi.advanceTimersByTime(1000));
   expect(current).toEqual({ mode: 'render' });
-  expect(screen.getByRole('combobox', { name: 'Mode', exact: true }).textContent).toBe('Render');
   expect(screen.getByRole('button', { name: `Enable ${title}` }).getAttribute('aria-expanded')).toBe('false');
 });
 
@@ -90,11 +89,11 @@ it('does not enable a section when the pointer only passes across it', async () 
 it('Reset disables tools and restores the preset; transparency stays in the color picker', async () => {
   const user = userEvent.setup();
   render(<Harness initial={{ mode: 'render', background: { color: '#abcdef', opacity: 0.4 }, exploded: { enabled: true, amount: 0.5 } }} />);
-  const mode = screen.getByRole('region', { name: 'Display', exact: true });
-  expect(within(mode).getByRole('combobox', { name: 'Mode' }).textContent).toBe('Custom');
-  // Projection shares the first row with Mode.
-  expect(within(mode).getByRole('combobox', { name: 'Projection' })).toBeTruthy();
-  expect(within(mode).queryByRole('slider')).toBeNull();
+  // Display's first section is a heading alone, "Custom display", with no body: no Mode (the strip's
+  // Display menu chooses it) and no Projection (the strip's own tile).
+  const mode = document.querySelector<HTMLElement>('[data-settings-section="display"]')!;
+  expect(mode.querySelector('h2')!.textContent).toBe('Custom display');
+  expect([within(mode).queryByRole('combobox'), within(mode).queryByRole('slider')]).toEqual([null, null]);
   const background = screen.getByRole('button', { name: 'Background color' });
   const preview = background.querySelector('[data-color-preview]') as HTMLElement;
   expect(preview.style.opacity).toBe('0.4');
@@ -106,11 +105,10 @@ it('Reset disables tools and restores the preset; transparency stays in the colo
   await user.keyboard('{Escape}');
   await user.click(screen.getByRole('button', { name: 'Reset', exact: true }));
   expect(current).toEqual({ mode: 'render' });
-  expect(within(mode).getByRole('combobox', { name: 'Mode' }).textContent).toBe('Render');
 });
 
-it('keeps one section order in every preset, Display first', () => {
-  const headings = ['Display', 'Surfaces', 'Edges', 'Grid / Axes', 'Lighting', 'Background', 'Floor'];
+it('keeps one section order in every preset, Custom display first', () => {
+  const headings = ['Custom display', 'Surfaces', 'Edges', 'Grid / Axes', 'Lighting', 'Background', 'Floor'];
   for (const mode of ['solid', 'render', 'wireframe']) {
     render(<Harness initial={{ mode }} />);
     expect(screen.getAllByRole('heading').map(node => node.textContent)).toEqual(headings);
@@ -166,7 +164,7 @@ it('Cross-section turns on at an X centre cut; its body is the axis dropdown and
   const amount = () => screen.getByRole('slider', { name: 'Clip amount' });
   expect(amount().getAttribute('aria-valuenow')).toBe('50');
   // The axis is a compact dropdown left of the slider, in the one row of the body.
-  const axis = screen.getByRole('combobox', { name: 'Clip axis' });
+  const axis = screen.getByRole('button', { name: 'Clip axis: X' });
   expect(axis.textContent).toBe('X');
   expect(axis.closest('[data-slot="slider"]')).toBeNull();
   expect(amount().closest('[data-slot="slider"]')!.parentElement!.contains(axis)).toBe(true);
@@ -183,14 +181,14 @@ it('Cross-section turns on at an X centre cut; its body is the axis dropdown and
   const share = Number(amount().getAttribute('aria-valuenow'));
   expect(share).toBeGreaterThan(50);
   expect(share).toBeLessThan(100);
-  fireEvent.keyDown(axis, { key: 'ArrowDown' });
-  fireEvent.click(screen.getByRole('option', { name: 'Y', exact: true }));
-  expect(resolveViewSettings(current).clip.axis).toBe('y');
+  await user.click(axis);
+  await user.click(screen.getByRole('menuitemradio', { name: 'Y', exact: true }));
+  expect([resolveViewSettings(current).clip.axis, screen.getByRole('button', { name: 'Clip axis: Y' }).textContent]).toEqual(['y', 'Y']);
   // The same share of Y's -50..50.
   expect(resolveViewSettings(current).clip.at).toBeCloseTo(50 - share, 9);
   expect(Number(amount().getAttribute('aria-valuenow'))).toBeCloseTo(share, 9);
   // The dropdown hands focus back to its trigger as it closes; take it to the slider after that.
-  await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   await act(async () => {});
   amount().focus();
   await user.keyboard('{Home}');
@@ -219,14 +217,6 @@ it('enabling Background does not expose or enable Lighting or Floor', () => {
   expect(screen.queryByRole('button', { name: 'Floor color' })).toBeNull();
   expect(resolveViewSettings(current).lighting.enabled).toBe(false);
   expect(resolveViewSettings(current).floor.enabled).toBe(false);
-});
-
-it('the Projection value ends in an ellipsis when its column is narrow, with its icon beside it', () => {
-  render(<Harness initial={{ mode: 'solid', camera: { enabled: true, projection: 'orthographic' } }} />);
-  const trigger = screen.getByRole('combobox', { name: 'Projection' });
-  const value = within(trigger).getByText('Orthographic');
-  expect(value.classList.contains('truncate')).toBe(true);
-  expect(value.parentElement!.querySelector('svg')).not.toBeNull();
 });
 
 it('Explode and Clip report their value at their step\'s precision, never float noise', () => {

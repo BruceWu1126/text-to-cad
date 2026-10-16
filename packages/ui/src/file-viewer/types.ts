@@ -85,17 +85,9 @@ export interface ViewerHistory {
 export interface RendererViewProps {
   /** The host's notice: the viewport's top-right once the file is on screen, Quick Edit under it. */
   notice?: ReactNode;
-  /** Optional host-owned controls inside the Display panel (the web's appearance). */
-  displayActions?: ReactNode;
   onNavigationActionsChange?: (actions: readonly FileNavigationAction[]) => void;
   file: FileMetadata;
   source: FileSource;
-  /**
-   * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn, as while the
-   * renderer shows its file fullscreen.
-   */
-  navbarSlot: HTMLElement | null;
   /**
    * The renderer shows its file fullscreen (the CAD viewer's Preview), or no longer does: the
    * navbar steps aside while it lasts.
@@ -141,8 +133,12 @@ export interface FileViewerProps {
   renderers: readonly RendererRegistration[];
   state: FileViewerState;
   onStateChange: (next: FileViewerState) => void;
-  /** Host controls inside the CAD Display panel. */
-  displayActions?: ReactNode;
+  /**
+   * The host's light/dark control, where the host keeps its own appearance (the web viewer; a host
+   * whose page inherits its app's, as the CAD app does, has none): last at the navbar's right end,
+   * the page's top-right corner, over every file, and last in the home's row.
+   */
+  colorSchemeControl?: ReactNode;
   /**
    * The person's on/off settings, in the app menu the navbar's logo opens over every file, with
    * the host's links (`host.links`).
@@ -155,7 +151,7 @@ export interface FileViewerProps {
   update?: ReactNode;
   /**
    * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * the last of the navbar's own controls, before the renderer's view controls.
+   * at the navbar's right end, before `colorSchemeControl`.
    */
   fullSize?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward, between the navbar's logo and the file's name. */

@@ -268,7 +268,7 @@ class CadApp:
         self.surface_subscribers = SurfaceSubscribers()
         # The drawing route's renders, off the request and one per drawing (``drawings.py``).
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
-        # A Quick Edit prompt's files: its views' job, its sketch and their renders (``prompt_files.py``).
+        # A Quick Edit prompt's files: its views' job, its annotation and their renders (``prompt_files.py``).
         self.prompt_files = PromptFiles(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # What a watched build saves, its catalog row computed before a read asks (``warm.py``).
         self.catalog_warm = CatalogWarmer()

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeSketch } from "./sketch.js";
+import { normalizeAnnotation } from "./annotation.js";
 
 const PLACEMENT = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const stroke = (fields = {}) => ({ id: "1", kind: "stroke", part: "o1.2", points: [0, 0, 0, 1, 1, 1], color: "#ff2d55", width: 2, ...fields });
 
-test("a sketch file is read with each mark's defaults filled", () => {
-  const sketch = normalizeSketch({
+test("an annotation file is read with each mark's defaults filled", () => {
+  const annotation = normalizeAnnotation({
     units: "mm",
     parts: { "o1.2": { placement: PLACEMENT } },
     marks: [
@@ -16,16 +16,16 @@ test("a sketch file is read with each mark's defaults filled", () => {
       { id: "3", kind: "text", part: "o1.2", points: [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0], color: "#000000", text: "M6", fontPx: 20 },
     ],
   });
-  assert.deepEqual(sketch.parts, { "o1.2": { placement: PLACEMENT } });
-  assert.deepEqual(sketch.marks.map(mark => mark.kind), ["stroke", "area", "text"]);
-  assert.deepEqual([sketch.marks[0].dash, sketch.marks[0].closed, sketch.marks[0].widths], ["solid", false, [1, 0.5]]);
-  assert.equal(sketch.marks[1].outline, 3, "an area's outline is all its points unless it says otherwise");
-  assert.equal(normalizeSketch({ marks: [] }).units, "mm");
+  assert.deepEqual(annotation.parts, { "o1.2": { placement: PLACEMENT } });
+  assert.deepEqual(annotation.marks.map(mark => mark.kind), ["stroke", "area", "text"]);
+  assert.deepEqual([annotation.marks[0].dash, annotation.marks[0].closed, annotation.marks[0].widths], ["solid", false, [1, 0.5]]);
+  assert.equal(annotation.marks[1].outline, 3, "an area's outline is all its points unless it says otherwise");
+  assert.equal(normalizeAnnotation({ marks: [] }).units, "mm");
 });
 
-test("a sketch that is not one is refused by what is wrong, an unknown field included", () => {
+test("an annotation that is not one is refused by what is wrong, an unknown field included", () => {
   for (const [raw, said] of [
-    [[], "a sketch is an object"],
+    [[], "an annotation is an object"],
     [{ marks: [], colour: "red" }, 'unknown field "colour"'],
     [{ marks: {} }, "marks must be an array"],
     [{ marks: [stroke({ shade: 1 })] }, 'marks[0]: unknown field "shade"'],
@@ -40,6 +40,6 @@ test("a sketch that is not one is refused by what is wrong, an unknown field inc
     [{ marks: [{ ...stroke(), kind: "area", triangles: [0, 1, 5] }] }, "marks[0].triangles must index its points"],
     [{ marks: [{ ...stroke(), kind: "text", fontPx: 12 }] }, "a text mark's points are its four corners"],
   ]) {
-    assert.throws(() => normalizeSketch(raw), (error) => error.message.startsWith("sketch: ") && error.message.includes(said), said);
+    assert.throws(() => normalizeAnnotation(raw), (error) => error.message.startsWith("annotation: ") && error.message.includes(said), said);
   }
 });

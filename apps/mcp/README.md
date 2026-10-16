@@ -21,8 +21,8 @@ extension):
   mounts a viewer card in the chat, and the host keeps the old cards. A card is
   the whole viewer at card size: its navbar (the logo, which opens the app menu,
   first; the file name that opens the explorer; the ⋯; then, at the right, the
-  update button, Full size where the host can show a view full size, and last Display
-  and Preview), the tools, the view cube, and Quick Edit. A
+  update button, and Full size where the host can show a view full size), the tool strip
+  ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
   newer card retires the older ones.
 
 A client that renders no MCP Apps never loads this page: its `cad_show` answers
@@ -243,9 +243,12 @@ another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
 frames, so there is nothing to keep its record under. `App.tsx` frames it (full page, or
 an inline card whose height the host is told; its Full size is the last of the navbar's
-own controls, before the view's own: Display and Preview). In a tab, preview's playbar sits on the line of Codex's
+controls). In a tab, preview's playbar sits on the line of Codex's
 composer, which floats over the page (`--cad-viewport-bottom-center`), and the
-home's list scrolls clear of it (`--cad-host-bottom-inset`).
+home's list scrolls clear of it (`--cad-host-bottom-inset`). On Codex's sidebar page (tabs,
+surface `sidebar`) the page's own chat button floats in the bottom-right corner, where the
+view cube sits: `App.tsx` sets `--cad-viewport-corner-bottom` to 52px, and the cube sits that
+far higher.
 
 ## Develop
 

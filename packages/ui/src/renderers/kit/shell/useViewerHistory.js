@@ -6,7 +6,7 @@ const LIMIT = 200;
  * One file view's undo history, across its tools: each step a tool takes records how to take it
  * back and do it again (`record`), and Undo and Redo walk the one list, whichever tool took the
  * step. Only what a person makes is a step — ink, a measurement — never the camera or a
- * selection. A tool whose work is gone (the drawing discarded with its model) takes its steps
+ * selection. A tool whose work is gone (the annotation discarded with its model) takes its steps
  * out (`forget`).
  *
  * @typedef {{ source: string, undo: () => void, redo: () => void }} ViewerHistoryStep

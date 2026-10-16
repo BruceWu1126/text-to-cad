@@ -84,14 +84,14 @@ test('the web host keeps the URL, the history, the title and the appearance, and
     assert.deepEqual(await autoReloadOptions().fetchServerInfo(), { ok: true, identityToken: 'restarted' });
     assert.deepEqual(serverCalls[0], { fresh: true });
 
-    // The appearance is the tab's, resolved against the OS.
-    assert.equal(viewer().displayActions.props.colorSchemePreference, 'system');
-    assert.equal(viewer().displayActions.props.resolvedColorSchemeMode, 'light');
+    // The appearance is the tab's, resolved against the OS; its control is the navbar's, last.
+    assert.equal(viewer().colorSchemeControl.props.colorSchemePreference, 'system');
+    assert.equal(viewer().colorSchemeControl.props.resolvedColorSchemeMode, 'light');
+    assert.equal(viewer().host.environment.colorScheme, 'light');
     await act(() => { systemDark = true; for (const listener of appearanceListeners) listener(); });
-    assert.equal(viewer().displayActions.props.resolvedColorSchemeMode, 'dark');
     assert.equal(viewer().host.environment.colorScheme, 'dark');
     assert.equal(window.document.documentElement.classList.contains('dark'), true);
-    await act(() => viewer().displayActions.props.onColorSchemePreferenceChange('light'));
+    await act(() => viewer().colorSchemeControl.props.onColorSchemePreferenceChange('light'));
     assert.equal(viewer().host.environment.colorScheme, 'light');
     assert.equal(window.document.documentElement.classList.contains('dark'), false);
     // In the tab's record, under no key of its own and in no cookie.

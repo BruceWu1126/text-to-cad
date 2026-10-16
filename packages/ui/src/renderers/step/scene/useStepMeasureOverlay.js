@@ -21,7 +21,7 @@ import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureR
 
 import { measureRulerDraftMeasurement } from "../workbench/measureRulerState.js";
 
-// What Select has picked, as the drawing's ink and the parts are: the one selection blue.
+// What Select has picked, as the annotations and the parts are: the one selection blue.
 const MEASURE_SELECTED_COLOR = "#2979ff";
 
 export function useStepMeasureOverlay({
@@ -75,7 +75,7 @@ export function useStepMeasureOverlay({
 
     // One drawing of the overlay as the camera stands now. It runs right after every render of the
     // scene (`scene.onAfterRender`), so a dimension moves in the same frame the model does, as the
-    // drawing's ink (in the scene) does; and on its own frames, for the snap marker's pulse while
+    // annotations (in the scene) do; and on its own frames, for the snap marker's pulse while
     // nothing re-renders the scene.
     const draw = (now) => {
       const context = canvas.getContext("2d");

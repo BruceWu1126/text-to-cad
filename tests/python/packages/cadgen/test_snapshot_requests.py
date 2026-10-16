@@ -680,16 +680,16 @@ class PoseLimitTests(_Workspace):
             self.prepare({"input": "arm.sdf", "jointValues": {"elbow": 91}})
 
 
-SKETCH = {"units": "mm", "parts": {}, "marks": [
+ANNOTATION = {"units": "mm", "parts": {}, "marks": [
     {"id": "1", "kind": "stroke", "part": None, "points": [0, 0, 0, 1, 1, 1], "color": "#ff2d55", "width": 2}]}
 
 
-class SketchAndTargetTests(_Workspace):
-    """A job's sketch is read from its file and handed to the page; TARGET re-aims a job file."""
+class AnnotationAndTargetTests(_Workspace):
+    """A job's annotation is read from its file and handed to the page; TARGET re-aims a job file."""
 
     def setUp(self) -> None:
         super().setUp()
-        self.sketch = self.write("ink.sketch.json", json.dumps(SKETCH))
+        self.annotation = self.write("ink.annotation.json", json.dumps(ANNOTATION))
         self.jobs = self.write("views.job.json", json.dumps({"jobs": [
             {"input": "part.stl", "camera": "iso", "outputs": [{"path": "a.png"}]},
             {"input": "part.stl", "camera": "top", "outputs": [{"path": "b.png"}]},
@@ -700,39 +700,39 @@ class SketchAndTargetTests(_Workspace):
         return resolve_render_job_packet(load_job_from_options(options, cwd=self.root), cwd=self.root)
 
     def test_a_sketch_file_or_object_reaches_the_page_as_the_object(self) -> None:
-        by_file = self.resolve(self.stl_job(sketch="ink.sketch.json"))["jobs"][0]
-        self.assertEqual((by_file["sketch"], by_file["resolved"]["sketchSource"]), (SKETCH, str(self.sketch)))
-        inline = self.resolve(self.stl_job(sketch=SKETCH))["jobs"][0]
-        self.assertEqual((inline["sketch"], "sketchSource" in inline["resolved"]), (SKETCH, False))
+        by_file = self.resolve(self.stl_job(annotation="ink.annotation.json"))["jobs"][0]
+        self.assertEqual((by_file["annotation"], by_file["resolved"]["annotationSource"]), (ANNOTATION, str(self.annotation)))
+        inline = self.resolve(self.stl_job(annotation=ANNOTATION))["jobs"][0]
+        self.assertEqual((inline["annotation"], "annotationSource" in inline["resolved"]), (ANNOTATION, False))
 
     def test_the_flag_draws_over_every_job_and_a_target_replaces_every_jobs_input(self) -> None:
         other = self.write("other.stl", STL)
         jobs = self.from_options(job=str(self.jobs), input=str(other), output="ignored.png",
-                                 sketch="ink.sketch.json", sketch_specified=True)["jobs"]
+                                 annotation="ink.annotation.json", annotation_specified=True)["jobs"]
         self.assertEqual([job["input"] for job in jobs], [str(other)] * 2)
-        self.assertEqual([job["sketch"] for job in jobs], [SKETCH] * 2)
+        self.assertEqual([job["annotation"] for job in jobs], [ANNOTATION] * 2)
         self.assertEqual([job["outputs"][0]["path"] for job in jobs], [str(self.root / "a.png"), str(self.root / "b.png")])
         # And the flag is on every door that draws a scene, by that name.
         for door in (step_door, stl_door, urdf_door, any_door):
             with self.subTest(door=door.__name__), mock.patch.object(snapshot_cli, "run_snapshot") as run:
                 run.return_value = snapshot_core.snapshot_result({"ok": True, "mode": "view", "outputs": []})
-                code, _ = run_door(door, [self.stl, self.out, "--sketch", "ink.sketch.json"])
+                code, _ = run_door(door, [self.stl, self.out, "--annotation", "ink.annotation.json"])
                 self.assertEqual(code, 0)
-                self.assertEqual((run.call_args.args[0].sketch, run.call_args.args[0].sketch_specified),
-                                 ("ink.sketch.json", True))
-        code, said = run_door(dxf_door, ["panel.dxf", self.out, "--sketch", "ink.sketch.json"])
+                self.assertEqual((run.call_args.args[0].annotation, run.call_args.args[0].annotation_specified),
+                                 ("ink.annotation.json", True))
+        code, said = run_door(dxf_door, ["panel.dxf", self.out, "--annotation", "ink.annotation.json"])
         self.assertEqual(code, 2)
-        self.assertIn("--sketch", said)
+        self.assertIn("--annotation", said)
 
     def test_a_sketch_that_is_not_one_is_refused_and_a_drawing_or_a_list_takes_none(self) -> None:
         self.write("list.json", "[]")
         self.write("panel.dxf", "0\nEOF\n")
         for job, said in (
-            (self.stl_job(sketch="missing.json"), "sketch file does not exist: missing.json"),
-            (self.stl_job(sketch="list.json"), "a sketch is a JSON object with units, parts and marks"),
-            (self.stl_job(sketch=["not", "one"]), "sketch is the path of a sketch JSON file"),
-            ({"input": "part.stl", "mode": "list", "outputs": [], "sketch": SKETCH}, "list mode draws nothing"),
-            ({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "sketch": SKETCH}, "panel.dxf has no parts or space"),
+            (self.stl_job(annotation="missing.json"), "annotation file does not exist: missing.json"),
+            (self.stl_job(annotation="list.json"), "an annotation is a JSON object with units, parts and marks"),
+            (self.stl_job(annotation=["not", "one"]), "annotation is the path of an annotation JSON file"),
+            ({"input": "part.stl", "mode": "list", "outputs": [], "annotation": ANNOTATION}, "list mode draws nothing"),
+            ({"input": "panel.dxf", "outputs": [{"path": "o.png"}], "annotation": ANNOTATION}, "panel.dxf has no parts or space"),
         ):
             with self.subTest(job=job), self.assertRaisesRegex(SnapshotError, re.escape(said)):
                 self.resolve(job)
@@ -762,13 +762,13 @@ class SketchAndTargetTests(_Workspace):
 
     def test_the_pages_refusal_of_a_mark_names_the_sketch_file(self) -> None:
         async def refused():
-            raise RuntimeError("Page.evaluate: Error: sketch: marks[0].color must be a #rrggbb colour\n    at nn (x.js:1)")
+            raise RuntimeError("Page.evaluate: Error: annotation: marks[0].color must be a #rrggbb colour\n    at nn (x.js:1)")
 
-        job = {"sketch": SKETCH, "resolved": {"sketchSource": "/p/ink.sketch.json"}}
-        with self.assertRaisesRegex(SnapshotError, r"^/p/ink\.sketch\.json: sketch: marks\[0\]\.color must be a #rrggbb colour$"):
-            asyncio.run(snapshot_core._refusing_sketch(job, refused()))
+        job = {"annotation": ANNOTATION, "resolved": {"annotationSource": "/p/ink.annotation.json"}}
+        with self.assertRaisesRegex(SnapshotError, r"^/p/ink\.annotation\.json: annotation: marks\[0\]\.color must be a #rrggbb colour$"):
+            asyncio.run(snapshot_core._refusing_annotation(job, refused()))
         with self.assertRaisesRegex(RuntimeError, "Page.evaluate"):
-            asyncio.run(snapshot_core._refusing_sketch({}, refused()))
+            asyncio.run(snapshot_core._refusing_annotation({}, refused()))
 
 
 if __name__ == "__main__":

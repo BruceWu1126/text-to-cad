@@ -131,15 +131,15 @@ the packet, and `--width`/`--height` size every output. A TARGET given with
 revision, a sibling). OUT is ignored with `--job`; the jobs' outputs say where
 the files go.
 
-## Sketches
+## Annotations
 
-A job's `sketch` (the `--sketch` flag sets it on every job) is ink drawn over
-the model: a sketch JSON file's path, resolved as a job's `input` is, or the
-sketch object itself. The CAD Viewer's Draw tool writes one with a Quick Edit
+A job's `annotation` (the `--annotation` flag sets it on every job) is ink drawn over
+the model: an annotation JSON file's path, resolved as a job's `input` is, or the
+annotation object itself. The CAD Viewer's Annotate tool writes one with a Quick Edit
 prompt, beside a job file that renders the views the person looked at with it
 (`cadgen.viewer.prompt_files`). Snapshot reads the file and hands the object to
 the page, which draws it with the viewer's own code: what an agent renders is
-what the person drew. A drawing (DXF) and `--mode list` take no sketch.
+what the person drew. A drawing (DXF) and `--mode list` take no annotation.
 
 ```json
 { "units": "mm",
@@ -160,7 +160,7 @@ what the person drew. A drawing (DXF) and `--mode list` take no sketch.
   triples) are in that part's own frame: the mark follows the part wherever the
   job puts it (exploded, posed), hides when it is hidden and is cut by the clip.
   A part the model no longer has falls back to `parts[id].placement`, where it
-  was when the sketch was made. `part: null` is in model coordinates. A mesh or
+  was when the annotation was made. `part: null` is in model coordinates. A mesh or
   robot scene has no occurrence ids, so its marks take those fallbacks.
 - `placement` (drawn on the model, or in space), `view` (the label of the view
   it was drawn in), `group` and `touches` (the parts under it as it was drawn)
@@ -168,8 +168,8 @@ what the person drew. A drawing (DXF) and `--mode list` take no sketch.
 - A stroke is as heavy against the image's height as it was against a viewer
   900 pixels tall.
 
-Every field is checked before the model loads, and a refusal names the sketch
-file and the mark (`ink.sketch.json: sketch: marks[2].color must be a #rrggbb
+Every field is checked before the model loads, and a refusal names the annotation
+file and the mark (`ink.annotation.json: annotation: marks[2].color must be a #rrggbb
 colour`). An unknown field is refused, never read as a default.
 
 ## Measurements

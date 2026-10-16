@@ -1,6 +1,6 @@
 """``/__cad/prompt-files``: the files a Quick Edit prompt names, rendered off the request.
 
-A copied Quick Edit is text, and text cannot carry a picture or a 3D sketch. So
+A copied Quick Edit is text, and text cannot carry a picture or a 3D annotation. So
 the views the person looked at, and the ink they drew over them, are written
 here as files and the prompt names them: anything that can read a file can read
 them, and an agent can render the same views again -- after an edit, to check
@@ -10,10 +10,10 @@ One prompt writes, in this process's directory under the system's temporary
 directory (which the system clears; they outlive the viewer, so a prompt pasted
 later still finds them):
 
-* ``<stem>-<n>.sketch.json`` -- the sketch, when the prompt has one: the format
-  ``cadgen snapshot --sketch`` reads (SNAPSHOTS.md, "Sketches").
+* ``<stem>-<n>.annotation.json`` -- the annotation, when the prompt has one: the format
+  ``cadgen snapshot --annotation`` reads (SNAPSHOTS.md, "Annotations").
 * ``<stem>-<n>.job.json`` -- ``{"jobs": [...]}``, one job per view: exactly what
-  ``cadgen snapshot --job <file>`` renders, the sketch named by its path.
+  ``cadgen snapshot --job <file>`` renders, the annotation named by its path.
 * ``<stem>-<n>-<label>.png`` -- each view, rendered from that job file by
   snapshot's own code (:func:`cadgen.snapshot_cli.run_snapshot_async`).
 
@@ -22,15 +22,15 @@ the person's, and the header keeps another site's page from reading them):
 
 * ``POST /__cad/prompt-files``, body ``{"name", "input", "views": [{"label",
   "camera", "display"?, "kinematics"?, "jointValues"?, "animation"?, "selection"?,
-  "width"?, "height"?}], "sketch": {...} | null, "measurements"?: [{"start", "end",
+  "width"?, "height"?}], "annotation": {...} | null, "measurements"?: [{"start", "end",
   "label", "color"}]}`` (Measure's results, drawn over every view) -> ``202 {"ok": true, "id", "retryMs"}``
-  at once, the request accepted (its shape, the sketch's outer shape and the job
+  at once, the request accepted (its shape, the annotation's outer shape and the job
   as snapshot prepares it); ``400 {"ok": false, "error"}`` when it is not.
-* ``POST /__cad/prompt-files/save``, body ``{"name", "kind": "sketch" | "measurement",
+* ``POST /__cad/prompt-files/save``, body ``{"name", "kind": "annotation" | "measurement",
   "data"}`` -> ``200 {"ok": true, "path"}``: a Quick Edit chip's copy as a file, written at
   once (``PromptFiles.save``); ``400`` when it is not one.
 * ``GET /__cad/prompt-files?id=<id>`` -> ``202 {"ok": true, "id", "retryMs"}``
-  while it renders; ``200 {"ok": true, "job", "sketch": <path> | null,
+  while it renders; ``200 {"ok": true, "job", "annotation": <path> | null,
   "images": [{"label", "path"}]}`` (the views' order) when it is done; ``500
   {"ok": false, "error"}`` when the render failed; ``404 {"ok": false, "error"}``
   for an id this process does not know, or no longer keeps (``KEEP_SECONDS``).
@@ -62,7 +62,7 @@ from cadgen._internal.atomic_replace import write_bytes_atomic
 __all__ = ["PROMPT_FILES_ROUTE", "PromptFiles", "WarmSnapshotSession"]
 
 PROMPT_FILES_ROUTE = "/__cad/prompt-files"
-# How long a request carries: a sketch is points, and a long session of drawing is megabytes.
+# How long a request carries: an annotation is points, and a long session of annotating is megabytes.
 MAX_BODY_BYTES = 32 * 1024 * 1024
 MAX_VIEWS = 16
 # When the page asks again while a prompt renders.
@@ -71,9 +71,9 @@ RETRY_MS = 200
 KEEP_SECONDS = 600.0
 # How long the browser stays open without a prompt to render.
 IDLE_SECONDS = 300.0
-_REQUEST_KEYS = frozenset({"name", "input", "views", "sketch", "measurements"})
+_REQUEST_KEYS = frozenset({"name", "input", "views", "annotation", "measurements"})
 _VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "animation", "selection", "width", "height"})
-_SKETCH_KEYS = frozenset({"units", "parts", "marks"})
+_ANNOTATION_KEYS = frozenset({"units", "parts", "marks"})
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.(png|json)")
 
@@ -218,8 +218,8 @@ class PromptFiles:
     def save(self, body: bytes) -> tuple[int, dict]:
         """A Quick Edit chip's copy as a file, written at once: ``200 {"ok": true, "path"}``, or ``400``.
 
-        ``{"name", "kind": "sketch", "data": <a sketch>}`` writes ``<name>-<n>.sketch.json``
-        (``cadgen snapshot --sketch`` reads it); ``{"name", "kind": "measurement", "data":
+        ``{"name", "kind": "annotation", "data": <an annotation>}`` writes ``<name>-<n>.annotation.json``
+        (``cadgen snapshot --annotation`` reads it); ``{"name", "kind": "measurement", "data":
         {start, end, label, color}}`` writes ``<name>-<n>.measurement.json``, the list of that one
         (``--measurements`` reads it). Nothing renders.
         """
@@ -230,10 +230,10 @@ class PromptFiles:
         if type(request) is not dict or not set(request) <= {"name", "kind", "data"}:
             raise ValueError("a chip's file is requested as {name, kind, data}")
         kind, data = request.get("kind"), request.get("data")
-        if kind == "sketch":
-            if type(data) is not dict or not set(data) <= _SKETCH_KEYS or type(data.get("marks")) is not list:
-                raise ValueError("a sketch is an object of units, parts and marks (a list)")
-            content, suffix = data, "sketch"
+        if kind == "annotation":
+            if type(data) is not dict or not set(data) <= _ANNOTATION_KEYS or type(data.get("marks")) is not list:
+                raise ValueError("an annotation is an object of units, parts and marks (a list)")
+            content, suffix = data, "annotation"
         elif kind == "measurement":
             from cadgen.snapshot_cli import normalize_measurements
             from cadgen.snapshot_core import SnapshotError
@@ -244,7 +244,7 @@ class PromptFiles:
                 raise ValueError(str(error)) from None
             suffix = "measurement"
         else:
-            raise ValueError("kind is sketch or measurement")
+            raise ValueError("kind is annotation or measurement")
         name = request.get("name")
         directory = self.directory
         with self._lock:
@@ -259,12 +259,12 @@ class PromptFiles:
             request = json.loads(body or b"null")
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(f"a prompt's files are requested as JSON: {error}") from None
-        name, input_path, views, sketch, measurements = _checked(request)
+        name, input_path, views, annotation, measurements = _checked(request)
         directory = self.directory
         with self._lock:
             self._count += 1
             prefix = f"{_stem(name or input_path)}-{self._count}"
-        sketch_path = directory / f"{prefix}.sketch.json" if sketch is not None else None
+        annotation_path = directory / f"{prefix}.annotation.json" if annotation is not None else None
         labels: set[str] = set()
         jobs, images = [], []
         for index, view in enumerate(views):
@@ -278,8 +278,8 @@ class PromptFiles:
                 if key in view:
                     output[key] = view[key]
             job: dict[str, object] = {"input": input_path}
-            if sketch_path is not None:
-                job["sketch"] = str(sketch_path)
+            if annotation_path is not None:
+                job["annotation"] = str(annotation_path)
             job["camera"] = view["camera"]
             for key in ("display", "kinematics", "jointValues", "animation", "selection"):
                 if view.get(key) is not None:
@@ -292,9 +292,9 @@ class PromptFiles:
             jobs.append(job)
             images.append({"label": view["label"], "path": str(image)})
         job_path = directory / f"{prefix}.job.json"
-        written = [job_path] + ([sketch_path] if sketch_path is not None else [])
-        if sketch_path is not None:
-            write_bytes_atomic(sketch_path, (json.dumps(sketch, indent=2) + "\n").encode("utf-8"))
+        written = [job_path] + ([annotation_path] if annotation_path is not None else [])
+        if annotation_path is not None:
+            write_bytes_atomic(annotation_path, (json.dumps(annotation, indent=2) + "\n").encode("utf-8"))
         write_bytes_atomic(job_path, (json.dumps({"jobs": jobs}, indent=2) + "\n").encode("utf-8"))
         try:
             _accepted(job_path)
@@ -302,7 +302,7 @@ class PromptFiles:
             for path in written:
                 path.unlink(missing_ok=True)
             raise
-        answer = {"ok": True, "job": str(job_path), "sketch": str(sketch_path) if sketch_path else None,
+        answer = {"ok": True, "job": str(job_path), "annotation": str(annotation_path) if annotation_path else None,
                   "images": images}
         render_id = secrets.token_hex(12)
         render = _Render()
@@ -373,7 +373,7 @@ class PromptFiles:
 def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     """The request's fields, each checked; ``ValueError`` names what is wrong."""
     if type(request) is not dict:
-        raise ValueError("a prompt's files are requested as an object: {name, input, views, sketch, measurements}")
+        raise ValueError("a prompt's files are requested as an object: {name, input, views, annotation, measurements}")
     unknown = sorted(set(request) - _REQUEST_KEYS)
     if unknown:
         raise ValueError(f"unknown field(s): {', '.join(unknown)}; a request has {', '.join(sorted(_REQUEST_KEYS))}")
@@ -404,17 +404,17 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
         for key in ("width", "height"):
             if key in view and (type(view[key]) is not int or not 1 <= view[key] <= 8192):
                 raise ValueError(f"{at}.{key} is a number of pixels, 1 to 8192")
-    sketch = request.get("sketch")
-    if sketch is not None:
-        if type(sketch) is not dict or not set(sketch) <= _SKETCH_KEYS or type(sketch.get("marks")) is not list:
-            raise ValueError("sketch is null or an object of units, parts and marks (a list)")
-        if not all(type(mark) is dict for mark in sketch["marks"]):
-            raise ValueError("sketch.marks lists objects")
+    annotation = request.get("annotation")
+    if annotation is not None:
+        if type(annotation) is not dict or not set(annotation) <= _ANNOTATION_KEYS or type(annotation.get("marks")) is not list:
+            raise ValueError("annotation is null or an object of units, parts and marks (a list)")
+        if not all(type(mark) is dict for mark in annotation["marks"]):
+            raise ValueError("annotation.marks lists objects")
     # Measure's results: their shape is snapshot's to check, with the job (`_accepted`).
     measurements = request.get("measurements")
     if measurements is not None and type(measurements) is not list:
         raise ValueError("measurements is null or a list of {start, end, label, color}")
-    return name or "", input_path, views, sketch, measurements
+    return name or "", input_path, views, annotation, measurements
 
 
 def _accepted(job_path: Path) -> None:

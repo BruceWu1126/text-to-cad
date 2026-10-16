@@ -492,8 +492,8 @@ reads the clipboard. Unsupported desktop clipboard environments return an error.
 
 It exposes `/__cad/prompt-files` for the files a copied Quick Edit prompt names by
 path: the views a person looked at as a snapshot job file (`cadgen snapshot --job`
-renders it as it stands), their sketch as a sketch file ([`SNAPSHOTS.md`](SNAPSHOTS.md),
-"Sketches"), and those views rendered to PNGs by snapshot's own code. `POST` accepts
+renders it as it stands), their annotation as an annotation file ([`SNAPSHOTS.md`](SNAPSHOTS.md),
+"Annotations"), and those views rendered to PNGs by snapshot's own code. `POST` accepts
 the request at once (`202 {id, retryMs}`) and renders off the request, one prompt at
 a time, in a headless browser it keeps open between prompts; `GET ?id=` answers 202
 until the files are written, then where they are. The files are scratch in the

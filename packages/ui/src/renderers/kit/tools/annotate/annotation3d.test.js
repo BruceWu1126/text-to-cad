@@ -5,10 +5,10 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
-import { normalizeSketch } from '@text-to-cad/core/common/sketch.js';
-import { inkSketch, mountInk, projectInk } from './ink3d.js';
+import { normalizeAnnotation } from '@text-to-cad/core/common/annotation.js';
+import { annotationDocumentOf, mountAnnotations, projectAnnotations } from './annotation3d.js';
 
-/** Draw's ink in 3D: drawn over one view, projected onto the parts under it, carried with them. */
+/** Annotate's ink in 3D: drawn over one view, projected onto the parts under it, carried with them. */
 
 // A 20 × 20 × 2 slab, part "slab" (top face at z = 0), and a 2 × 2 post, part "post", standing on it
 // to z = 10, under an orthographic camera looking straight down: one screen pixel is one unit, and
@@ -44,7 +44,7 @@ const worldOf = (item, part) => Array.from({ length: item.points.length / 3 },
 
 test('a stroke lies on the part under it, in its frame, two pixels off the face; one over nothing lies in the air at the orbit target', () => {
   const { runtime, slab } = rig();
-  const [onSlab, inAir] = projectInk(runtime, [stroke('on', [[42, 55], [45, 55]]), stroke('off', [[5, 5], [10, 5]])], size);
+  const [onSlab, inAir] = projectAnnotations(runtime, [stroke('on', [[42, 55], [45, 55]]), stroke('off', [[5, 5], [10, 5]])], size);
   assert.equal(onSlab.part, 'slab');
   const [start] = worldOf(onSlab, slab);
   assert.ok(Math.abs(start.x + 8) < 1e-6 && Math.abs(start.y + 5) < 1e-6, 'where it was drawn');
@@ -55,7 +55,7 @@ test('a stroke lies on the part under it, in its frame, two pixels off the face;
 
 test('a stroke drawn in space lies on the plane just in front of the model, on no part, whatever is under it; one on the model beside it still lands on the model', () => {
   const { runtime, slab } = rig();
-  const [inSpace, onModel] = projectInk(runtime, [{ ...stroke('space', [[42, 55], [45, 55]]), placement: 'space' },
+  const [inSpace, onModel] = projectAnnotations(runtime, [{ ...stroke('space', [[42, 55], [45, 55]]), placement: 'space' },
     { ...stroke('surface', [[42, 58], [45, 58]]), placement: 'surface' }], size);
   assert.equal(inSpace.part, null);
   assert.equal(inSpace.placement, 'space');
@@ -68,13 +68,13 @@ test('a stroke drawn in space lies on the plane just in front of the model, on n
   assert.ok(worldOf(onModel, slab).every(point => Math.abs(point.z - 2) < 1e-6));
   // Marks all in space look at no part: nothing under them is read.
   slab.raycast = () => { throw new Error('the parts were read for ink in space'); };
-  assert.equal(projectInk(runtime, [{ ...stroke('alone', [[42, 55], [45, 55]]), placement: 'space' }], size)[0].part, null);
+  assert.equal(projectAnnotations(runtime, [{ ...stroke('alone', [[42, 55], [45, 55]]), placement: 'space' }], size)[0].part, null);
 });
 
 test('a stroke stands in front of what it crosses, so nothing it was drawn over cuts it, and carries on in the air where it leaves the model', () => {
   const { runtime, slab } = rig();
   // Across the post (screen x 49–51) and off the slab's edge (x 40) to x 30.
-  const [item] = projectInk(runtime, [stroke('across', along(58, 30).map(x => [x, 52]))], size);
+  const [item] = projectAnnotations(runtime, [stroke('across', along(58, 30).map(x => [x, 52]))], size);
   assert.equal(item.part, 'slab');
   const world = worldOf(item, slab);
   for (const point of world) {
@@ -88,7 +88,7 @@ test('a stroke stands in front of what it crosses, so nothing it was drawn over 
 test('a fill all over a part lies on it; one partly over nothing lies whole on a sheet in front of what it covers; a text mark stands in front of what it covers', () => {
   const { runtime } = rig();
   const outline = points => points.map(([x, y]) => ({ x, y }));
-  const [on, partly, card] = projectInk(runtime, [
+  const [on, partly, card] = projectAnnotations(runtime, [
     // Six pixels and more clear of the post.
     { kind: 'area', id: 'on', outline: outline([[40.5, 57], [42, 57], [42, 59.5]]), color: '#0f0', opacity: 0.35 },
     { kind: 'area', id: 'partly', outline: outline([[42, 42], [30, 42], [30, 46]]), color: '#0f0', opacity: 0.35 },
@@ -106,9 +106,9 @@ test('a fill all over a part lies on it; one partly over nothing lies whole on a
 
 test('drawn, ink takes its part\'s place each frame — exploded or posed — hides with it and is cut where the model is; updated, only what changed is redrawn; disposed, the scene is as it was', () => {
   const { runtime, slab } = rig();
-  const [first, second] = projectInk(runtime, [stroke('a', [[42, 55], [45, 55]]), stroke('b', [[42, 58], [45, 58]])], size);
+  const [first, second] = projectAnnotations(runtime, [stroke('a', [[42, 55], [45, 55]]), stroke('b', [[42, 58], [45, 58]])], size);
   const before = runtime.scene.onBeforeRender;
-  const ink = mountInk(runtime);
+  const ink = mountAnnotations(runtime);
   ink.update([first]);
   const [line] = ink.group.children.filter(child => child.isLine2);
   ink.update([first, second]);
@@ -148,19 +148,19 @@ test('drawn, ink takes its part\'s place each frame — exploded or posed — hi
   assert.equal(runtime.scene.onBeforeRender, before);
 });
 
-test("an arrow's line and head follow one part together; each mark keeps the view it was drawn in; the drawing writes as a sketch file", () => {
+test("an arrow's line and head follow one part together; each mark keeps the view it was drawn in; the annotation writes as an annotation file", () => {
   const { runtime, slab } = rig();
   // The line lies mostly on the slab; the head's wings are over nothing.
   const marks = [
     { ...stroke('line', [[44, 56], [56, 56], [62, 56]]), group: 'arrow', view: 'view 1' },
     { ...stroke('wing', [[61, 57], [64, 59]]), group: 'arrow', view: 'view 1' },
   ];
-  const items = projectInk(runtime, marks, size);
+  const items = projectAnnotations(runtime, marks, size);
   assert.deepEqual(items.map(item => [item.part, item.view, item.group]), [['slab', 'view 1', 'arrow'], ['slab', 'view 1', 'arrow']]);
   assert.deepEqual(items[0].touches.map(touch => touch.part), ['slab']);
-  const sketch = normalizeSketch(JSON.parse(JSON.stringify(inkSketch(items))));
-  assert.deepEqual(Object.keys(sketch.parts), ['slab']);
-  assert.deepEqual(sketch.parts.slab.placement, slab.matrixWorld.toArray());
-  assert.deepEqual(sketch.marks.map(mark => [mark.id, mark.kind, mark.part, mark.view]), [['line', 'stroke', 'slab', 'view 1'], ['wing', 'stroke', 'slab', 'view 1']]);
-  assert.equal(sketch.marks[0].points.length, items[0].points.length);
+  const annotation = normalizeAnnotation(JSON.parse(JSON.stringify(annotationDocumentOf(items))));
+  assert.deepEqual(Object.keys(annotation.parts), ['slab']);
+  assert.deepEqual(annotation.parts.slab.placement, slab.matrixWorld.toArray());
+  assert.deepEqual(annotation.marks.map(mark => [mark.id, mark.kind, mark.part, mark.view]), [['line', 'stroke', 'slab', 'view 1'], ['wing', 'stroke', 'slab', 'view 1']]);
+  assert.equal(annotation.marks[0].points.length, items[0].points.length);
 });

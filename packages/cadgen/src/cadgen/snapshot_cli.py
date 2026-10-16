@@ -143,8 +143,8 @@ class SnapshotOptions:
     video_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
-    sketch: object = None
-    sketch_specified: bool = False
+    annotation: object = None
+    annotation_specified: bool = False
     measurements: object = None
     measurements_specified: bool = False
     focus: list[str] | None = None
@@ -349,34 +349,34 @@ def load_measurements_option(value: object, *, cwd: Path) -> object:
     return [parsed] if is_plain_object(parsed) else parsed
 
 
-def load_sketch_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
-    """``sketch`` in job form: the sketch object, and the file it was read from ("" inline).
+def load_annotation_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
+    """``annotation`` in job form: the annotation object, and the file it was read from ("" inline).
 
-    A job's ``sketch`` and the ``--sketch`` flag are the same value: a sketch
+    A job's ``annotation`` and the ``--annotation`` flag are the same value: an annotation
     JSON file's path (resolved against the working folder, as a job's input is),
-    the sketch JSON as text, or -- from a library call or a job -- the object.
+    the annotation JSON as text, or -- from a library call or a job -- the object.
     Only its outer shape is checked here; every field is checked by the page
-    that draws it (``normalizeSketch``), whose refusal names the file.
+    that draws it (``normalizeAnnotation``), whose refusal names the file.
     """
     if is_plain_object(value):
         return dict(value), ""
     text = value.strip() if isinstance(value, str) else ""
     if not text:
-        raise SnapshotError("sketch is the path of a sketch JSON file, or the sketch object itself")
+        raise SnapshotError("annotation is the path of an annotation JSON file, or the annotation object itself")
     source = ""
     if text.startswith("{"):
-        parsed = load_json_text(text, "sketch")
+        parsed = load_json_text(text, "annotation")
     else:
         path = (cwd / Path(text).expanduser()).resolve()
         if not path.is_file():
-            raise _missing(f"sketch file does not exist: {text}")
+            raise _missing(f"annotation file does not exist: {text}")
         try:
             parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
         except (OSError, UnicodeDecodeError) as exc:
-            raise SnapshotError(f"Cannot read sketch file {text}: {exc}") from exc
+            raise SnapshotError(f"Cannot read annotation file {text}: {exc}") from exc
         source = str(path)
     if not is_plain_object(parsed):
-        raise SnapshotError(f"{source or 'sketch'}: a sketch is a JSON object with units, parts and marks")
+        raise SnapshotError(f"{source or 'annotation'}: an annotation is a JSON object with units, parts and marks")
     return parsed, source
 
 
@@ -386,7 +386,7 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
     if not any(
         [
             bool(options.input),
-            options.sketch_specified,
+            options.annotation_specified,
             options.measurements_specified,
             options.mode_specified,
             options.view_labels,
@@ -408,8 +408,8 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
     # TARGET with --job: the same views over another model. OUT stays the jobs' own.
     if options.input:
         next_job["input"] = options.input
-    if options.sketch_specified:
-        next_job["sketch"] = options.sketch
+    if options.annotation_specified:
+        next_job["annotation"] = options.annotation
     if options.measurements_specified:
         next_job["measurements"] = options.measurements
     if options.mode_specified:
@@ -528,8 +528,8 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["video"] = parse_video_option(options.video, cwd=resolved_cwd)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
-    if options.sketch_specified:
-        job["sketch"] = options.sketch
+    if options.annotation_specified:
+        job["annotation"] = options.annotation
     if options.measurements_specified:
         job["measurements"] = options.measurements
     if options.debug:
@@ -876,8 +876,8 @@ class PreparedRenderJob:
     resolved_cwd: Path
     #: What the kind's check learned that its resolver needs (an SRDF's paired URDF).
     context: dict[str, object]
-    #: The file the job's sketch was read from ("" for none, or an inline one).
-    sketch_source: str = ""
+    #: The file the job's annotation was read from ("" for none, or an inline one).
+    annotation_source: str = ""
 
 
 def prepare_render_job(
@@ -968,11 +968,11 @@ def prepare_render_job(
         raise SnapshotError("selection.focus and selection.hide cannot be used in the same snapshot job")
 
     context = KIND_CHECKS[kind](job, kind=kind, input_path=input_path, mode=mode) or {}
-    sketch_source = ""
-    if job.get("sketch") is not None:
+    annotation_source = ""
+    if job.get("annotation") is not None:
         if mode != "view":
-            raise SnapshotError("a sketch is ink drawn over a view; list mode draws nothing to draw it on")
-        job["sketch"], sketch_source = load_sketch_option(job["sketch"], cwd=resolved_cwd)
+            raise SnapshotError("an annotation is ink drawn over a view; list mode draws nothing to draw it on")
+        job["annotation"], annotation_source = load_annotation_option(job["annotation"], cwd=resolved_cwd)
     if job.get("measurements") is not None:
         if mode != "view":
             raise SnapshotError("measurements are drawn over a view; list mode draws nothing to draw them on")
@@ -993,7 +993,7 @@ def prepare_render_job(
         reference_root=reference_root_for_input(input_path, resolved_cwd),
         resolved_cwd=resolved_cwd,
         context=dict(context),
-        sketch_source=sketch_source,
+        annotation_source=annotation_source,
     )
 
 
@@ -1008,9 +1008,9 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
         resolved_cwd=prepared.resolved_cwd,
         **prepared.context,
     )
-    if prepared.sketch_source:
+    if prepared.annotation_source:
         # So the page's refusal of a mark can name the file it is in (snapshot_core._render_job).
-        resolved_job["resolved"] = {**resolved_job["resolved"], "sketchSource": prepared.sketch_source}
+        resolved_job["resolved"] = {**resolved_job["resolved"], "annotationSource": prepared.annotation_source}
     return resolved_job
 
 
@@ -1390,9 +1390,9 @@ def check_drawing_render_job(
             f"({reasons}). A drawing's output takes: "
             f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
         )
-    if job.get("sketch") is not None:
+    if job.get("annotation") is not None:
         raise SnapshotError(
-            f"a sketch is ink drawn on a model's parts in 3D; {DRAWING_IS}, so {label} has no "
+            f"an annotation is ink drawn on a model's parts in 3D; {DRAWING_IS}, so {label} has no "
             "parts or space to draw it in."
         )
     if job.get("measurements") is not None:

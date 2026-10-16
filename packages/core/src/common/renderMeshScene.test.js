@@ -189,12 +189,12 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(normal.sceneSettings.render.enabled, false);
   assert.equal(normal.quality.id, "interactive");
   assert.equal(normal.sharedRenderOptions.renderScale, 1);
-  assert.equal(normal.displaySettings.guides.grid.enabled, false, "snapshot inherits the Solid preset, which draws no grid");
+  assert.equal(normal.displaySettings.guides.grid.enabled, false, "snapshot inherits Solid, which draws no grid");
   assert.equal(normal.displaySettings.guides.axis.enabled, false, "and no axes");
   assert.equal(normal.sceneSettings.appearance, "light", "in light, the CLI's default");
-  const gridded = renderJobContext(twoPartMeshData(), { display: { mode: "grid" } });
-  assert.equal(gridded.displaySettings.guides.grid.enabled, true, "the Grid preset draws one");
-  assert.equal(gridded.displaySettings.guides.grid.density, 2, "twice as fine");
+  const gridded = renderJobContext(twoPartMeshData(), { display: { modes: { solid: { grid: { enabled: true }, axes: { enabled: true } } } } });
+  assert.equal(gridded.displaySettings.guides.grid.enabled, true, "Solid's grid turned on draws one");
+  assert.equal(gridded.displaySettings.guides.grid.density, 2, "the measuring grid");
   assert.equal(gridded.displaySettings.guides.axis.enabled, true, "with the axes");
 
   const rendered = renderJobContext(twoPartMeshData(), { display: { mode: "render" } });
@@ -205,7 +205,7 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(rendered.sharedRenderOptions.renderScale, 2);
 
   const explicitScale = renderJobContext(twoPartMeshData(), {
-    display: { mode: "render", lighting: { quality: "preview" } },
+    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } } },
     output: { renderScale: 3 }
   });
   assert.equal(explicitScale.quality.id, "standard");
@@ -427,7 +427,7 @@ test("photographic Render applies a non-rest kinematics transform", () => {
   }
 });
 
-test("render display accepts common camera, selection and clipping controls", () => {
+test("render display accepts common camera, selection and clipping controls, and is always in perspective", () => {
   const context = renderJobContext(twoPartMeshData(), {
     kind: "step",
     camera: { preset: "front" },
@@ -436,11 +436,11 @@ test("render display accepts common camera, selection and clipping controls", ()
       camera: { projection: "orthographic" },
       clip: { axis: "x", at: 0.5 },
       exploded: { enabled: true, amount: 0.5 },
-      surfaces: { colorMode: "single", color: "#123456" }
+      modes: { render: { parts: { colorMode: "single", color: "#123456" } } }
     },
     selection: { hiddenPartIds: ["right"], selectedPartIds: ["left"] }
   });
-  assert.equal(context.camera.projection, "orthographic");
+  assert.equal(context.camera.projection, "perspective");
   assert.equal(context.sharedRenderOptions.clip.enabled, true);
   const options = modelOptionsForRenderJob(context, { selection: { hiddenPartIds: ["right"] } });
   assert.deepEqual(options.selection.hiddenPartIds, ["right"]);
@@ -576,7 +576,7 @@ test("a snapshot fits its camera's depth range in every preset, as the viewer fi
 
 test("an exploded Render snapshot keeps its floor and floor shadow on the rest placement, as the viewer does", async () => {
   const job = { mode: "view", kind: "step",
-    display: { mode: "render", lighting: { quality: "preview" }, exploded: { enabled: true, amount: 1 } },
+    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } }, exploded: { enabled: true, amount: 1 } },
     outputs: [{ path: "exploded.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -613,7 +613,7 @@ test("an exploded Render snapshot keeps its floor and floor shadow on the rest p
 test("a snapshot drawn at a render scale above 1 spreads its floor's dither by it", async () => {
   // Final draws twice the pixels it keeps: each kept pixel averages four, and the dither
   // must be drawn twice as wide to survive that, or the dark floor's bands come back.
-  const job = { mode: "view", kind: "step", display: { mode: "render", lighting: { quality: "final" } },
+  const job = { mode: "view", kind: "step", display: { mode: "render", modes: { render: { lighting: { quality: "final" } } } },
     outputs: [{ path: "final.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -693,16 +693,16 @@ test("a snapshot's Clip cuts and caps the model where the viewer's does, measure
   }
 });
 
-test("a snapshot draws the job's sketch on its parts as the scene places them, cut by its clip, as heavy as on the viewer", async () => {
+test("a snapshot draws the job's annotation on its parts as the scene places them, cut by its clip, as heavy as on the viewer", async () => {
   // A mark on the right part follows it where the exploded view moved it; a mark on a part the
-  // scene lacks sits where that part was when the sketch was made; a mark on no part stays put.
+  // scene lacks sits where that part was when the annotation was made; a mark on no part stays put.
   const moved = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 5, 0, 0, 1];
-  const sketch = { units: "mm", parts: { gone: { placement: moved } }, marks: [
+  const annotation = { units: "mm", parts: { gone: { placement: moved } }, marks: [
     { id: "1", kind: "stroke", part: "right", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
     { id: "2", kind: "stroke", part: "gone", points: [0, 0, 0, 1, 1, 0], color: "#007aff", width: 3 },
     { id: "3", kind: "area", part: null, points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
   ] };
-  const job = { mode: "view", kind: "step", sketch, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
+  const job = { mode: "view", kind: "step", annotation, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
     outputs: [{ path: "a.png", width: 64, height: 450, camera: "iso" }, { path: "b.png", width: 64, height: 450, camera: "top" }] };
   const meshData = twoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -713,8 +713,8 @@ test("a snapshot draws the job's sketch on its parts as the scene places them, c
   viewport.renderer.domElement = { ...viewport.renderer.domElement, height: 450 };
   try {
     await captureModel(viewport, { job });
-    const layer = scene.getObjectByName("sketch");
-    assert.ok(layer, "the sketch is in the scene");
+    const layer = scene.getObjectByName("annotation");
+    assert.ok(layer, "the annotation is in the scene");
     const [onRight, onGone, onNothing] = layer.children;
     const right = model.root.getObjectsByProperty("isMesh", true).find(object => object.userData.partId === "right" && !object.isInstancedMesh);
     assert.ok(right.matrixWorld.elements[12] !== 0 || right.matrixWorld.elements[13] !== 0, "the exploded view moved the part");
@@ -727,7 +727,7 @@ test("a snapshot draws the job's sketch on its parts as the scene places them, c
     assert.equal(onRight.material.linewidth, 1.5);
     assert.equal(layer.children.length, 3, "one layer serves every output of a height");
   } finally {
-    viewport.sketchLayer?.layer.dispose();
+    viewport.annotationLayer?.layer.dispose();
     model.dispose();
   }
 });

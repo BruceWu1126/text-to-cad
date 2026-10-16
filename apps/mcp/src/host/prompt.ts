@@ -48,7 +48,7 @@ async function png(part: Attachment): Promise<Blob> {
  * on every update, so the port keeps what this view has queued and sends all of it; when the host
  * clears the context (the message went, or the chip was removed) it starts again. `send`, where the
  * host takes messages, posts the context as the person's message now. A picture is an image block
- * where the host takes one; where it does not, and for every other file (a views job, a sketch), the
+ * where the host takes one; where it does not, and for every other file (a views job, an annotation), the
  * text names the path it is saved at (`part.path`).
  */
 export function createChatPromptContext(bridge: Pick<Bridge, 'request' | 'onHostContext' | 'hostContext'>, { reach }: {

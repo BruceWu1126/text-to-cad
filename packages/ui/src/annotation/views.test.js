@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { promptView, promptViews, sameView } from './views.js';
 
-/** A prompt's views: the view on screen and those the drawing was drawn in, as snapshot jobs say them. */
+/** A prompt's views: the view on screen and those the annotation was drawn in, as snapshot jobs say them. */
 
 const camera = (overrides = {}) => ({ position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 50, ...overrides });
 const view = (overrides = {}) => ({ camera: camera(), width: 1600, height: 1200, ...overrides });

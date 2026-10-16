@@ -70,14 +70,16 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   assert.equal(lone.fixture.view.occurrences[0].name, 'base');
   assert.equal(await view.tool('Explode').count(), 0, 'a single part: no Explode, so this is the lone-part view');
   // A single part has no tree under Select (its one row would be all of it), and no panel in its
-  // place: Select's modes are the chevron after its button on the strip, All, Faces and Edges, with no Parts.
-  assert.equal(await pane.locator('[data-cad-tool-stack] [data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
+  // place: Select's selection filter is the chevron after its button on the strip, everything
+  // ticked, with no Parts (a part is one thing) and no Position (nothing moves).
+  assert.equal(await pane.locator('[data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
   assert.equal(await pane.getByRole('region', { name: 'Select', exact: true }).count(), 0, 'and no Select card');
-  await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Select mode: All', exact: true }).click();
-  assert.deepEqual(await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio').allInnerTexts(), ['All', 'Faces', 'Edges']);
+  await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Selection filter: everything', exact: true }).click();
+  assert.deepEqual(await page.locator('[role=menu][aria-label="Selection filter"] [data-select-filter]').allInnerTexts(),
+    ['Select all', 'Faces', 'Edges', 'Annotations', 'Measurement']);
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
-  // Its faces load once Select is up: under All a press picks one.
+  // Its faces load once Select is up: picking everything, a press picks one.
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => /\.f\d+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
   const face = (await view.state()).selectedReferenceIds[0].split('|').at(-1);

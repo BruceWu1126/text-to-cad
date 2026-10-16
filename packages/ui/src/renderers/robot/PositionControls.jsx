@@ -169,7 +169,7 @@ function PoseControlRow({ pose, control }) {
   return <ControlRow control={control} value={value} onValueChange={pose.write} />;
 }
 
-/** The Pose row, a named SRDF group state to choose, or null where the robot declares none. */
+/** The Pose row: Default, then the SRDF's named group states, if it declares any. */
 export function PoseGroupStateRow({ pose }) {
   const read = () => pose.getSnapshot();
   const { groupStateId, values } = useSyncExternalStore(pose.subscribe, read, read);
@@ -185,9 +185,8 @@ export function PoseGroupStateRow({ pose }) {
 }
 
 /**
- * A robot's Position panel (the tool stack's, while the Position tool is up): its named pose (an
- * SRDF's group states) when it has one, then a compact slider row per control of the articulation —
- * one panel's rows, with no sections of their own. Reset is the panel heading's.
+ * A robot's Position section (the file sidebar's): its Pose row — Default, then an SRDF's group
+ * states — then a compact slider row per control of the articulation, with no sections of their own.
  *
  * @param {{ pose: ReturnType<typeof import("./poseStore.js").createPoseStore> }} props
  */
@@ -195,8 +194,8 @@ export default function PositionControls({ pose }) {
   if (!pose.controls.length) return <FileSheetStatusText className="py-2">No movable joints.</FileSheetStatusText>;
   return (
     <div className="space-y-1.5 pb-1.5 pt-0.5">
-      {/* A named state is a way of SETTING the controls, so it leads them. A plain URDF
-          declares none and opens straight onto its values. */}
+      {/* A pose is a way of SETTING the controls, so it leads them: Default for any robot, the
+          named states where an SRDF declares them. */}
       <PoseGroupStateRow pose={pose} />
       {pose.controls.map(control => <PoseControlRow key={control.id} pose={pose} control={control} />)}
     </div>

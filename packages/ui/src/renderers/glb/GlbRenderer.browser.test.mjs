@@ -91,15 +91,32 @@ async function open(t, file, { record = null } = {}) {
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
 
-// A GLB has no interaction tools, so no strip; its Display settings are the navbar's button beside Preview.
+// A GLB has no interaction tools, so its strip is the view's controls alone: Projection, Display, then Preview, with no rule.
 const noTools = async (pane) => {
-  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a static GLB has no tools, so no strip');
-  assert.equal(await displayButton(pane).count(), 1, 'its Display settings are the navbar\'s button beside Preview');
-  for (const name of ['Orbit', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
+  const strip = pane.getByRole('group', { name: 'Interaction tools' });
+  assert.deepEqual(await strip.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'a static GLB has no tools: the strip holds the view\'s controls alone');
+  assert.equal(await strip.locator('[data-strip-rule]').count(), 0, 'no rule with no tools before it');
+  for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
   }
 };
-const displayButton = pane => pane.locator('[data-view-controls]').getByRole('button', { name: 'Display', exact: true });
+const displayButton = pane => pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: /^Display mode: / });
+// Display's settings: its menu's Custom submenu.
+async function openDisplay(pane) {
+  await displayButton(pane).click();
+  await pane.page().locator('[role=menu][aria-label="Display mode"] [data-display-mode-option="custom"]').click();
+  await pane.page().locator('[data-display-popover]').waitFor();
+}
+// The display modes Display's menu offers, by id.
+async function displayModes(pane) {
+  await displayButton(pane).click();
+  const menu = pane.page().locator('[role=menu][aria-label="Display mode"]');
+  const modes = await menu.locator('[data-display-mode-option]:not([data-display-mode-option="custom"])').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option')));
+  await pane.page().keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  return modes;
+}
 // Display's settings: a dropdown, portaled out of the viewer.
 const displayPanel = pane => pane.page().locator('[data-display-popover]');
 // The viewport's own pixels, without any chrome over them: what a host capture returns.
@@ -171,23 +188,20 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   assert.deepEqual(errors, []);
 
   // Nothing of a GLB picks, measures, poses or is drawn on: the viewport simply
-  // orbits, pans and zooms, with no strip over it.
+  // orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a GLB has nothing to pick');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
-    'a GLB is 3D: Preview sits in the navbar beside Display');
+    'a GLB is 3D: Preview ends the strip after Display');
 
   // A GLB has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
   assert.equal(await pane.locator('[data-tool-panel]').count(), 0, 'nothing in the tool stack');
-  await displayButton(pane).click();
-  await displayPanel(pane).waitFor();
+  assert.deepEqual(await displayModes(pane), ['solid', 'render', 'grid'], 'a GLB has no edges to draw: no mode made of them');
+  await openDisplay(pane);
   const displayMenu = displayPanel(pane);
   assert.equal(await displayMenu.getByRole('tab').count(), 0, 'Display has no tabs inside it');
-  assert.deepEqual(await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).innerText(), 'Solid');
-  await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).click();
-  assert.deepEqual(await page.getByRole('option').allInnerTexts(), ['Solid', 'Render', 'Grid'], 'a GLB has no edges to draw: Solid and Render only');
-  await page.keyboard.press('Escape');
+  assert.equal(await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).count(), 0, 'its menu chooses the mode');
   assert.equal(await displayMenu.getByRole('heading', { name: 'Surfaces', exact: true }).count(), 1);
   for (const section of ['Edges', 'Cross-section', 'Explode']) assert.equal(await displayMenu.getByRole('heading', { name: section, exact: true }).count(), 0, section);
   await displayButton(pane).click();
@@ -302,26 +316,28 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest with its playbar up, plays there and in preview, and preview leaves the tools view\'s routine as it was', async (t) => {
+test('an animated GLB opens at rest with its Animation row up, plays there and in preview, and preview leaves the tools view\'s routine as it was', async (t) => {
   // The file's preview settings as a previous session left them: Orbit off, so the preview
   // camera holds still and what moves in a capture is the model alone.
   const { page, pane, errors } = await open(t, 'animated.glb', { record: { version: 2, settings: {},
     files: { [JSON.stringify(['/models/animated.glb', 'glb'])]: { version: 2, playback: { orbit: false } } } } });
   await ready(pane);
-  // Animation is its one tool, up from the open: its playbar at the bottom centre, with no strip to
-  // take it up from, so the playbar carries its settings itself.
-  const panel = pane.getByRole('toolbar', { name: 'Animation playback', exact: true });
+  // Animation is its one tool, up from the open: its row of controls, with no button to take it up
+  // from, carries its settings itself.
+  const panel = pane.getByRole('toolbar', { name: 'Animation controls', exact: true });
   await panel.waitFor();
-  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'one tool needs no strip');
-  assert.equal(await panel.getByRole('button', { name: 'Playback settings', exact: true }).count(), 1, 'its settings are on its playbar');
+  assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Projection: Orthographic', 'Preview'], 'one tool needs no button: the strip is the view\'s controls alone');
+  assert.equal(await panel.getByRole('button', { name: 'Playback settings', exact: true }).count(), 1, 'its settings are on its row');
+  assert.equal(await pane.getByRole('toolbar', { name: 'Animation playback', exact: true }).count(), 0, 'no playbar under the model in the tools view');
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   const toolsRest = await stillCapture(page);
   const panelTime = () => page.evaluate(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')));
+    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')));
   // The panel plays the clip in the tools view, and its start is the rest pose.
   await panel.getByRole('button', { name: 'Play animation', exact: true }).click();
   await page.waitForFunction(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
   await panel.getByRole('button', { name: 'Pause animation', exact: true }).click();
   assert.ok(differingPixels(toolsRest, await capture(page)) > 200, 'the panel moved the rider');
   await panel.getByRole('slider', { name: 'Animation time', exact: true }).focus();
@@ -331,7 +347,7 @@ test('an animated GLB opens at rest with its playbar up, plays there and in prev
   // The panel's routine left at its end: preview has a routine of its own, at rest.
   await page.keyboard.press('End');
   await page.waitForFunction(() => Number(document.querySelector(
-    '[data-testid="one"] [aria-label="Animation playback"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
+    '[data-testid="one"] [aria-label="Animation controls"] [role="slider"][aria-label="Animation time"]')?.getAttribute('aria-valuenow')) > 0.25);
   const panelHeld = await panelTime();
   const heldCapture = await stillCapture(page);
   assert.ok(differingPixels(toolsRest, heldCapture) > 200, 'the panel holds the rider at the end of its clip');
@@ -397,8 +413,8 @@ test('an animated GLB\'s preview opens at the clip\'s own Speed and Loop and for
   const { page, pane, errors } = await open(t, 'animated.glb', { record: { version: 2, settings: {},
     files: { [JSON.stringify(['/models/animated.glb', 'glb'])]: { version: 2, playback: { orbit: false } } } } });
   await ready(pane);
-  // The tools view's settings are its playbar's own (no strip for the tool's menu), as preview's are.
-  const panelSettings = pane.getByRole('toolbar', { name: 'Animation playback' }).getByRole('button', { name: 'Playback settings' });
+  // The tools view's settings are its Animation row's own, as preview's are its playbar's.
+  const panelSettings = pane.getByRole('toolbar', { name: 'Animation controls' }).getByRole('button', { name: 'Playback settings' });
   const previewSettings = pane.getByRole('toolbar', { name: 'Animation playback' }).getByRole('button', { name: 'Playback settings' });
   const enter = async () => {
     await pane.getByRole('button', { name: 'Preview', exact: true }).click();
@@ -459,7 +475,7 @@ test('a corrupt GLB raises the viewer\'s load alert, with reload and details', a
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.glb/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of ['Display', 'Preview']) {
+  for (const name of [/^Display mode: /, 'Preview']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   void page;

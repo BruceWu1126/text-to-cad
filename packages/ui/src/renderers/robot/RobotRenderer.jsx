@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { MousePointer2 } from "lucide-react";
+import { Box, MousePointer2, Spline } from "lucide-react";
 import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { createRobotScene } from "@text-to-cad/core/lib/urdf/robotScene.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
@@ -10,17 +10,11 @@ import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
-import { KeptPositionPanel, PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kinematicsControls.jsx";
-
-/** What a kept robot pose is: its group state's name where it is at one, otherwise Custom. */
-function keptPoseLabel(pose) {
-  const { groupStateId } = pose.getSnapshot();
-  const state = pose.groupStates.find(candidate => candidate.id === groupStateId);
-  return String(state?.label || state?.name || "").trim() || "Custom";
-}
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
+import SelectFilterMenu from "../kit/tools/select/SelectFilterMenu.jsx";
+import { selects } from "../kit/tools/select/selectFilter.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
-import PositionControls, { PoseGroupStateRow } from "./PositionControls.jsx";
+import PositionControls from "./PositionControls.jsx";
 import { useRobotReferences } from "./robotReferences.jsx";
 import LinksSection from "./LinksSection.jsx";
 import SdfSection from "./SdfSection.jsx";
@@ -34,6 +28,11 @@ import { useRobotDocument } from "./useRobotDocument.js";
 const NO_HANDLES = Object.freeze([]);
 const NO_REFERENCES = Object.freeze([]);
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
+const menuIcon = Icon => <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" />;
+// What a robot's Select picks (`kit/tools/select/selectFilter.js`): its links, and its joints'
+// knobs, each on its own; it opens with both.
+const ROBOT_SELECT_KINDS = Object.freeze([{ id: "links", label: "Links", icon: menuIcon(Box) }, { id: "position", label: "Position", icon: menuIcon(Spline) }]);
+const ROBOT_SELECT_DEFAULT = Object.freeze(ROBOT_SELECT_KINDS.map(kind => kind.id));
 function RobotSurface({ view, data }) {
   const document = useWorkspaceDocument({ view, data });
   const loaded = useRobotDocument({ entry: document.entry, client: document.client, resources: document.client.resources });
@@ -138,7 +137,7 @@ function RobotSurface({ view, data }) {
     load: { busy: (loaded.busy && !scene) || (Boolean(robot) && !scene), updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
     live, escape, rendererState,
     // A prompt's view: the robot's pose and the parts hidden. A robot is drawn in metres.
-    viewState: () => ({ jointValues: pose?.getSnapshot().values, hide: hiddenPartIds }), sketchUnits: "m"
+    viewState: () => ({ jointValues: pose?.getSnapshot().values, hide: hiddenPartIds }), annotationUnits: "m"
   });
   shellRef.current = shell;
   useDeclinedSelectReference(document);
@@ -194,16 +193,18 @@ function RobotSurface({ view, data }) {
   }, [scene]);
 
   // ---- tools -------------------------------------------------------------------------------
-  // Pose exists where something can be driven: a control of the articulation.
+  // Position exists where something can be driven: a control of the articulation.
   const posable = Boolean(pose?.controls.length);
   const { toolMode, selectTool } = shell;
-  // A robot restores into Pose before it has loaded; only a LOADED one can say it has nothing to pose.
-  useEffect(() => { if (robot && !posable && toolMode === ROBOT_TOOL.POSE) selectTool(ROBOT_TOOL.SELECT); }, [robot, posable, toolMode, selectTool]);
+  // What Select picks: Links and Position, each on its own; another file starts with both.
+  const [selectFilter, setSelectFilter] = useState(ROBOT_SELECT_DEFAULT);
+  useEffect(() => { setSelectFilter(ROBOT_SELECT_DEFAULT); }, [document.modelKey]);
   // A selection outlives Select: Quick Edit names it and the view lights it under any tool, until it
-  // is cleared. Picking is Select's alone.
+  // is cleared. Picking is Select's alone, and so are the joints' knobs, while it picks them.
   const clearSelection = selection.clear;
-  const poseActive = !shell.previewing && posable && Boolean(scene) && toolMode === ROBOT_TOOL.POSE;
   const selectActive = !shell.previewing && Boolean(scene) && toolMode === ROBOT_TOOL.SELECT;
+  const poseActive = selectActive && posable && selects(selectFilter, "position");
+  const picksLinks = selectActive && selects(selectFilter, "links");
 
   // Choosing a link or an object under another tool returns to Select first; its Links and the
   // Reference for what was chosen are Select's panels, so they are then on screen.
@@ -218,39 +219,25 @@ function RobotSurface({ view, data }) {
 
   const modelKey = document.modelKey;
 
-  // Whether the pose is not the opening one, for the kept Position panel: a boolean read off the
-  // pose store, so moving a control re-renders this only when it flips.
-  const noPose = useCallback(() => () => {}, []);
-  // Whether the pose is off its default: the Position panel's X and the kept panel. A boolean read
-  // off the pose store, so a pose step renders this only as the pose leaves or reaches the default.
-  const poseCustom = useSyncExternalStore(pose ? pose.subscribe : noPose,
-    () => Boolean(pose) && !positionValuesAreDefault(pose.getSnapshot().values, pose.defaults));
-  // Position is offered where a control can be driven; until the robot has loaded that is not
-  // known, and it is shown, idle, meanwhile.
+  // The one tool, Select, its filter the chevron's menu: Position offered where a control can be
+  // driven (until the robot has loaded that is not known, and it is offered meanwhile).
   const tools = [
-    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON }),
-    !robot || posable ? shell.tools.own({ id: ROBOT_TOOL.POSE, label: "Position", icon: <PositionToolIcon />,
-      // Lit while it is the tool alone: a pose it set is kept in the stack.
-      // Its panel is in the tool stack for as long as it is the tool.
-      onSelect: () => { if (!poseActive) selectTool(ROBOT_TOOL.POSE); } }) : null
-  ].filter(Boolean);
-  // The tool stack: Select's Links and Reference (and an SDF's own metadata), then Position's controls.
-  const linksShown = !shell.previewing && toolMode === ROBOT_TOOL.SELECT;
-  const toolPanels = <>
-    <LinksSection key={modelKey} active={linksShown} robot={robot?.robot || null} components={robot?.components}
+    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON,
+      menu: <SelectFilterMenu value={selectFilter} kinds={!robot || posable ? ROBOT_SELECT_KINDS : ROBOT_SELECT_KINDS.slice(0, 1)}
+        onChange={value => { setSelectFilter(value); selectTool(ROBOT_TOOL.SELECT); }} /> })
+  ];
+  // The file sidebar, whatever the tool: the Links (and an SDF's own metadata), then Position's controls.
+  const sidebarShown = !shell.previewing;
+  const sidebar = <>
+    <LinksSection key={modelKey} active={sidebarShown} robot={robot?.robot || null} components={robot?.components}
       parts={robot?.parts} hiddenPartIds={hiddenPartIds} onVisibilityChange={changeVisibility} selection={treeSelection} />
-    {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed hidden={!linksShown}>
+    {kind === "sdf" ? <ToolPanel id="sdf" title="SDF" label="SDF" fit="details" defaultCollapsed>
       <SdfSection info={robot?.robot?.sdf || null} />
     </ToolPanel> : null}
-    {/* Headed "Position", and its X while the pose is off its default (the X resets it); sized like
-        the tree. Select puts Position down, and the pose stays. */}
-    {posable && pose ? <ToolPanel id="position" title="Position" label="Position controls" closeLabel="Reset position"
-      onClose={poseCustom ? pose.reset : null} fit="details" resizable collapsible={false} hidden={!poseActive} lead={poseActive}>
+    {/* Headed "Position"; its Pose row's Default puts the joints back. */}
+    {posable && pose ? <ToolPanel id="position" title="Position" label="Position controls" fit="details">
       <PositionControls key={robot.revision} pose={pose} />
     </ToolPanel> : null}
-    {/* A pose that is not the default, kept while Position is not the tool: one line, its X the Reset. */}
-    {posable && pose && poseCustom && !poseActive && !shell.previewing ? <KeptPositionPanel summary={keptPoseLabel(pose)} onReset={pose.reset}
-      poseRow={pose.groupStates.length ? <PoseGroupStateRow pose={pose} /> : null} /> : null}
   </>;
 
   // What is selected, for Quick Edit: each link (an object by its link) as a reference into the
@@ -264,13 +251,13 @@ function RobotSurface({ view, data }) {
   const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
     ? { name: reference.target.selectors.join(", "), kind: "solid" } : ""), [resourcePath]);
 
-  return <RendererShell shell={shell} tools={tools} toolPanels={toolPanels}
+  return <RendererShell shell={shell} tools={tools} sidebar={sidebar}
     references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}
     nameReference={nameLink}
     onClearReferences={clearSelection}
     viewportOverlay={viewport => <>
       {poseActive ? <JointHandleOverlay handlesRef={handlesRef} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
-      <PointerPick viewport={viewport} scene={scene} enabled={selectActive} onPick={handlePick} onHover={selection.hoverHit} />
+      <PointerPick viewport={viewport} scene={scene} enabled={picksLinks} onPick={handlePick} onHover={selection.hoverHit} />
     </>} />;
 }
 

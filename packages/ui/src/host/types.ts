@@ -4,7 +4,7 @@ import type { FileActions, FileSource } from '../file-viewer/types.js';
 /** Environmental effects are supplied by the app; shared UI never discovers a clipboard. */
 export interface ClipboardPort {
   /**
-   * `text` may still be on its way (a copied Quick Edit whose sketch is being saved): the write
+   * `text` may still be on its way (a copied Quick Edit whose annotation is being saved): the write
    * starts inside the gesture that asked for it and takes the text when it arrives.
    */
   writeText(text: string | Promise<string>): Promise<void>;
@@ -13,7 +13,7 @@ export interface ClipboardPort {
 }
 /**
  * A Quick Edit's files, made on this machine for its prompt to carry and name: the views it carries
- * as a snapshot job file (`cadgen snapshot --job` renders them), its sketch as a sketch file, and
+ * as a snapshot job file (`cadgen snapshot --job` renders them), its annotation as an annotation file, and
  * each view's picture, rendered with the snapshot's own code. `create` answers where they are once
  * they are made; `read` fetches one. `createHttpPromptFiles` (`@text-to-cad/core/client`) is the
  * viewer server's.
@@ -22,11 +22,11 @@ export interface PromptFiles {
   create(request: {
     name: string; input: string;
     views: Array<Record<string, unknown> & { label: string }>;
-    sketch: Record<string, unknown> | null;
-  }): Promise<{ job: string; sketch: string | null; images: Array<{ label: string; path: string }> }>;
+    annotation: Record<string, unknown> | null;
+  }): Promise<{ job: string; annotation: string | null; images: Array<{ label: string; path: string }> }>;
   read(path: string): Promise<Blob>;
-  /** A Quick Edit chip's copy as a file, written at once: its path (a drawing's sketch, one measurement). */
-  save?(request: { name: string; kind: 'sketch' | 'measurement'; data: Record<string, unknown> }): Promise<string>;
+  /** A Quick Edit chip's copy as a file, written at once: its path (an annotation's annotation, one measurement). */
+  save?(request: { name: string; kind: 'annotation' | 'measurement'; data: Record<string, unknown> }): Promise<string>;
 }
 /**
  * What the app menu links to — the running version (its release notes), the source and the
@@ -62,7 +62,7 @@ export interface ViewerHost {
   fileActions?: FileActions;
   clipboard: ClipboardPort;
   promptContext: PromptContextPort;
-  /** Makes a Quick Edit's views, sketch and pictures as files. Absent: a prompt carries none of them. */
+  /** Makes a Quick Edit's views, annotation and pictures as files. Absent: a prompt carries none of them. */
   promptFiles?: PromptFiles;
   /**
    * Show a file, by its absolute path, in this view: a pick in the explorer, a renderer's link.
