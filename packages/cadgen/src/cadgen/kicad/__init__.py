@@ -11,7 +11,7 @@ Modules, each importing nothing heavy at module scope:
 - ``install``: find ``kicad-cli`` (``CADGEN_KICAD_CLI``, ``PATH``, the
   installers' folders) and judge its version.
 - ``cli``: run ``kicad-cli pcb drc`` on a saved board and read its report, the
-  one check the API does not offer (``cadgen pcb drc``).
+  one check the API does not offer: every build's last step, and ``cadgen pcb drc``.
 - ``sexpr``: read the S-expression syntax every KiCad file uses.
 - ``geometry`` / ``naming``: the frames, shapes and names the readers share.
 - ``board_index`` / ``refs``: a saved board read back from its file as what a

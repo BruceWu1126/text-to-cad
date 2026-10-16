@@ -456,7 +456,9 @@
     ]
   },
   "sheets": [],
-  "text_variables": {},
+  "text_variables": {
+    "CADGEN_BUILD": "b7f0b6def860451a40f9436b7c296d04e9c07f1f56fe1671d66f132f48e5698b"
+  },
   "tuning_profiles": {
     "meta": {
       "version": 2

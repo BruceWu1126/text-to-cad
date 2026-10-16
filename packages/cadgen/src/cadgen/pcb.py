@@ -7,10 +7,21 @@ kicad-python calls -- footprints from the libraries the project's
 net classes, exports. Calling the decorated function BUILDS: it starts KiCad's
 own headless API server (``kicad-cli api-server``), creates the document, runs
 the function, refills the zones, counts what is unrouted, saves, stops the
-server and prints one line. ``pcb.drc(board)`` runs KiCad's design rule check
-on a saved board, the one check the API does not offer; ``pcb.snapshot`` draws
-one. They are the same object -- this module is callable -- so
-``from cadgen import pcb`` gives a board script all of them::
+server, runs KiCad's design rule check on the saved file and prints one line,
+then every finding, errors first, in the text ``cadgen pcb drc`` prints::
+
+    blinky.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, DRC 0 errors 0 warnings, 4.6 s
+
+The board is saved before it is checked -- a half-routed board is the normal
+state for hours, and the viewer wants the file -- and the exit code stays 0
+whatever DRC finds: ``cadgen pcb drc`` is the exit-1 check for CI and scripts.
+Flags ride ``sys.argv`` as every cadgen script's do: ``--no-drc`` skips the
+check, ``--force`` overwrites a board something else saved (below), and a build
+that fails in a script run prints one ``FAILED:`` line and exits 1 as every cadgen
+script does (``--verbose`` for the traceback, ``--json`` for the envelope). ``pcb.drc(board)``
+runs the check alone on a saved board, the one check the API does not offer;
+``pcb.snapshot`` draws one. They are the same object -- this module is callable
+-- so ``from cadgen import pcb`` gives a board script all of them::
 
     from cadgen import pcb
     from cadgen.kipy.board_types import Net
@@ -38,6 +49,15 @@ exactly those. The server runs with an empty settings directory of its own, so
 no user library table is loaded. Coordinates and units are KiCad's
 (:mod:`cadgen.kipy.util.units`). No schematic.
 
+A build overwrites the board file, so it refuses to overwrite what it did not
+write. It records the SHA-256 of the board it saved as the project text
+variable ``CADGEN_BUILD``; KiCad writes the project's text variables into the
+board file as well, so the hash covers every line of the file but its own.
+Before a build, an existing board whose record is missing or does not match
+its bytes -- KiCad saved it, a hand edit, a foreign board at that path -- stops
+the build with one sentence naming the file and ``--force``. A first build into
+an empty directory needs nothing.
+
 The build is one server per call and nothing resident: no daemon, store or
 file tracer is involved, and importing this module never touches KiCad.
 :func:`connect` is the one seam between the build and KiCad.
@@ -46,6 +66,7 @@ file tracer is involved, and importing this module never touches KiCad.
 from __future__ import annotations
 
 import functools
+import hashlib
 import inspect
 import os
 import shutil
@@ -58,7 +79,8 @@ from types import ModuleType
 from typing import Any, Callable
 
 from cadgen._internal.snapshot_door import plot_snapshot_verb
-from cadgen.results import ValidationIssue, ValidationResult
+from cadgen.kicad.cli import Finding, issues
+from cadgen.results import ValidationResult
 
 __all__ = ["drc", "snapshot"]
 
@@ -70,15 +92,33 @@ snapshot = plot_snapshot_verb("pcb")
 _TIMEOUT_MS = 120_000
 _LIBRARY_TIMEOUT_S = 300.0
 
+#: The project text variable a build records the saved board's hash in.
+RECORD = "CADGEN_BUILD"
+_RECORD_LINE = f'(property "{RECORD}" '.encode()
+
 
 class BoardError(RuntimeError):
-    """What a build could not do with the board's companions: a library table row that did
-    not load, a footprint no declared library has. The message says what to add."""
+    """What a build could not do with the board's files: a library table row that did not
+    load, a footprint no declared library has, a board file something else saved. The
+    message says what to do."""
+
+
+@dataclass(frozen=True)
+class DrcReport:
+    """KiCad's design rule check of the saved board: the counts and every finding."""
+
+    errors: int
+    warnings: int
+    findings: tuple[Finding, ...]
+
+    def lines(self) -> list[str]:
+        """Every finding as ``cadgen pcb drc`` prints it, errors first."""
+        return [issue.human_line() for issue in issues(self.findings)]
 
 
 @dataclass(frozen=True)
 class BoardBuild:
-    """What one ``@pcb`` call wrote: the files and what is on the board."""
+    """What one ``@pcb`` call wrote: the files, what is on the board, what DRC found."""
 
     board: Path  #: the ``.kicad_pcb``
     project: Path  #: its ``.kicad_pro`` beside it
@@ -87,15 +127,17 @@ class BoardBuild:
     vias: int
     zones: int
     unconnected: int  #: pads not copper-connected to the first pad of their net
+    drc: DrcReport | None  #: ``None`` under ``--no-drc``
     seconds: float
 
     def report(self) -> str:
         from cadgen._internal.doors import display_path
 
+        checked = f"DRC {_count(self.drc.errors, 'error')} {_count(self.drc.warnings, 'warning')}, " if self.drc else ""
         return (
             f"{display_path(self.board)}: {_count(self.parts, 'part')}, {_count(self.tracks, 'track')}, "
             f"{_count(self.vias, 'via')}, {_count(self.zones, 'zone')}, {self.unconnected} unconnected, "
-            f"{self.seconds:.1f} s"
+            f"{checked}{self.seconds:.1f} s"
         )
 
 
@@ -123,7 +165,19 @@ def pcb(func: Callable[[Any], Any] | None = None, *, path: str | None = None):
         def build(*args: Any, **kwargs: Any) -> BoardBuild:
             if args or kwargs:
                 raise TypeError(f"{function.__name__}() takes no arguments: calling it builds {target.name}")
-            return _build(function, target)
+            try:
+                return _build(function, target)
+            except (SystemExit, KeyboardInterrupt):
+                raise
+            except Exception as error:
+                if function.__module__ != "__main__":
+                    raise
+                # Declared in the script being run, the failure is the script's: one line on
+                # stderr and exit 1, as a @step script's is. Imported, it is the caller's.
+                from cadgen._internal.cli_from_function import report_failure
+
+                report_failure(error, prog=f"python {script.name}", as_json="--json" in sys.argv[1:], verbose="--verbose" in sys.argv[1:])
+                raise SystemExit(1) from None
 
         build.board_path = target  # type: ignore[attr-defined]
         return build
@@ -168,7 +222,24 @@ def _start(cli: Path, settings: Path):
     return kicad
 
 
+def signature(board: Path) -> tuple[str | None, str]:
+    """``(recorded, actual)`` for a saved board: the hash its ``CADGEN_BUILD`` property
+    carries, if any, and the SHA-256 of every other line. KiCad saves the project's text
+    variables into the board as ``(property "NAME" "VALUE")`` lines, so the record sits in
+    the file it covers and is the one line left out of the hash."""
+    recorded = None
+    digest = hashlib.sha256()
+    for line in board.read_bytes().splitlines(keepends=True):
+        if line.lstrip().startswith(_RECORD_LINE):
+            recorded = line.split(b'"')[3].decode("ascii", "replace")
+            continue
+        digest.update(line)
+    return recorded, digest.hexdigest()
+
+
 def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
+    from cadgen._internal.doors import display_path
+    from cadgen.kicad.cli import run_drc
     from cadgen.kicad.install import find_kicad_cli
     from cadgen.kipy.board import Board
     from cadgen.kipy.errors import ApiError
@@ -176,6 +247,14 @@ def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
     from cadgen.kipy.proto.common.types.library_types_pb2 import LibraryLoadStatus, LibraryType
 
     started = time.perf_counter()
+    flags = sys.argv[1:]
+    if target.exists() and "--force" not in flags:
+        recorded, actual = signature(target)
+        if recorded != actual:
+            raise BoardError(
+                f"{display_path(target)} was last saved by something other than this script (KiCad, an "
+                "editor, another tool), so the build leaves it alone: pass --force to overwrite it"
+            )
     cli = find_kicad_cli()
     target.parent.mkdir(parents=True, exist_ok=True)
     settings = Path(tempfile.mkdtemp(prefix="cadgen-kicad-"))
@@ -213,6 +292,13 @@ def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
                 unconnected = _unconnected(board)
                 counts = (len(board.get_footprints()), len(board.get_tracks()), len(board.get_vias()), len(board.get_zones()))
                 board.save()
+                # The record is the saved file's hash, so it is set after the first save and
+                # written by a second, which changes the record's own line and no other.
+                project = board.get_project()
+                variables = project.get_text_variables()
+                variables[RECORD] = signature(target)[1]
+                project.set_text_variables(variables)
+                board.save()
             except BaseException:
                 # Nothing is saved. The document is closed unsaved so KiCad takes its own lock
                 # file with it; a server that cannot even do that is simply stopped.
@@ -226,6 +312,14 @@ def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
             kicad.close()
     finally:
         shutil.rmtree(settings, ignore_errors=True)
+    drc = None
+    if "--no-drc" not in flags:
+        findings = tuple(run_drc(cli, target))
+        drc = DrcReport(
+            errors=sum(1 for finding in findings if finding.severity == "error"),
+            warnings=sum(1 for finding in findings if finding.severity == "warning"),
+            findings=findings,
+        )
     result = BoardBuild(
         board=target,
         project=target.with_suffix(".kicad_pro"),
@@ -234,9 +328,12 @@ def _build(function: Callable[[Any], Any], target: Path) -> BoardBuild:
         vias=counts[2],
         zones=counts[3],
         unconnected=unconnected,
+        drc=drc,
         seconds=time.perf_counter() - started,
     )
     print(result.report())
+    for line in drc.lines() if drc else ():
+        print(line)
     sys.stdout.flush()
     return result
 
@@ -282,23 +379,13 @@ def drc(board: Path) -> ValidationResult:
     except KicadMissingError as error:
         return failed(target, str(error), code="kicad_missing")
     findings = run_drc(cli, target)
-    order = sorted(findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type))
-    issues = tuple(
-        ValidationIssue(
-            severity=finding.severity,
-            message=finding.description + (": " + "; ".join(finding.items) if finding.items else ""),
-            element=f"({finding.at[0]:g}, {finding.at[1]:g}) mm" if finding.at else None,
-            code=finding.type,
-        )
-        for finding in order
-    )
     errors = sum(1 for finding in findings if finding.severity == "error")
     unconnected = sum(1 for finding in findings if finding.check == "unconnected")
     warnings = sum(1 for finding in findings if finding.severity == "warning")
     return ValidationResult(
         ok=not (errors or unconnected),
         path=target,
-        issues=issues,
+        issues=issues(findings),
         summary="" if errors or unconnected else f"OK {display_path(target)}: DRC clean ({warnings} warning(s))",
     )
 

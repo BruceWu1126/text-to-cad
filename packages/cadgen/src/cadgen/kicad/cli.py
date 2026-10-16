@@ -1,8 +1,9 @@
 """Running ``kicad-cli`` for the one check KiCad's API does not offer: DRC.
 
-``cadgen pcb drc`` runs ``kicad-cli pcb drc --format json --severity-all`` on a saved
-board, the same binary the build's API server is, and reads KiCad's report
-(``drc.v1.json``) into :class:`Finding`s. The board is checked where it lies:
+Every ``@pcb`` build and ``cadgen pcb drc`` run ``kicad-cli pcb drc --format json
+--severity-all`` on a saved board, the same binary the build's API server is, and
+read KiCad's report (``drc.v1.json``) into :class:`Finding`s; :func:`issues` is the
+one rendering of them both print. The board is checked where it lies:
 kicad-cli reads the project beside it (the ``.kicad_pro`` the build saved, with
 its design rules and severities) and the report goes to a temporary file, so
 nothing is copied aside. The run gets its own empty settings directory in
@@ -19,7 +20,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Finding", "KicadRunError", "run_drc"]
+from cadgen.results import ValidationIssue
+
+__all__ = ["Finding", "KicadRunError", "issues", "run_drc"]
 
 _TIMEOUT_SECONDS = 600
 _NOISE = ("Fontconfig error",)
@@ -42,10 +45,20 @@ class Finding:
     #: Where the first item is, in millimetres from the board's origin.
     at: tuple[float, float] | None
 
-    def render(self) -> str:
-        where = f" @ ({self.at[0]:g}, {self.at[1]:g}) mm" if self.at else ""
-        named = f": {'; '.join(self.items)}" if self.items else ""
-        return f"{self.severity} {self.type}: {self.description}{named}{where}"
+
+def issues(findings) -> tuple[ValidationIssue, ...]:
+    """Every finding as the line protocol's issue, errors first, then by check and rule:
+    the one text a finding is printed as, by the build and by ``cadgen pcb drc``."""
+    order = sorted(findings, key=lambda finding: (finding.severity != "error", finding.check, finding.type))
+    return tuple(
+        ValidationIssue(
+            severity=finding.severity,
+            message=finding.description + (": " + "; ".join(finding.items) if finding.items else ""),
+            element=f"({finding.at[0]:g}, {finding.at[1]:g}) mm" if finding.at else None,
+            code=finding.type,
+        )
+        for finding in order
+    )
 
 
 def _quiet(text: str) -> str:

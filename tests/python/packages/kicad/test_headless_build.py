@@ -3,12 +3,15 @@
 The one door, ``python <board>.py``, on a script this test writes (a header, a
 resistor and an LED on a 40 x 30 mm board, with its ``fp-lib-table`` naming
 the three stock libraries), in its own directory: the files KiCad writes, the
-report line, then ``cadgen pcb drc`` clean. A missing footprint is the other
-contract: the script fails, names the library rows, and writes nothing.
+report line with KiCad's DRC counts, the ``CADGEN_BUILD`` record in the board and
+its project, a rebuild passing the record (``--no-drc``), a hand-edited board
+refused until ``--force``, then ``cadgen pcb drc`` clean. A missing footprint is
+the other contract: the script fails, names the library rows, and writes nothing.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -110,12 +113,33 @@ class HeadlessBuild(unittest.TestCase):
         root = self._project("pcb-smoke-", "LED_SMD:LED_0603_1608Metric")
         built = _run([sys.executable, "blinky.py"], root)
         self.assertEqual(0, built.returncode, built.stderr)
-        self.assertRegex(built.stdout, r"^blinky\.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, \d+\.\d s\n$")
+        self.assertRegex(built.stdout, r"^blinky\.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, DRC 0 errors 0 warnings, \d+\.\d s\n$")
         for suffix in (".kicad_pcb", ".kicad_pro", ".kicad_prl"):
             self.assertTrue((root / f"blinky{suffix}").is_file(), suffix)
         board = (root / "blinky.kicad_pcb").read_text(encoding="utf-8")
         self.assertIn('(generator "pcbnew")', board)
         self.assertEqual(3, len(re.findall(r'\(footprint "', board)))
+        # The record KiCad saved into the board and its project, verifying the board's bytes.
+        [record] = re.findall(r'\(property "CADGEN_BUILD" "([0-9a-f]{64})"\)', board)
+        project = json.loads((root / "blinky.kicad_pro").read_text(encoding="utf-8"))
+        self.assertEqual({"CADGEN_BUILD": record}, project["text_variables"])
+        self.assertEqual(record, hashlib.sha256(board.replace(f'\t(property "CADGEN_BUILD" "{record}")\n', "").encode("utf-8")).hexdigest())
+
+        rebuilt = _run([sys.executable, "blinky.py", "--no-drc"], root)
+        self.assertEqual(0, rebuilt.returncode, rebuilt.stderr)
+        self.assertRegex(rebuilt.stdout, r"^blinky\.kicad_pcb: 3 parts, 7 tracks, 1 via, 1 zone, 0 unconnected, \d+\.\d s\n$")
+
+        with (root / "blinky.kicad_pcb").open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        edited = (root / "blinky.kicad_pcb").read_bytes()
+        refused = _run([sys.executable, "blinky.py"], root)
+        self.assertEqual(1, refused.returncode)
+        self.assertIn("blinky.kicad_pcb was last saved by something other than this script", refused.stderr)
+        self.assertIn("pass --force to overwrite it", refused.stderr)
+        self.assertEqual(edited, (root / "blinky.kicad_pcb").read_bytes())
+        forced = _run([sys.executable, "blinky.py", "--force", "--no-drc"], root)
+        self.assertEqual(0, forced.returncode, forced.stderr)
+        self.assertNotEqual(edited, (root / "blinky.kicad_pcb").read_bytes())
 
         checked = _run([sys.executable, "-m", "cadgen.cli", "pcb", "drc", "blinky.kicad_pcb", "--json"], root)
         self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
