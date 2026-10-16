@@ -115,7 +115,7 @@ import sys
 from pathlib import Path
 
 from cadgen import build123d as bd
-from cadgen.step_export import export_build123d_step_scene
+from cadgen.step_export import export_build123d_step_file
 from cadgen.step_export_target import export_cad_target
 
 root = Path(sys.argv[1])
@@ -135,7 +135,7 @@ left.label = "left_cylinder"
 right = left.moved(bd.Pos(10, 0, 0))
 right.label = "right_cylinder"
 assembly = bd.Compound(children=[left, right], label="smoke_assembly")
-export_build123d_step_scene(assembly, root / "assembly.step")
+export_build123d_step_file(assembly, root / "assembly.step")
 PY
 
 # A STEP model the camera gate saves a rebuilt revision over. Built from
