@@ -29,7 +29,7 @@ const F = "f:9d2e8c1b5a70";
 const E = "e:12ab34cd56ef";
 const V = "v:fedcba987654";
 // Names by lineage: the feature that made the element, its number there, and a split piece's.
-const NAMED = ["f:dial.extrude1.3", "e:dial.extrude1.3.2", "v:lid.2"];
+const NAMED = ["f:dial.extrude1.3", "e:dial.make_box1.6;Gf:dial.cut1+f:dial.make_cylinder2.1", "v:dial.cut1~5d1e0c2f9a3b;U2:dial.fillet1"];
 
 test("every selector case parses as the shared fixture says", () => {
   for (const testCase of FIXTURE.selectorCases) {
@@ -72,12 +72,12 @@ test("isNativeCadSelector accepts every token and name form and rejects labels a
     assert.ok(isNativeCadSelector(selector), selector);
   }
   for (const selector of ["eye_shank", `servo_end_plate/${F}`, `bracket/${NAMED[0]}`, "", "not a selector!", "o1", "o1.2",
-    "o1.2.f7", "f45", "s2", "o:4B1F9E2A7C03", "f:dial.extrude1", "f:dial.extrude1.3.2.1"]) {
+    "o1.2.f7", "f45", "s2", "o:4B1F9E2A7C03", "f:dial.extrude1", "f:dial.extrude1.3.2", "f:dial.make_box1.6;G:dial.cut1"]) {
     assert.ok(!isNativeCadSelector(selector), selector);
   }
   assert.ok(isOccurrenceToken(O1) && !isOccurrenceToken(F) && !isOccurrenceToken("o1.2"));
   for (const name of [F, E, V, ...NAMED]) assert.ok(isElementName(name), name);
-  for (const value of [O1, "f7", "f:dial.extrude1", "f:9d2e8c1b5a70.3", "x:dial.extrude1.3"]) assert.ok(!isElementName(value), value);
+  for (const value of [O1, "f7", "f:dial.extrude1", "f:9d2e8c1b5a70.3", "x:dial.extrude1.3", "f:dial.cut3~5d1e", "e:a.b.1;Gf:c.d1+f:9d2e8c1b5a70"]) assert.ok(!isElementName(value), value);
 });
 
 test("an element ref is composed and split by one rule", () => {

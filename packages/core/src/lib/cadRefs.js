@@ -1,26 +1,35 @@
 // The ref grammar: one language, shared with cadgen (cadgen/cad_ref_syntax.py). A ref names an
 // occurrence by its token (`o:` + 12 hex, minted from its place in the tree) and an element by the
-// occurrence's token, a slash and the element's name: its kind (`f:`, `e:`, `v:`) and its lineage,
-// the feature that made it and its number among what that feature made --
-// `#o:4b1f9e2a7c03/f:dial.extrude1.3`. A piece of an element a later feature split takes its
-// number among the pieces after a further dot (`f:dial.extrude1.3.2`), and a feature the author
-// labelled goes by the label (`f:lid.2`). An element no construction names (an imported file's) is
-// named by its geometric token, 12 hex (`f:9d2e8c1b5a70`). A part label stands in for an occurrence
-// token (`#base`, `#base/f:dial.extrude1.3`); a bare element name resolves in a document with one
-// leaf. The cases of cadRefs.parity.json are asserted by both languages.
+// occurrence's token, a slash and the element's name: its kind (`f:`, `e:`, `v:`) and its
+// derivation from the features that made it -- an atom (the n-th element of its kind a feature
+// made, `dial.make_box1.6`, or a derivation folded to a feature and a digest,
+// `dial.cut3~5d1e0c2f9a3b`) and a step per feature that made it out of another (`;M:dial.cut1`
+// modified, `;Gf:` generated from a face, `;U2:`, `;L:`, `;D2` ...):
+// `#o:4b1f9e2a7c03/f:dial.make_box1.6;M:dial.cut1`. A feature the author labelled goes by the label
+// (`f:lid.2`). An element no construction names (an imported file's) is named by its geometric
+// token, 12 hex (`f:9d2e8c1b5a70`). A part label stands in for an occurrence token (`#base`,
+// `#base/f:dial.make_box1.6`); a bare element name resolves in a document with one leaf. A name is
+// an opaque string this grammar admits: nothing here reads a derivation. The cases of
+// cadRefs.parity.json are asserted by both languages.
 //
 // `<file>#<selectors>`, file half optional. Mirrors QUOTED_PREFIX_RE in cadgen/cad_ref_syntax.py.
 // The prefix sits LEFT of the '#' so it can never collide with the selector grammar on the right.
 // JSON-quote paths containing whitespace or delimiters: `"my part.step"#o:4b1f9e2a7c03`.
 const CAD_TOKEN_RE = /^\s*("(?:[^"\\\r\n]|\\.)*"|[^#"\s]*)#([^\s]*)/;
 const OCCURRENCE_TOKEN_SOURCE = "o:[0-9a-f]{12}";
-// Mirrors FEATURE_NAME_PATTERN and ELEMENT_NAME_PATTERN in cadgen/cad_ref_syntax.py: a feature is
-// a label or `function.operationN`; segments start with a letter and numbers with a digit, so the
-// two never read as one another, and a geometric token holds no dot.
+// Mirrors FEATURE_NAME_PATTERN, ATOM_PATTERN, STEP_PATTERN and ELEMENT_NAME_PATTERN in
+// cadgen/cad_ref_syntax.py: a feature is a label or `function.operationN`; segments start with a
+// letter and numbers with a digit, so the two never read as one another, and a geometric token
+// holds no dot.
 const SEGMENT_SOURCE = "[A-Za-z_][A-Za-z0-9_]*";
 const NUMBER_SOURCE = "[1-9][0-9]*";
+const HEX12_SOURCE = "[0-9a-f]{12}";
 const FEATURE_NAME_SOURCE = `${SEGMENT_SOURCE}(?:\\.${SEGMENT_SOURCE})?`;
-const ELEMENT_NAME_SOURCE = `[fev]:(?:[0-9a-f]{12}|${FEATURE_NAME_SOURCE}\\.${NUMBER_SOURCE}(?:\\.${NUMBER_SOURCE})?)`;
+const ATOM_SOURCE = `${FEATURE_NAME_SOURCE}(?:\\.${NUMBER_SOURCE}|~${HEX12_SOURCE})`;
+const STEP_SOURCE =
+  `;(?:(?:(?:M|MG[fev]|G[fev]|U)(?:${NUMBER_SOURCE})?|L):${FEATURE_NAME_SOURCE}(?:\\+[fev]:${ATOM_SOURCE})*` +
+  `|D${NUMBER_SOURCE})`;
+const ELEMENT_NAME_SOURCE = `[fev]:(?:${HEX12_SOURCE}|${ATOM_SOURCE}(?:${STEP_SOURCE})*)`;
 const OCCURRENCE_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})$`);
 const OCCURRENCE_ELEMENT_SELECTOR_RE = new RegExp(`^(${OCCURRENCE_TOKEN_SOURCE})/(${ELEMENT_NAME_SOURCE})$`);
 const ELEMENT_SELECTOR_RE = new RegExp(`^(${ELEMENT_NAME_SOURCE})$`);

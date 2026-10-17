@@ -611,20 +611,32 @@ def lineage_bytes(lineage: Mapping[str, Any]) -> bytes:
 
 
 def read_lineage(payload: bytes) -> dict[str, Any]:
-    """A stored lineage: ``{"made", "faces", "edges", "vertices", "modified"}``, each
-    list an element name or None per ordinal, every name of its kind and distinct, and
-    ``modified`` naming only named elements. ValueError for anything else."""
-    from cadgen.cad_ref_syntax import is_element_name, is_feature_name
+    """A stored lineage: ``{"made", "faces", "edges", "vertices", "table"}``, each list
+    an element name or None per ordinal, every name of its kind and distinct, and the
+    table spelling every folded atom a name or an entry reaches (``kernel_trace``), and
+    nothing else. ValueError for anything else."""
+    from cadgen.cad_ref_syntax import (
+        DERIVATION_RE,
+        is_element_name,
+        is_feature_name,
+        is_folded_atom,
+        split_derivation,
+    )
 
     try:
         lineage = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as error:
         raise ValueError("invalid lineage JSON") from error
-    if type(lineage) is not dict or set(lineage) != {"made", "modified", *(plural for plural, _kind in _LINEAGE_KINDS)}:
-        raise ValueError("a lineage holds made, faces, edges, vertices and modified")
+    if type(lineage) is not dict or set(lineage) != {"made", "table", *(plural for plural, _kind in _LINEAGE_KINDS)}:
+        raise ValueError("a lineage holds made, faces, edges, vertices and table")
     if lineage["made"] is not None and not is_feature_name(lineage["made"]):
         raise ValueError("a lineage's maker is not a feature name")
-    named: set[str] = set()
+    table = lineage["table"]
+    if type(table) is not dict or any(not is_folded_atom(atom) or type(text) is not str or not DERIVATION_RE.match(text)
+                                      or ";" not in text for atom, text in table.items()):
+        raise ValueError("a lineage's table maps folded atoms to derivations")
+    reached: set[str] = set()
+    pending: list[str] = []
     for plural, kind in _LINEAGE_KINDS:
         names = lineage[plural]
         if type(names) is not list or any(name is not None and not is_element_name(name, kind) for name in names):
@@ -632,11 +644,17 @@ def read_lineage(payload: bytes) -> dict[str, Any]:
         present = [name for name in names if name is not None]
         if len(set(present)) != len(present):
             raise ValueError(f"a lineage names two {plural} alike")
-        named.update(present)
-    modified = lineage["modified"]
-    if type(modified) is not dict or any(name not in named or not is_feature_name(feature)
-                                         for name, feature in modified.items()):
-        raise ValueError("a lineage's modifiers name its own elements and features")
+        pending.extend(name[2:] for name in present if DERIVATION_RE.match(name[2:]))
+    while pending:
+        atom, steps = split_derivation(pending.pop())
+        for folded in (atom, *(extra for step in steps for _kind, extra in step.extras)):
+            if is_folded_atom(folded) and folded not in reached:
+                if folded not in table:
+                    raise ValueError(f"a lineage's table does not spell {folded}")
+                reached.add(folded)
+                pending.append(table[folded])
+    if reached != set(table):
+        raise ValueError("a lineage's table spells atoms no name reaches")
     return lineage
 
 def effective_face_colors(shape: Any, colors: Any) -> dict:

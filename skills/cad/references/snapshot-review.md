@@ -14,7 +14,7 @@ view can draw: the snapshot still writes its image and warns that the model has
 no surfaces. A view or list that warns faces `could not be meshed` draws that part
 without them (and a list counts it without them); they are usually slivers a
 boolean left, and the warning names the part's ref and the faces
-(`#o:4b1f9e2a7c03`, `f:bracket.cut1.4`). One that warns faces `could not be brought
+(`#o:4b1f9e2a7c03`, `f:bracket.make_box1.2;M:bracket.cut1`). One that warns faces `could not be brought
 within tolerance of their exact surface` draws them as the mesher left them,
 past the display tolerance, and names them the same way.
 A part that `could not be meshed` at all, as the build warned, is left out: the

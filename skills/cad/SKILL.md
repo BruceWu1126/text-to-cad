@@ -123,8 +123,9 @@ Omitting OUT writes a sibling file with the format's extension. See
 A reference such as `/work/robot/STEP/assembly.step#o:4b1f9e2a7c03/f:bracket.make_box1.6`
 identifies geometry in a particular saved document: an occurrence by its token
 (`o:` and twelve hexadecimal characters) and, after a slash, one of its faces,
-edges or vertices by the element's name (`f:`, `e:`, `v:`, then the operation of
-the model's code that made it and the element's number among those it made). Its
+edges or vertices by the element's name (`f:`, `e:`, `v:`, then how the model's
+operations made it: the element an operation made, and a `;` step for each
+operation that changed it since). Its
 file part is the document's absolute path as the CAD viewer copied it, with the
 file's real name and extension (in quotes when it holds a space or `#`). Open that
 path with `read_scene`, and pass the whole reference to `resolve()`:
@@ -146,22 +147,29 @@ markup (or the image itself, attached).
 A bare `#o:4b1f9e2a7c03/f:bracket.make_box1.6` belongs to the document the
 conversation is about. A ref names geometry, never a position. An occurrence's
 token comes from its place in the tree (its parent, its name, its placement). An
-element's name is the operation that made it -- the function that called it, the
-operation, and how many times that function had called it in making that part
-(`bracket.make_box1`, the first box `bracket` made for it) -- and the element's number
-among those that operation made: `f:bracket.make_box1.6`. A later operation that
-trims or splits it keeps that name (a split piece adds its number:
-`f:bracket.make_box1.6.2`), and a label on a shape a later operation makes
-something of names the shape's operation there (`f:boss.3`; a part placed as it
-is keeps its own names, its label naming the occurrence). So a ref keeps resolving to the same face
-through a rebuild with other dimensions, code moved to other lines, a sibling
-inserted beside it, an edit to another part and the STEP round trip; it names
-another face when an earlier call of the same operation in the same function is
-added to or removed from that part's making. A face of an
-imported file is named by its geometry instead (`f:9d2e8c1b5a70`, twelve
-hexadecimal characters), and a ref in that form also finds the face with that
-geometry in a rebuilt model. A part label stands in for an occurrence token
-(`#housing/f:housing.make_cylinder1.1`). There
+element's name is how the model's operations made it, as the CAD kernel reported
+it. It starts at the element an operation made from nothing -- named by the
+function that called it, the operation, how many times that function had called
+it in making that part, and the element's number among those it made
+(`f:bracket.make_box1.6`, the sixth face of the first box `bracket` made) -- and
+adds a step for each operation that made it out of another:
+`f:bracket.make_box1.6;M:bracket.cut1` once the first cut trimmed it,
+`e:sk.make_rect1.2;Ge:part.extrude1` for the side an extrusion generated from a
+profile edge. A long one is folded to its last operation and a digest
+(`e:bracket.cut1~5d1e0c2f9a3b`); copy names whole. A label on a shape a later
+operation makes something of names the shape's operation there (`f:boss.3`; a
+part placed as it is keeps its own names, its label naming the occurrence). So a
+ref keeps resolving to the same face through a rebuild with other dimensions,
+code moved to other lines, a sibling inserted beside it, an edit to another part
+and the STEP round trip; it changes when an operation starts or stops changing
+that face, or an earlier call of the same operation in the same function is
+added to or removed from that part's making. A face of an imported file is
+named by its geometry instead (`f:9d2e8c1b5a70`, twelve hexadecimal
+characters), and a ref in that form also finds the face with that geometry in a
+rebuilt model. A part label stands in for an occurrence token
+(`#housing/f:housing.make_cylinder1.1`). Names come from the CAD viewer's copy
+button, or from a script: each entity of
+`read_scene(path).resolve("#housing").entities("face")` carries its ref. There
 is no inspect CLI: checks are Python scripts, and the
 [inspection reference](references/inspection-and-validation.md) covers label
 aliases, enumeration and measurement.
@@ -205,7 +213,7 @@ print(bracket.volume, len(bracket.faces()))
   `cadgen store why <model>.py` explains an unexpected rebuild or no-op, and
   `--force` rebuilds one model. More in the
   [model contract](references/step-generation.md#progress-and-runtime-diagnostics).
-- `cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1"` names the
+- `cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1;M:bore.cut1"` names the
   line of the model's code whose operation made the face a ref names and the
   one that last modified it, from the build's own account of the run
   ([which code made it](references/inspection-and-validation.md#which-code-made-it)):

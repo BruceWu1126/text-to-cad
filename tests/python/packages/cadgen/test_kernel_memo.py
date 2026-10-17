@@ -32,6 +32,7 @@ add_repo_path("packages/cadgen/src")
 
 from cadgen._internal import kernel_history, kernel_memo, kernel_trace  # noqa: E402
 from cadgen._internal.component_package import _shape_brep_bytes as _bytes  # noqa: E402
+from cadgen.cad_ref_syntax import Step, expanded_derivation  # noqa: E402
 
 COUNTS = ("hits", "misses", "unkeyable", "unreplayable", "errors")
 
@@ -46,6 +47,27 @@ def _run(function, *args):
     with kernel_memo.run(None) as run:
         result = function(*args)
     return result, _delta(before, kernel_memo.stats()), run
+
+
+def _named(run, body):
+    """The lineage of ``body`` as the run names it, and ``name(shape)``: the name it gives
+    a face, edge or vertex of ``body``."""
+    from cadgen._internal.entity_ordinals import entity_map
+
+    _key, lineage = run.identify(body)
+    maps = {kind: entity_map(body.wrapped, kind) for kind in ("face", "edge", "vertex")}
+    plurals = {"face": "faces", "edge": "edges", "vertex": "vertices"}
+
+    def name(shape):
+        kind = type(shape).__name__.lower()
+        return lineage[plurals[kind]][maps[kind].FindIndex(shape.wrapped) - 1]
+
+    return lineage, name
+
+
+def _spelled(lineage, name):
+    """``(made atom, steps)`` of a name, every folded atom it starts from spelled out."""
+    return expanded_derivation(name[2:], lineage["table"])
 
 
 def _bored_plate(radius=3.0):
@@ -473,13 +495,11 @@ class TraceTest(KernelMemoCase):
         row = run.trace.feature_rows()[-1]
         self.assertEqual((row["op"], row["function"], row["inputs"]), ("cut", "model", [0, 0, *moved]))
 
-    def test_elements_are_named_by_the_feature_that_made_them(self) -> None:
-        """Unchanged: same surface, same extent, inherited. Modified: same
-        surface, another extent, the name kept and the modifier recorded. Made:
-        anything else, named by the feature that made it."""
+    def test_an_element_an_operation_leaves_alone_keeps_its_name_and_one_it_changes_says_how(self) -> None:
+        """Left alone: the input's element, its name. Changed: the name of what it was and the
+        step the operation took -- modified (``M``), or generated from elements of the inputs
+        (``G``), named from the first source with the others after it."""
         from build123d import Axis, Location, Solid
-
-        from cadgen._internal.entity_ordinals import entity_map
 
         def model():
             box = Solid.make_box(20, 20, 8)
@@ -487,63 +507,70 @@ class TraceTest(KernelMemoCase):
             return box.cut(tool)
 
         body, _, run = _run(model)
-        _key, lineage = run.identify(body)
+        lineage, name = _named(run, body)
         self.assertEqual(lineage["made"], "model.cut1")
-        faces, edges = entity_map(body.wrapped, "face"), entity_map(body.wrapped, "edge")
-
-        def face(shape):
-            return lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
-
-        def edge(shape):
-            return lineage["edges"][edges.FindIndex(shape.wrapped) - 1]
-
         bottom = body.faces().sort_by(Axis.Z)[0]
         side = body.faces().sort_by(Axis.X)[0]
         bore = [shape for shape in body.faces() if shape.geom_type.name == "CYLINDER"][0]
-        self.assertRegex(face(bottom), r"^f:model\.make_box1\.[1-6]$")
-        self.assertEqual(lineage["modified"][face(bottom)], "model.cut1", "the hole changed the bottom face's extent")
-        self.assertRegex(face(side), r"^f:model\.make_box1\.[1-6]$")
-        self.assertNotIn(face(side), lineage["modified"], "the cut left the side face alone")
-        self.assertEqual(face(bore), "f:model.make_cylinder1.1", "the bore wall is the cylinder's face, trimmed")
-        self.assertEqual(lineage["modified"][face(bore)], "model.cut1")
-        vertical = body.edges().filter_by(Axis.Z).sort_by(Axis.X)[0]
-        rims = sorted(edge(shape) for shape in body.edges() if shape.geom_type.name == "CIRCLE")
-        self.assertRegex(edge(vertical), r"^e:model\.make_box1\.\d+$", "a box edge the cut never touched")
-        self.assertEqual(rims, ["e:model.cut1.1", "e:model.cut1.2"], "the hole's rims are new circles the cut made")
-        self.assertEqual(len(set(lineage["faces"])), len(lineage["faces"]))
+        self.assertRegex(name(side), r"^f:model\.make_box1\.[1-6]$", "the cut left the side face alone")
+        self.assertRegex(name(bottom), r"^f:model\.make_box1\.[1-6];M:model\.cut1$", "the hole changed the bottom")
+        self.assertEqual(name(bore), "f:model.make_cylinder1.1;M:model.cut1", "the bore wall: the cylinder's face, trimmed")
+        rims = [shape for shape in body.edges() if shape.geom_type.name == "CIRCLE"]
+        self.assertEqual(len(rims), 2)
+        for rim in rims:
+            atom, steps = _spelled(lineage, name(rim))
+            self.assertRegex(atom, r"^model\.make_box1\.[1-6]$", "a rim is generated from the box face it is cut in")
+            self.assertEqual([(step.op, step.kind, step.feature, step.extras) for step in steps],
+                             [("G", "f", "model.cut1", (("f", "model.make_cylinder1.1"),))])
+        self.assertEqual(len({name(rim) for rim in rims}), 2)
         self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
 
-    def test_each_piece_of_a_split_element_is_numbered(self) -> None:
-        from build123d import Axis, Box
+    def test_a_tool_face_coincident_with_another_tool_s_names_its_own_tool(self) -> None:
+        """Two pockets whose floors lie on one plane: each floor is its own tool's face,
+        modified -- the kernel says which, where a match by surface would take the first."""
+        from build123d import Location, Solid
 
-        from cadgen._internal.entity_ordinals import entity_map
+        def model():
+            body = Solid.make_box(30, 10, 10)
+            first = Solid.make_box(4, 10, 15).moved(Location((2, 0, 5)))
+            second = Solid.make_box(4, 10, 15).moved(Location((20, 0, 5)))
+            return body.cut(first, second)
+
+        body, _, run = _run(model)
+        lineage, name = _named(run, body)
+        floors = [face for face in body.faces() if abs(face.center().Z - 5) < 1e-6 and face.area < 60]
+        self.assertEqual(sorted(round(face.center().X) for face in floors), [4, 22])
+        for floor in floors:
+            tool = "model.make_box2" if floor.center().X < 15 else "model.make_box3"
+            self.assertRegex(name(floor), rf"^f:{re.escape(tool)}\.\d+;M:model\.cut1$")
+
+    def test_the_pieces_of_a_face_one_cut_splits_are_one_derivation_told_apart(self) -> None:
+        """The slot cuts the top in two: both pieces are the top face modified by the cut,
+        the second the cut reported numbered in the step (``;M2:``), where a later operation
+        leaves the number alone; an end the slot never reached keeps the box's name."""
+        from build123d import Axis, Box
 
         def model():
             return Box(30, 20, 10) - Box(4, 30, 20)
 
         body, _, run = _run(model)
-        _key, lineage = run.identify(body)
-        faces = entity_map(body.wrapped, "face")
-        # The slot cuts the box's top in two: two pieces of one face of the box, numbered.
-        top = sorted(lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
-                     for shape in body.faces() if abs(shape.center().Z - 5) < 1e-9)
+        lineage, name = _named(run, body)
+        top = sorted(name(face) for face in body.faces() if abs(face.center().Z - 5) < 1e-9)
         self.assertEqual(len(top), 2)
-        stem = top[0].rsplit(".", 1)[0]
-        self.assertRegex(stem, r"^f:model\.make_box1\.[1-6]$")
-        self.assertEqual(top, [f"{stem}.1", f"{stem}.2"])
-        self.assertEqual(lineage["modified"][top[0]], "model.cut1")
-        ends = [lineage["faces"][faces.FindIndex(shape.wrapped) - 1] for shape in body.faces().filter_by(Axis.X)]
-        self.assertTrue(all(name.count(".") == 2 for name in ends), "an end the slot does not reach is whole")
+        first = next(name for name in top if ";M:" in name)
+        self.assertRegex(first, r"^f:model\.make_box1\.[1-6];M:model\.cut1$")
+        self.assertEqual(sorted(top), sorted([first, first.replace(";M:", ";M2:")]))
+        ends = [face for face in body.faces().filter_by(Axis.X) if abs(abs(face.center().X) - 15) < 1e-9]
+        self.assertEqual(len(ends), 2)
+        self.assertTrue(all(re.fullmatch(r"f:model\.make_box1\.[1-6]", name(face)) for face in ends),
+                        "an end the slot does not reach is whole")
 
-    def test_two_places_of_one_shape_are_two_elements_and_an_in_place_operation_is_followed(self) -> None:
-        """An extrusion's caps are one TShape at two places: the bottom is the
-        profile's face, passed through, and the top is a face the extrusion made.
-        The profile reaches the extrusion through an in-place ``clean`` and a
-        placement the builder makes outside the patched surface: the lineage
-        follows both back to the face the profile made."""
+    def test_an_extrusion_names_its_sides_top_and_bottom_from_the_profile(self) -> None:
+        """The profile reaches the extrusion through the builder's in-place ``clean`` and a
+        placement outside the patched surface: the bottom is the profile's face as the
+        clean left it, the top the same face generated by the extrusion (its last shape),
+        each side generated from a profile edge."""
         from build123d import Axis, BuildPart, BuildSketch, Plane, SlotOverall, extrude
-
-        from cadgen._internal.entity_ordinals import entity_map
 
         def slot():
             with BuildPart() as part:
@@ -553,13 +580,112 @@ class TraceTest(KernelMemoCase):
             return part.part
 
         body, _, run = _run(slot)
-        _key, lineage = run.identify(body)
-        faces = entity_map(body.wrapped, "face")
-        bottom, top = (lineage["faces"][faces.FindIndex(shape.wrapped) - 1]
-                       for shape in body.faces().filter_by(Axis.Z).sort_by(Axis.Z))
-        self.assertEqual((bottom, top), ("f:slot.face1.1", "f:slot.extrude1.5"))
+        lineage, name = _named(run, body)
+        bottom, top = body.faces().filter_by(Axis.Z).sort_by(Axis.Z)
+        made, steps = _spelled(lineage, name(bottom))
+        self.assertEqual(_spelled(lineage, name(top)), (made, (*steps, Step("G", "f", 0, "slot.extrude1"))))
+        self.assertEqual(steps[-1].op, "M", "the profile face as the builder's clean left it")
+        for side in body.faces():
+            if abs(side.center().Z - 2.5) < 1e-6:
+                # The slot's two straight sides are generated from one edge, so one is ;D2.
+                last = [step for step in _spelled(lineage, name(side))[1] if step.op != "D"][-1]
+                self.assertEqual((last.op, last.kind, last.feature), ("G", "e", "slot.extrude1"))
         self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
         self.assertEqual(len(set(lineage["edges"])), len(lineage["edges"]), "a top edge is not its bottom twin")
+
+    def test_a_merged_face_keeps_every_face_it_was_merged_from(self) -> None:
+        """Two boxes fused side by side: the clean merges their tops into one face, modified
+        from the first box's top with the second's after it."""
+        from build123d import Axis, Pos, Solid
+
+        def model():
+            return Solid.make_box(10, 10, 10).fuse(Pos(10, 0, 0) * Solid.make_box(10, 10, 10))
+
+        body, _, run = _run(model)
+        lineage, name = _named(run, body)
+        top = body.faces().sort_by(Axis.Z)[-1]
+        self.assertAlmostEqual(top.area, 200.0)
+        atom, steps = _spelled(lineage, name(top))
+        self.assertRegex(atom, r"^model\.make_box1\.[1-6]$")
+        self.assertEqual([(step.op, step.feature) for step in steps], [("M", "model.fuse1")])
+        self.assertRegex(steps[0].extras[0][1], r"^model\.make_box2\.[1-6]$")
+
+    def test_a_revolution_names_its_faces_from_the_profile_and_its_end_from_the_face(self) -> None:
+        """Each face of a revolution is generated from a profile edge; a partial one begins
+        at the profile face itself and ends at the face it generated (its last shape)."""
+        from build123d import Axis, Face, Solid
+
+        def model(angle):
+            return Solid.revolve(Face.make_rect(3, 4).translate((6, 0, 0)), angle, Axis.Y)
+
+        for angle in (360, 270):
+            body, _, run = _run(model, angle)
+            lineage, name = _named(run, body)
+            ends = []
+            for face in body.faces():
+                if face.area > 50:
+                    self.assertRegex(name(face), r"^f:model\.make_rect1\.[1-4];Ge:model\.revolve1$")
+                else:
+                    ends.append(name(face))
+            self.assertEqual(sorted(ends), [] if angle == 360 else
+                             ["f:model.make_rect1.1", "f:model.make_rect1.1;Gf:model.revolve1"])
+            self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices")
+                                for name in lineage[plural]))
+
+    def test_an_element_no_maker_reports_is_named_from_its_neighbours(self) -> None:
+        """A fillet reports its face (generated from the edge it rounds) and the faces it
+        trims, not the edges and vertices bounding the new face: each takes a named parent's
+        name and its number among that parent's unnamed elements (the reverse pass)."""
+        from build123d import Axis, Solid
+
+        def model():
+            box = Solid.make_box(10, 10, 10)
+            return box.fillet(2, box.edges().filter_by(Axis.Z)[:1])
+
+        body, _, run = _run(model)
+        lineage, name = _named(run, body)
+        rounded = [face for face in body.faces() if face.geom_type.name == "CYLINDER"][0]
+        self.assertRegex(name(rounded), r"^f:model\.make_box1\.\d+;Ge:model\.fillet1$")
+        boundary = [edge for edge in rounded.edges() if edge.geom_type.name == "LINE"]
+        for edge in boundary:
+            _atom, steps = _spelled(lineage, name(edge))
+            self.assertEqual((steps[-1].op, steps[-1].feature), ("U", "model.fillet1"))
+        self.assertTrue(all(name is not None for plural in ("faces", "edges", "vertices") for name in lineage[plural]))
+
+    def test_a_wire_s_edges_are_the_edges_it_was_given_and_its_face_is_named_from_them(self) -> None:
+        """``Wire`` copies the edges whose vertices it merges and reports nothing: a copy on
+        the same curve over the same parameters is the edge it copies. Its face is named from
+        its edges (the forward pass), and the extrusion's sides from the edges."""
+        from build123d import Axis, Edge, Face, Solid, Vector, Wire
+
+        def model():
+            corners = [(0, 0), (10, 0), (10, 5), (0, 5)]
+            wire = Wire([Edge.make_line(corners[i], corners[(i + 1) % 4]) for i in range(4)])
+            return Solid.extrude(Face(wire), Vector(0, 0, 3))
+
+        body, _, run = _run(model)
+        lineage, name = _named(run, body)
+        sides = sorted(name(face) for face in body.faces() if abs(face.center().Z - 1.5) < 1e-9)
+        self.assertEqual(sides, [f"f:model.make_line{n}.1;Ge:model.extrude1" for n in range(1, 5)])
+        bottom = body.faces().sort_by(Axis.Z)[0]
+        atom, steps = _spelled(lineage, name(bottom))
+        self.assertEqual((atom, [(step.op, step.feature) for step in steps]), ("model.make_line1.1", [("L", "model.face1")]))
+        self.assertEqual([extra for _kind, extra in steps[0].extras], [f"model.make_line{n}.1" for n in (2, 3, 4)])
+
+    def test_a_loft_names_its_side_from_both_profiles_and_its_caps_from_their_edges(self) -> None:
+        from build123d import Location, Solid, Wire
+
+        def model():
+            return Solid.make_loft([Wire.make_circle(5), Wire.make_circle(3).moved(Location((0, 0, 10)))])
+
+        body, _, run = _run(model)
+        lineage, name = _named(run, body)
+        side = [face for face in body.faces() if face.geom_type.name != "PLANE"][0]
+        atom, steps = _spelled(lineage, name(side))
+        self.assertEqual((atom, [(step.op, step.kind, step.feature, step.extras) for step in steps]),
+                         ("model.make_circle1.1", [("G", "e", "model.make_loft1", (("e", "model.make_circle2.1"),))]))
+        caps = sorted(name(face) for face in body.faces() if face.geom_type.name == "PLANE")
+        self.assertEqual(caps, ["f:model.make_circle1.1;L:model.make_loft1", "f:model.make_circle2.1;L:model.make_loft1"])
 
     def test_a_label_pins_the_name_in_what_is_made_of_the_labelled_shape(self) -> None:
         """A shape the model labels and gives another construction names the feature
@@ -666,49 +792,6 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(run.identify(placed), (None, None), "a decoded child has no construction key and no lineage")
         self.assertIsNotNone(run.identify(own)[0])
 
-    def test_an_element_the_kernel_leaves_unbounded_is_signed_in_a_window(self) -> None:
-        """A hyperbola's natural bounds are the kernel's infinity, the finite
-        float 2e100, where its Cosh overflows: the signature samples a fixed
-        window instead, the same for every trim of the curve or surface."""
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeFace
-        from OCP.Geom import Geom_Hyperbola, Geom_SurfaceOfLinearExtrusion
-        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
-
-        def hyperbola(major: float):
-            return Geom_Hyperbola(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), major, 1.0)
-
-        self.assertEqual(hyperbola(2.0).LastParameter(), 2e100)
-        short = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(2.0), -1.0, 1.0).Edge())
-        long = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(2.0), -2.0, 0.5).Edge())
-        other = kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(hyperbola(3.0), -1.0, 1.0).Edge())
-        self.assertEqual(short[0], long[0])
-        self.assertNotEqual(short[1], long[1])
-        self.assertNotEqual(short[0], other[0])
-
-        surface = Geom_SurfaceOfLinearExtrusion(hyperbola(2.0), gp_Dir(0, 0, 1))
-        self.assertEqual(surface.Bounds(), (-2e100, 2e100, -2e100, 2e100))
-        low = kernel_trace.face_signature(BRepBuilderAPI_MakeFace(surface, -1.0, 1.0, 0.0, 2.0, 1e-6).Face())
-        high = kernel_trace.face_signature(BRepBuilderAPI_MakeFace(surface, -0.5, 0.5, 5.0, 9.0, 1e-6).Face())
-        self.assertEqual(low[0], high[0])
-        self.assertNotEqual(low[1], high[1])
-
-    def test_an_edge_the_kernel_built_without_vertices_is_signed_by_its_curve(self) -> None:
-        """A closed edge made straight from its curve has no vertices (a loft or sweep
-        leaves such edges, as the hypercar's chassis does): its ends are its curve's, the
-        same as the edge with vertices on that curve -- not a null vertex's point, which
-        the kernel refuses."""
-        from OCP.BRep import BRep_Builder
-        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge
-        from OCP.Geom import Geom_Circle
-        from OCP.TopoDS import TopoDS_Edge
-        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
-
-        circle = Geom_Circle(gp_Ax2(gp_Pnt(1, 2, 3), gp_Dir(0, 0, 1)), 5.0)
-        bare = TopoDS_Edge()
-        BRep_Builder().MakeEdge(bare, circle, 1e-7)
-        self.assertEqual(kernel_trace.edge_signature(bare),
-                         kernel_trace.edge_signature(BRepBuilderAPI_MakeEdge(circle).Edge()))
-
     def test_an_edit_elsewhere_renames_nothing(self) -> None:
         """A name's ordinal counts among the features the part descends from, never
         across the run: another hole in another part renames nothing in this one."""
@@ -739,10 +822,10 @@ class TraceTest(KernelMemoCase):
             plate_lineage = run.identify(part)[1]
         self.assertEqual(lineages[0], lineages[1])
         self.assertEqual(lineages[0]["made"], "bore.cut1")
-        self.assertIn("f:bore.make_cylinder1.1", lineages[0]["faces"])
+        self.assertIn("f:bore.make_cylinder1.1;M:bore.cut1", lineages[0]["faces"])
         # The plate's own two bores count among its own features.
         self.assertEqual(sorted(name for name in plate_lineage["faces"] if "make_cylinder" in name),
-                         ["f:bore.make_cylinder1.1", "f:bore.make_cylinder2.1"])
+                         ["f:bore.make_cylinder1.1;M:bore.cut1", "f:bore.make_cylinder2.1;M:bore.cut2"])
 
     def test_every_element_the_run_produced_is_named_through_a_sub_shape_input(self) -> None:
         """``Solid.extrude(bar.faces()[i])``: the tab's base is the bar's face, its edges and
@@ -768,7 +851,7 @@ class TraceTest(KernelMemoCase):
         end = bar.faces().sort_by(Axis.X)[-1]
         self.assertEqual(by_x[20.0], bar_lineage["faces"][bar_faces.FindIndex(end.wrapped) - 1],
                          "the tab's base is the bar's end face, by the bar's name")
-        self.assertRegex(by_x[25.0], r"^f:model\.extrude1\.\d+$", "the cap the extrusion made")
+        self.assertEqual(by_x[25.0], f"{by_x[20.0]};Gf:model.extrude1", "the cap the extrusion generated from it")
 
     def test_a_function_named_beyond_ascii_has_a_name_of_its_own(self) -> None:
         """Normalisation is injective: a name that is not an ASCII identifier is its ASCII
@@ -799,6 +882,19 @@ class TraceTest(KernelMemoCase):
         self.assertTrue(all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) for name in names))
         self.assertEqual(kernel_trace.identifier("<module>"), "module")
         self.assertEqual(kernel_trace.identifier("bracket"), "bracket")
+
+    def test_names_are_the_same_with_the_memo_off(self) -> None:
+        """Hits off, every call runs and its makers report again: the same names."""
+        def model():
+            return _junction_fillets()[1]
+
+        cold, _, run = _run(model)
+        expected = run.identify(cold)[1]
+        kernel_memo.clear()
+        with mock.patch.dict(os.environ, {"CADGEN_KERNEL_MEMO": "0"}):
+            plain, stats, again = _run(model)
+        self.assertEqual(stats["hits"], 0)
+        self.assertEqual(again.identify(plain)[1], expected)
 
     def test_names_and_construction_keys_are_the_same_cold_and_hot(self) -> None:
         def model():
@@ -929,7 +1025,7 @@ class HistoryCaptureTest(KernelMemoCase):
         origins = run.trace.features[1].history.origins
         face = 2  # kernel_history.KINDS: vertex, edge, face
         self.assertTrue(origins, "the split's pieces were reported")
-        self.assertIn((0, face, 1, "M"), {source for found in origins.values() for source in found},
+        self.assertIn((0, face, 1, "M"), {source[:4] for found in origins.values() for source in found},
                       "each half's face is the torus's one face, modified")
 
     def test_a_copy_is_the_same_elements(self) -> None:
@@ -946,7 +1042,7 @@ class HistoryCaptureTest(KernelMemoCase):
         origins = located.history.origins
         for kind, count in enumerate((8, 12, 6)):  # a box's vertices, edges and faces
             for ordinal in range(1, count + 1):
-                self.assertEqual(origins.get((0, kind, ordinal)), ((0, kind, ordinal, "I"),), (kind, ordinal))
+                self.assertEqual(origins.get((0, kind, ordinal)), ((0, kind, ordinal, "I", (1,)),), (kind, ordinal))
 
     def test_no_maker_is_asked_about_a_shape_it_never_saw_and_a_hit_asks_none(self) -> None:
         """Every query is about a sub-shape of the maker's own inputs: none raises. A hot run

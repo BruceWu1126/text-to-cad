@@ -41,27 +41,41 @@ for face in housing.entities("face"):
 ### Reference syntax
 
 ```text
-#o:4b1f9e2a7c03                        an occurrence or subassembly, by its token
-#o:4b1f9e2a7c03/f:bracket.make_box1.6  a face of that leaf occurrence, by its name
-#housing/e:bore.cut1.2                 an edge of the occurrence labelled housing
-#f:bracket.make_box1.6                 a face, only when the scene has exactly one leaf
-#o:4b1f9e2a7c03/f:9d2e8c1b5a70         a face named by its geometry (an imported file's)
-part.step#o:4b1f9e2a7c03               a file-prefixed ref matching the opened STEP
+#o:4b1f9e2a7c03                                  an occurrence or subassembly, by its token
+#o:4b1f9e2a7c03/f:bracket.make_box1.6            a face of that leaf occurrence, by its name
+#housing/f:bracket.make_box1.6;M:bracket.cut1    a face of the occurrence labelled housing
+#housing/e:bracket.cut1~5d1e0c2f9a3b             an edge whose derivation is folded
+#f:bracket.make_box1.6                           a face, only when the scene has exactly one leaf
+#o:4b1f9e2a7c03/f:9d2e8c1b5a70                   a face named by its geometry (an imported file's)
+part.step#o:4b1f9e2a7c03                         a file-prefixed ref matching the opened STEP
 ```
 
 An occurrence's token is `o:` and twelve lower-case hexadecimal characters,
 minted from its place in the tree (its parent's token, its name, its placement).
-An element's name is `f:`, `e:` or `v:`, the operation of the model's code that
-made it, and its number among the elements of its kind that operation made:
-`f:bracket.make_box1.6` is the sixth face of the first `make_box` the function
-`bracket` called for that part. The operation is the function, then the build123d
-operation and how many times that function had called it in making the part, or the label of a
-shape the model labelled and made something else of (`f:boss.3`, in `plate + boss`;
-a part placed as it is keeps its own names, its label naming the occurrence). An element
-a later operation split adds its piece's number (`f:bracket.make_box1.6.2`); an
-operation that only trims or moves it does not rename it. Lines are never in a
-name, so moving code renames nothing, and the viewer, the build's warnings and
-`resolve()` all name a face alike. An element no operation of the model's run
+An element's name is `f:`, `e:` or `v:` and how the model's operations made it,
+from what the CAD kernel reported. It starts at an element an operation made
+from nothing -- `f:bracket.make_box1.6`, the sixth face of the first `make_box`
+the function `bracket` called for that part -- and adds a step for each
+operation that made it out of another: `;M:bracket.cut1` when the first cut
+modified it (trimmed it, holed it), `;Gf:bracket.cut1` when the cut generated it
+from a face (a hole's rim, from the face it is cut in, with the cylinder's face
+after a `+`), `;Ge:part.extrude1` for an extrusion's side generated from a
+profile edge. An element the kernel reported nothing about is named from a named
+neighbour (`;U` from a face or edge it bounds, `;L` from its own edges or
+vertices), and the pieces of one face a cut split differ by a number in the
+step (`;M:bracket.cut1`, `;M2:bracket.cut1`). An operation
+is the function, then the build123d operation and how many times that function
+had called it in making the part, or the label of a shape the model labelled and
+made something else of (`f:boss.3`, in `plate + boss`; a part placed as it is
+keeps its own names, its label naming the occurrence). A name longer than 48
+characters is folded to its last operation and a digest
+(`e:bracket.cut1~5d1e0c2f9a3b`): copy it whole. An operation that leaves an
+element alone, or only moves the part, does not rename it, and lines are never
+in a name, so moving code renames nothing; a name changes when an operation
+starts or stops changing what it names. The viewer, the build's warnings and
+`resolve()` all name a face alike, and each entity of
+`scene.resolve("#occurrence").entities("face")` carries its name in its `ref`.
+An element no operation of the model's run
 made -- every element of an imported STEP -- is named by its geometry: `f:`,
 `e:` or `v:` and twelve hexadecimal characters, hashed from the element's shape
 within its body (a face's surface class, tight box and normal; an edge's curve
@@ -96,17 +110,18 @@ this cadgen, other bytes, a body read from a file or built outside build123d's
 constructions), with the reason.
 
 ```text
-$ cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1"
+$ cadgen store where STEP/bracket.step "#bracket/f:bore.make_cylinder1.1;M:bore.cut1"
 document  /work/STEP/bracket.step
-ref       #o:624d1aa32b5a/f:bore.make_cylinder1.1
+ref       #o:624d1aa32b5a/f:bore.make_cylinder1.1;M:bore.cut1
 model     /work/src/bracket.py::bracket
 face      made by bracket.py:6 in bore (Solid.make_cylinder)   bore.make_cylinder1
           last modified by bracket.py:6 in bore (cut)   bore.cut1
 ```
 
-The bore wall is the cylinder's face, trimmed by the cut that bored it. A face's
-name holds the operation that made it, so the same name answers across the
-builds of a model that leave that operation alone, and a face of a placed child
+The bore wall is the cylinder's face, trimmed by the cut that bored it. A name
+holds the operations that made the element what it is, so the same name answers
+across the builds of a model that leave those operations alone, `store where`
+spells a folded name out from the build's record, and a face of a placed child
 model is answered from that child's own build.
 
 ## Measurements

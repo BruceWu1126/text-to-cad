@@ -93,33 +93,48 @@ A ref was positional: `#o1.2.f7` named the second occurrence under the first and
 its seventh face, numbers one saved revision gave them and the next could give to
 other geometry. A ref now names what it points at: an occurrence by a **token**
 minted from its place in the tree (`#o:4b1f9e2a7c03`) and an element by its
-**name**, the operation of the model's code that made it and its number among
-the elements that operation made (`#o:4b1f9e2a7c03/f:bracket.make_box1.6`, the
-sixth face of the first box the function `bracket` made; a label may stand for
-the occurrence, `#housing/f:bracket.make_box1.6`). An element of an imported file,
-which no operation of a model made, is named by its geometry instead
-(`f:9d2e8c1b5a70`). The old spellings resolve to nothing, as any unknown string
-does: `resolve()` raises, a mate's `parent`, `child` or `axis` fails the build,
-and a clip's `m.get("#o1.3")` fails the bake. Take the new ones where they are
-shown -- the CAD Viewer's copy button, the `ref` of each row
-`cadgen step snapshot --mode list` prints, each entity's `ref` from
-`read_scene(...).resolve(...).entities(...)` -- and prefer labels, which need no
-renaming. The sidecar is schema 11: its mate ends, material assignments and
-animation tracks name occurrences by token. A schema-10 sidecar is refused and
-is rebuilt by rerunning the model, which binds them anew.
+**name**, how the model's operations made it as the CAD kernel reported it: the
+element an operation made from nothing (`#o:4b1f9e2a7c03/f:bracket.make_box1.6`,
+the sixth face of the first box the function `bracket` made) and a step for each
+operation that made it out of another (`f:bracket.make_box1.6;M:bracket.cut1`
+once the first cut trimmed it; `e:sk.make_rect1.2;Ge:part.extrude1`, the side an
+extrusion generated from a profile edge). A long name is folded to its last
+operation and a digest (`e:bracket.cut1~5d1e0c2f9a3b`), which the build's record
+spells out for `cadgen store where`. A label may stand for the occurrence
+(`#housing/f:bracket.make_box1.6`). An element of an imported file, which no
+operation of a model made, is named by its geometry instead (`f:9d2e8c1b5a70`).
+The old spellings resolve to nothing, as any unknown string does: `resolve()`
+raises, a mate's `parent`, `child` or `axis` fails the build, and a clip's
+`m.get("#o1.3")` fails the bake. Take the new ones where they are shown -- the
+CAD Viewer's copy button, each entity's `ref` from
+`read_scene(...).resolve(...).entities(...)`, and for occurrences the `ref` of
+each row `cadgen step snapshot --mode list` prints -- and prefer labels, which
+need no renaming. The sidecar is schema 11: its mate ends, material assignments
+and animation tracks name occurrences by token. A schema-10 sidecar is refused
+and is rebuilt by rerunning the model, which binds them anew.
 
 A ref by geometry (`f:` and twelve hexadecimal characters, how an imported
 file's elements are named) also finds an element of a part a model made, by its
 geometry: `resolve()`, a mate's `axis` and `cadgen store where` take it, and
-the viewer and `store where` give the element's name. An element's name moves when
-the code that made it moves to another operation (an earlier call of the same
-operation added in the same function, in making that part, renumbers the later
-ones; an edit to another part renames nothing); a label keeps it in what a later
-operation makes of the labelled shape: with `boss.label = "boss"`, the faces
-`boss` brings to `plate + boss` are `f:boss.1`, `f:boss.2`, …. A label set after
-the shape was used renames nothing already made of it. A labelled part placed in
-an assembly keeps its own names, its label naming the occurrence (`#lid`), so
-parts made alike and labelled apart are one part.
+the viewer and `store where` give the element's name. An element's name moves
+when an operation starts or stops changing it, or when the code that made it
+moves to another operation (an earlier call of the same operation added in the
+same function, in making that part, renumbers the later ones; an edit to another
+part renames nothing); a label keeps it in what a later operation makes of the
+labelled shape: with `boss.label = "boss"`, the faces `boss` brings to `plate +
+boss` are named from `boss` (`f:boss.1`, or `f:boss.1;M:model.fuse1` where the
+fuse changed it). A label set after the
+shape was used renames nothing already made of it. A labelled part placed in an
+assembly keeps its own names, its label naming the occurrence (`#lid`), so parts
+made alike and labelled apart are one part.
+
+Names took their last form late in 0.8: a name that numbered the pieces of a
+split face (`f:bracket.make_box1.6.2`) or kept a trimmed face's first name
+(`f:bracket.make_box1.6` for the box face a cut had holed) is now
+`f:bracket.make_box1.6;M2:bracket.cut1` and
+`f:bracket.make_box1.6;M:bracket.cut1`. Every model rebuilds once on upgrading
+(`producer changed`), which renames its elements and writes its STEP again; take
+refs saved before that again from the viewer or `read_scene`.
 
 ## Meshes come from cadgen in 0.8
 

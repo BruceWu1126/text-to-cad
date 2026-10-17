@@ -207,7 +207,7 @@ class TheEntry(ProvenanceCase):
         self.assertEqual(["f:pin.make_cylinder1.1", "f:pin.make_cylinder1.2", "f:pin.make_cylinder1.3"],
                          sorted(lineage["faces"]))
         self.assertTrue(all(name.startswith("e:pin.make_cylinder1.") for name in lineage["edges"]))
-        self.assertEqual({}, lineage["modified"])
+        self.assertEqual({}, lineage["table"], "short derivations spell themselves")
 
     def test_features_name_the_calling_frame_in_the_model_and_its_helpers(self) -> None:
         arm = next(entry for entry in self._entries().values() if entry["model"].endswith("::arm"))

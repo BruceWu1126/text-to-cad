@@ -3,19 +3,26 @@
 A ref names an occurrence by its token (``o:`` and twelve hexadecimal
 characters, minted from its place in the tree: ``_internal/tree_tokens.py``) and
 an element by the occurrence's token, a slash and the element's **name**
-(README law 20): its kind (``f:``, ``e:``, ``v:``) and its lineage, the feature
-that made it and its number among what that feature made
-(``_internal/kernel_trace.py``) -- ``#o:4b1f9e2a7c03/f:dial.extrude1.3``; a piece
-of an element a later feature split takes its number among the pieces after a
-further dot (``f:dial.extrude1.3.2``), and a feature the author labelled goes by
-the label (``f:lid.2``). An element no construction names -- of an imported file,
-or of a shape the model took from outside its run -- is named by its geometric
-token, twelve hexadecimal characters (``f:9d2e8c1b5a70``,
-``_internal/geometric_tokens.py``). A part label stands in for an occurrence
-token (``#base``, ``#base/f:dial.extrude1.3``); a bare element name
-(``#f:dial.extrude1.3``) resolves in a document with one leaf. Mates (``m1``)
+(README law 20): its kind (``f:``, ``e:``, ``v:``) and its derivation from the
+features that made it (``_internal/kernel_trace.py``). A derivation starts at an
+atom -- the n-th element of its kind a feature made, ``dial.make_box1.6``, or a
+derivation too long to spell, folded to the feature of its last step and a digest,
+``dial.cut3~5d1e0c2f9a3b``, which the component's lineage spells -- and adds a step
+per feature that made the element out of another: ``;M:<feature>`` modified,
+``;G<kind>:<feature>`` generated from an element of that kind, ``;MG<kind>:``
+both -- with a number after it for the n-th of a result's elements the step made alike --
+``;U[n]:<feature>`` the (n-th) unnamed sub-element of its parent, ``;L:<feature>``
+named from its lower elements, each with up to four further sources or lower
+elements as ``+<kind>:<atom>``, and ``;D<n>`` the n-th of a component's elements
+otherwise named alike: ``#o:4b1f9e2a7c03/f:dial.make_box1.6;M:dial.cut1``. A
+feature the author labelled goes by the label (``f:lid.2``). An element no
+construction names -- of an imported file, or of a shape the model took from
+outside its run -- is named by its geometric token, twelve hexadecimal characters
+(``f:9d2e8c1b5a70``, ``_internal/geometric_tokens.py``). A part label stands in
+for an occurrence token (``#base``, ``#base/f:dial.make_box1.6``); a bare element
+name (``#f:dial.make_box1.6``) resolves in a document with one leaf. Mates (``m1``)
 are not part of the structured grammar. Both parsers assert the cases of
-``cadRefs.parity.json``.
+``cadRefs.parity.json``; to both, a name is an opaque string the grammar admits.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from typing import Mapping
 
 
 # `<file>#<selectors>`, where the file half is optional. The prefix is the file's path relative
@@ -38,13 +46,29 @@ OCCURRENCE_TOKEN_PATTERN = r"o:[0-9a-f]{12}"
 # A name segment: a function, an operation and its count, or a label (``kernel_trace.identifier``).
 _SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
 _NUMBER = r"[1-9][0-9]*"
-# An element's name: its lineage -- a feature (``label`` or ``function.operationN``), the
-# element's number among what it made and, for a piece, the piece's number -- or its
-# geometric token. Segments start with a letter and numbers with a digit, so the two
-# never read as one another.
+_HEX12 = r"[0-9a-f]{12}"
+# A feature: ``label`` or ``function.operationN``. Segments start with a letter and numbers
+# with a digit, so the two never read as one another.
 FEATURE_NAME_PATTERN = rf"{_SEGMENT}(?:\.{_SEGMENT})?"
-ELEMENT_NAME_PATTERN = rf"[fev]:(?:[0-9a-f]{{12}}|{FEATURE_NAME_PATTERN}\.{_NUMBER}(?:\.{_NUMBER})?)"
+# An atom: the n-th element of its kind a feature made, or a derivation folded to the feature
+# of its last step and a digest of it (the component lineage's table spells it).
+MADE_ATOM_PATTERN = rf"{FEATURE_NAME_PATTERN}\.{_NUMBER}"
+FOLDED_ATOM_PATTERN = rf"{FEATURE_NAME_PATTERN}~{_HEX12}"
+ATOM_PATTERN = rf"{FEATURE_NAME_PATTERN}(?:\.{_NUMBER}|~{_HEX12})"
+# A step: what a feature made of the element before it -- modified (M), generated from an
+# element of a kind (G<k>), both (MG<k>), the n-th unnamed sub-element of a parent (U[n]),
+# named from lower elements (L) -- with further sources or lower elements, or the n-th of
+# a component's elements otherwise named alike (D<n>). A number after M, G<k> or MG<k> is
+# the n-th of a result's elements the same step made from the same sources.
+STEP_PATTERN = (rf";(?:(?:(?:M|MG[fev]|G[fev]|U)(?:{_NUMBER})?|L):{FEATURE_NAME_PATTERN}(?:\+[fev]:{ATOM_PATTERN})*"
+                rf"|D{_NUMBER})")
+DERIVATION_PATTERN = rf"{ATOM_PATTERN}(?:{STEP_PATTERN})*"
+# An element's name: its kind and its derivation, or its geometric token.
+ELEMENT_NAME_PATTERN = rf"[fev]:(?:{_HEX12}|{DERIVATION_PATTERN})"
 FEATURE_NAME_RE = re.compile(rf"^{FEATURE_NAME_PATTERN}$")
+FOLDED_ATOM_RE = re.compile(rf"^{FOLDED_ATOM_PATTERN}$")
+DERIVATION_RE = re.compile(rf"^{DERIVATION_PATTERN}$")
+_STEP_RE = re.compile(rf"^(M|MG|G|U|L|D)([fev])?({_NUMBER})?(?::({FEATURE_NAME_PATTERN})((?:\+[fev]:{ATOM_PATTERN})*))?$")
 OCCURRENCE_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})$")
 OCCURRENCE_ELEMENT_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})/({ELEMENT_NAME_PATTERN})$")
 ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_NAME_PATTERN})$")
@@ -91,16 +115,93 @@ def is_feature_name(value: object) -> bool:
     return isinstance(value, str) and FEATURE_NAME_RE.match(value) is not None
 
 
-def element_feature(element: str) -> str | None:
-    """The name of the feature that made the element an element name names, or None
-    for a geometric token (``f:dial.extrude1.3.2`` -> ``dial.extrude1``)."""
-    lineage = element[2:]
-    if "." not in lineage:
-        return None
-    segments = lineage.split(".")
-    while segments and segments[-1].isdigit():
-        segments.pop()
-    return ".".join(segments) or None
+@dataclass(frozen=True)
+class Step:
+    """One step of a derivation: ``op`` (``M``, ``G``, ``MG``, ``U``, ``L`` or ``D``), the
+    source kind of a ``G``/``MG`` (``f``, ``e``, ``v``; else ""), the number of a ``U`` or a
+    ``D`` (0 where none is written), the feature that took the step ("" for ``D``) and its
+    further sources or lower elements, ``(kind, atom)``."""
+
+    op: str
+    kind: str = ""
+    number: int = 0
+    feature: str = ""
+    extras: tuple[tuple[str, str], ...] = ()
+
+
+def is_folded_atom(value: object) -> bool:
+    """Whether ``value`` is a folded atom (``feature~`` and twelve hex digits)."""
+    return isinstance(value, str) and FOLDED_ATOM_RE.match(value) is not None
+
+
+def atom_feature(atom: str) -> str:
+    """The feature an atom names: the one that made the element, or the last step's of a
+    folded derivation (``dial.make_box1.6`` and ``dial.cut3~5d1e0c2f9a3b`` -> ``dial.make_box1``,
+    ``dial.cut3``)."""
+    return atom.split("~", 1)[0] if "~" in atom else atom.rsplit(".", 1)[0]
+
+
+def split_derivation(text: str) -> tuple[str, tuple[Step, ...]]:
+    """``(atom, steps)`` of a derivation -- an element name without its kind. ValueError
+    for text the grammar does not admit."""
+    if DERIVATION_RE.match(text) is None:
+        raise ValueError(f"not a derivation: {text!r}")
+    atom, *written = text.split(";")
+    steps = []
+    for step in written:
+        match = _STEP_RE.match(step)
+        if match is None:  # the derivation pattern admitted it, so this cannot happen
+            raise ValueError(f"not a step: {step!r}")
+        op, kind, number, feature, extras = match.groups()
+        steps.append(Step(op, kind or "", int(number or 0), feature or "",
+                          tuple((extra[0], extra[2:]) for extra in extras.split("+")[1:]) if extras else ()))
+    return atom, tuple(steps)
+
+
+def derivation_features(text: str) -> list[str]:
+    """The features a derivation names -- its atom's, each step's and each extra atom's --
+    in order, each once."""
+    atom, steps = split_derivation(text)
+    found = [atom_feature(atom)]
+    for step in steps:
+        found.extend([step.feature] if step.feature else [])
+        found.extend(atom_feature(extra) for _kind, extra in step.extras)
+    return list(dict.fromkeys(found))
+
+
+def expanded_derivation(text: str, table: Mapping[str, str]) -> tuple[str, tuple[Step, ...]]:
+    """``(made atom, steps)`` of a derivation with every folded atom it starts from spelled
+    out through ``table`` (a component lineage's): the element's whole making, from the
+    element some feature made to the last step. ValueError where the table lacks an atom."""
+    steps: tuple[Step, ...] = ()
+    seen: set[str] = set()
+    while True:
+        atom, more = split_derivation(text)
+        steps = more + steps
+        if not is_folded_atom(atom):
+            return atom, steps
+        if atom in seen or atom not in table:
+            raise ValueError(f"the lineage does not spell {atom!r}")
+        seen.add(atom)
+        text = table[atom]
+
+
+def made_and_modified(element: str, table: Mapping[str, str]) -> tuple[str | None, str | None]:
+    """The feature that made the element a name names -- the last step's that made it
+    anew (generated it, named it from a parent or from its lower elements), else the one
+    that made the element it was made from -- and the feature that last modified it since,
+    or None; ``(None, None)`` for a geometric token."""
+    derivation = element[2:]
+    if DERIVATION_RE.match(derivation) is None:
+        return None, None
+    atom, steps = expanded_derivation(derivation, table)
+    made, modified = atom_feature(atom), None
+    for step in steps:
+        if step.op == "M":
+            modified = step.feature
+        elif step.op != "D":
+            made, modified = step.feature, None
+    return made, modified
 
 
 def element_kind(element: str) -> str:

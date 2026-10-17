@@ -145,7 +145,7 @@ def where(document: Path | str, ref: str) -> Where:
     not ``known``, with its ``reason``."""
     from cadgen._internal.component_package import read_lineage
     from cadgen._internal.step_hash import step_file_hash
-    from cadgen.cad_ref_syntax import element_feature, element_kind
+    from cadgen.cad_ref_syntax import element_kind, made_and_modified
     from cadgen.refs import descriptor_space, locate, resolve
     from cadgen.store.objects import read_verified_object
     from cadgen.store.parts import element_tokens
@@ -247,12 +247,11 @@ def where(document: Path | str, ref: str) -> Where:
             return answer.unknown("the body has no element of that name: the ref names a build "
                                   "this document is not")
         element = str(resolved.element)
-        if element_feature(element) is None:
+        made_by, modified_by = made_and_modified(element, lineage.get("table") or {})
+        if made_by is None:
             return answer.unknown("no feature of the model's run made this element: the run took it, as it "
                                   "was, from a shape no feature made (a child's or a file's)")
         answer.ref = f"#{occurrence_id}/{element}"
-        made_by = element_feature(element)
-        modified_by = (lineage.get("modified") or {}).get(element)
     answer.made = feature(made_by)
     answer.modified = feature(modified_by)
     if answer.made is None:

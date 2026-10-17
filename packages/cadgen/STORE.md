@@ -50,7 +50,7 @@ One word per concept; the code uses these words and no others.
 | **part** | a component's display data under one producer: ONE index entry naming its display mesh and its selector table (§3), keyed by the construction that made the component -- its content, where no construction did -- and its lineage |
 | **feature** | one call of a kernel construction from the model's own code, as the run's trace saw it (`_internal/kernel_trace.py`): named, within a part, `<function>.<operation><count>` -- `bracket.extrude1`, the first `extrude` of the function `bracket` among the features the part descends from -- or, in a part made of a shape an author labelled, by that label (§2) |
 | **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
-| **lineage** | a component's account of its elements: the feature that made the body and, per face, edge and vertex, its **name** -- `f:bracket.extrude1.3`, the third face the feature made -- and the feature that last modified it (§2); an object the component's tree entry names |
+| **lineage** | a component's account of its elements: the feature that made the body, per face, edge and vertex its **name** -- its derivation from the features that made it, from what the kernel's makers reported: `f:bracket.make_box1.6;M:bracket.cut1`, the sixth face of the first box, modified by the first cut -- and the **table** that spells each derivation folded to a short atom (§2); an object the component's tree entry names |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
 | **document** | a CAD file as a reader takes it, named by its bytes' hash: `index/document` maps a STEP's bytes to one tree -- the result it was exported from or, where verify finds it does not hold that result or no build wrote it, its own content (§3, *Exports*) |
 | **export** | a file a model owes that is written from its stored result, never by running its body: its STEP, by the build pool (`store/exports.py`), with the names writer -- each part's key and each face's and edge's name in the file -- or plain; its sidecar, from its record; its declared meshes, cut from the tree its STEP's bytes map to (a mesh-only model's, from its result). Queued as the result is recorded, finished by the run (§3, *Exports*) |
@@ -312,28 +312,64 @@ not named by it: there the label names the occurrence (`#lid`), so identical
 constructions labelled apart (`screw:0`, `screw:1`) are one part, written once
 and placed twice. A function or label that is not an ASCII identifier is
 written as its ASCII form and the first eight hex digits of its sha256, so no
-two are written alike. A component's lineage follows
-each of its faces, edges and vertices back through the features to the one
-that made it -- through an input that is a sub-shape of a feature's result
-(`bar.faces()[i]`) to that result -- and names it `<kind>:<feature>.<n>`: the
-feature and the element's number among the elements of its kind the feature
-made, in the order of its result (`f:bracket.extrude1.3`); a piece of an element a
-later feature split takes its number among the pieces after a further dot
-(`f:bracket.extrude1.3.2`). A feature that trimmed or otherwise modified an
-element does not rename it: the last one is recorded beside the name, for
-`store where`. Every element a feature produced has a name: one the trace
-cannot follow to an input is the feature's that returned it, as is one it
-rebuilt or trimmed from a shape no feature made; only an element passed on as it
-was from such a shape -- a child's, a file's -- has none. A feature's file and
-line are never in a name -- they are the provenance entry's (§3) -- so moving
-code renames nothing; a call of the same operation inserted earlier in the same
-function, among the part's own features, renumbers the later ones, which a
-label never is, and an edit anywhere else in the model renames nothing. The grammar:
-`[fev]:<feature>.<n>[.<piece>]`, a feature one or two segments
-`[A-Za-z_][A-Za-z0-9_]*` joined by a dot, numbers from 1
-(`cad_ref_syntax.ELEMENT_NAME_PATTERN`, which the client's `cadRefs.js`
-mirrors). A construction the memo cannot key is still a feature: its elements
-are named like any other's, and it runs again on every run.
+two are written alike.
+
+An element's name is its **derivation**, from what the kernel reported, composed
+as FreeCAD 1.0 composes it (`TopoShape::makeShapeWithElementMap`). The makers a
+feature runs -- a boolean and the clean after it, a prism, a fillet, the face of
+a wire and its fixes -- are recorded while it runs and asked, of each element
+of the feature's inputs, what they modified or generated from it
+(`_internal/kernel_history.py`), and the feature names every element of its
+results from its inputs' names: an element an input holds unchanged (every
+boolean here leaves alone what it does not change), or holds at another place
+of the same shape (a placement), or a copy of one, **is** that element and has
+its name; one the makers report is named from its first source -- a vertex
+before an edge before a face, then by input, then by name -- and the step the
+feature took, `M` modified, `G<kind>` generated from an element of that kind,
+`MG<kind>` both, with up to four further sources (`f:bracket.make_box1.6;M:bracket.cut1`,
+the trimmed sixth face of the box; `e:sk.make_rect1.2;Ge:part.extrude1`, the
+side an extrusion generated from the rectangle's second edge, whose top face is
+`f:sk.make_rect1.1;Gf:part.extrude1`); an element no maker reports is named
+from a named parent -- an edge from a face, then a vertex from an edge, the
+first by name, with its number among that parent's unnamed elements (`U`) --
+or else from its lower elements, all of them named (`L`: an edge from its
+vertices, a face from its outer wire's edges); and only an element left with
+no source at all is the feature's own, its number among the elements of its
+kind the feature made in the order of its results (`f:bracket.make_box1.6`:
+every element of a primitive, and what the passes cannot reach). Elements of
+one result a step made alike -- from the same sources, the same way: the pieces
+of one face a cut split, the pieces of a ruled loft's long edge, reported as
+generated from every vertex on it -- are numbered in the step, the second and
+later by their place among what was reported of their first source (`;M2:`,
+`;Gv2:`, FreeCAD's index), so a later operation that changes one renumbers no
+other; of a component's elements still named alike -- two places of one shape
+in one body -- the second and later, in the component's order, take `;D2`,
+`;D3`. A derivation longer than 48 characters is folded to
+the feature of its last step and the first twelve hex digits of its sha256
+(`bracket.cut1~5d1e0c2f9a3b`), a further source that is no atom is folded
+whatever its length, and a folded atom takes further steps like any other, so
+every name stays short; the component's lineage object keeps what each folded
+atom stands for (its `table`, §3), every one its names or that table reach.
+Nothing is measured: no surface, curve or extent is compared to name anything.
+An element passed on unchanged from a shape no feature made -- a child's, a
+file's -- has no name and names nothing (it is no source, parent or lower
+element of a name); an element made out of one alone falls to the passes, and
+to the feature. A feature's file and line are never in a name -- they are the
+provenance entry's (§3) -- so moving code renames nothing; a name changes when
+its derivation does: a feature that starts or stops modifying the element, a
+call of the same operation inserted earlier in the same function among the
+part's own features (which renumbers the later ones, as a label never is). An
+edit anywhere else in the model renames nothing. The grammar, which the
+client's `cadRefs.js` mirrors (`cad_ref_syntax.ELEMENT_NAME_PATTERN`):
+`[fev]:` and an atom -- `<feature>.<n>` or `<feature>~<12 hex>`, a feature one
+or two segments `[A-Za-z_][A-Za-z0-9_]*` joined by a dot, numbers from 1 --
+and its steps, each `;<op>:<feature>` with up to four `+[fev]:<atom>` (`op`
+one of `M[n]`, `G[fev][n]`, `MG[fev][n]`, `U[n]`, `L`) or `;D<n>`. A construction the
+memo cannot key is still a feature: its elements are named like any other's,
+and it runs again on every run. The history a miss composed is kept with the
+memo's entry, and the naming computed from it with that, so a hit -- which
+hands back the miss's shapes -- names as the miss did without running a maker
+(README law 18).
 
 **Geometric tokens are the fallback matcher.** An element no lineage names --
 every element of a file read, and those a model took from a shape no feature
@@ -404,9 +440,12 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   what its part is keyed by and what names its faces, edges and vertices. The
   lineage object is canonical JSON (`component_package.lineage_bytes`):
   `{"made": <the feature that made the body>, "faces": [...], "edges": [...],
-  "vertices": [...], "modified": {<name>: <the feature that last modified
-  it>}}`, each list the elements' names by ordinal, `null` for one no feature
-  made. The recipe is each face ordinal's effective RGBA: absent native face
+  "vertices": [...], "table": {<folded atom>: <derivation>}}`, each list the
+  elements' names by ordinal, `null` for one passed on from a shape no feature
+  made, and the table every folded atom a name or an entry reaches, and nothing
+  else (`read_lineage` checks it): what the derivations stand for in full, the
+  string table of FreeCAD's element maps, so the object is the content-hashed
+  record of the names and a name in a file stays short. The recipe is each face ordinal's effective RGBA: absent native face
   ordinals are removed before hashing, and ordinal keys become strings before
   canonical sorting, so a JSON round trip past ordinal 9 keeps the identity. A
   uniform colour stays occurrence metadata; named PBR definitions and leaf
@@ -555,7 +594,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   The **selector table** (`_internal/selector_table.py`, schema 6) is the one
   place a ref's facts are minted. From the exact BREP, the topology facts and
   the display mesh, per face, edge and vertex, the **element name** a ref ends
-  in, which leads each row -- its lineage (§2), `f:bracket.extrude1.3`, or, for
+  in, which leads each row -- its lineage (§2), `f:bracket.make_box1.6;M:bracket.cut1`, or, for
   an element no lineage names, its geometric token, `f:9d2e8c1b5a70`, measured
   here, in the pool's job -- the parameters the facts carry and each edge's exact
   length and centre (no face's area or centroid: *A face's area*, above),
@@ -1107,13 +1146,13 @@ of its lineage stands for, and the **occurrences** of those components in the
 result, each with the feature whose call made the shape it places. A component
 names its elements by those features through its lineage object (§2, §3),
 which is how an element finds the feature that made it and the one that last
-modified it: lineage is found from what each feature was given and returned,
-with no history object from the kernel (an element of a result whose TShape
-an input holds, or that an input holds with the same surface and extent, is
-unchanged there and inherits its lineage; one an input held on the same
-surface with another extent was modified by the feature; any other was made by
-it), and the walk stops at a shape no feature made (a child's geometry, an
-imported file), whose elements are of unknown origin. A part one construction
+modified it: its derivation, spelled out through the object's table, is every
+step that made it (§2) -- made by the feature of its last step that made it
+anew (generated it, or named it from a parent or from its lower elements),
+else by the feature that made the element it came from; last modified by the
+feature of the last `M` step after that -- and an element passed on from a
+shape no feature made (a child's geometry, an imported file) has no derivation,
+its origin unknown. A part one construction
 made twice is one part (§3), named by its first making; each of its
 occurrences keeps the call that made it, so each answers with its own line.
 A file and a line are here and nowhere else, so an edit that moves code
@@ -1128,7 +1167,8 @@ wrote, which hold its result unless the document entry lists what differs), the
 ref resolved in the tree the record names (by the one resolver every ref goes
 through, `cadgen.refs`; a ref in geometric-token form is matched to its element
 by geometry first, §2) to its occurrence and its component, whose lineage
-names the feature the element's name holds -- looked up in the entry that
+spells the element's derivation and so names the features that made and last
+modified it -- looked up in the entry that
 describes that occurrence: the model's, or, for an occurrence a link placed, the
 child's, by the occurrence's token in the child's own tree (through the
 record's children, while the child's record still holds the key the parent

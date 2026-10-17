@@ -402,8 +402,10 @@ is, the effects later calls had on it -- restated stably (`construction_key`),
 is that component's identity (law 20), the same in a cold worker, a warm one
 and with hits off. The same layer records each call from the
 model's own code as a **feature** (`_internal/kernel_trace.py`), whose lineage
-names the faces, edges and vertices of what the run made, and whose trace is
-what provenance keeps (law 20, `STORE.md` §3). The hooks that
+names the faces, edges and vertices of what the run made from what the OCCT
+makers the call ran report of them (`_internal/kernel_history.py`) -- kept with
+the call's entry, so a hit names as its miss did and runs no maker -- and whose
+trace is what provenance keeps (law 20, `STORE.md` §3). The hooks that
 remain change no result: `determinism.py` fixes the iteration order of
 build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
 point that leaves equality alone), a child call hands back the child's
@@ -463,21 +465,34 @@ question with another's name.
   the producer that derives its display data -- so one body is one mesh
   however its bytes come out, a file that holds its result maps to that
   result, and a preview's parts are the file's. A
-  face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): the
-  feature that made it -- `<function>.<operation><count>`, counted among the
-  features the part descends from so an edit elsewhere renames nothing, or the
-  label an author gave the shape, which pins it in what is made of that shape
-  once labelled (a label set after a construction used the shape renames
-  nothing it made; on a part placed as it is, a label names the occurrence:
-  parts made alike and labelled apart are one part) -- and its number among the elements of its
-  kind that feature made, `f:bracket.extrude1.3`, with a piece's number after a
-  later split. A ref is the occurrence's **token** (`o:`, from its place in
-  the tree: parent token, name, rounded placement) and the element's name:
-  `#o:4b1f9e2a7c03/f:bracket.extrude1.3`. So a ref survives a STEP round trip, a
-  sibling's insertion, a dimension change and code that moves, and a name
-  copied from the viewer resolves in `inspect` to the same face. Nothing on
-  the way from a run to its record measures geometry to name anything: the
-  key and the lineage are what the run's memo and trace already hold.
+  face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): its
+  derivation from the features that made it, from what the kernel's makers
+  reported (`_internal/kernel_history.py`), composed as FreeCAD 1.0 composes
+  it. An element an operation left alone keeps its name; one it modified or
+  generated is named from the element it came from and the feature that took
+  the step (`f:bracket.make_box1.6;M:bracket.cut1`, the box's sixth face the
+  cut trimmed; `e:sk.make_rect1.2;Ge:part.extrude1`); one no maker reported is
+  named from a named parent or its named lower elements; only one with no
+  source at all -- every element of a primitive -- is its number among the
+  elements of its kind its feature made (`f:bracket.make_box1.6`); elements
+  one step made alike are numbered in it (`;M2:`), and of a part's elements
+  still named alike the second takes `;D2`. A feature is
+  `<function>.<operation><count>`, counted among the features the part
+  descends from so an edit elsewhere renames nothing, or the label an author
+  gave the shape, which pins it in what is made of that shape once labelled (a
+  label set after a construction used the shape renames nothing it made; on a
+  part placed as it is, a label names the occurrence: parts made alike and
+  labelled apart are one part). A derivation too long to spell is folded to its
+  last feature and a digest (`bracket.cut1~5d1e0c2f9a3b`), which the part's
+  lineage object spells. A ref is the occurrence's **token** (`o:`, from its
+  place in the tree: parent token, name, rounded placement) and the element's
+  name: `#o:4b1f9e2a7c03/f:bracket.make_box1.6;M:bracket.cut1`. So a ref
+  survives a STEP round trip, a sibling's insertion, a dimension change and
+  code that moves -- it changes when a feature starts or stops changing what
+  it names -- and a name copied from the viewer resolves in `read_scene` to the
+  same face. Nothing on the way from a run to its record measures geometry to
+  name anything: the key and the lineage are what the run's memo, its trace
+  and its makers already hold.
 - **Geometry is the fallback.** What no construction of a run made -- a file
   read, a shape built outside the patched kernel surface -- is keyed by its
   bytes, and its elements are named by **geometric tokens**

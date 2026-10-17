@@ -52,7 +52,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCP.TopAbs import TopAbs_COMPOUND, TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX
 from OCP.TopExp import TopExp
 from OCP.TopoDS import TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedMapOfShape, TopTools_ListOfShape
@@ -82,13 +82,17 @@ def stats() -> dict[str, int]:
 @dataclass
 class History:
     """A feature's history: ``origins[(result position, kind, ordinal)]`` is a tuple of
-    ``(input index, source kind, source ordinal, how)`` -- kinds by their index in
+    ``(input index, source kind, source ordinal, how, place)`` -- kinds by their index in
     :data:`KINDS`, ordinals in ``TopExp.MapShapes`` of the shape as given or returned,
-    ``how`` one of ``I`` (copied), ``M`` (modified), ``G`` (generated). An element no
-    maker reported has no entry. ``structures`` is the trace's naming of the feature,
-    computed from it once and kept with it (``kernel_trace``)."""
+    ``how`` one of ``I`` (copied), ``M`` (modified), ``G`` (generated), and ``place`` the
+    element's position among what the maker reported of that source (a tuple, one
+    position per maker of the chain that made it out of another: FreeCAD's index, which
+    tells apart elements made alike from the same sources). An element no maker reported
+    has no entry. ``structures`` is the trace's naming of the feature, computed from it
+    once and kept with it (``kernel_trace``)."""
 
-    origins: dict[tuple[int, int, int], tuple[tuple[int, int, int, str], ...]] = field(default_factory=dict)
+    origins: dict[tuple[int, int, int], tuple[tuple[int, int, int, str, tuple[int, ...]], ...]] = field(
+        default_factory=dict)
     structures: dict[Any, Any] = field(default_factory=dict, repr=False)
 
 
@@ -183,13 +187,18 @@ def _made(maker: Any) -> Callable[[Any], list[tuple[Any, str]]]:
 
 
 def _swept(maker: Any) -> Callable[[Any], list[tuple[Any, str]]]:
+    """A sweep's ``FirstShape(s)`` is ``s`` where the sweep began -- itself, or the copy a
+    sweep asked to copy its profile makes (build123d's revolution does) -- and its
+    ``LastShape(s)`` is generated from ``s``, unless it is the first again (a full turn)."""
     made = _made(maker)
 
     def query(sub: Any) -> list[tuple[Any, str]]:
         found = made(sub)
-        for end in (maker.FirstShape(sub), maker.LastShape(sub)):
-            if not end.IsNull() and not end.IsSame(sub):
-                found.append((end, GENERATED))
+        first, last = maker.FirstShape(sub), maker.LastShape(sub)
+        if not first.IsNull() and not first.IsSame(sub):
+            found.append((first, SAME))
+        if not last.IsNull() and not last.IsSame(sub) and (first.IsNull() or not last.IsSame(first)):
+            found.append((last, GENERATED))
         return found
     return query
 
@@ -403,13 +412,17 @@ def _map(shape: Any, kind: Any) -> Any:
 
 def _merged(found: tuple, more: tuple) -> tuple:
     """Origins ``more`` added to ``found``: one per source element, the stronger account
-    kept where a source arrives twice (generated over modified over copied)."""
-    by_source = {(j, kind, ordinal): how for j, kind, ordinal, how in found}
-    for j, kind, ordinal, how in more:
+    kept where a source arrives twice (generated over modified over copied), and its
+    first place."""
+    by_source = {(j, kind, ordinal): (how, place) for j, kind, ordinal, how, place in found}
+    for j, kind, ordinal, how, place in more:
         known = by_source.get((j, kind, ordinal))
-        if known is None or _STRENGTH[how] > _STRENGTH[known]:
-            by_source[(j, kind, ordinal)] = how
-    return tuple((j, kind, ordinal, how) for (j, kind, ordinal), how in by_source.items())
+        if known is None:
+            by_source[(j, kind, ordinal)] = (how, place)
+        else:
+            stronger = how if _STRENGTH[how] > _STRENGTH[known[0]] else known[0]
+            by_source[(j, kind, ordinal)] = (stronger, min(place, known[1]))
+    return tuple((j, kind, ordinal, how, place) for (j, kind, ordinal), (how, place) in by_source.items())
 
 
 def _then(first: str, second: str) -> str:
@@ -421,6 +434,35 @@ def _then(first: str, second: str) -> str:
     return GENERATED if GENERATED in (first, second) else MODIFIED
 
 
+def _held(shape: Any) -> set:
+    """The TShapes a shape is made of whole: itself and every compound, solid, shell and
+    face it holds -- what one maker's result can reach another's, or a feature's, as."""
+    found = {shape.TShape()}
+    for kind in (TopAbs_COMPOUND, TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE):
+        held = _map(shape, kind)
+        found.update(held.FindKey(index).TShape() for index in range(1, held.Extent() + 1))
+    return found
+
+
+def _feeding(taken: list[_Record], results: list[Any]) -> list[_Record]:
+    """The makers whose results reach the feature's results -- held by one of them, or
+    by the input of a maker that does -- in order: what FreeCAD's mapper chain follows.
+    build123d runs makers whose results it drops (a placement deep-copies its shape and
+    keeps the original), and those report nothing of the feature."""
+    wanted: set = set()
+    for result in results:
+        if result is not None:
+            wanted |= _held(result)
+    feeding = []
+    for record in reversed(taken):
+        if not wanted.isdisjoint(_held(record.result)):
+            feeding.append(record)
+            for shape in record.inputs:
+                wanted |= _held(shape)
+    feeding.reverse()
+    return feeding
+
+
 def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> History:
     """The feature's :class:`History`: ``inputs`` the shapes it was given as it was given
     them (None where empty), ``results`` the shapes it returned (None where empty) and
@@ -428,7 +470,10 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
     taken = sorted((record for record in records if record.result is not None), key=lambda record: record.order)
     if not taken or not any(shape is not None for shape in results):
         return History()
-    given = [None if shape is None else [_map(shape, kind) for kind in KINDS] for shape in inputs]
+    taken = _feeding(taken, results)
+    if not taken:
+        return History()
+    given: list[list | None] = [None] * len(inputs)
     reported = TopTools_IndexedMapOfShape()
     origins: list[tuple] = []
 
@@ -436,11 +481,15 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         index = reported.FindIndex(sub)
         if index:
             return origins[index - 1]
-        for j, maps in enumerate(given):
-            if maps is not None:
-                ordinal = maps[kind].FindIndex(sub)
-                if ordinal:
-                    return ((j, kind, ordinal, SAME),)
+        for j, shape in enumerate(inputs):
+            if shape is None:
+                continue
+            maps = given[j]
+            if maps is None:
+                maps = given[j] = [_map(shape, topabs) for topabs in KINDS]
+            ordinal = maps[kind].FindIndex(sub)
+            if ordinal:
+                return ((j, kind, ordinal, SAME, ()),)
         return None
 
     def report(shape: Any, found: tuple) -> None:
@@ -468,33 +517,41 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
                     found = source(sub, kind)
                     if found is None:
                         continue
-                    for made, how in _asked(query, sub):
+                    for at, (made, how) in enumerate(_asked(query, sub), 1):
                         made_kind = _KIND.get(made.ShapeType())
                         if made_kind is None or made.IsSame(sub):
                             continue
-                        report(made, tuple((j, k, o, _then(was, how)) for j, k, o, was in found))
+                        report(made, tuple((j, k, o, _then(was, how), (*place, at)) for j, k, o, was, place in found))
     history = History()
     if not origins:
         return history
+    # Every element of every result, once, with each place it has among them: a result's
+    # element, by its ordinal there -- and, for a result that is a maker's result at another
+    # place (build123d's ``located`` places a copy), the maker's element at that ordinal.
+    held = [TopTools_IndexedMapOfShape() for _kind in KINDS]
+    places: list[list[list[tuple[int, int]]]] = [[] for _kind in KINDS]
     for position, result in enumerate(results):
         if result is None:
             continue
-        maps = [_map(result, kind) for kind in KINDS]
-        # A result that is a maker's result at another place (build123d's ``located``
-        # places a copy) holds its elements at the same ordinals.
-        moved = [None if record.result.IsSame(result) or not record.result.IsPartner(result) else
-                 [_map(record.result, kind) for kind in KINDS] for record in taken]
-        for index in range(1, reported.Extent() + 1):
-            made = reported.FindKey(index)
-            kind = _KIND[made.ShapeType()]
-            ordinal = maps[kind].FindIndex(made)
-            if not ordinal:
-                ordinal = next((at for at in (other[kind].FindIndex(made) for other in moved if other is not None)
-                                if at), 0)
-            if ordinal:
-                key = (position, kind, ordinal)
-                found = history.origins.get(key)
-                history.origins[key] = origins[index - 1] if found is None else _merged(found, origins[index - 1])
+        sources = [result] + [record.result for record in taken
+                              if record.result.IsPartner(result) and not record.result.IsSame(result)]
+        for shape in sources:
+            for kind, topabs in enumerate(KINDS):
+                elements = _map(shape, topabs)
+                for ordinal in range(1, elements.Extent() + 1):
+                    index = held[kind].Add(elements.FindKey(ordinal))
+                    if index > len(places[kind]):
+                        places[kind].append([])
+                    if (position, ordinal) not in places[kind][index - 1]:
+                        places[kind][index - 1].append((position, ordinal))
+    for index in range(1, reported.Extent() + 1):
+        made = reported.FindKey(index)
+        kind = _KIND[made.ShapeType()]
+        at = held[kind].FindIndex(made)
+        for position, ordinal in places[kind][at - 1] if at else ():
+            key = (position, kind, ordinal)
+            found = history.origins.get(key)
+            history.origins[key] = origins[index - 1] if found is None else _merged(found, origins[index - 1])
     return history
 
 

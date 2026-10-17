@@ -28,47 +28,72 @@ is written as its ASCII form and a digest of it (``identifier``), so no two are
 written alike. Lines and files are not in a name: they are where the trace
 says a feature ran (the provenance entry, ``store where``).
 
-Lineage is by identity and geometry, not by the kernel's history objects. An
-element is a TShape at one place in its shape (two places of one TShape -- a
-prism's two caps -- are two elements). Each element of a component is followed
-back through the features: at each feature, an element of the result that an
-input holds at the same place (where the operation saw it, as the kernel keeps
-what an operation leaves alone, or in the shape's own frame, as a placement
-keeps everything) or that an input held with the same surface (or curve, or
-point) and the same extent is **unchanged** there and inherits its lineage from
-that input; one on the surface of an input's element the result no longer holds,
-with another extent, was **modified** by the feature; any other element was
-**made** by it. Surfaces, curves and extents are compared in the frame the
-operation saw them (the inputs as they were passed, the result as it was
-returned), rounded absolutely, and only for the elements an operation touched.
-An input that is a sub-shape of a feature's result (``bar.faces()[i]``) is
-followed to that result, where the feature placed it. The walk stops at a shape
-no feature made (a materialized child, an imported file, a shape built outside
-the patched surface): an element the operation passed on from it as it was
-has no lineage, and one it rebuilt or trimmed is made by the operation -- as is
-one that traces to an input the trace cannot follow, so every element a
-feature produced has a name.
+**Lineage is the kernel's history, composed as FreeCAD 1.0 composes it**
+(``TopoShape::makeShapeWithElementMap``). The makers a feature runs report, of each
+element of its results, the elements of its inputs it was modified, generated or
+copied from (``kernel_history``), and the feature names every element of its
+results from its inputs' names, in this order:
 
-An element's **name** is its lineage: ``<kind>:<feature>.<n>``, the feature that
-made it and its number among the elements of that kind the feature made, in the
-order of its result -- ``f:dial.extrude1.3`` -- and, where a later feature split
-one element into several, each piece's number among them after a further dot,
-in the component's own order: ``f:dial.extrude1.3.2``. The features that
-modified an element do not rename it; the last of them is recorded beside its
-name. An element with no lineage has no name here (``None``): its part names it
-by its geometry (``geometric_tokens``).
+1. **Identity.** An element one of its inputs holds where the operation saw it --
+   the kernel keeps what an operation leaves alone, and every boolean here leaves
+   alone what it does not change -- or holds at another place of the same shape (a
+   placement), or a copy of one, is that element, and has its name.
+2. **History.** An element the makers report is named from its first source -- a
+   vertex before an edge before a face, then the input it is of, then by name --
+   and the step the feature took: modified (``M``), generated from an element of a
+   kind (``G<kind>``), both (``MG<kind>``), with up to four further sources.
+3. **Reverse pass.** An unnamed edge of a named face, then an unnamed vertex of a
+   named edge, is named from its first named parent (by name) and its number among
+   that parent's unnamed sub-elements (``U``).
+4. **Forward pass.** An unnamed edge whose vertices are all named, then an unnamed
+   face whose outer wire's edges are, is named from the first of them by name, with
+   up to four more (``L``).
+5. **Made.** An element still unnamed is the feature's own: its number among the
+   elements of its kind the feature made, in the order of its results, as every
+   element of a primitive is.
 
-``Trace.account`` is a component's whole account: its lineage, the object its
-tree entry names (``component_package``) -- the feature that made the body and,
-per element ordinal, its name -- and the feature each name of it stands for;
-``Trace.feature_rows`` is the run's features, what the provenance entry keeps
+An element passed on unchanged from a shape no feature made (a materialized child, an
+imported file, a shape built outside the patched surface) has no name here -- its part
+names it by its geometry (``geometric_tokens``) -- and names nothing: it is no parent
+or lower element of a name, and a source from it is skipped, so an element made out of
+one alone falls to the passes, and to the feature. Nothing here measures geometry:
+what a step says is what the kernel reported.
+
+An element's **name** is its kind and its derivation (``cad_ref_syntax``): the atom it
+starts from (the n-th element of its kind a feature made, ``dial.make_box1.6``) and a
+step per feature that made it out of another (``f:dial.make_box1.6;M:dial.cut1``,
+``e:sk.make_rect1.2;Ge:part.extrude1``). A derivation longer than ``FOLD_LENGTH``
+characters is **folded** to the feature of its last step and a digest of it
+(``dial.cut1~5d1e0c2f9a3b``), and a further source that is not an atom is folded
+whatever its length, so every name stays short; the component's lineage keeps what each
+folded atom stands for (its ``table``), every one its names or that table reach.
+Elements of one result a step made alike -- from the same sources, the same way: the
+pieces of a face one cut splits, the pieces of a ruled loft's long edge, which it
+reports as generated from every vertex on it -- are numbered in the step, the second
+and later by their place among what was reported of their first source (``;M2:``,
+``;Gv2:``, FreeCAD's index), so a later operation that changes one leaves the others'
+numbers alone. Of a component's elements still named alike (two places of one shape
+in one body), the second and later, in ordinal order, take ``;D2``, ``;D3``.
+
+The **structure** of a feature's naming -- each element's rule: the input element it
+is, its sources, its parent candidates, its lower elements, its number -- is computed
+from its history and the live shapes once, the first time a component needs it, and kept
+with the history, so a hit's feature (whose history is its miss's) reuses it; it depends
+on whether the elements of the feature's inputs have names, so it is kept per account of
+that (``_skey``). The names themselves are rendered per part, as a feature's name is the
+part's: strings, from those structures, with no maker run and no map built on a warm run.
+
+``Trace.account`` is a component's whole account: its lineage, the object its tree
+entry names (``component_package``) -- the feature that made the body, per element
+ordinal its name, and the table -- and the feature each feature name it holds stands
+for; ``Trace.feature_rows`` is the run's features, what the provenance entry keeps
 with those names (``cadgen.store.provenance``).
 """
 
 from __future__ import annotations
 
+import bisect
 import hashlib
-import math
 import re
 import sys
 import weakref
@@ -77,39 +102,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from OCP.BRep import BRep_Tool
-from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepTools import BRepTools
-from OCP.GeomAbs import GeomAbs_CurveType, GeomAbs_SurfaceType
-from OCP.Precision import Precision
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
-from OCP.TopExp import TopExp
+from OCP.TopExp import TopExp, TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_IndexedMapOfShape
 
 from cadgen._internal.source_hash import is_first_party_source_file
 
-__all__ = ["Feature", "Trace", "edge_signature", "face_signature", "vertex_signature"]
+__all__ = ["FOLD_LENGTH", "Feature", "Trace", "identifier", "operation_name"]
 
-# Lineage compares geometry rounded absolutely: positions and lengths to a
-# micron, directions to a nanoradian's worth, like an occurrence's placement
-# (tree_tokens). A face or edge an operation left alone keeps its surface and
-# its extent to far better than this; one it trimmed keeps the surface alone.
-POSITION_QUANTUM = 1e-6
-DIRECTION_QUANTUM = 1e-9
-_SAMPLES = 3
-_WINDOW = (-1.0, 1.0)
+# A derivation longer than this many characters is folded (``cad_ref_syntax``): long enough
+# for a made atom and a step or two, short enough for a STEP file and a prompt.
+FOLD_LENGTH = 48
+# Further sources (history) and lower elements (forward pass) a step lists, as FreeCAD does.
+_EXTRAS = 4
+# The element kinds, by their index in ``kernel_history.KINDS``: vertex, edge, face.
+_TOPABS = (TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE)
+_LETTER = "vef"
+_PLURAL = ("vertices", "edges", "faces")
+VERTEX, EDGE, FACE = 0, 1, 2
 _HERE = Path(__file__).resolve().parent
 # A kernel call reached through cadgen's own machinery before any model frame
 # (a child's materialization, the store's own constructions) is cadgen's, not
 # the model's: no feature. Its public helpers (``cadgen.geometry``,
 # ``cadgen.assembly``) are called by the model and count as build123d does.
 _OWN = tuple(_HERE.parent / name for name in ("store", "_internal", "daemon"))
-# The element kinds a component names, each with its ref prefix and plural.
-KINDS = (("face", TopAbs_FACE, "f", "faces"), ("edge", TopAbs_EDGE, "e", "edges"),
-         ("vertex", TopAbs_VERTEX, "v", "vertices"))
-_TOPABS = {kind: topabs for kind, topabs, _prefix, _plural in KINDS}
 _NOT_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # What a digest of a name looks like at its end, which a name written as it is never has.
@@ -119,8 +138,10 @@ _DIGESTED = re.compile(r"_[0-9a-f]{8}$")
 _FRAMES = {"<module>": "module", "<lambda>": "lambda", "<genexpr>": "genexpr", "<listcomp>": "listcomp",
            "<dictcomp>": "dictcomp", "<setcomp>": "setcomp"}
 _FRAME_WORDS = frozenset(_FRAMES.values())
-_IDENTITY = tuple(int(round((1.0 if row == column else 0.0) / DIRECTION_QUANTUM)) if column < 4 else 0
-                  for row in (1, 2, 3) for column in (1, 2, 3, 4))
+# Placements compare rounded, as an occurrence's placement does (tree_tokens): only to tell
+# the places of one shape in another apart.
+_POSITION_QUANTUM = 1e-6
+_DIRECTION_QUANTUM = 1e-9
 
 
 def identifier(text: str) -> str:
@@ -166,7 +187,6 @@ class Feature:
     # The input shapes as passed and the results as returned: handle copies,
     # so a later in-place move of the object does not move what the operation
     # saw; None for an empty shape or a child model's promise not yet forced.
-    # The lineage tables are computed from these on demand.
     handles: list[Any] = field(default_factory=list, repr=False)
     results: list[Any] = field(default_factory=list, repr=False)
     # The author's label for what this feature made, when one pins its name, and the
@@ -174,13 +194,9 @@ class Feature:
     # label had never been set.
     label: str | None = None
     pinned_at: int | None = None
-    # What the makers the call ran report of its results (``kernel_history.History``).
+    # What the makers the call ran report of its results (``kernel_history.History``),
+    # with the structures of its naming kept in it; None where it could not be composed.
     history: Any = field(default=None, repr=False)
-    _tables: dict[tuple[int, str], dict[int, tuple]] = field(default_factory=dict, repr=False)
-    # Per element kind, each element this feature made (its key where the result
-    # holding it was returned: :func:`_placed`) -> its number among them, in the
-    # order of the results and of each result's elements.
-    _numbers: dict[str, dict[tuple, int]] = field(default_factory=dict, repr=False)
     # Functions of the feature alone, computed once: the operation as its name spells
     # it, the name without its count (``<function>.<operation>``, as written) -- every
     # part's naming reads them for each feature it descends from -- and, on first use,
@@ -210,6 +226,18 @@ class Feature:
                 "inputs": list(self.inputs)}
 
 
+@dataclass
+class _Structure:
+    """One feature's naming: ``rules[position][kind][ordinal - 1]`` for each element of
+    each result (None for an empty result), each rule one of ``("x",)`` passed on from
+    a shape no feature made, no name; ``("s", input, ordinal)`` that input's element;
+    ``("h", sources)`` named by history, each source ``(input, kind, ordinal, how)``;
+    ``("u", candidates)`` from a parent, each ``(kind, ordinal, number)``; ``("l",
+    lowers)`` from its lower elements, each ``(kind, ordinal)``; ``("m", number)`` made."""
+
+    rules: list[list[list[tuple]] | None]
+
+
 class Trace:
     """The features of one run, in call order, and the lineage they give."""
 
@@ -224,19 +252,22 @@ class Trace:
         # The same for the call that made each live object: the first feature that
         # returned it itself, never one that only held it (a compound it was attached to).
         self._made_object: dict[int, tuple[weakref.ref, int]] = {}
-        self._signatures_by_body: dict[tuple, dict[int, tuple]] = {}
-        self._chains: dict[tuple[int, int, str, int], tuple[tuple[int, int] | None, int | None]] = {}
-        # (TShape, element kind) -> the map of a body's elements of that kind in
-        # its own frame, each element's key (:func:`_key`) -> its ordinal there,
-        # and the keys by ordinal. A body is mapped once, however many features
-        # hold it and elements ask.
-        self._maps: dict[tuple[Any, Any], tuple[Any, dict[tuple, int], list[tuple]]] = {}
-        # (TShape, placement, element kind) -> each element's key where a shape so
-        # placed has it (:func:`_placed`), by ordinal.
-        self._placed: dict[tuple, list[tuple]] = {}
-        # (feature index, input index) -> where that input came from (:meth:`_source`).
-        self._sources: dict[tuple[int, int], tuple] = {}
         self._made_by: Callable[[Any], int | None] = lambda _tshape: None
+        # Per feature, as it is recorded: the features it descends from (itself and,
+        # transitively, every feature that made what it was given) as bits by index; per
+        # stem, the features of that stem; per label, the features that claim it, in order.
+        self._ancestors: list[int] = []
+        self._stems: dict[str, int] = {}
+        self._labelled: dict[str, list[int]] = {}
+        # Per run: where each input came from (``_source``), the structure each feature is
+        # named by and what it was computed from (``_skey``), the element each element that is
+        # an input's resolves to (``_origin``), and maps of results in their own frames.
+        self._sources: dict[tuple[int, int], tuple] = {}
+        self._structures: dict[int, _Structure] = {}
+        self._skeys: dict[int, bytes] = {}
+        self._origins: dict[tuple, tuple | None] = {}
+        self._local: dict[tuple, Any] = {}
+        self._places: dict[tuple, dict[Any, list[int]]] = {}
 
     # --- recording ---------------------------------------------------------------------
 
@@ -308,6 +339,12 @@ class Trace:
             results=[handle_of(shape) for shape in results],
         )
         self.features.append(feature)
+        ancestors = 1 << feature.index
+        for given in feature.inputs:
+            if given is not None:
+                ancestors |= self._ancestors[given]
+        self._ancestors.append(ancestors)
+        self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
         for shape, index, _handle in inputs:
             if index is not None:
                 self._pin(index, getattr(shape, "__dict__", {}).get("label"), at=feature.index)
@@ -338,6 +375,7 @@ class Trace:
         feature = self.features[self.unwrapped(index)]
         if feature.label is None:
             feature.label, feature.pinned_at = identifier(label), at
+            bisect.insort(self._labelled.setdefault(feature.label, []), feature.index)
 
     def unwrapped(self, index: int) -> int:
         """The feature that made what feature ``index`` returned, through the features
@@ -377,92 +415,57 @@ class Trace:
     def account(self, body: Any, made_by: Callable[[Any], int | None]) -> tuple[dict[str, Any] | None, dict[str, int]]:
         """The lineage of one unlocated component ``body`` (a ``TopoDS_Shape``):
         ``{"made": <feature name or None>, "faces": [...], "edges": [...],
-        "vertices": [...], "modified": {<element name>: <feature name>}}``, each
-        list holding an element name or None per ``TopExp.MapShapes_s`` ordinal,
-        and ``modified`` the last feature that modified each named element that
-        was; None when no feature of the run made any of it. ``made_by`` answers,
-        for a ``TopoDS_TShape``, the feature of this run that made it. With it, the
-        feature (its index in the run) each feature name it holds stands for, with
-        the features those were given: what ``store where`` answers a name of this
-        part with."""
+        "vertices": [...], "table": {<folded atom>: <derivation>}}``, each list
+        holding an element name or None per ``TopExp.MapShapes_s`` ordinal, the table
+        every folded atom the names reach; None when no feature of the run made any of
+        it. ``made_by`` answers, for a ``TopoDS_TShape``, the feature of this run that
+        made it. With it, the feature (its index in the run) each feature name the
+        lineage holds stands for, with the features those were given: what ``store
+        where`` answers a name of this part with."""
+        from cadgen.cad_ref_syntax import derivation_features
+
         self._made_by = made_by
         maker = self._maker(made_by, body)
         owners = self._owners(made_by, body)
         if maker is None and not owners:
             return None, {}
-        traced_by_kind = []
-        for kind, topabs, prefix, plural in KINDS:
-            elements = self._elements(body, topabs)
-            traced_by_kind.append([self._lineage(made_by, owners, elements.FindKey(ordinal), kind)
-                                   for ordinal in range(1, elements.Extent() + 1)])
         # A body build123d only wrapped or placed was made by what it wraps.
         made_feature = None if maker is None else self.unwrapped(maker)
-        named_features = {made[0] for traced in traced_by_kind for made, _modifier in traced if made is not None}
-        named_features |= {modifier for traced in traced_by_kind for _made, modifier in traced if modifier is not None}
-        if made_feature is not None:
-            named_features.add(made_feature)
-        roots = [index for _shape, index in owners] + sorted(named_features)
+        roots = [index for _shape, index in owners] + ([made_feature] if made_feature is not None else [])
         names = self._names(roots, made_feature, made_at=max(roots))
+        renderer = _Renderer(self, names)
         payload: dict[str, Any] = {"made": None if made_feature is None else names[made_feature]}
-        modified: dict[str, str] = {}
         named = False
-        for (kind, topabs, prefix, plural), traced in zip(KINDS, traced_by_kind):
-            pieces = Counter(made for made, _modifier in traced if made is not None)
-            seen: Counter = Counter()
-            element_names: list[str | None] = []
-            for made, modifier in traced:
-                if made is None:
-                    element_names.append(None)
-                    continue
-                name = f"{prefix}:{names[made[0]]}.{made[1]}"
-                if pieces[made] > 1:
-                    seen[made] += 1
-                    name = f"{name}.{seen[made]}"
-                element_names.append(name)
-                if modifier is not None:
-                    modified[name] = names[modifier]
-            named = named or any(name is not None for name in element_names)
-            payload[plural] = element_names
+        for kind in (FACE, EDGE, VERTEX):
+            elements = _map(body, _TOPABS[kind])
+            texts = []
+            for ordinal in range(1, elements.Extent() + 1):
+                node = self._component_node(body, owners, elements.FindKey(ordinal), kind, ordinal)
+                texts.append(None if node is None else renderer.text(node))
+            listed = renderer.distinct(texts)
+            payload[_PLURAL[kind]] = [None if text is None else f"{_LETTER[kind]}:{text}" for text in listed]
+            named = named or any(text is not None for text in listed)
         if maker is None and not named:
             return None, {}
-        payload["modified"] = modified
-        stands = set(named_features)
-        for index in named_features:
+        payload["table"] = renderer.closed([text for kind in (FACE, EDGE, VERTEX) for text in
+                                            (name[2:] for name in payload[_PLURAL[kind]] if name is not None)])
+        by_name = {name: index for index, name in names.found.items()}
+        stands: set[int] = set() if made_feature is None else {made_feature}
+        for text in [*(name[2:] for kind in (FACE, EDGE, VERTEX) for name in payload[_PLURAL[kind]] if name),
+                     *payload["table"].values()]:
+            stands.update(by_name[feature] for feature in derivation_features(text) if feature in by_name)
+        for index in list(stands):
             stands.update(given for given in self.features[index].inputs if given is not None)
-        return payload, {names[index]: index for index in sorted(stands)}
+        return payload, {names[index]: index for index in sorted(stands) if index in names}
 
-    def _names(self, roots: list[int], body: int | None, *, made_at: int) -> dict[int, str]:
-        """The name of each feature a part descends from -- ``roots`` and, transitively,
-        every feature that made what one of them was given -- counted among them in
-        call order: a label pinned by the time the part was made (by feature ``made_at``,
-        the last of its own), the first of the part's features to claim it keeping it,
-        else ``<function>.<operation><count>``, every feature counting in its stem.
-        ``body`` is the feature that made the part's body, whose own label names the
-        occurrence and pins nothing here: identical constructions labelled apart are
-        one part, named alike. A label pinned later -- set on a shape after it was given
-        to the construction that made this part -- renames nothing here."""
-        seen: set[int] = set()
-        pending = [index for index in roots if index is not None]
-        while pending:
-            index = pending.pop()
-            if index in seen:
-                continue
-            seen.add(index)
-            pending.extend(given for given in self.features[index].inputs if given is not None and given not in seen)
-        counts: Counter = Counter()
-        labels: set[str] = set()
-        names: dict[int, str] = {}
-        for index in sorted(seen):
-            feature = self.features[index]
-            stem = feature.stem
-            counts[stem] += 1
-            if (feature.label is not None and feature.pinned_at is not None and feature.pinned_at <= made_at
-                    and index != body and feature.label not in labels):
-                labels.add(feature.label)
-                names[index] = feature.label
-            else:
-                names[index] = f"{stem}{counts[stem]}"
-        return names
+    def _names(self, roots: list[int], body: int | None, *, made_at: int) -> "_Names":
+        """The names of the features a part descends from -- ``roots`` and, transitively,
+        every feature that made what one of them was given (:class:`_Names`)."""
+        ancestors = 0
+        for index in roots:
+            if index is not None:
+                ancestors |= self._ancestors[index]
+        return _Names(self, ancestors, body, made_at)
 
     def _maker(self, made_by: Callable[[Any], int | None], body: Any) -> int | None:
         """The feature that made ``body``, or None: the one its TShape is
@@ -492,22 +495,44 @@ class Trace:
                 found.append((entity, index))
         return found
 
-    def _lineage(self, made_by: Callable[[Any], int | None], owners: list[tuple[Any, int]], element: Any,
-                 kind: str) -> tuple[tuple[int, int] | None, int | None]:
-        """``(made, modified)`` for one element of a component (in the component's
-        frame): ``made`` the feature that made it and its number among what that
-        feature made, ``modified`` the feature that last modified it; None where
-        unknown."""
+    def _component_node(self, body: Any, owners: list[tuple[Any, int]], element: Any, kind: int,
+                        ordinal: int) -> tuple | None:
+        """The element of a feature's result that element ``ordinal`` of the component
+        ``body`` is: ``(feature, position, kind, ordinal there)``, or None."""
         for shape, index in owners:
-            local = _relative(element, shape)
-            if _key(local) not in self._ordinals(shape, element.ShapeType()):
+            whole = shape is body
+            local = element if whole else _relative(element, shape)
+            if not whole and not self._own_map(shape, kind).Contains(local):
                 continue
-            found = self._located(index, shape)
-            if found is None:
-                return None, None
-            position, location = found
-            return self._chain(made_by, index, position, kind, local if location is None else local.Moved(location))
-        return None, None
+            located = self._located(index, shape)
+            if located is None:
+                return None
+            position, location = located
+            if whole and location is None:
+                return index, position, kind, ordinal
+            found = self._local_map(index, position, kind).FindIndex(local if location is None else local.Moved(location))
+            return (index, position, kind, found) if found else None
+        return None
+
+    # --- where things are ----------------------------------------------------------------
+
+    def _own_map(self, shape: Any, kind: int) -> Any:
+        key = ("own", shape.TShape(), kind)
+        found = self._local.get(key)
+        if found is None:
+            found = self._local[key] = _map(shape.Located(TopLoc_Location()), _TOPABS[kind])
+        return found
+
+    def _local_map(self, index: int, position: int, kind: Any) -> Any:
+        """``TopExp.MapShapes`` of result ``position`` of feature ``index`` in its own frame,
+        of one kind (an index of ``_TOPABS``, or a ``TopAbs`` type)."""
+        key = (index, position, kind)
+        found = self._local.get(key)
+        if found is None:
+            result = self.features[index].results[position]
+            topabs = _TOPABS[kind] if isinstance(kind, int) else kind
+            found = self._local[key] = _map(result.Located(TopLoc_Location()), topabs)
+        return found
 
     def _located(self, index: int, shape: Any) -> tuple[int, Any] | None:
         """Where feature ``index`` returned ``shape``: ``(position, None)`` for a result
@@ -515,19 +540,27 @@ class Trace:
         where ``shape`` is placed, if a place of it is, else its first place -- the
         location of it inside that result (unlocated); None when no result holds it."""
         feature = self.features[index]
-        position = feature.position_of(shape.TShape())
+        tshape = shape.TShape()
+        position = feature.position_of(tshape)
         if position is not None:
             return position, None
-        tshape = shape.TShape()
+        topabs = shape.ShapeType()
         for position, result in enumerate(feature.results):
             if result is None:
                 continue
-            elements, _ordinals, keys = self._mapped(result, shape.ShapeType())
-            places = [ordinal for ordinal, key in enumerate(keys, 1) if key[0] == tshape]
-            if not places:
+            key = (index, position, topabs)
+            places = self._places.get(key)
+            if places is None:
+                elements = self._local_map(index, position, topabs)
+                places = self._places[key] = {}
+                for ordinal in range(1, elements.Extent() + 1):
+                    places.setdefault(elements.FindKey(ordinal).TShape(), []).append(ordinal)
+            found = places.get(tshape)
+            if not found:
                 continue
-            relative = _transform(result.Location().Inverted().Multiplied(shape.Location()).Transformation())
-            ordinal = next((ordinal for ordinal in places if keys[ordinal - 1][1] == relative), places[0])
+            elements = self._local_map(index, position, topabs)
+            relative = _transform(result.Location().Inverted().Multiplied(shape.Location()))
+            ordinal = next((at for at in found if _transform(elements.FindKey(at).Location()) == relative), found[0])
             return position, elements.FindKey(ordinal).Location()
         return None
 
@@ -556,199 +589,480 @@ class Trace:
         self._sources[(index, j)] = found
         return found
 
-    def _chain(self, made_by: Callable[[Any], int | None], index: int, position: int, kind: str,
-               element: Any) -> tuple[tuple[int, int] | None, int | None]:
-        """Follow ``element`` (a sub-shape of result ``position`` of feature ``index``,
-        in that result's local frame) back through the features. Iterative, memoized
-        per node: the chain of a body the model built step by step is as long as
-        its steps."""
-        path: list[tuple[int, int, str, int]] = []
-        current: tuple[int, int, Any] | None = (index, position, element)
-        answer: tuple[tuple[int, int] | None, int | None] = (None, None)
-        while current is not None:
-            index, position, element = current
-            feature = self.features[index]
-            ordinal = self._ordinals(feature.results[position], element.ShapeType()).get(_key(element), 0)
-            node = (index, position, kind, ordinal)
-            if node in self._chains:
-                answer = self._chains[node]
-                break
-            if node in path:
-                break  # the feature returned the TShape it was handed: no feature made this
-            path.append(node)
-            entry = self._table(feature, position, kind).get(ordinal)
-            if entry is None or entry[0] == "made":
-                number = self._number(feature, position, kind, ordinal) if ordinal else None
-                answer = ((index, number), None) if number is not None else (None, None)
-                break
-            _tag, j, k, _modified = entry
-            source = self._source(index, j)
-            if source[0] != "followed":
-                answer = (None, None)  # passed on as it was from a shape no feature made
-                break
-            _followed, up, up_position, location = source
-            given = self._elements(feature.handles[j], element.ShapeType()).FindKey(k)
-            current = (up, up_position, given if location is None else given.Moved(location))
-        # Unwind: a node whose entry was "modified" is the last modification seen
-        # from above, so it overrides what the chain below it answered.
-        for node in reversed(path):
-            index, position, kind, ordinal = node
-            entry = self._table(self.features[index], position, kind).get(ordinal)
-            if entry is not None and entry[0] == "from" and entry[3]:
-                answer = (answer[0], index)
-            self._chains[node] = answer
-        return answer
+    def _input_node(self, index: int, j: int, kind: int, ordinal: int) -> tuple | None:
+        """The element of a result of the feature that made input ``j`` of feature
+        ``index`` that that input's element ``ordinal`` of ``kind`` is, or None."""
+        source = self._source(index, j)
+        if source[0] != "followed":
+            return None
+        _followed, up, position, location = source
+        if location is None:
+            return up, position, kind, ordinal
+        handle = self.features[index].handles[j]
+        local = self._own_map(handle, kind).FindKey(ordinal)
+        found = self._local_map(up, position, kind).FindIndex(local.Moved(location))
+        return (up, position, kind, found) if found else None
 
-    def _number(self, feature: Feature, position: int, kind: str, ordinal: int) -> int | None:
-        """The number of element ``ordinal`` of result ``position`` among the
-        elements of ``kind`` that ``feature`` made, counted through its results in
-        order, each result's in ordinal order (an element two results hold where
-        they were returned counts once)."""
-        topabs = _TOPABS[kind]
-        numbers = feature._numbers.get(kind)
-        if numbers is None:
-            numbers = {}
-            for at, result in enumerate(feature.results):
-                if result is None:
-                    continue
-                table = self._table(feature, at, kind)
-                for number_at, placed in enumerate(self._placed_keys(result, topabs), 1):
-                    entry = table.get(number_at)
-                    if (entry is None or entry[0] == "made") and placed not in numbers:
-                        numbers[placed] = len(numbers) + 1
-            feature._numbers[kind] = numbers
-        return numbers.get(self._placed_keys(feature.results[position], topabs)[ordinal - 1])
+    # --- structures ----------------------------------------------------------------------
 
-    def _table(self, feature: Feature, position: int, kind: str) -> dict[int, tuple]:
-        """Per element ordinal of one result (its local frame): ``("made",)`` or
-        ``("from", input index, input element ordinal, modified)``."""
-        key = (position, kind)
-        table = feature._tables.get(key)
-        if table is not None:
-            return table
-        topabs = _TOPABS[kind]
-        result = feature.results[position]
-        keys = self._mapped(result, topabs)[2]
-        placed = self._placed_keys(result, topabs)
-        table: dict[int, tuple] = {}
-        # First by identity: the kernel keeps the faces and edges an operation
-        # leaves alone, where the operation saw them, and a placement keeps them
-        # all, each where it was in its shape; an element an input holds either
-        # way passed through unchanged.
-        inputs = [(j, self._placed_ordinals(handle, topabs), self._ordinals(handle, topabs))
-                  for j, handle in enumerate(feature.handles) if handle is not None]
-        held: set[tuple[int, int]] = set()
-        same_shape: set[int] = set()
-        for ordinal in range(1, len(keys) + 1):
-            found = next(((j, at[placed[ordinal - 1]]) for j, at, _local in inputs if placed[ordinal - 1] in at), None)
-            if found is None:
-                found = next(((j, local[keys[ordinal - 1]]) for j, _at, local in inputs if keys[ordinal - 1] in local),
-                             None)
-            if found is not None:
-                table[ordinal] = ("from", found[0], found[1], False)
-                held.add(found)
-                same_shape.add(ordinal)
-        if len(table) < len(keys):
-            # Then by geometry, among what the operation consumed: an input
-            # element the result no longer holds is where a new one came from.
-            same: dict[tuple, tuple[int, int]] = {}
-            surface: dict[tuple, tuple[int, int]] = {}
-            for j, handle in enumerate(feature.handles):
-                if handle is None:
-                    continue
-                signatures = self._signatures(handle, kind)
-                for k in range(1, len(self._mapped(handle, topabs)[2]) + 1):
-                    if (j, k) in held:
-                        continue
-                    signature = self._signature(signatures, handle, topabs, kind, k)
-                    same.setdefault(signature, (j, k))
-                    surface.setdefault(signature[0], (j, k))
-            signatures = self._signatures(result, kind)
-            for ordinal in range(1, len(keys) + 1):
-                if ordinal in table:
-                    continue
-                if not surface:
-                    # Nothing consumed: every element the inputs do not hold is new.
-                    table[ordinal] = ("made",)
-                    continue
-                signature = self._signature(signatures, result, topabs, kind, ordinal)
-                found = same.get(signature)
-                if found is not None:
-                    table[ordinal] = ("from", found[0], found[1], False)
-                    continue
-                found = surface.get(signature[0])
-                table[ordinal] = ("from", found[0], found[1], True) if found is not None else ("made",)
-        # An element that came from an input no feature made is that shape's as it was
-        # passed on, and this operation's where it rebuilt or trimmed it; one from an
-        # input the trace cannot follow is this operation's: every element a feature
-        # produced has a name.
-        for ordinal, entry in table.items():
-            if entry[0] != "from":
+    def _rule(self, node: tuple) -> tuple | None:
+        index, position, kind, ordinal = node
+        rules = self._structure(index).rules[position]
+        if rules is None or not 0 < ordinal <= len(rules[kind]):
+            return None
+        return rules[kind][ordinal - 1]
+
+    def _structure(self, index: int) -> _Structure:
+        """Feature ``index``'s naming (:class:`_Structure`), with every feature it descends
+        from named first, without recursion."""
+        found = self._structures.get(index)
+        if found is not None:
+            return found
+        stack = [(index, False)]
+        while stack:
+            current, ready = stack.pop()
+            if current in self._structures:
                 continue
-            source = self._source(feature.index, entry[1])[0]
-            if source == "lost" or (source == "foreign" and ordinal not in same_shape):
-                table[ordinal] = ("made",)
-        feature._tables[key] = table
-        return table
+            if ready:
+                self._structures[current] = self._built(current)
+                continue
+            stack.append((current, True))
+            for j in range(len(self.features[current].handles)):
+                source = self._source(current, j)
+                if source[0] == "followed" and source[1] not in self._structures:
+                    stack.append((source[1], False))
+        return self._structures[index]
 
-    def _signatures(self, handle: Any, kind: str) -> dict[int, tuple]:
-        """The signatures of a shape's faces or edges in the frame it was seen
-        in, by ordinal, filled as they are asked for: one table per (body,
-        placement)."""
-        key = (handle.TShape(), _placement(handle), kind)
-        found = self._signatures_by_body.get(key)
+    def _skey(self, index: int) -> bytes:
+        """What a feature's structure was computed from, beside its own history and shapes:
+        for each input, the same of the feature that made it, or that none of this run did.
+        The same in every run of the same code, so a hit's structure is its miss's."""
+        found = self._skeys.get(index)
         if found is None:
-            found = self._signatures_by_body[key] = {}
+            parts = []
+            for j in range(len(self.features[index].handles)):
+                source = self._source(index, j)
+                parts.append(self._skey(source[1]) if source[0] == "followed" else source[0].encode())
+            found = self._skeys[index] = hashlib.blake2b(b"|".join(parts), digest_size=12).digest()
         return found
 
-    def _signature(self, signatures: dict[int, tuple], handle: Any, topabs: Any, kind: str, ordinal: int) -> tuple:
-        signature = signatures.get(ordinal)
-        if signature is None:
-            element = self._elements(handle, topabs).FindKey(ordinal).Moved(handle.Location())
-            signature = signatures[ordinal] = _SIGNATURES[kind](element)
-        return signature
+    def _built(self, index: int) -> _Structure:
+        feature = self.features[index]
+        key = self._skey(index)
+        history = feature.history
+        if history is not None:
+            found = history.structures.get(key)
+            if found is not None:
+                return found
+        structure = self._computed(index)
+        if history is not None:
+            history.structures[key] = structure
+        return structure
 
-    def _elements(self, shape: Any, kind: Any) -> Any:
-        """``TopExp.MapShapes`` of ``shape``'s elements of ``kind``, in its own frame."""
-        return self._mapped(shape, kind)[0]
+    def _same(self, index: int, j: int, kind: int, ordinal: int) -> tuple | None:
+        """The rule of an element that is input ``j``'s element ``ordinal``: that element,
+        nothing where it is a shape's no feature made, unnamed where the trace cannot
+        follow the input."""
+        source = self._source(index, j)
+        if source[0] == "foreign":
+            return ("x",)
+        node = self._input_node(index, j, kind, ordinal)
+        if node is None:
+            return None
+        rule = self._rule(node)
+        if rule is None:
+            return None
+        return ("x",) if rule[0] == "x" else ("s", j, ordinal)
 
-    def _ordinals(self, shape: Any, kind: Any) -> dict[tuple, int]:
-        """Each element's key in its shape's own frame (:func:`_key`) -> its ordinal
-        in :meth:`_elements`."""
-        return self._mapped(shape, kind)[1]
+    def _computed(self, index: int) -> _Structure:
+        feature = self.features[index]
+        origins = feature.history.origins if feature.history is not None else {}
+        given = [None if handle is None else [_map(handle, topabs) for topabs in _TOPABS] for handle in feature.handles]
+        made = [TopTools_IndexedMapOfShape() for _kind in _TOPABS]
+        rules: list[list[list[tuple]] | None] = []
+        for position, result in enumerate(feature.results):
+            if result is None:
+                rules.append(None)
+                continue
+            maps = [_map(result, topabs) for topabs in _TOPABS]
+            partners = [j for j, handle in enumerate(feature.handles)
+                        if handle is not None and handle.TShape() == result.TShape() and not handle.IsSame(result)]
+            table: list[list[tuple | None]] = [[None] * maps[kind].Extent() for kind in range(3)]
+            for kind in range(3):
+                for ordinal in range(1, maps[kind].Extent() + 1):
+                    element = maps[kind].FindKey(ordinal)
+                    rule = None
+                    for j, held in enumerate(given):
+                        if held is not None:
+                            at = held[kind].FindIndex(element)
+                            if at:
+                                rule = self._same(index, j, kind, at)
+                                break
+                    if rule is None and partners:
+                        rule = self._same(index, partners[0], kind, ordinal)
+                    if rule is None:
+                        rule = self._history_rule(index, origins.get((position, kind, ordinal)), kind)
+                    table[kind][ordinal - 1] = rule
+                _ranked(table[kind])
+            _passes(maps, table)
+            for kind in range(3):
+                for ordinal, rule in enumerate(table[kind], 1):
+                    if rule is None:
+                        table[kind][ordinal - 1] = ("m", made[kind].Add(maps[kind].FindKey(ordinal)))
+            rules.append(table)
+        return _Structure(rules)
 
-    def _mapped(self, shape: Any, kind: Any) -> tuple[Any, dict[tuple, int], list[tuple]]:
-        key = (shape.TShape(), kind)
-        found = self._maps.get(key)
-        if found is None:
-            elements = _map(_local(shape), kind)
-            keys = [_key(elements.FindKey(i)) for i in range(1, elements.Extent() + 1)]
-            ordinals: dict[tuple, int] = {}
-            for ordinal, element_key in enumerate(keys, 1):
-                ordinals.setdefault(element_key, ordinal)
-            found = self._maps[key] = (elements, ordinals, keys)
+    def _history_rule(self, index: int, found: tuple | None, kind: int) -> tuple | None:
+        """The rule history gives an element with origins ``found``: a copy is its source;
+        else its sources that have names, with the places it has among what was reported of
+        them (``_ranked`` reads them), or nothing (the element falls to the passes)."""
+        if not found:
+            return None
+        for j, source_kind, ordinal, how, _place in found:
+            if how == "I" and source_kind == kind:
+                return self._same(index, j, kind, ordinal)
+        named = []
+        for j, source_kind, ordinal, how, place in found:
+            if how == "I":
+                continue
+            rule = self._same(index, j, source_kind, ordinal)
+            if rule is not None and rule[0] != "x":
+                named.append((j, source_kind, ordinal, how, place))
+        if not named:
+            return None
+        named.sort()
+        return "h", tuple(source[:4] for source in named), 1, named[0][4]
+
+    def _origin(self, node: tuple) -> tuple | None:
+        """The element ``node`` resolves to through the inputs it is: the first, back
+        through the features, that is no input's; None where that is a shape's no
+        feature made."""
+        found = self._origins.get(node, False)
+        if found is not False:
+            return found
+        path = []
+        current: tuple | None = node
+        while current is not None:
+            known = self._origins.get(current, False)
+            if known is not False:
+                current = known
+                break
+            path.append(current)
+            rule = self._rule(current)
+            if rule is None or rule[0] == "x":
+                current = None
+                break
+            if rule[0] != "s":
+                break
+            index, _position, kind, _ordinal = current
+            current = self._input_node(index, rule[1], kind, rule[2])
+        for visited in path:
+            self._origins[visited] = current
+        return current
+
+
+class _Names:
+    """The names of the features one part descends from (``ancestors``, bits by index),
+    each computed when first asked: counted among them in call order -- a label pinned
+    by the time the part was made (by feature ``made_at``, the last of its own), the first
+    of the part's features to claim it keeping it, else ``<function>.<operation><count>``,
+    every feature counting in its stem. ``body`` is the feature that made the part's body,
+    whose own label names the occurrence and pins nothing here: identical constructions
+    labelled apart are one part, named alike. A label pinned later -- set on a shape after
+    it was given to the construction that made this part -- renames nothing here."""
+
+    def __init__(self, trace: Trace, ancestors: int, body: int | None, made_at: int) -> None:
+        self.trace = trace
+        self.ancestors = ancestors
+        self.body = body
+        self.made_at = made_at
+        self.found: dict[int, str] = {}
+
+    def __contains__(self, index: object) -> bool:
+        return isinstance(index, int) and index >= 0 and (self.ancestors >> index) & 1 == 1
+
+    def __getitem__(self, index: int) -> str:
+        name = self.get(index)
+        if name is None:
+            raise KeyError(index)
+        return name
+
+    def get(self, index: int, default: str | None = None) -> str | None:
+        if index not in self:
+            return default
+        name = self.found.get(index)
+        if name is None:
+            name = self.found[index] = self._name(index)
+        return name
+
+    def _name(self, index: int) -> str:
+        trace = self.trace
+        feature = trace.features[index]
+        label = feature.label
+        if label is not None and self._pins(index):
+            claimer = next((other for other in trace._labelled[label] if other in self and self._pins(other)), None)
+            if claimer == index:
+                return label
+        stem = feature.stem
+        return f"{stem}{(self.ancestors & trace._stems[stem] & ((2 << index) - 1)).bit_count()}"
+
+    def _pins(self, index: int) -> bool:
+        feature = self.trace.features[index]
+        return feature.pinned_at is not None and feature.pinned_at <= self.made_at and index != self.body
+
+
+class _Renderer:
+    """The names of one part's elements: each element's derivation rendered with the
+    part's feature names (``Trace._names``), folded where long, and the table of what
+    each folded atom stands for."""
+
+    def __init__(self, trace: Trace, names: _Names) -> None:
+        self.trace = trace
+        self.names = names
+        # node -> (text, the feature of its last step, or of its atom), or None
+        self.texts: dict[tuple, tuple[str, str] | None] = {}
+        self.table: dict[str, str] = {}
+
+    def text(self, node: tuple) -> str | None:
+        rendered = self._rendered(node)
+        return None if rendered is None else rendered[0]
+
+    def _rendered(self, node: tuple) -> tuple[str, str] | None:
+        origin = self.trace._origin(node)
+        if origin is None:
+            return None
+        texts = self.texts
+        if origin in texts:
+            return texts[origin]
+        stack = [origin]
+        open_: set[tuple] = set()
+        while stack:
+            current = stack[-1]
+            if current in texts:
+                stack.pop()
+                continue
+            needs = [need for need in self._depends(current) if need is not None and need not in texts]
+            if needs and current not in open_:
+                open_.add(current)
+                stack.extend(need for need in needs if need not in open_)
+                continue
+            texts[current] = self._composed(current)
+            stack.pop()
+        return texts[origin]
+
+    def _rule(self, node: tuple) -> tuple:
+        rule = self.trace._rule(node)
+        return ("x",) if rule is None else rule
+
+    def _depends(self, node: tuple) -> list[tuple | None]:
+        """The elements a name is made of -- its sources, its parent candidates, its lower
+        elements -- each as the element it resolves to (``Trace._origin``)."""
+        rule = self._rule(node)
+        index, position, _kind, _ordinal = node
+        if rule[0] == "h":
+            found = [self.trace._input_node(index, j, source_kind, ordinal)
+                     for j, source_kind, ordinal, _how in rule[1]]
+        elif rule[0] == "u":
+            found = [(index, position, parent_kind, parent) for parent_kind, parent, _number in rule[1]]
+        elif rule[0] == "l":
+            found = [(index, position, lower_kind, lower) for lower_kind, lower in rule[1]]
+        else:
+            return []
+        return [None if element is None else self.trace._origin(element) for element in found]
+
+    def _of(self, node: tuple | None) -> tuple[str, str] | None:
+        """The rendered name of the element ``node`` resolves to, or None."""
+        if node is None:
+            return None
+        origin = self.trace._origin(node)
+        return None if origin is None else self.texts.get(origin)
+
+    def _composed(self, node: tuple) -> tuple[str, str] | None:
+        rule = self._rule(node)
+        index, position, kind, _ordinal = node
+        feature = self.names.get(index)
+        if feature is None or rule[0] in ("x", "s"):
+            return None
+        if rule[0] == "m":
+            return f"{feature}.{rule[1]}", feature
+        if rule[0] == "h":
+            sources = []
+            for j, source_kind, ordinal, how in rule[1]:
+                rendered = self._of(self.trace._input_node(index, j, source_kind, ordinal))
+                if rendered is not None:
+                    sources.append((source_kind, j, rendered, how))
+            if not sources:
+                return None
+            sources.sort(key=lambda source: (source[0], source[1], source[2][0]))
+            hows = {how for _kind, _j, _rendered, how in sources}
+            base_kind = sources[0][0]
+            op = "M" if hows == {"M"} else ("G" if hows == {"G"} else "MG") + _LETTER[base_kind]
+            if rule[2] > 1:
+                op += str(rule[2])
+            extras = _distinct([(source_kind, rendered) for source_kind, _j, rendered, _how in sources])
+            return self._step(sources[0][2], op, feature, extras[1:1 + _EXTRAS])
+        if rule[0] == "u":
+            candidates = []
+            for parent_kind, parent, number in rule[1]:
+                rendered = self._of((index, position, parent_kind, parent))
+                if rendered is not None:
+                    candidates.append((rendered[0], number, rendered))
+            if not candidates:
+                return None
+            _text, number, rendered = min(candidates)
+            return self._step(rendered, f"U{number}" if number > 1 else "U", feature, [])
+        if rule[0] == "l":
+            lowers = []
+            for lower_kind, lower in rule[1]:
+                rendered = self._of((index, position, lower_kind, lower))
+                if rendered is None:
+                    return None
+                lowers.append((rendered[0], lower_kind, rendered))
+            lowers.sort(key=lambda lower: lower[0])
+            extras = _distinct([(lower_kind, rendered) for _text, lower_kind, rendered in lowers])
+            return self._step(lowers[0][2], "L", feature, extras[1:1 + _EXTRAS])
+        return None
+
+    def _step(self, base: tuple[str, str], op: str, feature: str,
+              extras: list[tuple[int, tuple[str, str]]]) -> tuple[str, str]:
+        """``base`` and a step the feature took, its further sources as atoms, folded
+        where long."""
+        text = f"{base[0]};{op}:{feature}" + "".join(f"+{_LETTER[kind]}:{self.atom(rendered)}"
+                                                    for kind, rendered in extras)
+        return self.folded(text, feature) if len(text) > FOLD_LENGTH else (text, feature)
+
+    def atom(self, rendered: tuple[str, str]) -> str:
+        """A rendered derivation as an atom: itself where it is one, else folded."""
+        text, feature = rendered
+        return text if ";" not in text else self.folded(text, feature)[0]
+
+    def folded(self, text: str, feature: str) -> tuple[str, str]:
+        atom = f"{feature}~{hashlib.sha256(text.encode()).hexdigest()[:12]}"
+        self.table[atom] = text
+        return atom, feature
+
+    def distinct(self, texts: list[str | None]) -> list[str | None]:
+        """One kind's names of a component, each named alike after the first given the
+        next ``;D<n>`` in ordinal order."""
+        from cadgen.cad_ref_syntax import split_derivation
+
+        seen: Counter = Counter()
+        found: list[str | None] = []
+        for text in texts:
+            if text is None:
+                found.append(None)
+                continue
+            seen[text] += 1
+            if seen[text] == 1:
+                found.append(text)
+                continue
+            marked = f"{text};D{seen[text]}"
+            if len(marked) > FOLD_LENGTH:
+                atom, steps = split_derivation(text)
+                last = next((step.feature for step in reversed(steps) if step.feature), None)
+                from cadgen.cad_ref_syntax import atom_feature
+
+                marked = self.folded(marked, last or atom_feature(atom))[0]
+            found.append(marked)
         return found
 
-    def _placed_keys(self, handle: Any, kind: Any) -> list[tuple]:
-        """Each element's key where ``handle`` has it -- the handle's own placement
-        composed with the element's in it (:func:`_placed`) -- by ordinal."""
-        location = handle.Location()
-        if location.IsIdentity():
-            return self._mapped(handle, kind)[2]
-        key = (handle.TShape(), _placement(handle), kind)
-        found = self._placed.get(key)
-        if found is None:
-            transform = location.Transformation()
-            elements = self._elements(handle, kind)
-            found = self._placed[key] = [_placed(transform, elements.FindKey(i)) for i in range(1, elements.Extent() + 1)]
-        return found
+    def closed(self, texts: list[str]) -> dict[str, str]:
+        """The table entries ``texts`` reach: every folded atom they or the entries name."""
+        from cadgen.cad_ref_syntax import is_folded_atom, split_derivation
 
-    def _placed_ordinals(self, handle: Any, kind: Any) -> dict[tuple, int]:
-        """:meth:`_placed_keys` as a map to ordinals (the first of two alike)."""
-        ordinals: dict[tuple, int] = {}
-        for ordinal, placed in enumerate(self._placed_keys(handle, kind), 1):
-            ordinals.setdefault(placed, ordinal)
-        return ordinals
+        closed: dict[str, str] = {}
+        pending = list(texts)
+        while pending:
+            atom, steps = split_derivation(pending.pop())
+            for reached in (atom, *(extra for step in steps for _kind, extra in step.extras)):
+                if is_folded_atom(reached) and reached not in closed:
+                    closed[reached] = self.table[reached]
+                    pending.append(closed[reached])
+        return dict(sorted(closed.items()))
+
+
+def _ranked(rules: list[tuple | None]) -> None:
+    """Tell apart, in one result's elements of one kind, those history made alike -- the
+    same sources, taken the same way: a ruled loft reports each piece of a long edge as
+    generated from every vertex on it -- by their place among what was reported of their
+    first source, FreeCAD's index: the second and later are numbered in their step
+    (``;Gv2:``), where a later operation leaves the number alone."""
+    alike: dict[tuple, list[int]] = {}
+    for at, rule in enumerate(rules):
+        if rule is not None and rule[0] == "h":
+            alike.setdefault(rule[1], []).append(at)
+    for members in alike.values():
+        if len(members) < 2:
+            continue
+        members.sort(key=lambda at: (rules[at][3], at))
+        for rank, at in enumerate(members, 1):
+            _tag, sources, _rank, place = rules[at]
+            rules[at] = ("h", sources, rank, place)
+
+
+def _distinct(named: list[tuple[int, tuple[str, str]]]) -> list[tuple[int, tuple[str, str]]]:
+    """Sources or lower elements, each kind and name once, in order: a name twice adds
+    nothing to a name made of it."""
+    seen: set[tuple[int, str]] = set()
+    found = []
+    for kind, rendered in named:
+        if (kind, rendered[0]) not in seen:
+            seen.add((kind, rendered[0]))
+            found.append((kind, rendered))
+    return found
+
+
+def _passes(maps: list[Any], table: list[list[tuple | None]]) -> None:
+    """The reverse and forward passes over one result's elements (``maps``, by kind),
+    naming in ``table`` what identity and history left unnamed (None): an edge of a named
+    face, then a vertex of a named edge, from its parents (``u``); then an edge whose
+    vertices are all named, and a face whose outer wire's edges are, from those (``l``)."""
+
+    def named(kind: int, ordinal: int) -> bool:
+        rule = table[kind][ordinal - 1]
+        return rule is not None and rule[0] != "x"
+
+    for parent_kind, child_kind in ((FACE, EDGE), (EDGE, VERTEX)):
+        candidates: dict[int, list[tuple[int, int, int]]] = {}
+        for parent in range(1, maps[parent_kind].Extent() + 1):
+            if not named(parent_kind, parent):
+                continue
+            children = _map(maps[parent_kind].FindKey(parent), _TOPABS[child_kind])
+            number = 0
+            for at in range(1, children.Extent() + 1):
+                child = maps[child_kind].FindIndex(children.FindKey(at))
+                if not child or table[child_kind][child - 1] is not None:
+                    continue
+                number += 1
+                candidates.setdefault(child, []).append((parent_kind, parent, number))
+        for child, found in candidates.items():
+            table[child_kind][child - 1] = ("u", tuple(found))
+    for ordinal in range(1, maps[EDGE].Extent() + 1):
+        if table[EDGE][ordinal - 1] is None:
+            lowers = _lowers(TopExp_Explorer(maps[EDGE].FindKey(ordinal), TopAbs_VERTEX), maps[VERTEX], named, VERTEX)
+            if lowers:
+                table[EDGE][ordinal - 1] = ("l", tuple((VERTEX, lower) for lower in lowers))
+    for ordinal in range(1, maps[FACE].Extent() + 1):
+        if table[FACE][ordinal - 1] is None:
+            wire = BRepTools.OuterWire_s(TopoDS.Face_s(maps[FACE].FindKey(ordinal)))
+            if wire.IsNull():
+                continue
+            lowers = _lowers(TopExp_Explorer(wire, TopAbs_EDGE), maps[EDGE], named, EDGE)
+            if lowers:
+                table[FACE][ordinal - 1] = ("l", tuple((EDGE, lower) for lower in lowers))
+
+
+def _lowers(explorer: Any, elements: Any, named: Callable[[int, int], bool], kind: int) -> list[int] | None:
+    """The ordinals of what ``explorer`` visits, each once, when all of them are named."""
+    found: list[int] = []
+    while explorer.More():
+        ordinal = elements.FindIndex(explorer.Current())
+        if not ordinal or not named(kind, ordinal):
+            return None
+        if ordinal not in found:
+            found.append(ordinal)
+        explorer.Next()
+    return found or None
 
 
 # --- helpers ----------------------------------------------------------------------------
@@ -780,33 +1094,10 @@ def handle_of(shape: Any) -> Any:
     return None if wrapped is None else wrapped.Located(wrapped.Location())
 
 
-def _local(handle: Any) -> Any:
-    return handle.Located(TopLoc_Location())
-
-
-def _placement(handle: Any) -> tuple[int, ...]:
-    return _transform(handle.Location().Transformation())
-
-
-def _key(element: Any) -> tuple:
-    """An element's identity in the shape it was mapped from: its TShape and its
-    placement there (nothing for none)."""
-    location = element.Location()
-    return element.TShape(), () if location.IsIdentity() else _transform(location.Transformation())
-
-
-def _placed(transform: Any, element: Any) -> tuple:
-    """An element's identity where a shape placed by ``transform`` has it."""
-    return element.TShape(), _transform(transform.Multiplied(element.Location().Transformation()))
-
-
-def _transform(transform: Any) -> tuple[int, ...]:
-    """A placement rounded as positions and directions are (an identity is ``()``)."""
-    values = tuple(
-        int(round(transform.Value(row, column) / (POSITION_QUANTUM if column == 4 else DIRECTION_QUANTUM)))
-        for row in (1, 2, 3) for column in (1, 2, 3, 4)
-    )
-    return () if values == _IDENTITY else values
+def _map(shape: Any, kind: Any) -> Any:
+    found = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, kind, found)
+    return found
 
 
 def _relative(element: Any, shape: Any) -> Any:
@@ -816,143 +1107,8 @@ def _relative(element: Any, shape: Any) -> Any:
     return element if location.IsIdentity() else element.Moved(location.Inverted())
 
 
-def _map(shape: Any, kind: Any) -> Any:
-    found = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape, kind, found)
-    return found
-
-
-def _q(value: float, quantum: float = POSITION_QUANTUM) -> int:
-    scaled = value / quantum
-    if not math.isfinite(scaled):
-        raise ValueError("geometry coordinate is not finite")
-    return int(round(scaled))
-
-
-def _point(point: Any) -> tuple[int, int, int]:
-    return _q(point.X()), _q(point.Y()), _q(point.Z())
-
-
-def _direction(direction: Any) -> tuple[int, int, int]:
-    """A direction rounded and sign-normalized: the line it spans, not its sense."""
-    values = (_q(direction.X(), DIRECTION_QUANTUM), _q(direction.Y(), DIRECTION_QUANTUM), _q(direction.Z(), DIRECTION_QUANTUM))
-    for value in values:
-        if value:
-            return values if value > 0 else tuple(-v for v in values)
-    return values
-
-
-def _axis_point(axis: Any) -> tuple[int, int, int]:
-    """The point of an axis closest to the origin: names the line whatever point
-    the kernel parametrizes it from."""
-    location, direction = axis.Location(), axis.Direction()
-    along = location.X() * direction.X() + location.Y() * direction.Y() + location.Z() * direction.Z()
-    return (_q(location.X() - along * direction.X()), _q(location.Y() - along * direction.Y()),
-            _q(location.Z() - along * direction.Z()))
-
-
-def _samples(evaluate: Callable[..., Any], bounds: tuple[float, ...], count: int = _SAMPLES) -> tuple:
-    """Points of a curve (two bounds) or surface (four) at a fixed grid over its bounds."""
-    def steps(first: float, last: float) -> list[float]:
-        return [first + (last - first) * i / (count - 1) for i in range(count)]
-
-    if len(bounds) == 2:
-        return tuple(_point(evaluate(u)) for u in steps(bounds[0], bounds[1]))
-    return tuple(_point(evaluate(u, v)) for u in steps(bounds[0], bounds[1]) for v in steps(bounds[2], bounds[3]))
-
-
-def _bounded(first: float, last: float) -> tuple[float, float]:
-    """A parameter's natural bounds, or a fixed window about zero where the
-    kernel leaves it unbounded: its infinity is the finite float 2e100, where a
-    hyperbola overflows and every offset surface samples alike. The window
-    names the curve or surface the same whatever trim an edge or face takes
-    from it."""
-    if any(not math.isfinite(bound) or Precision.IsInfinite_s(bound) for bound in (first, last)):
-        return _WINDOW
-    return first, last
-
-
-def face_signature(face: Any) -> tuple[tuple, tuple]:
-    """``(surface, extent)`` of a face in world coordinates: the surface it lies
-    on (its class and parameters, or sample points of a freeform surface) and
-    where it lies on it (its vertex points, else its middle point, and its edge
-    count), rounded absolutely."""
-    topods_face = TopoDS.Face_s(face)
-    adaptor = BRepAdaptor_Surface(topods_face, False)
-    kind = adaptor.GetType()
-    if kind == GeomAbs_SurfaceType.GeomAbs_Plane:
-        plane = adaptor.Plane()
-        normal, origin = plane.Axis().Direction(), plane.Location()
-        offset = normal.X() * origin.X() + normal.Y() * origin.Y() + normal.Z() * origin.Z()
-        direction = _direction(normal)
-        raw = (_q(normal.X(), DIRECTION_QUANTUM), _q(normal.Y(), DIRECTION_QUANTUM), _q(normal.Z(), DIRECTION_QUANTUM))
-        surface: tuple = ("plane", direction, _q(offset if raw == direction else -offset))
-    elif kind == GeomAbs_SurfaceType.GeomAbs_Cylinder:
-        cylinder = adaptor.Cylinder()
-        surface = ("cylinder", _direction(cylinder.Axis().Direction()), _axis_point(cylinder.Axis()), _q(cylinder.Radius()))
-    elif kind == GeomAbs_SurfaceType.GeomAbs_Cone:
-        cone = adaptor.Cone()
-        surface = ("cone", _point(cone.Apex()), _direction(cone.Axis().Direction()), _q(abs(cone.SemiAngle()), DIRECTION_QUANTUM))
-    elif kind == GeomAbs_SurfaceType.GeomAbs_Sphere:
-        sphere = adaptor.Sphere()
-        surface = ("sphere", _point(sphere.Location()), _q(sphere.Radius()))
-    elif kind == GeomAbs_SurfaceType.GeomAbs_Torus:
-        torus = adaptor.Torus()
-        surface = ("torus", _point(torus.Location()), _direction(torus.Axis().Direction()),
-                   _q(torus.MajorRadius()), _q(torus.MinorRadius()))
-    else:
-        geom = BRep_Tool.Surface_s(topods_face)
-        u0, u1, v0, v1 = geom.Bounds()
-        bounds = (*_bounded(u0, u1), *_bounded(v0, v1))
-        surface = (str(kind).rsplit("_", 1)[-1].lower(), _samples(geom.Value, bounds))
-    vertices = _map(face, TopAbs_VERTEX)
-    points = sorted(_point(BRep_Tool.Pnt_s(TopoDS.Vertex_s(vertices.FindKey(i)))) for i in range(1, vertices.Extent() + 1))
-    if not points:
-        umin, umax, vmin, vmax = BRepTools.UVBounds_s(topods_face)
-        points = [_point(adaptor.Value((umin + umax) / 2.0, (vmin + vmax) / 2.0))]
-    extent = (tuple(points), _map(face, TopAbs_EDGE).Extent())
-    return surface, extent
-
-
-def vertex_signature(vertex: Any) -> tuple[tuple, tuple]:
-    """``(point, ())`` of a vertex in world coordinates, rounded absolutely: a
-    vertex has no extent, so one at the same point is the same vertex."""
-    return _point(BRep_Tool.Pnt_s(TopoDS.Vertex_s(vertex))), ()
-
-
-def edge_signature(edge: Any) -> tuple[tuple, tuple]:
-    """``(curve, extent)`` of an edge in world coordinates: the curve it lies on
-    (its class and parameters, or sample points of a freeform curve) and its
-    end points, rounded absolutely -- its vertices', or, for an edge the kernel built
-    without vertices (a closed edge of a loft or sweep), its curve's ends."""
-    topods_edge = TopoDS.Edge_s(edge)
-    first, last = TopExp.FirstVertex_s(topods_edge, True), TopExp.LastVertex_s(topods_edge, True)
-    if first.IsNull() or last.IsNull():
-        ends = BRepAdaptor_Curve(topods_edge)
-        first_point, last_point = (_point(ends.Value(ends.FirstParameter())),
-                                   _point(ends.Value(ends.LastParameter())))
-    else:
-        first_point, last_point = _point(BRep_Tool.Pnt_s(first)), _point(BRep_Tool.Pnt_s(last))
-    extent = tuple(sorted((first_point, last_point)))
-    if BRep_Tool.Degenerated_s(topods_edge):
-        return ("degenerate", first_point), extent
-    adaptor = BRepAdaptor_Curve(topods_edge)
-    kind = adaptor.GetType()
-    if kind == GeomAbs_CurveType.GeomAbs_Line:
-        line = adaptor.Line()
-        curve: tuple = ("line", _direction(line.Direction()), _axis_point(line.Position()))
-    elif kind == GeomAbs_CurveType.GeomAbs_Circle:
-        circle = adaptor.Circle()
-        curve = ("circle", _point(circle.Location()), _direction(circle.Axis().Direction()), _q(circle.Radius()))
-    elif kind == GeomAbs_CurveType.GeomAbs_Ellipse:
-        ellipse = adaptor.Ellipse()
-        curve = ("ellipse", _point(ellipse.Location()), _direction(ellipse.Axis().Direction()),
-                 _q(ellipse.MajorRadius()), _q(ellipse.MinorRadius()))
-    else:
-        geom = BRep_Tool.Curve_s(topods_edge, 0.0, 0.0)
-        bounds = _bounded(geom.FirstParameter(), geom.LastParameter())
-        curve = (str(kind).rsplit("_", 1)[-1].lower(), _samples(geom.Value, bounds, 5))
-    return curve, extent
-
-
-_SIGNATURES = {"face": face_signature, "edge": edge_signature, "vertex": vertex_signature}
+def _transform(location: Any) -> tuple[int, ...]:
+    """A placement rounded as positions and directions are: only to tell places apart."""
+    transform = location.Transformation()
+    return tuple(int(round(transform.Value(row, column) / (_POSITION_QUANTUM if column == 4 else _DIRECTION_QUANTUM)))
+                 for row in (1, 2, 3) for column in (1, 2, 3, 4))
