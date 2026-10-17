@@ -352,7 +352,7 @@ explorer, with its ⋯; at the right only the blue update button, while a newer 
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app; the home shows GitHub, Discord and X under its wordmark instead.
-Display and the Studio are the view's, at its tool strip's end. This host
+Display and Present are the view's, at the navbar's right end. This host
 supplies the links (`src/host/viewerLinks.js`): its version (with its build's id,
 `v0.7.15-dev.b80844940`, for any build but the release's own), the GitHub (where new
 issues open) and Discord its build names (`VIEWER_GITHUB_URL`, `VIEWER_DISCORD_URL`);

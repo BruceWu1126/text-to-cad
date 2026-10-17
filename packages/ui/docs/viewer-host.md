@@ -71,8 +71,8 @@ use the [explicit fake host](../src/host/testing/host.ts).
 ## A CAD renderer's controls
 
 The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the viewport: its
-tool strip, the view's controls at the strip's end (Display, the Studio), the tool in hand's
-sub-toolbar and its file sidebar (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
+tool strip, the tool in hand's sub-toolbar and its file sidebar, its view's controls (Display,
+Present) drawn into the navbar's `navbarSlot` (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
 DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
 file's name opens that). The layout a person gives the file sidebar — each section's size —
 and the tool stack's panels is one
@@ -121,11 +121,10 @@ commands should read the current viewport through a ref, avoiding parent/child
 render loops. These actions use existing host capabilities for effects. What a
 person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
-A renderer's controls for the view are the renderer's own, never the navbar's: the CAD
-viewer's for a 3D view (Display and the Studio) end its tool strip. A renderer that shows its
-file in a mode of its own (the CAD viewer's Studio) draws that mode's controls itself, inside
-the view (the Studio's, in its top-right corner: Studio settings and Exit studio); the navbar
-stays over it. The host's `captureRequest`
+A renderer's controls for the view are the renderer's own, drawn into the box FileViewer
+hands it at the navbar's right end (`navbarSlot`): the CAD viewer's for a 3D view, Display and
+Present, and in its Studio, Studio settings and Exit studio; the navbar stays over the Studio.
+Where there is no navbar (a view shown small) the renderer draws them over its view. The host's `captureRequest`
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
 

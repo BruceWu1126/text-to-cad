@@ -62,13 +62,14 @@ none.
   icon. The person's own settings, the theme among them, are never here: they are the app
   menu's.
 
-  *Design note: the navbar is the host's and the file's; the view's controls are the
-  strip's.* What a host or the file adds (the update, an alert's icon, Full size) is the
-  navbar's right end. The view's own controls, **Display** and the **Studio**, end the tool
-  strip after a thin rule: they act on the whole view, whatever tool is in hand, so they
-  are no tools, but they belong with the chrome over the view; in the Studio its own controls
-  stand in the view's top-right corner, Render's settings among them. A new per-file button that
-  is no tool goes after that rule.
+  *Design note: the strip is for tools; the view's controls are the navbar's.* What a host or
+  the file adds (the update, an alert's icon, Full size) is the navbar's right end, and last
+  after them the view's own controls, **Display** and **Present** (`navbarSlot`): they act on
+  the whole view, whatever tool is in hand, so they are no tools. In the Studio the same place
+  holds its own controls, **Studio settings** and **Exit studio**. A host with no navbar has
+  them over the view instead: Display and Present ending the strip after a thin rule, the
+  Studio's pair in the view's top-right corner. A new per-file button that is no tool goes
+  with them.
 
   A host's home has no navbar: under its TEXTTOCAD wordmark and byline, its update, when there is
   one, is a row of its own (the blue button, labeled **Update**, its card centred under it), then
@@ -108,16 +109,15 @@ none.
   rows on screen, the rows of a folder open inline among them. A pick opens the file and
   closes it, as do Escape and a press anywhere outside it.
 - **Tool strip** at the top centre, 8px down, never wider than the view less 8px at each
-  side (it wraps before it would be): the tools, left to right, then a thin rule and the
-  view's controls, **Display** and the **Studio** (below). 24px tiles with 14px icons, an even
-  4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
-  `data-cad-toolbar`). A file with no tools and a 3D view has a strip of Display and the Studio
-  alone; one with neither has no strip. On a phone ([mobile](#the-file-sidebar-and-the-tool-stack))
-  the tiles are 36px with 18px icons, a chevron 20px wide, in one row that never wraps, the file
-  sidebar's tiles first, ruled off from the tools: what does not fit goes, from the strip's end
-  (the Studio, Display, then the tools from the last, then the sidebar's tiles), into **More
-  tools** (an ellipsis, last), a tool or a section a row ticked while it is in hand or open and
-  Display opening its popover from More (`touchStripFit`).
+  side (it wraps before it would be): the tools, left to right (with no navbar, then a thin
+  rule and the view's controls, **Display** and **Present**: below). 24px tiles with 14px icons,
+  an even 4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
+  `data-cad-toolbar`). A file with no tools has no strip. On a phone
+  ([mobile](#the-file-sidebar-and-the-tool-stack)) the tiles are 36px with 18px icons, a chevron
+  20px wide, in one row that never wraps, clear of the file sidebar's tile at its left: what does
+  not fit goes, from the strip's end (the view's controls where the strip has them, then the
+  tools from the last), into **More tools** (an ellipsis, last), a tool a row ticked while it is
+  in hand and Display opening its popover from More (`touchStripFit`).
 - **Sub-toolbar** under the strip, 8px below it, centred: the tool in hand's one row of
   controls (`SubToolbar`, `data-cad-sub-toolbar`), there for as long as the tool is up (see
   [Tools and lifecycle](#tools-and-lifecycle)). Select and Measure have none. On a phone its
@@ -141,14 +141,17 @@ none.
   enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
   control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
   room that control takes from the bottom edge. The Studio omits it, and so does a phone.
-- **Display and the Studio** end the tool strip, after its rule, for a 3D file: **Display**
-  (the active mode's sphere: see [Display settings](#display-settings-and-section-primitives))
-  and the **Studio** (a play triangle), the strip's tiles, hinted above them
-  (`data-view-controls`). They are no tools: pressing one leaves the tool in hand as it is.
-  Display's dropdown opens down from its button, centred, never taller than the viewer
-  below it. A view that is not 3D has none of them, and neither does a view drawn as a
-  picture, one that is loading or failed to load, or the Studio, whose own controls stand in
-  the view's top-right corner (see [the Studio](#camera-animation-and-the-studio)).
+- **Display and Present** end the navbar, for a 3D file (`data-view-controls`, the box
+  FileViewer hands the renderer as `navbarSlot`): **Display** (the active mode's sphere: see
+  [Display settings](#display-settings-and-section-primitives)) and **Present** (a play
+  triangle, the way into the Studio), the navbar's icon buttons, hinted below them. They are no
+  tools: pressing one leaves the tool in hand as it is. Display's dropdown opens down from its
+  button, aligned to its end, never taller than the viewer below it. A view that is not 3D has
+  none of them, and neither does a view drawn as a picture or one that is loading or failed to
+  load; in the Studio the same place holds its own controls (see
+  [the Studio](#camera-animation-and-the-studio)). With no navbar (a host showing the view
+  alone) they end the tool strip after its rule, and the Studio's stand in the view's top-right
+  corner.
 - **Nothing sits at the bottom centre**, in the tools view or the Studio: a file's routines
   play from the file sidebar's Animation section (see [the Studio](#camera-animation-and-the-studio)).
 - **Model update status** sits under the strip and its sub-toolbar, centred, and where
@@ -342,7 +345,7 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   section is its head and its body.
 - **Sections.** Each section is a `ToolPanel` drawn as one: a 24px head — its name 12px in from
   the panel's edge, what its body puts there (`ToolPanelHeadAction`: Position's and Animation's
-  Reset), then its X — and its body. A tree's head is its search box instead of its name, the X
+  Reset), then its X — and its body. A tree's head is its filter instead of its name, the X
   after it. The section is its content's height and the panel as tall as it is, up to its cap;
   past that the whole panel scrolls, as one, the head pinned to its top
   (`data-pinned`). A tree's rows are mounted as that scroll brings them into view
@@ -472,8 +475,8 @@ pick.
 
 ## Display settings and section primitives
 
-Display is not a tool. Its tile at the strip's end shows the current mode's sphere icon and
-opens a compact popover. The strip order is Display, the Studio. Its root has **Display Mode**
+Display is not a tool. Its button at the navbar's right end shows the current mode's sphere icon and
+opens a compact popover. The order is Display, then Present. Its root has **Display Mode**
 and **Projection** section labels, with no title or close-button row. Both sections use
 right-aligned checkmarks for the selected choice. Clicking outside or pressing Escape closes
 the popover. Opening it leaves the active tool and its controls in place. A 2D view has no

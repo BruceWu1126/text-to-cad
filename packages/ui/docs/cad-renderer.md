@@ -56,12 +56,12 @@ tools), the GLB, mesh and robot renderers the second. The headless renderer
 disabled, onSelect, description?, menu? }` — a press is a tool's only action; a tool with
 settings has them as `menu`, a chevron right after its button (Select's filter, the only
 one), and what it can be set to while it is up is its sub-toolbar. Display is not a tool:
-its settings are a dropdown from its tile at the strip's end, after the tools' rule and
-before the Studio's (`kit/shell/DisplayPopover.jsx`), a 3D view's alone. A renderer
+its settings are a dropdown from its button at the navbar's right end, before Present
+(`kit/shell/DisplayPopover.jsx`), a 3D view's alone. A renderer
 builds its own list from `shell.tools.own(...)`, adding `shell.tools.annotate` where it offers
 Annotate, declared in its `toolModes` as a mode (a press on the tool in hand does nothing); STEP's is in `step/StepSurface.jsx`.
 Routines play from the file sidebar's Animation section, which the shell adds for any file with
-routines (`kit/tools/playbar/AnimationSection.jsx`), in the tools view and the Studio alike. The Studio (preview) is not a tool: it is a tile after Display, last on the strip. Nor is Quick Edit: it is a box at the top-right, there while something is picked, annotated or measured. `createToolModes({ defaultMode, modes })`
+routines (`kit/tools/playbar/AnimationSection.jsx`), in the tools view and the Studio alike. The Studio (preview) is not a tool: Present, after Display at the navbar's right end, enters it. Nor is Quick Edit: it is a box at the top-right, there while something is picked, annotated or measured. `createToolModes({ defaultMode, modes })`
 answers what a press does (`next`), what a saved tab may record (`persisted`) and
 which tool a file opens in (`restore`); the STEP declaration is
 `CAD_TOOL_MODES` in `workbench/constants.js`. The scrubber follows the clock on
@@ -185,9 +185,9 @@ shell.syncSceneBounds();         // the scene moved its bounds (a pose): the sta
 shell.scheduleStateSave();       // a slice changed: write the view soon, and on unmount
 shell.playback; shell.setPlayback(patch); // the file's: Orbit's speed, Autoplay, the chosen Speed and Loop
 shell.orbiting; shell.setOrbiting(on);   // the Studio's Orbit, transient: off at every entry and exit
-// The shell adds Display and the Studio (a `previewable` view's, at the strip's end), the Studio's corner (Studio
+// The shell adds Display and Present (a `previewable` view's, in the navbar), the Studio's controls (Studio
 // settings, Exit studio), the Animation section for a file with routines, and the sub-toolbar of its own tool (Annotate's).
-const tools = [shell.tools.own({ id, label, icon, menu }), shell.tools.annotate].filter(Boolean); // []: no tools (a 3D view's strip is Display and the Studio alone)
+const tools = [shell.tools.own({ id, label, icon, menu }), shell.tools.annotate].filter(Boolean); // []: no tools, and no strip
 // subToolbar: the renderer's tool in hand's row; sidebar: the file's sections, each a ToolPanel, whatever the tool
 return <RendererShell shell={shell} tools={tools} subToolbar={toolRow} sidebar={<>{treeSection}{positionSection}</>}
   viewportOverlay={viewport => <PointerPick viewport={viewport} scene={scene} enabled={selecting} onPick={pick} onHover={hover} />} />;
@@ -505,7 +505,7 @@ loader asks which it is. The STEP renderer matches none of them.
   the highlight ink a STEP part wears; hover is not React state. A robot has no
   viewport menu and so no framing items; opening the file again fits it afresh.
 - **Sidebar**: the file sidebar's sections, a tile each, whatever the tool: **Links**
-  ([Robot links](#robot-links): headed by its search box), **SDF** for an `.sdf`
+  ([Robot links](#robot-links): headed by its filter), **SDF** for an `.sdf`
   (`SdfSection.jsx`), then **Position** where a control can be driven. No tool panels.
   `PositionControls.jsx` is the Position section's body (`RobotRenderer.jsx`) — the `Pose`
   label and dropdown (`Default`, which puts the joints back, the SRDF group states, and
@@ -569,8 +569,8 @@ Preparation resolves metadata with the viewer's abort signal; the component
 and viewport are imported lazily after renderer selection.
 
 A CAD renderer's controls are its own, over the viewport: its tool strip, the tool in hand's
-sub-toolbar and its file sidebar. Display is a dropdown from its tile at the strip's end,
-before the Studio's. The Studio (preview) is the shell's own state in
+sub-toolbar and its file sidebar. Display is a dropdown from its button at the navbar's right
+end, before Present. The Studio (preview) is the shell's own state in
 every 3D renderer, with no host prop, and the navbar stays over it; see [the Studio](settings-ui.md#camera-animation-and-the-studio)
 and [the host's side](viewer-host.md#the-studio-and-renderer-navigation-actions).
 
@@ -1082,7 +1082,7 @@ empty space asks about the model as a whole (Show all, Expand all, Collapse all,
 then the framing group). A single-part STEP has no part menu — a press on the part
 opens this one too — so there it opens with the part menu's reference group for the
 whole part (`<file>#`): Copy Reference (`modelMenuDescriptor`'s `copyText`). The tree starts directly below the model tree
-section's head, its search box (`TreeFilterInput`, `primitives/tree-filter`, shared with the
+section's head, its filter (`TreeFilterInput`, `primitives/tree-filter`, shared with the
 explorer), with a conditional Show all after it. While something is isolated, an isolation
 bar heads the tree (`Isolated: …` and **Exit**). Clicking empty tree space clears
 selection, including a pending topology pick.
@@ -1437,9 +1437,9 @@ The Studio is one `previewing` state the shell owns (`usePreviewState` in
 it and passes it in as `preview`, as STEP does. It is a 3D view's: a renderer that
 offers it declares `previewable` (STEP, GLB, the meshes and robots do), and one that
 does not has no Studio button and stays in its normal view whatever sets the state. The
-Studio button, last on the tool strip, sets it — after covering the view in the frame of the
-press ("Preparing studio…", until Render is on screen and detail has gone quiet) — and Escape
-or Exit studio, an X in its top-right corner, clears it; no host prop reaches it.
+Present button, last in the navbar, sets it — after covering the view in the frame of the
+press ("Preparing studio…", until Render is on screen, detail has gone quiet and the picture has
+converged) — and Escape or Exit studio, an X beside Studio settings in the navbar, clears it; no host prop reaches it.
 While it is up, the frame drops the tool strip and its sub-toolbar, the tool stack and their
 resize handles, Quick Edit, view cube (not mounted), alert card and viewport menu, the file
 sidebar offers its Position and Animation alone (the Studio's own pose and routine), and every
@@ -1510,7 +1510,7 @@ child leads the tree instead, unless the description has no content anywhere,
 in which case every link is kept. An SRDF shows its paired URDF's tree.
 
 The section reuses the model tree's pieces rather than cloning them: the dense
-row primitive, the search box (`TreeFilterInput`, `primitives/tree-filter`), and the ranked
+row primitive, the filter (`TreeFilterInput`, `primitives/tree-filter`), and the ranked
 flat search of `kit/inspector/modelTreeSearch.js` (`useTreeSearch`). Its X is the section's: it
 closes the panel. The search index also reads a row's `searchAliases`, so a
 link is found by its joint name and the hit shows that joint in place of its

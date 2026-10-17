@@ -52,10 +52,10 @@ and matching do not load the component.
 `prepare` returns `{ data, dispose? }`. FileViewer opens a file's document when the
 file is shown, and again only on `reload`: a renderer follows its file's changes
 itself (every CAD renderer loads the next revision behind what is on screen). A CAD
-file's controls are its own, over the viewport: its tool strip and the view's controls at
-the strip's end (Display, the Studio), the tool in hand's sub-toolbar, and its file sidebar
-([the design system](settings-ui.md#the-file-sidebar-and-the-tool-stack)). The navbar holds
-none of them.
+file's controls are its own, over the viewport: its tool strip, the tool in hand's
+sub-toolbar, and its file sidebar
+([the design system](settings-ui.md#the-file-sidebar-and-the-tool-stack)); the view's
+controls (Display, Present) are the navbar's, last at its right end.
 
 Below 600px of its own width FileViewer is mobile (`useViewerMobile`). The width is a
 breakpoint boolean, never a pixel value, so a resize within one layout does not
@@ -101,7 +101,8 @@ At the right, only what a host or a file adds: the host's update button, a rende
 actions, the host's Full size, where the host shows the view small, and last, in the page's
 top-right corner, the host's colour scheme control (`colorSchemeControl`, which `CadViewer`
 passes on to FileViewer and `ViewerNavbar`), where it has one. A renderer's
-own view controls (a 3D view's Display and Studio) are its own, at its tool strip's end.
+own view controls (a 3D view's Display and Present, or the Studio's settings and Exit studio)
+go last, in the box FileViewer hands it (`navbarSlot`, `data-view-controls`).
 
 The explorer (`navigation/FolderExplorer.jsx`) is a popover under the file's name, a
 fixed 18rem wide and never resized. It floats over the view, so opening it resizes

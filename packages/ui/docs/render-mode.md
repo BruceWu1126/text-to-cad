@@ -155,9 +155,8 @@ unchanged after a runtime replacement does not.
 
 ## Where the controls live
 
-Display settings are a dropdown from the Display button at the tool strip's end
-(the current mode's sphere, after the tools' rule and before the Studio's:
-`kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
+Display settings are a dropdown from the Display button at the navbar's right end
+(the current mode's sphere, before Present: `kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
 modes are every offered mode but Render (`DisplayModeOptions.js`). The Studio draws the model
 in Render whatever the file's mode (the view settings store's `presentMode`), and the tools
 view never does: a file whose mode is Render is drawn there in Solid. Render's settings page is
@@ -167,7 +166,7 @@ sections of the file sidebar (see
 [settings-ui.md](./settings-ui.md#the-file-sidebar-and-the-tool-stack)); nothing in them is
 a display setting.
 
-Display and the Studio, the view's controls at the strip's end, are offered by a 3D view
+Display and Present, the view's controls at the navbar's right end, are offered by a 3D view
 alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`):
 
 | Renderer | Files | Display and the Studio |
