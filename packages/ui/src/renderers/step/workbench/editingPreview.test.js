@@ -40,6 +40,15 @@ test("a build the file moved past keeps no failure", () => {
   assert.deepEqual([moved.superseded, moved.error], [true, ""]);
 });
 
+test("the saved file is kept from the moment the feed names it, and a build that wrote nothing has none", () => {
+  const building = reduceEditingPreview(initialEditingPreview(), update(5, { preview: named() }));
+  assert.equal(building.saved, null);
+  const written = reduceEditingPreview(building, update(5, { preview: named(), saved: { tree: TREE, documentHash: "d".repeat(64) } }));
+  assert.deepEqual(written.saved, { tree: TREE, documentHash: "d".repeat(64) });
+  assert.equal(written.state, "building", "the file lands before the build's done");
+  assert.equal(reduceEditingPreview(written, update(5, { state: "done", saved: { tree: "", documentHash: "" } })).saved, null);
+});
+
 test("only a queued or running build is active", () => {
   for (const state of ["submitted", "queued", "building"]) assert.equal(editingBuildActive({ state }), true, state);
   for (const state of ["done", "failed", "disconnected", undefined]) assert.equal(editingBuildActive({ state }), false, String(state));

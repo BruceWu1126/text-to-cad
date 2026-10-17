@@ -705,7 +705,12 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   that called them -- each one publishing its file as above, having it
   verified, then cutting its meshes. A model's `done` event says its result is
   recorded; its `STEP saved` event follows when its file lands. The command
-  returns, and prints its result, once every export is finished; an export that
+  returns, and prints its result, once every export is finished -- or, with
+  `--no-wait`, once every model's result is recorded: the result lines are
+  printed then, a daemon worker releases its client (the `released` frame) and
+  writes the files before its next job, a build with no daemon writes them
+  before it exits; a failure of theirs is then the worker's exit, the build
+  feed's and the next run's, not the released caller's. An export that
   fails fails the command, every other export still gets its turn, the file on
   disk stays as it was, and the record keeps owing the file (its output entry
   pending), which the model's next run exports without running the body. A
@@ -1812,7 +1817,11 @@ and its artifact jobs (above), with two executors that behave identically:
   soon as its URL is announced, so a session's first build finds warm spares.
   Inside a worker, a compile or an artifact job is the same client call back to
   the daemon; a parent's children build in the parent's worker, in the slot it
-  holds (§9a).
+  holds (§9a). A worker answers its client when the command's answer is complete:
+  after the run's exports, or, with `--no-wait`, once every model's result is
+  recorded (the `released` frame, which the client returns on); the worker then
+  finishes the files, its job open in the ledger until its exit frame, and a
+  client that left after its release is no lost client.
   **A job runs in its caller's environment**, as it would cold: every request
   carries the client's whole environment and the worker applies it for that
   job -- a name the caller has is set, a name it lacks is unset, which also
@@ -2174,7 +2183,10 @@ component the store holds -- the stored parts first, then all of them once the
 build pool's job for the rest is done -- and whether that is all of them; the
 preview's annotations
 name the one object they are (below); a saved result the document's tree and
-digest; and the ledger keeps nothing else of any of them. Kinematics,
+digest, which the feed names as the file-written event (`saved`) the moment it
+lands -- after the result is recorded, so the feed's two events are the
+result (its preview, then `done`) and the file; and the ledger keeps nothing
+else of any of them. Kinematics,
 appearance and animation travel in the sidecar for every durable reader, and
 in the preview's annotations object for the viewer alone.
 

@@ -146,7 +146,14 @@ with that `producer`), the parts by their keys, and the annotations with
 catalog row carries for a saved file, keyed by the tree's tokens) or 404 for
 anything that is not such an object. A `preview` whose `producer` is null names
 no parts: the client finds them as for a saved file. A superseded build's
-`preview` is null, as is a build's before its result exists.
+`preview` is null, as is a build's before its result exists. A build records
+its result and writes its file after (cadgen's `STORE.md` §3, *Exports*), so
+the feed has two events for it: the preview, complete with its parts, is the
+result recorded; `saved` -- the tree the file's bytes were written from and
+their digest (`documentHash`), null until then -- is the file written, the
+moment it lands, whatever the build's `state` (a child's `done` precedes its
+save; a root's `done` follows every export of the run). The client reads the
+catalog again on either.
 
 The explorer's two reads are `GET /__cad/folder?path=<abs>` (one folder's
 subfolders and CAD files, natural order) and `GET /__cad/search?path=<abs>&q=`

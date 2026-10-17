@@ -1870,6 +1870,7 @@ def generate_step_targets(
     verbose: bool = False,
     json_output: bool = False,
     profile: bool = False,
+    wait: bool = True,
 ) -> int:
     """Build trees for ``targets``. Returns the process exit code.
 
@@ -1877,6 +1878,12 @@ def generate_step_targets(
     alone cannot say WHICH targets were rebuilt and which were already current, and the
     logger's prose goes to stderr by design -- so without this a caller reading the streams
     apart had no machine-readable result at all.
+
+    ``wait`` False (``--no-wait``) prints the result once every model's result is
+    recorded and releases whoever asked (``executors.release_caller``: a daemon worker's
+    client returns then), before the run finishes the files it queued; the files are
+    written all the same, and a failure of theirs is this process's exit code and the
+    build feed's, not the released caller's.
     """
     tool_name = "cadgen"
     logger = CliLogger("cadgen", verbose=verbose)
@@ -1929,7 +1936,8 @@ def generate_step_targets(
     # The targets are the roots of the run: a child is built when its parent's body
     # calls it (cadgen.authoring), by the same pipeline, in this process. The run
     # finishes every export its calls queued -- each model's STEP, meshes and summary
-    # line -- as it ends, children first, before the results are printed.
+    # line -- as it ends, children first, before the results are printed; with
+    # ``wait`` False the results are printed, and the caller released, before that.
     with build_run(logger):
         for spec in selected_specs:
             logger.debug(f"Generating... {spec.source_ref}")
@@ -1943,9 +1951,24 @@ def generate_step_targets(
             elif built.outcome == "skipped-peer":
                 logger.info(f"{spec.cad_ref} was built by a concurrent run; skipped")
             _emit(spec, built)
-    logger.total()
-    _flush()
+        if not wait:
+            _answer(logger, _flush, release=True)
+    if wait:
+        _answer(logger, _flush)
     return 0
+
+
+def _answer(logger: CliLogger, flush: Callable[[], None], *, release: bool = False) -> None:
+    """The command's answer: its total and the result lines -- after its exports, whose
+    end is the command's; or, with ``--no-wait`` (``release``), once every model's
+    result is recorded, whoever asked released then (``executors.release_caller``) and
+    the exports finishing after."""
+    logger.total()
+    flush()
+    if release:
+        from cadgen.daemon.executors import release_caller
+
+        release_caller(0)
 
 
 def generate_dxf_targets(
@@ -1955,11 +1978,13 @@ def generate_dxf_targets(
     verbose: bool = False,
     json_output: bool = False,
     profile: bool = False,
+    wait: bool = True,
 ) -> int:
     """Build drawings. A drawing is a model (STORE.md §3), so its run answers on
     stdout exactly as a STEP model's does: one `outcome document` line per
     target, upgraded to JSON by ``json_output`` (``tree`` is null — a drawing
-    has no geometry tree)."""
+    has no geometry tree). ``wait`` as :func:`generate_step_targets`'s: the
+    drawing writes its own file in its run; what its children owe is queued."""
     from cadgen.store.gate import stale
 
     reported: list[dict[str, object]] = []
@@ -2073,6 +2098,10 @@ def generate_dxf_targets(
                 else:
                     logger.info(_generated_dxf_summary(spec))
                     _emit(spec, "built")
-    logger.total()
-    _flush()
+            if not wait:
+                _answer(logger, _flush, release=True)
+        if wait:
+            _answer(logger, _flush)
+    else:
+        _answer(logger, _flush)
     return 0

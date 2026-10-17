@@ -188,8 +188,11 @@ change of finishes reloads the composition. Until its own arrive, what the saved
 on screen had stays in hand by the tokens the two share, [Position's rule](cad-renderer.md#position)
 for a replacement. A routine that bends a tube plays on a preview only as the one in
 hand, with the saved document's skins; changed, it waits for the save. When the build
-writes the file, the catalog names the saved revision -- a revision past the one the
-build began over, which the feed does not call superseded -- and it replaces the
+writes the file -- the feed's second event, `saved`, the tree the bytes were written
+from and their digest, which lands after the result is recorded and may precede the
+build's `done` -- the catalog is read at once (`useEditingPreview`) and names the saved
+revision -- a revision past the one the build began over, which the feed does not call
+superseded -- and it replaces the
 preview in place with nothing fetched twice (the parts are the preview's, by key; a
 routine is keyed by its keyframes, so a playing one is neither stopped nor rewound),
 the label goes, and nothing on screen moves: no selection, measurement, ink or pose

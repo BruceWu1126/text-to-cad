@@ -152,6 +152,13 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertEqual(outcome, 0)
         self.assertEqual(err, "hello\n")
 
+    def test_a_released_frame_ends_the_request_with_its_code_before_the_exit(self):
+        """``--no-wait``: the worker releases its client once the command's answer is
+        complete and writes the files after; the client returns on the frame and reads
+        nothing more (the exit frame reaches nobody)."""
+        outcome, out, _err = self._run([{"stream": "stdout", "data": "current part.step\n"}, {"released": 0}])
+        self.assertEqual((outcome, out), (0, "current part.step\n"))
+
 
 class ResidentProcessLifecycle(unittest.TestCase):
     def test_the_daemon_starts_outside_the_callers_project_directory(self):
@@ -367,6 +374,60 @@ class ServerRelaysTheDeath(unittest.TestCase):
                 # The pool's crash count (`cadgen daemon status`) agrees: a stopped job is no crash.
                 self.assertEqual(pool.release.call_args.kwargs["cancelled"], ended == "cancelled")
                 self.assertEqual(next(frame["workerDied"]["exitStatus"] for frame in conn.frames if "workerDied" in frame), status)
+
+    def test_a_job_that_released_its_client_finishes_after_the_client_left(self):
+        """``--no-wait``: a worker that released its client goes on writing the files; the
+        client leaving after that is no loss -- the worker is not killed, its job ends with
+        its exit frame as done, not cancelled, and the ledger closes it then."""
+        class Releasing:
+            pid = 778
+            extra = False
+
+            def __init__(self) -> None:
+                self.sent: list[dict] = []
+
+            def send(self, request: dict) -> None:
+                self.sent.append(request)
+
+            def frames(self, **_kwargs):
+                yield {"stream": "stdout", "data": "built part.step\n"}
+                yield {"released": 0}
+                yield {"event": {"model": "/w/part.py", "state": "building", "phase": "STEP saved",
+                                 "saved": {"output": "/w/part.step", "tree": "t" * 64, "documentHash": "d" * 64}}}
+                yield {"exit": 0}
+
+            def alive(self) -> bool:
+                return True
+
+            def kill(self) -> None:
+                raise AssertionError("the worker was killed after releasing its client")
+
+        class Leaves(self._Conn):
+            """A client that returns on the released frame: every send after it fails."""
+
+            gone = False
+
+            def send(self, raw: bytes) -> None:
+                if self.gone:
+                    raise BrokenPipeError("the client left")
+                super().send(raw)
+                self.gone = "released" in self.frames[-1]
+
+        pool = mock.Mock()
+        worker = Releasing()
+        pool.acquire.return_value = worker
+        conn = Leaves()
+        jobs = JobLedger()
+        with mock.patch.object(server, "_JOBS", jobs), mock.patch.object(server, "_POOL", pool), \
+                mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0):
+            server._handle_request(conn, {"tool": "run", "argv": ["/w/part.py", "--no-wait"], "cwd": "/w",
+                                          "prog": "python part.py"})
+        self.assertEqual([next(iter(frame)) for frame in conn.frames if frame != {"stream": "stdout", "data": ""}],
+                         ["stream", "released"], "the client heard its release and nothing after")
+        pool.release.assert_called_once_with(worker, healthy=True, cancelled=False)
+        (job,) = jobs.snapshot()
+        self.assertEqual((job["state"], job["exit"]), ("done", 0))
+        self.assertEqual(job["savedResults"]["/w/part.step"]["documentHash"], "d" * 64, "the save landed after the release")
 
     def test_a_job_whose_caller_left_is_released_as_cancelled_not_crashed(self):
         class Gone(self._Conn):

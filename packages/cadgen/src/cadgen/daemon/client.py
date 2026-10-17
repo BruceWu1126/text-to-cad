@@ -770,6 +770,12 @@ def _run_request(
             return settled(_RESTART)
         if "exit" in message:
             return settled(int(message["exit"]))
+        if "released" in message:
+            # The command's answer is complete (--no-wait): the worker writes the files
+            # after this, and the exit frame it sends then reaches nobody.
+            if strict:
+                return protocol_failure("released a geometry request")
+            return settled(int(message["released"]))
         if "artifactResult" in message:
             if on_artifact_result is None:
                 return settled(None)

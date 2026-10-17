@@ -15,7 +15,17 @@ export function initialEditingPreview() {
     updatedAt: 0,
     error: "",
     preview: null,
+    saved: null,
   };
+}
+
+// The file the build saved, as the feed names it: the tree its bytes were written from and their
+// digest; null while the build has written nothing. A build records its result and writes its file
+// after, so this is the feed's second event, which the catalog is read on.
+function savedFile(value) {
+  const tree = String(value?.tree || "").trim();
+  const documentHash = String(value?.documentHash || "").trim();
+  return tree && documentHash ? { tree, documentHash } : null;
 }
 
 // The preview revision an answer names, as the state keeps it; null for an answer naming none
@@ -78,5 +88,6 @@ export function reduceEditingPreview(current, next) {
     file: next.file || next.output,
     // Named from the moment the result exists; a build the file moved past has none to show.
     preview: superseded ? null : previewRevision(next.preview),
+    saved: savedFile(next.saved),
   };
 }

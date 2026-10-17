@@ -569,10 +569,12 @@ src/cadgen/
                          #   out, for a copy nothing else keeps up to date
                          #   (_internal/channel.py)
   store/                 # the store (STORE.md): objects, index, records, trees,
-                         #   closure, gate, materialize, publish, gc, view,
-                         #   exports (a model's STEP written from its result and
-                         #   verified against it, §3), provenance (the build's
-                         #   account of its code, §3)
+                         #   results (a model's result under the key of
+                         #   everything it was built from, §3), closure, gate,
+                         #   materialize, publish, gc, view, exports (a model's
+                         #   STEP written from its result and verified against
+                         #   it, §3), provenance (the build's account of its
+                         #   code, §3)
   cli/                   # generated command shells, one per <format> <verb>
   cli_tree.py            # the build tree on stderr / JSONL events, and each
                          #   built model's time line (model code vs cadgen)

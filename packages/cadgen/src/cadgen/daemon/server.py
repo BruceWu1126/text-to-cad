@@ -161,6 +161,7 @@ def _watch_client(
     *,
     finishes_alone: bool = False,
     left: threading.Event | None = None,
+    released: threading.Event | None = None,
 ) -> None:
     """Kill the WORKER when the requesting client vanishes mid-job.
 
@@ -176,14 +177,18 @@ def _watch_client(
     for its client: the worker stops it before its next derivation unless an identical
     request has attached, and stays warm.
 
-    ``left`` is set before a kill: the job was stopped, not lost to a crash.
+    ``left`` is set before a kill: the job was stopped, not lost to a crash. ``released``
+    is set once the job answered its client before its files were written (``--no-wait``,
+    the ``released`` frame): the client leaving is then no loss, and the worker finishes.
     """
     while not done.wait(CLIENT_LIVENESS_INTERVAL_SECONDS):
+        if released is not None and released.is_set():
+            return
         try:
             with send_lock:
                 _send(conn, {"stream": "stdout", "data": ""})
         except OSError:
-            if done.is_set():
+            if done.is_set() or (released is not None and released.is_set()):
                 return
             if finishes_alone:
                 _log(f"{tool}: client left; worker {worker.pid} stops before its next derivation")
@@ -456,10 +461,13 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     # derived, the derivation in hand finished and the worker warm. A model build or a
     # door whose caller left is still killed: there a cancel means stop.
     finishes_alone = is_artifact
+    # Set once the job released its client before its files were written (--no-wait):
+    # the client is expected to leave, and the worker finishes the files.
+    released = threading.Event()
     watchdog = threading.Thread(
         target=_watch_client,
         args=(conn, send_lock, watchdog_done, tool, worker, preserve_coalesced_work),
-        kwargs={"finishes_alone": finishes_alone, "left": left},
+        kwargs={"finishes_alone": finishes_alone, "left": left, "released": released},
         daemon=True,
     )
     watchdog.start()
@@ -503,6 +511,10 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                 break
             if frame.get("stream") == "stderr":
                 stderr_tail.append(str(frame.get("data") or ""))
+            if "released" in frame:
+                if is_artifact:
+                    raise _WorkerBrokeProtocol("artifact worker released its client")
+                released.set()
             if not is_artifact:
                 _JOBS.observe(frame)
             if is_artifact:
@@ -530,7 +542,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                     with send_lock:
                         _send(conn, frame)
                 except OSError:
-                    if finishes_alone or preserve_coalesced_work():
+                    if finishes_alone or released.is_set() or preserve_coalesced_work():
                         relay_connected = False
                     else:
                         raise

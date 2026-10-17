@@ -349,7 +349,10 @@ The warm daemon is on by default; `cadgen daemon status` shows running and
 queued work, and `CADGEN_DAEMON=0 python part.py` builds with transient workers
 under the same contract. Results go to stdout, errors to stderr. Model runs
 accept `--json` (one result line; a failure is `{"ok": false, "error": "..."}`
-with exit status 1) and `--verbose` (full tracebacks); `python part.py --help`
+with exit status 1), `--verbose` (full tracebacks) and `--no-wait` (return once
+every model's result is recorded and its preview is on screen: the build service
+writes the STEP and mesh files after it has answered, and a failure of theirs
+reaches the next run and the viewer, not this command); `python part.py --help`
 lists the flags. A script builds the models its `__main__` block calls; no flag
 selects one.
 

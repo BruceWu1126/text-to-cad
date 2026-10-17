@@ -6,9 +6,11 @@ file's output path and store and reports the newest: whether it is queued or run
 far it has got, whether it failed and why; the preview revision it published -- the result
 tree's hash, the producer its parts are keyed under, the part key of each component the
 store holds and the hash of its annotations object, artifact-side objects the viewer reads
-as it reads any -- and, once it has finished, whether the file moved past it
-(``superseded``), when its failure and its preview are no longer the news. A daemon restart
-expires this channel; the catalog keeps serving the bytes on disk.
+as it reads any; the file it saved (``saved``: the tree the bytes were written from and
+their digest), the moment it lands -- a build records its result first and writes the file
+after, so the two are the feed's two events; and, once it has finished, whether the file
+moved past it (``superseded``), when its failure and its preview are no longer the news. A
+daemon restart expires this channel; the catalog keeps serving the bytes on disk.
 """
 
 from __future__ import annotations
@@ -106,7 +108,18 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
         result["preview"] = None
     else:
         result["preview"] = _preview_revision(latest, target)
+    result["saved"] = _saved_file(latest, target)
     return result
+
+
+def _saved_file(job: dict, target: str) -> dict | None:
+    """The file ``job`` saved at ``target``, once it has: the tree its bytes were written
+    from and their digest (the ledger keeps nothing else of it, ``daemon/jobs.py``), or None
+    while the build has written nothing there."""
+    saved = (job.get("savedResults") or {}).get(target)
+    if not isinstance(saved, dict) or not saved.get("tree") or not saved.get("documentHash"):
+        return None
+    return {"tree": str(saved["tree"]), "documentHash": str(saved["documentHash"])}
 
 
 def _preview_revision(job: dict, target: str) -> dict | None:

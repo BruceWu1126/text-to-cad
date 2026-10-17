@@ -36,8 +36,21 @@ class BuildStatusTests(unittest.TestCase):
         # The preview revision is names: the tree published, no parts yet, no annotations.
         self.assertEqual(result["preview"], {"tree": "a" * 64, "producer": None, "parts": {}, "complete": False,
                                              "annotations": None})
-        for private in ("subject", "storeRoot", "previews", "saved", "savedResults", "previewUnavailable", "superseded"):
+        for private in ("subject", "storeRoot", "previews", "savedResults", "previewUnavailable", "superseded"):
             self.assertNotIn(private, result)
+        self.assertIsNone(result["saved"], "nothing written yet")
+
+    def test_the_saved_file_is_the_feeds_own_event_from_the_moment_it_lands(self):
+        """A build records its result (its preview, then `done`) and writes its file after
+        (STORE.md §3, *Exports*): the feed names the save the moment the ledger has it,
+        whatever the build's state, and the viewer reads the catalog then."""
+        building = self.job(previews={self.output: {"tree": "a" * 64}},
+                            savedResults={self.output: {"tree": "a" * 64, "documentHash": "d" * 64}})
+        result = preview_status(self.output, jobs=[building])
+        self.assertEqual((result["state"], result["saved"]), ("building", {"tree": "a" * 64, "documentHash": "d" * 64}))
+        # Another output the same build saved is not this file's event.
+        other = self.job(savedResults={str(self.root / "other.step"): {"tree": "a" * 64, "documentHash": "d" * 64}})
+        self.assertIsNone(preview_status(self.output, jobs=[other])["saved"])
 
     def test_the_status_names_the_preview_revision_and_its_annotations_by_their_objects(self):
         from cadgen.catalog import artifact_file_hash

@@ -182,6 +182,11 @@ export interface CadEditingPreview {
   superseded?: boolean;
   /** The preview revision: null before the build's result exists and for a superseded build. */
   preview?: CadEditingPreviewRevision | null;
+  /**
+   * The file the build saved, the moment it lands: the tree its bytes were written from and their
+   * digest; null while it has written nothing. A build records its result and writes the file after.
+   */
+  saved?: { tree: string; documentHash: string } | null;
 }
 /**
  * A preview revision's annotations object (`GET /__cad/store?annotations=`): exactly the fields a
