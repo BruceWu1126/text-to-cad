@@ -883,6 +883,38 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(kernel_trace.identifier("<module>"), "module")
         self.assertEqual(kernel_trace.identifier("bracket"), "bracket")
 
+    def test_a_stored_lineage_reads_back_only_whole(self) -> None:
+        """A lineage object reads back as written, or not at all: a name out of the grammar
+        or of another kind, two elements named alike, a table entry that is no stepped
+        derivation, a folded atom the table does not spell, an entry no name reaches."""
+        import copy
+
+        from cadgen._internal.component_package import canonical_json_bytes, read_lineage
+
+        written = {"made": "part.extrude1", "faces": ["f:part.extrude1~0123456789ab", None, "f:part.make_box1.2"],
+                   "edges": ["e:part.make_box1.1;M:part.cut1", "e:0a1b2c3d4e5f"], "vertices": [],
+                   "table": {"part.extrude1~0123456789ab": "part.make_box1.1;Gf:part.extrude1+e:sk.cut2~abcdefabcdef",
+                             "sk.cut2~abcdefabcdef": "sk.make_line1.1;M:sk.cut2"}}
+        self.assertEqual(read_lineage(canonical_json_bytes(written)), written)
+        edits = {  # (list, key, value): value None drops the key
+            "a face named as an edge": ("faces", 2, "e:part.make_box1.2"),
+            "a step out of the grammar": ("edges", 0, "e:part.make_box1.1;X:part.cut1"),
+            "two names on one line": ("faces", 2, "f:part.make_box1.2\nf:part.make_box1.3"),
+            "a name that is no string": ("faces", 2, 7),
+            "two faces alike": ("faces", 1, "f:part.make_box1.2"),
+            "an entry with no step": ("table", "sk.cut2~abcdefabcdef", "sk.make_line1.1"),
+            "an atom the table lacks": ("table", "sk.cut2~abcdefabcdef", None),
+            "an entry no name reaches": ("table", "x.cut9~ffffffffffff", "x.make_box1.1;M:x.cut9"),
+        }
+        for label, (field, key, value) in edits.items():
+            changed = copy.deepcopy(written)
+            if value is None:
+                del changed[field][key]
+            else:
+                changed[field][key] = value
+            with self.subTest(label), self.assertRaises(ValueError):
+                read_lineage(canonical_json_bytes(changed))
+
     def test_names_are_the_same_with_the_memo_off(self) -> None:
         """Hits off, every call runs and its makers report again: the same names."""
         def model():

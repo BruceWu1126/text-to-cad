@@ -72,6 +72,13 @@ _STEP_RE = re.compile(rf"^(M|MG|G|U|L|D)([fev])?({_NUMBER})?(?::({FEATURE_NAME_P
 OCCURRENCE_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})$")
 OCCURRENCE_ELEMENT_SELECTOR_RE = re.compile(rf"^({OCCURRENCE_TOKEN_PATTERN})/({ELEMENT_NAME_PATTERN})$")
 ELEMENT_SELECTOR_RE = re.compile(rf"^({ELEMENT_NAME_PATTERN})$")
+# Texts of one form, one per line, each admitted whole (``joined_lines``): element names of
+# a kind, folded atoms, derivations of at least one step (what a lineage's table spells).
+_LINES = "(?:{0})(?:\n(?:{0}))*"
+ELEMENT_NAME_LINES_RE = {letter: re.compile(_LINES.format(rf"{letter}:(?:{_HEX12}|{DERIVATION_PATTERN})"))
+                         for letter in "fev"}
+FOLDED_ATOM_LINES_RE = re.compile(_LINES.format(FOLDED_ATOM_PATTERN))
+STEPPED_DERIVATION_LINES_RE = re.compile(_LINES.format(rf"{ATOM_PATTERN}(?:{STEP_PATTERN})+"))
 
 # A build123d part label used in place of an occurrence token. Deliberately narrow: it must not
 # start with a digit, and it excludes "/" because that separates an occurrence from its element.
@@ -156,6 +163,30 @@ def split_derivation(text: str) -> tuple[str, tuple[Step, ...]]:
         steps.append(Step(op, kind or "", int(number or 0), feature or "",
                           tuple((extra[0], extra[2:]) for extra in extras.split("+")[1:]) if extras else ()))
     return atom, tuple(steps)
+
+
+def joined_lines(pattern: re.Pattern[str], texts: list[object]) -> str | None:
+    """``texts`` joined one per line when every one is a string the grammar admits whole
+    (``pattern`` one of the ``*_LINES_RE``, which take every line in one match), else
+    None: a lineage's thousands of names checked by one call, not one each."""
+    if not texts:
+        return ""
+    try:
+        joined = "\n".join(texts)  # type: ignore[arg-type]
+    except TypeError:
+        return None
+    if joined.count("\n") != len(texts) - 1 or pattern.fullmatch(joined) is None:
+        return None
+    return joined
+
+
+def folded_atoms(text: str) -> list[str]:
+    """The folded atoms of a derivation the grammar admits, or of names one per line -- the
+    atom each starts from, a further source's -- read off each '~', which only a folded
+    atom holds: the feature before it, back to the ':' (a name's kind's, at the latest) or
+    the start, and the digest after it."""
+    pieces = text.split("~")
+    return [f"{piece.rsplit(':', 1)[-1]}~{after[:12]}" for piece, after in zip(pieces, pieces[1:])]
 
 
 def derivation_features(text: str) -> list[str]:

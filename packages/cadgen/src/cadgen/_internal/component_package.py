@@ -615,13 +615,15 @@ def read_lineage(payload: bytes) -> dict[str, Any]:
     """A stored lineage: ``{"made", "faces", "edges", "vertices", "table"}``, each list
     an element name or None per ordinal, every name of its kind and distinct, and the
     table spelling every folded atom a name or an entry reaches (``kernel_trace``), and
-    nothing else. ValueError for anything else."""
+    nothing else. ValueError for anything else. Each list is checked whole, one match of
+    the grammar over its names one per line (``joined_lines``)."""
     from cadgen.cad_ref_syntax import (
-        DERIVATION_RE,
-        is_element_name,
+        ELEMENT_NAME_LINES_RE,
+        FOLDED_ATOM_LINES_RE,
+        STEPPED_DERIVATION_LINES_RE,
+        folded_atoms,
         is_feature_name,
-        is_folded_atom,
-        split_derivation,
+        joined_lines,
     )
 
     try:
@@ -633,27 +635,28 @@ def read_lineage(payload: bytes) -> dict[str, Any]:
     if lineage["made"] is not None and not is_feature_name(lineage["made"]):
         raise ValueError("a lineage's maker is not a feature name")
     table = lineage["table"]
-    if type(table) is not dict or any(not is_folded_atom(atom) or type(text) is not str or not DERIVATION_RE.match(text)
-                                      or ";" not in text for atom, text in table.items()):
+    if (type(table) is not dict or joined_lines(FOLDED_ATOM_LINES_RE, list(table)) is None
+            or joined_lines(STEPPED_DERIVATION_LINES_RE, list(table.values())) is None):
         raise ValueError("a lineage's table maps folded atoms to derivations")
-    reached: set[str] = set()
     pending: list[str] = []
     for plural, kind in _LINEAGE_KINDS:
         names = lineage[plural]
-        if type(names) is not list or any(name is not None and not is_element_name(name, kind) for name in names):
+        present = [name for name in names if name is not None] if type(names) is list else None
+        joined = None if present is None else joined_lines(ELEMENT_NAME_LINES_RE[kind[0]], present)
+        if joined is None:
             raise ValueError(f"a lineage's {plural} are not {kind} names")
-        present = [name for name in names if name is not None]
         if len(set(present)) != len(present):
             raise ValueError(f"a lineage names two {plural} alike")
-        pending.extend(name[2:] for name in present if DERIVATION_RE.match(name[2:]))
+        pending.extend(folded_atoms(joined))
+    reached: set[str] = set()
     while pending:
-        atom, steps = split_derivation(pending.pop())
-        for folded in (atom, *(extra for step in steps for _kind, extra in step.extras)):
-            if is_folded_atom(folded) and folded not in reached:
-                if folded not in table:
-                    raise ValueError(f"a lineage's table does not spell {folded}")
-                reached.add(folded)
-                pending.append(table[folded])
+        folded = pending.pop()
+        if folded not in reached:
+            if folded not in table:
+                raise ValueError(f"a lineage's table does not spell {folded}")
+            reached.add(folded)
+            if "~" in table[folded]:
+                pending.extend(folded_atoms(table[folded]))
     if reached != set(table):
         raise ValueError("a lineage's table spells atoms no name reaches")
     return lineage
