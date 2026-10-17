@@ -179,11 +179,27 @@ class Feature:
     # holding it was returned: :func:`_placed`) -> its number among them, in the
     # order of the results and of each result's elements.
     _numbers: dict[str, dict[tuple, int]] = field(default_factory=dict, repr=False)
+    # Functions of the feature alone, computed once: the operation as its name spells
+    # it, the name without its count (``<function>.<operation>``, as written) -- every
+    # part's naming reads them for each feature it descends from -- and, on first use,
+    # the first position at which each TShape was returned.
+    operation: str = field(init=False, repr=False)
+    stem: str = field(init=False, repr=False)
+    _positions: dict[Any, int] | None = field(default=None, init=False, repr=False)
 
-    @property
-    def stem(self) -> str:
-        """The name without its count: ``<function>.<operation>``, as written."""
-        return f"{identifier(self.function)}.{operation_name(self.op)}"
+    def __post_init__(self) -> None:
+        self.operation = operation_name(self.op)
+        self.stem = f"{identifier(self.function)}.{self.operation}"
+
+    def position_of(self, tshape: Any) -> int | None:
+        """The first position among the results at which ``tshape`` was returned, or None."""
+        positions = self._positions
+        if positions is None:
+            positions = self._positions = {}
+            for position, result in enumerate(self.results):
+                if result is not None:
+                    positions.setdefault(result.TShape(), position)
+        return positions.get(tshape)
 
     def row(self) -> dict[str, Any]:
         """The feature as the provenance entry records it: where it ran, and the
@@ -334,7 +350,7 @@ class Trace:
             if result is None:
                 return index
             held = result.TShape()
-            if operation_name(feature.op) == "compound":
+            if feature.operation == "compound":
                 children = TopoDS_Iterator(result)
                 child = children.Value() if children.More() else None
                 if child is None:
@@ -497,7 +513,7 @@ class Trace:
         where ``shape`` is placed, if a place of it is, else its first place -- the
         location of it inside that result (unlocated); None when no result holds it."""
         feature = self.features[index]
-        position = _position_of(feature, shape)
+        position = feature.position_of(shape.TShape())
         if position is not None:
             return position, None
         tshape = shape.TShape()
@@ -796,14 +812,6 @@ def _relative(element: Any, shape: Any) -> Any:
     ``shape``'s own frame."""
     location = shape.Location()
     return element if location.IsIdentity() else element.Moved(location.Inverted())
-
-
-def _position_of(feature: Feature, handle: Any) -> int | None:
-    tshape = handle.TShape()
-    for position, result in enumerate(feature.results):
-        if result is not None and result.TShape() == tshape:
-            return position
-    return None
 
 
 def _map(shape: Any, kind: Any) -> Any:
