@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { referenceMeasurements } from "../../workbench/referenceMeasurements.js";
+import { useFaceArea } from "../../workbench/faceAreas.js";
 import { nodeVolume } from "../../workbench/partVolume.js";
 import { splitElementRef } from "@text-to-cad/core/lib/cadRefs.js";
 import { STEP_MODEL_ROOT_ID, stepTreeNodeLeafPartIds } from "@text-to-cad/core/lib/step/stepTree.js";
@@ -43,9 +44,11 @@ function MeasurementRows({rows}) {
 
 // A face's or an edge's own measurements: its area, its length, the radii of a round one, an
 // arc's sweep. Where it is (its centre, its normal), what kind it is and whose it is are the
-// heading's and the view's to say.
-function TopologyDetail({ reference }) {
-  return <MeasurementRows rows={referenceMeasurements(reference).rows} />;
+// heading's and the view's to say. A face's area is cadgen's, asked for as the face is shown and
+// listed once it has come.
+function TopologyDetail({ reference, faceAreas }) {
+  const faceArea = useFaceArea(faceAreas, reference);
+  return <MeasurementRows rows={referenceMeasurements(reference, { faceArea }).rows} />;
 }
 
 // A component's or a subassembly's: how many parts, its overall size and its volume.
@@ -130,7 +133,7 @@ function referenceName(item, meshData, partName) {
  *
  * @returns {{ title: import("react").ReactNode, content: import("react").ReactNode } | null}
  */
-export function useStepReference({ references = [], meshData = null, measurements = null, partsSize = null, partName = null }) {
+export function useStepReference({ references = [], meshData = null, measurements = null, partsSize = null, partName = null, faceAreas = null }) {
   const items = useMemo(() => Array.isArray(references) ? references.filter(Boolean) : [], [references]);
   const idsKey = JSON.stringify(items.map(itemKey));
   const [browsed, setBrowsed] = useState(null);
@@ -162,7 +165,7 @@ export function useStepReference({ references = [], meshData = null, measurement
     {activeItem && (isPartNode(activeItem)
       ? <PartDetail node={activeItem} meshData={meshData} size={boxSize(activeItem) || partsSize?.(stepTreeNodeLeafPartIds(activeItem))
         || (items.length === 1 ? measurements?.size : null)}/>
-      : <TopologyDetail reference={activeItem}/>)}
+      : <TopologyDetail reference={activeItem} faceAreas={faceAreas}/>)}
   </div>;
   return { title, content };
 }

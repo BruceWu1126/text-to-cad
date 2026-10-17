@@ -109,6 +109,32 @@ if __name__ == "__main__":
 """
 
 
+# A quarter torus whose face is the mate's axis: its parameters give the torus's centre, not an
+# origin of the face, so the axis passes through the face's exact centroid -- which is neither
+# its box's middle nor the point at its parametric middle.
+TORUS_MODEL = """
+import cadgen
+from cadgen import label_shape, step
+from cadgen import build123d as bd
+
+KINEMATICS = {
+    "mates": [
+        cadgen.revolute("swing", parent="#base", child="#ring", axis="#ring/RING_FACE", limits=(0, 90)),
+    ],
+}
+
+@step(kinematics=KINEMATICS)
+def elbow():
+    base = label_shape(bd.Box(20, 20, 4), "base")
+    ring = label_shape(bd.Pos(4, 2, 9) * bd.Rot(0, 30, 0) * bd.Torus(6, 1.5, major_angle=90), "ring")
+    return bd.Compound(children=[base, ring])
+
+
+if __name__ == "__main__":
+    elbow()
+"""
+
+
 def _face_of(make, geom_type=None) -> str:
     """The name a build gives one face of the part ``make`` makes (its first, or its one face
     of ``geom_type``), as a person would paste it from `inspect refs`: a part placed as it is
@@ -140,6 +166,26 @@ def _arm_face() -> str:
         return label_shape(bd.Pos(10, 3, 6) * bd.Rot(0, 40, 30) * bd.Cylinder(2, 16), "arm")
 
     return _face_of(pivot, bd.GeomType.CYLINDER)
+
+
+def _ring_face_by_geometry() -> str:
+    """The geometric token of TORUS_MODEL's ring's torus face (``geometric_tokens``), the one
+    face of its component whose surface is a torus."""
+    from cadgen import build123d as bd
+    from cadgen._internal.entity_ordinals import entity_map
+    from cadgen._internal.geometric_tokens import element_tokens
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GeomAbs import GeomAbs_SurfaceType
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+
+    ring = bd.Pos(4, 2, 9) * bd.Rot(0, 30, 0) * bd.Torus(6, 1.5, major_angle=90)
+    unlocated = ring.wrapped.Located(TopLoc_Location())
+    faces = entity_map(unlocated, "face")
+    (ordinal,) = [index for index in range(1, faces.Extent() + 1)
+                  if BRepAdaptor_Surface(TopoDS.Face_s(faces.FindKey(index))).GetType()
+                  == GeomAbs_SurfaceType.GeomAbs_Torus]
+    return element_tokens(unlocated)["faces"][ordinal - 1]
 
 
 def _arm_face_by_geometry() -> str:
@@ -370,7 +416,8 @@ class KinematicsBuildTests(unittest.TestCase):
                 artifact_path=package, manifest=manifest, selector_bundle=SelectorBundle(manifest=manifest),
             )
             composed = index_with_assembly_occurrences(build_selector_index(manifest), artifact)
-            expected = _axis_from_ref(composed, f"#arm/{_arm_face()}", mate="swing", source_ref="pivot")
+            expected = _axis_from_ref(composed, f"#arm/{_arm_face()}", mate="swing", source_ref="pivot",
+                                      centroid=lambda row: self.fail("a cylinder's axis needs no centroid"))
         finally:
             import shutil
 
@@ -378,6 +425,22 @@ class KinematicsBuildTests(unittest.TestCase):
         (mate,) = self._sidecar(script)["kinematics"]["mates"]
         self.assertEqual(mate["axis"], expected)
         self.assertNotIn(mate["axis"]["dir"], ([0.0, 0.0, 1.0], [0.0, 0.0, -1.0]))
+
+    def test_an_axis_through_a_torus_face_passes_through_its_exact_centroid(self) -> None:
+        # No selector row carries a face's centroid: the axis measures it on the stored component,
+        # exactly, and places it as the occurrence places the face.
+        from cadgen import build123d as bd
+
+        script = self.root / "elbow.py"
+        script.write_text(TORUS_MODEL.replace("RING_FACE", _ring_face_by_geometry()), encoding="utf-8")
+        self.assertEqual(0, self._build(script))
+        (mate,) = self._sidecar(script)["kinematics"]["mates"]
+        ring = bd.Pos(4, 2, 9) * bd.Rot(0, 30, 0) * bd.Torus(6, 1.5, major_angle=90)
+        (face,) = [face for face in ring.faces() if face.geom_type == bd.GeomType.TORUS]
+        centroid, middle = face.center(bd.CenterOf.MASS), face.center(bd.CenterOf.BOUNDING_BOX)
+        self.assertGreater((centroid - middle).length, 0.5, "the fixture tells a centroid from a box's middle")
+        for got, want in zip(mate["axis"]["origin"], centroid):
+            self.assertAlmostEqual(got, want, places=6)
 
     def test_an_axis_ref_by_geometry_resolves_as_its_face_by_name(self) -> None:
         # A ref by geometric token -- copied from a reader with no lineage, or before the

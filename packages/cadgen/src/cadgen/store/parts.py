@@ -54,8 +54,10 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # geometric token. 7: a part is keyed by its component's construction key (or its content, for
 # geometry no construction made) and lineage, and its selector table names every element by its
 # lineage, or its geometric token where it has none (README law 20). 8: the selector table carries no
-# solid volume. 9: its face and edge boxes are the display mesh's.
-PART_VERSION = 9
+# solid volume. 9: its face and edge boxes are the display mesh's. 10: it carries no face area,
+# centroid, relevance or flags (a view measures a face where it shows it, ``measure_face``), and
+# the mesher decides which faces must have triangles from its own first pass.
+PART_VERSION = 10
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -383,14 +385,14 @@ def _topology(entry: dict, topods: Any) -> dict:
         return read_topology_facts(read_verified_object(entry["topology"]))
     from cadgen._internal.topology_extract import extract_topology_facts
 
-    return extract_topology_facts(topods, brep=entry["brep"])
+    return extract_topology_facts(topods)
 
 
 def element_names(entry: dict, topods: Any) -> dict[str, list[str]]:
     """Every face's, edge's and vertex's name in a decode of the component ``entry``
     describes, by ordinal: its lineage's (the object the entry names, read verified),
     and the geometric token of each element no lineage names (``geometric_tokens``,
-    measured from the topology facts' metrics and remembered by the component's bytes:
+    measured where one is needed and remembered by the component's bytes:
     ``geometric_tokens.component_tokens``)."""
     from cadgen._internal import geometric_tokens
     from cadgen._internal.component_package import read_lineage
@@ -415,10 +417,10 @@ def measure_face(tree_hash: str, cid: str, face: int) -> dict:
     measured exactly on the component's stored BREP: ``{"area": a, "center": [x, y, z]}``, its
     area and centroid by GProps, in the component's own frame. What a view shows a face's area
     by -- its Reference panel, its measure tool -- and what a mate's axis takes as its origin
-    where nothing else gives one (``_internal/kinematics_resolve``): measured where asked, by
-    one build-pool job (``kind: measure``), never with the part's display data, and remembered
-    in ``index/bounds`` by the component's BREP and the face (``bounds.cached_face_measure``),
-    so each face is measured once."""
+    where nothing else gives one (``_internal/kinematics_resolve``): measured where asked -- a
+    view's by one build-pool job (``kind: measure``), an axis's in the build resolving it --
+    never with the part's display data, and remembered in ``index/bounds`` by the component's
+    BREP and the face (``bounds.cached_face_measure``), so each face is measured once."""
     from cadgen.store.bounds import cached_face_measure
 
     descriptor, _producer = _captured(tree_hash, None)

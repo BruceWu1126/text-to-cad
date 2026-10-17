@@ -7,6 +7,7 @@ import { PositionToolIcon, positionValuesAreDefault } from "../kit/inspector/kin
 import { filterSelectionReferences, toggleReferenceGroupSelection, connectedReferenceIds } from "./workbench/selectionFilter.js";
 import { buildTangentFaceGraph } from "./workbench/tangentFaceSelection.js";
 import { createHoverStore } from "./workbench/hoverStore.js";
+import { createFaceAreas } from "./workbench/faceAreas.js";
 
 import * as THREE from "three";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -306,7 +307,8 @@ function StepSurfaceBody({ view, data }) {
     loadMeshForEntry,
     loadReferencesForEntry,
     fatalLoadFailure,
-    clearFatalLoadFailure
+    clearFatalLoadFailure,
+    faceMeasureRequest
   } = useCadAssets({
     initialEntry: liveEntry,
     client,
@@ -316,6 +318,11 @@ function StepSurfaceBody({ view, data }) {
     buildNormalizedReferenceState,
     previewGate: previewGateRef,
   });
+
+  // The view's faces' exact areas, as cadgen measures each when it is first shown (the Reference
+  // panel's Area, the measure tool's chip): no part's selector table carries them.
+  const faceAreas = useMemo(() => createFaceAreas({ requestFor: faceMeasureRequest, measure: (body) => client.measureFace(body) }),
+    [faceMeasureRequest, client]);
 
   const editingFile = liveEntry ? fileKey(liveEntry) : selectedKey;
   const editingAvailable = /\.st(?:ep|p)$/i.test(editingFile || "");
@@ -3103,6 +3110,7 @@ function StepSurfaceBody({ view, data }) {
   };
   const layerProps = {
     ...(previewing ? openingWork : toolsWork),
+    faceAreas,
     meshData: selectedDisplayMeshData,
     modelKey: selectedKey,
     isLoading: viewportIsLoading,
@@ -3237,6 +3245,7 @@ function StepSurfaceBody({ view, data }) {
     onClearSelection: clearAssemblySelection,
     onHoverTreeNode: setHoveredListPartId,
     hoverStore,
+    faceAreas,
     onTogglePartVisibility: togglePartVisibility,
     treeSelectionDisabled: stepInteractionBlocked,
     menuForNode: assemblyNodeMenu,

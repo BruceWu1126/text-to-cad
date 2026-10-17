@@ -47,19 +47,19 @@ def write_assembly(path) -> None:
 def refusing_the_pins_side(real):
     """``tessellate._mesh`` with every mesher's work on a cylinder's side undone: the face
     neither OCCT nor the fallback covers."""
-    def mesh(topods, face_map, required, kinds, deflection, angle):
+    def mesh(topods, face_map, kinds, deflection, angle):
         from OCP.BRepAdaptor import BRepAdaptor_Surface
         from OCP.BRepTools import BRepTools
         from OCP.GeomAbs import GeomAbs_Cylinder
         from OCP.TopoDS import TopoDS
 
-        faces = real(topods, face_map, required, kinds, deflection, angle)
+        faces, required = real(topods, face_map, kinds, deflection, angle)
         for ordinal in range(1, face_map.Extent() + 1):
             face = TopoDS.Face_s(face_map.FindKey(ordinal))
             if BRepAdaptor_Surface(face).GetType() == GeomAbs_Cylinder:
                 BRepTools.Clean_s(face)
                 faces.pop(ordinal, None)
-        return faces
+        return faces, required
     return mesh
 
 

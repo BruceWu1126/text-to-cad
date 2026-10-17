@@ -16,7 +16,9 @@ import { chromium } from 'playwright';
 // table (`components/<cid>.selectors.json`, cadgen's), each read by the part's key and
 // the object the record names -- for a part the store holds; `POST /__cad/parts`
 // answers the same record for one cadgen has to derive first, as this server does
-// for a cold store (`client/partResolution.js` validates it).
+// for a cold store (`client/partResolution.js` validates it). `POST /__cad/measure`
+// answers a face's exact area and centroid, as cadgen measured them for the fixture
+// (`components/<cid>.measures.json`).
 
 const FIXTURE = new URL('../step/__fixtures__/step/', import.meta.url);
 
@@ -39,7 +41,8 @@ export async function loadStepFixture() {
   for (const [cid, component] of Object.entries(view.components)) {
     const mesh = decodeComponentTessellation(new Uint8Array(await read(`components/${cid}.glb`)));
     const table = await read(`components/${cid}.selectors.json`);
-    partData.set(component.part, { cid, mesh,
+    const measures = JSON.parse(await read(`components/${cid}.measures.json`));
+    partData.set(component.part, { cid, mesh, measures,
       selectors: { bytes: table, object: createHash('sha256').update(table).digest('hex') } });
   }
   const occurrence = name => view.occurrences.find(entry => entry.name === name).id;
@@ -404,6 +407,13 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
       return;
     }
     if (url.pathname.endsWith('/__cad/parts/cancel')) { response.statusCode = 204; response.end(); return; }
+    if (url.pathname.endsWith('/__cad/measure')) {
+      const body = await readBody(request);
+      const measured = fixture.partData.get(body.part)?.measures?.[body.face - 1];
+      if (measured) json(response, measured);
+      else { response.statusCode = 400; json(response, { error: `no face ${body.face} of part ${body.part}` }); }
+      return;
+    }
     if (url.pathname.endsWith('/__cad/parts')) {
       const body = await readBody(request);
       const shown = views.get(body.tree) || fixture;

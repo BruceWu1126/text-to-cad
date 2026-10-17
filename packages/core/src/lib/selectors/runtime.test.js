@@ -18,19 +18,19 @@ const F7 = "f:plate.fillet1.3.2";
 const E1 = "e:plate.extrude1.1";
 const E4 = "e:9d2e8c1b5a70";
 
-// The selector table's wire columns (cadgen selector_table.py, schema 5) as `joinSelectorTable`
+// The selector table's wire columns (cadgen selector_table.py, schema 6) as `joinSelectorTable`
 // extends them: a face gains its triangle range, an edge its segment range.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
-const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"];
-const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
+const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "faceStart", "faceCount", "edgeStart", "edgeCount"];
+const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "normal", "bbox", "edgeStart", "edgeCount", "params", "tangentGroup", "triangleStart", "triangleCount"];
 const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"];
 const TABLES = { occurrenceColumns: OCCURRENCE_COLUMNS, shapeColumns: SHAPE_COLUMNS, faceColumns: FACE_COLUMNS, edgeColumns: EDGE_COLUMNS };
 
 const box = (x0, x1, y1) => ({ min: [x0, 0, 0], max: [x1, y1, 0] });
 const occurrenceRow = (bbox, shapes, faces, edges) => [null, bbox, 0, shapes, 0, faces, 0, edges, 0, 0];
-const shapeRow = (ordinal, bbox, center, faces, edges) => [ordinal, "solid", bbox, center, 1, 0, faces, 0, edges];
-const faceRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, edges = 0, tangentGroup = 1, triangles = [0, 0] } = {}) =>
-  [name, ordinal, shape, "plane", 1, center, [0, 0, 1], bbox, 0, edges, 0, 0, {}, tangentGroup, ...triangles];
+const shapeRow = (ordinal, bbox, center, faces, edges) => [ordinal, "solid", bbox, center, 0, faces, 0, edges];
+const faceRow = (name, ordinal, shape, { bbox = null, edges = 0, tangentGroup = 1, triangles = [0, 0] } = {}) =>
+  [name, ordinal, shape, "plane", [0, 0, 1], bbox, 0, edges, {}, tangentGroup, ...triangles];
 const edgeRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, faces = 0, chain = null, visibilityClass = "feature", segments = [0, 0] } = {}) =>
   [name, ordinal, shape, "line", 1, center, bbox, 0, faces, 0, 0, 0, 0, {}, faces, "c0", 90, visibilityClass, chain, ...segments];
 
@@ -114,8 +114,8 @@ test("buildSelectorRuntime composes the placing occurrence with each row's own n
       shapes: [shapeRow(1, null, null, 3, 1)],
       faces: [
         faceRow(F1, 1, 1, { tangentGroup: 1 }),
-        faceRow(F7, 7, 1, { center: [1, 0, 0], tangentGroup: 3 }),
-        faceRow("", 9, 1, { center: [1, 0, 0], tangentGroup: 3 })
+        faceRow(F7, 7, 1, { tangentGroup: 3 }),
+        faceRow("", 9, 1, { tangentGroup: 3 })
       ],
       edges: [edgeRow(E4, 4, 1, { chain: 2 })]
     },
@@ -222,7 +222,7 @@ function componentBundle(xOffset) {
       tables: TABLES,
       occurrences: [occurrenceRow(bbox, 1, 1, 1)],
       shapes: [shapeRow(1, bbox, [xOffset + 0.5, 0.5, 0], 1, 1)],
-      faces: [faceRow(F1, 1, 1, { center: [xOffset + 0.5, 0.5, 0], bbox, edges: 1, triangles: [0, 1] })],
+      faces: [faceRow(F1, 1, 1, { bbox, edges: 1, triangles: [0, 1] })],
       edges: [edgeRow(E1, 1, 1, { center: [xOffset + 0.5, 0, 0], bbox: box(xOffset, xOffset + 1, 0), faces: 1, segments: [0, 1] })],
       relations: { faceEdgeRows: [0], edgeFaceRows: [0] }
     },
@@ -280,9 +280,10 @@ test("buildTransformedSelectorRuntime applies part transforms to rows and proxy 
     ]]
   ]));
 
-  assert.deepEqual(transformed.faces[0].center, [10.5, 20.5, 30]);
+  const placedBox = { min: [10, 20, 30], max: [11, 21, 30] };
+  assert.deepEqual(transformed.faces[0].bbox, placedBox);
   assert.deepEqual(transformed.edges[0].center, [10.5, 20, 30]);
-  assert.deepEqual(transformed.references.find((reference) => reference.selectorType === "face").pickData.center, [10.5, 20.5, 30]);
+  assert.deepEqual(transformed.references.find((reference) => reference.selectorType === "face").pickData.bbox, placedBox);
   assert.deepEqual(Array.from(transformed.proxy.facePositions), [
     10, 20, 30,
     11, 20, 30,

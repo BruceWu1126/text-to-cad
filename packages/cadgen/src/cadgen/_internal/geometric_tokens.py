@@ -99,8 +99,8 @@ def _enum(value: Any, prefix: str) -> str:
 
 def _face_facts(face: Any, metrics: dict[str, Any]) -> dict[str, Any]:
     """The face's signature material: its surface class, its tight box and area as
-    ``topology_extract.component_metrics`` measured them (the one measurement the
-    selector table reads too), and its normal at its parametric middle."""
+    ``topology_extract.component_metrics`` measured them, and its normal at its parametric
+    middle."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.BRepGProp import BRepGProp_Face
     from OCP.BRepTools import BRepTools
@@ -225,8 +225,7 @@ def element_tokens(shape: Any, *, brep: str | None = None) -> dict[str, list[str
     "vertices": [...]}``, in ``TopExp.MapShapes_s`` order so a caller joins them to
     the topology facts and the mesh by ordinal. ``brep``, the component's BREP
     object hash when the caller has it, lets the faces' and edges' exact metrics be
-    the ones this process measures for its selector table
-    (``topology_extract.component_metrics``), once."""
+    the ones this process already measured (``topology_extract.component_metrics``)."""
     from OCP.BRep import BRep_Tool
     from OCP.TopoDS import TopoDS
 

@@ -4,7 +4,7 @@ A ref someone copies (``#o:4b1f9e2a7c03/f:dial.extrude1.3``), the facts a tool
 reports for it and the sets the viewer's connected selection grows it to (an
 edge's chain, a face's tangent group) all come from this one table. It is
 derived from the exact BREP and the component's topology facts, extracted in
-memory (``topology_extract``) -- the facts hold the exact metrics, surface and
+memory (``topology_extract``) -- the facts hold the edges' exact metrics, surface and
 curve types, parameters, loops and edge classes; the BREP adds what they do not
 carry: the vertices, which edge ends where, and the tangent directions the chains
 follow -- from the component's display mesh, which gives each face and edge its
@@ -12,7 +12,8 @@ box (``tessellate``: a face's triangles', an edge's polyline's, so within the
 display chord of the exact box), and from each element's **name**
 (``cadgen.store.parts.element_names``: its lineage, or its geometric token where it
 has none, README law 20), and it is stored as one of a part's two objects, beside
-that mesh (``cadgen.store.parts``).
+that mesh (``cadgen.store.parts``). A face's area and centroid are no row's: they
+are measured where a view asks for them (``cadgen.store.parts.measure_face``).
 The page joins its rows to the mesh's face and edge tables by ordinal and
 composes ``occurrence token + "/" + element name``; it mints nothing. The CLI
 reads the same table (``cadgen.assembly_lookup``).
@@ -46,8 +47,11 @@ from cadgen._internal.glb_topology import (
 # row carries no volume (nothing read it: a view's part volume is its mesh's). 5: a face's
 # and an edge's ``bbox`` is its display mesh's -- a face's triangles', an edge's polyline's --
 # so within the display chord of its exact box (tessellation_policy); the exact boxes are
-# measured where they are read (a geometric token's signature, a written STEP's verify).
-SELECTOR_TABLE_SCHEMA_VERSION = 5
+# measured where they are read (a geometric token's signature, a written STEP's verify). 6: a
+# face row carries no area, centre, relevance or flags, and a shape row no area: a face's area and
+# centroid are measured where a view asks for them (``store.parts.measure_face``), and its
+# relevance and flags, which its area alone decided, had no reader.
+SELECTOR_TABLE_SCHEMA_VERSION = 6
 _IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
 # The one row of a component's table: the whole component, at the identity.
@@ -59,11 +63,10 @@ OCCURRENCE_COLUMNS = [
 # A solid (or shell, or the bare shape) of the component: ``shape`` on an element row
 # is its ordinal here. Shapes carry no name; the occurrence names a body.
 SHAPE_COLUMNS = [
-    "ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount",
+    "ordinal", "kind", "bbox", "center", "faceStart", "faceCount", "edgeStart", "edgeCount",
 ]
 FACE_COLUMNS = [
-    "name", "ordinal", "shape", "surfaceType", "area",
-    "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags",
+    "name", "ordinal", "shape", "surfaceType", "normal", "bbox", "edgeStart", "edgeCount",
     "params", "tangentGroup",
 ]
 EDGE_COLUMNS = [
@@ -75,11 +78,7 @@ EDGE_COLUMNS = [
 VERTEX_COLUMNS = [
     "name", "ordinal", "shape", "center", "bbox", "edgeStart", "edgeCount",
 ]
-# A face with no area is a ref nothing can pick or measure; the bit is the
-# edge table's, so one vocabulary reads both.
-FACE_FLAG_NOT_REFERENCEABLE = STEP_EDGE_FLAGS["NOT_REFERENCEABLE"]
 _EDGE_UNREFERENCEABLE = STEP_EDGE_FLAGS["DEGENERATE"] | STEP_EDGE_FLAGS["NOT_REFERENCEABLE"]
-_ANALYTIC_SURFACES = {"plane", "cylinder", "cone", "sphere", "torus"}
 _ANALYTIC_CURVES = {"line", "circle", "ellipse"}
 # Two edge ends meeting at a vertex continue one chain when their tangents are
 # opposed within this angle: the one aligned continuation at a branch.
@@ -338,9 +337,7 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
     if overall is None:
         overall = _zero_box()
     diagonal = max(math.sqrt(sum((overall["max"][i] - overall["min"][i]) ** 2 for i in range(3))), 1e-9)
-    size_floor = max(diagonal * diagonal * 1e-6, 1e-12)
     length_floor = max(diagonal * 1e-5, 1e-12)
-    total_area = max(sum(float(face.get("area") or 0.0) for face in faces), 1e-12)
     total_length = max(sum(float(edge.get("length") or 0.0) for edge in edges), 1e-12)
 
     face_edge_rows: list[int] = []
@@ -380,12 +377,10 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
         vertex_edge_rows.extend(sorted(edges_at_vertex[ordinal]))
         vertex_edges[ordinal] = (start, len(vertex_edge_rows) - start)
 
-    shape_area: dict[int, float] = {}
     shape_box: dict[int, dict | None] = {}
     counts = {"face": {}, "edge": {}}
     for face in faces:
         ordinal = int(face.get("shape") or 1)
-        shape_area[ordinal] = shape_area.get(ordinal, 0.0) + float(face.get("area") or 0.0)
         shape_box[ordinal] = _merge(shape_box.get(ordinal), face_box[int(face["ord"])])
         counts["face"][ordinal] = counts["face"].get(ordinal, 0) + 1
     for edge in edges:
@@ -398,23 +393,16 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
         shape_rows.append([
             ordinal, str(shape_meta.get("kind") or "shape"), box,
             [(box["min"][i] + box["max"][i]) / 2 for i in range(3)],
-            shape_area.get(ordinal, 0.0),
             0, counts["face"].get(ordinal, 0), 0, counts["edge"].get(ordinal, 0),
         ])
 
     face_rows = []
     for face in faces:
         ordinal = int(face["ord"])
-        area = float(face.get("area") or 0.0)
-        referenceable = area > 1e-12
-        surface_type = str(face.get("surfaceType") or "")
         start, count = face_edges[ordinal]
         face_rows.append([
-            names["faces"][ordinal - 1], ordinal, int(face.get("shape") or 1), surface_type, area,
-            face.get("center") or [0.0, 0.0, 0.0], face.get("normal"),
-            face_box[ordinal] or _zero_box(), start, count,
-            _relevance(area, total_area, surface_type in _ANALYTIC_SURFACES, size_floor) if referenceable else 0,
-            0 if referenceable else FACE_FLAG_NOT_REFERENCEABLE,
+            names["faces"][ordinal - 1], ordinal, int(face.get("shape") or 1), str(face.get("surfaceType") or ""),
+            face.get("normal"), face_box[ordinal] or _zero_box(), start, count,
             face.get("params"), tangent_groups[ordinal],
         ])
 

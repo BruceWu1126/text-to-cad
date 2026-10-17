@@ -199,12 +199,13 @@ class AssemblyEntityRefsTest(_AssemblyDisplayFixture, unittest.TestCase):
         merged = self._merged()
         rows = self._placed(merged.faces)
         self.assertTrue(rows, "no placed faces were merged")
-        # The two identical boxes differ ONLY by placement, so component-local centres would be
+        # The two identical boxes differ ONLY by placement, so component-local boxes would be
         # identical. Distinct centres prove the occurrence transform was applied.
-        centres = {tuple(round(value, 6) for value in row["center"]) for row in rows}
+        centres = {tuple(round((row["bbox"]["min"][axis] + row["bbox"]["max"][axis]) / 2, 6) for axis in range(3))
+                   for row in rows}
         self.assertGreater(len(centres), 1, "faces collapsed to one position")
-        for row in rows:
-            self.assertGreater(float(row["area"]), 0.0, "a rigid placement must preserve area")
+        for row in self._placed(merged.edges):
+            self.assertGreater(float(row["length"]), 0.0, "a rigid placement must preserve length")
 
     def test_a_normal_is_rotated_not_translated(self) -> None:
         """The silent failure: putting a direction through the full matrix makes it absorb the
@@ -381,8 +382,9 @@ class PlacementAgainstAnalyticGeometryTest(_AssemblyDisplayFixture, unittest.Tes
         self.assertEqual(len(self._EXPECTED_BOXES), checked, "not every fixture box was checked")
 
     def test_face_centres_land_on_the_box_faces_they_belong_to(self) -> None:
-        """A box's six faces sit at its face midpoints. Those are known numbers, so a placed
-        face centre can be checked without asking the placement code where it should be."""
+        """A box's six faces sit at its face midpoints, the middles of their boxes. Those are
+        known numbers, so a placed face can be checked without asking the placement code where
+        it should be."""
         merged = assembly_lookup.merge_assembly_entities(_empty_index(), self.descriptor, self.package_dir)
         by_occurrence: dict[str, list] = {}
         for row in self._placed(merged.faces):
@@ -401,7 +403,8 @@ class PlacementAgainstAnalyticGeometryTest(_AssemblyDisplayFixture, unittest.Tes
                     point = list(centre)
                     point[axis] = centre[axis] + sign * half[axis]
                     wanted.add(tuple(round(value, 4) for value in point))
-            found = {tuple(round(value, 4) for value in row["center"]) for row in faces}
+            found = {tuple(round((row["bbox"]["min"][axis] + row["bbox"]["max"][axis]) / 2, 4) for axis in range(3))
+                     for row in faces}
             self.assertEqual(
                 wanted, found, f"{occurrence_id} ({names.get(occurrence_id)}) faces are misplaced"
             )

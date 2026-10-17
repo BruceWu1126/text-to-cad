@@ -30,7 +30,10 @@ export function faceFillOffset(runtime, reference) {
     normal[1] / normalLength,
     normal[2] / normalLength
   ];
-  const center = Array.isArray(reference?.pickData?.center) ? reference.pickData.center : [0, 0, 0];
+  // Which side of the face the camera is on: any point of the face's box tells it.
+  const box = reference?.pickData?.bbox;
+  const center = Array.isArray(reference?.pickData?.center) ? reference.pickData.center
+    : Array.isArray(box?.min) && Array.isArray(box?.max) ? box.min.map((value, axis) => (value + box.max[axis]) / 2) : [0, 0, 0];
   const modelOffset = runtime.modelGroup.position;
   const worldCenter = [
     Number(center[0] || 0) + Number(modelOffset?.x || 0),

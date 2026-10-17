@@ -1078,7 +1078,23 @@ export function useCadAssets({
     syncAssetCacheMemory();
   }, [client, resources]);
 
+  // The measure request naming a face of the view on screen (`POST /__cad/measure`): the view's tree,
+  // id and producer, the component the face's occurrence places and its part, and the face's ordinal.
+  const faceMeasureRequest = useCallback((reference) => {
+    const descriptor = packageRef.current?.descriptor;
+    const occurrenceId = String(reference?.occurrenceId || "").trim();
+    const face = reference?.pickData?.ordinal;
+    if (!descriptor?.tree || !descriptor?.viewId || !descriptor?.producer || !occurrenceId || !Number.isInteger(face)) {
+      return null;
+    }
+    const occurrence = (descriptor.occurrences || []).find((entry) => entry?.id === occurrenceId);
+    const cid = String(occurrence?.component || "");
+    const part = cid ? descriptor.components?.[cid]?.part : null;
+    return part ? { tree: descriptor.tree, viewId: descriptor.viewId, producer: descriptor.producer, cid, part, face } : null;
+  }, []);
+
   return {
+    faceMeasureRequest,
     meshState,
     setMeshState,
     meshLoadInProgress,

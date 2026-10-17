@@ -1147,7 +1147,9 @@ static heading has a Copy action (the reference on show, with its file's absolut
 fields collapse. A compact dropdown browses the selected references directly
 without modifying the selection. New selections show their newest reference.
 Under the browsed reference's name, its rows are its key measurements alone
-(`StepReferenceSection.js`): a face's area and a round face's radii, an edge's
+(`StepReferenceSection.js`): a face's area (cadgen's exact measure of it, which no
+selector table carries: asked for when the face is shown, `POST /__cad/measure` through
+`workbench/faceAreas.js`, and listed once it has come) and a round face's radii, an edge's
 length, radii and an arc's sweep, a part's size and volume, a subassembly's part
 count, size and volume — no type, canonical ID, centre, normal, component or
 source material row. Rows share a 64px label column, an 8px gutter and 11px

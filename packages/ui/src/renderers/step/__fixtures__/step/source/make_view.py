@@ -5,9 +5,11 @@ person builds it, and what that build leaves is copied here: the view descriptor
 (``assembly.json``, as ``descriptor_for_view`` serves it for the saved
 document's tree), the document-bound sidecar (``hinge_block.step.json``),
 cadgen's articulation of its kinematics (``hinge_block.articulation.json``,
-``cadgen.articulation.step_articulation``), and each component's part -- its
+``cadgen.articulation.step_articulation``), each component's part -- its
 display mesh (``components/<cid>.glb``) and its selector table
-(``components/<cid>.selectors.json``) -- read from the store under the part's key.
+(``components/<cid>.selectors.json``) -- read from the store under the part's key,
+and each of its faces' exact area and centroid as cadgen measures them when a
+view asks (``components/<cid>.measures.json``, ``parts.measure_face``).
 Every id in them is minted by the build: the occurrences' tokens from the tree,
 the elements' names from their lineage.
 
@@ -42,6 +44,7 @@ def main() -> None:
         subprocess.run([sys.executable, "src/hinge_block.py"], cwd=scratch, env=environment, check=True)
         os.environ["CADGEN_CACHE_DIR"] = environment["CADGEN_CACHE_DIR"]
 
+        from cadgen._internal.selector_table import read_selector_table
         from cadgen._internal.source_sidecar import read_source_sidecar
         from cadgen.articulation import step_articulation
         from cadgen.store import parts
@@ -70,6 +73,10 @@ def main() -> None:
                     raise SystemExit(f"{cid}: the build left no {role} for its part")
                 (components / f"{cid}{suffix}").write_bytes(payload + (b"\n" if role == "selectors" else b""))
                 print(cid, role, len(payload), "bytes")
+            count = read_selector_table(parts.read(component["part"], "selectors"))["stats"]["faceCount"]
+            measures = [{"face": face, **parts.measure_face(tree, cid, face)} for face in range(1, count + 1)]
+            (components / f"{cid}.measures.json").write_text(json.dumps(measures) + "\n", encoding="utf-8")
+            print(cid, "measures", count, "faces")
         print("documentHash", document_hash, "tree", tree)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

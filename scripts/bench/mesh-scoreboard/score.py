@@ -245,16 +245,15 @@ def occt_mesh(solid, face_map, deflection: float, angle: float):
 
 
 def cadgen_mesh(solid, face_map, chord: float, angle: float):
-    """cadgen's display mesh of the solid, through the store's mesher."""
-    from cadgen._internal.selector_table import build_selector_table
+    """cadgen's display mesh of the solid, through the store's mesher, from its topology facts."""
     from cadgen._internal.tessellate import mesh_component
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload
     from cadgen.store.parts import PART_VERSION
 
-    table = build_selector_table(solid, extract_topology_facts(solid))
+    facts = extract_topology_facts(solid)
     start = time.perf_counter()
-    body = mesh_component(solid, table, {}, part="0" * 64 + f"-v{PART_VERSION}", chord=chord, angle=angle)
+    body = mesh_component(solid, facts, {}, part="0" * 64 + f"-v{PART_VERSION}", chord=chord, angle=angle).body
     seconds = time.perf_counter() - start
     mesh = decode_payload(body)
     faces = [(o, s // 3, c // 3) for o, s, c, _colour in mesh.faces.tolist()]

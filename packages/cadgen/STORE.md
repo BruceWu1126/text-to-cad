@@ -149,8 +149,8 @@ components (`step_scene_mesh.prototype_topology`,
 reads a linked child's by the BREP its tree names, decoding one only where the
 entry is missing, so no document of the result is assembled for them;
 geometric tokens (below); and a face's exact area and centroid, keyed by its
-component's BREP and the face's ordinal, measured when a view asks for them
-(§3, *A face's area*). Nothing in the index holds a value computed while a
+component's BREP and the face's ordinal, measured when a view or a mate's axis
+asks for them (§3, *A face's area*). Nothing in the index holds a value computed while a
 model runs (README law 18): a model's own checks and operations always execute.
 
 ### The two sides of the store — a law
@@ -520,11 +520,15 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
 
   **A face's area** is no part's: no reader takes it but a person looking at
   one face -- a view's Reference panel, its measure tool -- and a mate's axis
-  that falls back to a face's centroid. So a part's derivation measures no
-  face's area or centroid; the face is measured where it is asked for, exactly,
-  on its component's stored BREP (GProps), by ONE build-pool job per face
-  (`kind: measure`, `store.parts.measure_face`), remembered in `index/bounds` by
-  the component's BREP and the face's ordinal so each face is measured once. A
+  through a face whose parameters give no origin (a torus's give its centre),
+  which passes through the face's centroid (`_internal/kinematics_resolve.py`).
+  So no part stores a face's area or centroid, and its derivation measures one
+  only where the mesher must (a face its first pass leaves all but empty, below)
+  or a geometric token reads it. A face is measured where it is asked for,
+  exactly, on its component's stored BREP (GProps, `store.parts.measure_face`)
+  -- for a view by ONE build-pool job per face (`kind: measure`), for a mate's
+  axis by the build that resolves it -- and remembered in `index/bounds` by the
+  component's BREP and the face's ordinal, so each face is measured once. A
   view asks `POST /__cad/measure` with the view it holds (`tree`, `viewId`,
   `producer`), the component and its part key (`cid`, `part`) and the face's
   ordinal (`face`): the store's answer at once, else the face's job, which
@@ -548,16 +552,17 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   always names complete objects. Nothing stores the facts but that pin, and
   nothing outside a derivation reads them.
 
-  The **selector table** (`_internal/selector_table.py`, schema 5) is the one
+  The **selector table** (`_internal/selector_table.py`, schema 6) is the one
   place a ref's facts are minted. From the exact BREP, the topology facts and
   the display mesh, per face, edge and vertex, the **element name** a ref ends
   in, which leads each row -- its lineage (§2), `f:bracket.extrude1.3`, or, for
   an element no lineage names, its geometric token, `f:9d2e8c1b5a70`, measured
-  here, in the pool's job -- the exact metrics and parameters the facts carry,
+  here, in the pool's job -- the parameters the facts carry and each edge's exact
+  length and centre (no face's area or centroid: *A face's area*, above),
   each face's and edge's box (its display mesh's: a face's triangles', an edge's
   polyline's, so within the display chord of the exact box, which is measured
   where it is read -- a geometric token's signature, a written STEP's verify),
-  the plane normals, whether an entity can be referenced, its relevance, every adjacency
+  the plane normals, whether an edge can be referenced and its relevance, every adjacency
   (face–edge, edge–vertex), each edge's chain and each face's tangent group —
   the sets the viewer's connected selection grows a pick to. Ordinals stay in
   the table as the join to the mesh's face and edge tables, and never leave it:
@@ -578,8 +583,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   such a face again, whole and finer (unless its first pass took seconds),
   tessellates a face no pass gets right over its own parameters where that does
   no harm (`_internal/face_fallback.py`), and reads what the triangles do not
-  say from the component's topology facts (each face's area and surface type,
-  each edge's class) and its face colours. A body (`store/meshes.py`) is glTF 2.0 binary
+  say from the component's topology facts (each face's surface type, each
+  edge's class) and its face colours. A body (`store/meshes.py`) is glTF 2.0 binary
   in the component's own units: ONE triangle primitive (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
   face's ordinal, contiguous index range and colour, an edge table giving each
@@ -596,7 +601,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   CAD Viewer names the parts it draws without them, and a mesh export warns that
   its file has a hole there and is not watertight. A face smaller than the mesh
   resolves (area under the deflection squared) may have no triangles and is not
-  named. Any other failure -- OCCT raising, a body its
+  named: its area is its first pass's triangles' where they cover that much, and
+  is measured exactly (GProps) only for a face they leave all but empty. Any other failure -- OCCT raising, a body its
   encoding refuses -- is the component's `MeshProductionError`. A mesh export
   at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part

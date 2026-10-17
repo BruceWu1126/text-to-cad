@@ -238,10 +238,19 @@ class FreeformSurfaces(unittest.TestCase):
 
         self.topods = BRepBuilderAPI_NurbsConvert(Cylinder(10, 20).wrapped, True).Shape()
         self.face_map, _edges = tessellate._maps(self.topods)
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+
         facts = _facts(self.topods)
         self.kinds = {face["ord"]: face["surfaceType"] for face in facts["faces"]}
+
+        def area(ordinal):
+            props = GProp_GProps()
+            BRepGProp.SurfaceProperties_s(self.face_map.FindKey(ordinal), props)
+            return props.Mass()
+
         # Every face is a B-spline now; the side is the largest, and the one that is curved.
-        self.side = max(facts["faces"], key=lambda face: face["area"])["ord"]
+        self.side = max(self.kinds, key=area)
         self.assertEqual(self.kinds[self.side], "bsplinesurface")
 
     def faulty(self, meshed_at, freeform=True):
@@ -506,22 +515,44 @@ class EmptyFace(unittest.TestCase):
         self.assertGreater(len(meshed), 1, "the component was meshed again")
         self.assertEqual(_open_edges(mesh), 0, "and no face has a gap")
 
+    def test_only_a_face_a_pass_leaves_empty_is_measured_exactly_and_once(self):
+        # The first pass's triangles say which faces the mesh resolves; the kernel's integral is
+        # taken of a face the pass left empty -- the bore, here, on the first call -- once,
+        # however many passes and checks ask after it.
+        from OCP.BRepGProp import BRepGProp
+
+        measured, real = [], BRepGProp.SurfaceProperties_s
+
+        def counted(face, *args):
+            measured.append(self.faces.FindIndex(face))
+            return real(face, *args)
+
+        with mock.patch.object(BRepGProp, "SurfaceProperties_s", side_effect=counted):
+            self.assertBoreMeshed(self.mesh(lambda shape, call: False))
+            self.assertEqual(measured, [], "a pass that meshes every face measures none")
+            self.assertBoreMeshed(self.mesh(lambda shape, call: call == 1))
+        self.assertEqual(measured, [self.bore])
+
     def test_a_face_under_what_the_mesh_resolves_may_be_left_empty_and_unnamed(self):
-        # The bore made a sliver: its area in the selector table is under the square of
-        # the component's deflection. No mesher covers it, and nothing has to say so.
+        # A pin a hundredth of a millimetre across on the plate: its top, a thousandth of a
+        # square millimetre, is under the square of the component's deflection. OCCT leaves it
+        # empty here and no mesher covers it: nothing has to say so, and it earns no finer pass.
+        from build123d import Axis, Box, Cylinder, Location
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
         from cadgen._internal import face_fallback
-        from cadgen._internal.tessellate import _bounding_diagonal
         from cadgen.store.meshes import decode_payload
 
-        deflection = CHORD * _bounding_diagonal(self.topods)
-        facts = _facts(self.topods)
-        for face in facts["faces"]:
-            if face["ord"] == self.bore:
-                face["area"] = deflection * deflection / 4
+        plate = Box(20, 20, 10) - Cylinder(4, 10) + Location((8, 8, 5.005)) * Box(0.01, 0.1, 0.01)
+        self.topods = plate.wrapped
+        self.faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.topods, TopAbs_FACE, self.faces)
+        self.bore = self.faces.FindIndex(plate.faces().sort_by(Axis.Z)[-1].wrapped)
         with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
-            mesh = self.mesh(lambda shape, call: True, facts=facts)
-        bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
-        self.assertEqual((bore["indexCount"], decode_payload(self.body).unmeshed_faces), (0, []))
+            mesh = self.mesh(lambda shape, call: True)
+        top = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
+        self.assertEqual((top["indexCount"], decode_payload(self.body).unmeshed_faces, len(self.meshed)), (0, [], 1))
 
 
 def _with_a_stray_degenerated_edge(topods):

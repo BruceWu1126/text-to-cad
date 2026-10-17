@@ -84,18 +84,19 @@ test("the runtime composes refs from the table's names and carries its facts", (
   assert.deepEqual(faces.map((reference) => reference.pickData.element), faceRows.map((row) => row.name));
   assert.ok(faces.every((reference) => reference.pickData.name === null), "an element's name is no name of its own");
   assert.deepEqual(faces.map((reference) => reference.pickData.ordinal), faceRows.map((row) => row.ordinal), "the ordinal joins the mesh");
-  assert.deepEqual(faces.map((reference) => reference.pickData.area), faceRows.map((row) => row.area), "exact areas, not the mesh's");
+  assert.ok(faces.every((reference) => !("area" in reference.pickData)), "no face carries an area: cadgen measures it when asked");
   assert.deepEqual(faces.map((reference) => reference.pickData.normal), faceRows.map((row) => row.normal), "a plane's normal, else none");
-  assert.deepEqual(faces.map((reference) => reference.pickData.flags), faceRows.map((row) => row.flags));
   const edgeRows = rowsOf(table, "edges", "edgeColumns");
   const edges = runtime.references.filter((reference) => reference.selectorType === "edge");
   assert.deepEqual(edges.map((reference) => reference.displaySelector), edgeRows.map((row) => `${GEAR}/${row.name}`));
   assert.deepEqual(edges.map((reference) => reference.pickData.chain), edgeRows.map((row) => row.chain));
+  assert.deepEqual(edges.map((reference) => reference.pickData.length), edgeRows.map((row) => row.length), "exact lengths, not the mesh's");
+  assert.deepEqual(edges.map((reference) => reference.pickData.flags), edgeRows.map((row) => row.flags));
   // Adjacency is the table's relation rows, composed under the same occurrence.
   const first = edgeRows[0];
   assert.deepEqual(edges[0].pickData.adjacentSelectors,
     table.relations.edgeFaceRows.slice(first.faceStart, first.faceStart + first.faceCount).map((row) => `${GEAR}/${faceRows[row].name}`));
-  // A shape is a row (it groups faces and carries a volume), never a reference.
+  // A shape is a row (it groups faces), never a reference.
   assert.equal(runtime.shapes.length, table.shapes.length);
   assert.ok(runtime.references.every((reference) => reference.selectorType !== "shape"));
 });

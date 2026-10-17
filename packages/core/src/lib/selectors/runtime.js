@@ -213,7 +213,7 @@ function referenceSummary(selectorType, row) {
     return String(row.name || row.sourceName || row.occurrenceId || "").trim();
   }
   if (selectorType === "face") {
-    return `${row.surfaceType || "face"} area=${row.area ?? 0}`;
+    return `${row.surfaceType || "face"}`;
   }
   if (selectorType === "vertex") {
     return "vertex";
@@ -309,10 +309,10 @@ function buildReference({
       surfaceType: row.surfaceType || null,
       curveType: row.curveType || null,
       visibilityClass: row.visibilityClass || null,
-      // Measured quantities the topology already computed exactly. Rigid
-      // occurrence transforms preserve both, so they pass through unchanged.
+      // An edge's length, which the topology computed exactly; a rigid occurrence transform
+      // preserves it, so it passes through unchanged. A face's area is no row's: cadgen measures
+      // it when a view asks (`CadClient.measureFace`).
       length: Number.isFinite(Number(row.length)) ? Number(row.length) : null,
-      area: Number.isFinite(Number(row.area)) ? Number(row.area) : null,
       center: row.center || null,
       normal: row.normal || null,
       params: row.params || null,

@@ -109,7 +109,7 @@ it("Features opens as tall as its rows need, up to the whole column, on desktop 
 
 // What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
 // under it; a part file has no tree, its one row being all there would be, and the Reference alone.
-const face = { id: 'o:0b1c2d3e4f5a/f:base.extrude1.2', normalizedSelector: 'o:0b1c2d3e4f5a/f:base.extrude1.2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane', area: 20 } };
+const face = { id: 'o:0b1c2d3e4f5a/f:base.extrude1.2', normalizedSelector: 'o:0b1c2d3e4f5a/f:base.extrude1.2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane' } };
 function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
   const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
   return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,

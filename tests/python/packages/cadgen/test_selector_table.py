@@ -21,7 +21,6 @@ from cadgen._internal.geometric_tokens import element_names, element_tokens  # n
 from cadgen._internal.glb_topology import STEP_EDGE_FLAGS  # noqa: E402
 from cadgen.cad_ref_syntax import is_element_name  # noqa: E402
 from cadgen._internal.selector_table import (  # noqa: E402
-    FACE_FLAG_NOT_REFERENCEABLE,
     SELECTOR_TABLE_SCHEMA_VERSION,
     build_selector_table,
     read_selector_table,
@@ -117,9 +116,7 @@ class BoxTableTest(unittest.TestCase):
         faces = _rows(table, "faces")
         for face in faces:
             self.assertEqual(face["edgeCount"], 4)
-            self.assertEqual(face["flags"], 0)
             self.assertIsNotNone(face["normal"], "a plane carries its normal")
-            self.assertGreater(face["relevance"], 0)
         self.assertEqual(table["bbox"], {"min": [-5.0, -10.0, -15.0], "max": [5.0, 10.0, 15.0]})
 
     def test_the_bytes_read_as_written_and_a_foreign_payload_is_refused(self) -> None:
@@ -199,12 +196,16 @@ class SlotChainTest(unittest.TestCase):
                 self.assertAlmostEqual(row["params"]["sweepRadians"], 3.141592653589793, places=6)
 
 
-class ReferenceabilityTest(unittest.TestCase):
-    def test_flags_use_the_edge_vocabulary(self) -> None:
-        self.assertEqual(FACE_FLAG_NOT_REFERENCEABLE, STEP_EDGE_FLAGS["NOT_REFERENCEABLE"])
-        table = _table(Box(1, 1, 1))
-        self.assertTrue(all(row["flags"] == 0 for row in _rows(table, "faces")))
-        self.assertTrue(all(row["relevance"] > 0 for row in _rows(table, "edges")))
+class MeasuredWhereReadTest(unittest.TestCase):
+    def test_a_face_row_carries_no_area_and_an_edge_its_length_and_relevance(self) -> None:
+        # A face's area and centroid are measured where a view asks (``store.parts.measure_face``).
+        table = _table(Box(1, 2, 3))
+        self.assertFalse({"area", "center", "relevance", "flags"} & set(table["tables"]["faceColumns"]))
+        self.assertNotIn("area", table["tables"]["shapeColumns"])
+        edges = _rows(table, "edges")
+        self.assertEqual(sorted(round(row["length"], 9) for row in edges), [1.0] * 4 + [2.0] * 4 + [3.0] * 4)
+        self.assertTrue(all(row["relevance"] > 0 and not row["flags"] & STEP_EDGE_FLAGS["NOT_REFERENCEABLE"]
+                            for row in edges))
 
 
 if __name__ == "__main__":

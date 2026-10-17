@@ -5,9 +5,11 @@
 // cadgen/store/parts.py) and serves by part (`/__tess_cache/<part>.selectors.json`):
 // each element's name that a ref ends in (`f:`, `e:`, `v:` and its lineage, the
 // feature that made it and its number there -- `f:dial.extrude1.3` -- or, where no
-// construction names it, its geometric token, 12 hex), exact metrics and
-// parameters, plane normals, referenceable flags and relevance, face-edge and
-// edge-vertex adjacency, each edge's chain and each face's tangent group. The page
+// construction names it, its geometric token, 12 hex), an edge's exact length and
+// centre, parameters, plane normals, an edge's referenceable flags and relevance,
+// face-edge and edge-vertex adjacency, each edge's chain and each face's tangent
+// group -- no face's area or centroid, which cadgen measures when a view asks
+// (`POST /__cad/measure`, `CadClient.measureFace`). The page
 // joins those rows to the mesh it draws -- by ORDINAL, which the table and the
 // mesh's face and edge tables share -- so a face's triangle range and an edge's
 // segment range are its range on screen, and composes a ref as
@@ -22,8 +24,9 @@ import { meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
 // 2: element rows carry no id, localId, occurrenceId or shapeId column (an
 // occurrence's rows are the part's, placed by the page). 3: element rows lead with
 // their name. 4: a shape row carries no volume. 5: a face's and an edge's bbox is its display
-// mesh's, within the display chord of the exact box.
-export const SELECTOR_TABLE_SCHEMA_VERSION = 5;
+// mesh's, within the display chord of the exact box. 6: a face row carries no area, centre,
+// relevance or flags, and a shape row no area.
+export const SELECTOR_TABLE_SCHEMA_VERSION = 6;
 
 const TABLES = Object.freeze({
   occurrences: "occurrenceColumns", shapes: "shapeColumns", faces: "faceColumns",

@@ -12,8 +12,8 @@ The viewer, snapshots and mesh exports all draw these same bytes.
 Face and edge ordinals are ``TopExp.MapShapes`` order on the unlocated
 component -- the order its selector table and every selector use -- and the
 mesher reads what the triangles do not say from the component's topology facts
-(``topology_extract``: each face's area and surface type, each edge's display
-class) and its intrinsic face colours: the one input a display mesh and a mesh
+(``topology_extract``: each face's surface type, each edge's display class) and
+its intrinsic face colours: the one input a display mesh and a mesh
 export at another tolerance are both made from (``cadgen.store.parts``). Beside
 the body it gives back each face's box, its triangles', and each edge's, its
 polyline's, which a part's selector table records (``selector_table``).
@@ -51,7 +51,10 @@ component, which is drawn without it, and the body names it (``unmeshedFaces``,
 an export of the whole document, and each of them says which faces of which part
 it does not draw or write. A face smaller than the mesh can resolve -- its area
 under the square of the chord tolerance, inside the error every triangle may
-carry -- may have none and is not named, and such a face earns no finer pass. Any
+carry -- may have none and is not named, and such a face earns no finer pass. Its
+area is the first pass's triangles' where they cover at least that much of it, and
+measured exactly (GProps) only where they do not: a face the pass left empty, or all
+but empty. Any
 failure inside OCCT is the component's error. A component with no faces meshes
 nothing: its edges are sampled from their own curves.
 
@@ -344,26 +347,62 @@ def _freeform_distance(face, positions: np.ndarray, normals: np.ndarray, triangl
     return farthest
 
 
-def _mesh(topods, face_map, required: list[int], kinds: dict[int, str], deflection: float,
-          angle: float) -> dict[int, tuple]:
-    """Mesh the component and read its faces back, and while a face of ``required`` is
-    faulty (``_faulty``: empty, holed, or off its surface), mesh it all again, cleaned, at
-    the retry deflections -- unless its first pass took over ``_RETRY_SECONDS``, when its
-    freeform faces go unmeasured too. A face no whole pass gets right -- one OCCT refuses,
-    or keeps meshing wrong -- is tessellated over its own parameters against its meshed
-    neighbours, on the pass with the fewest open edges, then the fewest faulty faces, then
-    the coarsest: a finer pass can close a gap the component's own deflection leaves (an
-    actuator's 32 open edges at a quarter of it, 443 at its own)."""
+def _triangle_area(positions: np.ndarray, triangles: np.ndarray) -> float:
+    corners = positions[triangles].astype(np.float64)
+    return float(0.5 * np.linalg.norm(np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0]),
+                                      axis=1).sum())
+
+
+def _required(faces: dict, count: int, deflection: float, exact_area) -> list[int]:
+    """The faces of ``count`` that must have triangles: those the mesh can resolve, their area
+    at least the square of the deflection -- a face's triangles' (``faces``, a pass read back)
+    where they cover that much, else its exact area (``exact_area(ordinal)``), measured only
+    for a face the pass left empty or all but empty. A smaller face may have none, and earns no
+    finer pass: a watch case's 0.002 mm² sliver left a 1,529-face case meshed three times
+    over, fifteen times as long, for a face under what the mesh can resolve."""
+    floor = deflection * deflection
+    return [ordinal for ordinal in range(1, count + 1)
+            if (ordinal in faces and _triangle_area(faces[ordinal][0], faces[ordinal][2]) >= floor)
+            or exact_area(ordinal) >= floor]
+
+
+def _mesh(topods, face_map, kinds: dict[int, str], deflection: float,
+          angle: float) -> tuple[dict[int, tuple], list[int]]:
+    """Mesh the component and read its faces back -- and the faces that must have triangles,
+    as its first pass decides (``_required``) -- and while one of those is faulty
+    (``_faulty``: empty, holed, or off its surface), mesh it all again, cleaned, at the retry
+    deflections -- unless its first pass took over ``_RETRY_SECONDS``, when its freeform
+    faces go unmeasured too. A face no whole pass gets right -- one OCCT refuses, or keeps
+    meshing wrong -- is tessellated over its own parameters against its meshed neighbours, on
+    the pass with the fewest open edges, then the fewest faulty faces, then the coarsest: a
+    finer pass can close a gap the component's own deflection leaves (an actuator's 32 open
+    edges at a quarter of it, 443 at its own). Each face's exact area is measured once, when
+    first asked for."""
+    from OCP.BRepGProp import BRepGProp
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
     from OCP.BRepTools import BRepTools
+    from OCP.GProp import GProp_GProps
     from OCP.Precision import Precision
+    from OCP.TopoDS import TopoDS
 
     faces: dict = {}
+    required: list[int] = []
     passes: list[tuple[int, int, float]] = []
     quick = True
+    areas: dict[int, float] = {}
+
+    def exact_area(ordinal: int) -> float:
+        if ordinal not in areas:
+            props = GProp_GProps()
+            try:
+                BRepGProp.SurfaceProperties_s(TopoDS.Face_s(face_map.FindKey(ordinal)), props)
+                areas[ordinal] = float(props.Mass())
+            except Exception:  # noqa: BLE001 - a face the kernel cannot measure is held to nothing
+                areas[ordinal] = 0.0
+        return areas[ordinal]
 
     def mesh(scale: float) -> list[int]:
-        nonlocal faces, quick
+        nonlocal faces, quick, required
         started = time.perf_counter()
         # OCCT refuses a deflection under its confusion tolerance.
         status = BRepMesh_IncrementalMesh(topods, max(deflection * scale, Precision.Confusion_s()),
@@ -371,6 +410,8 @@ def _mesh(topods, face_map, required: list[int], kinds: dict[int, str], deflecti
         if not passes:
             quick = time.perf_counter() - started <= _RETRY_SECONDS
         faces = _read_faces(topods, face_map)
+        if not passes:
+            required = _required(faces, face_map.Extent(), deflection, exact_area)
         opened = _open_edges(faces)
         faulty = _faulty(faces, face_map, required, kinds, deflection, bool(status & _TROUBLED_PASS) or opened > 0,
                          quick)
@@ -384,17 +425,17 @@ def _mesh(topods, face_map, required: list[int], kinds: dict[int, str], deflecti
     retries = _RETRY_SCALES if quick else ()
     for scale in retries:
         if not faulty:
-            return faces
+            return faces, required
         BRepTools.Clean_s(topods)
         faulty = mesh(scale)
     if not faulty:
-        return faces
+        return faces, required
     best = -min(passes)[2]
     if best != -passes[-1][2]:
         BRepTools.Clean_s(topods)
         faulty = mesh(best)
-    _tessellate(topods, face_map, faulty, kinds, deflection, angle)
-    return _read_faces(topods, face_map)
+    _tessellate(topods, face_map, faulty, kinds, deflection, angle, exact_area)
+    return _read_faces(topods, face_map), required
 
 
 def _read_faces(topods, face_map) -> dict[int, tuple[np.ndarray, np.ndarray, np.ndarray]]:
@@ -406,9 +447,11 @@ def _read_faces(topods, face_map) -> dict[int, tuple[np.ndarray, np.ndarray, np.
     return _faces_one_by_one(triangulated) if faces is None else faces
 
 
-def _tessellate(topods, face_map, ordinals: list[int], kinds: dict[int, str], deflection: float, angle: float) -> None:
+def _tessellate(topods, face_map, ordinals: list[int], kinds: dict[int, str], deflection: float, angle: float,
+                exact_area) -> None:
     """Give each face of ``ordinals`` the triangles ``face_fallback`` builds over its
-    parameters, when they cover its own area to ``_FALLBACK_AREA_TOLERANCE``; a face
+    parameters, when they cover its own area (``exact_area(ordinal)``) to
+    ``_FALLBACK_AREA_TOLERANCE``; a face
     left without keeps what OCCT gave it -- none, for a face it refuses, which the body
     names. The faces OCCT refused go first, then the ones it meshed wrong, each group
     together, and a group keeps its triangles only if they did no harm: the tessellator
@@ -420,15 +463,11 @@ def _tessellate(topods, face_map, ordinals: list[int], kinds: dict[int, str], de
     however many faces it has."""
     from cadgen._internal import face_fallback
     from OCP.BRep import BRep_Builder, BRep_Tool
-    from OCP.BRepGProp import BRepGProp
-    from OCP.GProp import GProp_GProps
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopoDS import TopoDS
 
-    def tessellated(face):
-        exact = GProp_GProps()
-        BRepGProp.SurfaceProperties_s(face, exact)
-        area = exact.Mass()
+    def tessellated(ordinal: int, face):
+        area = exact_area(ordinal)
         return face_fallback.tessellate_face(
             topods, face, deflection, angle, lambda covered: abs(covered - area) <= _FALLBACK_AREA_TOLERANCE * area)
 
@@ -436,7 +475,7 @@ def _tessellate(topods, face_map, ordinals: list[int], kinds: dict[int, str], de
         opened = None if may_open else _open_edges(_read_faces(topods, face_map))
         taken = []
         for ordinal, face, previous in members:
-            if (result := tessellated(face)) is not None:
+            if (result := tessellated(ordinal, face)) is not None:
                 BRep_Builder().UpdateFace(face, result[0])
                 taken.append((ordinal, face, previous, result[1]))
         if not taken:
@@ -700,8 +739,8 @@ def mesh_component(topods, facts: dict, face_colors: dict, *, part: str, chord: 
 
     ``topods`` is a private decode of the component's BREP: meshing stores its
     triangulation on the shape, so it must not be a shape anything else holds.
-    ``facts`` are the component's topology facts (its faces' areas and surface types, its
-    edges' classes) and ``face_colors`` its intrinsic face colours by ordinal, in the same
+    ``facts`` are the component's topology facts (its faces' surface types, its edges'
+    classes) and ``face_colors`` its intrinsic face colours by ordinal, in the same
     ordinals. A failure inside OCCT is the component's ``MeshProductionError``.
     """
     try:
@@ -747,7 +786,7 @@ def _mesh_component(topods, facts: dict, face_colors: dict, *, part: str, chord:
     from OCP.TopoDS import TopoDS
 
     face_map, edge_map = _maps(topods)
-    table_faces = [(int(face["ord"]), face.get("area")) for face in facts["faces"]]
+    table_faces = [int(face["ord"]) for face in facts["faces"]]
     # An edge's display class as its selector table names it (``visibilityClass``).
     table_edges = [(int(edge["ord"]), str(edge.get("class") or STEP_EDGE_VISIBILITY_CLASSES["FEATURE"]))
                    for edge in facts["edges"]]
@@ -760,19 +799,15 @@ def _mesh_component(topods, facts: dict, face_colors: dict, *, part: str, chord:
     # OCCT refuses a deflection under its confusion tolerance, which a component of
     # next to no extent (a lone vertex) would otherwise ask for.
     deflection = max(chord * diagonal, Precision.Confusion_s())
-    # Every face the mesh can resolve must have triangles; a smaller one may have none.
-    # Only a face that must earns the finer passes: a watch case's 0.002 mm² sliver
-    # left a 1,529-face case meshed three times over, fifteen times as long, for a
-    # face under what the mesh can resolve.
-    required = [ordinal for ordinal, area in table_faces if float(area or 0.0) >= deflection * deflection]
     kinds = {int(face["ord"]): str(face.get("surfaceType") or "") for face in facts["faces"]}
-    faces = _mesh(topods, face_map, required, kinds, deflection, angle) if face_map.Extent() else {}
+    # Every face the mesh can resolve must have triangles; a smaller one may have none.
+    faces, required = _mesh(topods, face_map, kinds, deflection, angle) if face_map.Extent() else ({}, [])
     # A face no mesher covered is left out, and the body names it: every reader says so.
     unmeshed = [ordinal for ordinal in required if ordinal not in faces]
 
     position_parts, normal_parts, index_parts, face_ranges = [], [], [], []
     vertex_base = index_start = 0
-    for ordinal, _area in table_faces:
+    for ordinal in table_faces:
         positions, normals, triangles = faces.get(ordinal, (np.zeros((0, 3), np.float32),) * 2 + (np.zeros((0, 3), np.uint32),))
         position_parts.append(positions)
         normal_parts.append(normals)

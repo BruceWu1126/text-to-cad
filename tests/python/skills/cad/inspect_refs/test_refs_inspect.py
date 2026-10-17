@@ -204,7 +204,7 @@ class StepSceneTests(unittest.TestCase):
 
     def test_face_and_edge_names_match_display_extraction(self):
         from cadgen._internal.geometric_tokens import element_names
-        from cadgen._internal.topology_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import component_metrics, extract_topology_facts
         # Compare using the scene's canonical BREP, before its world placement: the
         # entities come in the table's ordinal order, each under its name -- for a file no
         # model run named, the token the body's geometry gives that ordinal.
@@ -212,6 +212,7 @@ class StepSceneTests(unittest.TestCase):
         selection = scene.resolve("#pin_1")
         raw = scene._loaded.prototype_shapes[selection._node.prototype_key]
         facts = extract_topology_facts(raw)
+        faces = component_metrics(raw)["faces"]
         tokens = element_names(None, raw)
         for kind, plural in (("face", "faces"), ("edge", "edges")):
             entities = list(selection.entities(kind))
@@ -221,4 +222,5 @@ class StepSceneTests(unittest.TestCase):
                 self.assertEqual(entity.ref, f"{selection.ref}/{tokens[plural][i - 1]}")
                 self.assertEqual(entity.kind, kind)
                 metric = {"face": "area", "edge": "length"}[kind]
-                self.assertAlmostEqual(getattr(entity.shape(), metric), rows[i - 1][metric], places=6)
+                exact = (faces if kind == "face" else rows)[i - 1][metric]
+                self.assertAlmostEqual(getattr(entity.shape(), metric), exact, places=6)

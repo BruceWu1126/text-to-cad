@@ -465,7 +465,7 @@ test("display reads only the stored mesh and joins selectors on first use", asyn
   assert.equal(bundle.manifest.edges.length, table.stats.edgeCount);
   const column = (columns, name) => bundle.manifest.tables[columns].indexOf(name);
   const stored = (rows, columns, name) => table[rows][0][table.tables[columns].indexOf(name)];
-  assert.equal(bundle.manifest.faces[0][column("faceColumns", "area")], stored("faces", "faceColumns", "area"), "exact stored face area survives");
+  assert.deepEqual(bundle.manifest.faces[0][column("faceColumns", "params")], stored("faces", "faceColumns", "params"), "a stored face's parameters survive");
   assert.equal(bundle.manifest.edges[0][column("edgeColumns", "length")], stored("edges", "edgeColumns", "length"), "exact stored edge length survives");
 });
 

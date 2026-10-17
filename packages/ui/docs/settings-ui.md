@@ -624,7 +624,8 @@ its whole as a hint; a number never wraps inside itself. Its heading, flush with
 the rows' labels, names the reference: its own label when it has one (a part's or subassembly's
 name, a named face), otherwise its part and kind ("base · face 3") — never the
 raw id, which is no row either. In a STEP its rows are the reference's key
-measurements, nothing else: a face's area, and a round face's diameter and
+measurements, nothing else: a face's area (once cadgen's exact number has come; no placeholder
+before it), and a round face's diameter and
 radius (a torus's two radii); an edge's length, or a round one's diameter,
 radius and circumference or arc length, with an arc's sweep; a part's size and
 volume; a subassembly's part count, size and volume. What it is (its kind and

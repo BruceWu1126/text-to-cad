@@ -59,6 +59,8 @@ export function useStepPanels({
   // The viewport's hover (`workbench/hoverStore.js`): a large tree under Faces or Edges asks for the
   // topology of the part the pointer rests on.
   hoverStore = null,
+  // The view's faces' exact areas, as cadgen measures them when asked (`workbench/faceAreas.js`).
+  faceAreas = null,
 }) {
   const mobile = useViewerMobile();
   const modelReferences = geometryInspection?.references || EMPTY;
@@ -82,7 +84,7 @@ export function useStepPanels({
     return names;
   }, [stepTreeRoot]);
   const partName = useCallback(id => partNames.get(String(id || '')) || '', [partNames]);
-  const reference = useStepReference({ references: selectedReferences, meshData: selectedMeshData, measurements, partsSize, partName });
+  const reference = useStepReference({ references: selectedReferences, meshData: selectedMeshData, measurements, partsSize, partName, faceAreas });
   // What every tree row is handed, the same object until something in it changes: the host's
   // actions behind stable identities, its menus and state as they are.
   const toggleTreeNode = useLatestCallback(onToggleTreeNode), selectTreeNode = useLatestCallback(onSelectTreeNode);

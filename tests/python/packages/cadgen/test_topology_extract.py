@@ -19,7 +19,7 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 SHAPE_KEYS = {"ord", "kind"}
-FACE_KEYS = {"ord", "shape", "surfaceType", "area", "center", "loops"}
+FACE_KEYS = {"ord", "shape", "surfaceType", "loops"}
 FACE_OPTIONAL = {"normal", "params"}
 EDGE_KEYS = {"ord", "shape", "class", "continuity", "dihedralDeg", "flags", "adjacentFaceCount", "curveType",
              "faceOrds", "length", "center"}
@@ -121,10 +121,6 @@ class TopologyFactsTest(unittest.TestCase):
 
         for entry in self.facts["faces"]:
             face = self.face(entry)
-            props = GProp_GProps()
-            BRepGProp.SurfaceProperties_s(face, props)
-            self.assertEqual(entry["area"], props.Mass())
-            self.assertEqual(entry["center"], [props.CentreOfMass().X(), props.CentreOfMass().Y(), props.CentreOfMass().Z()])
             adaptor = BRepAdaptor_Surface(face)
             if entry["surfaceType"] == "plane":
                 direction = adaptor.Plane().Position().Direction()
@@ -142,6 +138,7 @@ class TopologyFactsTest(unittest.TestCase):
             props = GProp_GProps()
             BRepGProp.LinearProperties_s(edge, props)
             self.assertEqual(entry["length"], props.Mass())
+            self.assertEqual(entry["center"], [props.CentreOfMass().X(), props.CentreOfMass().Y(), props.CentreOfMass().Z()])
             if "sweepRadians" in entry:
                 curve = BRepAdaptor_Curve(edge)
                 self.assertEqual(entry["sweepRadians"], abs(curve.LastParameter() - curve.FirstParameter()))
@@ -189,8 +186,7 @@ class TopologyFactsObjectTest(unittest.TestCase):
     def facts(self) -> dict:
         return {
             "shapes": [{"ord": 1, "kind": "solid"}],
-            "faces": [{"ord": 1, "shape": 1, "surfaceType": "plane", "area": 1.0, "center": [0.5, 0.5, 0.0],
-                       "normal": [0.0, 0.0, -1.0],
+            "faces": [{"ord": 1, "shape": 1, "surfaceType": "plane", "normal": [0.0, 0.0, -1.0],
                        "params": {"origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0]}, "loops": [[1]]}],
             "edges": [{"ord": 1, "shape": 1, "class": "feature", "continuity": "c0", "dihedralDeg": 90.0, "flags": 1,
                        "adjacentFaceCount": 1, "curveType": "circle", "faceOrds": [1], "length": 6.283185307179586,

@@ -196,8 +196,6 @@ def positioning_facts_for_row(
     if selector_type == "face":
         surface_type = str(row.get("surfaceType") or "").lower()
         facts["kind"] = surface_type or "face"
-        if row.get("area") not in {None, ""}:
-            facts["area"] = float(row["area"])
 
         normal = _normalize(
             _float_triplet(row.get("normal"))

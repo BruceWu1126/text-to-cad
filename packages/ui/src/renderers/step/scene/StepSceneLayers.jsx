@@ -234,7 +234,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
 
   useStepMeasureOverlay({
     measureCanvasRef, measureState, activeMeasurementId, measureHoverRef, measureModeActive,
-    runtimeRef, mountRef, previewMode, viewerReadyTick
+    runtimeRef, mountRef, previewMode, viewerReadyTick, faceAreas: props.faceAreas
   });
 
   useStepPicking({

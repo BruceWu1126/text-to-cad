@@ -541,6 +541,8 @@ test('under Faces or Edges, one press on a part whose faces are not loaded loads
   assert.equal(await pane.getByRole('region', { name: 'Features', exact: true }).getByText('Loading…').count(), 0, 'and stops once the face is picked');
   assert.equal(await pane.locator('[data-cad-toolbar] [role=status]').count(), 0, 'nothing under the strip says so');
   // Named by its part as the tree names it and its kind, never by its raw id, which is no row either.
+  // Its area is cadgen's, measured when the face is shown (`POST /__cad/measure`): it comes.
+  await reference.getByText(/^[\d,.]+ mm²$/).waitFor();
   const faceText = (await reference.innerText()).replace(/\s+/g, ' ');
   // The face by its name, its lineage: what a copy carries too.
   assert.match(faceText, new RegExp(`^base · face ${face.split('/').pop()} Area [\\d,.]+ mm² Copy`), 'the Reference names the face under the pointer, over its area');

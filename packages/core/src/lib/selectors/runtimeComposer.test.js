@@ -25,9 +25,9 @@ function random(seed) {
 // them with each face's triangle range and each edge's segment range. Element rows lead with
 // their name; `shape` is the owning solid's ordinal; no row names an occurrence.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
-const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"];
-const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance",
-  "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
+const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "faceStart", "faceCount", "edgeStart", "edgeCount"];
+const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "normal", "bbox", "edgeStart", "edgeCount", "params",
+  "tangentGroup", "triangleStart", "triangleCount"];
 const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart",
   "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain",
   "segmentStart", "segmentCount"];
@@ -70,7 +70,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
   };
   for (let s = 0; s < shapeCount; s += 1) {
     shapes.push([s + 1, "solid", { min: [-100, -100, -100], max: [100, 100, 100] },
-      [coord(), coord(), coord()], 1000 * rand(), 0, 0, 0, 0]);
+      [coord(), coord(), coord()], 0, 0, 0, 0]);
   }
   for (let f = 0; f < faceCount; f += 1) {
     const shape = (f % shapeCount) + 1;
@@ -117,8 +117,8 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
       // Vertices one coordinate apart are different vertices.
       loop.push(pushEdge(shape, [b, [b[0], b[1], b[2] + 1.5], [b[0] + 0.5, b[1], b[2] + 1.5], a]));
     }
-    faces.push([elementName("f", f + 1), f + 1, shape, f % 2 ? "plane" : "cylinder", 10 * rand(), [coord(), coord(), coord()],
-      [0, 0, 1], { min: [-100, -100, -100], max: [100, 100, 100] }, 0, loop.length, 0, 0,
+    faces.push([elementName("f", f + 1), f + 1, shape, f % 2 ? "plane" : "cylinder",
+      [0, 0, 1], { min: [-100, -100, -100], max: [100, 100, 100] }, 0, loop.length,
       f % 2 ? { origin: [coord(), coord(), coord()], normal: [0, 0, 1] } : { axis: [0, 1, 0], center: [coord(), coord(), coord()], radius: 3 },
       f + 1, 0, 0]);
     faceEdgeRows.push(...loop);

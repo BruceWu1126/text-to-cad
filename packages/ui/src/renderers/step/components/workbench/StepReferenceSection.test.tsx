@@ -1,7 +1,8 @@
 import React from 'react';
-import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {useStepReference} from '../../../../../dist/renderers/step/components/workbench/StepReferenceSection.js';
+import {createFaceAreas} from '../../../../../dist/renderers/step/workbench/faceAreas.js';
 Object.assign(globalThis,{React});
 beforeEach(()=>{
  vi.stubGlobal('ResizeObserver',class {observe(){} unobserve(){} disconnect(){}});
@@ -49,14 +50,25 @@ it('browses individual selected edges from the heading, and shows only the brows
  expect(screen.queryByRole('button',{name:'Previous element'})).toBeNull();
 });
 
-it('a face shows its area, and a round one its radii: nothing of its kind, id, place or part beyond what its heading names',()=>{
- const {rerender}=render(<StepReferenceSection references={[arc]}/>);
- const face={id:'o:1a2b3c4d5e6f/f:base.extrude1.2',normalizedSelector:'o:1a2b3c4d5e6f/f:base.extrude1.2',selectorType:'face',pickData:{surfaceType:'plane',area:662.734,center:[2,4,6],normal:[0,0,1],sourceName:'Camera',bbox:{min:[0,0,0],max:[40,20,0]}}};
- rerender(<StepReferenceSection references={[face]}/>);
+it('a face shows its area, cadgen\'s measure of it, and a round one its radii: nothing of its kind, id, place or part beyond what its heading names',async()=>{
+ // Each face's area as cadgen measures it on asking (`POST /__cad/measure`): held until the test lets it come.
+ const answers:Record<number,(area:number)=>void>={};
+ const faceAreas=createFaceAreas({
+  requestFor:(reference:any)=>({tree:'t',viewId:'v',producer:{},cid:'c',part:'p',face:reference.pickData.ordinal}),
+  measure:(body:any)=>new Promise(resolve=>{answers[body.face]=(area:number)=>resolve({face:body.face,area,center:[0,0,0]});}),
+ });
+ // cadgen answers the face's request, once the panel has made it.
+ const answer=(face:number,area:number)=>act(async()=>{await Promise.resolve();answers[face](area);});
+ const {rerender}=render(<StepReferenceSection references={[arc]} faceAreas={faceAreas}/>);
+ const face={id:'o:1a2b3c4d5e6f/f:base.extrude1.2',normalizedSelector:'o:1a2b3c4d5e6f/f:base.extrude1.2',selectorType:'face',pickData:{ordinal:2,surfaceType:'plane',normal:[0,0,1],sourceName:'Camera',bbox:{min:[0,0,0],max:[40,20,0]}}};
+ rerender(<StepReferenceSection references={[face]} faceAreas={faceAreas}/>);
  expect(heading()).toBe('Camera · face f:base.extrude1.2');
+ expect(rows()).toEqual([]);
+ await answer(2,662.734);
  expect(rows()).toEqual(['Area662.73 mm²']);
  for (const gone of ['Type','Face · Planar','ID','o:1a2b3c4d5e6f/f:base.extrude1.2','Center','Normal','Size','Component']) expect(screen.queryByText(gone),gone).toBeNull();
- rerender(<StepReferenceSection references={[{...face,pickData:{...face.pickData,surfaceType:'cylinder',area:94.25,params:{radius:3}}}]}/>);
+ rerender(<StepReferenceSection references={[{...face,id:'o:1a2b3c4d5e6f/f:base.extrude1.5',normalizedSelector:'o:1a2b3c4d5e6f/f:base.extrude1.5',pickData:{...face.pickData,ordinal:5,surfaceType:'cylinder',params:{radius:3}}}]} faceAreas={faceAreas}/>);
+ await answer(5,94.25);
  expect(rows()).toEqual(['Diameter Ø6 mm','Radius R3 mm','Area94.25 mm²']);
 });
 

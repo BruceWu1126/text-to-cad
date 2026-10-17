@@ -12,7 +12,11 @@ leaves, its group nodes and their names, read from the flattened tree. No
 component's topology is read for them. An axis ref names a face or edge of one
 occurrence, and only that occurrence's component is read: its selector rows
 come from its part's selector table, derived through the build pool when the
-store has none, and a ref by geometry is matched against the component.
+store has none, and a ref by geometry is matched against the component. An
+axis through a face whose parameters give no origin of its own -- a torus's,
+which give its centre -- passes through the face's exact centroid, which no
+selector row carries: it is measured on the stored component then, and only
+then (``store.parts.measure_face``).
 
 Nothing here moves geometry. A kinematics declaration describes how the
 written tree articulates; the tree itself is the model's return value and is
@@ -84,7 +88,26 @@ def _with_named_entities(index, descriptor: Mapping[str, Any], refs: list[str], 
         shutil.rmtree(view, ignore_errors=True)
 
 
-def _axis_from_ref(index, ref: str, *, mate: str, source_ref: str) -> dict[str, list[float]]:
+def _face_centroid(row: Mapping[str, Any], descriptor: Mapping[str, Any], tree_hash: str) -> list[float] | None:
+    """The face row's exact centroid, where its occurrence places it: measured on the stored
+    component the occurrence places (``store.parts.measure_face``, remembered by its BREP), and
+    placed as the composed index places the row (``assembly_lookup``)."""
+    from cadgen.assembly_lookup import _matrix, transform_point
+    from cadgen.store.parts import measure_face
+
+    owner = str(row.get("occurrenceId") or "")
+    occurrence = next((entry for entry in descriptor.get("occurrences") or []
+                       if isinstance(entry, Mapping) and str(entry.get("id") or "") == owner), None)
+    if occurrence is None or not isinstance(row.get("ordinal"), int):
+        return None
+    measured = measure_face(tree_hash, str(occurrence.get("component") or ""), row["ordinal"])
+    return transform_point(_matrix(occurrence.get("transform")), measured["center"])
+
+
+def _axis_from_ref(index, ref: str, *, mate: str, source_ref: str,
+                   centroid: Callable[[Mapping[str, Any]], list[float] | None]) -> dict[str, list[float]]:
+    """The world-at-rest axis ``ref`` names in ``index``. ``centroid(row)`` is a face row's exact
+    centroid, asked for only by an axis whose face's parameters give no origin."""
     from cadgen.analysis import positioning_facts_for_row
     from cadgen.lookup import find
 
@@ -105,6 +128,8 @@ def _axis_from_ref(index, ref: str, *, mate: str, source_ref: str) -> dict[str, 
         )
     facts = positioning_facts_for_row(selector_type, row, index)
     direction = facts.get("axisVector") or facts.get("normal") or facts.get("direction")
+    if selector_type == "face" and direction is not None and "origin" not in (row.get("params") or {}):
+        facts = positioning_facts_for_row(selector_type, {**row, "center": centroid(row)}, index)
     origin = facts.get("origin") or facts.get("center") or facts.get("point")
     if not (isinstance(direction, list) and isinstance(origin, list)):
         kind = facts.get("kind") or selector_type
@@ -183,5 +208,6 @@ def resolve_kinematics_block(
             if entities is None:
                 entities = _with_named_entities(index, descriptor, axis_refs, tree_hash=tree_hash, producer=producer,
                                                 ready=ready)
-            mate["axis"] = _axis_from_ref(entities, str(axis["ref"]), mate=name, source_ref=source_ref)
+            mate["axis"] = _axis_from_ref(entities, str(axis["ref"]), mate=name, source_ref=source_ref,
+                                          centroid=lambda row: _face_centroid(row, descriptor, tree_hash))
     return resolved, occurrence_ids

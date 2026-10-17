@@ -102,7 +102,7 @@ def transform_bbox(matrix: list[float], bbox: object) -> dict[str, list[float]] 
 # uniform across surface and curve types: a plane and a cylinder both carry `origin`/`axis`, a
 # line carries `origin`/`direction`, and a cylinder's `radius` is a length that a rigid transform
 # does not change. Anything unlisted is carried through untouched, which is right for ordinals,
-# counts, flags and areas -- and is why `params` is transformed key-by-key rather than wholesale.
+# counts, flags and lengths -- and is why `params` is transformed key-by-key rather than wholesale.
 #
 # The param key sets are the COMPLETE vocabulary of `step_scene_geometry._curve_params` and
 # `_surface_params`, which is what writes the `params` this places. A point is spelled `origin`
@@ -352,7 +352,7 @@ def merge_assembly_entities(
     places it) and ``shapeId`` (the occurrence's solid, by the component's own ordinal);
     its range columns (``faceStart``, ``edgeCount``, ...) are copied as the component's table
     wrote them: they index that table, and nothing here reads them. The shapes of every
-    occurrence are listed too, placed, for the facts a solid gives (its volume); they carry no
+    occurrence are listed too, placed, for the facts a solid gives (its box); they carry no
     ref of their own: the occurrence names a body.
     """
     occurrences = descriptor.get("occurrences")
