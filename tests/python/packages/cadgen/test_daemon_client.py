@@ -282,6 +282,16 @@ class ResidentProcessLifecycle(unittest.TestCase):
             self.assertEqual((os.environ["CADGEN_DAEMON_CHILD"], os.environ["CADGEN_DAEMON_SOCKET"]),
                              ("1", "/daemon.sock"))
 
+    def test_a_builds_file_trace_never_sees_what_the_version_token_reads(self):
+        # A model body's compile or artifact job asks for the token on the build's thread:
+        # cadgen's own files are never the model's input.
+        from cadgen._internal import filetrace
+
+        with filetrace.capture() as trace:
+            client.compute_version_token()
+        files, folders = trace.inputs()
+        self.assertEqual((list(files), list(folders)), ([], []))
+
     def test_the_daemon_popen_is_retained_by_an_owned_reaper(self):
         process = mock.Mock(pid=4321)
         finished = threading.Event()

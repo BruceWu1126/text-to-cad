@@ -220,20 +220,27 @@ def _declared_version(base: Path) -> str:
 def compute_version_token(root: Path | None = None) -> str:
     """The running daemon's identity: the version declared beside its code plus the newest
     ``.py`` mtime under it. Client and server compute this identically from the same
-    files; inequality means restart."""
+    files; inequality means restart.
+
+    Read unseen by a build's file trace (``filetrace.paused``): a model body's compile or
+    artifact job asks for it on the build's thread, and cadgen's own files are never a
+    model's input."""
+    from cadgen._internal.filetrace import paused
+
     base = Path(root) if root is not None else CADGEN_DIR
     newest = 0
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [name for name in dirnames if name != "__pycache__"]
-        for filename in filenames:
-            if not filename.endswith(".py"):
-                continue
-            try:
-                mtime = os.stat(os.path.join(dirpath, filename)).st_mtime_ns
-            except OSError:
-                continue
-            newest = max(newest, mtime)
-    return f"{_declared_version(base)}:{newest}"
+    with paused():
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+            for filename in filenames:
+                if not filename.endswith(".py"):
+                    continue
+                try:
+                    mtime = os.stat(os.path.join(dirpath, filename)).st_mtime_ns
+                except OSError:
+                    continue
+                newest = max(newest, mtime)
+        return f"{_declared_version(base)}:{newest}"
 
 
 def _request_payload(
