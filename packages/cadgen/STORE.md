@@ -1806,7 +1806,8 @@ and may reclaim idle workers or refuse work (§9 below). A worker is recycled af
 `CADGEN_DAEMON_RECYCLE` jobs (default 1000) as a leak hedge, and the daemon
 exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600). The
 first client that needs the daemon starts it, and `cadgen viewer` starts it as
-soon as its URL is announced, so a session's first build finds warm spares.
+soon as its URL is announced, so a session's first build finds warm spares; a
+viewer where none can start refuses to start, naming why.
 Inside a worker, a compile or an artifact job is the same client call back to
 the daemon; a parent's children build in the parent's worker, in the slot it
 holds (§9a). A worker answers its client when the command's answer is complete:
@@ -1924,14 +1925,14 @@ the address is a pipe name, which has no path to outgrow.
 
 **No daemon, no job.** A request no daemon takes fails, naming why
 (`client.DaemonUnavailable`): what a start needs and this machine lacks, found
-before any start (`client.unavailable`: no local IPC family, a socket folder
-another user owns, a state directory this user cannot write), a start that
-failed, a daemon that exited instead of answering, or one that did not answer
-within thirty seconds of its start -- those two name its log. A request the
-daemon lost mid-job -- its worker died, the daemon was killed or stopped
-answering -- fails and says so, naming the log. Nothing runs a job anywhere
-else, and nothing runs it again: a job that ran half an hour and is then
-silently rerun is worse than its failure.
+before any start (`client.unavailable`, what `cadgen doctor` reports: no local
+IPC family, a socket folder another user owns, a state directory this user
+cannot write), a start that failed, a daemon that exited instead of answering,
+or one that did not answer within thirty seconds of its start -- those two name
+its log. A request the daemon lost mid-job -- its worker died, the daemon was
+killed or stopped answering -- fails and says so, naming the log. Nothing runs
+a job anywhere else, and nothing runs it again: a job that ran half an hour and
+is then silently rerun is worse than its failure.
 
 **A client that never answers holds up no one.** Each connection proves the
 authkey, and the daemon proves it back, on a thread of its own

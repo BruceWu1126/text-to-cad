@@ -71,6 +71,18 @@ class DoctorTests(unittest.TestCase):
             _, out, _ = _run([tmp])
         self.assertRegex(out, r"sharing  on: by default, since cadgen said so on \d{4}-\d{2}-\d{2}\n")
 
+    def test_the_report_says_whether_a_build_daemon_can_start_and_why_not(self) -> None:
+        with TemporaryDirectory() as tmp:
+            code, out, _ = _run([tmp])
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"daemon   OK — \S+ can start here\n")
+        reason = "This Python offers no local IPC family for the build daemon"
+        with TemporaryDirectory() as tmp, mock.patch("cadgen.daemon.client.unavailable", return_value=reason):
+            code, out, err = _run([tmp])
+        self.assertEqual(code, 5, "every build runs on a daemon: none can start, nothing can build")
+        self.assertIn(f"daemon   FAILED — no build daemon can start here: {reason}", err)
+        self.assertNotIn("daemon   OK", out)
+
     def test_the_report_names_the_kernel_it_loaded(self) -> None:
         with TemporaryDirectory() as tmp:
             code, out, _ = _run([tmp])

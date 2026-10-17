@@ -434,13 +434,15 @@ class _LateApp:
 
 
 def _prewarm_daemon() -> None:
-    """Start the build daemon. Best-effort: without one, the viewer serves what it did."""
-    from cadgen.daemon.client import prewarm  # noqa: PLC0415 - kernel-free, needed only now
+    """Start the build daemon now, so the session's first build or compile finds warm workers.
+    One that cannot start is said here, on stderr, and by every compile and part job the
+    viewer then asks of it."""
+    from cadgen.daemon.client import DaemonUnavailable, prewarm  # noqa: PLC0415 - kernel-free, needed only now
 
     try:
         prewarm()
-    except Exception:  # noqa: BLE001 - a daemon that cannot start is the first build's to report
-        pass
+    except DaemonUnavailable as error:
+        _err(f"CAD Viewer: no build daemon could start: {error}\n")
 
 
 def _harden_streams() -> None:
@@ -659,6 +661,15 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
             if args["json"]:
                 _out(f"{_compact_json({'url': url, 'port': port, 'action': 'reused'})}\n")
             return 0
+
+    # Every compile and every part a view lacks is a build daemon's job: where none can start,
+    # the viewer does not start either, and says why.
+    from cadgen.daemon.client import unavailable  # noqa: PLC0415 - kernel-free, needed only now
+
+    reason = unavailable()
+    if reason is not None:
+        _err(f"The CAD Viewer cannot start: no build daemon can start here. {reason}\n")
+        return 1
 
     if args["detach"]:
         return launch_detached(argv, as_json=args["json"], prog=prog)

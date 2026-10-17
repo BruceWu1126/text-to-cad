@@ -346,7 +346,8 @@ parts are written in parallel; a module that appears rebuilds it like an edit.
 ## Progress and runtime diagnostics
 
 Every build runs on the warm daemon; `cadgen daemon status` shows running and
-queued work. Results go to stdout, errors to stderr. Model runs
+queued work, and `cadgen doctor` says whether one can start here and why not.
+Results go to stdout, errors to stderr. Model runs
 accept `--json` (one result line; a failure is `{"ok": false, "error": "..."}`
 with exit status 1), `--verbose` (full tracebacks) and `--no-wait` (return once
 every model's result is recorded and its preview is on screen: the build service

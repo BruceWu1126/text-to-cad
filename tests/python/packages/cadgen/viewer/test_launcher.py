@@ -668,6 +668,21 @@ class Detach(LauncherFixture):
         self.assertNotIn("DO_NOT_TRACK", env)
         self.assertNotIn("CADGEN_TELEMETRY", env)
 
+class RefusesWithoutADaemon(LauncherFixture):
+    """Every compile and every part a view lacks is a build daemon's job: where none can
+    start, the viewer does not start either, and says why."""
+
+    def test_where_no_build_daemon_can_start_the_viewer_refuses_naming_why(self) -> None:
+        blocker = Path(self.make_root()) / "not-a-folder"
+        blocker.write_text("", encoding="utf-8")
+        code, stdout, stderr = self.run_to_exit(["--dist", self.make_dist(), "--json", "--new"],
+                                                CADGEN_DAEMON_STATE_DIR=str(blocker / "state"))
+        self.assertEqual(code, 1, stdout + stderr)
+        self.assertIn("The CAD Viewer cannot start: no build daemon can start here.", stderr)
+        self.assertIn("set CADGEN_DAEMON_STATE_DIR to a folder this user can write", stderr)
+        self.assertNotIn("CAD Viewer URL", stdout)
+
+
 class PrewarmsTheDaemon(LauncherFixture):
     """After its announcement a launch starts the build daemon, whose workers import
     build123d before any build asks: a session's first build finds them warm."""

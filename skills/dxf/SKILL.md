@@ -22,8 +22,8 @@ The first run downloads that installation and the first snapshot its headless
 browser; later runs reuse both.
 
 `cadgen doctor <skill-dir>` reports the installation in use and checks that it is
-the one this skill pins, and that the CAD kernel loads; use it for installation or
-kernel load errors.
+the one this skill pins, that the CAD kernel loads, and that the build daemon every
+build runs on can start; use it for installation, kernel load or daemon errors.
 
 Drawings are build123d geometry, so a drawing build loads the CAD kernel like a
 STEP build does (~2.5s cold; the warm daemon absorbs it on re-runs).

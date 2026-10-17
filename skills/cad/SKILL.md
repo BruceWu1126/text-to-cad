@@ -36,8 +36,8 @@ one installation, and its warm build daemon, with the CAD app's server:
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
 
 `cadgen doctor <skill-dir>` reports the installation in use, whether it is the one
-this skill pins, and whether the CAD kernel loads. Each command's `--help` lists
-its flags.
+this skill pins, whether the CAD kernel loads, and whether the build daemon every
+build runs on can start. Each command's `--help` lists its flags.
 
 CLI paths and `read_scene`/`read_step` paths are relative to the working
 directory, as are a model's own file reads unless anchored on `__file__`.
