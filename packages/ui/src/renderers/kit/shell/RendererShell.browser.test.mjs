@@ -133,7 +133,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   const first = page.getByTestId('one');
   // Display's settings are a dropdown from its button at the strip's end, its menu's Custom
   // submenu (`DisplayPopover.jsx`), portaled out of the pane: a file never opens with it, and it is not a tool.
-  const displayButton = pane => pane.locator('[data-cad-toolbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
+  const displayButton = pane => pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
   const display = page.locator('[data-display-settings="solid"]');
   const cameraZoom = id => page.evaluate(pane => window.cadHarness[pane].controller?.readState().camera?.zoom ?? null, id);
   await displayButton(first).waitFor().catch(async (error) => { throw new Error(`${error.message}; page errors: ${errors.join('; ')}; body: ${await page.locator("body").innerText()}; requests: ${requests.join(", ")}`); });
@@ -578,8 +578,8 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.equal(await card.count(), 0, 'and raises nothing');
 
   // THE CUBE IS THE BOTTOM-RIGHT CORNER'S, far enough off the bottom that its axes stay inside the
-  // view, and the tool stack stops above it. The view's controls, Display then the Studio, end the
-  // strip, after a rule; the navbar holds none. The right of the view is Quick Edit's, and the bottom middle the host's (a
+  // view, and the tool stack stops above it. The view's controls, Display then Present, end the
+  // navbar; the strip keeps to its tools. The right of the view is Quick Edit's, and the bottom middle the host's (a
   // composer, on some).
   const frameBox = await canvasElement.boundingBox();
   const cubeBox = await pane.getByLabel('View cube', { exact: true }).boundingBox();
@@ -589,9 +589,9 @@ test('a renderer says more about its load than a download: finding the file, edi
   const offRight = frameBox.x + frameBox.width - cubeBox.x - cubeBox.width;
   assert.ok(offRight >= 0 && offRight < 20, `the view cube stays against the right edge: ${offRight}px`);
   assert.ok(stackBox.y + stackBox.height <= cubeBox.y, 'the tool stack stops above the cube');
-  assert.deepEqual(await pane.locator('[data-cad-toolbar] [data-strip-rule] + [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Studio'], 'Display then the Studio, after the strip\'s rule');
-  assert.equal(await pane.locator('[data-viewer-navbar] button[aria-label^="Display mode"], [data-viewer-navbar] button[aria-label="Studio"]').count(), 0, 'nothing of them in the navbar');
+  assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Present'], 'Display then Present, at the navbar\'s right end');
+  assert.equal(await pane.locator('[data-cad-toolbar] [data-view-controls], [data-cad-toolbar] [data-strip-rule]').count(), 0, 'the strip keeps to its tools');
 
   // FINDING: the wait before the file is even located covers the viewport, and says
   // so as such rather than as a phase of reading it.

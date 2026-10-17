@@ -8,7 +8,7 @@ Object.assign(globalThis,{React});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 // The tree as it ships: a section of the file sidebar, opened by its tile, headed by its search box.
 const inSidebar=(tree:React.ReactElement)=><FileSidebar layout={{panels:{},collapsed:{}}} onLayoutChange={()=>{}}>{tree}</FileSidebar>;
-const openFeatures=()=>fireEvent.click(within(screen.getByRole('group',{name:'File sidebar'})).getByRole('button',{name:'Features'}));
+const openModelTree=()=>fireEvent.click(within(screen.getByRole('group',{name:'File sidebar'})).getByRole('button',{name:'Model tree'}));
 const search=()=>screen.getByRole('textbox',{name:'Filter model'}) as HTMLInputElement;
 const refs=(o='o1')=>[1,2].map(n=>({id:`${o}.f${n}`,selectorType:'face',occurrenceId:o,normalizedSelector:`${o}.f${n}`}));
 const partNode=(id:string,name:string,componentId?:string)=>({id,nodeType:'part',name,leafPartIds:[id],children:[],...(componentId?{componentId}:{})});
@@ -29,11 +29,11 @@ it('starts the compact tree immediately below its search box and keeps disclosur
  const controls={expandedTreeNodeIds:[],onSelectTreeNode,onToggleTreeNode};
  const props={stepRoot:assemblyRoot,active:true,onLoadTopology,partControls:controls};
  const {rerender}=render(inSidebar(<ModelingTreeView {...props}/>));
- openFeatures();
+ openModelTree();
  expect(screen.queryByRole('button',{name:'Select tom'})).toBeNull();
  // The section's head is its search box, no heading, then the X that closes the section.
  const head=document.querySelector<HTMLElement>('[data-sidebar-head]')!;
- expect([head.contains(search()),search().placeholder,head.querySelector('[data-tool-panel-heading]')]).toEqual([true,'Search…',null]);
+ expect([head.contains(search()),search().placeholder,head.querySelector('[data-tool-panel-heading]')]).toEqual([true,'Filter…',null]);
  expect(screen.queryByLabelText('Model tree summary')).toBeNull();
  const select=screen.getByRole('button',{name:'Select Arm'});
  expect(select.parentElement?.style.height).toBe('24px'); // the dense tree's rows
@@ -49,12 +49,12 @@ it('starts the compact tree immediately below its search box and keeps disclosur
  // Show all, while parts are hidden, follows the search box, before the section's X.
  rerender(inSidebar(<ModelingTreeView {...props} partControls={{...controls,hiddenPartIds:['base']}}/>));
  const actions=[...head.querySelectorAll('button')].map(button=>button.getAttribute('aria-label')||button.textContent);
- expect(actions).toEqual(['Show all','Close features']);
+ expect(actions).toEqual(['Show all','Close model tree']);
 });
 
 it('the search box is always there: Escape clears a query and Clear filter does too, the tree back each time',()=>{
  render(inSidebar(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[]}}/>));
- openFeatures();
+ openModelTree();
  fireEvent.change(search(),{target:{value:'Wheel'}});
  expect(screen.queryByRole('list',{name:'Model'})).toBeNull();
  fireEvent.keyDown(search(),{key:'Escape'});

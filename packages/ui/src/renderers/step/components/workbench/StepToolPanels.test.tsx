@@ -10,7 +10,7 @@ import FloatingToolBar from '../../../../../dist/renderers/kit/tools/FloatingToo
 import ToolPanel from '../../../../../dist/renderers/kit/tools/ToolPanel.js';
 import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
 
-// The STEP renderer's sections in the file sidebar — an assembly's Features, Position — and the
+// The STEP renderer's sections in the file sidebar — an assembly's Model tree, Position — and the
 // panels of its tools in the tool stack (Explode, Clip), each where it is decided, under what holds
 // them. The viewport that picks and draws is the browser suite's (`StepRenderer.browser.test.mjs`).
 
@@ -39,8 +39,8 @@ const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', childr
 const rows = () => [...document.querySelectorAll('[aria-label="Modeling tree"] button')].map(button => button.getAttribute('aria-label'))
   .filter(label => /^(?:Select|Expand|Collapse) /.test(label || ''));
 const locks = () => [...document.querySelectorAll<HTMLElement>('[aria-label="Modeling tree"] [data-disclosure-locked]')].map(mark => mark.dataset.disclosureLocked);
-// The Features section; the sidebar's sections on screen, and the stack's panels.
-const features = () => document.querySelector<HTMLElement>('section[data-tool-panel][aria-label="Features"]')!;
+// The Model tree section; the sidebar's sections on screen, and the stack's panels.
+const features = () => document.querySelector<HTMLElement>('section[data-tool-panel][aria-label="Model tree"]')!;
 const sections = () => [...document.querySelectorAll<HTMLElement>('[data-cad-file-sidebar] section[data-tool-panel]')].filter(node => !node.hidden).map(node => node.getAttribute('aria-label'));
 
 /** The layout a host keeps, applying what the stack writes back. */
@@ -48,13 +48,12 @@ function useLayout(initial: any = { panels: {}, collapsed: {} }) {
   const [layout, setLayout] = useState<any>(initial);
   return [layout, (patch: any) => setLayout((current: any) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }))] as const;
 }
-// `mobile`: a phone's sidebar, whose tiles the strip draws (`onTiles`), its panel alone here.
+// `mobile`: a phone's sidebar, one tile opening its panel (`phone`).
 function Features({ mode = 'all', mobile = false }) {
   const [layout, change] = useLayout();
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [, setTiles] = useState<any[]>([]);
   // The shell hands the sidebar the viewer's layout (`RendererShell.jsx`).
-  return <FileSidebar layout={layout} onLayoutChange={change} onTiles={mobile ? setTiles : null}>
+  return <FileSidebar layout={layout} onLayoutChange={change} phone={mobile}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
@@ -80,26 +79,26 @@ it("the geometry Select picks shapes the tree: Parts, Faces or Edges alone every
   expect(locks()).toEqual([]);
 });
 
-it("Features is its search box over its tree — Select's modes are the strip's — opened by its tile, closed by its X or the tile again, never folding, its search kept while closed", async () => {
+it("Model tree is its filter over its tree — Select's modes are the strip's — opened by its tile, closed by its X or the tile again, never folding, its search kept while closed", async () => {
   const user = userEvent.setup();
   render(<Features />);
-  const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Features' });
+  const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Model tree' });
   // Open: its tile pressed, the panel out with the section in it. Closing, the panel slides away with it.
   const open = () => [tile.getAttribute('aria-pressed'), document.querySelector('[data-cad-file-sidebar]')!.hasAttribute('data-open')];
   // None is open as the file opens; the tile opens it.
-  expect([sections(), open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['Features'], ['false', false], true]);
+  expect([sections(), open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['Model tree'], ['false', false], true]);
   await user.click(tile);
   expect([open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['true', true], false]);
   // Its head: the search box and the section's X; no heading, nothing to fold.
   const head = features().querySelector<HTMLElement>('[data-sidebar-head]')!;
   const search = within(head).getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
-  expect([head.querySelector('[data-tool-panel-heading]'), search.getAttribute('placeholder')]).toEqual([null, 'Search…']);
-  expect([...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Close features']);
+  expect([head.querySelector('[data-tool-panel-heading]'), search.getAttribute('placeholder')]).toEqual([null, 'Filter…']);
+  expect([...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Close model tree']);
   expect(within(features()).queryByRole('button', { name: /^(?:Collapse|Expand) features$/ })).toBeNull();
   await user.type(search, 'ba');
   expect(within(features()).getByRole('status').textContent).toMatch(/match/);
   // Its X closes it; the tile opens it again, as it was left; a second press of the tile closes it.
-  await user.click(within(head).getByRole('button', { name: 'Close features' }));
+  await user.click(within(head).getByRole('button', { name: 'Close model tree' }));
   expect(open()).toEqual(['false', false]);
   await user.click(tile);
   expect([open(), search.value]).toEqual([['true', true], 'ba']);
@@ -107,7 +106,7 @@ it("Features is its search box over its tree — Select's modes are the strip's 
   expect(open()).toEqual(['false', false]);
 });
 
-it("Features is as tall as its rows, on desktop and phone alike: no cap, scroller or grip of its own, its rows scrolling with the sidebar", () => {
+it("Model tree is as tall as its rows, on desktop and phone alike: no cap, scroller or grip of its own, its rows scrolling with the sidebar", () => {
   for (const mobile of [true, false]) {
     render(<Features mobile={mobile} />);
     expect([features().style.maxHeight, features().querySelector('[role=separator]')]).toEqual(['', null]);
@@ -139,7 +138,7 @@ it("a part file with no joints has no section, picked or not; an assembly its tr
   expect(sections()).toEqual([]);
   view.unmount();
   render(<Panels assembly references={[face]} />);
-  expect(sections()).toEqual(['Features']);
+  expect(sections()).toEqual(['Model tree']);
 });
 
 // ---- Explode and Clip ---------------------------------------------------------------------------

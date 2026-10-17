@@ -174,10 +174,10 @@ async function open(t, file, { panel = true } = {}) {
       if (await tile.getAttribute('aria-pressed') !== 'true') await tile.click();
       await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
     },
-    // In and out of the Studio, by its button on the strip and its X, once its cover has lifted.
+    // In and out of the Studio, by Present and Exit studio in the navbar, once its cover has lifted.
     async studio(enter) {
-      await pane.getByRole('button', { name: enter ? 'Studio' : 'Exit studio', exact: true }).click();
-      await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Studio', exact: true }).waitFor();
+      await pane.getByRole('button', { name: enter ? 'Present' : 'Exit studio', exact: true }).click();
+      await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Present', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
     },
     // A joint set from the sidebar's Position section, whatever Select picks.
@@ -198,8 +198,8 @@ async function open(t, file, { panel = true } = {}) {
     },
     // A selection is React state: it is on screen a render after whatever changed it.
     waitPressed: count => page.waitForFunction(wanted => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === wanted, count),
-    // Display: its button at the strip's end, before the Studio, the mode in hand; its settings, its per-mode settings page.
-    displayButton: () => tools.locator('[data-view-controls]').getByRole('button', { name: /^Display mode: / }),
+    // Display: its button at the navbar's right end, before Present, the mode in hand; its settings, its per-mode settings page.
+    displayButton: () => pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / }),
     async openDisplay() {
       await robot.displayButton().click();
       await page.getByRole('button', { name: 'Solid settings', exact: true }).click();
@@ -274,10 +274,10 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   await robot.openPosition();
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
   assert.equal(await robot.tool('Annotate').count(), 0, 'Annotate is a STEP tool; a robot description has none');
-  // Display and the Studio are the view's controls, ending the strip after its tools, for a robot as for any 3D file.
-  assert.deepEqual(await robot.tools.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Studio']);
-  // Display is the button beside the Studio, shut as the file opens.
+  // Display and Present are the view's controls, at the navbar's right end, for a robot as for any 3D file.
+  assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Present']);
+  // Display is the button beside Present, shut as the file opens.
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs');
   assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], [['Links', 'Position controls'], [], ['Links', 'Position']]);

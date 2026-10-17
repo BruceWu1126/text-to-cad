@@ -130,7 +130,7 @@ it('Quick Edit is there once something is picked, with what the host can do, is 
   fireEvent.click(within(box).getByRole('button', { name: 'Close Quick Edit' }));
   expect(screen.queryByRole('region', { name: 'Quick Edit' })).toBeNull();
   pick(canvas);
-  fireEvent.click(screen.getByRole('button', { name: 'Studio' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await waitFor(() => expect(container.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(true));
   expect(container.querySelector('[data-preview-chrome]')!.contains(container.querySelector('[data-quick-edit]'))).toBe(true);
 });
@@ -302,7 +302,7 @@ it('the renderer is told the camera settled, through what the viewport reports: 
   act(() => { viewport.props.onCameraSettled(); });
   expect(overlay('camera-settles')).toBe('2');
   // The Studio: the camera that moves records no perspective, and the renderer still hears of it.
-  fireEvent.click(screen.getByRole('button', { name: 'Studio' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await waitFor(() => expect(viewport.props.previewMode).toBe(true));
   act(() => { viewport.props.onPerspectiveChange({ position: [4, 5, 6], target: [0, 0, 0], up: [0, 0, 1], zoom: 2, projection: 'orthographic' }); });
   act(() => { viewport.props.onCameraSettled(); });
@@ -352,7 +352,7 @@ function mountRoutine(data: Record<string, unknown>) {
 it('opening another file while the Studio is up leaves it, and the routine on screen goes back to rest', async () => {
   const calls: string[] = [];
   const rerender = mountRoutine({ animation: routineRuntime('a', calls), modelKey: 'a.glb' });
-  fireEvent.click(screen.getByRole('button', { name: 'Studio' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await screen.findByRole('button', { name: 'Exit studio' });
   // Entering puts the tools view's routine down, and with Autoplay off plays nothing.
   expect(calls).toEqual(['release a']);
@@ -365,7 +365,7 @@ it('a view that stops offering the Studio while it is up leaves it as every exit
   const calls: string[] = [];
   const runtime = routineRuntime('a', calls);
   const rerender = mountRoutine({ animation: runtime });
-  fireEvent.click(screen.getByRole('button', { name: 'Studio' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await screen.findByRole('button', { name: 'Exit studio' });
   rerender({ animation: runtime, previewable: false });
   // Put down on the way in, and again on the way out.

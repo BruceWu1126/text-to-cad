@@ -34,10 +34,10 @@ const root = path.resolve(args.dir || ".");
 // a robot description.
 const fixtures = [
   // `tools` is the file's own tool strip (a mesh and a drawing have none: a tool that does not
-  // apply is hidden, not disabled); `threeD` ends the strip with Display and the Studio; `sections`
+  // apply is hidden, not disabled); `threeD` has Display and Present at the navbar's right end; `sections`
   // are file sidebar tiles it must have (what there is to read of the file, whatever the tool).
   { format: "stl", file: "smoke.stl", parts: false, tools: [], sections: [], threeD: true },
-  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure"], sections: ["Features"], threeD: true },
+  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure"], sections: ["Model tree"], threeD: true },
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: [], sections: [], threeD: false, minCoverage: 0.003 },
   { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select"], sections: ["Links"], threeD: true },
@@ -293,14 +293,14 @@ async function formatGate() {
         buttons.map((button) => button.getAttribute("aria-label")));
       for (const label of fixture.sections) if (!tiles.includes(label)) failures.push(`${fixture.format}: missing the ${label} tile (sidebar: ${tiles.join(", ")})`);
       if (!fixture.sections.length && tiles.length) failures.push(`${fixture.format}: a file sidebar on a file with nothing to read (${tiles.join(", ")})`);
-      // The view's own controls end the strip: Display (its mode) then the Studio on a 3D view,
-      // none on a drawing. The navbar holds none of them: its left is the logo (the app menu, the
-      // person's settings in it), the file's name and its ⋯, on every file, drawing included.
-      const controls = await page.locator("[data-cad-toolbar] [data-view-controls] button").evaluateAll((buttons) =>
+      // The view's own controls, last in the navbar: Display (its mode) then Present on a 3D view,
+      // none on a drawing; the strip keeps to the tools. The navbar's left is the logo (the app
+      // menu, the person's settings in it), the file's name and its ⋯, on every file, drawing included.
+      const controls = await page.locator("[data-viewer-navbar] [data-view-controls] button").evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("aria-label")));
-      const expected = fixture.threeD ? ["Display mode: Solid", "Studio"] : [];
+      const expected = fixture.threeD ? ["Display mode: Solid", "Present"] : [];
       if (JSON.stringify(controls) !== JSON.stringify(expected)) failures.push(`${fixture.format}: the view's controls are ${JSON.stringify(controls)}`);
-      if (await page.locator("[data-viewer-navbar] [data-view-controls]").count()) failures.push(`${fixture.format}: view controls in the navbar`);
+      if (await page.locator("[data-cad-toolbar] [data-view-controls]").count()) failures.push(`${fixture.format}: view controls on the strip`);
       const menus = await page.getByRole("button", { name: "Menu", exact: true }).count();
       if (menus !== 1) failures.push(`${fixture.format}: ${menus} app menus (one on every file)`);
       const menu = await canvasMenuItems(page, canvas);
@@ -322,10 +322,10 @@ async function formatGate() {
   }
 }
 
-// Inspect is the tools view, in the file's mode (Solid); Render is the Studio's alone, in by its
-// button at the strip's end and out by its X, each once the cover over the crossing has lifted.
+// Inspect is the tools view, in the file's mode (Solid); Render is the Studio's alone, in by
+// Present and out by Exit studio, both in the navbar, each once the cover over the crossing has lifted.
 async function selectViewingMode(page, current, next) {
-  const [press, arrive] = next === "Render" ? ["Studio", "Exit studio"] : ["Exit studio", "Studio"];
+  const [press, arrive] = next === "Render" ? ["Present", "Exit studio"] : ["Exit studio", "Present"];
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);
   await page.getByRole("button", { name: press, exact: true }).click();
   await page.getByRole("button", { name: arrive, exact: true }).waitFor();

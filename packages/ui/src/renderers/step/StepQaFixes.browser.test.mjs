@@ -73,7 +73,7 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   // A single part has no tree under Select (its one row would be all of it), and no panel in its
   // place: Select's selection filter is the chevron after its button on the strip, everything
   // ticked, with no Parts (a part is one thing) and no Position (nothing moves).
-  assert.equal(await pane.locator('[data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
+  assert.equal(await pane.locator('[data-tool-panel][aria-label="Model tree"]').count(), 0, 'no tree for a part file');
   assert.equal(await pane.getByRole('region', { name: 'Select', exact: true }).count(), 0, 'and no Select card');
   await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Selection filter: everything', exact: true }).click();
   assert.deepEqual(await page.locator('[role=menu][aria-label="Selection filter"] [data-select-filter]').allInnerTexts(),

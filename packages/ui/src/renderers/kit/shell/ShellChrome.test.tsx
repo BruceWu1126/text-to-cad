@@ -203,19 +203,34 @@ it("the sidebar's tiles are there whatever the tool, a tool's own section coming
   expect([tileNames(), preferences.writes]).toEqual([['Harness tree', 'Reference'], 0]);
 });
 
-it("on a phone the sidebar's tiles lead the strip, ruled off from its tools, and open their panel under it at a phone's width with no grip; Annotate's controls are its chevron's menu", () => {
+it("on a phone the file sidebar is one tile at the top-left, on the strip's line, the strip kept clear of it; it opens the panel on the section last open (the first, at first), headed by a tab per section and one X; Annotate's controls are its chevron's menu", () => {
   frame({ mobile: true });
   const strip = screen.getByRole('group', { name: 'Interaction tools' });
-  // No toolbar of the sidebar's own: its tiles are the strip's first group.
-  expect(document.querySelectorAll('[data-file-sidebar-tools]')).toHaveLength(1);
-  const group = within(strip).getByRole('group', { name: 'File sidebar' });
-  expect([within(group).getAllByRole('button').map(button => button.getAttribute('aria-label')), group.nextElementSibling!.hasAttribute('data-strip-rule')])
-    .toEqual([['Harness tree', 'Reference'], true]);
-  // Its room hangs under the strip, at the left, down to a little past the view's middle.
-  expect(document.querySelector<HTMLElement>('[data-file-sidebar-room]')!.style).toMatchObject({ left: '8px', bottom: '40%' });
-  fireEvent.click(within(group).getByRole('button', { name: 'Reference' }));
-  expect([isOpen(), within(group).getByRole('button', { name: 'Reference' }).getAttribute('aria-pressed'), bar().style.width, bar().querySelector('[data-file-sidebar-corner]')])
-    .toEqual([true, 'true', '256px', null]);
+  const toggle = screen.getByRole('button', { name: 'Sidebar' });
+  // The sidebar's toolbar is its one tile, not the strip's: the strip is centred clear of it.
+  expect([strip.contains(toggle), toggle.hasAttribute('data-file-sidebar-toggle'), document.querySelectorAll('[data-file-sidebar-tools] button').length])
+    .toEqual([false, true, 1]);
+  expect(document.querySelector<HTMLElement>('[data-cad-tool-groups]')!.style).toMatchObject({ left: '62px', right: '62px' });
+  // Its room runs from the top-left corner to the view's bottom inset, clear of Quick Edit's peek.
+  expect(document.querySelector<HTMLElement>('[data-file-sidebar-room]')!.style).toMatchObject({ top: '8px', left: '8px', bottom: 'calc(var(--cad-quick-edit-peek, 0px) + 8px)' });
+  const tabs = () => [...document.querySelectorAll<HTMLElement>('[data-file-sidebar-tab]')].map(tab => [tab.getAttribute('aria-label'), tab.getAttribute('data-state')]);
+  const shownSection = () => ['Harness tree', 'Harness reference'].filter(label => !panel(label)!.hasAttribute('data-sidebar-closed'));
+  expect(isOpen()).toBe(false);
+  fireEvent.click(toggle);
+  expect([isOpen(), toggle.getAttribute('aria-pressed'), tabs(), shownSection()]).toEqual([true, 'true', [['Harness tree', 'on'], ['Reference', 'off']], ['Harness tree']]);
+  // A phone's panel, its own width and no grip; the one X is the tab row's, none in a section's head.
+  expect([bar().style.width, bar().querySelector('[data-file-sidebar-corner]')]).toEqual(['288px', null]);
+  expect([...document.querySelectorAll('[data-file-sidebar-close]')].map(button => [button.getAttribute('aria-label'), Boolean(button.closest('[data-file-sidebar-tabs]'))]))
+    .toEqual([['Close sidebar', true]]);
+  fireEvent.click(document.querySelector('[data-file-sidebar-tab="reference"]')!);
+  expect([tabs(), shownSection()]).toEqual([[['Harness tree', 'off'], ['Reference', 'on']], ['Harness reference']]);
+  // Closed by its X, it opens again on the section last open; the tile closes it too.
+  fireEvent.click(screen.getByRole('button', { name: 'Close sidebar' }));
+  expect([isOpen(), toggle.getAttribute('aria-pressed')]).toEqual([false, 'false']);
+  fireEvent.click(toggle);
+  expect([isOpen(), shownSection()]).toEqual([true, ['Harness reference']]);
+  fireEvent.click(toggle);
+  expect(isOpen()).toBe(false);
   fireEvent.click(tool('Annotate'));
   expect(tool('Annotate').getAttribute('aria-pressed')).toBe('true');
   expect([screen.queryByRole('toolbar', { name: 'Annotation controls' }), Boolean(screen.getByRole('button', { name: 'Annotation settings' }))]).toEqual([null, true]);
@@ -244,7 +259,7 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   frame();
   const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Studio']);
+  expect(barButtons()).toEqual(['Display mode', 'Present']);
   stage('finding');
   expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
   expect(document.querySelector('[data-cad-tool-stack]')).toBeNull();
@@ -252,14 +267,14 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   expect(viewportProps.current.isLoading).toBe(true);
   stage('idle');
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Studio']);
+  expect(barButtons()).toEqual(['Display mode', 'Present']);
   // With nothing to work on yet, the strip is idle together, and so are Display and the Studio.
   stage('unready');
   expect(strip()).toEqual(['Select', 'Annotate', 'Keep', 'Pose']);
-  const idle = (name: string) => (name === 'Display' ? displayButton() : name === 'Studio' ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
-  expect(['Select', 'Annotate', 'Display', 'Studio'].map(idle)).toEqual([true, true, true, true]);
+  const idle = (name: string) => (name === 'Display' ? displayButton() : name === 'Present' ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
+  expect(['Select', 'Annotate', 'Display', 'Present'].map(idle)).toEqual([true, true, true, true]);
   stage('idle');
-  expect(['Select', 'Annotate', 'Display', 'Studio'].map(idle)).toEqual([false, false, false, false]);
+  expect(['Select', 'Annotate', 'Display', 'Present'].map(idle)).toEqual([false, false, false, false]);
 });
 
 it("Display and the Studio are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for the Studio leaves it as it is", () => {
@@ -267,7 +282,7 @@ it("Display and the Studio are a 3D view's, as its renderer declares: a view tha
   const ask = () => act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
   // A 3D view (the harness's, declared `previewable`): Display and the Studio end the strip, and a request enters it.
   frame();
-  expect(barButtons()).toEqual(['Display mode', 'Studio']);
+  expect(barButtons()).toEqual(['Display mode', 'Present']);
   ask();
   expect(viewportProps.current.previewMode).toBe(true);
   cleanup();
@@ -275,7 +290,7 @@ it("Display and the Studio are a 3D view's, as its renderer declares: a view tha
   // strip, no rule, and the same request leaves the normal view on screen, its tools up.
   frame({ name: 'flat.harness' });
   expect(barButtons()).toEqual([]);
-  for (const name of [/^Display mode: /, 'Studio']) expect(screen.queryByRole('button', { name })).toBeNull();
+  for (const name of [/^Display mode: /, 'Present']) expect(screen.queryByRole('button', { name })).toBeNull();
   expect(document.querySelector('[data-strip-rule]')).toBeNull();
   ask();
   expect(viewportProps.current.previewMode).toBe(false);
@@ -295,24 +310,25 @@ it('a load the model did not survive leaves only the card saying so, and a faile
   expect(viewportProps.current.viewCube).toBe(false);
   stage('failed');
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Studio']);
+  expect(barButtons()).toEqual(['Display mode', 'Present']);
   expect(viewportProps.current.viewCube).toBe(true);
 });
 
 it("a dismissed alert's own icon, at the navbar's right, brings its card back; it goes with the card's return, and when the alert clears", async () => {
-  // The harness under the real FileViewer, whose navbar's right holds nothing of its own, nor the
-  // view's controls (they end the strip): only a dismissed alert's icon.
+  // The harness under the real FileViewer, whose navbar's right holds nothing of its own but the
+  // view's controls, last (Display and Present: the strip keeps to the tools), and a dismissed
+  // alert's icon before them.
   const host = testHost({ links: viewerLinks({ version: '0.7.5' }), environment: { colorScheme: 'light', platform: 'darwin' },
     files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file', extension: 'harness', size: 1 }) } });
   render(<FileViewer file="/models/one.harness" host={host as any} renderers={[createHarnessRenderer({ preferences: tabSettings() })]}
     state={{}} onStateChange={() => {}} />);
-  await screen.findByRole('button', { name: 'Studio' });
+  await screen.findByRole('button', { name: 'Present' });
   const right = () => [...document.querySelector('[data-viewer-navbar] > div')!.querySelectorAll('a, button')].map(node => node.getAttribute('aria-label'));
   const card = () => screen.queryByRole('alert');
   const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
-  const view: string[] = [];
-  expect([right(), barButtons()]).toEqual([view, ['Display mode', 'Studio']]);
-  expect(document.querySelectorAll('[data-viewer-navbar] [data-view-controls] button')).toHaveLength(0);
+  const view = ['Display mode: Solid', 'Present'];
+  expect([right(), barButtons()]).toEqual([view, []]);
+  expect(document.querySelectorAll('[data-viewer-navbar] [data-view-controls] button')).toHaveLength(2);
   stage('failed');
   expect(card()!.textContent).toContain('Harness update failed');
   expect(right()).toEqual(view, 'the card is up: no icon');
@@ -366,7 +382,7 @@ it('a host showing the view small gets the model alone: no tools, no view action
 it("Display and the Studio end the strip; Render is no mode of Display's, and a mode's settings leave Annotate and kept tools in place", async () => {
   const user = userEvent.setup({ skipHover: true });
   const { remount } = frame();
-  expect([strip(), barButtons()]).toEqual([['Select', 'Annotate', 'Keep', 'Pose'], ['Display mode', 'Studio']]);
+  expect([strip(), barButtons()]).toEqual([['Select', 'Annotate', 'Keep', 'Pose'], ['Display mode', 'Present']]);
   const solid = render(<SolidModeIcon />).container.querySelector('svg')!;
   expect(displayButton().querySelector('svg')!.innerHTML).toEqual(solid.innerHTML);
   await user.click(displayButton());
@@ -400,7 +416,7 @@ it("Display and the Studio end the strip; Render is no mode of Display's, and a 
 
 // The Studio, entered as its tile enters it: the view covered first, then the Studio under the cover.
 async function enterStudio(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Studio' }));
+  await user.click(screen.getByRole('button', { name: 'Present' }));
   await screen.findByRole('button', { name: 'Exit studio' });
 }
 const studioSettings = () => screen.queryByRole('region', { name: 'Studio settings' });
@@ -461,7 +477,7 @@ it("the Studio is in Render: the strip, the view's controls and the stack step a
   await user.click(within(corner).getByRole('button', { name: 'Exit studio' }));
   expect(chrome.hidden).toBe(false);
   expect(viewportProps.current.previewMode).toBe(false);
-  expect(barButtons()).toEqual(['Display mode', 'Studio']);
+  expect(barButtons()).toEqual(['Display mode', 'Present']);
   // The tools view is back in the file's own mode (the Studio drew Render over it: `presentMode`).
   expect(displayButton().getAttribute('aria-label')).toBe('Display mode: Solid');
   // The tool in hand is as it was, its section's tile with it; Display, put away, stays shut.
@@ -486,7 +502,7 @@ it("the Studio is covered from the press until its picture has converged, then s
     frame();
     const cover = () => document.querySelector('[data-preview-cover]');
     const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-    fireEvent.click(screen.getByRole('button', { name: 'Studio' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Present' }));
     // The press is answered at once, before the Studio itself is entered under it.
     expect(cover()?.textContent).toBe('Preparing studio…');
     await wait(100);

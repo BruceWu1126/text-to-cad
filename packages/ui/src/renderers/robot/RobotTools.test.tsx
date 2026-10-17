@@ -178,9 +178,9 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   expect([robot.filter(), robot.knobs(), picks.latest!.enabled]).toEqual(['Selection filter: Position', 1, false]);
   expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // Display is not a tool: its settings (each mode's page), from the strip's end, open over Select
-  // and leave it the tool, with its knobs; Escape puts them away.
-  await user.click(within(within(robot.pane).getByRole('group', { name: 'Interaction tools' })).getByRole('button', { name: /^Display mode: / }));
+  // Display is not a tool: its settings (each mode's page), from the navbar's right end, open over
+  // Select and leave it the tool, with its knobs; Escape puts them away.
+  await user.click(within(robot.pane.querySelector<HTMLElement>('[data-viewer-navbar]')!).getByRole('button', { name: /^Display mode: / }));
   await user.click(screen.getByRole('button', { name: 'Solid settings' }));
   await waitFor(() => expect(document.querySelector('[data-display-settings]')).not.toBeNull());
   expect([robot.toolNames(), robot.knobs()]).toEqual([['Select:true'], 1]);
@@ -201,10 +201,11 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   robot.client.dispose();
 });
 
-it('a robot is a 3D view: Display and the Studio end its strip', async () => {
+it('a robot is a 3D view: Display and Present end the navbar, the strip keeping to its tools', async () => {
   const robot = await openRobot();
-  const actions = within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector<HTMLElement>('[data-view-controls]')!;
-  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Studio']);
+  const actions = robot.pane.querySelector<HTMLElement>('[data-viewer-navbar] [data-view-controls]')!;
+  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Present']);
+  expect(within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector('[data-view-controls]')).toBeNull();
   robot.client.dispose();
 });
 
@@ -249,22 +250,24 @@ it('robot Links and Position are the file sidebar\'s tiles whatever Select picks
   robot.client.dispose();
 });
 
-it('on a phone a robot\'s sidebar tiles lead the strip, ruled off from Select, and open the panel under it', async () => {
+it('on a phone a robot\'s sidebar is one tile beside the strip, opening a panel of Links and Position tabs', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
   const robot = await openRobot({ phone: true });
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
   const strip = within(robot.pane).getByRole('group', { name: 'Interaction tools' });
-  // No toolbar of the sidebar's own: its tiles are the strip's first group, then a rule, then Select.
-  expect(robot.pane.querySelectorAll('[data-file-sidebar-tools]')).toHaveLength(1);
-  const group = strip.querySelector<HTMLElement>('[data-file-sidebar-tools]')!;
-  expect([within(group).getAllByRole('button').map(tile => tile.getAttribute('aria-label')), group.nextElementSibling!.hasAttribute('data-strip-rule')])
-    .toEqual([['Links', 'Position'], true]);
-  fireEvent.click(within(group).getByRole('button', { name: 'Links' }));
+  const toggle = within(robot.pane).getByRole('button', { name: 'Sidebar' });
+  expect([strip.contains(toggle), robot.pane.querySelectorAll('[data-file-sidebar-tools] button').length]).toEqual([false, 1]);
+  fireEvent.click(toggle);
   await waitFor(() => expect(robot.pane.querySelector('aside[data-cad-file-sidebar]')!.hasAttribute('data-open')).toBe(true));
-  // A phone's panel: its own width, and no grip.
+  // Its first section, under a tab per section; a phone's panel: its own width, and no grip.
+  expect([...robot.pane.querySelectorAll('[data-file-sidebar-tab]')].map(tab => [tab.getAttribute('aria-label'), tab.getAttribute('data-state')]))
+    .toEqual([['Links', 'on'], ['Position', 'off']]);
   const aside = robot.pane.querySelector<HTMLElement>('aside[data-cad-file-sidebar]')!;
-  expect([aside.style.width, aside.querySelector('[data-file-sidebar-corner]')]).toEqual(['256px', null]);
+  expect([aside.style.width, aside.querySelector('[data-file-sidebar-corner]')]).toEqual(['288px', null]);
+  fireEvent.click(robot.pane.querySelector('[data-file-sidebar-tab="position"]')!);
+  await waitFor(() => expect(robot.jointField('shoulder')).toBeTruthy());
+  expect(robot.pane.querySelector('[data-tool-panel][aria-label="Links"]')!.hasAttribute('data-sidebar-closed')).toBe(true);
   robot.client.dispose();
 });
 
@@ -301,7 +304,7 @@ it('the Studio draws the opening pose and leaving it restores the tools pose wit
   robot.type('shoulder', '30');
   const posed = matrix();
   expect(posed).not.toEqual(opening);
-  await userEvent.setup().click(robot.tool('Studio'));
+  await userEvent.setup().click(within(robot.pane).getByRole('button', { name: 'Present' }));
   await waitFor(() => expect(matrix()).toEqual(opening));
   await userEvent.setup().click(screen.getByRole('button', { name: 'Exit studio', exact: true }));
   await waitFor(() => expect(matrix()).toEqual(posed));

@@ -91,7 +91,7 @@ it('draws the kinematic tree collapsed below the first real choice, with each li
   fireEvent.click(tile);
   expect(tile.getAttribute('aria-pressed')).toBe('true');
   const head = document.querySelector<HTMLElement>('[data-sidebar-head]')!;
-  expect([head.contains(filter()), filter().getAttribute('placeholder'), head.querySelector('[data-tool-panel-heading]')]).toEqual([true, 'Search…', null]);
+  expect([head.contains(filter()), filter().getAttribute('placeholder'), head.querySelector('[data-tool-panel-heading]')]).toEqual([true, 'Filter…', null]);
   fireEvent.click(within(head).getByRole('button', { name: 'Close links' }));
   expect(tile.getAttribute('aria-pressed')).toBe('false');
   // base_footprint is only a frame (no geometry, no mass, base_link fixed to it): it has nothing

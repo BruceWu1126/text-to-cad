@@ -299,3 +299,33 @@ it('docked on a phone it is a bottom sheet peeking at its header and chips, keep
   expect([opener(), compose().hasAttribute('inert')]).toEqual([null, false]);
   expect(box()!.querySelector('[data-quick-edit-resize]')).toBeNull();
 });
+
+it('Copy needs no note: with nothing written it copies what is picked, while Queue and Send wait for one', async () => {
+  let copied: Promise<string> | string = '';
+  const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} },
+    promptContext: { getSnapshot: () => composer, subscribe: () => () => {}, deliver: vi.fn(), send: vi.fn() } as any });
+  mount(host, { references: [face] });
+  const disabled = () => ['Copy Prompt', 'Queue', 'Send'].map(name => within(box()!).getByRole('button', { name }).hasAttribute('disabled'));
+  expect([note(), disabled()]).toEqual(['', [false, true, true]]);
+  fireEvent.click(within(box()!).getByRole('button', { name: 'Copy Prompt' }));
+  await waitFor(() => expect(within(box()!).getByRole('button', { name: 'Prompt copied' })).toBeTruthy());
+  expect(await copied).toBe('File: /models/parts/bracket.step\nReferences:\n/models/parts/bracket.step#o1.f2');
+});
+
+it('peeking on a phone, its row is the note\'s field and a plain icon button per action, which acts without opening the sheet', async () => {
+  let copied: Promise<string> | string = '';
+  const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} },
+    promptContext: { getSnapshot: () => composer, subscribe: () => () => {}, deliver: vi.fn(), send: vi.fn() } as any });
+  const { update } = mount(host, { docked: true });
+  press();
+  update({ references: [face] });
+  const peek = box()!.querySelector<HTMLElement>('[data-quick-edit-peek]')!;
+  const actions = [...peek.querySelectorAll<HTMLButtonElement>('[data-quick-edit-peek-action]')];
+  expect([within(peek).getByRole('button', { name: 'Describe your changes…' }) !== null,
+    actions.map(button => [button.dataset.quickEditPeekAction, button.getAttribute('aria-label'), button.getAttribute('data-variant'), button.disabled])])
+    .toEqual([true, [['copy', 'Copy Prompt', 'outline', false], ['queue', 'Queue', 'outline', true], ['send', 'Send', 'outline', true]]]);
+  fireEvent.click(actions[0]);
+  await waitFor(() => expect(peek.querySelector('[data-quick-edit-peek-action="copy"]')!.getAttribute('aria-label')).toBe('Prompt copied'));
+  expect(await copied).toBe('File: /models/parts/bracket.step\nReferences:\n/models/parts/bracket.step#o1.f2');
+  expect(within(box()!).getByRole('button', { name: 'Describe your changes…' }).getAttribute('aria-expanded')).toBe('false');
+});

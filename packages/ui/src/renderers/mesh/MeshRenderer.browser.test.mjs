@@ -105,17 +105,16 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh has no interaction tools, so its strip is the view's controls alone: Display, then the Studio, with no rule.
+// A mesh has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Present.
 const noTools = async (pane) => {
-  const strip = pane.getByRole('group', { name: 'Interaction tools' });
-  assert.deepEqual(await strip.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Studio'], 'a mesh has no tools: the strip holds the view\'s controls alone');
-  assert.equal(await strip.locator('[data-strip-rule]').count(), 0, 'no rule with no tools before it');
+  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a mesh has no tools, and no strip');
+  assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    ['Display mode: Solid', 'Present'], 'its view\'s controls end the navbar');
   for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
   }
 };
-const displayButton = pane => pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: /^Display mode: / });
+const displayButton = pane => pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
 // Display's settings: its per-mode settings page.
 async function openDisplay(pane) {
   await displayButton(pane).click();
@@ -171,11 +170,11 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-// Render is the Studio's: in by its button on the strip and out by its X, each once the view has
+// Render is the Studio's: in by Present and out by Exit studio, both in the navbar, each once the view has
 // come together under its cover.
 async function studio(page, pane, enter) {
-  await pane.getByRole('button', { name: enter ? 'Studio' : 'Exit studio', exact: true }).click();
-  await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Studio', exact: true }).waitFor();
+  await pane.getByRole('button', { name: enter ? 'Present' : 'Exit studio', exact: true }).click();
+  await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Present', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
     && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
 }
@@ -196,8 +195,8 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   // simply orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a mesh has nothing to pick');
-  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Studio', exact: true }).count(), 1,
-    'an STL is 3D: the Studio ends the strip after Display');
+  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Present', exact: true }).count(), 1,
+    'an STL is 3D: Present ends the navbar after Display');
 
   // A mesh has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
@@ -377,7 +376,7 @@ test('a corrupt mesh raises the viewer\'s load alert and an empty one says there
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.stl/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of [/^Display mode: /, 'Studio']) {
+  for (const name of [/^Display mode: /, 'Present']) {
     assert.equal(await broken.pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   assert.equal(await alert.getByRole('button', { name: 'Retry', exact: true }).count(), 1);
