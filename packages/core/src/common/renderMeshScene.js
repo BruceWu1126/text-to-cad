@@ -357,13 +357,12 @@ function roundedBounds(bounds) {
 // duplicated `name` (600/600), and the coordinates carried 16 significant figures.
 //
 // `ref` survives rather than `id`/`occurrenceId` because it is the form that goes
-// straight back into `--focus` / `--hide` / `inspect`; the bare id is one string slice
+// straight back into `--focus` / `--hide` / `read_scene(...).resolve()`; the bare id is one string slice
 // away for anyone who needs it.
 // A label ref (`#eye_shank`) addresses a part by the `name` already in every row, so this
 // payload deliberately does NOT carry a second `labelRef` identifier -- that would undo the
-// size work above for a string the row already contains. `inspect refs` reports the exact
-// paste spelling, including the numbered form for duplicated labels, where the output is
-// small enough for it to be free.
+// size work above for a string the row already contains. A duplicated label's numbered
+// aliases (`#wheel_1`, `#wheel_2`) are spelled out where the bare label is refused.
 export function listRenderableParts(parts) {
   return toArray(parts).map((part, index) => {
     const occurrenceId = String(part?.occurrenceId || part?.id || "");

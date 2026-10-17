@@ -57,7 +57,7 @@ def quantity_color_rgba_from_color(color: object) -> object | None:
     arguments as sRGB and linearizes them once more on the way in, so for
     ``srgb("#808080")`` (channels 0.216) the internal value is 0.038. Written
     as linear, that reached the file as sRGB 0.216 and came back through the
-    reader -- ``inspect``, ``read_step``, the Viewer's STEP import, any other
+    reader -- ``read_step``, ``read_scene``, the Viewer's STEP import, any other
     CAD tool -- two and a half stops darker than the tree renders the same
     part. Normalizing the channel values through Quantity_TOC_RGB puts the
     intended sRGB byte in the file.

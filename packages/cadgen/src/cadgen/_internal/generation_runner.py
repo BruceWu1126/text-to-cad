@@ -438,7 +438,7 @@ def run_script_generator(
     ``model_prints_to_stdout`` decides where the MODEL's own ``print()`` output
     lands. The CLI contract is "stdout carries the result; stderr carries
     progress" — and when a generator runs as a subroutine of another verb
-    (``inspect``, ``snapshot``, a mesh export), its prints ahead of the verb's
+    (a ``snapshot``, a mesh export), its prints ahead of the verb's
     JSON broke every ``| jq`` pipeline. So the default routes them to stderr
     with the rest of the progress; only the direct build flows (``cadgen step
     build``, ``python model.py``), where the model's stdout is the user's own

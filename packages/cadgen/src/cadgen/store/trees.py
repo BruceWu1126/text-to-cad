@@ -259,8 +259,8 @@ def tree_kind(tree: dict[str, Any] | None) -> str:
     A tree with links, or with more than one own occurrence, is an assembly; one
     occurrence and no links is a part. The authored ``kind=`` (or the static
     inference from a model's return) only steers how a build packages its own
-    geometry; what a run reports, what ``inspect`` reports, and what
-    ``inspect diff`` compares is this, so the three can never disagree.
+    geometry; what a run reports and what the descriptor every reader opens says
+    (``entryKind``) is this, so the two can never disagree.
     """
     if not isinstance(tree, dict):
         return "part"

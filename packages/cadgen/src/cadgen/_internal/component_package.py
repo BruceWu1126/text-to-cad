@@ -224,8 +224,9 @@ def placed_prototype_bounds(codec: str, brep: str, prototype: Any, location: Any
 
 def _bbox_from_shape(shape: Any) -> dict[str, list[float]] | None:
     """The world-frame axis-aligned bounding box of a composed shape, as the
-    ``{"min": [...], "max": [...]}`` the assembly.json records so a cheap whole-entry
-    inspect summary does not have to re-mesh + extract full topology.
+    ``{"min": [...], "max": [...]}`` the assembly.json records so a reader of the whole
+    entry (a snapshot's bounds, ``--mode list``) does not have to re-mesh + extract full
+    topology.
 
     Measured PER LEAF and merged, not once over the whole compound, because a
     leaf's box is a pure function of its geometry and rotation. Translation
@@ -371,9 +372,9 @@ def _shape_brep_bytes(shape: Any) -> bytes:
     ``_content_hash_shape``'s serialization so the worker rebuilds exactly the
     geometry the cid addresses.
 
-    Takes a build123d shape or a bare ``TopoDS_Shape``: ``inspect validate``
-    ships its per-prototype payloads through here too, and it holds kernel
-    shapes, not wrappers."""
+    Takes a build123d shape or a bare ``TopoDS_Shape``: a document's
+    prototypes (``store.build``) and a materialized child (``store.materialize``)
+    come through here too, and they hold kernel shapes, not wrappers."""
     import io
 
     from OCP.BinTools import BinTools, BinTools_FormatVersion
@@ -439,10 +440,10 @@ def parallel_worker_count(work_count: int, *, env_var: str) -> int:
     ``env_var`` overrides (0/1 disables). Defaults engage only when there is
     enough work to amortize the per-worker interpreter + OCP import cost
     (~seconds each), and cap at eight so a large machine does not multiply a
-    ~300 MB resident kernel by its core count. One sizing rule, every pool: the
-    component build and ``inspect validate`` differ only in the variable that
-    overrides them. The shared memory policy can lower either requested count
-    to fit extraction reservations inside the owning worker's allowance."""
+    ~300 MB resident kernel by its core count. One sizing rule for every such
+    pool, each with the variable that overrides it (the component build's is
+    ``CADGEN_COMPONENT_WORKERS``). The shared memory policy can lower a requested
+    count to fit extraction reservations inside the owning worker's allowance."""
     from cadgen.daemon.memory import component_worker_limit
 
     env_value = os.environ.get(env_var, "").strip()

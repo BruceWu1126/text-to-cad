@@ -3,7 +3,7 @@
 One job, against the freshly built tree, before the sidecar is written:
 every mate's parent/child occurrence ref must name a real occurrence, and every
 ``axis={"ref": ...}`` selector becomes world-at-rest ``{"origin", "dir"}``
-numbers via the same composed selector index inspect uses. The sidecar carries
+numbers via the same composed selector index a snapshot's ``--focus`` uses. The sidecar carries
 only numbers — the viewer does arithmetic, never topology.
 
 Every ref resolves through the one resolver (``cadgen.refs``). A mate's ends
@@ -35,7 +35,7 @@ def _fail(message: str) -> ValueError:
 
 def _occurrence_index(descriptor: Mapping[str, Any]):
     """The selector index an axis ref resolves in, before any component is read: the
-    tree's leaf occurrences and its group nodes, the composed selector index inspect uses
+    tree's leaf occurrences and its group nodes, the composed selector index a snapshot uses
     (``assembly_lookup.index_with_assembly_occurrences``) without any component's
     topology, which :func:`_with_named_entities` adds for the leaves axis refs name."""
     from cadgen.assembly_lookup import merge_assembly_occurrences
