@@ -905,9 +905,8 @@ test("the Studio is a still Render showcase: its top-right holds its settings (O
   assert.equal(await view.tool('Animation').count(), 0);
   const boxes = names => Promise.all(names.map(name => pane.getByRole('button', { name, exact: true }).boundingBox()));
   await view.enterStudio();
-  // The Studio has the page to itself: the navbar goes, and its own controls stand in the view's
-  // top-right corner: its settings, then the way out, side by side.
-  await pane.locator('[data-viewer-navbar]').waitFor({ state: 'detached' });
+  // The Studio's own controls stand in the view's top-right corner: its settings, then the way
+  // out, side by side.
   const [settingsBox, exitBox] = await boxes(['Studio settings', 'Exit studio']);
   assert.ok(settingsBox.y === exitBox.y && settingsBox.x < exitBox.x, 'one row: Studio settings, Exit studio');
   const corner = await pane.locator('[data-preview-corner]').boundingBox();

@@ -68,9 +68,9 @@ function tabSettings(initial: object = {}) {
   return store;
 }
 type Settings = ReturnType<typeof tabSettings>;
-function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, onFullscreenChange = vi.fn(), appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false } = {}) {
+function frame({ name = 'panel.harness', preferences = tabSettings(), state = undefined as unknown, mobile = false, onStateChange = (_: unknown) => {}, appearance = { colorScheme: 'light' } as object, notice = null as React.ReactNode, viewer = false } = {}) {
   const props = { source: { id: 'one' }, file: { path: `/models/${name}`, name, kind: 'file' }, document: null, notice,
-    onFullscreenChange, onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
+    onReady() {}, onOpenFile() {}, appearance, state, onStateChange, reload() {}, data: { services: { preferences } } };
   // `viewer`: inside a viewer's element, as FileViewer draws it, where the viewer's keys are its own.
   const element = () => {
     const shell = <ViewerHostContext.Provider value={testHost()}><ViewerMobileContext.Provider value={mobile}>
@@ -263,24 +263,22 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
 });
 
 it("Display and the Studio are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for the Studio leaves it as it is", () => {
-  const onFullscreenChange = vi.fn();
   // The Studio asked for from outside the strip, as a link or a host request would.
   const ask = () => act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
   // A 3D view (the harness's, declared `previewable`): Display and the Studio end the strip, and a request enters it.
-  frame({ onFullscreenChange });
+  frame();
   expect(barButtons()).toEqual(['Display mode', 'Studio']);
   ask();
-  expect([viewportProps.current.previewMode, onFullscreenChange.mock.calls]).toEqual([true, [[true]]]);
+  expect(viewportProps.current.previewMode).toBe(true);
   cleanup();
-  onFullscreenChange.mockClear();
   // A view whose renderer does not declare it (`flat.harness`, a 2D view's stand-in): neither on the
   // strip, no rule, and the same request leaves the normal view on screen, its tools up.
-  frame({ name: 'flat.harness', onFullscreenChange });
+  frame({ name: 'flat.harness' });
   expect(barButtons()).toEqual([]);
   for (const name of [/^Display mode: /, 'Studio']) expect(screen.queryByRole('button', { name })).toBeNull();
   expect(document.querySelector('[data-strip-rule]')).toBeNull();
   ask();
-  expect([viewportProps.current.previewMode, onFullscreenChange.mock.calls]).toEqual([false, []]);
+  expect(viewportProps.current.previewMode).toBe(false);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
   expect(strip()).toEqual(['Annotate']);
 });
@@ -429,10 +427,9 @@ it("three surfaces: the strip, the sidebar's tiles and the stack share the light
   expect(has(studioSettings()!, FILE_SIDEBAR_SURFACE_CLASS)).toBe(true);
 });
 
-it("the Studio is fullscreen and in Render: the strip, the view's controls and the stack step aside, the sidebar offers Position alone, bare, at the top-left; the top-right holds its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
+it("the Studio is in Render: the strip, the view's controls and the stack step aside, the sidebar offers Position alone, bare, at the top-left; the top-right holds its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
   const user = userEvent.setup();
-  const onFullscreenChange = vi.fn();
-  frame({ onFullscreenChange });
+  frame();
   await user.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
   await openDisplay(user);
@@ -441,8 +438,7 @@ it("the Studio is fullscreen and in Render: the strip, the view's controls and t
   expect([chrome.hidden, chrome.hasAttribute('inert')]).toEqual([true, true]);
   expect(chrome.contains(document.querySelector('[data-cad-tool-stack]'))).toBe(true);
   expect(displayPopover()).toBeNull();
-  // The page steps aside (the host hides its navbar), and the strip goes with the tools view.
-  expect(onFullscreenChange.mock.calls).toEqual([[true]]);
+  // The strip goes with the tools view.
   expect([barButtons(), screen.queryByRole('group', { name: 'Interaction tools' })]).toEqual([[], null]);
   // The top-left: the sidebar's Studio sections (Position, here) as tiles with no surface under them.
   expect(tileNames()).toEqual(['Position']);
@@ -463,7 +459,6 @@ it("the Studio is fullscreen and in Render: the strip, the view's controls and t
   fireEvent.click(floor());
   expect([viewportProps.current.previewMode, chrome.hidden]).toEqual([true, true]);
   await user.click(within(corner).getByRole('button', { name: 'Exit studio' }));
-  expect(onFullscreenChange.mock.calls).toEqual([[true], [false]]);
   expect(chrome.hidden).toBe(false);
   expect(viewportProps.current.previewMode).toBe(false);
   expect(barButtons()).toEqual(['Display mode', 'Studio']);
