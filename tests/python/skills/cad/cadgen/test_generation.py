@@ -800,17 +800,21 @@ class CadGenerationTests(unittest.TestCase):
         tree, _ = self._fixture_tree("flat")
 
         # A current model reuses its tree: the topology options match, the tree is
-        # complete, and its source closure is unchanged -> no remesh.
+        # complete, and its source closure is unchanged -> no run, no remesh; what the
+        # model may still owe (its files, its display data) is queued for the run to finish.
         with (
             mock.patch.object(cad_generation, "_checked_source_tree", return_value=tree),
             mock.patch.object(cad_generation, "_existing_topology_artifact_matches_spec_without_scene", return_value=True),
             mock.patch.object(cad_generation, "run_script_generator") as run_generator,
             mock.patch.object(cad_generation, "_generate_part_outputs") as package,
+            mock.patch.object(cad_generation, "_Export") as queued,
             ):
             result = cad_generation._generate_step_outputs(spec, force=False)
 
         run_generator.assert_not_called()
         package.assert_not_called()
+        queued.assert_called_once()
+        self.assertEqual(queued.call_args.args[:2], (spec, tree))
         self.assertEqual(tree, result.tree)
         self.assertIsNone(result.scene)
 
