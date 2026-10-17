@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { animationRenderFrame, buildDefaultAnimationState, findAnimationClip } from '@text-to-cad/core/common/animationClock.js';
-import { AnimationClockProvider, createAnimationClock } from '../../../../dist/renderers/step/workbench/animationClockStore.js';
+import { createAnimationClock } from '../../../../dist/renderers/step/workbench/animationClockStore.js';
 import { useStepMotionControls } from '../../../../dist/renderers/step/workbench/useStepMotionControls.js';
 
 const parameters = [
@@ -23,11 +23,11 @@ function advance(ms = 100) {
   const queued = [...frames.values()]; frames.clear();
   act(() => queued.forEach(frame => frame(performance.now() + ms)));
 }
-// The host's side: which motion each claim named, and whether the Studio is up (`previewing`).
-function setup(initialClips: any = clips, { previewing = false } = {}) {
+// The host's side: which motion each claim named.
+function setup(initialClips: any = clips) {
   const clock = createAnimationClock();
   const used: string[] = [];
-  const host = { onUse: (motion: string) => used.push(motion), previewing: () => previewing };
+  const host = { onUse: (motion: string) => used.push(motion) };
   const hook = renderHook(({ modelClips }) => {
     const [animation, setAnimation] = useState(buildDefaultAnimationState(modelClips));
     const [values, setValues] = useState(definition.defaultParameterValues);
@@ -37,11 +37,10 @@ function setup(initialClips: any = clips, { previewing = false } = {}) {
       selectedAnimationClips: modelClips, selectedActiveAnimationClip: findAnimationClip(modelClips, animation.activeClipId),
       animationState: animation, animationStateRef: animationRef, setAnimationState: setAnimation,
       stepModuleParameterValuesRef: valuesRef, setStepModuleParameterValues: setValues,
-      setAppliedStepPoseName: setPose, motionRevisionRef: revision, host });
+      setAppliedStepPoseName: setPose, motionRevisionRef: revision, clock, host });
     return { ...commands, animation, values, pose, animationRef, valuesRef,
       frame: animationRenderFrame({ ...animation, clip: findAnimationClip(modelClips, animation.activeClipId) }) };
-  }, { initialProps: { modelClips: initialClips },
-    wrapper: ({ children }) => <AnimationClockProvider value={clock}>{children}</AnimationClockProvider> });
+  }, { initialProps: { modelClips: initialClips } });
   return { ...hook, clock, used };
 }
 
@@ -69,7 +68,7 @@ it('a parameter edit stops live playback, keeps its transport preferences, reset
   expect(result.current.animation).toEqual({ ...preferences, enabled: true, playing: true, elapsedSec: 0 });
 });
 
-it('leaving preview keeps the transport preferences too', () => {
+it('putting the routine down keeps the transport preferences too', () => {
   const { result, clock } = setup();
   pickPreferences(result);
   act(() => result.current.handleAnimationPlayToggle()); advance();
@@ -89,14 +88,6 @@ it.each(['play', 'scrub', 'restart'])("%s in the tools view is a use of the rout
   act(() => routineCommands(result)[command]());
   expect([result.current.values.hinge, result.current.pose, result.current.animation.enabled]).toEqual([5, '', true]);
   expect(used).toEqual(['position', 'animation']);
-});
-
-it.each(['play', 'scrub', 'restart'])("%s in the Studio plays over the model as it opens: the tools view's pose and Explode stay", command => {
-  const { result, used } = setup(clips, { previewing: true });
-  act(() => result.current.handleApplyPose('open'));
-  act(() => routineCommands(result)[command]());
-  expect([result.current.values.hinge, result.current.pose, result.current.animation.enabled]).toEqual([80, 'open', true]);
-  expect(used).toEqual(['position']);
 });
 
 it.each(['clip', 'speed', 'loop'])('%s is how the routine plays, not a use of it: the pose and Explode stay', command => {

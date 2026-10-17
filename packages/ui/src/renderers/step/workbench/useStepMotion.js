@@ -56,7 +56,7 @@ export function stepMotionSources(entry) {
  * @param {{ entry: object, fileKey: string, resources: object, meshData: object | null, meshPartial: boolean,
  *   readStored: () => { pose: object | null }, clipboard: object,
  *   reportError: (message: string) => void,
- *   host?: { previewing(): boolean, onUse(motion: "position" | "animation"): void } }} options
+ *   host?: { onUse(motion: "position" | "animation"): void } }} options
  */
 export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial, readStored, clipboard, reportError, host = null }) {
   const animationClock = useAnimationClockStore();
@@ -316,7 +316,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
   const commands = useStepMotionControls({
     selectedStepModuleDefinition: definition, selectedAnimationClips: clips, selectedActiveAnimationClip: activeClip,
     animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,
-    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, host
+    setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, clock: animationClock, host
   });
 
   // Embedded animation clips are checked against the compiled tree once it is
@@ -380,17 +380,38 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
   };
 
   // What the Position and Animation sections read and call.
+  const { positionControls, animationControls } = motionSectionControls({
+    status, error, definition, parameterValues: stepModuleParameterValues, appliedPoseName, animationRuntime,
+    animationStatus, animationError, clipList, animationState, commands, clock: animationClock,
+    onCopyParams: copyParameters, onPasteParams: pasteParameters
+  });
+
+  return {
+    definition, clips, loading, topologyRequired: stepModuleRequiresTopology(definition), parameterValues: stepModuleParameterValues,
+    animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
+    onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
+    releaseAnimation: commands.releaseAnimation,
+    resetMotion: commands.resetMotion, resetPosition: commands.resetPosition, restore
+  };
+}
+
+/**
+ * What the Position and Animation sections read and call, over one motion's state and commands:
+ * the tools view's (`useStepMotion`) or the Studio's (`useStepStudioMotion`).
+ */
+export function motionSectionControls({ status, error, definition, parameterValues, appliedPoseName, animationRuntime,
+  animationStatus, animationError, clipList, animationState, commands, clock, onCopyParams = null, onPasteParams = null }) {
   const positionControls = {
     status, error, definition,
-    parameterValues: stepModuleParameterValues,
+    parameterValues,
     onParameterChange: commands.handleStepModuleParameterChange,
     onResetParameters: commands.handleResetStepModuleParameters,
     onApplyPose: commands.handleApplyPose,
     activePose: animationState.enabled !== false ? "" : appliedPoseName,
     positionActive: !animationRuntime,
     onResetMotion: commands.resetMotion,
-    onCopyParams: copyParameters,
-    onPasteParams: pasteParameters
+    onCopyParams,
+    onPasteParams
   };
   const animationControls = {
     status: animationStatus,
@@ -409,20 +430,10 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
     onSpeedChange: commands.handleAnimationSpeedChange,
     onLoopToggle: commands.handleAnimationLoopToggle,
     onRelease: commands.releaseAnimation,
-    savePlayback: commands.savePlayback,
-    restorePlayback: commands.restorePlayback,
     resetModel: commands.resetMotion,
-    // The kit's scrubber reads its time from the runtime it is handed, not from a context: the
-    // old STEP-only bar did, which is why this object never carried one. It is the same clock
-    // the pose pass writes per frame, so the scrubber re-renders and nothing else does.
-    clock: animationClock
+    // The kit's scrubber reads its time from the runtime it is handed, not from a context. It is the
+    // same clock the pose pass writes per frame, so the scrubber re-renders and nothing else does.
+    clock
   };
-
-  return {
-    definition, loading, topologyRequired: stepModuleRequiresTopology(definition), parameterValues: stepModuleParameterValues,
-    animationState, animationStateRef, animationRuntime, animationError, positionControls, animationControls,
-    onParameterChange: commands.handleStepModuleParameterChange, onPlayToggle: commands.handleAnimationPlayToggle,
-    releaseAnimation: commands.releaseAnimation,
-    resetMotion: commands.resetMotion, resetPosition: commands.resetPosition, restore
-  };
+  return { positionControls, animationControls };
 }

@@ -27,7 +27,7 @@ function liveRuntime(modelKey: string) {
   const canvas = document.createElement('canvas');
   return { THREE, camera, orthographicCamera: camera, controls: { target: new THREE.Vector3(), update() {} },
     renderer: { domElement: canvas }, hasVisibleModel: true, activeModelKey: modelKey,
-    // What the viewport's own effects (preview's orbit) touch on any runtime.
+    // What the viewport's own effects (the Studio's orbit) touch on any runtime.
     interactionState: { restoreTimerId: 0 }, keyboardOrbitState: null, requestRender() {}, scheduleIdleQuality() {} };
 }
 
@@ -52,15 +52,15 @@ it('a viewport resize is a settle every time, even when the stored perspective i
   expect(onPerspectiveChange).toHaveBeenCalledTimes(1);
 });
 
-it('a preview camera that moves is a settle, and records no perspective', () => {
+it("the camera of a viewport that keeps none (the Studio's) moving is a settle; the editor's records it instead", () => {
   const { all, rerender, runtime, onCameraSettled, onPerspectiveChange } = mount();
-  rerender(<ShellViewport {...(all as any)} previewMode />);
+  rerender(<ShellViewport {...(all as any)} studio onPerspectiveChange={null} />);
   runtime.camera.position.set(0, -200, 50);
   act(() => { runtimeHook.options.emitPerspectiveChange(runtime); });
   expect(onCameraSettled).toHaveBeenCalledTimes(1);
   expect(onPerspectiveChange).not.toHaveBeenCalled();
-  // Out of preview, the same move is recorded instead (and the shell turns that into the settle).
-  rerender(<ShellViewport {...(all as any)} previewMode={false} />);
+  // A viewport that keeps its camera records the same move (and the shell turns that into the settle).
+  rerender(<ShellViewport {...(all as any)} />);
   runtime.camera.position.set(10, -200, 50);
   act(() => { runtimeHook.options.emitPerspectiveChange(runtime); });
   expect(onPerspectiveChange).toHaveBeenCalledTimes(1);

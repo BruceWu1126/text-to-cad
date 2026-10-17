@@ -94,13 +94,13 @@ it('a rebuild keeps the named pose chosen while the joints and named poses are t
 });
 
 it('an update that leaves the routine as it was neither stops nor rewinds it, a changed routine is compiled again, at rest', async () => {
-  // In the Studio: its routine plays over the model as it opens, and the tools view's pose stays.
-  const { result, rerender } = mount(saved(1, { routine: 'swing-1' }), { previewing: () => true, onUse() {} });
+  // Played, the routine plays from the model at rest.
+  const { result, rerender } = mount(saved(1, { routine: 'swing-1' }), { onUse() {} });
   await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
   act(() => result.current.onPlayToggle());
-  expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 30 }]);
+  expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
 
   rerender({ entry: saved(2, { routine: 'swing-1' }) });
   await loaded(result, 2);

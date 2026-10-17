@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   advanceAnimationElapsed, animationNowMs, clampAnimationElapsed, clampAnimationSpeed
@@ -45,7 +45,8 @@ export function useGlbAnimation(document, requestRender) {
     stateRef.current = next;
     setState(next);
   }, []);
-  useEffect(() => {
+  // At rest for every document, before anything (an Autoplay) plays it.
+  useLayoutEffect(() => {
     clock.resetAnimationClock();
     update({ ...REST, activeClipId: clips[0]?.id || "" });
   }, [document, clips, clock, update]);
@@ -75,20 +76,6 @@ export function useGlbAnimation(document, requestRender) {
     clock.resetAnimationClock();
     update({ enabled: false, playing: false, elapsedSec: 0 });
   }, [clock, update]);
-  // Preview's routine is its own (`kit/shell/useRendererShell.js`): the tools view's is saved as it
-  // stands — which clip, where its clock is, whether it plays — and handed back as it was.
-  const savePlayback = useCallback(() => {
-    const { activeClipId, enabled, playing, elapsedSec } = stateRef.current;
-    return { activeClipId, enabled, playing, elapsedSec: playing ? clock.getAnimationClock() : elapsedSec };
-  }, [clock]);
-  const restorePlayback = useCallback((saved) => {
-    const clip = clips.find((candidate) => candidate.id === saved?.activeClipId);
-    if (!clip) return;
-    const enabled = saved.enabled === true;
-    const elapsedSec = clampAnimationElapsed(saved.elapsedSec, clip.duration);
-    clock.setAnimationClock(elapsedSec);
-    update({ activeClipId: clip.id, enabled, playing: enabled && saved.playing === true, elapsedSec });
-  }, [clips, clock, update]);
   const onScrub = useCallback((value) => {
     if (!activeClip) return;
     const elapsedSec = clampAnimationElapsed(value, activeClip.duration);
@@ -145,8 +132,8 @@ export function useGlbAnimation(document, requestRender) {
     clips, activeClipId: activeClip?.id || "", enabled: state.enabled, playing: state.playing,
     elapsedSec: state.elapsedSec, speed: state.speed, loopEnabled: state.loopEnabled,
     clock, showRestart: false,
-    onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, restorePlayback,
+    onClipSelect, onPlayToggle, onRestart, onScrub, onRelease,
     onSpeedChange: (speed) => update({ speed: clampAnimationSpeed(speed) }),
     onLoopToggle: (loopEnabled) => update({ loopEnabled: loopEnabled !== false })
-  } : null), [clips, activeClip, state, clock, onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, restorePlayback, update]);
+  } : null), [clips, activeClip, state, clock, onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, update]);
 }

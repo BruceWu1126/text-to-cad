@@ -38,6 +38,11 @@ import ViewportError from "../../kit/status/ViewportError.jsx";
  * | pointer: hover, tap, double-click, measure picks | `useStepPicking.js` |
  * | Pose knobs | the kit's `JointHandleOverlay` |
  *
+ * The Render Studio mounts its own instance in its own viewport (`studio`, `StepStudioLayers.jsx`):
+ * a second scene of the same model, posed and played by the Studio's own motion, with nothing to
+ * pick, measure or hover. The editor's instance alone answers the file's memory accounting, the
+ * detail loader's adoption protocol and the debug seams.
+ *
  * Hover is the one input that is not a prop. The layers subscribe to the surface's hover store
  * and resolve it through the surface (`surfaceProps.resolveHover`), so a hover change re-renders
  * this component and no other: not the surface, its tool stack or the Features tree.
@@ -47,7 +52,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const hover = useViewerHover(surfaceProps.hoverStore, surfaceProps.resolveHover);
   const props = { ...surfaceProps, hoveredPartId: hover.hoveredPartId, hoveredReferenceId: hover.hoveredReferenceId };
   const {
-    meshData, modelKey, isLoading, renderMode, previewMode, pickMode, hiddenPartIds, selectedPartIds,
+    meshData, modelKey, isLoading, renderMode, studio = false, pickMode, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
     jointHandles, measureState, activeMeasurementId, selectedMeasurementIds = [], hoveredMeasurementId = "", measureModeActive,
     onLodCameraChange, onMeshSourceAdoption, onViewerAlertChange,
@@ -240,14 +245,14 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
 
   useStepMeasureOverlay({
     measureCanvasRef, measureState, activeMeasurementId, selectedMeasurementIds, hoveredMeasurementId, measureHoverRef, measureModeActive,
-    runtimeRef, mountRef, previewMode, viewerReadyTick
+    runtimeRef, mountRef, studio, viewerReadyTick
   });
 
   useStepPicking({
     runtimeRef,
     mountRef: hostRef,
     sceneMountRef: mountRef,
-    previewMode,
+    studio,
     pickMode,
     selectorRuntime: activeSelectorRuntime,
     pickableFaces: filteredPickableFaces,
@@ -271,6 +276,8 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const placementRef = useRef(null);
   placementRef.current = { modelKey, renderMode, floor: normalizedThemeSettings.floor || {}, renderConfiguration: props.renderConfiguration };
   useEffect(() => {
+    // The editor's layers answer them: the Studio's (`studio`) draw a second scene of the same model.
+    if (studio) return undefined;
     // Byte attribution for the headless memory harness (read, never polled here).
     const memoryProbe = () => renderMemoryAccounting(runtimeRef.current);
     // The LIVE record transforms, so a browser test can assert where a posed occurrence
@@ -311,7 +318,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
       if (window.__cadJointHandles === jointHandleLayout) delete window.__cadJointHandles;
       if (Object.getOwnPropertyDescriptor(window, "__cadModelPlacement")?.get === placement) delete window.__cadModelPlacement;
     };
-  }, [runtimeRef, stepScene]);
+  }, [runtimeRef, stepScene, studio]);
 
   return (
     <>

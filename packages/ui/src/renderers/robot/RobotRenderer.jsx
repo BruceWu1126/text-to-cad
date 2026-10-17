@@ -9,6 +9,7 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { readFileView } from "../kit/shell/fileView.js";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
+import { useStudioScene } from "../kit/shell/useStudioScene.js";
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
@@ -65,11 +66,9 @@ function RobotSurface({ view, data }) {
   const robotRef = useRef(robot);
   robotRef.current = robot;
 
-  // Preview draws the opening pose and all visuals while preserving the person's work.
+  // The Studio: a robot of its own (`studioScene`, below), posed by its own Position.
   const preview = usePreviewState();
   const previewing = preview.previewing;
-  const previewingRef = useRef(previewing);
-  previewingRef.current = previewing;
 
   // ---- scene ----------------------------------------------------------------------------
   const [scene, setScene] = useState(null);
@@ -93,7 +92,7 @@ function RobotSurface({ view, data }) {
   const shellRef = useRef(null);
   // A highlight recolours links and casts no new shadow: its frame keeps the shadow maps.
   const requestHighlightFrame = useCallback(() => shellRef.current?.requestFrame?.(), []);
-  const selection = useLinkSelection({ scene, requestRender: requestHighlightFrame, shown: !previewing });
+  const selection = useLinkSelection({ scene, requestRender: requestHighlightFrame });
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
   const live = useMemo(() => ({
@@ -116,7 +115,7 @@ function RobotSurface({ view, data }) {
     shellRef.current?.syncSceneBounds();
     shellRef.current?.scheduleStateSave();
   }, []);
-  const { hiddenPartIds, changeVisibility } = useRobotVisibility({ robot, scene, requestRender: requestVisibilityRender, stored, shown: !previewing });
+  const { hiddenPartIds, changeVisibility } = useRobotVisibility({ robot, scene, requestRender: requestVisibilityRender, stored });
   // Pose is read when saved; visibility is immutable React state, scoped to this file revision.
   const rendererState = useMemo(() => (robot && pose ? {
     signatures: { pose: robot.revision, visibility: robot.revision },
@@ -138,20 +137,31 @@ function RobotSurface({ view, data }) {
   // ---- a pose step: k matrices, one frame, no component ----------------------------------
   const handlesRef = useRef(NO_HANDLES);
   const handleLayoutRef = useRef(null);
-  const presentPoseRef = useRef(null);
-  // The Studio's own pose: the robot as it opens, each time the Studio opens, moved by the Studio's
-  // Position section and gone as it closes — the tools view's pose (`pose`) is never touched.
+  // The Studio's own robot and pose: the robot as it opens, each time the Studio opens, moved by the
+  // Studio's Position section and gone as it closes — the tools view's robot and pose are never touched.
+  const studioScene = useStudioScene(scene, previewing);
   const studioPose = useMemo(() => (previewing && robot ? createPoseStore(robot.description) : null), [previewing, robot]);
-  const studioPoseRef = useRef(studioPose);
-  studioPoseRef.current = studioPose;
+  useLayoutEffect(() => {
+    if (!studioScene || !studioPose) return undefined;
+    let boundsFrame = 0;
+    const present = () => {
+      if (!studioScene.setJointValues(studioPose.getSnapshot().values)) return;
+      const studioView = shellRef.current?.frame.studioViewRef.current;
+      studioView?.requestRender?.();
+      boundsFrame ||= window.requestAnimationFrame(() => { boundsFrame = 0; shellRef.current?.frame.studioViewRef.current?.syncSceneBounds?.(); });
+    };
+    present();
+    const unsubscribe = studioPose.subscribe(present);
+    return () => { unsubscribe(); window.cancelAnimationFrame(boundsFrame); };
+  }, [studioScene, studioPose]);
+  const studio = useMemo(() => ({ scene: studioScene }), [studioScene]);
   useLayoutEffect(() => {
     if (!scene || !pose || !robot) { handlesRef.current = NO_HANDLES; return undefined; }
     const prepared = prepareRobotJointHandles(THREE, robot.description, scene);
     let boundsFrame = 0;
     const readHandles = () => { handlesRef.current = robotJointHandles(THREE, prepared, scene, pose.getSnapshot().values, pose.write); };
     const present = () => {
-      const shown = previewingRef.current ? studioPoseRef.current?.getSnapshot().values ?? pose.defaults : pose.getSnapshot().values;
-      if (!scene.setJointValues(shown)) return;
+      if (!scene.setJointValues(pose.getSnapshot().values)) return;
       readHandles();
       shellRef.current?.requestRender();
       // Lighting, shadows and the floor follow the posed robot: once per frame, however many writes landed in it.
@@ -160,17 +170,11 @@ function RobotSurface({ view, data }) {
     const step = () => { shellRef.current?.scheduleStateSave(); present(); };
     readHandles();
     present();
-    presentPoseRef.current = present;
     const unsubscribe = pose.subscribe(step);
     return () => {
       unsubscribe(); window.cancelAnimationFrame(boundsFrame); handlesRef.current = NO_HANDLES;
-      if (presentPoseRef.current === present) presentPoseRef.current = null;
     };
   }, [scene, pose, robot]);
-  useLayoutEffect(() => {
-    presentPoseRef.current?.();
-    return studioPose?.subscribe(() => presentPoseRef.current?.());
-  }, [previewing, studioPose]);
 
   // Read-only debug/test seams: where the Pose knobs are (CSS pixels, with each joint's
   // value), where every link group IS (so a test asserts what is drawn, not what was asked
@@ -256,7 +260,7 @@ function RobotSurface({ view, data }) {
   const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
     ? { name: reference.target.selectors.join(", "), kind: "solid" } : ""), [resourcePath]);
 
-  return <RendererShell shell={shell} tools={tools} sidebar={sidebar}
+  return <RendererShell shell={shell} tools={tools} sidebar={sidebar} studio={studio}
     references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}
     nameReference={nameLink}
     onClearReferences={clearSelection}

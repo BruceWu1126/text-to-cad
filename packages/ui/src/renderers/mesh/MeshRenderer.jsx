@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { useRendererShell } from "../kit/shell/useRendererShell.js";
+import { useStudioScene } from "../kit/shell/useStudioScene.js";
 import { noGeometryAlert } from "../kit/status/loadAlerts.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import { MESH_DECLINED_LIVE_COMMANDS } from "./tools.js";
@@ -25,8 +26,11 @@ function MeshSurface({ view, data }) {
     live: LIVE
   });
   useDeclinedSelectReference(document);
+  // The Studio's own scene: the editor's sibling, over its geometry.
+  const studioScene = useStudioScene(scene, shell.previewing);
+  const studio = useMemo(() => ({ scene: studioScene }), [studioScene]);
 
-  return <RendererShell shell={shell} tools={[]} />;
+  return <RendererShell shell={shell} tools={[]} studio={studio} />;
 }
 
 export default function MeshRenderer(props) {

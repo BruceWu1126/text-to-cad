@@ -9,12 +9,11 @@ import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../annotation/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
 import { useChromeBackdropColor } from "../look/useChromeBackdropColor.js";
-import { VIEWER_RENDER_PROFILE, sceneForRenderProfile } from "../viewport/renderProfile.js";
+import { studioViewScene } from "../viewport/studioViewScene.js";
 import { CAD_ANNOTATION_DEFAULTS } from "../tools/annotate/AnnotationOverlay.jsx";
 import { annotationDocumentOf } from "../tools/annotate/annotation3d.js";
 import { normalizeToolStack } from "../tools/toolStackLayout.js";
 import { normalizePlayback } from "../tools/playbar/playbackPreferences.js";
-import { animationControlsHaveContent } from "../tools/playbar/AnimationTimeControl.js";
 import { DisplayModeSettings } from "../view-settings/DisplayModeSettings.jsx";
 import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.js";
 import { useViewSettings } from "../view-settings/useViewSettings.js";
@@ -75,13 +74,6 @@ const SESSION_SAVE_DELAY_MS = 180;
 const EMPTY = Object.freeze({});
 
 /**
- * The mode the view settings store draws instead of the file's (its `presentMode`): Render is the
- * Studio's alone (preview), drawn whatever mode the file is in, and the tools view never draws it —
- * a file left in Render is drawn there in Solid. Its Render settings are the file's either way.
- */
-const presentModeFor = (previewing, fileMode) => (previewing ? "render" : fileMode === "render" ? "solid" : null);
-
-/**
  * Everything a file-family renderer needs from its host that is not about its
  * scene. The renderer loads its document and builds its scene; this hook owns
  * the rest and hands back one `shell` object for `<RendererShell>`:
@@ -138,11 +130,10 @@ const presentModeFor = (previewing, fileMode) => (previewing ? "render" : fileMo
  *   editPending?: boolean, finding?: boolean }} options.load  The
  *   renderer's document load. `busy`: nothing to show yet. `updating`: a newer revision is loading behind the scene on
  *   screen. The rest are for a renderer whose document is more than a download — see `loadReport.js`.
- * @param {object | null} [options.animation]  A routine runtime (with its own `clock`), when the file has
- *   routines. They play from the file sidebar's Animation section, in the tools view, whose frame stays
- *   on the model as a pose does, and in the Studio (preview). Each mode's routine is its own: entering
- *   the Studio saves the tools view's (`savePlayback`) and starts at rest, playing only under Autoplay,
- *   and leaving hands it back (`restorePlayback`).
+ * @param {object | null} [options.animation]  The tools view's routine runtime (with its own `clock`),
+ *   when the file has routines. They play from the file sidebar's Animation section, whose frame stays
+ *   on the model as a pose does. The Studio's routine is its own, on its own scene (`RendererShell`'s
+ *   `studio.animation`).
  * @param {{ commands?: Record<string, (...args: any[]) => void>, declined?: Record<string, string>,
  *   state?: () => object, resource?: () => object }} [options.live]  Live commands this renderer adds (by name) or
  *   declines (name to the error its caller reads), and extra fields for the live state. Every name in
@@ -211,38 +202,18 @@ export function useRendererShell({
   const previewing = previewable && previewState.previewing;
   const previewingRef = useRef(previewing);
   previewingRef.current = previewing;
-  // Preview and the tools view are two states. The tools view's is never touched by preview: the
-  // renderer draws preview from the model as it opens (`previewing`), and keeps its own work as it
-  // is. The routine is the one thing both modes play on the same model, so it crosses here, on
-  // every way in and out: entering saves the tools view's routine as it stands (`savePlayback`) and
-  // puts it down, preview opening at rest and playing only under Autoplay; leaving puts preview's
-  // down and hands the saved one back (`restorePlayback`), to the file it came from.
-  const animationRef = useRef(animation);
-  animationRef.current = animation;
-  const modelKeyRef = useRef(modelKey);
-  modelKeyRef.current = modelKey;
-  const toolsRoutine = useRef(null);
-  const autoplayRef = useRef(false);
+  // The Studio and the tools view are two views (`StudioView.jsx`): the Studio mounts a viewport,
+  // a scene, a pose and a routine of its own over the editor's, which stays as it is. Crossing
+  // touches nothing of either: it mounts the Studio or takes it away.
   // The Studio's Orbit, on or off: its alone, off each time it opens until its settings turn it on.
   const [orbiting, setOrbiting] = useState(false);
-  // Preview's Render scene, prepared ahead of it (`previewPrepare`, below), so entering has less to do.
-  const previewPrepare = useRef(null);
-  // The view settings store (made below): a crossing draws its mode with the state it sets, so the
-  // Studio and its Render arrive in one render, not a second one after a layout effect.
-  const viewSettingsStoreRef = useRef(null);
+  // The Studio's environment and code, prepared ahead of it (`studioPrepare`, below).
+  const studioPrepare = useRef(null);
   const commitPreviewing = useCallback(entering => {
     if (entering === previewingRef.current) return;
     previewingRef.current = entering;
-    const runtime = animationControlsHaveContent(animationRef.current) ? animationRef.current : null;
-    if (entering) toolsRoutine.current = runtime?.savePlayback ? { file: modelKeyRef.current, playback: runtime.savePlayback() } : null;
-    runtime?.onRelease();
-    if (!entering && runtime?.restorePlayback && toolsRoutine.current?.file === modelKeyRef.current) runtime.restorePlayback(toolsRoutine.current.playback);
-    if (!entering) toolsRoutine.current = null;
     setOrbiting(false);
-    const store = viewSettingsStoreRef.current;
-    store?.configure({ presentMode: presentModeFor(entering, store.getSnapshot().display.mode) });
     previewState.set(entering);
-    if (entering && runtime && autoplayRef.current) runtime.onPlayToggle();
   }, [previewState.set]);
   const setPreviewing = useCallback(next => {
     // A view that does not offer Preview never enters it, whatever asks.
@@ -265,18 +236,15 @@ export function useRendererShell({
   // — one that reads them while it is still deciding what to load — creates them itself and passes
   // them in. It is the same store either way; owning it here is a convenience, not a rule.
   const { display: displaySettings, scene: desiredScene, store: viewSettingsStore } = useViewSettings(colorScheme, viewSettings);
-  viewSettingsStoreRef.current = viewSettingsStore;
   useLayoutEffect(() => { viewSettingsStore.configure({ features }); }, [viewSettingsStore, features]);
-  // The mode drawn (`presentModeFor`): set by a crossing itself (`commitPreviewing`), and here for
-  // every other way it changes — the file's own mode, a renderer's own preview state.
-  const fileMode = displaySettings.mode;
-  useLayoutEffect(() => {
-    viewSettingsStore.configure({ presentMode: presentModeFor(previewing, fileMode) });
-  }, [viewSettingsStore, previewing, fileMode]);
   // Before the first paint, like every later edit: through the store, never around it.
   useLayoutEffect(() => { viewSettingsStore.restore(restored.display); }, [viewSettingsStore, restored]);
   const ownViewerRef = useRef(null);
   const viewerRef = providedViewerRef || ownViewerRef;
+  // The Studio's viewport, while it is open (`StudioView.jsx`), and the view on screen: what a live
+  // camera or capture acts on.
+  const studioViewRef = useRef(null);
+  const viewOnScreen = () => (previewingRef.current ? studioViewRef.current : viewerRef.current);
   // Exactly one coordinator drives one viewport. A renderer that resolved the view itself
   // hands the result in, and this call stands down (`useAppliedViewSettings`).
   const appliedByRenderer = viewSettings?.applied || null;
@@ -284,13 +252,13 @@ export function useRendererShell({
   const viewUpdate = appliedByRenderer || ownViewUpdate;
   const resolvedScene = viewUpdate.scene;
   const rendering = resolvedScene.render.enabled;
-  // Preview's scene, prepared ahead: Render's studio and environment at preview's quality, so
-  // entering it is one change on screen (`setPreviewing`). Warmed once the model is on screen.
-  previewPrepare.current = signal => {
-    if (resolvedScene.render.enabled) return null;
+  // What the Studio will need, prepared ahead while the model is on screen: Render's studio code and
+  // its environment at the Studio's quality, into the GPU device's cache the Studio draws from
+  // (`studioEnvironmentCacheFor`). Preparing changes nothing the editor draws.
+  studioPrepare.current = signal => {
     const prepare = viewerRef.current?.prepareViewSettings;
     if (!prepare) return null;
-    return prepare(sceneForRenderProfile(viewSettingsStore.sceneFor("render"), VIEWER_RENDER_PROFILE.PREVIEW), signal);
+    return prepare(studioViewScene(viewSettingsStore.sceneFor("render")), signal);
   };
 
   // The camera the file was left at, scoped to this model: the viewport applies it in place of
@@ -366,12 +334,11 @@ export function useRendererShell({
   const handlePerspectiveChange = useCallback((nextPerspective) => {
     // A camera that moved is a camera that settled, whether or not the file records it.
     cameraSettledRef.current?.();
-    if (previewing) return;
     const snapshot = clonePerspectiveSnapshot(nextPerspective);
     if (!snapshot) return;
     activePerspectiveRef.current = snapshot;
     scheduleSessionSave();
-  }, [previewing, scheduleSessionSave]);
+  }, [scheduleSessionSave]);
 
   // ---- host chrome ----------------------------------------------------------
   const chromeBackdropColor = useChromeBackdropColor(colorScheme === "dark");
@@ -399,7 +366,6 @@ export function useRendererShell({
     services.onPreferenceChange({ toolStack: next });
   }, [services.onPreferenceChange]);
   const autoplay = playback.autoplay;
-  autoplayRef.current = autoplay;
   const setAutoplay = useCallback(value => setPlayback({ autoplay: value === true }), [setPlayback]);
   const hostRef = useRef(null);
   const [hostElement, setHostElement] = useState(null);
@@ -420,11 +386,11 @@ export function useRendererShell({
   const runtimeAlert = onRuntimeAlert ? null : ownRuntimeAlert;
   const viewerLoading = Boolean(load.busy);
   const hasContent = Boolean(scene) && !viewerLoading;
-  // Preview's scene warmed a moment after the model is on screen, before anyone asks for it.
+  // The Studio warmed a moment after the model is on screen, before anyone asks for it.
   useEffect(() => {
     if (!previewable || !hasContent) return undefined;
     const controller = new AbortController();
-    const timer = setTimeout(() => { void Promise.resolve(previewPrepare.current?.(controller.signal)).catch(() => {}); }, 600);
+    const timer = setTimeout(() => { void Promise.resolve(studioPrepare.current?.(controller.signal)).catch(() => {}); }, 600);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [previewable, hasContent, modelKey]);
   const presentationKey = shellPresentationKey(modelKey, revisionKey);
@@ -614,7 +580,7 @@ export function useRendererShell({
       const nextDisplay = viewerDisplaySettingsForCamera(viewSettingsStore.getSnapshot().display, camera);
       const requested = clonePerspectiveSnapshot(camera);
       if (previewing) {
-        if (!viewerRef.current?.setPerspective?.(requested)) throw new Error("The viewer could not apply this camera.");
+        if (!studioViewRef.current?.setPerspective?.(requested)) throw new Error("The viewer could not apply this camera.");
         return;
       }
       const snapshot = cameraForViewSettings(requested, nextDisplay, { lightingQuality: "preview" });
@@ -627,12 +593,13 @@ export function useRendererShell({
     // Frame the model again, without turning the camera. The name is the host
     // protocol's ("cad-reset-camera"); the viewport calls the same act resetZoom.
     resetCamera() {
-      if (!viewerRef.current?.resetZoom?.()) throw new Error("The viewer camera is unavailable.");
+      if (!viewOnScreen()?.resetZoom?.()) throw new Error("The viewer camera is unavailable.");
     },
     setDisplaySettings(patch) { viewSettingsStore.patch(patch); },
     capture() {
-      if (!viewerRef.current?.captureScreenshotBlob) throw new Error("The viewer cannot capture this model yet.");
-      return viewerRef.current.captureScreenshotBlob();
+      const view = viewOnScreen();
+      if (!view?.captureScreenshotBlob) throw new Error("The viewer cannot capture this model yet.");
+      return view.captureScreenshotBlob();
     },
     thumbnail(size) {
       if (!viewerRef.current?.captureThumbnail) throw new Error("The viewer cannot picture this model yet.");
@@ -662,6 +629,10 @@ export function useRendererShell({
     options: DISPLAY_MODE_OPTIONS.filter(option => offeredModes.includes(option.value)),
     onChange: viewSettingsStore.selectMode,
   };
+  // The scene the Studio's own view draws (`StudioView.jsx`): the file's Render, as its settings stand.
+  const studioDesiredScene = useMemo(() => studioViewScene(viewSettingsStore.sceneFor("render")),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewSettingsStore, displaySettings, colorScheme, features]);
   const display = mode => <DisplayModeSettings mode={mode} features={features} display={displaySettings}
     appearance={colorScheme} lightingQuality="preview" onPatch={patch => viewSettingsStore.patchMode(mode, patch)}
     onReset={() => viewSettingsStore.resetMode(mode)} />;
@@ -702,7 +673,7 @@ export function useRendererShell({
     // Frame-facing (RendererShell).
     frame: {
       view, hostRef, hostElement, sceneBackdrop, modelKey, presentationKey, sceneScaleMode, scene,
-      viewerRef, viewUpdate, resolvedScene, viewerPerspective, activePerspectiveRef, handlePerspectiveChange,
+      viewerRef, studioViewRef, viewUpdate, resolvedScene, viewerPerspective, activePerspectiveRef, handlePerspectiveChange,
       onCameraSettled: reportCameraSettled,
       preserveInteractionPixelRatio: preserveInteractionPixelRatio === true,
       runtimeLifecycle: stableRuntimeLifecycle,
@@ -714,7 +685,8 @@ export function useRendererShell({
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      annotateToolActive, annotation, history, deletePicked, measurements, animation, display, displayMode, projection
+      annotateToolActive, annotation, history, deletePicked, measurements, animation, display, displayMode, projection,
+      studioDesiredScene
     }
   };
 }

@@ -4,7 +4,6 @@ import { advanceAnimationElapsed, animationClipDuration, animationNowMs,
   firstAnimationClipId } from "@text-to-cad/core/common/animationClock.js";
 import { normalizeParameterValue, normalizeParameterValues } from "@text-to-cad/core/common/parameters.js";
 import { poseValuesForPreset } from "../components/workbench/PoseControlsSection.js";
-import { useAnimationClockStore } from "./animationClockStore.js";
 
 // Single command boundary for STEP motion. Refs are published synchronously so
 // queued playback callbacks cannot resurrect the previous motion owner.
@@ -13,16 +12,16 @@ import { useAnimationClockStore } from "./animationClockStore.js";
 // going back to rest when one is used (and when Explode's tool is taken up, which the host watches)
 // — nothing is set aside to come back. Position and the routine are both here; Explode is the
 // host's view settings, so `host.onUse(motion)` tells it which of these two was used ("position" or
-// "animation") and it takes Explode off. `host.previewing()` says, at the moment of the call,
-// whether preview is up: preview's routine is its own, and moves nothing of the tools view's.
+// "animation") and it takes Explode off. The tools view and the Studio each have their own motion
+// (`useStepMotion`, `useStepStudioMotion`): their own values, their own routine and its `clock`.
 export function useStepMotionControls({
   selectedStepModuleDefinition, selectedAnimationClips, selectedActiveAnimationClip,
   animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,
-  setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, host = null
+  setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, clock, host = null
 }) {
   const hostRef = useRef(host);
   hostRef.current = host;
-  const { getAnimationClock, setAnimationClock, resetAnimationClock } = useAnimationClockStore();
+  const { getAnimationClock, setAnimationClock, resetAnimationClock } = clock;
   const writeParameters = useCallback((values) => {
     const current = stepModuleParameterValuesRef.current;
     // Scrubbing/speed edits must not reapply the kinematics tree on every event
@@ -54,11 +53,9 @@ export function useStepMotionControls({
     hostRef.current?.onUse?.("position");
   }, [rewindAnimation]);
   // A routine used — played, scrubbed, rewound: it plays from the model at rest, so the pose goes
-  // back to its default, and the host takes Explode off. Preview's routine is its own: it plays
-  // over the model as it opens and touches nothing of the tools view's.
+  // back to its default, and the host takes Explode off.
   const claimAnimation = useCallback(() => {
     motionRevisionRef.current += 1;
-    if (hostRef.current?.previewing?.()) return;
     resetPosition();
     hostRef.current?.onUse?.("animation");
   }, [resetPosition]);
@@ -289,30 +286,11 @@ export function useStepMotionControls({
     };
   }, [animationState.enabled, animationState.playing, selectedActiveAnimationClip]);
 
-  // Back to rest: the routine stopped and rewound, the model as Position has it. Its Reset, and
-  // leaving preview.
+  // Back to rest: the routine stopped and rewound, the model as Position has it. Its Reset.
   const releaseAnimation = rewindAnimation;
-  // Preview's routine is its own (`kit/shell/useRendererShell.js`): the tools view's is saved as it
-  // stands — which routine, where its clock is, whether it plays — and handed back as it was, a kept
-  // frame included. Neither crossing is a use: nothing else moves.
-  const savePlayback = useCallback(() => {
-    const { activeClipId, enabled, playing, elapsedSec } = animationStateRef.current;
-    return { activeClipId, enabled, playing, elapsedSec: playing ? getAnimationClock() : elapsedSec };
-  }, [getAnimationClock]);
-  const restorePlayback = useCallback((saved) => {
-    const clip = findAnimationClip(selectedAnimationClips, saved?.activeClipId);
-    if (!clip) return;
-    const elapsedSec = clampAnimationElapsed(saved.elapsedSec, animationClipDuration(clip));
-    motionRevisionRef.current += 1;
-    const nextState = { ...animationStateRef.current, activeClipId: clip.id, enabled: saved.enabled !== false,
-      playing: saved.enabled !== false && saved.playing === true, elapsedSec };
-    animationStateRef.current = nextState;
-    setAnimationState(nextState);
-    setAnimationClock(elapsedSec);
-  }, [selectedAnimationClips]);
 
   return { handleStepModuleParameterChange, applyStepModuleParameterValues, handleResetStepModuleParameters,
     handleApplyPose, handleAnimationClipSelect, handleAnimationPlayToggle, handleAnimationRestart,
     handleAnimationScrub, handleAnimationSpeedChange, handleAnimationLoopToggle, resetMotion, resetPosition,
-    releaseAnimation, savePlayback, restorePlayback };
+    releaseAnimation };
 }

@@ -7,10 +7,9 @@ const EMPTY = Object.freeze([]);
 /**
  * Which visuals are hidden: React state, since the Links rows draw it, scoped to this file. The
  * `visibility` slice of the file's view restores it against the payload's revision, and a live
- * reload keeps only the ids the loaded part list still has. The scene is told on every change, and
- * draws every visual while the ids are not `shown` (preview, which draws the robot as it opens).
+ * reload keeps only the ids the loaded part list still has. The scene is told on every change.
  */
-export function useRobotVisibility({ robot, scene, requestRender, stored, shown = true }) {
+export function useRobotVisibility({ robot, scene, requestRender, stored }) {
   const [visibility, setVisibility] = useState(null);
   const restored = useMemo(() => {
     if (!robot) return EMPTY;
@@ -28,8 +27,8 @@ export function useRobotVisibility({ robot, scene, requestRender, stored, shown 
   }, [robot, restored, validIds]);
   useLayoutEffect(() => {
     if (!scene) return;
-    scene.setHiddenPartIds(shown ? hiddenPartIds : EMPTY);
+    scene.setHiddenPartIds(hiddenPartIds);
     requestRender();
-  }, [scene, hiddenPartIds, shown, requestRender]);
+  }, [scene, hiddenPartIds, requestRender]);
   return { hiddenPartIds, changeVisibility };
 }

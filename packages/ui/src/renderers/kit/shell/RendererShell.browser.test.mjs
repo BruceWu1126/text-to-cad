@@ -106,22 +106,30 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
     // A Retina quality switch resizes the drawing buffer. Every such clear
     // must be followed by its replacement draw in the SAME task, even while
     // shader preparation is asynchronous. Canvas identity alone cannot catch it.
+    // A view of the GPU device is handed its frame (`transferFromImageBitmap`) at the end of the
+    // frame's task: that is its redraw.
     const draws = new WeakMap();
+    const drew = canvas => draws.set(canvas, (draws.get(canvas) || 0) + 1);
     window.cadBufferClears = [];
     for (const name of ['drawElements', 'drawArrays', 'drawElementsInstanced', 'drawArraysInstanced']) {
       const original = WebGL2RenderingContext.prototype[name];
       WebGL2RenderingContext.prototype[name] = function (...args) {
-        draws.set(this.canvas, (draws.get(this.canvas) || 0) + 1);
+        drew(this.canvas);
         return original.apply(this, args);
       };
     }
+    const transfer = ImageBitmapRenderingContext.prototype.transferFromImageBitmap;
+    ImageBitmapRenderingContext.prototype.transferFromImageBitmap = function (...args) {
+      drew(this.canvas);
+      return transfer.apply(this, args);
+    };
     for (const name of ['width', 'height']) {
       const property = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, name);
       Object.defineProperty(HTMLCanvasElement.prototype, name, { ...property, set(value) {
         property.set.call(this, value);
         if (this !== window.cadHarnessView?.canvas) return;
         const before = draws.get(this) || 0;
-        queueMicrotask(() => window.cadBufferClears.push({ name, redrawn: (draws.get(this) || 0) > before }));
+        queueMicrotask(() => queueMicrotask(() => window.cadBufferClears.push({ name, redrawn: (draws.get(this) || 0) > before })));
       } });
     }
 
@@ -220,7 +228,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   assert.deepEqual(errors, []);
 });
 
-test('a viewport that goes loses its WebGL context and leaves no listener on the page, and a context recovery hands over to a fresh one', async (t) => {
+test('every view draws through the one GPU device: a view that goes leaves it and no listener on the page, and a lost device is recovered for the view on screen', async (t) => {
   const origin = await serve(t, (url, root, response) => {
     if (url.pathname.endsWith('/__cad/catalog')) {
       response.setHeader('Content-Type', 'application/json');
@@ -233,17 +241,19 @@ test('a viewport that goes loses its WebGL context and leaves no listener on the
   const { page, errors } = await newPage(t);
   await page.addInitScript(() => {
     window.Worker = undefined;
-    // Every WebGL context the page makes, held weakly, and the keydown listeners on the window and
-    // the document, counted as the DOM keeps them (one per listener and capture flag).
+    // Every WebGL context the page makes, on a canvas or off one, and the keydown listeners on the
+    // window and the document, counted as the DOM keeps them (one per listener and capture flag).
     const contexts = [];
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
-      const context = getContext.call(this, type, ...rest);
-      if (context && /webgl/.test(type) && !contexts.some(ref => ref.deref() === context)) contexts.push(new WeakRef(context));
-      return context;
-    };
-    // Oldest first: lost, or collected (true); live (false).
-    window.cadContextsLost = () => contexts.map(ref => ref.deref()?.isContextLost() ?? true);
+    for (const Canvas of [HTMLCanvasElement, OffscreenCanvas]) {
+      const getContext = Canvas.prototype.getContext;
+      Canvas.prototype.getContext = function (type, ...rest) {
+        const context = getContext.call(this, type, ...rest);
+        if (context && /webgl/.test(type) && !contexts.includes(context)) contexts.push(context);
+        return context;
+      };
+    }
+    window.cadContexts = contexts;
+    window.cadContextsLost = () => contexts.map(context => context.isContextLost());
     const keydown = new Set(), ids = new WeakMap();
     let next = 0;
     const key = (target, listener, options) => {
@@ -265,42 +275,33 @@ test('a viewport that goes loses its WebGL context and leaves no listener on the
   const shown = () => page.waitForFunction(() => window.cadHarness?.a?.controller?.readState().loading === false
     && !!document.querySelector('[data-testid="one"] [aria-busy="false"] canvas'));
   const gone = () => page.waitForFunction(() => !document.querySelector('[data-testid="one"] canvas'));
-  // A teardown finishes after React has taken the view off the page, so the expected contexts are
-  // awaited before the state is read.
-  const state = async (expected) => {
-    await page.waitForFunction(lost => JSON.stringify(window.cadContextsLost()) === JSON.stringify(lost), expected).catch(() => {});
-    return page.evaluate(() => ({ contexts: window.cadContextsLost(), keydown: window.cadKeydownListeners() }));
-  };
+  const state = () => page.evaluate(() => ({ contexts: window.cadContextsLost(), views: window.__cadGpuDevice?.().views ?? null,
+    keydown: window.cadKeydownListeners() }));
   await shown();
   const keydown = await page.evaluate(() => window.cadKeydownListeners());
-  assert.deepEqual(await state([false]), { contexts: [false], keydown });
+  assert.deepEqual(await state(), { contexts: [false], views: 1, keydown }, 'one context, the device\'s, and one view of it');
 
-  // A file switch, or a library card pictured: the view goes and another comes. Every one that went
-  // has lost its context, the GPU memory with it, and the page keeps no listener of its controls.
+  // A file switch, or a library card pictured: the view goes and another comes. The next view draws
+  // through the same device (its buffers and programs kept), and the page keeps no listener of the
+  // controls that went.
   for (let remount = 1; remount <= 3; remount += 1) {
     await page.evaluate(() => window.cadHarness.mounted(false));
     await gone();
     await page.evaluate(() => window.cadHarness.mounted(true));
     await shown();
-    const contexts = [...Array(remount).fill(true), false];
-    assert.deepEqual(await state(contexts), { contexts, keydown },
-      `after remount ${remount}: the views that went have lost their contexts, and the page holds one view's listeners`);
+    assert.deepEqual(await state(), { contexts: [false], views: 1, keydown }, `after remount ${remount}`);
   }
 
-  // A context RECOVERY replaces the runtime under a view that stays: the next one draws in a
-  // context of its own, and the one it replaced goes as any other does, its listeners with it.
-  const recovered = page.evaluate(() => new Promise(resolve => {
-    const canvas = document.querySelector('[data-testid="one"] [aria-busy="false"] canvas');
-    const extension = canvas.getContext('webgl2').getExtension('WEBGL_lose_context');
-    canvas.addEventListener('webglcontextlost', () => setTimeout(() => { extension.restoreContext(); resolve(); }), { once: true });
+  // The device's context lost and restored: the view on screen draws again, in the same device, and
+  // is a viewer: the camera orbits under a drag.
+  await page.evaluate(() => new Promise(resolve => {
+    const extension = window.cadContexts[0].getExtension('WEBGL_lose_context');
+    window.cadContexts[0].canvas.addEventListener('webglcontextlost', () => setTimeout(() => { extension.restoreContext(); resolve(); }), { once: true });
     extension.loseContext();
   }));
-  await recovered;
-  await page.waitForFunction(() => window.cadContextsLost().length === 5);
+  await page.waitForFunction(() => !window.cadContexts[0].isContextLost());
   await shown();
-  assert.deepEqual(await state([true, true, true, true, false]), { contexts: [true, true, true, true, false], keydown },
-    'the recovered view draws in a fresh context, and the one it replaced is lost');
-  // And the fresh one is a viewer: the camera orbits under a drag.
+  assert.deepEqual(await state(), { contexts: [false], views: 1, keydown });
   const before = await page.evaluate(() => window.__cadCamera().position);
   const box = await page.getByTestId('one').locator('[aria-busy="false"] > div > canvas').first().boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -309,10 +310,10 @@ test('a viewport that goes loses its WebGL context and leaves no listener on the
   await page.mouse.up();
   await page.waitForFunction(start => window.__cadCamera().position.some((value, index) => Math.abs(value - start[index]) > 1e-3), before);
 
-  // The last view goes: every context is lost, and no test seam keeps a runtime on the window.
+  // The last view goes: the device holds none, and no test seam keeps a runtime on the window.
   await page.evaluate(() => window.cadHarness.mounted(false));
   await gone();
-  assert.deepEqual((await state([true, true, true, true, true])).contexts, [true, true, true, true, true]);
+  await page.waitForFunction(() => window.__cadGpuDevice?.().views === 0);
   assert.deepEqual(await page.evaluate(() => [typeof window.__cadCamera, typeof window.__cadStage]), ['undefined', 'undefined']);
   assert.deepEqual(errors, []);
 });

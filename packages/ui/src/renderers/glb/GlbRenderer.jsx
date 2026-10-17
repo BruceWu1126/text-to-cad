@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { useRendererShell } from "../kit/shell/useRendererShell.js";
+import { useStudioScene } from "../kit/shell/useStudioScene.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import { GLB_DECLINED_LIVE_COMMANDS } from "./tools.js";
 import { useGlbAnimation } from "./useGlbAnimation.js";
@@ -27,8 +28,12 @@ function GlbSurface({ view, data }) {
   });
   requestRenderRef.current = shell.requestRender;
   useDeclinedSelectReference(document);
+  // The Studio's own scene, the editor's sibling over its geometry, and its own routine, played on it.
+  const studioScene = useStudioScene(scene, shell.previewing);
+  const studioAnimation = useGlbAnimation(studioScene?.document || null, () => shell.frame.studioViewRef.current?.requestRender?.());
+  const studio = useMemo(() => ({ scene: studioScene, animation: studioAnimation }), [studioScene, studioAnimation]);
 
-  return <RendererShell shell={shell} tools={[]} />;
+  return <RendererShell shell={shell} tools={[]} studio={studio} />;
 }
 
 export default function GlbRenderer(props) {

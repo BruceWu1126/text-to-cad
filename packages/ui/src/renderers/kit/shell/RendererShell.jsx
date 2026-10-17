@@ -12,7 +12,6 @@ import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
 import { modelUpdateStatus, ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
-import { VIEWER_RENDER_PROFILE, renderProfileKeepsPixelRatio, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import DisplayPopover from "./DisplayPopover.jsx";
 import StudioSettings from "./StudioSettings.jsx";
 import { withGroups } from "../../../annotation/geometry.js";
@@ -25,6 +24,7 @@ import { animationControlsHaveContent } from "../tools/playbar/AnimationTimeCont
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
+import StudioView from "./StudioView.jsx";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
 import AnnotationSelectionBar from "../tools/annotate/AnnotationSelectionBar.jsx";
 
@@ -147,9 +147,15 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  *   down): the renderer lights its own overlay under it, and returns true when there is one.
  *   `selectsAnnotations`: whether Select picks the annotation's ink, as the renderer's Select filter says; the
  *   ink is drawn either way.
+ *   `studio`: the Render Studio's own, while it is open (`shell.previewing`), for a 3D view: the scene the
+ *   renderer built for it (`scene`, its family's builder over the editor's geometry, null until it can be
+ *   drawn), what drives that scene from inside the Studio's viewport (`overlay(viewport, drawn)`, given
+ *   the Render scene the Studio draws), its routine (`animation`, the Animation section's in the Studio),
+ *   and the Studio viewport's `runtimeLifecycle` and `onCameraSettled`. The Studio is a view of its own
+ *   (`StudioView.jsx`) over the editor's, which nothing of it reaches.
  */
 export default function RendererShell({ shell, tools, toolPanels = null, subToolbar = null, sidebar = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
-  onContextMenuOpenChange = null, viewportOverlay = null,
+  onContextMenuOpenChange = null, viewportOverlay = null, studio = null,
   frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null, selectsAnnotations = true }) {
   const frame = shell.frame;
   const mobile = useViewerMobile();
@@ -160,14 +166,18 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // The Studio's settings panel: closed as the Studio opens, until its button brings it out.
   const [studioPanelOpen, setStudioPanelOpen] = useState(false);
   const stripButtonClass = useStripButtonClass();
-  // Entering preview changes a lot at once — Render's studio, its camera, finer detail loading for
-  // the new view — so the view is covered ("Preparing studio…") from the press until all of that has
-  // landed: Render on screen, no detail refining for a moment (`cad:quality-status`), and the
-  // studio's picture converged (every sample of its frame drawn: the viewport's `pictureProgress`)
-  // — unless it starts over, the view moving (a routine playing), when there is nothing to wait for —
-  // or at most a few seconds. Then the cover fades away from the finished picture.
-  const renderOnScreenRef = useRef(false);
-  renderOnScreenRef.current = frame.resolvedScene.render.enabled;
+  // The Studio is a view of its own, mounted over the editor's as it opens (`StudioView.jsx`), and
+  // its first picture takes a moment on a large model — its scene built, finer detail loading for its
+  // camera — so it is covered ("Preparing studio…") from the press until all of that has landed: its
+  // first frame presented (`studioPresented`), no detail refining for a moment (`cad:quality-status`),
+  // and its picture converged (every sample of its frame drawn: the view's `pictureProgress`) — unless
+  // it starts over, the view moving (a routine playing), when there is nothing to wait for — or at most
+  // a few seconds. Then the cover fades away from the finished picture. Leaving needs no cover: the
+  // Studio's view goes, and under it is the editor's, as it was.
+  const studioViewRef = frame.studioViewRef;
+  const [studioPresented, setStudioPresented] = useState(false);
+  const studioPresentedRef = useRef(false);
+  studioPresentedRef.current = previewing && studioPresented;
   // A press covers the view first, in its own frame, and preview is entered under it: preview's
   // first render can take a moment on a large model, and the cover answers the press at once.
   const [coverRequested, setCoverRequested] = useState(false);
@@ -180,10 +190,10 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   if (coverFor !== previewing) {
     setCoverFor(previewing);
     setPreviewSettled(false);
+    setStudioPresented(false);
     if (previewing) { setCoverRequested(false); setStudioPanelOpen(false); }
   }
   const previewCovered = coverRequested || (previewing && !previewSettled);
-  const coverColor = useRef(null);
   useEffect(() => {
     if (!previewing) return undefined;
     let refining = false, quiet = 0, done = false, lastSample = -1;
@@ -192,8 +202,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     const settle = (delay = PREVIEW_COVER_QUIET_MS) => {
       clearTimeout(quiet);
       quiet = setTimeout(() => {
-        if (refining || !renderOnScreenRef.current) { settle(); return; }
-        const progress = frame.viewerRef.current?.pictureProgress?.();
+        if (refining || !studioPresentedRef.current) { settle(); return; }
+        const progress = studioViewRef.current?.pictureProgress?.();
         const moving = progress && progress.sample < lastSample;
         lastSample = progress?.sample ?? -1;
         if (progress && progress.sample < progress.samples && !moving) settle(PREVIEW_COVER_CONVERGE_MS);
@@ -208,11 +218,11 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     settle(PREVIEW_COVER_MIN_MS);
     return () => { done = true; clearTimeout(cap); clearTimeout(quiet); window.removeEventListener("cad:quality-status", onQuality); };
   }, [previewing]);
-  if (!previewing) coverColor.current = frame.sceneBackdrop;
-  const animation = frame.animation;
+  // The routine the Animation section plays: the tools view's, or in the Studio the Studio's own.
+  const animation = previewing ? studio?.animation ?? null : frame.animation;
   const hasAnimation = animationControlsHaveContent(animation);
   // Speed and Loop, once chosen in the Animation section's Playback settings, are the file's, and what its
-  // routine plays with, whatever it authored, until they are chosen again. Unset, the routine's own apply.
+  // routines play with, whatever they authored, until they are chosen again. Unset, the routine's own apply.
   const { speed: chosenSpeed, loop: chosenLoop } = shell.playback;
   const animationRef = useRef(animation);
   animationRef.current = animation;
@@ -221,7 +231,14 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (!animationControlsHaveContent(runtime)) return;
     if (chosenSpeed != null && Number(runtime.speed) !== chosenSpeed) runtime.onSpeedChange(chosenSpeed);
     if (chosenLoop != null && (runtime.loopEnabled !== false) !== chosenLoop) runtime.onLoopToggle(chosenLoop);
-  }, [hasAnimation, animation?.speed, animation?.loopEnabled, animation?.activeClipId, chosenSpeed, chosenLoop]);
+  }, [previewing, hasAnimation, animation?.speed, animation?.loopEnabled, animation?.activeClipId, chosenSpeed, chosenLoop]);
+  // The Studio opens at rest, its routine started only by Autoplay.
+  const autoplayRef = useRef(shell.autoplay);
+  autoplayRef.current = shell.autoplay;
+  useEffect(() => {
+    const runtime = animationRef.current;
+    if (previewing && autoplayRef.current && animationControlsHaveContent(runtime) && !runtime.playing) runtime.onPlayToggle();
+  }, [previewing, hasAnimation]);
   // What those settings change is the file's, and applied to its routine at once.
   const playbackRuntime = hasAnimation ? {
     ...animation,
@@ -268,13 +285,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (over) event.stopPropagation();
   };
   useEffect(() => { setPreviewing(false); }, [frame.modelKey, setPreviewing]);
-  // One viewport, two render profiles over the same Display settings (`renderProfile.js`): the
-  // tools view is drawn for working on the model, preview for looking at it.
-  const renderProfile = previewing ? VIEWER_RENDER_PROFILE.PREVIEW : VIEWER_RENDER_PROFILE.TOOLS;
-  const drawnScene = useMemo(() => sceneForRenderProfile(resolvedScene, renderProfile), [resolvedScene, renderProfile]);
-  // Preview is a state of its own (`useRendererShell`'s `setPreviewing`): it opens on the model as
-  // authored, in Render, still, its routine at rest and started only by Autoplay, and leaving it
-  // gives the tools view back exactly as it was.
+  // The Studio is a view of its own (`StudioView.jsx`): it opens on the model as authored, in Render,
+  // still, its routine at rest and started only by Autoplay, and leaving it takes it away.
   const enterPreview = () => {
     setCoverRequested(true);
     // After the frame the cover is painted in (a hidden page paints none: a timer stands in).
@@ -462,15 +474,14 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     projection={resolvedScene.camera.projection}
                     focalLength={resolvedScene.camera.focalLength}
                     themeSettings={resolvedScene.theme}
-                    displaySettings={drawnScene.display}
+                    displaySettings={resolvedScene.display}
                     appearance={resolvedScene.appearance}
                     receiveShadows={resolvedScene.view.lighting.enabled}
                     renderMode={resolvedScene.render.enabled}
                     renderConfiguration={resolvedScene.render.configuration}
-                    quality={drawnScene.quality}
-                    orbitPreview={previewing && orbitPlaying}
-                    previewMode={previewing}
-                    previewOrbitSpeed={frame.previewOrbitSpeed ?? 1}
+                    quality={resolvedScene.quality}
+                    // Under the Studio the editor draws nothing; it draws what it owes as the Studio goes.
+                    suspended={previewing}
                     isLoading={viewerLoading}
                     viewCube={!compact && !failed && !mobile}
                     viewUpdate={frame.viewUpdate}
@@ -483,11 +494,17 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     onPresentationChange={frame.handlePresentationChange}
                     onViewerAlertChange={frame.setRuntimeAlert}
                     onCameraSettled={frame.onCameraSettled}
-                    preserveInteractionPixelRatio={frame.preserveInteractionPixelRatio || renderProfileKeepsPixelRatio(renderProfile)}
+                    preserveInteractionPixelRatio={frame.preserveInteractionPixelRatio}
                     runtimeLifecycle={frame.runtimeLifecycle}
                   >{overlay}</ShellViewport>
                 </div>
               </div>
+              {/* The Studio: a view of its own over the editor's, mounted while it is open. */}
+              {previewing && studio ? <div className="pointer-events-auto absolute inset-0 z-[1]" data-studio-view="">
+                <StudioView studio={studio} desired={frame.studioDesiredScene} modelKey={frame.modelKey}
+                  sceneScaleMode={frame.sceneScaleMode} viewRef={studioViewRef} onPresented={setStudioPresented}
+                  orbit={orbitPlaying} orbitSpeed={frame.previewOrbitSpeed ?? 1} />
+              </div> : null}
 
               {/* The Studio (preview): the tools put away and the navbar kept (the way to other files), the model in
                   Render — the tools view never is — and still until Orbit is turned on. Its controls
@@ -566,7 +583,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 className={cn("absolute inset-0 z-40 flex items-center justify-center",
                   // At once over the press, so nothing of preview shows first; it fades only as it lifts.
                   previewCovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 transition-opacity duration-300 motion-reduce:transition-none")}
-                style={{ backgroundColor: coverColor.current || frame.sceneBackdrop }}>
+                style={{ backgroundColor: frame.sceneBackdrop }}>
                 {previewCovered ? <span role="status" className="flex items-center gap-2 text-tiny text-muted-foreground">
                   <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />Preparing studio…
                 </span> : null}

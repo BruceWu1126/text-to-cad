@@ -450,9 +450,13 @@ async function settledCameraFrame(page, { projection = null, stage, requireSettl
     const stableFrames = stable ? before.stableFrames + 1 : 0;
     window.__viewerTestCameraFrame = { ...after, stableFrames };
     if (stableFrames < 2) return false;
+    // A view draws through the page's GPU device and is handed its frames as bitmaps; a browser
+    // without one draws in a context of the canvas's own.
     const gl = after.canvas.getContext("webgl2");
-    if (!gl || gl.isContextLost()) throw new Error('camera: presented canvas has no live WebGL2 context');
-    gl.finish();
+    if (gl) {
+      if (gl.isContextLost()) throw new Error('camera: presented canvas has lost its WebGL2 context');
+      gl.finish();
+    } else if (!(window.__cadGpuDevice?.().views > 0)) throw new Error('camera: presented canvas draws through no GPU device');
     delete window.__viewerTestCameraFrame;
     return { camera: after.camera, quality: after.quality, levelCounts: after.levelCounts,
       lodSettled: after.lodSettled, lodPendingEvaluation: after.lodPendingEvaluation,

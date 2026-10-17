@@ -11,8 +11,8 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   const before = store.getSnapshot();
   assert.equal(before.display.mode, "solid");
   assert.equal(before.scene.view.lighting.exposure, 0);
-  store.selectMode("render");
-  assert.equal(store.getSnapshot().scene.view.lighting.exposure, 1);
+  assert.equal(store.sceneFor("render").view.lighting.exposure, 1);
+  store.selectMode("xray");
   store.selectMode("solid");
   assert.deepEqual(store.getSnapshot(), before);
   store.resetMode("render");
@@ -21,17 +21,14 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   assert.deepEqual(createViewSettingsStore(before.display).getSnapshot(), before);
 });
 
-test("a present mode draws the scene in that mode, the file's own mode and settings untouched, and back again", () => {
-  const store = createViewSettingsStore({});
+test("Render is the Studio's: a file left in Render is drawn in Solid, its mode its own, and the Studio resolves Render from the same settings", () => {
+  const store = createViewSettingsStore({ mode: "render" });
   store.patchMode("render", { lighting: { exposure: 1 } });
-  const before = store.getSnapshot();
-  assert.equal(before.scene.view.mode, "solid");
-  store.configure({ presentMode: "render" });
-  const presented = store.getSnapshot();
-  assert.deepEqual([presented.display, presented.scene.view.mode, presented.scene.view.lighting.exposure, presented.scene.render.enabled],
-    [before.display, "render", 1, true]);
-  store.configure({ presentMode: null });
-  assert.deepEqual(store.getSnapshot(), before);
+  const { display, scene } = store.getSnapshot();
+  assert.deepEqual([display.mode, scene.view.mode, scene.render.enabled], ["render", "solid", false]);
+  const studio = store.sceneFor("render");
+  assert.deepEqual([studio.view.mode, studio.view.lighting.exposure, studio.render.enabled], ["render", 1, true]);
+  assert.equal(store.getSnapshot().display, display);
 });
 
 test("inactive mode edits preserve the scene and no-op mode/reset actions publish nothing", () => {
