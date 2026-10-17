@@ -320,8 +320,8 @@ class SavedDocumentIdentityTest(unittest.TestCase):
         parent_record = read_record(parent)
         self.assertTrue(parent_record["children"])
         self.assertEqual(
-            {(entry["model"], entry["tree"]) for entry in parent_record["children"]},
-            {(child_record["model"], child_record["tree"])},
+            {(entry["model"], entry["key"]) for entry in parent_record["children"]},
+            {(child_record["model"], child_record["key"])},
         )
         parent_result = flatten(parent_record["tree"])
         self.assertEqual(

@@ -99,6 +99,7 @@ def _cmd_info(as_json: bool) -> int:
         "document": "document entries (bytes -> tree)",
         "output": "output entries (path -> model)",
         "provenance": "provenance entries (which operation at which line made each part, face and edge)",
+        "result": "results by key (a record and its provenance under the key of everything it was built from)",
         "component": "component entries",
         "bounds": "bounding boxes and leaf layouts",
         "part": "part entries (a part's display mesh and selector table)",
