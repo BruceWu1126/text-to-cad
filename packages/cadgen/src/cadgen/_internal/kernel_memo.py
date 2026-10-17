@@ -1679,7 +1679,7 @@ class _Row:
 
 
 class _Effect:
-    """One operation's change to one input, as sparse rows, replayable and undoable."""
+    """One operation's change to one input, as sparse rows, replayable."""
 
     __slots__ = ("rows", "id", "origin", "__weakref__")
 
@@ -1709,15 +1709,6 @@ class _Effect:
         for row in self.rows:
             row.set(row.after)
         self.note(run_id)
-
-    def undo(self) -> None:
-        for row in reversed(self.rows):
-            row.set(row.before)
-            rows = _LEDGER.get(row.tshape)
-            if rows and rows[-1] is row:
-                rows.pop()
-                if not rows:
-                    del _LEDGER[row.tshape]
 
     def forget(self) -> None:
         """Out of the ledger without touching the shapes: the memo no longer
