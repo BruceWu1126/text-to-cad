@@ -30,6 +30,22 @@ def verify_step(path, expected, occurrences=None, colors=None, *, named=True):
     return verify_scene(load_step_scene(Path(path)), expected, occurrences, colors, named=named)
 
 
+def _derived(kind, label, ordinal):
+    """A name of each form a derivation takes -- the element a feature made, modified, folded,
+    generated with a further source, named from a parent, from lower elements, numbered in its
+    step and told apart -- by ordinal, so a file carries every character a name may hold."""
+    forms = (
+        f"{label}.box1.{ordinal}",
+        f"{label}.box1.{ordinal};M:{label}.cut1",
+        f"{label}.cut1~{ordinal:012x}",
+        f"{label}.box1.{ordinal};Gf:{label}.cut1+f:{label}.cyl1.1",
+        f"{label}.cyl1.1;U{ordinal}:{label}.fillet1",
+        f"{label}.box1.{ordinal};L:{label}.face1+e:{label}.box1.{ordinal + 1}",
+        f"{label}.box1.{ordinal};M2:{label}.cut1;D2",
+    )
+    return f"{kind}:{forms[ordinal % len(forms)]}"
+
+
 def _expected(shape, label, part):
     """The component ``shape`` places, keyed ``part``, every face and edge named."""
     from OCP.TopLoc import TopLoc_Location
@@ -39,8 +55,8 @@ def _expected(shape, label, part):
 
     unlocated = shape.wrapped.Located(TopLoc_Location())
     faces, edges = face_boxes(unlocated), edge_boxes(unlocated)
-    names = ComponentNames(part=part, faces=tuple(f"f:{label}.make1.{n}" for n in range(1, len(faces) + 1)),
-                           edges=tuple(f"e:{label}.make1.{n}" for n in range(1, len(edges) + 1)))
+    names = ComponentNames(part=part, faces=tuple(_derived("f", label, n) for n in range(1, len(faces) + 1)),
+                           edges=tuple(_derived("e", label, n) for n in range(1, len(edges) + 1)))
     return expected_component(unlocated, names)
 
 
@@ -135,9 +151,9 @@ class VerifyStepTest(unittest.TestCase):
                                                        "bracket": dataclasses.replace(bracket, names=renamed)}))
         self.assertEqual(found, [
             (None, _KEYS["bracket"], "face names missing from the file: f:bracket.make2.1"),
-            (None, _KEYS["bracket"], "face names the result does not have: f:bracket.make1.1"),
+            (None, _KEYS["bracket"], f"face names the result does not have: {_derived('f', 'bracket', 1)}"),
             (None, _KEYS["bracket"], "edge names missing from the file: e:bracket.make2.1"),
-            (None, _KEYS["bracket"], "edge names the result does not have: e:bracket.make1.1"),
+            (None, _KEYS["bracket"], f"edge names the result does not have: {_derived('e', 'bracket', 1)}"),
         ])
 
     def test_an_element_is_where_the_result_has_it_within_the_display_tolerance(self) -> None:
@@ -160,7 +176,7 @@ class VerifyStepTest(unittest.TestCase):
                                                    + boxes[1:]})
                     found = self.messages(self.verify(self.named, {**self.components, "bracket": moved}))
                     message = (f"{kind}s off their place by more than {tolerance:.3g} and their own tolerance: "
-                               f"{kind[0]}:bracket.make1.1")
+                               f"{_derived(kind[0], 'bracket', 1)}")
                     self.assertEqual(found, [(None, _KEYS["bracket"], message)] if reported else [])
 
     def test_a_body_the_file_trims_otherwise_does_not_verify(self) -> None:
@@ -283,11 +299,13 @@ class VerifyStepTest(unittest.TestCase):
         placed = {self.named_tokens[label]: label for label in ("bracket", "twin")}
         self.assertEqual(sorted(found), sorted(
             (token, _KEYS["bracket"],
-             f"the occurrence {label} draws f:bracket.make1.1 in no colour where the result draws (1, 0, 0, 1)")
+             f"the occurrence {label} draws {_derived('f', 'bracket', 1)} in no colour where the result draws "
+             "(1, 0, 0, 1)")
             for token, label in placed.items()))
         unplaced = self.messages(self.verify(self.named, {**self.components, "bracket": coloured}, None))
         self.assertEqual(unplaced, [(None, _KEYS["bracket"],
-                                     "the part draws f:bracket.make1.1 in no colour where the result draws (1, 0, 0, 1)")])
+                                     f"the part draws {_derived('f', 'bracket', 1)} in no colour where the result draws "
+                                     "(1, 0, 0, 1)")])
 
     def test_a_placements_colour_on_every_face_is_drawn_as_the_placement(self) -> None:
         """A coloured compound's colour comes back on each of its faces: drawn alike where
@@ -314,7 +332,7 @@ class VerifyStepTest(unittest.TestCase):
             return [mismatch.message for mismatch in verify_step(path, components.values(), occurrences, colors)]
 
         self.assertEqual(verified(panel.color), [])
-        faces = ", ".join(f"f:panel.make1.{n}" for n in range(1, 6)) + " and 7 more"
+        faces = ", ".join(_derived("f", "panel", n) for n in range(1, 6)) + " and 7 more"
         self.assertEqual(verified((0.2, 0.3, 0.5, 1.0)), [
             f"the occurrence panel draws {faces} in (0.2, 0.3, 0.4, 1) where the result draws (0.2, 0.3, 0.5, 1)"])
         self.assertEqual(verified(None), [
@@ -362,11 +380,14 @@ class VerifyStepTest(unittest.TestCase):
 
     def test_a_name_the_file_gives_two_faces_is_reported(self) -> None:
         tampered = self.named.with_name("tampered.step")
-        tampered.write_bytes(self.named.read_bytes().replace(b"'f:bracket.make1.2'", b"'f:bracket.make1.1'"))
+        first, second = _derived("f", "bracket", 1), _derived("f", "bracket", 2)
+        data = self.named.read_bytes()
+        self.assertIn(f"'{second}'".encode(), data, "a name is written whole, as one string")
+        tampered.write_bytes(data.replace(f"'{second}'".encode(), f"'{first}'".encode()))
         found = self.messages(self.verify(tampered))
         self.assertEqual(found, [
-            (None, _KEYS["bracket"], "face names missing from the file: f:bracket.make1.2"),
-            (None, _KEYS["bracket"], "face names on more than one face: f:bracket.make1.1"),
+            (None, _KEYS["bracket"], f"face names missing from the file: {second}"),
+            (None, _KEYS["bracket"], f"face names on more than one face: {first}"),
         ])
 
     def test_a_name_the_file_could_carry_is_missing_whatever_element_it_names(self) -> None:
@@ -485,8 +506,8 @@ class VerifyStepTest(unittest.TestCase):
         green = dataclasses.replace(components["pair"], face_colors={1: (0.0, 1.0, 0.0, 1.0)})
         found = [(mismatch.occurrence, mismatch.message)
                  for mismatch in verify_step(path, [green, components["cube"]], occurrences, colors)]
-        self.assertEqual(found, [(tokens["pair"], "the occurrence pair draws f:pair.make1.1 in (1, 0, 0, 1) "
-                                                  "where the result draws (0, 1, 0, 1)")])
+        self.assertEqual(found, [(tokens["pair"], f"the occurrence pair draws {_derived('f', 'pair', 1)} "
+                                                  "in (1, 0, 0, 1) where the result draws (0, 1, 0, 1)")])
 
     def test_an_edge_no_file_can_name_is_checked_through_its_faces(self) -> None:
         """A whole ellipsoid made by transforming a sphere keeps its poles' degenerate edges on

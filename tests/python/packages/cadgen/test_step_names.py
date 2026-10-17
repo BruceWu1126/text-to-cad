@@ -38,13 +38,29 @@ def _elements(shape, kind):
     return [found.FindKey(ordinal) for ordinal in range(1, found.Extent() + 1)]
 
 
+def _derived(kind, label, ordinal):
+    """A name of each form a derivation takes -- the element a feature made, modified, folded,
+    generated with a further source, named from a parent, from lower elements, numbered in its
+    step and told apart -- by ordinal, so a file carries every character a name may hold."""
+    forms = (
+        f"{label}.box1.{ordinal}",
+        f"{label}.box1.{ordinal};M:{label}.cut1",
+        f"{label}.cut1~{ordinal:012x}",
+        f"{label}.box1.{ordinal};Gf:{label}.cut1+f:{label}.cyl1.1",
+        f"{label}.cyl1.1;U{ordinal}:{label}.fillet1",
+        f"{label}.box1.{ordinal};L:{label}.face1+e:{label}.box1.{ordinal + 1}",
+        f"{label}.box1.{ordinal};M2:{label}.cut1;D2",
+    )
+    return f"{kind}:{forms[ordinal % len(forms)]}"
+
+
 def _names(label, shape):
     from cadgen._internal.step_names import ComponentNames
 
     return ComponentNames(
         part=_KEYS[label],
-        faces=tuple(f"f:{label}.box1.{ordinal}" for ordinal in range(1, len(_elements(shape, "face")) + 1)),
-        edges=tuple(f"e:{label}.box1.{ordinal}" for ordinal in range(1, len(_elements(shape, "edge")) + 1)),
+        faces=tuple(_derived("f", label, ordinal) for ordinal in range(1, len(_elements(shape, "face")) + 1)),
+        edges=tuple(_derived("e", label, ordinal) for ordinal in range(1, len(_elements(shape, "edge")) + 1)),
     )
 
 
@@ -88,7 +104,7 @@ def _rig():
 def _strip_names(data: bytes) -> bytes:
     """``data`` with every element name and part key the writer added taken out, and OCCT's
     line wrapping (which a longer record moves) undone."""
-    data = re.sub(rb"'[fe]:[A-Za-z_]+\.box1\.\d+'", b"''", data)
+    data = re.sub(rb"'[fe]:[A-Za-z_][^']*'", b"''", data)
     data = re.sub(rb"'[0-9a-f]{64}-v7'", b"''", data)
     return re.sub(rb"\r?\n\s*", b"", data)
 
