@@ -206,11 +206,18 @@ class GateTruthTable(StoreCase):
         out.unlink()
         self.assertEqual(self.stale_clause(script), 5)
         self.assertEqual(stale(script).key, record["key"])
-        # A sidecar is a run's: without it the result does not stand.
+        # The sidecar is written again from the record: the result still stands.
         sidecar = self.root / "plate.step.json"
         sidecar.write_bytes(b"{}")
         self.record(script, tree=self.tree_for("plate"), output=sidecar)
         sidecar.unlink()
+        self.assertEqual(self.stale_clause(script), 5)
+        self.assertEqual(stale(script).key, record["key"])
+        # A drawing is a run's: without it the result does not stand.
+        drawing = self.root / "plate.dxf"
+        drawing.write_bytes(b"0\nSECTION\n")
+        self.record(script, tree=self.tree_for("plate"), output=drawing)
+        drawing.unlink()
         self.assertEqual(self.stale_clause(script), 5)
         self.assertIsNone(stale(script).key)
 

@@ -221,8 +221,9 @@ class _Export:
 
     ``step`` is what the STEP needs, or None for a model that writes none: the plan
     (:func:`_export_plan`), the record to fill, the sidecar payload, the document pair
-    expected on disk, the producer the file's part keys name, the build's live shapes
-    (``live``) and the publish rule to ask again (``still_saves``).
+    expected on disk, the build's live shapes (``live``) and the publish rule to ask
+    again (``still_saves``). The document entry a written file gets names the producer
+    the export wrote with.
     """
 
     def __init__(self, spec: EntrySpec, tree: str, *, logger: CliLogger, step: dict | None = None,
@@ -322,7 +323,7 @@ class _Export:
         if export is not None:
             # The bytes, mapped to the tree they were written from before any parse of them:
             # pending until the verify answers.
-            note_document_tree(digest, tree, producer=step["producer"], verified=False, plain=plain)
+            note_document_tree(digest, tree, producer=export["producer"], verified=False, plain=plain)
         outputs = record["outputs"]
         outputs[str(step_path)] = {**plan.output(), "sha256": digest, **({"plain": True} if plain else {})}
         sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
@@ -943,7 +944,7 @@ def _generate_part_outputs(
                        else _generated_python_glb_summary(spec))
             _Export(spec, tree_hash, logger=logger, announce=None if reemit_source_hash else summary,
                     step={"plan": export_plan, "record": record, "sidecar_payload": sidecar_payload,
-                          "expected_document_pair": expected_document_pair, "producer": producer, "live": live,
+                          "expected_document_pair": expected_document_pair, "live": live,
                           "still_saves": still_saves} if writes_step else None)
         # Every part of the result is stored before the build reports done (the pool's
         # job for them runs while the record is written), so a view of what it built only
@@ -1760,7 +1761,7 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     candidate = getattr(verdict, "candidate", None)
     if spec.source != "generated" or spec.step_path is None or not candidate or verdict.stored is not None:
         # A record whose stored result stands is the candidate itself: what it owes
-        # beyond an export (a sidecar, a drawing) is a run's, not a restore's.
+        # beyond an export (a drawing) is a run's, not a restore's.
         return None
     from cadgen.store.provenance import write_provenance
     from cadgen.store.records import note_output, write_record
@@ -1783,22 +1784,43 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     return tree
 
 
-def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,
-         healed: set[str] | None = None) -> None:
-    """A model whose stored result ``tree`` is current: its source result announced, and
-    what it may still owe queued (``_Export``), healed without running its body -- its
-    STEP (a file that did not hold its result, written plain this time; one another
-    writer wrote; one whose entry the store lost; one missing, or never written because
-    its export failed), its parts' display data (a cleared store) and its declared mesh
-    exports (a deleted file, a changed declaration). The STEP first, so the display data
-    derived is that of the result its bytes then map to, never of a marked file's own
-    content.
+def _recorded_sidecar(record: Mapping[str, object]) -> dict[str, object]:
+    """The sidecar a model's result carries, from its record -- the kinematics, appearance
+    and animation its build resolved, in the build's order -- so a file written again from
+    the stored result gets the result's annotations, never the file's own
+    (``annotation_refresh`` writes the same). Empty where the record holds none, which
+    ``write_source_sidecar`` reads as: no sidecar."""
+    return {section: copy.deepcopy(record[section]) for section in ("kinematics", "appearance", "animation")
+            if record.get(section) is not None}
 
-    Then what its children owe: a current model's body does not run, so it calls no
-    child, yet its gate asked each one (``verdict``, clause 3) -- a child whose stored
-    result stands but whose files owe an export (its export failed, its file was
-    deleted) is healed the same way, by this path, and its own children after it. A
-    child that owes a run does not stand, and the parent's run would have called it."""
+
+def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,
+         healed: set[str] | None = None, display: bool = True) -> None:
+    """A model whose stored result ``tree`` is current: its source result announced, what
+    its children owe healed, then what it may still owe itself queued (``_Export``) --
+    none of it by running its body. Its STEP (a file that did not hold its result,
+    written plain this time; one another writer wrote; one whose entry the store lost;
+    one missing, or never written because its export failed) and, with it or alone, its
+    sidecar, written from the record (:func:`_recorded_sidecar`): a sidecar is a function
+    of the result, so one on disk that is not the record's -- deleted, foreign, the other
+    state's after a restore -- is written again even beside a kept STEP. Then its parts'
+    display data (a cleared store) and its declared mesh exports (a deleted file, a
+    changed declaration). The STEP first, so the display data derived is that of the
+    result its bytes then map to, never of a marked file's own content.
+
+    The children: a current model's body does not run, so it calls no child, yet its gate
+    asked each one (``verdict``, clause 3). Every child whose result stands is healed the
+    same way, by this path, its own children with it and before the parent, as a build
+    queues them, so one run of the root leaves no file of the tree owed. A child whose
+    record its source has moved on from, while a stored result answers for the source as
+    it is now, is restored first (:func:`_restore_result`): the parent's hit leaves the
+    child's record and files in the state the parent stands on. A child that owes a run
+    does not stand, and the parent's run would have called it.
+
+    ``display``: whether the model's parts' display data is asked for. A root's request
+    covers its whole tree, links expanded, so the children it heals ask for none."""
+    from cadgen.store.gate import stale
+    from cadgen.store.index import split_model_ref
     from cadgen.store.records import read_record
 
     model = _model_for_spec(spec)
@@ -1806,41 +1828,38 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
     healed.add(model)
     _current_source_result(spec, tree)
     record = read_record(model) or {}
-    step = None
-    if spec.source == "generated" and spec.step_output and spec.step_path is not None:
-        from cadgen._internal.source_sidecar import _raw_source_sidecar
-        from cadgen.store.records import document_entry_for_hash
-
-        pair = _document_pair_state(spec.step_path)
-        plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
-        if plan.kept is None:
-            logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
-                        + (" without names" if plan.plain else ""))
-            step = {"plan": plan, "record": copy.deepcopy(record), "sidecar_payload": _raw_source_sidecar(spec.step_path),
-                    "expected_document_pair": pair,
-                    "producer": (document_entry_for_hash(pair[0] or "") or {}).get("producer"),
-                    "live": {}, "still_saves": lambda: None}
-    _Export(spec, tree, logger=logger, step=step, display=True)
-    from cadgen.store.gate import stale
-    from cadgen.store.index import split_model_ref
-
     asked = getattr(verdict, "descendants", None) or {}
     for child in record.get("children") or []:
         child_model = str((child or {}).get("model") or "")
         if not child_model or child_model in healed:
-            continue
-        child_verdict = asked.get(child_model) or stale(child_model)
-        owed = any(output.get("stale") for clause in child_verdict.clauses if clause.get("clause") == 5
-                   for output in clause.get("outputs") or [])
-        if child_verdict.key is None or child_verdict.tree is None or not owed:
             continue
         script, function = split_model_ref(child_model)
         source = source_from_path(script, function=function)
         if source is None:
             continue
         child_spec = _entry_spec_from_source(source)
-        _hit(child_spec, child_verdict.tree, logger=logger, verdict=child_verdict, healed=healed)
+        child_verdict = asked.get(child_model) or stale(child_model)
+        if child_verdict.key is None and _restore_result(child_spec, child_verdict, logger=logger) is None:
+            continue
+        _hit(child_spec, child_verdict.tree, logger=logger, verdict=child_verdict, healed=healed, display=False)
         _tree_event(child_spec, "current")
+    step = None
+    if spec.source == "generated" and spec.step_output and spec.step_path is not None:
+        from cadgen._internal.source_sidecar import source_sidecar_path
+
+        pair = _document_pair_state(spec.step_path)
+        plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
+        recorded = (record.get("outputs") or {}).get(str(source_sidecar_path(spec.entry_path).resolve())) or {}
+        sidecar_owed = pair[1] != (str(recorded.get("sha256") or "") or None)
+        if plan.kept is None:
+            logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
+                        + (" without names" if plan.plain else ""))
+        elif sidecar_owed:
+            logger.info(f"{_display_path(source_sidecar_path(spec.step_path))} is not the record's; writing it again")
+        if plan.kept is None or sidecar_owed:
+            step = {"plan": plan, "record": copy.deepcopy(record), "sidecar_payload": _recorded_sidecar(record),
+                    "expected_document_pair": pair, "live": {}, "still_saves": lambda: None}
+    _Export(spec, tree, logger=logger, step=step, display=display)
 
 
 def build_child(defn: object) -> tuple[str, str]:

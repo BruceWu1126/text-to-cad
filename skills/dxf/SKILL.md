@@ -41,8 +41,9 @@ parameterless `@dxf` model function.
 build job a `@step` part has; its one output is the `.dxf` file; it has no
 geometry tree (nothing links to a drawing). Every run writes the sibling
 `<name>.dxf` (or the `out=` the decorator names); an unchanged source is a
-no-op; a drawing that calls a part model — `bracket()` inside its body — is
-stale whenever that part's GEOMETRY changes and current when it does not;
+no-op; a drawing that calls a part model — `bracket()` inside its body — depends
+on that part's result by its key, so it is stale whenever the part is rebuilt (its
+source edited, whatever its geometry) and current when it is not;
 `cadgen store why <drawing>.py` explains the verdict; `--force` rebuilds it
 anyway. The CAD Viewer and `dxf snapshot` read the `.dxf` file itself, so the
 file you hand a cutting service, the file the viewer draws and the file a

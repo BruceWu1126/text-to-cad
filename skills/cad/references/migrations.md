@@ -221,7 +221,8 @@ its own children and the cadgen and kernel versions that built it -- so:
 - upgrading cadgen or the CAD kernel rebuilds every model once:
   `producer changed: cadgen 0.7.21 -> 0.8.0`.
 - bringing a source back to a state already built is a hit: the stored result is
-  restored and nothing runs.
+  restored and nothing runs -- for a child too, whose parent is then a hit as well
+  and restores the child with its own files.
 - deleting a model's STEP (or a declared mesh) beside a current model exports it
   again from the stored result, without running the model.
 

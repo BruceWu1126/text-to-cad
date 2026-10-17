@@ -316,11 +316,3 @@ def record_for_document(document: Path | str) -> dict[str, Any] | None:
     """MODEL-SIDE: the record behind a ``.step`` on disk (generated or imported),
     or None. A reader that needs a TREE uses ``tree_for_document_hash``."""
     return read_record(source_for_document(document))
-
-
-def current_tree(model: Path | str) -> str | None:
-    record = read_record(model)
-    if record is None:
-        return None
-    tree = str(record.get("tree") or "").strip()
-    return tree or None

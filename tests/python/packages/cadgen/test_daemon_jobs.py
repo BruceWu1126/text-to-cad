@@ -302,6 +302,26 @@ class Lifecycle(unittest.TestCase):
         self.ledger.finish(request, 0)
         self.assertEqual(["done", "done"], [job["state"] for job in self.ledger.snapshot()])
 
+    def test_a_child_in_the_requests_own_file_is_a_row_of_its_own_too(self):
+        """Rows are keyed by model, not by script: ``pair.py::part`` built inside
+        ``pair.py::asm`` is a child row under the request, while the request's own model
+        -- spelled with its function, or bare as a file's sole model is -- is its row."""
+        pair = (Path(self.tmp.name) / "pair.py").resolve()
+        pair.write_text("from cadgen import step\nfrom cadgen import build123d as bd\n\n@step\ndef part():\n"
+                        "    return bd.Box(1, 1, 1)\n\n@step\ndef asm():\n    return part()\n", encoding="utf-8")
+        request = self.ledger.start(tool="run", subject=f"{pair}::asm", store_root=self.tmp.name)
+        self.ledger.observe(self._event(f"{pair}::asm", "building", job=request["id"], sequence=1, phase="generate"))
+        self.ledger.observe(self._event(f"{pair}::part", "building", job=request["id"], sequence=1, phase="generate"))
+        rows = self.ledger.snapshot()
+        self.assertEqual([f"{pair}::asm", f"{pair}::part"], [job["subject"] for job in rows])
+        self.assertEqual(("building", "generate"), (rows[0]["state"], rows[0]["phase"]))
+        self.assertEqual(request["id"], rows[1]["request"])
+        sole = self.ledger.start(tool="run", subject=f"{self.model}::widget")
+        self.ledger.observe(self._event(self.model, "building", job=sole["id"], sequence=1, phase="generate"))
+        rows = self.ledger.snapshot()
+        self.assertEqual(3, len(rows), "a sole model spelled bare is the request's own")
+        self.assertEqual("building", rows[2]["state"])
+
     def test_a_requests_end_closes_the_child_rows_it_left_running(self):
         parent = str((Path(self.tmp.name) / "rig.py").resolve())
         request = self.ledger.start(tool="run", subject=parent)

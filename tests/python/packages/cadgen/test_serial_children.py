@@ -64,7 +64,37 @@ def grand():
 """
 
 
-class SerialChildren(unittest.TestCase):
+DYN_CHILD = """\
+import importlib
+from cadgen import step
+from cadgen import build123d as bd
+
+
+@step
+def child():
+    plug = importlib.import_module("plug")
+    return bd.Box(plug.VALUE, 3.0, 2.0)
+"""
+
+DYN_PARENT = """\
+import importlib
+from cadgen import step
+from cadgen import build123d as bd
+from dyn_child import child
+
+
+@step
+def parent():
+    piece = child()
+    plug = importlib.import_module("plug")
+    return bd.Compound(children=[bd.Pos(plug.VALUE * 4, 0, 0) * piece], label="parent")
+"""
+
+
+class SerialChildrenCase(unittest.TestCase):
+    """A child, its parent and a grandparent in one folder, each run as ``python x.py``
+    with no daemon and a store of its own."""
+
     def setUp(self):
         temporary = generated_cad_directory(prefix="serial-children-")
         self.addCleanup(temporary.cleanup)
@@ -107,6 +137,11 @@ class SerialChildren(unittest.TestCase):
         self.assertIsNotNone(record, f"{script.name} has no record")
         return record
 
+    def current(self) -> list[str]:
+        return [Path(e["model"]).stem for e in self.events if e.get("state") == "current"]
+
+
+class SerialChildren(SerialChildrenCase):
     def test_a_child_built_inside_its_parent_is_the_child_built_alone(self):
         code, err = self.build(self.child)
         self.assertEqual(code, 0, err)
@@ -131,7 +166,7 @@ class SerialChildren(unittest.TestCase):
         code, err = self.build(self.parent, "--force")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.done(), ["parent"])
-        self.assertEqual([Path(e["model"]).stem for e in self.events if e.get("state") == "current"], ["child"])
+        self.assertEqual(self.current(), ["child"])
         hit = self.record(self.parent)
         self.assertEqual(hit["tree"], miss["tree"])
         self.assertEqual(hit["closure"]["hash"], miss["closure"]["hash"])
@@ -219,7 +254,71 @@ class SerialChildren(unittest.TestCase):
         self.assertIn("a model may not depend on itself", err)
 
 
-class QueuedExports(SerialChildren):
+class HitsHealTheTree(SerialChildrenCase):
+    """A current model's hit heals what its children owe, restores a child brought back
+    to a state already built, and records one closure whether its child ran or was
+    decoded (STORE.md §3, §4)."""
+
+    def test_a_run_of_the_root_heals_what_a_grandchild_owes(self):
+        code, err = self.build(self.grand)
+        self.assertEqual(code, 0, err)
+        written = (self.root / "child.step").read_bytes()
+        (self.root / "child.step").unlink()
+        code, err = self.build(self.grand)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.done(), [], "a missing file ran a body")
+        self.assertIn("child.step is missing; writing it again", err)
+        self.assertEqual((self.root / "child.step").read_bytes(), written)
+        self.assertEqual(self.current(), ["child", "parent", "grand"], "the tree is healed children first")
+
+    def test_a_child_brought_back_to_a_state_already_built_makes_its_parent_a_hit(self):
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        first = {name: self.record(path)["key"] for name, path in (("child", self.child), ("parent", self.parent))}
+        files = {name: (self.root / f"{name}.step").read_bytes() for name in first}
+        (self.root / "size.txt").write_text("5.0", encoding="utf-8")
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(self.done()), ["child", "parent"])
+        self.assertNotEqual(self.record(self.child)["key"], first["child"])
+        # Back: the child's stored result answers for its source as it is now, so the
+        # parent stands too (clause 3); its hit restores the child, and no body runs.
+        (self.root / "size.txt").write_text("4.0", encoding="utf-8")
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.done(), [], "the revert ran a body")
+        self.assertEqual(self.current(), ["child", "parent"])
+        self.assertIn("restored", err)
+        for name, path in (("child", self.child), ("parent", self.parent)):
+            self.assertEqual(self.record(path)["key"], first[name], f"{name} is not at its first key")
+            self.assertEqual((self.root / f"{name}.step").read_bytes(), files[name], f"{name}.step is not the first build's")
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.done(), self.current()), ([], ["child", "parent"]))
+        self.assertNotIn("writing it again", err)
+
+    def test_a_parent_records_one_closure_whether_its_child_ran_or_was_decoded(self):
+        """A helper both bodies import dynamically: on a miss the child's scope executes it
+        first, so unless that scope evicts what it ran first, the parent's import finds it
+        loaded, executes nothing, and the parent's closure misses what a hit run -- the
+        child decoded, the parent importing the helper itself -- records."""
+        (self.root / "plug.py").write_text("VALUE = 3.0\n", encoding="utf-8")
+        child, parent = self.root / "dyn_child.py", self.root / "dyn_parent.py"
+        child.write_text(DYN_CHILD, encoding="utf-8")
+        parent.write_text(DYN_PARENT, encoding="utf-8")
+        code, err = self.build(parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(self.done()), ["dyn_child", "dyn_parent"])
+        miss = self.record(parent)["closure"]
+        code, err = self.build(parent, "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.done(), self.current()), (["dyn_parent"], ["dyn_child"]))
+        hit = self.record(parent)["closure"]
+        self.assertIn("plug.py", miss["files"])
+        self.assertEqual((sorted(miss["files"]), miss["hash"]), (sorted(hit["files"]), hit["hash"]))
+
+
+class QueuedExports(SerialChildrenCase):
     """A call's files are queued as its result is recorded and finished by the run that
     owns the command, children first: a child's STEP is written while its parent's body
     goes on, the command's result is printed once every file is written, and an export

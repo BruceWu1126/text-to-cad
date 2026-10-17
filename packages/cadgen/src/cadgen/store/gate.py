@@ -13,18 +13,22 @@
    its caller's) — or a constant the model imported by value
    (``record.constants``) no longer hashes the same;
 3. for any recorded child: its stored result does not stand (``child stale``)
-   **or** stands under another key than the one recorded (``child rebuilt``);
+   **or** stands under another key than the one recorded (``child rebuilt``) -- a
+   child stands under its record's key or, once its source moved on and came back,
+   under the key its source has now when a stored result answers for it (its
+   candidate, below), which its parent's hit restores;
 4. the tree object or any object it (transitively) references is missing;
 5. any declared output does not match ``outputs``;
 6. the producer that built the record -- cadgen, the kernel -- is not this one.
 
 A model's stored result is in the store when clauses 1–4 and 6 hold
 (``Verdict.stored``, the record's key). It STANDS when clause 5 then finds at most a
-STEP or a declared mesh to owe: ``Verdict.key`` is that key, a decorated call takes
-the result as it is, exporting what the files owe without running the body, and a
-parent depends on the child by it (clause 3); a missing sidecar or drawing is a
-run's, as is anything else the gate finds, and a child that owes one does not stand
-for its parent, whose run calls it. The verdict also names the key the source has
+STEP, its sidecar or a declared mesh to owe -- each written again from the stored
+result and its record, never by a run: ``Verdict.key`` is that key, a decorated call
+takes the result as it is, exporting what the files owe without running the body,
+and a parent depends on the child by it (clause 3); a missing drawing is a run's, as
+is anything else the gate finds, and a child that owes one does not stand for its
+parent, whose run calls it. The verdict also names the key the source has
 NOW (``Verdict.candidate``): what a result would be keyed by if this source were
 built, from this model, the record's closure as it hashes now, its constants as
 they read now, its children's keys as they stand now and this producer -- what a
@@ -49,15 +53,26 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cadgen._internal import filetrace
+from cadgen._internal.source_sidecar import SOURCE_SIDECAR_SUFFIX
 from cadgen.store.closure import current_closure_hash
 from cadgen.store.index import resolve_model_ref, split_model_ref
 from cadgen.store.records import read_record
 from cadgen.store.trees import _stamp, _stamp_is_settled, tree_complete
 
 
-#: The outputs a standing result still owes without a run: its STEP, exported again
-#: from the stored result, and its declared meshes, cut again (``generation._hit``).
+#: The outputs a standing result still owes without a run (``generation._hit``): its
+#: STEP, exported again from the stored result, and its declared meshes, cut again --
+#: and the STEP's sidecar, ``<document>.json``, written again from the record.
 _EXPORTED_SUFFIXES = frozenset({".step", ".stp", ".stl", ".glb", ".3mf"})
+
+
+def _exported(path: str) -> bool:
+    """Whether a standing result owes ``path`` without a run (``_EXPORTED_SUFFIXES``). A
+    drawing, or any other output, comes only from a run."""
+    name = Path(path).name.lower()
+    if name.endswith(SOURCE_SIDECAR_SUFFIX):
+        name = name[: -len(SOURCE_SIDECAR_SUFFIX)]
+    return Path(name).suffix in _EXPORTED_SUFFIXES
 
 
 @dataclass
@@ -65,9 +80,6 @@ class Verdict:
     model: str
     stale: bool
     clauses: list[dict[str, Any]] = field(default_factory=list)
-    #: The source's closure hash as it is NOW (the script's own sha when there is no
-    #: record to name a closure).
-    closure: str | None = None
     #: Exact result from the record this verdict checked, never a later lookup.
     tree: str | None = None
     #: The record's key while its stored result is in the store (the module docstring:
@@ -217,7 +229,6 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
     if record is None:
         clauses.append({"clause": 1, "stale": True, "why": "no record"})
         verdict.stale = True
-        verdict.closure = _sha256_file(script)
         return verdict
     clauses.append({"clause": 1, "stale": False})
     verdict.tree = str(record.get("tree") or "") or None
@@ -240,7 +251,6 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
                                    own=closure.get("own") or {})
     else:
         now = None
-    verdict.closure = now or _sha256_file(script)
     # The constants as they read now, by recorded name, each module imported once
     # kernel-free: clause 2 compares them, and the candidate key is made of them.
     recorded_constants = record.get("constants") or {}
@@ -272,14 +282,16 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
 
     # Clause 3, by key: a child's stored result must stand, under the very key the
     # parent composed. A child rebuilt from an edited source stands under another key
-    # -- whatever its geometry -- and the parent follows it (STORE.md §4).
+    # -- whatever its geometry -- and the parent follows it (STORE.md §4); one whose
+    # source came back to a state already built stands under that state's key before
+    # anything restores it (_standing_key).
     child_clauses: list[dict[str, Any]] = []
     child_keys: list[str] = []
     for child in record.get("children") or []:
         child_model = str((child or {}).get("model") or "")
         recorded = str((child or {}).get("key") or "")
         child_verdict = stale(child_model, memo=memo) if child_model else None
-        current_key = child_verdict.key if child_verdict is not None else None
+        current_key = _standing_key(child_verdict) if child_verdict is not None else None
         rebuilt = current_key is not None and current_key != recorded
         child_stale = current_key is None or rebuilt
         child_clauses.append(
@@ -317,9 +329,9 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         output_clauses.append({"path": path, "stale": not ok, "why": why})
         if not ok:
             verdict.stale = True
-            # A STEP or a declared mesh is exported again from the stored result; any
-            # other output (a sidecar, a drawing) comes only from a run.
-            owed_a_run = owed_a_run or Path(path).suffix.lower() not in _EXPORTED_SUFFIXES
+            # A STEP, its sidecar or a declared mesh is written again from the stored
+            # result and its record; any other output (a drawing) comes only from a run.
+            owed_a_run = owed_a_run or not _exported(path)
     clauses.append({"clause": 5, "stale": any(c["stale"] for c in output_clauses), "outputs": output_clauses})
 
     from cadgen.store.results import producer_versions, result_key
@@ -351,6 +363,24 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
     return verdict
 
 
+def _standing_key(verdict: Verdict) -> str | None:
+    """The key a model's result stands under for its parent: its record's, while that
+    stands (``Verdict.key``); else, for a record its source has moved on from, the key
+    the source has NOW when a stored result answers for it (``Verdict.candidate``,
+    ``store.results``) -- a source brought back to a state already built stands for its
+    parent before anything restores it, and the parent's hit restores it
+    (``generation._hit``) instead of running its own body. A read: nothing is written
+    until a run takes the result."""
+    if verdict.key is not None:
+        return verdict.key
+    if verdict.stored is not None or not verdict.candidate:
+        return None
+    from cadgen.store.results import read_result
+
+    tree = str((read_result(verdict.candidate) or {}).get("tree") or "")
+    return verdict.candidate if tree and tree_complete(tree) else None
+
+
 def _constants_now(script: Path, constants: Mapping[str, Mapping[str, str]]) -> dict[str, dict[str, str] | None]:
     """The record's constants as their modules hold them now, by module: each name's
     hash (``closure.module_constant_hashes``), a name no longer a literal absent, a
@@ -378,7 +408,3 @@ def _closure_why(script: Path, closure: Mapping[str, Any], now: str | None) -> s
         missing = [rel for rel in source_files(changed) if not (Path(script).resolve().parent / rel).exists()]
         return f"closure file missing: {', '.join(missing or changed)}" if (missing or changed) else "closure file missing"
     return describe_changes(changed)
-
-
-def is_current(model: Path | str) -> bool:
-    return not stale(model).stale

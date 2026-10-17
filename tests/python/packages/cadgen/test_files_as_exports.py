@@ -226,6 +226,8 @@ class FilesAsExportsTest(unittest.TestCase):
         self.build()
         digest = hashlib.sha256(self.step.read_bytes()).hexdigest()
         stamp = os.stat(self.step)
+        producer = self.entry().get("producer")
+        self.assertIsNotNone(producer, "the build's entry names no producer")
         remove_entry("document", document_key(digest))
         self.assertIsNone(self.entry())
         outcome, said = self.build()
@@ -237,6 +239,7 @@ class FilesAsExportsTest(unittest.TestCase):
         entry = self.entry()
         self.assertEqual(self.record()["tree"], entry["tree"])
         self.assertNotIn("verified", entry)
+        self.assertEqual(producer, entry.get("producer"), "the entry says what the file written again carries")
         self.assertEqual("current", self.build()[0])
 
     def test_a_verify_that_cannot_compare_leaves_the_file_its_own_content(self) -> None:

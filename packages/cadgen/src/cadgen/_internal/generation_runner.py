@@ -531,17 +531,20 @@ def _run_script_generator_body(
     # module space, so every first-party file the generator loads and runs executes
     # inside the window and is hashed as it runs (ExecutionHashes), from the source it
     # was compiled from (_first_party_from_source); a child's module ran in its parent's
-    # window, which its own scope takes its executions from. Alongside it, the trace:
-    # every file the build opened, whoever opened it, and the folders its code listed.
-    # Each scope nests exclusively, so a child's build leaves its parent's untouched.
-    if generator is None:
+    # window, which its own scope takes its executions from, and what its body first
+    # executes leaves the module space when its scope closes (below). Alongside it, the
+    # trace: every file the build opened, whoever opened it, and the folders its code
+    # listed. Each scope nests exclusively, so a child's build leaves its parent's
+    # untouched.
+    root = generator is None
+    if root:
         evict_first_party_modules()
     from cadgen.store.closure import ExecutionHashes
 
     with (
         filetrace.capture() as trace,
         _first_party_from_source(),
-        ExecutionHashes(imported=None if generator is None else spec.script_path) as executed_hashes,
+        ExecutionHashes(imported=None if root else spec.script_path) as executed_hashes,
         # The model run the memo and the trace see: the script's top level and
         # the body, every kernel construction called from its own code.
         kernel_memo.run(spec.script_path) as kernel_run,
@@ -577,6 +580,11 @@ def _run_script_generator_body(
             # all that --profile profiles (cadgen._internal.build_timing).
             with model_body(spec.script_path.parent):
                 raw_payload = generator()
+    if not root:
+        # The child's scope closed: a module its body imported first leaves sys.modules,
+        # so its parent's body imports it itself, as it does when the child is decoded,
+        # and hit and miss record one closure (STORE.md §3).
+        evict_first_party_modules(only=executed_hashes.ran_first())
     if frame.failed:
         # A child's build failed inside the body, which went on without it: the run
         # fails with the child, whatever the body made of the exception (STORE.md §9a).

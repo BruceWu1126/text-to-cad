@@ -43,7 +43,7 @@ def main() -> int:
     parser.add_argument("--placement-model", help="Source containing the placement substitution; defaults to --model")
     parser.add_argument("--child-daemon-socket", help="Use a caller-owned dedicated warm daemon for child builds; default uses transient workers")
     parser.add_argument("--skip-imports", action="store_true", help="Measure builds only, omitting the separate import study")
-    parser.add_argument("--assert-child-pins", action="store_true", help="Require geometry to change only its child pin and placement to preserve all pins")
+    parser.add_argument("--assert-child-keys", action="store_true", help="Require a geometry edit to change only the edited child's key and a placement edit to keep every key")
     parser.add_argument("--geometry-from", required=True)
     parser.add_argument("--geometry-to", required=True)
     parser.add_argument("--placement-from", required=True)
@@ -58,8 +58,8 @@ def main() -> int:
     model, store = model_path(args.model), model_path(args.store)
     geometry_model = model_path(args.geometry_model or model)
     placement_model = model_path(args.placement_model or model)
-    if args.assert_child_pins and geometry_model == model:
-        parser.error("--assert-child-pins requires --geometry-model naming a child source")
+    if args.assert_child_keys and geometry_model == model:
+        parser.error("--assert-child-keys requires --geometry-model naming a child source")
     originals = {path: (path.read_bytes(), path.stat()) for path in (model, geometry_model, placement_model)}
     original = originals[model][0]
     variants = {name: {path: saved[0] for path, saved in originals.items()}
@@ -110,11 +110,11 @@ def main() -> int:
     logs.mkdir(parents=True, exist_ok=True)
     if args.child_daemon_socket:
         report["timingBoundary"] = "same root interpreter, kernel imported; child daemon IPC and declared output completion included; workers primed before measured calls; no profiler"
-    initial_child_pins = None
+    initial_child_keys = None
     seen_document_hashes = set()
 
     def run(label: str, variant: str, *, measured: bool):
-        nonlocal initial_child_pins
+        nonlocal initial_child_keys
         variant_kind = variant_kinds[variant]
         for path, payload in variants[variant].items():
             path.write_bytes(payload)
@@ -139,9 +139,9 @@ def main() -> int:
         saves = [event for event in root_events if event.get("saved")]
         source_results = [event for event in root_events if event.get("sourceResult")]
         children = []
-        for pin in record.get("children") or []:
-            child = read_record(pin["model"]) or {}
-            children.append({"model": pin["model"], "recordedKey": pin.get("key"), "currentKey": child.get("key"),
+        for entry in record.get("children") or []:
+            child = read_record(entry["model"]) or {}
+            children.append({"model": entry["model"], "recordedKey": entry.get("key"), "currentKey": child.get("key"),
                              "currentTree": child.get("tree"),
                              # The tree its file's bytes map to: its result once verified.
                              "fileTree": tree_for_document_hash(step_sha256(child)),
@@ -167,14 +167,14 @@ def main() -> int:
             if event.get("state") in {"done", "current", "failed"}:
                 timing["terminalMs"] = event["elapsedMs"]
                 timing["terminalState"] = event["state"]
-        current_pins = {child["model"]: child["recordedKey"] for child in children}
-        if initial_child_pins is None:
-            initial_child_pins = current_pins
-        changed_pins = sorted(key for key in current_pins.keys() | initial_child_pins.keys()
-                              if current_pins.get(key) != initial_child_pins.get(key))
-        expected_changes = sorted(key for key in initial_child_pins
+        current_keys = {child["model"]: child["recordedKey"] for child in children}
+        if initial_child_keys is None:
+            initial_child_keys = current_keys
+        changed_keys = sorted(key for key in current_keys.keys() | initial_child_keys.keys()
+                              if current_keys.get(key) != initial_child_keys.get(key))
+        expected_changes = sorted(key for key in initial_child_keys
                                   if variant_kind == "geometry" and key.split("::")[0] == str(geometry_model))
-        pin_check = (bool(initial_child_pins) and changed_pins == expected_changes
+        key_check = (bool(initial_child_keys) and changed_keys == expected_changes
                      and all(child["currentKey"] == child["recordedKey"] for child in children))
         actual_outputs = {path: sha256(Path(path).read_bytes()) for path in record.get("outputs") or {}}
         actual_steps = [digest for path, digest in actual_outputs.items() if Path(path).suffix.lower() in {".step", ".stp"}]
@@ -189,8 +189,8 @@ def main() -> int:
                "events": events, "stages": stages, "tree": record.get("tree"), "documentHash": step_sha256(record) or None,
                "actualOutputSha256": actual_outputs,
                "fileTree": tree_for_document_hash(step_sha256(record)), "children": children,
-               "modelMilestones": milestones, "changedChildPins": changed_pins,
-               "childPinCheckPassed": pin_check if args.assert_child_pins else None,
+               "modelMilestones": milestones, "changedChildKeys": changed_keys,
+               "childKeyCheckPassed": key_check if args.assert_child_keys else None,
                "components": sorted((tree.get("components") or {}).keys()), "occurrences": len(tree.get("occurrences") or []),
                "firstPreviewMs": previews[0]["elapsedMs"] if previews else None,
                "sourceResultMs": source_results[0]["elapsedMs"] if source_results else None,
@@ -201,8 +201,8 @@ def main() -> int:
         print(json.dumps({key: row[key] for key in ("run", "milliseconds", "exit", "firstPreviewMs", "savedMs")}), flush=True)
         if code:
             raise RuntimeError(f"{label} failed; see {log_path}")
-        if args.assert_child_pins and (not pin_check or (variant_kind == "geometry" and len(expected_changes) != 1)):
-            raise AssertionError(f"{label} changed unexpected child pins: {changed_pins}, expected {expected_changes}")
+        if args.assert_child_keys and (not key_check or (variant_kind == "geometry" and len(expected_changes) != 1)):
+            raise AssertionError(f"{label} changed unexpected child keys: {changed_keys}, expected {expected_changes}")
         if variant in novel_variants and not first_output_digest:
             raise AssertionError(f"{label} did not produce a previously unseen STEP digest in this study")
         return record

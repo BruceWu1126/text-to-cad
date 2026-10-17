@@ -1024,8 +1024,10 @@ class ExecutionHashes:
     what executes while it is the innermost and, with ``imported``, what importing
     that module ran in this build (:func:`importing`) -- so a child's closure is the
     same built alone or inside its parent -- and the outer scope never owns the
-    inner's executions. The facts are the build's: the hash and the bytes each file
-    ran with, shared by every scope of the build and read by any closure walk."""
+    inner's executions; what the inner scope executed first leaves the module space at
+    its exit (:meth:`ran_first`). The facts are the build's: the hash and the bytes
+    each file ran with, shared by every scope of the build and read by any closure
+    walk."""
 
     def __init__(self, *, imported: Path | str | None = None) -> None:
         self.hashes: dict[str, str] = {}  # what this scope's build executed, by path, as it ran
@@ -1034,6 +1036,7 @@ class ExecutionHashes:
         self.thread = threading.get_ident()  # the build's thread: the only one whose executions are its
         self._imported = imported
         self._previous: ExecutionHashes | None = None
+        self._known: frozenset[str] = frozenset()  # the facts when this scope opened
 
     def __enter__(self) -> "ExecutionHashes":
         global _ACTIVE, _HOOK_INSTALLED
@@ -1048,8 +1051,16 @@ class ExecutionHashes:
             for path in (key, *sorted(_IMPORT_RUNS.get(key, ()))):
                 if path in self.facts:
                     self.hashes[path] = self.facts[path]
+        self._known = frozenset(self.facts)
         _ACTIVE = self
         return self
+
+    def ran_first(self) -> set[str]:
+        """The files whose first execution in the build was this scope's own -- a module a
+        child's body imported first -- which leave ``sys.modules`` when a child's scope
+        closes (``generation_runner``), so the parent's body imports them itself, as it
+        does when the child is decoded, and hit and miss record one closure."""
+        return set(self.hashes) - self._known
 
     def __exit__(self, *exc: object) -> None:
         global _ACTIVE

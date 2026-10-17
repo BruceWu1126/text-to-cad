@@ -87,6 +87,21 @@ def _real(path: str | os.PathLike[str]) -> str:
         return str(path)
 
 
+def _model_subject(ref: str) -> str:
+    """A model ref as a subject: its script's real path, ``::fn`` kept."""
+    script, separator, function = ref.partition("::")
+    return _real(script) + separator + function if script else ""
+
+
+def _same_model(ref: str, subject: str) -> bool:
+    """Whether a model ref (as :func:`_model_subject` spells it) names a request's subject:
+    the same script, and the same function where both name one -- an event spells a
+    file's sole model bare (``index.display_model``), a request a whole file bare."""
+    script, _, function = ref.partition("::")
+    subject_script, _, subject_function = subject.partition("::")
+    return script == subject_script and (not function or not subject_function or function == subject_function)
+
+
 def declared_outputs(subject: str, tool: str) -> list[str]:
     """The output paths a job will write, from its declarations alone.
 
@@ -145,7 +160,7 @@ class JobLedger:
     def start(self, *, tool: str, subject: str, argv: list[str] | None = None, store_root: str = "") -> dict[str, Any]:
         if tool == "artifact":
             subject = ""
-        subject = _real(subject) if subject else ""
+        subject = _model_subject(subject)
         now = self._clock()
         sequence = next(self._ids)
         job: dict[str, Any] = {
@@ -211,11 +226,12 @@ class JobLedger:
     def observe(self, frame: dict[str, Any]) -> None:
         """Fold one relayed frame into the ledger (only ``event`` frames matter): a
         transition of the request's own model, or of a child the request built inside its
-        body, which has a row of its own under the request (:meth:`_child_row`)."""
+        body -- one in the request's own file included -- which has a row of its own under
+        the request (:meth:`_child_row`)."""
         event = frame.get("event") if isinstance(frame, dict) else None
         if not isinstance(event, dict):
             return
-        model = _real(str(event.get("model") or ""))
+        model = _model_subject(str(event.get("model") or ""))
         state = str(event.get("state") or "")
         if not model or not state:
             return
@@ -226,7 +242,7 @@ class JobLedger:
             if request is None:
                 return  # a transition for a job this ledger never saw start
             job = request
-            if producer and _real(model.split("::", 1)[0]) != _real(request["subject"].split("::", 1)[0]):
+            if producer and not _same_model(model, request["subject"]):
                 job = self._child_row(request, model, now)
             ordinal = int(event.get("sequence") or 0)
             if ordinal and ordinal <= job.get("eventSequence", 0):
@@ -386,9 +402,9 @@ class JobLedger:
             job["ledgerRevision"] = self._revision
         self._changed.notify_all()
 
-    def _running_for(self, subject: str, *, exclude: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    def _running_for(self, subject: str) -> dict[str, Any] | None:
         for job in reversed(list(self._jobs.values())):
-            if job is not exclude and job["subject"] == subject and job["state"] in _RUNNING:
+            if job["subject"] == subject and job["state"] in _RUNNING:
                 return job
         return None
 

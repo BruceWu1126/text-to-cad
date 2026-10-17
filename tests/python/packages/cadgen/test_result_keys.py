@@ -10,6 +10,7 @@ stands and is retired once another cadgen's.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import os
 import time
@@ -34,6 +35,23 @@ SIZE = {size}
 @step
 def plate():
     return bd.Box(SIZE, 4.0, 2.0)
+"""
+
+FINISHED = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+SIZE = {size}
+
+
+@step(materials={{
+    "definitions": {{"finish": {{"name": "Finish", "baseColor": {colour!r}, "roughness": 0.5}}}},
+    "assignments": [{{"targets": ["#plate"], "material": "finish"}}],
+}})
+def plate():
+    shape = bd.Box(SIZE, 4.0, 2.0)
+    shape.label = "plate"
+    return shape
 """
 
 
@@ -93,6 +111,54 @@ class ResultKeys(unittest.TestCase):
         restored = self.record()
         self.assertEqual((restored["key"], restored["tree"]), (first["key"], first["tree"]))
         self.assertEqual(self.document.read_bytes(), first_bytes, "the STEP is the first build's again")
+
+    def test_a_restored_result_writes_its_own_sidecar_and_a_lost_one_is_written_again(self):
+        """A model with a finish: its sidecar is a function of its record. A source brought
+        back to a state already built gets that state's sidecar, bound to that state's
+        STEP -- never the sidecar the other state left on disk -- whether the edit between
+        changed the finish alone (the STEP kept) or the geometry too (the STEP written
+        again); and a sidecar deleted beside a current model is written again from the
+        record, with no run (gate clause 5)."""
+        from cadgen._internal.source_sidecar import read_source_sidecar, source_sidecar_path
+
+        def finished(size: float, colour: str) -> None:
+            self.plate.write_text(FINISHED.format(size=size, colour=colour), encoding="utf-8")
+
+        def sidecar() -> dict:
+            return read_source_sidecar(self.document)
+
+        finished(10.0, "#FF0000")
+        self.assertEqual(self.build()[1], ["done"])
+        red = self.record()
+        red_bytes = self.document.read_bytes()
+        self.assertEqual(sidecar()["appearance"], red["appearance"])
+        # The finish alone: the record moves on and the STEP is kept.
+        finished(10.0, "#0000FF")
+        self.build()
+        blue = self.record()
+        self.assertNotEqual(blue["key"], red["key"])
+        self.assertNotEqual(blue["appearance"], red["appearance"])
+        self.assertEqual(sidecar()["appearance"], blue["appearance"])
+        finished(10.0, "#FF0000")
+        self.assertEqual(self.build()[1], ["current"])
+        self.assertEqual(self.record()["key"], red["key"])
+        self.assertEqual(sidecar()["appearance"], red["appearance"], "the restored result took the other state's sidecar")
+        self.assertEqual(sidecar()["documentHash"], hashlib.sha256(self.document.read_bytes()).hexdigest())
+        self.assertEqual(self.build()[1], ["current"], "the restore left the model owing a run")
+        # The geometry and the finish: the STEP is written again, with the record's sidecar.
+        finished(11.0, "#0000FF")
+        self.assertEqual(self.build()[1], ["done"])
+        self.assertNotEqual(self.document.read_bytes(), red_bytes)
+        finished(10.0, "#FF0000")
+        self.assertEqual(self.build()[1], ["current"])
+        self.assertEqual(self.document.read_bytes(), red_bytes)
+        self.assertEqual(sidecar()["appearance"], red["appearance"])
+        self.assertEqual(sidecar()["documentHash"], hashlib.sha256(red_bytes).hexdigest())
+        # A sidecar deleted beside a current model: written again from the record, no run.
+        source_sidecar_path(self.document).unlink()
+        self.assertEqual(self.build()[1], ["current"])
+        self.assertEqual(sidecar()["appearance"], red["appearance"])
+        self.assertEqual(sidecar()["documentHash"], hashlib.sha256(red_bytes).hexdigest())
 
     def test_a_deleted_step_is_exported_again_without_a_run(self):
         self.assertEqual(self.build()[1], ["done"])

@@ -427,7 +427,8 @@ class ServerRelaysTheDeath(unittest.TestCase):
         pool.release.assert_called_once_with(worker, healthy=True, cancelled=False)
         (job,) = jobs.snapshot()
         self.assertEqual((job["state"], job["exit"]), ("done", 0))
-        self.assertEqual(job["savedResults"]["/w/part.step"]["documentHash"], "d" * 64, "the save landed after the release")
+        self.assertEqual(job["savedResults"][os.path.realpath("/w/part.step")]["documentHash"], "d" * 64,
+                         "the save landed after the release")
 
     def test_a_job_whose_caller_left_is_released_as_cancelled_not_crashed(self):
         class Gone(self._Conn):
