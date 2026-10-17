@@ -232,7 +232,7 @@ def element_tokens(shape: Any, *, brep: str | None = None) -> dict[str, list[str
 
     from cadgen._internal.topology_extract import component_metrics
 
-    metrics = component_metrics(shape, brep=brep)
+    metrics = component_metrics(shape, brep=brep, face_boxes=True)
     faces, edges, vertices = _maps(shape)
     face_facts = [_face_facts(TopoDS.Face_s(faces.FindKey(i)), metrics["faces"][i - 1])
                   for i in range(1, faces.Extent() + 1)]

@@ -6,9 +6,9 @@ mesh of it at the display tolerance), naming a fixed test part key
 ``fixtures.json``), and ``<name>.selectors.json``, the component's selector table
 (``cadgen._internal.selector_table``): what the page joins to the mesh, and the
 oracle every id and fact a JS test expects comes from. Both are made as cadgen
-derives a part (``cadgen.store.parts``): the table from the component's topology
-facts, extracted in memory, and its elements' names, and the mesh from the table
-and the component's face colours. Each shape is built inside a kernel run, as a
+derives a part (``cadgen.store.parts``): the mesh from the component's topology
+facts, extracted in memory, and its face colours, and the table from the facts,
+its elements' names and the mesh's boxes. Each shape is built inside a kernel run, as a
 model's build makes it, so its elements are named by their lineage
 (``f:sun_gear.extrude1.3``), as a build names them.
 
@@ -90,11 +90,12 @@ def main() -> None:
         entry, payload = prepared["entry"], prepared["payload"]
         topods = decode_display_shape(entry, payload).wrapped
         colors = effective_face_colors(topods, entry["faceColors"])
-        table = build_selector_table(topods, extract_topology_facts(topods), element_names(lineage, topods))
-        (HERE / f"{name}.selectors.json").write_bytes(selector_table_bytes(table) + b"\n")
+        facts = extract_topology_facts(topods)
         part = versioned_key(hashlib.sha256(f"cadgen-test-fixture:{name}".encode()).hexdigest(), PART_VERSION)
-        body = tessellate.mesh_component(topods, table, colors, part=part, chord=chord, angle=angle)
-        (HERE / f"{name}.glb").write_bytes(body)
+        meshed = tessellate.mesh_component(topods, facts, colors, part=part, chord=chord, angle=angle)
+        table = build_selector_table(topods, facts, element_names(lineage, topods), boxes=meshed.boxes)
+        (HERE / f"{name}.selectors.json").write_bytes(selector_table_bytes(table) + b"\n")
+        (HERE / f"{name}.glb").write_bytes(meshed.body)
         manifest[name] = {"part": part}
     (HERE / "fixtures.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(manifest, indent=2, sort_keys=True))

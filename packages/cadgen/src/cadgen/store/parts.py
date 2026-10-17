@@ -19,12 +19,13 @@ estimate and counts (and ``unmeshedFaceCount`` when a face could not be meshed),
 table's counts. One probe answers whether a part's display data is stored.
 
 Derivation extracts the component's topology facts in memory (an eager-only component's
-are the object its tree pins), builds the selector table from them and the component's
-element names -- its lineage's, and the geometric token of each element no lineage names
-(``_internal/geometric_tokens``) -- meshes the component from the table and its face
-colours, writes the two objects and then the record, so a record always names complete
-objects. Nothing stores the facts. A mesh export at another tolerance builds the table for
-the bytes it decodes, the same way, and stores nothing (``mesh_at``).
+are the object its tree pins), meshes the component from them and its face colours, builds
+the selector table from the facts, the component's element names -- its lineage's, and the
+geometric token of each element no lineage names (``_internal/geometric_tokens``) -- and the
+mesh's boxes of its faces and edges, writes the two objects and then the record, so a record
+always names complete objects. Nothing stores the facts. A mesh export at another tolerance
+extracts the facts of the bytes it decodes, the same way, meshes from them and stores
+nothing (``mesh_at``).
 """
 from __future__ import annotations
 
@@ -53,8 +54,8 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # geometric token. 7: a part is keyed by its component's construction key (or its content, for
 # geometry no construction made) and lineage, and its selector table names every element by its
 # lineage, or its geometric token where it has none (README law 20). 8: the selector table carries no
-# solid volume.
-PART_VERSION = 8
+# solid volume. 9: its face and edge boxes are the display mesh's.
+PART_VERSION = 9
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")
@@ -385,14 +386,6 @@ def _topology(entry: dict, topods: Any) -> dict:
     return extract_topology_facts(topods, brep=entry["brep"])
 
 
-def _table(entry: dict, topods: Any) -> dict:
-    """The component's selector table, built for this decode: its facts and its elements'
-    names (:func:`element_names`)."""
-    from cadgen._internal.selector_table import build_selector_table
-
-    return build_selector_table(topods, _topology(entry, topods), element_names(entry, topods))
-
-
 def element_names(entry: dict, topods: Any) -> dict[str, list[str]]:
     """Every face's, edge's and vertex's name in a decode of the component ``entry``
     describes, by ordinal: its lineage's (the object the entry names, read verified),
@@ -425,31 +418,32 @@ def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None)
         return prior
     if keep_going is not None and not keep_going():
         return None
-    from cadgen._internal.selector_table import selector_table_bytes
+    from cadgen._internal.selector_table import build_selector_table, selector_table_bytes
     from cadgen._internal.tessellate import mesh_component
     from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
     with _meshing():
         topods, colors = _decoded(entry)
-        table = _table(entry, topods)
-        glb = mesh_component(topods, table, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
-                             angle=DISPLAY_TESSELLATION["angleTolerance"])
-        return _write(key, glb, selector_table_bytes(table))
+        facts = _topology(entry, topods)
+        meshed = mesh_component(topods, facts, colors, part=key, chord=DISPLAY_TESSELLATION["chordTolerance"],
+                                angle=DISPLAY_TESSELLATION["angleTolerance"])
+        table = build_selector_table(topods, facts, element_names(entry, topods), boxes=meshed.boxes)
+        return _write(key, meshed.body, selector_table_bytes(table))
 
 
 def mesh_at(entry: dict, key: str, chord: float, angle: float) -> bytes:
     """The GLB body of the part ``key`` names, at ``chord``/``angle``, meshed in this process
     and stored nowhere: a mesh export at a tolerance other than the display one
     (``_internal/mesh_export.py``), whose file is the output. ``entry`` is the component's
-    tree entry. The mesher reads what the display mesh's read -- a selector table and the
-    component's face colours -- with the table built here for the bytes it decodes, as a
-    derivation builds it, so the export is the same whether or not the store holds the
+    tree entry. The mesher reads what the display mesh's read -- the component's topology
+    facts and its face colours -- with the facts extracted here for the bytes it decodes, as
+    a derivation extracts them, so the export is the same whether or not the store holds the
     part (law 5)."""
     from cadgen._internal.tessellate import mesh_component
 
     with _meshing():
         topods, colors = _decoded(entry)
-        return mesh_component(topods, _table(entry, topods), colors, part=key, chord=chord, angle=angle)
+        return mesh_component(topods, _topology(entry, topods), colors, part=key, chord=chord, angle=angle).body
 
 
 def _captured(tree_hash: str, producer: dict | None) -> tuple[dict, dict]:

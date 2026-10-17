@@ -2,19 +2,21 @@
 
 The facts of one unlocated component's exact topology, read off the BREP with
 OCCT and never meshed: each solid's ordinal and kind; each face's
-surface type, exact area, centroid and tight box (GProps, BndLib), a plane's
-oriented normal, its analytic parameters and its loops as ordered edge
-ordinals; each edge's visibility class, continuity, dihedral angle, flags,
-adjacent faces, exact length, centroid, tight box, curve type, analytic
-parameters and, for a circle, its sweep. Face and edge ordinals are the
+surface type, exact area and centroid (GProps), a plane's oriented normal, its
+analytic parameters and its loops as ordered edge ordinals; each edge's
+visibility class, continuity, dihedral angle, flags, adjacent faces, exact
+length and centroid, curve type, analytic parameters and, for a circle, its
+sweep. No box: a face's and an edge's are its display mesh's, which the
+selector table takes from the mesher (``tessellate``). Face and edge ordinals are the
 ``TopExp.MapShapes_s`` order the selector table joins an element's name to
 (``store.parts.element_names``), and the component's mesh (``tessellate``) is
 grouped by the same ordinals.
 
 ``extract_topology_facts`` returns them in memory as a plain structure -- the
-three ordinal tables ``shapes``, ``faces`` and ``edges`` -- that the selector
-table takes whole (``selector_table.build_selector_table``): every field it
-carries, the table reads. Nothing stores them, except an eager-only
+three ordinal tables ``shapes``, ``faces`` and ``edges`` -- that the mesher reads
+(each face's surface type and area, each edge's class) and the selector table
+takes whole (``selector_table.build_selector_table``): every field it carries,
+the table reads. Nothing stores them, except an eager-only
 component's, which its tree pins as an object
 (``topology_facts.topology_facts_bytes``, ``component_package``).
 
@@ -97,9 +99,10 @@ def _bnd_box(topo) -> list[float] | None:
 
     ``BRepBndLib::Add`` bounds a B-spline by its CONTROL POLYGON, which for a
     NURBS circle of radius r reaches r/cos(22.5 deg) = 1.082 r -- an 8% overshoot
-    on every rounded surface. These boxes are what ``inspect refs --facts``
-    reports as bounds and what a caller measures clearance against, so they must
-    describe the surface, not its poles: ``AddOptimal`` subdivides instead.
+    on every rounded surface. These boxes are what a geometric token's face
+    signature rounds (``geometric_tokens``) and what a written STEP's verify
+    compares (``step_verify``), so they must describe the surface, not its poles:
+    ``AddOptimal`` subdivides instead.
     ``useTriangulation=False`` throughout, because meshing here would mutate the
     shared ``TShape`` and break content-addressed component dedup.
     """
@@ -118,43 +121,43 @@ def _bnd_box(topo) -> list[float] | None:
         return None
 
 
-# The exact metrics of a component's faces and edges -- the kernel's integrals and tight
-# boxes, most of what a table costs -- remembered per component in this process, so that
-# a part's derivation (``store.parts``), whose selector table and whose elements' geometric
-# tokens (``geometric_tokens``) both read them, measures each face and edge once. Keyed by
-# the component's BREP object, which both read the same decode of; memory only, bounded.
-# Each entry: the faces' metrics, the edges' integrals, and whether the edges' boxes --
-# which only the table reads -- have been measured and added to the edges' metrics.
+# The exact metrics of a component's faces and edges -- the kernel's integrals, and the faces'
+# tight boxes for the geometric tokens -- remembered per component in this process, so that a
+# part's derivation (``store.parts``), whose topology facts and whose elements' geometric tokens
+# (``geometric_tokens``) both read the integrals, measures each face and edge once. Keyed by
+# the component's BREP object, which both read the same decode of; memory only, bounded. Each
+# entry: the faces' integrals, the edges' integrals, and whether the faces' boxes -- which only
+# the tokens read -- have been measured and added to the faces' metrics.
 _METRICS_MEMO: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _METRICS_MEMO_SIZE = 256
 _METRICS_LOCK = threading.Lock()
 
 
-def component_metrics(shape, *, brep: str | None = None, edge_boxes: bool = False) -> dict[str, list[dict[str, Any]]]:
-    """Each face's ``area``, ``center`` and tight ``bbox`` and each edge's ``length`` and
-    ``center`` -- and, with ``edge_boxes``, each edge's tight ``bbox`` -- of the unlocated
-    component ``shape``, in ``TopExp.MapShapes_s`` order; a key a measurement failed is
-    absent. The geometric tokens read the faces and the edges' integrals; the selector
-    table reads everything. ``brep``, the component's BREP object hash, keys the process
-    memo: the measurements an earlier caller took of the same component are returned, the
-    edges' boxes are added to them the first time a caller asks (so a component only ever
-    named by tokens is never boxed edge by edge), and None measures without the memo."""
+def component_metrics(shape, *, brep: str | None = None, face_boxes: bool = False) -> dict[str, list[dict[str, Any]]]:
+    """Each face's ``area`` and ``center`` and each edge's ``length`` and ``center`` -- and, with
+    ``face_boxes``, each face's tight ``bbox`` -- of the unlocated component ``shape``, in
+    ``TopExp.MapShapes_s`` order; a key a measurement failed is absent. The geometric tokens read
+    all of it; the topology facts read the integrals. ``brep``, the component's BREP object
+    hash, keys the process memo: the measurements an earlier caller took of the same component
+    are returned, the faces' boxes are added to them the first time a caller asks (so a
+    component only ever named by its lineage is never boxed face by face), and None measures
+    without the memo. The rows are the memo's own: a caller copies the keys it reads."""
     remembered = _remembered(brep)
     if remembered is None:
         face_map, edge_map = _element_maps(shape)
         remembered = {
-            "faces": [_face_metrics(TopoDS.Face_s(face_map.FindKey(i))) for i in range(1, face_map.Extent() + 1)],
+            "faces": [_face_integrals(TopoDS.Face_s(face_map.FindKey(i))) for i in range(1, face_map.Extent() + 1)],
             "edges": [_edge_integrals(TopoDS.Edge_s(edge_map.FindKey(i))) for i in range(1, edge_map.Extent() + 1)],
-            "edgeBoxes": False,
+            "faceBoxes": False,
         }
         _remember(brep, remembered)
-    if edge_boxes and not remembered["edgeBoxes"]:
-        _, edge_map = _element_maps(shape)
-        for ordinal, metrics in enumerate(remembered["edges"], start=1):
-            box = _bnd_box(TopoDS.Edge_s(edge_map.FindKey(ordinal)))
+    if face_boxes and not remembered["faceBoxes"]:
+        face_map, _ = _element_maps(shape)
+        for ordinal, metrics in enumerate(remembered["faces"], start=1):
+            box = _bnd_box(TopoDS.Face_s(face_map.FindKey(ordinal)))
             if box is not None:
                 metrics["bbox"] = box
-        remembered["edgeBoxes"] = True
+        remembered["faceBoxes"] = True
     return {"faces": remembered["faces"], "edges": remembered["edges"]}
 
 
@@ -178,6 +181,12 @@ def _remember(brep: str | None, metrics: dict[str, Any]) -> None:
             _METRICS_MEMO.popitem(last=False)
 
 
+def _taken(metrics: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    """The ``keys`` of a memo row a measurement gave: the facts own these and no other, whatever
+    another reader of the same row (the tokens' faces' boxes) has added to it."""
+    return {key: metrics[key] for key in keys if key in metrics}
+
+
 def _element_maps(shape) -> tuple[TopTools_IndexedMapOfShape, TopTools_IndexedMapOfShape]:
     face_map = TopTools_IndexedMapOfShape()
     edge_map = TopTools_IndexedMapOfShape()
@@ -186,7 +195,7 @@ def _element_maps(shape) -> tuple[TopTools_IndexedMapOfShape, TopTools_IndexedMa
     return face_map, edge_map
 
 
-def _face_metrics(face) -> dict[str, Any]:
+def _face_integrals(face) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     try:
         props = GProp_GProps()
@@ -196,9 +205,6 @@ def _face_metrics(face) -> dict[str, Any]:
         metrics["center"] = [center.X(), center.Y(), center.Z()]
     except Exception:
         pass
-    box = _bnd_box(face)
-    if box is not None:
-        metrics["bbox"] = box
     return metrics
 
 
@@ -291,7 +297,7 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
     # The identity the scene loader joins ordinals by.
     from cadgen._internal.step_scene_loader import _shape_hash
 
-    metrics = component_metrics(shape, brep=brep, edge_boxes=True)
+    metrics = component_metrics(shape, brep=brep)
     face_map = TopTools_IndexedMapOfShape()
     edge_map = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, TopAbs_FACE, face_map)
@@ -347,7 +353,7 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
             # _enum_name_geomabs spells them), with EXACT metrics from
             # GProps/BndLib -- reading, not meshing.
             "surfaceType": _enum_name_geomabs(kind),
-            **metrics["faces"][ordinal - 1],
+            **_taken(metrics["faces"][ordinal - 1], ("area", "center")),
         }
         if kind == GeomAbs_SurfaceType.GeomAbs_Plane:
             # The plane's normal, oriented as the face is.
@@ -437,7 +443,7 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
             "adjacentFaceCount": len(unique_faces),
             "curveType": _enum_name_geomabs(curve_kind),
             "faceOrds": deduped_ords,
-            **metrics["edges"][ordinal - 1],
+            **_taken(metrics["edges"][ordinal - 1], ("length", "center")),
         }
         params = _selector_curve_params(curve_adaptor)
         if params:

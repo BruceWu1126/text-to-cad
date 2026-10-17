@@ -11,10 +11,14 @@ The viewer, snapshots and mesh exports all draw these same bytes.
 
 Face and edge ordinals are ``TopExp.MapShapes`` order on the unlocated
 component -- the order its selector table and every selector use -- and the
-mesher reads what the triangles do not say from the component's selector table
-(each face's area, each edge's display class) and its intrinsic face colours:
-the one input a display mesh and a mesh export at another tolerance are both
-made from (``cadgen.store.parts``). Every pass is checked for what OCCT gets
+mesher reads what the triangles do not say from the component's topology facts
+(``topology_extract``: each face's area and surface type, each edge's display
+class) and its intrinsic face colours: the one input a display mesh and a mesh
+export at another tolerance are both made from (``cadgen.store.parts``). Beside
+the body it gives back each face's box, its triangles', and each edge's, its
+polyline's, which a part's selector table records (``selector_table``).
+
+Every pass is checked for what OCCT gets
 wrong, and a face it gets wrong is faulty. OCCT drops the odd tiny face at one
 deflection and meshes it at the next. It can leave a gap inside a face (the radial
 engine's cylinder head lost a sixth of a B-spline around its pole; the W16's and the
@@ -67,7 +71,7 @@ import struct
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -104,6 +108,16 @@ _FALLBACK_AREA_TOLERANCE = 0.25
 
 class MeshProductionError(ValueError):
     """A component OCCT could not mesh completely."""
+
+
+class MeshedComponent(NamedTuple):
+    """One component meshed: its GLB ``body``, and ``boxes`` -- ``{"faces": {ordinal: box},
+    "edges": {ordinal: box}}``, each box ``[xmin, ymin, zmin, xmax, ymax, zmax]`` -- a face's
+    from its triangles (from its edges' polylines when it has none), an edge's from its
+    polyline; an element with neither has no box."""
+
+    body: bytes
+    boxes: dict[str, dict[int, list[float]]]
 
 
 def _bounding_diagonal(topods) -> float:
@@ -679,17 +693,19 @@ def _edge_polyline(edge, adjacent: list[int], face_map, faces, deflection: float
                      for k in range(1, sampler.NbPoints() + 1)], np.float32)
 
 
-def mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float) -> bytes:
-    """Mesh one unlocated component and return its GLB body, which names ``part``.
+def mesh_component(topods, facts: dict, face_colors: dict, *, part: str, chord: float,
+                   angle: float) -> MeshedComponent:
+    """Mesh one unlocated component: its GLB body, which names ``part``, and its faces' and
+    edges' boxes (:class:`MeshedComponent`).
 
     ``topods`` is a private decode of the component's BREP: meshing stores its
     triangulation on the shape, so it must not be a shape anything else holds.
-    ``table`` is the component's selector table (its faces' areas, its edges'
-    classes) and ``face_colors`` its intrinsic face colours by ordinal, in the same
+    ``facts`` are the component's topology facts (its faces' areas and surface types, its
+    edges' classes) and ``face_colors`` its intrinsic face colours by ordinal, in the same
     ordinals. A failure inside OCCT is the component's ``MeshProductionError``.
     """
     try:
-        return _mesh_component(topods, table, face_colors, part=part, chord=chord, angle=angle)
+        return _mesh_component(topods, facts, face_colors, part=part, chord=chord, angle=angle)
     except Exception as error:  # noqa: BLE001 - OCCT's own, told apart below
         # OCP raises OCCT's exception classes, whose Python bases differ between
         # platform wheels (Standard_ConstructionError is no Standard_Failure): one is
@@ -699,24 +715,46 @@ def mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: 
         raise MeshProductionError(f"OCCT failed on the component: {type(error).__name__}: {error}") from error
 
 
-def _rows(table: dict, kind: str, *names: str) -> list[tuple]:
-    """``(ordinal, *names)`` of each of the table's ``kind`` rows (``faces`` or ``edges``)."""
-    columns = table["tables"][f"{kind[:-1]}Columns"]
-    at = [columns.index(name) for name in ("ordinal", *names)]
-    return sorted(tuple(row[index] for index in at) for row in table[kind])
+def _box(points: np.ndarray) -> list[float]:
+    low, high = points.min(axis=0), points.max(axis=0)
+    return [float(low[0]), float(low[1]), float(low[2]), float(high[0]), float(high[1]), float(high[2])]
 
 
-def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord: float, angle: float) -> bytes:
+def _boxes(faces: dict, edges: list, adjacent: list[list[int]]) -> dict[str, dict[int, list[float]]]:
+    """Each meshed face's box (its triangles'), each edge's (its polyline's), and each face a
+    pass left without triangles boxed by its edges' polylines."""
+    face_boxes = {ordinal: _box(block[0]) for ordinal, block in faces.items() if len(block[0])}
+    edge_boxes = {ordinal: _box(polyline) for ordinal, _visibility, polyline in edges}
+    bounding: dict[int, list[list[float]]] = {}
+    for edge_ordinal, face_ordinals in enumerate(adjacent):
+        box = edge_boxes.get(edge_ordinal)
+        if box is None:
+            continue
+        for face_ordinal in face_ordinals:
+            if face_ordinal not in face_boxes:
+                bounding.setdefault(face_ordinal, []).append(box)
+    for face_ordinal, found in bounding.items():
+        face_boxes[face_ordinal] = [min(box[axis] for box in found) for axis in range(3)] + \
+                                   [max(box[axis] for box in found) for axis in range(3, 6)]
+    return {"faces": face_boxes, "edges": edge_boxes}
+
+
+def _mesh_component(topods, facts: dict, face_colors: dict, *, part: str, chord: float,
+                    angle: float) -> MeshedComponent:
+    from cadgen._internal.glb_topology import STEP_EDGE_VISIBILITY_CLASSES
     from cadgen.store.meshes import encode_payload
     from OCP.Precision import Precision
     from OCP.TopoDS import TopoDS
 
     face_map, edge_map = _maps(topods)
-    table_faces, table_edges = _rows(table, "faces", "area"), _rows(table, "edges", "visibilityClass")
+    table_faces = [(int(face["ord"]), face.get("area")) for face in facts["faces"]]
+    # An edge's display class as its selector table names it (``visibilityClass``).
+    table_edges = [(int(edge["ord"]), str(edge.get("class") or STEP_EDGE_VISIBILITY_CLASSES["FEATURE"]))
+                   for edge in facts["edges"]]
     if len(table_faces) != face_map.Extent() or len(table_edges) != edge_map.Extent():
         raise MeshProductionError(
             f"the component's BREP has {face_map.Extent()} faces and {edge_map.Extent()} edges, "
-            f"its selector table {len(table_faces)} and {len(table_edges)}"
+            f"its topology facts {len(table_faces)} and {len(table_edges)}"
         )
     diagonal = _bounding_diagonal(topods)
     # OCCT refuses a deflection under its confusion tolerance, which a component of
@@ -727,7 +765,7 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
     # left a 1,529-face case meshed three times over, fifteen times as long, for a
     # face under what the mesh can resolve.
     required = [ordinal for ordinal, area in table_faces if float(area or 0.0) >= deflection * deflection]
-    kinds = dict(_rows(table, "faces", "surfaceType"))
+    kinds = {int(face["ord"]): str(face.get("surfaceType") or "") for face in facts["faces"]}
     faces = _mesh(topods, face_map, required, kinds, deflection, angle) if face_map.Extent() else {}
     # A face no mesher covered is left out, and the body names it: every reader says so.
     unmeshed = [ordinal for ordinal in required if ordinal not in faces]
@@ -765,5 +803,6 @@ def _mesh_component(topods, table: dict, face_colors: dict, *, part: str, chord:
     else:
         low = high = np.zeros(3, np.float32)
     bounds = {"min": [float(v) for v in low], "max": [float(v) for v in high]}
-    return encode_payload(part=part, positions=positions, normals=normals, indices=indices, face_ranges=face_ranges,
+    body = encode_payload(part=part, positions=positions, normals=normals, indices=indices, face_ranges=face_ranges,
                           edges=edges, bounds=bounds, unmeshed_faces=unmeshed)
+    return MeshedComponent(body, _boxes(faces, edges, adjacent))

@@ -7,10 +7,12 @@ derived from the exact BREP and the component's topology facts, extracted in
 memory (``topology_extract``) -- the facts hold the exact metrics, surface and
 curve types, parameters, loops and edge classes; the BREP adds what they do not
 carry: the vertices, which edge ends where, and the tangent directions the chains
-follow -- and from each element's **name** (``cadgen.store.parts.element_names``:
-its lineage, or its geometric token where it has none, README law 20), and it is
-stored as one of a part's two objects, beside its display mesh
-(``cadgen.store.parts``), whose mesher reads its faces' areas and edges' classes.
+follow -- from the component's display mesh, which gives each face and edge its
+box (``tessellate``: a face's triangles', an edge's polyline's, so within the
+display chord of the exact box), and from each element's **name**
+(``cadgen.store.parts.element_names``: its lineage, or its geometric token where it
+has none, README law 20), and it is stored as one of a part's two objects, beside
+that mesh (``cadgen.store.parts``).
 The page joins its rows to the mesh's face and edge tables by ordinal and
 composes ``occurrence token + "/" + element name``; it mints nothing. The CLI
 reads the same table (``cadgen.assembly_lookup``).
@@ -41,8 +43,11 @@ from cadgen._internal.glb_topology import (
 # what the same columns hold. 2: no row carries an occurrence id, a local id or a
 # shape id (the table is one unplaced component's; the occurrence placing it is the
 # tree's to name). 3: every face, edge and vertex row leads with its name. 4: a shape
-# row carries no volume (nothing read it: a view's part volume is its mesh's).
-SELECTOR_TABLE_SCHEMA_VERSION = 4
+# row carries no volume (nothing read it: a view's part volume is its mesh's). 5: a face's
+# and an edge's ``bbox`` is its display mesh's -- a face's triangles', an edge's polyline's --
+# so within the display chord of its exact box (tessellation_policy); the exact boxes are
+# measured where they are read (a geometric token's signature, a written STEP's verify).
+SELECTOR_TABLE_SCHEMA_VERSION = 5
 _IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
 # The one row of a component's table: the whole component, at the identity.
@@ -285,13 +290,17 @@ def capabilities() -> dict[str, Any]:
     }
 
 
-def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, Any] | None = None, *,
+                         boxes: Mapping[str, Mapping[int, list[float]]]) -> dict[str, Any]:
     """The table of one unlocated component: ``shape`` (a ``TopoDS_Shape``), its
     topology facts (``topology_extract.extract_topology_facts``, or the object an
-    eager-only component's tree pins) and its elements' names by ordinal
+    eager-only component's tree pins), its elements' names by ordinal
     (``{"faces": [...], "edges": [...], "vertices": [...]}``,
-    ``cadgen.store.parts.element_names``); with no names, each element goes by its
-    geometric token (``geometric_tokens``), as an element no lineage names does."""
+    ``cadgen.store.parts.element_names``) and its display mesh's boxes
+    (``tessellate.MeshedComponent.boxes``: ``{"faces": {ordinal: box}, "edges":
+    {ordinal: box}}``); with no names, each element goes by its geometric token
+    (``geometric_tokens``), as an element no lineage names does. An edge the mesh drew
+    no polyline for (a degenerate one) is boxed by its end vertices."""
     if names is None:
         from cadgen._internal.geometric_tokens import element_names
 
@@ -309,9 +318,20 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
     chains = _edge_chains(edges, ends, tangents)
     tangent_groups = _tangent_groups(faces, edges)
 
+    face_box = {int(face["ord"]): _box(boxes["faces"].get(int(face["ord"]))) for face in faces}
+    edge_box = {}
+    for edge in edges:
+        ordinal = int(edge["ord"])
+        found = _box(boxes["edges"].get(ordinal))
+        if found is None and ends.get(ordinal):
+            points = [positions[vertex] for vertex in ends[ordinal]]
+            found = {"min": [min(point[axis] for point in points) for axis in range(3)],
+                     "max": [max(point[axis] for point in points) for axis in range(3)]}
+        edge_box[ordinal] = found
+
     overall = None
     for face in faces:
-        overall = _merge(overall, _box(face.get("bbox")))
+        overall = _merge(overall, face_box[int(face["ord"])])
     for ordinal in vertex_ordinals:
         point = positions[ordinal]
         overall = _merge(overall, {"min": list(point), "max": list(point)})
@@ -366,7 +386,7 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
     for face in faces:
         ordinal = int(face.get("shape") or 1)
         shape_area[ordinal] = shape_area.get(ordinal, 0.0) + float(face.get("area") or 0.0)
-        shape_box[ordinal] = _merge(shape_box.get(ordinal), _box(face.get("bbox")))
+        shape_box[ordinal] = _merge(shape_box.get(ordinal), face_box[int(face["ord"])])
         counts["face"][ordinal] = counts["face"].get(ordinal, 0) + 1
     for edge in edges:
         ordinal = int(edge.get("shape") or 1)
@@ -392,7 +412,7 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
         face_rows.append([
             names["faces"][ordinal - 1], ordinal, int(face.get("shape") or 1), surface_type, area,
             face.get("center") or [0.0, 0.0, 0.0], face.get("normal"),
-            _box(face.get("bbox")) or _zero_box(), start, count,
+            face_box[ordinal] or _zero_box(), start, count,
             _relevance(area, total_area, surface_type in _ANALYTIC_SURFACES, size_floor) if referenceable else 0,
             0 if referenceable else FACE_FLAG_NOT_REFERENCEABLE,
             face.get("params"), tangent_groups[ordinal],
@@ -416,7 +436,7 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
             params = {**(params or {}), "sweepRadians": float(edge["sweepRadians"])}
         edge_rows.append([
             names["edges"][ordinal - 1], ordinal, int(edge.get("shape") or 1), curve_type, length,
-            edge.get("center") or [0.0, 0.0, 0.0], _box(edge.get("bbox")) or _zero_box(),
+            edge.get("center") or [0.0, 0.0, 0.0], edge_box[ordinal] or _zero_box(),
             face_start, face_count, vertex_start, vertex_count,
             _relevance(length, total_length, curve_type in _ANALYTIC_CURVES, length_floor) if referenceable else 0,
             flags, params,

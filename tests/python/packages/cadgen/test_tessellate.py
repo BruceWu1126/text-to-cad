@@ -39,16 +39,15 @@ def _facts(topods) -> dict:
     return extract_topology_facts(topods)
 
 
-def _mesh(shape, *, chord=CHORD, angle=ANGLE, table=None):
-    """``shape`` meshed as the store meshes a component, from its selector table (``table``
+def _mesh(shape, *, chord=CHORD, angle=ANGLE, facts=None):
+    """``shape`` meshed as the store meshes a component, from its topology facts (``facts``
     when given): its GLB body, decoded."""
     from cadgen._internal.mesh_formats import decode_tessellation
     from cadgen._internal.tessellate import mesh_component
-    from cadgen._internal.selector_table import build_selector_table
 
     topods = getattr(shape, "wrapped", shape)
-    table = build_selector_table(topods, _facts(topods)) if table is None else table
-    body = mesh_component(topods, table, {}, part=PART, chord=chord, angle=angle)
+    facts = _facts(topods) if facts is None else facts
+    body = mesh_component(topods, facts, {}, part=PART, chord=chord, angle=angle).body
     return body, decode_tessellation(body)
 
 
@@ -236,14 +235,13 @@ class FreeformSurfaces(unittest.TestCase):
         from build123d import Cylinder
         from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
         from cadgen._internal import tessellate
-        from cadgen._internal.selector_table import build_selector_table
 
         self.topods = BRepBuilderAPI_NurbsConvert(Cylinder(10, 20).wrapped, True).Shape()
         self.face_map, _edges = tessellate._maps(self.topods)
-        table = build_selector_table(self.topods, _facts(self.topods))
-        self.kinds = dict(tessellate._rows(table, "faces", "surfaceType"))
+        facts = _facts(self.topods)
+        self.kinds = {face["ord"]: face["surfaceType"] for face in facts["faces"]}
         # Every face is a B-spline now; the side is the largest, and the one that is curved.
-        self.side = max(tessellate._rows(table, "faces", "area"), key=lambda row: row[1])[0]
+        self.side = max(facts["faces"], key=lambda face: face["area"])["ord"]
         self.assertEqual(self.kinds[self.side], "bsplinesurface")
 
     def faulty(self, meshed_at, freeform=True):
@@ -329,7 +327,7 @@ class EmptyFace(unittest.TestCase):
         self.faces = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(self.topods, TopAbs_FACE, self.faces)
 
-    def mesh(self, refuses, table=None):
+    def mesh(self, refuses, facts=None):
         """Mesh the plate while OCCT leaves its bore empty after each call ``refuses``
         names (the shape it was asked to mesh, and the call's number)."""
         from OCP import BRepMesh
@@ -345,7 +343,7 @@ class EmptyFace(unittest.TestCase):
             return result
 
         with mock.patch.object(BRepMesh, "BRepMesh_IncrementalMesh", side_effect=mesher):
-            self.body, mesh = _mesh(self.topods, table=table)
+            self.body, mesh = _mesh(self.topods, facts=facts)
         return mesh
 
     def assertBoreMeshed(self, mesh):
@@ -513,17 +511,15 @@ class EmptyFace(unittest.TestCase):
         # the component's deflection. No mesher covers it, and nothing has to say so.
         from cadgen._internal import face_fallback
         from cadgen._internal.tessellate import _bounding_diagonal
-        from cadgen._internal.selector_table import build_selector_table
         from cadgen.store.meshes import decode_payload
 
         deflection = CHORD * _bounding_diagonal(self.topods)
-        table = build_selector_table(self.topods, _facts(self.topods))
-        columns = table["tables"]["faceColumns"]
-        for row in table["faces"]:
-            if row[columns.index("ordinal")] == self.bore:
-                row[columns.index("area")] = deflection * deflection / 4
+        facts = _facts(self.topods)
+        for face in facts["faces"]:
+            if face["ord"] == self.bore:
+                face["area"] = deflection * deflection / 4
         with mock.patch.object(face_fallback, "tessellate_face", return_value=None):
-            mesh = self.mesh(lambda shape, call: True, table=table)
+            mesh = self.mesh(lambda shape, call: True, facts=facts)
         bore = next(row for row in mesh.face_ranges if row["ord"] == self.bore)
         self.assertEqual((bore["indexCount"], decode_payload(self.body).unmeshed_faces), (0, []))
 

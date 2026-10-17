@@ -31,8 +31,16 @@ from cadgen._internal.topology_extract import extract_topology_facts  # noqa: E4
 
 
 def _table(part, lineage=None):
+    """The part's table as a derivation builds it: from its facts, its names and its display
+    mesh's boxes."""
+    from cadgen._internal.tessellate import mesh_component
+    from cadgen.tessellation_policy import DISPLAY_TESSELLATION
+
     shape = part.wrapped
-    return build_selector_table(shape, extract_topology_facts(shape), element_names(lineage, shape))
+    facts = extract_topology_facts(shape)
+    boxes = mesh_component(shape, facts, {}, part="0" * 64 + "-v1", chord=DISPLAY_TESSELLATION["chordTolerance"],
+                           angle=DISPLAY_TESSELLATION["angleTolerance"]).boxes
+    return build_selector_table(shape, facts, element_names(lineage, shape), boxes=boxes)
 
 
 def _rows(table, name):

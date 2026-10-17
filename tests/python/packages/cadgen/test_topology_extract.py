@@ -19,10 +19,10 @@ from tests.python.support.paths import add_repo_path
 add_repo_path("packages/cadgen/src")
 
 SHAPE_KEYS = {"ord", "kind"}
-FACE_KEYS = {"ord", "shape", "surfaceType", "area", "center", "bbox", "loops"}
+FACE_KEYS = {"ord", "shape", "surfaceType", "area", "center", "loops"}
 FACE_OPTIONAL = {"normal", "params"}
 EDGE_KEYS = {"ord", "shape", "class", "continuity", "dihedralDeg", "flags", "adjacentFaceCount", "curveType",
-             "faceOrds", "length", "center", "bbox"}
+             "faceOrds", "length", "center"}
 EDGE_OPTIONAL = {"params", "sweepRadians"}
 
 
@@ -190,11 +190,11 @@ class TopologyFactsObjectTest(unittest.TestCase):
         return {
             "shapes": [{"ord": 1, "kind": "solid"}],
             "faces": [{"ord": 1, "shape": 1, "surfaceType": "plane", "area": 1.0, "center": [0.5, 0.5, 0.0],
-                       "bbox": [0.0, 0.0, 0.0, 1.0, 1.0, 0.0], "normal": [0.0, 0.0, -1.0],
+                       "normal": [0.0, 0.0, -1.0],
                        "params": {"origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0]}, "loops": [[1]]}],
             "edges": [{"ord": 1, "shape": 1, "class": "feature", "continuity": "c0", "dihedralDeg": 90.0, "flags": 1,
                        "adjacentFaceCount": 1, "curveType": "circle", "faceOrds": [1], "length": 6.283185307179586,
-                       "center": [0.0, 0.0, 0.0], "bbox": [-1.0, -1.0, 0.0, 1.0, 1.0, 0.0], "sweepRadians": 6.283185307179586}],
+                       "center": [0.0, 0.0, 0.0], "sweepRadians": 6.283185307179586}],
         }
 
     def test_round_trip_keeps_every_value_and_the_extractors_order(self) -> None:
@@ -233,18 +233,20 @@ class TopologyFactsObjectTest(unittest.TestCase):
 
         shape = (Box(4, 5, 3) - Cylinder(1, 6)).wrapped
         facts = extract_topology_facts(shape)
-        live = selector_table_bytes(build_selector_table(shape, facts))
-        pinned = selector_table_bytes(build_selector_table(shape, read_topology_facts(topology_facts_bytes(facts))))
+        boxes = {"faces": {1: [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]}, "edges": {}}
+        live = selector_table_bytes(build_selector_table(shape, facts, boxes=boxes))
+        pinned = selector_table_bytes(build_selector_table(shape, read_topology_facts(topology_facts_bytes(facts)),
+                                                           boxes=boxes))
         self.assertEqual(live, pinned)
 
 
 class TightBoundsTest(unittest.TestCase):
-    """A face's or edge's reported bbox must bound the SURFACE, not its poles.
+    """A face's exact box -- the one a geometric token's signature rounds -- must bound the
+    SURFACE, not its poles; the table's, its display mesh's, lies within the display chord.
 
     ``BRepBndLib::Add`` bounds a B-spline by its control polygon: a NURBS
     circle of radius r reports r/cos(22.5 deg) = 1.082 r, so every rounded
-    surface came back ~8% too big and `inspect refs --facts` bounds could
-    invent a clash that is not there (PR #370 bug record 004).
+    surface came back ~8% too big (PR #370 bug record 004).
     """
 
     def _nurbs_cylinder(self, radius: float, height: float):
@@ -255,28 +257,36 @@ class TightBoundsTest(unittest.TestCase):
         return BRepBuilderAPI_NurbsConvert(solid.wrapped, True).Shape()
 
     def test_nurbs_cylinder_face_bounds_match_the_radius(self) -> None:
-        from cadgen._internal.topology_extract import extract_topology_facts
+        from cadgen._internal.topology_extract import component_metrics
 
         radius, height = 7.5, 4.0
-        facts = extract_topology_facts(self._nurbs_cylinder(radius, height))
-        lateral = [f for f in facts["faces"] if f["surfaceType"] == "bsplinesurface" and f["bbox"][5] - f["bbox"][2] > height / 2]
+        metrics = component_metrics(self._nurbs_cylinder(radius, height), face_boxes=True)
+        lateral = [f for f in metrics["faces"] if f["bbox"][5] - f["bbox"][2] > height / 2]
         self.assertTrue(lateral, "fixture must produce a NURBS lateral face")
         for face in lateral:
             xmin, ymin, _zmin, xmax, ymax, _zmax = face["bbox"]
             for value in (xmax, ymax, -xmin, -ymin):
                 self.assertAlmostEqual(value, radius, places=4)
 
-    def test_component_bounds_match_the_radius(self) -> None:
+    def test_the_tables_bounds_lie_within_the_display_chord(self) -> None:
         from cadgen._internal.selector_table import build_selector_table
+        from cadgen._internal.tessellate import _bounding_diagonal, mesh_component
         from cadgen._internal.topology_extract import extract_topology_facts
+        from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 
         radius, height = 7.5, 4.0
         shape = self._nurbs_cylinder(radius, height)
-        bbox = build_selector_table(shape, extract_topology_facts(shape))["bbox"]
-        self.assertAlmostEqual(bbox["max"][0], radius, places=4)
-        self.assertAlmostEqual(bbox["max"][1], radius, places=4)
-        self.assertAlmostEqual(bbox["min"][0], -radius, places=4)
-        self.assertAlmostEqual(bbox["max"][2], height / 2, places=4)
+        facts = extract_topology_facts(shape)
+        chord = DISPLAY_TESSELLATION["chordTolerance"]
+        boxes = mesh_component(shape, facts, {}, part="0" * 64 + "-v1", chord=chord,
+                               angle=DISPLAY_TESSELLATION["angleTolerance"]).boxes
+        bbox = build_selector_table(shape, facts, boxes=boxes)["bbox"]
+        deflection = chord * _bounding_diagonal(shape)
+        # The mesh's nodes lie on the surface: never past it, short of it by the chord at most.
+        for value, exact in ((bbox["max"][0], radius), (bbox["max"][1], radius), (-bbox["min"][0], radius),
+                             (bbox["max"][2], height / 2)):
+            self.assertLessEqual(value, exact + 1e-6)
+            self.assertGreaterEqual(value, exact - deflection)
 
 
 if __name__ == "__main__":

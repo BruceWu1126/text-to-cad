@@ -525,20 +525,23 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   both objects are present at their sizes. Derivation (`parts._derive`) decodes
   the component's BREP once, extracts its **topology facts** in memory
   (`_internal/topology_extract.py`: ordinal tables of its solids, faces and
-  edges holding exactly what the selector table reads and no tessellation
-  input; an eager-only component's are the object its tree pins), builds the
-  selector table from the BREP and the facts, meshes the component, writes both
-  objects and then the entry, so an entry always names complete objects.
-  Nothing stores the facts but that pin, and nothing outside a derivation reads
-  them.
+  edges holding exactly what the mesher and the selector table read and no
+  tessellation input; an eager-only component's are the object its tree pins),
+  meshes the component from them, builds the selector table from the BREP, the
+  facts and the mesh, writes both objects and then the entry, so an entry
+  always names complete objects. Nothing stores the facts but that pin, and
+  nothing outside a derivation reads them.
 
-  The **selector table** (`_internal/selector_table.py`, schema 4) is the one
-  place a ref's facts are minted. From the exact BREP and the topology facts,
-  per face, edge and vertex, the **element name** a ref ends in, which leads
-  each row -- its lineage (§2), `f:bracket.extrude1.3`, or, for an element no
-  lineage names, its geometric token, `f:9d2e8c1b5a70`, measured here, in the
-  pool's job -- the exact metrics and parameters the facts carry, the plane
-  normals, whether an entity can be referenced, its relevance, every adjacency
+  The **selector table** (`_internal/selector_table.py`, schema 5) is the one
+  place a ref's facts are minted. From the exact BREP, the topology facts and
+  the display mesh, per face, edge and vertex, the **element name** a ref ends
+  in, which leads each row -- its lineage (§2), `f:bracket.extrude1.3`, or, for
+  an element no lineage names, its geometric token, `f:9d2e8c1b5a70`, measured
+  here, in the pool's job -- the exact metrics and parameters the facts carry,
+  each face's and edge's box (its display mesh's: a face's triangles', an edge's
+  polyline's, so within the display chord of the exact box, which is measured
+  where it is read -- a geometric token's signature, a written STEP's verify),
+  the plane normals, whether an entity can be referenced, its relevance, every adjacency
   (face–edge, edge–vertex), each edge's chain and each face's tangent group —
   the sets the viewer's connected selection grows a pick to. Ordinals stay in
   the table as the join to the mesh's face and edge tables, and never leave it:
@@ -559,8 +562,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   such a face again, whole and finer (unless its first pass took seconds),
   tessellates a face no pass gets right over its own parameters where that does
   no harm (`_internal/face_fallback.py`), and reads what the triangles do not
-  say from the part's selector table (each face's area, each edge's class) and
-  the component's face colours. A body (`store/meshes.py`) is glTF 2.0 binary
+  say from the component's topology facts (each face's area and surface type,
+  each edge's class) and its face colours. A body (`store/meshes.py`) is glTF 2.0 binary
   in the component's own units: ONE triangle primitive (positions, normals, u16
   indices up to 65,535 vertices, else u32), a face table whose rows give each
   face's ordinal, contiguous index range and colour, an edge table giving each
@@ -582,9 +585,9 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   at the display tolerance
   writes the stored display meshes; one at any other tolerance meshes each part
   in the exporting process the way its display mesh was made -- from the BREP,
-  its face colours and a selector table built for that BREP (`parts.mesh_at`;
-  the stored table may be another decode's of the same part, listing the
-  elements in its own order) -- and stores nothing (the file is the output;
+  its face colours and the topology facts extracted from that BREP
+  (`parts.mesh_at`; the stored table may be another decode's of the same part,
+  listing the elements in its own order) -- and stores nothing (the file is the output;
   `_internal/mesh_export.py`). A mesh of one BREP at one tolerance is the same
   bytes whichever body derived the part (README law 5). Tolerances outside the tessellation policy's
   bounds (`tessellation_policy.tolerance_refusal`) are refused, never meshed. No

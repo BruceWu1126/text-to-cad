@@ -18,7 +18,7 @@ const F7 = "f:plate.fillet1.3.2";
 const E1 = "e:plate.extrude1.1";
 const E4 = "e:9d2e8c1b5a70";
 
-// The selector table's wire columns (cadgen selector_table.py, schema 4) as `joinSelectorTable`
+// The selector table's wire columns (cadgen selector_table.py, schema 5) as `joinSelectorTable`
 // extends them: a face gains its triangle range, an edge its segment range.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
 const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"];

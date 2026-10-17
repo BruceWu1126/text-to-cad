@@ -21,8 +21,9 @@ import { meshEdgePolylines, meshFaceRanges } from "./tessellationCache.js";
 // halfway. tests/python/global/test_artifact_version_policy.py holds both equal.
 // 2: element rows carry no id, localId, occurrenceId or shapeId column (an
 // occurrence's rows are the part's, placed by the page). 3: element rows lead with
-// their name. 4: a shape row carries no volume.
-export const SELECTOR_TABLE_SCHEMA_VERSION = 4;
+// their name. 4: a shape row carries no volume. 5: a face's and an edge's bbox is its display
+// mesh's, within the display chord of the exact box.
+export const SELECTOR_TABLE_SCHEMA_VERSION = 5;
 
 const TABLES = Object.freeze({
   occurrences: "occurrenceColumns", shapes: "shapeColumns", faces: "faceColumns",

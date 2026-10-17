@@ -87,7 +87,6 @@ def _shapes() -> dict:
 
 def _mesh(topods):
     """The solid's display mesh as the store derives it, decoded, with its deflection in millimetres."""
-    from cadgen._internal.selector_table import build_selector_table
     from cadgen._internal.tessellate import mesh_component
     from cadgen._internal.topology_extract import extract_topology_facts
     from cadgen.store.meshes import decode_payload
@@ -96,9 +95,8 @@ def _mesh(topods):
     from OCP.BRepBndLib import BRepBndLib
     from OCP.Bnd import Bnd_Box
 
-    table = build_selector_table(topods, extract_topology_facts(topods))
-    body = mesh_component(topods, table, {}, part="0" * 64 + f"-v{PART_VERSION}",
-                          chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"])
+    body = mesh_component(topods, extract_topology_facts(topods), {}, part="0" * 64 + f"-v{PART_VERSION}",
+                          chord=DISPLAY_TESSELLATION["chordTolerance"], angle=DISPLAY_TESSELLATION["angleTolerance"]).body
     box = Bnd_Box()
     BRepBndLib.Add_s(topods, box, False)
     x0, y0, z0, x1, y1, z1 = box.Get()
