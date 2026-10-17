@@ -105,11 +105,11 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh has no interaction tools, so its strip is the view's controls alone: Display, then Preview, with no rule.
+// A mesh has no interaction tools, so its strip is the view's controls alone: Display, then the Studio, with no rule.
 const noTools = async (pane) => {
   const strip = pane.getByRole('group', { name: 'Interaction tools' });
   assert.deepEqual(await strip.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Preview'], 'a mesh has no tools: the strip holds the view\'s controls alone');
+    ['Display mode: Solid', 'Studio'], 'a mesh has no tools: the strip holds the view\'s controls alone');
   assert.equal(await strip.locator('[data-strip-rule]').count(), 0, 'no rule with no tools before it');
   for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
@@ -196,8 +196,8 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   // simply orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a mesh has nothing to pick');
-  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
-    'an STL is 3D: Preview ends the strip after Display');
+  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Studio', exact: true }).count(), 1,
+    'an STL is 3D: the Studio ends the strip after Display');
 
   // A mesh has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
@@ -218,12 +218,12 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
   await settle(page);
 
-  await display(page, GUIDES_OFF);
   // The Studio draws the model in Render, on the studio's floor; leaving it takes the studio down.
   await studio(page, pane, true);
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
   await studio(page, pane, false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
+  await display(page, GUIDES_OFF);
 
   // Surfaces. An STL authors no colour, so Original is the viewer's surface colour; Flat is unlit, one colour.
   const shaded = await capture(page);
@@ -377,7 +377,7 @@ test('a corrupt mesh raises the viewer\'s load alert and an empty one says there
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.stl/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of [/^Display mode: /, 'Preview']) {
+  for (const name of [/^Display mode: /, 'Studio']) {
     assert.equal(await broken.pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   assert.equal(await alert.getByRole('button', { name: 'Retry', exact: true }).count(), 1);

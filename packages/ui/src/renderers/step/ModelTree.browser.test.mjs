@@ -22,7 +22,7 @@ import ModelingTree from '../../../dist/renderers/step/components/workbench/Mode
 import { createHoverStore } from '../../../dist/renderers/step/workbench/hoverStore.js';
 import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
 // ?groups=&parts= size the assembly; the default is ${GROUPS} groups of ${PARTS} parts. ?sidebar
-// draws the tree as the viewer does, a section of the file sidebar, headed, with Find.
+// draws the tree as the viewer does, a section of the file sidebar its tile opens, headed by its search box.
 const query = new URLSearchParams(location.search);
 const GROUPS = +query.get('groups') || ${GROUPS}, PARTS = +query.get('parts') || ${PARTS};
 const groups = Array.from({length:GROUPS}, (_, g) => {
@@ -173,11 +173,11 @@ createRoot(document.getElementById('root')).render(<App/>);
   check(await layout(), 'revealed');
 
   // Search: two hundred ranked hits in the same rows; the cursor walks them from the keyboard,
-  // each step in view, and Enter selects the hit under it. The field is Find's, its button in the
-  // heading the tree has as the file sidebar's section, which scrolls as one.
+  // each step in view, and Enter selects the hit under it. The field heads the tree as the file
+  // sidebar's section, which scrolls as one.
   await page.goto(`http://127.0.0.1:${server.address().port}/?sidebar`);
+  await model.getByRole('group', { name: 'File sidebar' }).getByRole('button', { name: 'Features', exact: true }).click();
   await model.getByRole('button', { name: 'Select Part 0-0', exact: true }).waitFor();
-  await model.getByRole('button', { name: 'Find in model', exact: true }).click();
   const search = model.getByRole('textbox', { name: 'Filter model' });
   await search.fill('part 1');
   const results = model.locator('[aria-label="Model search results"]');

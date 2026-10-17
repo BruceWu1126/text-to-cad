@@ -167,8 +167,24 @@ async function open(t, file, { panel = true } = {}) {
       };
       requestAnimationFrame(step);
     })),
+    // The file sidebar's tiles, and a section opened by its tile (one at a time), left open if it is.
+    tiles: () => pane.locator('[data-file-sidebar-tools] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
+    async openSection(name) {
+      const tile = pane.getByRole('group', { name: 'File sidebar' }).getByRole('button', { name, exact: true });
+      if (await tile.getAttribute('aria-pressed') !== 'true') await tile.click();
+      await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
+    },
+    // In and out of the Studio, by its button on the strip and its X, once its cover has lifted.
+    async studio(enter) {
+      await pane.getByRole('button', { name: enter ? 'Studio' : 'Exit studio', exact: true }).click();
+      await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Studio', exact: true }).waitFor();
+      await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
+    },
     // A joint set from the sidebar's Position section, whatever Select picks.
-    async type(name, value, unit) { await robot.jointField(name, unit).fill(String(value)); await robot.jointField(name, unit).press('Enter'); },
+    async type(name, value, unit) {
+      await robot.openSection('Position');
+      await robot.jointField(name, unit).fill(String(value)); await robot.jointField(name, unit).press('Enter');
+    },
     pressedRows: () => pane.locator('[aria-label="Robot tree area"] button[aria-pressed="true"]').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     // The pressed rows once they read `wanted` (in any order), or the assertion naming what they did read.
     async pressed(wanted, message) {
@@ -182,7 +198,7 @@ async function open(t, file, { panel = true } = {}) {
     },
     // A selection is React state: it is on screen a render after whatever changed it.
     waitPressed: count => page.waitForFunction(wanted => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === wanted, count),
-    // Display: its button at the strip's end, before Preview, the mode in hand; its settings, its per-mode settings page.
+    // Display: its button at the strip's end, before the Studio, the mode in hand; its settings, its per-mode settings page.
     displayButton: () => tools.locator('[data-view-controls]').getByRole('button', { name: /^Display mode: / }),
     async openDisplay() {
       await robot.displayButton().click();
@@ -232,8 +248,8 @@ async function open(t, file, { panel = true } = {}) {
   };
   if (panel) {
     await pane.locator('[aria-busy="false"] canvas').first().waitFor();
-    // Its Links are the file sidebar's, there before anything is located.
-    await robot.linksPanel().waitFor();
+    // Its Links are the file sidebar's, opened by their tile.
+    await robot.openSection('Links');
     await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
     await robot.settled();
   }
@@ -258,29 +274,31 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   await robot.openPosition();
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
   assert.equal(await robot.tool('Annotate').count(), 0, 'Annotate is a STEP tool; a robot description has none');
-  // Display and Preview are the view's controls, ending the strip after its tools, for a robot as for any 3D file.
+  // Display and the Studio are the view's controls, ending the strip after its tools, for a robot as for any 3D file.
   assert.deepEqual(await robot.tools.locator('[data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Preview']);
-  // Display is the button beside Preview, shut as the file opens.
+    ['Display mode: Solid', 'Studio']);
+  // Display is the button beside the Studio, shut as the file opens.
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs');
-  assert.deepEqual([await robot.sidebar(), await robot.stack()], [['Links', 'Position controls'], []]);
-  // Headed "Position": its fold, named by it, then its Pose menu, whose Default is the way back.
-  const positionHeading = robot.position().locator('[data-tool-panel-heading]');
+  assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], [['Links', 'Position controls'], [], ['Links', 'Position']]);
+  // Its tile opens it in Links' place. Headed "Position", its Reset (idle at the default pose) and its X.
+  await robot.openSection('Position');
+  assert.equal(await robot.linksPanel().isVisible(), false, 'one section at a time');
+  const positionHeading = robot.position().locator('[data-sidebar-head]');
   assert.equal((await positionHeading.getByRole('heading').innerText()).trim(), 'Position');
-  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label') || button.textContent.trim())),
-    ['Position', 'Pose: Default'], 'the heading is its fold and its Pose menu');
+  assert.deepEqual(await positionHeading.getByRole('button').evaluateAll(buttons => buttons.map(button => [button.getAttribute('aria-label'), button.disabled])),
+    [['Reset position', true], ['Close position', false]], 'the heading is its Reset and its X');
   await robot.openPosition();
   // One knob per joint a person can drive: no fixed joint, no mimic follower. The follower has no slider either.
   assert.deepEqual(Object.keys(await robot.handles()).sort(), ['grip', 'lift', 'nod', 'shoulder']);
   assert.equal(await robot.jointField('grip_mirror', 'm').count(), 0);
   assert.equal(await robot.jointField('camera_mount').count(), 0);
   // The SRDF's "home" state is the pose the robot opens in, and the Position section's Pose menu,
-  // in its heading, names it.
+  // its first row, names it.
   assert.equal(round6((await robot.handles()).shoulder.value), round6(home));
   assert.equal((await robot.handles()).lift.value, 0.1);
   const position = robot.position();
-  const poseSelect = position.locator('[data-sidebar-head] [data-pose-menu]');
+  const poseSelect = position.locator('[data-tool-panel-body] [data-pose-row] [data-pose-menu]');
   assert.equal(await poseSelect.getAttribute('aria-label'), 'Pose: Default');
   // Compact joint rows: a small value field beside each slider, as wide as its text needs (a
   // length "0 m" as a turn "0°"), never clipping it; rows 6px apart.
@@ -389,20 +407,28 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.deepEqual([round6(left[1] - carriage[1]), round6(right[1] - carriage[1])], [0.04, -0.04]);
   assert.equal((await robot.stats()).lastPoseWrites, 2, 'the master and its follower, nothing else');
 
-  // Posing a joint far past the rest box never resizes the grid or the studio floor, and never
-  // moves the camera: the arm swung straight up stands well above anything the rest pose reached.
-  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ mode: 'render', modes: { render: { floor: { enabled: true } } } }));
+  // Posing a joint far past the rest box never resizes the ground, and never moves the camera: the
+  // arm swung straight up stands well above anything the rest pose reached. So too in the Studio,
+  // on its floor, with its own pose.
+  const toolsCamera = await robot.camera();
+  await robot.type('shoulder', -90);
+  await page.waitForFunction(top => window.__cadStage().bounds.max[2] > top + 0.2, restStage.bounds.max[2]);
+  const swung = await page.evaluate(() => window.__cadStage());
+  assert.ok(restStage.gridRadius > 0);
+  assert.equal(swung.gridRadius, restStage.gridRadius, 'the ground keeps the size the rest pose gave it');
+  assert.ok(sameCamera(await robot.camera(), toolsCamera), 'a pose never re-frames');
+  await robot.studio(true);
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
+  await robot.settled();
   const floored = await page.evaluate(() => window.__cadStage());
   const flooredCamera = await robot.camera();
   await robot.type('shoulder', -90);
   await page.waitForFunction(top => window.__cadStage().bounds.max[2] > top + 0.1, floored.bounds.max[2]);
-  const swung = await page.evaluate(() => window.__cadStage());
-  assert.ok(swung.bounds.max[2] > restStage.bounds.max[2] + 0.2, `past the rest box: ${JSON.stringify([restStage.bounds, swung.bounds])}`);
-  assert.ok(restStage.gridRadius > 0);
-  assert.equal(swung.gridRadius, restStage.gridRadius, 'the ground keeps the size the rest pose gave it');
-  assert.deepEqual(swung.studioGround, floored.studioGround, 'so does the studio floor');
-  assert.ok(sameCamera(await robot.camera(), flooredCamera), 'a pose never re-frames');
+  const studioSwung = await page.evaluate(() => window.__cadStage());
+  assert.deepEqual(studioSwung.studioGround, floored.studioGround, 'the studio floor keeps its size');
+  assert.ok(sameCamera(await robot.camera(), flooredCamera), 'a pose never re-frames the Studio');
+  await robot.studio(false);
+  await page.waitForFunction(() => !window.__cadStage()?.studioGround);
 
   // Anywhere else the press is the camera's, and no joint moves.
   const posed = await robot.handles();
@@ -496,8 +522,6 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   assert.equal(faces.length, 1, `one face and size: ${faces.join(' / ')}`);
   assert.doesNotMatch(faces[0], /mono/i);
   assert.ok((await card.locator('[data-info-row]').first().boundingBox()).height <= 19, 'a compact row');
-  // Links has no X.
-  assert.equal(await robot.linksPanel().getByRole('button', { name: 'Close links', exact: true }).count(), 0);
   // Picking Position alone keeps the selection: Quick Edit still carries it, and the Links stay.
   await robot.openPosition();
   assert.equal(await robot.linksPanel().isVisible(), true, 'Links stay while Select picks Position');
@@ -594,11 +618,10 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   assert.deepEqual(await page.evaluate(() => window.cadHarness.opened), ['/models/meshes/head.glb']);
   await headCard.getByRole('button', { name: 'base', exact: true }).first().click();
   await robot.pressed(['Select base']);
-  // The filter finds a link by the joint that carries it.
-  await pane.getByRole('button', { name: 'Find in links', exact: true }).click();
+  // The search box heading Links finds a link by the joint that carries it.
   await pane.getByRole('textbox', { name: 'Filter links', exact: true }).fill('nod');
   await pane.getByRole('list', { name: 'Link search results' }).getByRole('button', { name: 'Select head', exact: true }).waitFor();
-  await pane.getByRole('button', { name: 'Close find', exact: true }).click();
+  await pane.getByRole('button', { name: 'Clear filter', exact: true }).click();
   await pane.getByRole('list', { name: 'Robot links', exact: true }).waitFor();
 
   // Host commands: a robot has no faces or edges for a command to select, and says so; clearSelection clears the link selection.
@@ -649,11 +672,12 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   assert.equal(record.renderer.visibility.signature, record.renderer.pose.signature, 'both against the description');
   await page.evaluate(() => window.cadHarness.mounted(true));
   // The tool is never saved, nor what it picks: the reloaded file opens in Select picking links and
-  // knobs, Display shut.
-  await robot.linksPanel().waitFor();
+  // knobs, Display shut, no section open.
+  await robot.openSection('Links');
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: everything']);
   await pane.getByRole('button', { name: 'Reveal upper_arm', exact: true }).waitFor();
   assert.equal(await robot.displayPanel().count(), 0, 'it comes back with Display shut');
+  await robot.openSection('Position');
   await robot.jointField('shoulder').waitFor();
   assert.deepEqual([await robot.jointField('shoulder').inputValue(), await robot.jointField('lift', 'm').inputValue(), await robot.jointField('nod').inputValue()], ['25°', '0.2 m', '12°']);
   await page.waitForFunction(() => window.__cadJointHandles?.().find(handle => handle.id === 'shoulder')?.value === 25);
@@ -667,28 +691,23 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   t.after(() => { revision = 1; });
   await page.evaluate(() => window.cadHarness.a.client.refresh());
   await page.evaluate(() => window.cadHarness.mounted(true));
+  await robot.openSection('Position');
   await robot.jointField('shoulder').waitFor();
   assert.deepEqual([await robot.jointField('shoulder').inputValue(), await robot.jointField('lift', 'm').inputValue()], ['0°', '0 m'], 'a pose belongs to the description it was made on');
+  await robot.openSection('Links');
   await pane.getByRole('button', { name: 'Hide upper_arm', exact: true }).waitFor();
   assert.equal(await pane.getByRole('button', { name: 'Reveal upper_arm', exact: true }).count(), 0, 'and so do its hidden visuals');
   assert.deepEqual(robot.errors, []);
 });
 
-test('preview draws the robot as it opens, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
+test('the Studio draws the robot as it opens, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
   const robot = await open(t, 'arm.urdf');
   const { page, pane } = robot;
   const opening = await robot.links();
   const away = async () => { const surface = await robot.surface(); await page.mouse.move(surface.x + surface.width - 90, surface.y + surface.height / 2); };
-  const enterPreview = async () => {
-    await pane.getByRole('button', { name: 'Preview', exact: true }).click();
-    await pane.getByRole('button', { name: 'Exit preview', exact: true }).waitFor();
-    await robot.settled();
-  };
-  const exitPreview = async () => {
-    await pane.getByRole('button', { name: 'Exit preview', exact: true }).click();
-    await pane.getByRole('button', { name: 'Preview', exact: true }).waitFor();
-  };
-  // Preview opens still (Orbit off): the robot as preview draws a file opened afresh.
+  const enterPreview = async () => { await robot.studio(true); await robot.settled(); };
+  const exitPreview = () => robot.studio(false);
+  // The Studio opens still (Orbit off): the robot as the Studio draws a file opened afresh.
   await away();
   await enterPreview();
   const authored = (await robot.capture()).data;
@@ -699,16 +718,17 @@ test('preview draws the robot as it opens, and leaving it finds the tools view a
   await page.waitForFunction(() => window.__robotLinks().some(({ link }) => link === 'upper_arm'));
   const posed = await robot.links();
   assert.notDeepEqual(posed.upper_arm, opening.upper_arm, 'the shoulder turned the upper arm');
+  await robot.openSection('Links');
   await pane.getByRole('button', { name: 'Hide base', exact: true }).click();
   await pane.getByRole('button', { name: 'Reveal base', exact: true }).waitFor();
   await pane.getByRole('button', { name: 'Select upper_arm', exact: true }).click();
   await robot.pressed(['Select upper_arm']);
 
-  // Preview draws none of it: the opening pose, every visual, nothing lit.
+  // The Studio draws none of it: the opening pose, every visual, nothing lit.
   await away();
   await enterPreview();
-  assert.deepEqual(await robot.links(), opening, 'preview poses the robot as it opens');
-  assert.ok((await robot.capture()).data.equals(authored), 'preview draws the robot as it opens');
+  assert.deepEqual(await robot.links(), opening, 'the Studio poses the robot as it opens');
+  assert.ok((await robot.capture()).data.equals(authored), 'the Studio draws the robot as it opens');
 
   // Leaving finds the tools view's work as it was left.
   await exitPreview();
@@ -725,16 +745,13 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   await page.waitForFunction(() => window.__cadJointHandles?.().length === 1);
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
   // The same sections as any robot, whatever the format on disk, whatever Select picks: SDF is the
-  // sidebar's, under Links (what the description says about itself sits with its links), folded
-  // until opened.
-  assert.deepEqual([await robot.sidebar(), await robot.stack()], [['Links', 'SDF', 'Position controls'], []]);
+  // sidebar's, its tile after Links' (what the description says about itself sits with its links).
+  const sections = [['Links', 'SDF', 'Position controls'], [], ['Links', 'SDF', 'Position']];
+  assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], sections);
   await robot.pickLinks();
-  assert.deepEqual([await robot.sidebar(), await robot.stack()], [['Links', 'SDF', 'Position controls'], []]);
-  await robot.section('SDF').getByRole('button', { name: 'SDF', exact: true }).click();
-  // A section draws no box of its own: where it is drawn is its rows'.
-  const [linksTree, sdfBox] = await Promise.all([robot.linksPanel().locator('[data-tool-panel-body]').boundingBox(),
-    robot.section('SDF').locator('[data-tool-panel-heading]').boundingBox()]);
-  assert.ok(sdfBox.y >= linksTree.y + linksTree.height - 1, 'SDF follows the link tree');
+  assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], sections);
+  await robot.openSection('SDF');
+  assert.equal(await robot.linksPanel().isVisible(), false, 'one section at a time');
   const text = (await robot.section('SDF').innerText()).replace(/\s+/g, ' ');
   for (const fact of ['Version 1.9', 'Document world', 'World lab', 'Frame mode native', 'Root link base', 'Model swing', 'Links 2', 'Joints 1', 'Lights 1', 'sun / directional']) assert.ok(text.includes(fact), `${fact} in: ${text}`);
   // Its joint frame and its child link frame differ (the child sits at an offset): the knob still drives it.
@@ -785,6 +802,7 @@ test('a pose step costs the same on a long chain: one matrix, no component', asy
   const robot = await open(t, 'chain.urdf');
   const { page, pane } = robot;
   await robot.openPosition();
+  await robot.openSection('Position');
   await page.waitForFunction(count => window.__cadJointHandles?.().length === count, CHAIN_LINKS - 1);
   await robot.settled();
   // What a step costs is counted, never timed: the matrices it writes and the renders it causes.
