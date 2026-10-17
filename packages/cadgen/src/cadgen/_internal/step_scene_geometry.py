@@ -219,15 +219,22 @@ def _edge_continuity_name(edge: Any, face_shapes: list[Any]) -> str:
         return ""
 
 
-def _face_normal_at_edge_fraction(edge: Any, face: Any, fraction: float) -> list[float] | None:
-    curve = BRepAdaptor_Curve2d(edge, face)
+def face_surface(face: Any) -> Any:
+    """The face's surface adaptor restricted to the face's parameter bounds -- what an edge's
+    dihedral angle reads the face's normal from. Restricting runs over every edge of the
+    face, so the caller makes it once per face, however many of its edges ask."""
+    return BRepAdaptor_Surface(face, True)
+
+
+def _face_normal_at_edge_fraction(curve: Any, face: Any, props: Any, fraction: float) -> list[float] | None:
+    """The face's oriented unit normal where the edge is at ``fraction`` of its parameter
+    range: ``curve`` is the edge's parameter curve on the face, ``props`` the face's surface
+    properties (``BRepLProp_SLProps`` over :func:`face_surface`)."""
     first = float(curve.FirstParameter())
     last = float(curve.LastParameter())
     if not math.isfinite(first) or not math.isfinite(last) or abs(last - first) <= 1e-12:
         return None
     uv = curve.Value(first + ((last - first) * fraction))
-    surface = BRepAdaptor_Surface(face, True)
-    props = BRepLProp_SLProps(surface, 1, 1e-6)
     props.SetParameters(float(uv.X()), float(uv.Y()))
     if not props.IsNormalDefined():
         return None
@@ -237,22 +244,27 @@ def _face_normal_at_edge_fraction(edge: Any, face: Any, fraction: float) -> list
     return _normalize(normal)
 
 
-def _sampled_edge_dihedral_deg(edge: Any, face_shapes: list[Any], fallback_normals: list[list[float] | None]) -> float | None:
+def _sampled_edge_dihedral_deg(edge: Any, face_shapes: list[Any], surfaces: list[Any]) -> float | None:
+    """The largest angle between the two faces' normals at the edge's sample points;
+    ``surfaces`` holds each face's :func:`face_surface`, None where it could not be made."""
     if len(face_shapes) != 2:
+        return None
+    try:
+        curves = [BRepAdaptor_Curve2d(edge, face) for face in face_shapes]
+        props = [BRepLProp_SLProps(surface, 1, 1e-6) for surface in surfaces]
+    except Exception:  # noqa: BLE001 - an edge with no curve on a face, or a face with no surface, has no angle
         return None
     max_angle: float | None = None
     denominator = STEP_EDGE_SAMPLE_COUNT + 1
     for index in range(1, STEP_EDGE_SAMPLE_COUNT + 1):
         fraction = index / denominator
         try:
-            left_normal = _face_normal_at_edge_fraction(edge, face_shapes[0], fraction)
-            right_normal = _face_normal_at_edge_fraction(edge, face_shapes[1], fraction)
+            left_normal = _face_normal_at_edge_fraction(curves[0], face_shapes[0], props[0], fraction)
+            right_normal = _face_normal_at_edge_fraction(curves[1], face_shapes[1], props[1], fraction)
         except Exception:  # noqa: BLE001 - OCP normal queries can raise; a skipped sample must not fail the edge read
             left_normal = None
             right_normal = None
         angle = _angle_between_vectors_deg(left_normal, right_normal)
         if angle is not None and math.isfinite(angle):
             max_angle = angle if max_angle is None else max(max_angle, angle)
-    if max_angle is not None:
-        return max_angle
-    return _angle_between_vectors_deg(fallback_normals[0], fallback_normals[1]) if len(fallback_normals) == 2 else None
+    return max_angle

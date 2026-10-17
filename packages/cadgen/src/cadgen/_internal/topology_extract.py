@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import Any
+from typing import Any, Callable
 
 from OCP.Bnd import Bnd_Box
 from OCP.BRep import BRep_Tool
@@ -64,6 +64,7 @@ from cadgen._internal.step_scene_geometry import (
     _is_smooth_continuity,
     _sampled_edge_dihedral_deg,
     _surface_params,
+    face_surface,
 )
 from cadgen._internal.step_scene_types import _enum_name
 
@@ -214,10 +215,13 @@ def _edge_integrals(edge) -> dict[str, Any]:
     return metrics
 
 
-def _edge_classification(edge, faces: list) -> dict[str, Any]:
+def _edge_classification(edge, faces: list, surfaces: Callable[[], list]) -> dict[str, Any]:
     """Visibility class plus the classification columns the selector tables
     carry (continuity, dihedralDeg, flags, adjacentFaceCount), from the
-    exact faces either side of the edge."""
+    exact faces either side of the edge. ``surfaces()`` gives those faces'
+    restricted surface adaptors (``step_scene_geometry.face_surface``), each
+    made once per face by the caller: asked only for an edge whose angle is
+    sampled."""
     F, C = STEP_EDGE_FLAGS, STEP_EDGE_VISIBILITY_CLASSES
     count = len(faces)
     result: dict[str, Any] = {
@@ -251,16 +255,16 @@ def _edge_classification(edge, faces: list) -> dict[str, Any]:
     except Exception:
         continuity = ""
     if continuity == "c0":
-        dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, [None, None])
+        dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, surfaces())
         result.update(cls=C["FEATURE"], continuity="c0", flags=F["HARD"],
                       dihedralDeg=dihedral)
         return result
     if _is_smooth_continuity(continuity):
-        dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, [None, None])
+        dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, surfaces())
         result.update(cls=C["TANGENT"], continuity=continuity,
                       flags=F["TANGENT"], dihedralDeg=dihedral)
         return result
-    dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, [None, None])
+    dihedral = _sampled_edge_dihedral_deg(edge, typed_faces, surfaces())
     if dihedral is not None:
         if dihedral > STEP_EDGE_ANGULAR_TOLERANCE_DEG:
             result.update(cls=C["FEATURE"], continuity="sampled_hard",
@@ -378,6 +382,21 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
         entry["loops"] = loops
         faces.append(entry)
 
+    # Each face's restricted surface adaptor, made the first time an edge of the face has its
+    # angle sampled: restricting runs over every edge of the face, so it is made once a face.
+    surfaces: dict[int, Any] = {}
+
+    def surface(face_ord: int, face) -> Any:
+        found = surfaces.get(face_ord) if face_ord else None
+        if found is None and face_ord not in surfaces:
+            try:
+                found = face_surface(TopoDS.Face_s(face))
+            except Exception:  # noqa: BLE001 - a face whose surface cannot be read gives no angle
+                found = None
+            if face_ord:
+                surfaces[face_ord] = found
+        return found
+
     edges: list[dict[str, Any]] = []
     for ordinal in range(1, edge_map.Extent() + 1):
         edge = TopoDS.Edge_s(edge_map.FindKey(ordinal))
@@ -407,7 +426,9 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
                 seen_face_ords.add(face_ord)
                 unique_faces.append(f)
                 deduped_ords.append(face_ord)
-        classification = _edge_classification(edge, unique_faces)
+        classification = _edge_classification(
+            edge, unique_faces,
+            lambda: [surface(face_ord, face) for face_ord, face in zip(deduped_ords, unique_faces)])
         if len(unique_faces) != len(adjacent):
             classification["cls"] = STEP_EDGE_VISIBILITY_CLASSES["SEAM"]
             classification["continuity"] = "seam"
