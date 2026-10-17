@@ -11,9 +11,9 @@ of them alike; ``failed`` when the latest job for the document failed.
 
 Artifact-side only: no record, no script, no closure is read here, and nothing
 on disk is scraped — there is no advisory progress record any more. With no
-daemon (``CADGEN_DAEMON=0``, or none running) there is no feed: a document then
-reads from its tree alone, and the viewer's own compile is reported by the
-compile client's in-flight marker (``cadgen_ops``).
+daemon running there is no feed: a document then reads from its tree alone, and
+the viewer's own compile is reported by the compile client's in-flight marker
+until the daemon lists it (``cadgen_ops``).
 
 No kernel import: this is a viewing-path read.
 """

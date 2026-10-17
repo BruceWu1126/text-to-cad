@@ -10,7 +10,7 @@ import time
 import unittest
 from unittest import mock
 
-from cadgen.daemon import artifacts, broker, client, pool, server, transport
+from cadgen.daemon import artifacts, client, pool, server, transport
 from cadgen.daemon.jobs import JobLedger
 from tests.python.support.broker import PrivateBroker
 from cadgen.daemon.memory import MemoryPolicy, MIB
@@ -142,9 +142,7 @@ sys.addaudithook(audit)
             stack.enter_context(mock.patch.object(server, "_POOL", workers))
             stack.enter_context(mock.patch.object(server, "_log"))
             stack.enter_context(mock.patch.object(client, "_connect_or_spawn", side_effect=lambda _: transport.connect(address, self.private.key)))
-            stack.enter_context(mock.patch("cadgen.daemon.executors.use_daemon", return_value=True))
             stack.enter_context(mock.patch.object(pool.subprocess, "Popen", side_effect=start))
-            stack.enter_context(mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted fallback")))
             for name in ("_script_path", "_document_path"):
                 stack.enter_context(mock.patch.object(server, name, side_effect=AssertionError("source/document routing")))
             stack.enter_context(mock.patch("cadgen.daemon.jobs.declared_outputs", side_effect=AssertionError("source scan")))
@@ -183,24 +181,6 @@ sys.addaudithook(audit)
             self.assertTrue(all(row["subject"] == "" and row["outputs"] == [] for row in jobs))
             self.assertEqual(sum(row["state"] == "failed" for row in jobs), 2)
             self.assertEqual(self.private.broker.snapshot()["granted"], 4, "one slot a job")
-
-    def test_with_no_daemon_a_display_job_derives_in_this_process_on_its_own_thread(self):
-        from cadgen.store import parts
-
-        derive, threads, leases = parts.derive, [], []
-
-        def leased(*args, **kwargs):
-            threads.append(threading.current_thread())
-            leases.append(broker.current_lease())
-            return derive(*args, **kwargs)
-
-        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("a process per job")), \
-             mock.patch.object(parts, "derive", side_effect=leased):
-            result = artifacts.submit_artifact(self.request, store_root=self.store).result(60)
-        self.assertNotEqual(threads, [threading.current_thread()])
-        self.assertIsNone(leases[0], "with no daemon there is no broker to take a slot from")
-        self.assert_geometry_and_result(result)
-        self.settled()
 
     def test_real_daemon_detach_retains_native_worker_for_attached_subscriber(self):
         entered, release = self.root / "daemon-entered", self.root / "daemon-release"

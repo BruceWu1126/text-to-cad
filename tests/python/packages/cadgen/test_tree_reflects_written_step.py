@@ -20,6 +20,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
+from tests.python.support.warm_daemon import verified
 
 CADGEN_SRC = add_repo_path("packages/cadgen/src")
 

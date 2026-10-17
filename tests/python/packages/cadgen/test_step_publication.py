@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.documents import assert_same_document
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.tmp_root import generated_cad_directory
 
 
@@ -28,6 +29,9 @@ class StepPublicationTests(unittest.TestCase):
         })
         env.start()
         self.addCleanup(env.stop)
+        # The build runs here, as a worker runs it; its export and display jobs run where they
+        # are submitted, so a fault injected into one lands in it.
+        self.enterContext(inline_artifacts())
 
     def build(self, size: int, *, force: bool = False, annotated: bool = False) -> int:
         from cadgen.cli._run_model import run_model_argv

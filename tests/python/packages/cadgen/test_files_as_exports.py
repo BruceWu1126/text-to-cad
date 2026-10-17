@@ -16,9 +16,12 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.cad_test_roots import IsolatedCadRoots
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
+
+from cadgen.daemon.artifacts import submit_artifact as daemon_submit_artifact  # noqa: E402 - the job's real dispatch
 
 MODEL = """
 from cadgen import step, label_shape
@@ -42,6 +45,9 @@ class FilesAsExportsTest(unittest.TestCase):
 
         roots = IsolatedCadRoots(self, prefix="files-as-exports-")
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}))
+        # The export and the verify run where they are submitted: what they write and
+        # answer is the subject, and the build hears the verify before it returns.
+        self.enterContext(inline_artifacts())
         self.root = roots.cad_root
         self.script = self.root / "rig.py"
         self.script.write_text(MODEL, encoding="utf-8")

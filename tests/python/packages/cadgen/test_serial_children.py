@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -92,10 +93,12 @@ def parent():
 
 
 class SerialChildrenCase(unittest.TestCase):
-    """A child, its parent and a grandparent in one folder, each run as ``python x.py``
-    with no daemon and a store of its own."""
+    """A child, its parent and a grandparent in one folder, each built as ``python x.py``
+    builds it -- the run a worker makes, here in this process, its exports and display jobs
+    run where they are submitted (``inline_artifacts``) -- with a store of its own."""
 
     def setUp(self):
+        self.enterContext(inline_artifacts())
         temporary = generated_cad_directory(prefix="serial-children-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()

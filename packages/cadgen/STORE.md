@@ -512,10 +512,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   exists -- a model's or a re-emit's -- it asks the build pool for the parts of
   its own components the store lacks (`parts.request_display`: one job, `kind:
   display`, or on the daemon's pool, for a batch past half a megabyte of BREP,
-  one per such share, balanced by size, a pool slot each but the build's own;
-  with no daemon, one job on a thread of the build's own process, whatever the
-  batch -- the kernel holds the interpreter lock through each mesh, so a second
-  thread would only take turns with the first) and waits for them, as one,
+  one per such share, balanced by size, a pool slot each but the build's own)
+  and waits for them, as one,
   before it reports done. A linked child's parts are its own build's, so a parent asks
   only for its own. A compile of a document asks for every part of its tree
   before it reports done; a model whose result stands asks for those of the
@@ -544,8 +542,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   derived. A part the store lacks (a cleared, evicted or older store) is derived
   by ONE build-pool job for the request (`kind: display`,
   `daemon/artifacts.py`): one request, one job, one worker -- a daemon
-  worker's, or with no daemon (§9) a thread of the process that asks, the
-  server's or the snapshot's own, never a request's thread -- and correctness
+  worker's, never a request's thread -- and correctness
   never depends on a store hit. A part that job cannot derive is left out of a view, which names
   it by the occurrences that place it, as a build's warning does: the CAD
   Viewer draws the rest under a warning, a snapshot and a list draw and list
@@ -717,10 +714,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   **Exports are queued, and the run finishes them.** Every call of a model,
   root or child, queues what the model owes the moment its result is recorded
   (`generation._Export`): the export job is submitted then, so a child's STEP
-  is written on the build pool while its parent's body goes on (with no daemon
-  the job runs on a thread of the build's own process, where the kernel's calls
-  hold the interpreter lock, so it interleaves with the body rather than running
-  beside it). The run that owns the command (`authoring.build_run`) finishes
+  is written on the build pool while its parent's body goes on. The run that
+  owns the command (`authoring.build_run`) finishes
   every export it queued once the command's bodies have returned, in the order
   queued -- children before the parent that called them -- each one publishing
   its file, then cutting its meshes. A model's `done` event says its result is
@@ -1784,63 +1779,55 @@ asked. A child a parent's body calls is no job: it is decoded from its stored
 result or built serially inside the parent's own process (§9a). What goes to
 the pool is a document compile (`cadgen.daemon.executors.submit_compile`: a
 door's, the CAD Viewer's, or a body's `read_step` of a file with no tree) and
-the artifact jobs (§3: display, measure, export), with two executors that behave
-identically:
+the artifact jobs (§3: display, measure, export), all of them the
+daemon's.
 
-- **Daemon executor (default).** Workers are persistent and warm. The routing
-  key is the model (`script::function` — two models in one file are two
-  subjects, two workers): a request for a model whose worker is
-  idle takes it; whose worker is busy binds a spare as an **extra** for that
-  one job (the extra returns to the spare set after); a model with no worker
-  binds a spare and a replacement starts in the background; no spare means a
-  spawn. Spares load build123d/OCP as well as the lazy tool parsers before
-  announcing readiness; importing the supervisor never loads the kernel.
-  A worker starts in the system temp folder but keeps it off its import path
-  (`python -P`, as every process cadgen starts does: the daemon, the store's
-  gc, a transient compile, the Viewer), so a build imports exactly what
-  `python script.py` would (law 7), nothing another program or user left in
-  that folder stands in for cadgen, and no import lists it: other programs keep
-  changing it, and on the path every import that missed it would list it
-  again, tens of thousands of entries a time, by every worker of a burst.
-  Spares: `CADGEN_DAEMON_SPARES` (default 2). A request that names no model (a
-  document compile, an artifact job) borrows a spare without binding it;
-  borrowed workers count toward spare capacity while busy and fill a free spare
-  slot when they return, so a stream of artifact jobs reuses warm kernels, and
-  a subject-less burst keeps its surplus workers for two idle seconds, for an
-  asynchronous client's next poll (a zero-spare pool retires every returning
-  borrowed worker). Worker admission accounts for
-  resident memory and pending reservations,
-  and may reclaim idle workers or refuse work (§9 below). A worker is recycled after
-  `CADGEN_DAEMON_RECYCLE` jobs (default 1000) as a leak hedge, and the daemon
-  exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600). The
-  first client that needs the daemon starts it, and `cadgen viewer` starts it as
-  soon as its URL is announced, so a session's first build finds warm spares.
-  Inside a worker, a compile or an artifact job is the same client call back to
-  the daemon; a parent's children build in the parent's worker, in the slot it
-  holds (§9a). A worker answers its client when the command's answer is complete:
-  after the run's exports, or, with `--no-wait`, once every model's result is
-  recorded (the `released` frame, which the client returns on); the worker then
-  finishes the files, its job open in the ledger until its exit frame, and a
-  client that left after its release is no lost client.
-  **A job runs in its caller's environment**, as it would cold: every request
-  carries the client's whole environment and the worker applies it for that
-  job -- a name the caller has is set, a name it lacks is unset, which also
-  clears what a previous job's model code exported (`worker._apply_request_env`).
-  The store root, `PYTHONPATH` (absolutized against the caller's folder),
-  `CADGEN_STORE_MAX` and the telemetry switches reach a
-  job this way, and so does every variable a model reads (§3). Only the names
-  the daemon's machinery sets for itself are neither sent nor replaced
-  (`client.INTERNAL_ENV_VARS`: the worker's own daemon, address and state
-  directory, the request's job id, the install channel). Nothing else a job
-  sees comes from the process that started the daemon.
-- **Transient executor (`CADGEN_DAEMON=0`).** A subprocess per job -- a
-  document compile -- alive for that job only. It inherits the environment, so
-  a test's `CADGEN_CACHE_DIR` isolates its store; tests and CI run this way. An
-  artifact job (`kind: display` and the rest, `daemon/artifacts.py`) is no
-  process of its own: it runs in the process that asks, on a thread of its own,
-  against that process's store, with no slot to take (with no daemon there is
-  no broker), since a process per job would import the kernel again for every
-  one.
+**Workers are persistent and warm.** The routing
+key is the model (`script::function` — two models in one file are two
+subjects, two workers): a request for a model whose worker is
+idle takes it; whose worker is busy binds a spare as an **extra** for that
+one job (the extra returns to the spare set after); a model with no worker
+binds a spare and a replacement starts in the background; no spare means a
+spawn. Spares load build123d/OCP as well as the lazy tool parsers before
+announcing readiness; importing the supervisor never loads the kernel.
+A worker starts in the system temp folder but keeps it off its import path
+(`python -P`, as every process cadgen starts does: the daemon, the store's
+gc, the Viewer), so a build imports exactly what
+`python script.py` would (law 7), nothing another program or user left in
+that folder stands in for cadgen, and no import lists it: other programs keep
+changing it, and on the path every import that missed it would list it
+again, tens of thousands of entries a time, by every worker of a burst.
+Spares: `CADGEN_DAEMON_SPARES` (default 2). A request that names no model (a
+document compile, an artifact job) borrows a spare without binding it;
+borrowed workers count toward spare capacity while busy and fill a free spare
+slot when they return, so a stream of artifact jobs reuses warm kernels, and
+a subject-less burst keeps its surplus workers for two idle seconds, for an
+asynchronous client's next poll (a zero-spare pool retires every returning
+borrowed worker). Worker admission accounts for
+resident memory and pending reservations,
+and may reclaim idle workers or refuse work (§9 below). A worker is recycled after
+`CADGEN_DAEMON_RECYCLE` jobs (default 1000) as a leak hedge, and the daemon
+exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600). The
+first client that needs the daemon starts it, and `cadgen viewer` starts it as
+soon as its URL is announced, so a session's first build finds warm spares.
+Inside a worker, a compile or an artifact job is the same client call back to
+the daemon; a parent's children build in the parent's worker, in the slot it
+holds (§9a). A worker answers its client when the command's answer is complete:
+after the run's exports, or, with `--no-wait`, once every model's result is
+recorded (the `released` frame, which the client returns on); the worker then
+finishes the files, its job open in the ledger until its exit frame, and a
+client that left after its release is no lost client.
+**A job runs in its caller's environment**, as it would cold: every request
+carries the client's whole environment and the worker applies it for that
+job -- a name the caller has is set, a name it lacks is unset, which also
+clears what a previous job's model code exported (`worker._apply_request_env`).
+The store root, `PYTHONPATH` (absolutized against the caller's folder),
+`CADGEN_STORE_MAX` and the telemetry switches reach a
+job this way, and so does every variable a model reads (§3). Only the names
+the daemon's machinery sets for itself are neither sent nor replaced
+(`client.INTERNAL_ENV_VARS`: the worker's own daemon, address and state
+directory, the request's job id, the install channel). Nothing else a job
+sees comes from the process that started the daemon.
 
 **Scratch outlives a killed process.** A process keeps its served views
 (`cadgen-views/<pid>/`), an exported view (`cadgen-view-<pid>-*`), a build's
@@ -1980,9 +1967,8 @@ are themselves dispatched through the daemon when one is reachable, so they
 run on warm kernels; the subject-less commands (`store`, `doctor`, `daemon
 status`, all snapshot orchestration) run in-process. STEP snapshots delegate
 missing document compilation and part derivation to the build pool -- a daemon
-worker's job, or with no daemon a compile process of its own and an artifact
-job on a thread of the snapshot's process (above) -- so their request
-resolution and browser orchestration import no kernel themselves.
+worker's job -- so their request resolution and browser orchestration import no
+kernel themselves.
 
 When the daemon's runtime changes, a request carrying the new version is told
 to restart. With nothing running, the old daemon releases its address and lock
@@ -1998,10 +1984,9 @@ CPU scheduling and reuse remain independent of memory admission:
 
 1. **Job slots — one running build per core.** A counting semaphore of
    `N = os.cpu_count()` slots, the daemon's, shared by its workers
-   (`CADGEN_JOBS` overrides; `daemon/broker.py`); with no daemon there is no
-   broker, and a build runs its body and its pool jobs on threads of its own
-   process with no slot to take -- its display data as one job, since slots are
-   what a large batch is shared out over (§3). A job takes a slot before its body runs and
+   (`CADGEN_JOBS` overrides; `daemon/broker.py`); a build in the process that
+   asked (`CADGEN_DAEMON=0`) has no broker, and runs its body with no slot to
+   take. A job takes a slot before its body runs and
    holds it through its emit -- a child built inside the body runs in the slot
    its parent holds (§9a) -- and it **yields the slot while it waits for a pool
    job** (its parts' display data, a compile, an export) and reacquires --
@@ -2072,8 +2057,7 @@ pool calibrates both.
 
 This is a soft admission envelope, not a native allocator limit. A single
 OCCT operation may grow between RSS samples. Where RSS cannot be enumerated,
-reservations still apply. Transient execution receives extraction-pool sizing,
-but has no daemon-wide aggregate process budget. CPU slot counts remain upper
+reservations still apply. CPU slot counts remain upper
 bounds, and extraction concurrency also fits a per-worker extraction ceiling
 (a third of the budget, capped at 2048 MiB), which is not the admission
 reservation and is likewise unconfigurable.
@@ -2148,7 +2132,7 @@ caller's own process, there and then:
   publishes over a child it could not build, and its previous document stays.
 - **Files queued.** A child's files are its own build's: its STEP's export job
   is submitted as its result is recorded and runs on the build pool while the
-  parent's body goes on (§3, *Exports*, says how with no daemon); the run
+  parent's body goes on (§3, *Exports*); the run
   finishes every export it queued, children first, once the command's bodies
   have returned. A child's `done` says its result is recorded and its parent
   may compose it; its file follows.

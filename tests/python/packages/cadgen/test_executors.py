@@ -1,10 +1,10 @@
-"""The transient executor: a real subprocess per job, and the events a job emits.
+"""A document's compile is a daemon job, and the events it emits.
 
-``CADGEN_DAEMON=0`` is the path tests and CI run, so it is tested with a real worker on
-a real (temporary) store. The one job a build hands to the pool is a document compile
-(``submit_compile``): what it must do is compile into the store the job names, report
-the document's transitions through the event sink, capture a failed job's output for
-the error, and never block the caller until ``wait()``.
+Tested with a real daemon (the test file's own) on a real (temporary) store. The one job
+a build hands to the pool is a document compile (``submit_compile``): what it must do is
+compile into the store the job names, report the document's transitions through the event
+sink, capture a failed job's output for the error, and never block the caller until
+``wait()``.
 """
 
 from __future__ import annotations
@@ -24,15 +24,13 @@ add_repo_path("packages/cadgen/src")
 from cadgen.daemon import executors  # noqa: E402
 
 
-class TransientCompile(unittest.TestCase):
+class DaemonCompile(unittest.TestCase):
     def setUp(self):
         self.tmp = temporary_directory(prefix="cadgen-executors-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.store = self.root / "store"
-        self.state = self.root / "state"
-        env = {"CADGEN_DAEMON": "0", "CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON_STATE_DIR": str(self.state)}
-        patcher = mock.patch.dict(os.environ, env)
+        patcher = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)})
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("CADGEN_DAEMON_CHILD", None)
@@ -84,9 +82,6 @@ class TransientCompile(unittest.TestCase):
         self.assertIn("broken.step", job.output())
         self.assertTrue(self.closed.wait(30), "the document's line never closed")
         self.assertEqual((self.events[-1]["model"], self.events[-1]["state"]), (str(document), "failed"))
-
-    def test_use_daemon_is_false_when_opted_out(self):
-        self.assertFalse(executors.use_daemon())
 
 
 if __name__ == "__main__":

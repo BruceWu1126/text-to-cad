@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.inline_artifacts import inline_artifacts
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -129,8 +130,10 @@ class RetainedRevisionPublication(unittest.TestCase):
 
         executors.set_event_sink(lambda _event: None)
         self.addCleanup(executors.set_event_sink, None)
-        # The run that owns the command finishes the export it queued as it ends.
-        with mock.patch.object(exports, "export_step", side_effect=injecting_export), build_run():
+        # The run that owns the command finishes the export it queued as it ends; the export
+        # job runs where it is submitted, so the fault lands in it.
+        with mock.patch.object(exports, "export_step", side_effect=injecting_export), inline_artifacts(), \
+                build_run():
             result = generation._generate_part_outputs(
                 spec,
                 preloaded_scene=scene,

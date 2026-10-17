@@ -45,9 +45,9 @@ class CadgenOps:
         # whoever submitted it (a CLI build, a parent's child build, our compile).
         snapshot = build_progress_snapshot(candidate)
         if snapshot is None and self.client.in_flight(build_key):
-            # Our own compile before the daemon lists it (or with no daemon at
-            # all): an indeterminate compiling badge beats showing nothing, and
-            # it is what the client's attach loop needs to attach TO.
+            # Our own compile before the daemon lists it: an indeterminate
+            # compiling badge beats showing nothing, and it is what the client's
+            # attach loop needs to attach TO.
             snapshot = {"writing": True, "busy": False, "runId": None, "progress": None}
 
         # Resolved once and threaded through both uses below.

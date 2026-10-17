@@ -203,9 +203,7 @@ path, the rehearsal, and local/manual fallbacks.
   checkout serves `apps/web/dist`). The CAD, DXF and robot-description skills document that verb directly.
   Nothing in `cadgen.viewer` imports the CAD kernel at module scope — its kernel
   actions, compiling a foreign STEP and deriving a part's display data, are jobs
-  of cadgen's build pool: a daemon worker's, or with no daemon a compile process
-  of its own and an artifact job on a thread of the server's process — never
-  work a request's thread does.
+  of cadgen's build pool, a daemon worker's — never work a request's thread does.
   Keep repo-level tooling in `scripts/`, not under `apps/web/`.
 - `packages/core` stays non-React. Shared FileViewer/renderers belong in
   `packages/ui`; host workflow state belongs in apps. Apps never import another

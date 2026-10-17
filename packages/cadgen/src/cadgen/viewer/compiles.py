@@ -4,10 +4,9 @@ The viewer renders what exists. Its one build-shaped action is compiling a
 document whose BYTES have no tree yet — a vendor's ``.step``, or a generated
 one built into another store — and that is a compile
 JOB submitted to the pool (``cadgen.daemon.executors.submit_compile``): the same
-job a door submits when handed such a document. It runs on a daemon spare (or a
-transient subprocess under ``CADGEN_DAEMON=0``), takes a job slot, coalesces
-with a door compiling the same bytes and shows in the build tree. Nothing here
-loads the kernel; the server never does.
+job a door submits when handed such a document. It runs on a daemon spare, takes
+a job slot, coalesces with a door compiling the same bytes and shows in the build
+tree. Nothing here loads the kernel; the server never does.
 
 Concurrent viewer requests for one document attach to the first: one job, one
 answer for all of them. Progress reaches the status endpoint through the

@@ -441,7 +441,7 @@ class ArtifactTransport(unittest.TestCase):
     def payload(self):
         return {"tool": "artifact", "argv": [], "artifact": {"kind": "producer"}, "store_root": "/store"}
 
-    def test_protocol_loss_failure_and_missing_result_never_retry_cold(self):
+    def test_protocol_loss_failure_and_missing_result_never_retry(self):
         for frames, reason in (
             ([], "closed the connection"),
             ([{"exit": 0}], "completed without returning"),
@@ -451,8 +451,7 @@ class ArtifactTransport(unittest.TestCase):
         ):
             raw = [json.dumps(frame).encode() for frame in frames] + [b""]
             conn = Connection(raw)
-            with self.subTest(frames=frames), mock.patch.object(client, "_connect_or_spawn", return_value=conn) as connect, \
-                 mock.patch("cadgen.daemon.artifacts._run_here", side_effect=AssertionError("cold retry")):
+            with self.subTest(frames=frames), mock.patch.object(client, "_connect_or_spawn", return_value=conn) as connect:
                 with self.assertRaisesRegex(artifacts.ArtifactJobError, reason):
                     client.run_artifact(self.payload())
                 self.assertEqual(connect.call_count, 1)
@@ -505,7 +504,7 @@ class ArtifactStartup(unittest.TestCase):
         }))
 
     @unittest.skipIf(os.name == "nt", "Windows named pipes do not have the Unix socket path limit")
-    def test_actual_overlong_socket_startup_fails_future_once_without_cold_retry(self):
+    def test_actual_overlong_socket_startup_fails_future_once_without_a_retry(self):
         address = str(self.root / ("long-" * 30) / "daemon.sock")
         processes = []
         spawn = client._spawn_daemon
@@ -520,7 +519,6 @@ class ArtifactStartup(unittest.TestCase):
         try:
             with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": address}), \
                  mock.patch.object(client, "_spawn_daemon", side_effect=recorded_spawn) as launched, \
-                 mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted cold retry")), \
                  mock.patch.object(artifacts, "execute", side_effect=AssertionError("native work in caller")):
                 future = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root / "store")
                 with self.assertRaisesRegex(artifacts.ArtifactJobError,
@@ -547,7 +545,7 @@ class ArtifactStartup(unittest.TestCase):
                         process.kill()
                         process.wait(timeout=5)
 
-    def test_a_nonspawner_deadline_is_terminal_without_respawn_or_cold_retry(self):
+    def test_a_nonspawner_deadline_is_terminal_without_respawn_or_a_retry(self):
         from cadgen.daemon import transport
 
         address = transport.private_address("artifact-startup-" + str(os.getpid()))
@@ -557,7 +555,7 @@ class ArtifactStartup(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": address}), \
              mock.patch.object(client, "SPAWN_WAIT_SECONDS", 0.1), \
              mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("second spawner")) as spawn, \
-             mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted cold retry")):
+             mock.patch.object(artifacts, "execute", side_effect=AssertionError("native work in caller")):
             future = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root / "store")
             try:
                 with self.assertRaisesRegex(artifacts.ArtifactJobError, "No build daemon answered at .* within"):
@@ -641,65 +639,6 @@ class ArtifactLeases(unittest.TestCase):
         self.assertEqual(snapshot["peakRunning"], 1)
         self.assertEqual(snapshot["granted"], 3)
 
-    def test_with_no_daemon_a_job_runs_here_on_its_own_thread_while_its_caller_yields(self):
-        # The job's thread holds no slot (with no daemon there is no broker to take one
-        # from); the caller waiting on it gives its own slot back for the wait -- the job
-        # sees the slot free -- and takes it back once the job is done.
-        threads, leases, free = [], [], []
-
-        def identity():
-            threads.append(threading.current_thread())
-            leases.append(broker.current_lease())
-            deadline = time.monotonic() + 5
-            while self.private.broker.snapshot()["running"] and time.monotonic() < deadline:
-                time.sleep(.005)
-            free.append(self.private.broker.snapshot()["running"])
-            return dict(PRODUCER)
-
-        self.fake.producer_identity.side_effect = identity
-        with mock.patch.object(subprocess, "Popen", side_effect=AssertionError("a process per job")), \
-             broker.held("caller", required=True):
-            self.assertEqual(artifacts.resolve_artifact({"kind": "producer"}), PRODUCER)
-            self.assertIsNotNone(broker.current_lease())
-        self.assertNotEqual(threads, [threading.current_thread()])
-        self.assertIsNone(leases[0])
-        self.assertEqual(free, [0], "the caller kept its slot while it waited")
-        snapshot = self.settled()
-        self.assertEqual((snapshot["peakRunning"], snapshot["granted"]), (1, 2))
-
-    def test_with_no_daemon_a_job_for_another_store_is_refused_before_it_runs(self):
-        with self.assertRaisesRegex(ValueError, "runs in this process"):
-            artifacts.submit_artifact({"kind": "producer"}, store_root=str(Path(self.root) / "other"))
-        self.fake.producer_identity.assert_not_called()
-
-    def test_with_no_daemon_a_job_whose_one_subscriber_left_stops_before_its_next_part(self):
-        started, release = threading.Event(), threading.Event()
-        asked = []
-
-        def derive(tree, cids, *, producer, keep_going):
-            done = {}
-            for cid in cids:
-                asked.append(keep_going())
-                if not asked[-1]:
-                    break
-                started.set()
-                self.assertTrue(release.wait(5))
-                done[cid] = {"part": cid}
-            return done
-
-        self.fake.derive.side_effect = derive
-        future = artifacts.submit_artifact(display_request())
-        self.assertTrue(started.wait(5))
-        self.assertTrue(future.detach())
-        with self.assertRaises(artifacts.ArtifactDetached):
-            future.result()
-        release.set()
-        deadline = time.monotonic() + 5
-        while len(asked) < 2 and time.monotonic() < deadline:
-            time.sleep(.005)
-        self.settled()
-        self.assertEqual(asked, [True, False])
-
     def test_missing_or_malformed_required_broker_does_not_execute(self):
         request = {"tool": "artifact", "argv": [], "artifact": {"kind": "producer"}, "store_root": self.root}
         frames = []
@@ -760,8 +699,7 @@ class ArtifactLeases(unittest.TestCase):
         with mock.patch.object(server, "_BROKER", self.private.broker), mock.patch.object(server, "_JOBS", ledger), \
              mock.patch.object(server, "_POOL", pool), mock.patch.object(server, "_log", side_effect=log), \
              mock.patch.object(self.private.broker, "claim_artifact_entry", side_effect=claiming), \
-             mock.patch.object(client, "_connect_or_spawn", side_effect=lambda _: transport.connect(address, self.private.key)), \
-             mock.patch("cadgen.daemon.executors.use_daemon", return_value=True):
+             mock.patch.object(client, "_connect_or_spawn", side_effect=lambda _: transport.connect(address, self.private.key)):
             acceptor = threading.Thread(target=serve_two, daemon=True)
             acceptor.start()
             first = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root)

@@ -457,7 +457,8 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
 
 class FaceMeasureRequests(unittest.TestCase):
     """A face's exact area and centroid, which no part carries, measured when a view asks: one
-    pool job per face, joined by every request for it, its answer the store's afterwards."""
+    pool job per face, joined by every request for it, its answer the store's afterwards. The
+    job runs where it is submitted (``inline_artifacts``): what it answers is the subject."""
 
     def setUp(self):
         self.tmp = generated_cad_directory(prefix="face-measure-")
@@ -465,6 +466,7 @@ class FaceMeasureRequests(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.tmp.name) / "store"), "CADGEN_DAEMON": "0"})
         env.start()
         self.addCleanup(env.stop)
+        self.enterContext(inline_artifacts())
         from build123d import Solid
 
         self.body = Solid.make_box(10, 8, 4).cut(Solid.make_cylinder(2, 10))

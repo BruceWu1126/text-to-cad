@@ -5,14 +5,9 @@ serially in the parent's own process (``cadgen.authoring``, STORE.md §9a). What
 build still hands to the pool is a document compile (:func:`submit_compile`), and
 what it waits on is a :class:`Job`: the compile's exit, or, for the top-level call
 of a model, the source result its own pipeline announces (:func:`capture_source_result`).
-Which executor runs a compile is decided once per process:
-
-* **daemon** (default) -- the job is a request to the warm daemon, streamed on a
-  background thread. Inside a daemon worker this is the same client call back to the
-  daemon the worker belongs to.
-* **transient** (``CADGEN_DAEMON=0``) -- a subprocess alive for this job only. It
-  inherits the environment, so a test's ``CADGEN_CACHE_DIR`` isolates its store with
-  no protocol support; tests and CI run this way.
+A compile is a request to the warm daemon, streamed on a background thread. Inside a
+daemon worker this is the same client call back to the daemon the worker belongs to;
+a daemon that cannot take it fails the job, its output saying why.
 
 The store root travels with every job as an explicit request field rather than as
 ambient environment, so one daemon serves any number of isolated stores.
@@ -28,8 +23,6 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
-import subprocess
-import sys
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -200,23 +193,16 @@ def model_event(model: Path | str, state: str, **extra: Any) -> dict:
     return payload
 
 
-# --- executor selection ---------------------------------------------------------------
-
-
-def use_daemon() -> bool:
-    """The daemon executor unless the caller opted out."""
-    return os.environ.get("CADGEN_DAEMON") != "0"
-
-
-# --- transient executor -----------------------------------------------------------------
+# --- processes cadgen starts -------------------------------------------------------------
 
 
 def worker_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment a worker process starts with: this cadgen, findable from any cwd.
+    """The environment a process cadgen starts begins with -- the daemon, a pool worker,
+    the store's gc: this cadgen, findable from any cwd.
 
-    A worker runs ``python -m cadgen...`` from the MODEL's directory, so a relative
-    ``PYTHONPATH`` entry (``packages/cadgen/src`` from a checkout root, the shape every
-    test runner uses) would resolve against that directory and the worker would import
+    Such a process runs ``python -P -m cadgen...`` in the system temp folder, so a
+    relative ``PYTHONPATH`` entry (``packages/cadgen/src`` from a checkout root, the shape
+    every test runner uses) would resolve against that folder and the process would import
     whatever cadgen the interpreter has installed instead -- a different version, a
     different store layout, silently. Absolutize every entry and put this cadgen's
     source root first.
@@ -233,6 +219,9 @@ def worker_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+# --- compiles ------------------------------------------------------------------------------
+
+
 def submit_compile(
     document: Path,
     *,
@@ -246,8 +235,8 @@ def submit_compile(
     never run a body, but a document with no tree — a vendor STEP, or one built
     into another store — has to be read by the kernel once. That read goes through
     the pool like a build — a slot, the tree, and coalescing with anyone compiling
-    the same bytes (the CAD Viewer, another door) — on a daemon spare or a
-    transient subprocess, never in the caller."""
+    the same bytes (the CAD Viewer, another door) — on a daemon spare, never in the
+    caller."""
     import hashlib
 
     from cadgen._internal.atomic_replace import read_bytes_with_ladder
@@ -261,12 +250,7 @@ def submit_compile(
     job = Job(document)
     emit_event(model_event(document, "submitted", parent=str(parent) if parent else None))
     tool_argv = [str(document)] + (["--force"] if force else [])
-    if use_daemon():
-        _submit_daemon(
-            job, root, closure=closure, tool="step-compile", argv=tool_argv, prog="cadgen step compile",
-        )
-    else:
-        _submit_transient(job, root, command=[sys.executable, "-P", "-m", "cadgen.cli.step_compile", *tool_argv])
+    _submit_daemon(job, root, closure=closure, tool="step-compile", argv=tool_argv, prog="cadgen step compile")
     emit_event(model_event(document, "building", phase="compile"))
 
     def finish() -> None:
@@ -276,53 +260,6 @@ def submit_compile(
 
     threading.Thread(target=finish, name=f"cadgen-compile-{document.stem}", daemon=True).start()
     return job
-
-
-def _submit_transient(job: Job, store_root: Path, *, command: list[str]) -> None:
-    """Run ``command`` as a subprocess of this one, in the job's own store, and finish
-    ``job`` with its exit; its output is kept for the error path."""
-    env = worker_env()
-    env["CADGEN_DAEMON"] = "0"
-    env["CADGEN_CACHE_DIR"] = str(store_root)
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(job.script.parent),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="backslashreplace",
-        )
-    except OSError as exc:
-        job._say(f"could not start a worker for {job.script.name}: {exc}\n")
-        job._finish(1)
-        return
-
-    def pump(stream) -> None:
-        for line in stream:
-            job._say(line)
-
-    def finish() -> None:
-        readers = [threading.Thread(target=pump, args=(stream,), daemon=True) for stream in (process.stdout, process.stderr)]
-        for reader in readers:
-            reader.start()
-        code = process.wait()
-        for reader in readers:
-            reader.join(timeout=5.0)
-        if not any(reader.is_alive() for reader in readers):
-            for stream in (process.stdout, process.stderr):
-                if stream is not None:
-                    stream.close()
-        if code != 0:
-            emit_event(model_event(job.model, "failed", exit=code))
-        job._finish(code)
-
-    threading.Thread(target=finish, name=f"cadgen-job-{job.script.stem}", daemon=True).start()
-
-
-# --- daemon executor ---------------------------------------------------------------------
 
 
 def _submit_daemon(

@@ -21,8 +21,8 @@
 The daemon IS the broker for its workers: it serves slot requests over its own
 socket (``server._handle_request``) and claims in-flight entries for the requests
 it relays. A lease is a CONNECTION: holding a slot is holding the connection open,
-so a worker that dies releases its slot by dying. With no daemon there is no
-broker: a build runs its own body and its pool jobs on threads of its own process.
+so a worker that dies releases its slot by dying. A process that is no daemon
+worker has no broker, and holds no slot.
 Memory admission belongs to the worker pool, separately from these CPU leases;
 yielding a CPU lease never releases the parent's memory allowance.
 
@@ -285,7 +285,7 @@ def _send(conn: transport.Channel, frame: dict) -> None:
 
 def _endpoint() -> tuple[str, bytes] | None:
     """Where this process's broker is: the daemon it belongs to, when it is a daemon
-    worker. None when there is none (a build with no daemon)."""
+    worker. None in any other process."""
     if os.environ.get("CADGEN_DAEMON_CHILD"):
         from cadgen.daemon.client import daemon_address
 

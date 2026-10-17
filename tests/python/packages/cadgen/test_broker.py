@@ -166,7 +166,7 @@ class Slots(PrivateBrokerFixture):
         self._settle(lambda s: s["running"] == 0 and s["queued"] == 0)
 
     def test_no_broker_means_no_limit_and_no_error(self):
-        # A build with no daemon: its body and its pool jobs run on its own threads.
+        # A process that is no daemon worker: no broker, so no slot and no error.
         with mock.patch.object(broker, "_endpoint", return_value=None):
             with broker.held("free") as lease:
                 self.assertIsNone(lease)

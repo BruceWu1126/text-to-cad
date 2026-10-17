@@ -4,8 +4,7 @@ store (``kind: display``: one request, one job, one worker); one face's exact ar
 centroid, measured on its component's stored BREP for a view or a mate's axis that asks
 (``kind: measure``, ``store.parts.measure_face``); a stored tree written to
 a staged STEP (``kind: export``, ``store/exports.py``). A job runs on a daemon
-worker, or, with no daemon (``CADGEN_DAEMON=0``), in the process that asks, on a
-thread of its own: never a process per job. The caller's own thread never imports
+worker, never in the process that asks: the caller's own thread never imports
 the native producer. Requests contain immutable pins and may name a staged file,
 never a script, a declared output, or an instruction to run arbitrary Python.
 """
@@ -215,33 +214,24 @@ class ArtifactFuture(Future):
 
 
 def submit_artifact(request, *, store_root=None):
-    """Start a typed artifact operation as ONE build-pool job, on a thread of its own,
-    without importing the CAD kernel on the caller's thread: a daemon worker's, or with no
-    daemon this process's (:func:`_run_here`), against the store it names, which must then
-    be this process's. A caller that waits for it yields the slot it holds (``result``)."""
+    """Start a typed artifact operation as ONE build-pool job, a daemon worker's, against
+    the store it names, from a thread of its own: the caller's thread never imports the
+    CAD kernel. A caller that waits for it yields the slot it holds (``result``)."""
     request = normalize_request(request)
     root = store_path(store_root)
     future = ArtifactFuture()
     from cadgen.daemon import client
-    from cadgen.daemon.executors import use_daemon
 
-    daemon = use_daemon()
-    payload = None
-    if daemon:
-        dependency = getattr(_WORKER, "root", None) is not None or broker.current_lease() is not None
-        # Captured before the dispatch thread: every request's root/dependency/env is
-        # its caller's, not whichever HTTP thread happens to run next.
-        payload = client.artifact_payload(request, store_root=root, dependency=dependency)
-    elif root != store_path():
-        raise ValueError(f"with no daemon an artifact job runs in this process, on its store, not {root}")
+    dependency = getattr(_WORKER, "root", None) is not None or broker.current_lease() is not None
+    # Captured before the dispatch thread: every request's root/dependency/env is
+    # its caller's, not whichever HTTP thread happens to run next.
+    payload = client.artifact_payload(request, store_root=root, dependency=dependency)
 
     def run():
         try:
             if not future._begin():
                 return
-            value = (client.run_artifact(payload, subscriber=future) if daemon
-                     else _run_here(request, keep_going=lambda: not future.detached))
-            future._complete(value)
+            future._complete(client.run_artifact(payload, subscriber=future))
         except Exception as exc:
             future._complete(error=exc)
         finally:
@@ -249,18 +239,6 @@ def submit_artifact(request, *, store_root=None):
 
     threading.Thread(target=run, name="cadgen-artifact", daemon=True).start()
     return future
-
-
-def _run_here(request, *, keep_going):
-    """The job in this process, with no daemon to run it and no broker to take a slot
-    from; asking ``keep_going`` before each derivation, which stops once its one
-    subscriber has left. The result is what a worker's would be: plain JSON. What the
-    job reads on its thread is cadgen's own, never an input of a build in progress
-    (``filetrace.paused``)."""
-    from cadgen._internal.filetrace import paused
-
-    with paused():
-        return result_frame(request, execute(request, keep_going=keep_going))["result"]
 
 
 def resolve_artifact(request, *, store_root=None):
