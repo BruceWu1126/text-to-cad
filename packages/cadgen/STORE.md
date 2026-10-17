@@ -472,10 +472,12 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   never measures or meshes geometry on its own thread: the moment its result
   exists -- a model's or a re-emit's -- it asks the build pool for the parts of
   its own components the store lacks (`parts.request_display`: one job, `kind:
-  display`, or for a batch past half a megabyte of BREP one per such share,
-  balanced by size, a pool slot each but the build's own; with no daemon,
-  threads of the build's own process) and waits for them, as one, before it
-  reports done. A linked child's parts are its own build's, so a parent asks
+  display`, or on the daemon's pool, for a batch past half a megabyte of BREP,
+  one per such share, balanced by size, a pool slot each but the build's own;
+  with no daemon, one job on a thread of the build's own process, whatever the
+  batch -- the kernel holds the interpreter lock through each mesh, so a second
+  thread would only take turns with the first) and waits for them, as one,
+  before it reports done. A linked child's parts are its own build's, so a parent asks
   only for its own. A compile of a document asks for every part of its tree
   before it reports done; a model whose result stands asks for those of the
   tree its file maps to (a mesh-only model's own), links expanded, when the run
@@ -1952,7 +1954,8 @@ CPU scheduling and reuse remain independent of memory admission:
    `N = os.cpu_count()` slots, the daemon's, shared by its workers
    (`CADGEN_JOBS` overrides; `daemon/broker.py`); with no daemon there is no
    broker, and a build runs its body and its pool jobs on threads of its own
-   process with no slot to take. A job takes a slot before its body runs and
+   process with no slot to take -- its display data as one job, since slots are
+   what a large batch is shared out over (§3). A job takes a slot before its body runs and
    holds it through its emit -- a child built inside the body runs in the slot
    its parent holds (§9a) -- and it **yields the slot while it waits for a pool
    job** (its parts' display data, a compile, an export's or a verify's answer)

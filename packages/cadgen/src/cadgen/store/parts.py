@@ -522,9 +522,13 @@ def stored_keys(keys: dict[str, str]) -> dict[str, str]:
     return {cid: key for cid, key in keys.items() if probe(key) is not None}
 
 
-# A batch of parts this large or larger, in BREP bytes, goes to the pool as more than one job,
-# so free slots derive it together: about one job for each such share, at most one for each slot
-# but the one the caller holds. A small batch -- an edit's, a view's -- is one job.
+# A batch of parts this large or larger, in BREP bytes, goes to the daemon's pool as more than
+# one job, so free slots derive it together: about one job for each such share, at most one for
+# each slot but the one the caller holds. A small batch -- an edit's, a view's -- is one job.
+# With no daemon there is no pool of slots, only this process, and a batch is one job on one
+# thread of it: the kernel holds the interpreter lock through each mesh (OCCT meshes the part's
+# faces on threads of its own meanwhile), so a second thread would take turns with the first,
+# never run beside it, and every other thread of the build would wait on both.
 _BATCH_BYTES = 512 * 1024
 
 
@@ -532,9 +536,9 @@ def request_display(tree_hash: str, *, producer: dict | None = None,
                     cids: list[str] | None = None) -> "DisplayJob | None":
     """Have the build pool derive the display data of every part of ``tree_hash`` the store
     lacks -- jobs (``kind: display``, ``daemon/artifacts.py``) that run while the caller
-    goes on, on daemon workers or, with no daemon, threads of this process: one, or for a
-    large batch one per share of it
-    (``_BATCH_BYTES``), the shares balanced by BREP size -- and return them as one
+    goes on: on daemon workers, one, or for a large batch one per share of it
+    (``_BATCH_BYTES``), the shares balanced by BREP size; with no daemon, one, on a thread
+    of this process -- and return them as one
     :class:`DisplayJob`; None when the store holds them all. A build submits it the moment
     its result exists and waits for it before it reports done
     (``_internal/generation.py``), so a view of what it built only reads.
@@ -571,11 +575,13 @@ def request_display(tree_hash: str, *, producer: dict | None = None,
 
 def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:
     """``missing``'s components as the batches the pool derives: one, or one per
-    ``_BATCH_BYTES`` of their BREP up to a slot each but the caller's, each component to
-    the batch with the fewest bytes so far, largest first."""
+    ``_BATCH_BYTES`` of their BREP up to a slot each but the caller's -- the daemon's slots;
+    with no daemon, one thread -- each component to the batch with the fewest bytes so far,
+    largest first."""
     import math
 
     from cadgen.daemon.broker import job_limit
+    from cadgen.daemon.executors import use_daemon
 
     sizes = {}
     for cid in missing:
@@ -583,7 +589,8 @@ def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:
             sizes[cid] = object_path(components[cid]["brep"]).stat().st_size
         except OSError:
             sizes[cid] = 0
-    count = max(1, min(job_limit() - 1, len(missing), math.ceil(sum(sizes.values()) / _BATCH_BYTES)))
+    slots = job_limit() - 1 if use_daemon() else 1
+    count = max(1, min(slots, len(missing), math.ceil(sum(sizes.values()) / _BATCH_BYTES)))
     batches: list[list[str]] = [[] for _ in range(count)]
     loads = [0] * count
     for cid in sorted(missing, key=lambda cid: (-sizes[cid], cid)):
