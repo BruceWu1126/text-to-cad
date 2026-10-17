@@ -23,7 +23,7 @@ from unittest import mock
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, verified, warm_entries
+from tests.python.support.warm_daemon import served, warm_entries
 
 CADGEN_SRC = add_repo_path("packages/cadgen/src")
 
@@ -111,7 +111,6 @@ class EnvironmentInputs(unittest.TestCase):
         self.assertEqual([entry for entry in files if entry.startswith("<environment ")], ["<environment SIZE>"])
 
     def test_a_warm_job_runs_in_its_callers_environment(self) -> None:
-        self.addCleanup(verified, self.project / "store")
         # The first run starts the daemon with SIZE=10 in its environment; the run with
         # SIZE=20 must build what its caller asked for.
         self._sizes_rebuild_it_and_nothing_else_does(warm=True)

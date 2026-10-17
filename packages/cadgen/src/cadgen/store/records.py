@@ -29,8 +29,7 @@ source (a generated file is independent of its script).
 Two sides, two index kinds (STORE.md §2, the law):
 
 - ``index/document/<sha256(document BYTES)>-v<DOCUMENT_SCHEMA_VERSION>``
-  (``document_key``) → ``{"tree": …, "kind": …}`` (and, from an export, ``verified``,
-  ``plain`` and ``differ``: :func:`note_document_tree`).
+  (``document_key``) → ``{"tree": …, "kind": …}`` (:func:`note_document_tree`).
   ARTIFACT → ARTIFACT. The only thing a reader (a door, the viewer, snapshot)
   consults to find the tree for a file: hash the bytes, look it up, read
   objects. Written whenever a tree is published for a document — by the
@@ -82,8 +81,8 @@ RECORD_KIND = "record"
 # translation as the STEP file states it.
 # Schema 12: a model's STEP is an export of the tree it names: the record is written at
 # the source result, its STEP output pending (an empty sha256) until the export lands,
-# then its sha256 and writer (``plain`` for a file written without names). No separate
-# document tree, correspondence maps or writer input.
+# then its sha256 and writer. No separate document tree, correspondence maps or writer
+# input.
 # Schema 13: the record carries its result's key and the producer that built it, and
 # names each child by the child's key (store/results.py), never by its tree.
 RECORD_SCHEMA_VERSION = 13
@@ -107,7 +106,9 @@ RECORD_SCHEMA_VERSION = 13
 # Schema 12: an exported file's bytes map to the result tree it was written from,
 # pending (``verified`` false) until its verify answers, or to its own content and what
 # differs (``differ``) when it does not hold that tree.
-DOCUMENT_SCHEMA_VERSION = 12
+# Schema 13: an exported file's bytes map to the result tree it was written from, at
+# once and finally: nothing parses the file to check it.
+DOCUMENT_SCHEMA_VERSION = 13
 
 
 def record_key(model: Path | str) -> str:
@@ -188,32 +189,20 @@ def _resolved(path: Path | str) -> str:
 
 
 def note_document_tree(
-    document_hash: str, tree: str, *, kind: str = "step",
-    producer: dict[str, Any] | None = None, verified: bool = True, plain: bool = False,
-    differ: list[str] | None = None,
+    document_hash: str, tree: str, *, kind: str = "step", producer: dict[str, Any] | None = None,
 ) -> None:
     """``index/document/<sha256(bytes)>-v<schema>`` → the tree describing those
     bytes. Artifact → artifact; idempotent; atomic. Keeps the entry's mesh ledger
     when the tree is unchanged (those meshes were cut from this same tree).
 
     An export's publication maps the bytes it wrote to the tree it wrote them from
-    before any parse of them (``store/exports.py``): pending, ``verified`` False --
-    and ``plain`` for a file written without names -- until its verify answers.
-    Confirmed, the entry is written again without them; a file that does not hold
-    its tree maps to its own content, listing what differs (``differ``), and stays
-    ``plain`` when it was written so."""
+    (``store/exports.py``); a compile, the bytes it read to the tree it built from them."""
     digest = str(document_hash or "").strip()
     tree_hash = str(tree or "").strip()
     if not digest or not tree_hash:
         return
     existing = read_entry("document", document_key(digest)) or {}
     payload: dict[str, Any] = {"schemaVersion": DOCUMENT_SCHEMA_VERSION, "tree": tree_hash, "kind": str(kind or "step")}
-    if not verified:
-        payload["verified"] = False
-    if plain:
-        payload["plain"] = True
-    if differ:
-        payload["differ"] = [str(line) for line in differ]
     meshes = existing.get("meshes")
     if existing.get("schemaVersion") == DOCUMENT_SCHEMA_VERSION and isinstance(meshes, dict) and str(existing.get("tree") or "") == tree_hash:
         payload["meshes"] = meshes

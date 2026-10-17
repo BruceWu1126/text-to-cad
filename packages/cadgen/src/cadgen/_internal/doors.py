@@ -49,26 +49,16 @@ def document_snapshot(document: Path) -> tuple[str, str]:
     """The tree for THIS document's bytes — a door's one question (STORE.md §9).
 
     Yes, the store has one — ``index/document/<sha256(bytes)>-v<schema>`` → tree (STORE.md
-    §2, the law: artifact → artifact; no record is opened) → it is used, once the
-    verify of an export's pending entry has answered (``store.exports.confirm_document``). Source
+    §2, the law: artifact → artifact; no record is opened) → it is used. Source
     changes are the model's record's business, never the door's: a document is
-    never refused and no body ever runs here. No, or a pending entry whose verify could
-    not answer → a **compile job** in the pool builds a tree from the file's bytes,
-    exactly as for an imported STEP, whether or not the file has a script, and the
-    lookup is repeated.
+    never refused and no body ever runs here. No → a **compile job** in the pool
+    builds a tree from the file's bytes, exactly as for an imported STEP,
+    whether or not the file has a script, and the lookup is repeated.
     """
     from cadgen.catalog import result_snapshot_for
 
     document = Path(document).expanduser().resolve()
     snapshot = result_snapshot_for(document)
-    if snapshot:
-        # An export's entry is pending until its verify answers: confirmed first
-        # (store/exports.py), it names what the file shows; one no verify can settle is
-        # compiled, as for a miss.
-        from cadgen.store.exports import confirm_document
-
-        tree = confirm_document(document, *snapshot)
-        snapshot = (snapshot[0], tree) if tree else None
     if snapshot:
         return snapshot
     from cadgen.daemon.executors import submit_compile

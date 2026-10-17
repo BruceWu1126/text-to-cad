@@ -123,13 +123,11 @@ def _publish_sidecar(staged_step: Path, entry_path: Path) -> None:
 @dataclass(frozen=True)
 class _ExportPlan:
     """What a build does about its STEP (STORE.md §3, *Exports*): keep the file on disk,
-    whose recorded output entry is ``kept``, or export the result -- ``plain``, without
-    names, where the file the same result was last written to did not hold it. ``why`` says
-    why a file the same result was last written to, still on disk, is written again (a
-    current model's re-export, :func:`_hit`); empty otherwise."""
+    whose recorded output entry is ``kept``, or export the result. ``why`` says why a file
+    the same result was last written to is written again (a current model's re-export,
+    :func:`_hit`); empty otherwise."""
 
     kept: dict | None
-    plain: bool
     why: str = ""
 
     @property
@@ -143,20 +141,16 @@ class _ExportPlan:
 
         if self.kept is not None:
             return dict(self.kept)
-        return {"sha256": "", "writer": STEP_WRITER_SCHEME, **({"plain": True} if self.plain else {})}
+        return {"sha256": "", "writer": STEP_WRITER_SCHEME}
 
 
 def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, force: bool,
                  on_disk: str | None) -> _ExportPlan:
-    """The kept rule: a build keeps its STEP, writing and verifying nothing, when its
-    record's last build had this very tree, wrote the file with this writer, the file on
-    disk when the build started still has the bytes it recorded, the store maps those
-    bytes to a tree (their document entry), and they held the result or were written
-    plain (the same result is written plain to the same bytes again) -- unless forced.
-    Otherwise it exports, plain where the same result's last file from this writer did
-    not hold it (its document entry lists what differs) or was itself written plain; a
-    forced build, or another writer, writes the names again, and a file whose entry the
-    store lost is written again (to the same bytes) and verified again."""
+    """The kept rule: a build keeps its STEP, writing nothing, when its record's last build
+    had this very tree, wrote the file with this writer, the file on disk when the build
+    started still has the bytes it recorded, and the store maps those bytes (their document
+    entry) -- unless forced. Otherwise it exports; a file whose entry the store lost is
+    written again, to the same bytes, and mapped again."""
     from cadgen.step_export import STEP_WRITER_SCHEME
     from cadgen.store.records import document_entry_for_hash
 
@@ -165,25 +159,19 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     same = previous.get("tree") == tree
     sha = str(prior.get("sha256") or "")
     entry = document_entry_for_hash(sha) if sha else None
-    marked = bool(entry and entry.get("differ"))
     this_writer = prior.get("writer") == STEP_WRITER_SCHEME
-    if (not force and same and sha and this_writer and on_disk == sha and entry is not None
-            and (not marked or prior.get("plain"))):
-        return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer", "plain") if key in prior},
-                           plain=bool(prior.get("plain")))
+    if not force and same and sha and this_writer and on_disk == sha and entry is not None:
+        return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer")})
     why = ""
     if not force and same and sha and on_disk == sha:
-        why = ("did not hold its result" if marked and not prior.get("plain")
-               else "was written by another writer" if not this_writer
-               else "has no entry in the store" if entry is None else "")
+        why = "was written by another writer" if not this_writer else "has no entry in the store"
     elif not force and same:
         why = ("was never written" if not sha else "is missing" if on_disk is None
                else "is not the file the record names")
-    return _ExportPlan(kept=None, plain=not force and same and this_writer and (marked or bool(prior.get("plain"))),
-                       why=why)
+    return _ExportPlan(kept=None, why=why)
 
 
-def _submit_export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object]) -> object:
+def _submit_export(tree: str, staged: Path, *, live: Mapping[str, object]) -> object:
     """The export job writing ``tree`` to ``staged`` (``store/exports.py``), started now:
     the build pool's, or, for a result holding a component only this process's live shape
     stands for, this process's own, done here and now. Its ``result()`` is the job's answer."""
@@ -193,11 +181,11 @@ def _submit_export(tree: str, staged: Path, *, names: bool, live: Mapping[str, o
         from cadgen.store.exports import export_step
 
         done: Future = Future()
-        done.set_result(export_step(tree, staged, names=names, shapes=live))
+        done.set_result(export_step(tree, staged, shapes=live))
         return done
     from cadgen.daemon.artifacts import submit_artifact
 
-    return submit_artifact({"kind": "export", "tree": tree, "out": str(staged), "names": names})
+    return submit_artifact({"kind": "export", "tree": tree, "out": str(staged)})
 
 
 class _Export:
@@ -211,14 +199,12 @@ class _Export:
     in the order queued -- children before the parent that called them
     (``cadgen.authoring.build_run``). Finishing one publishes the written file (the file
     and its sidecar into place, the expected pair checked first, §7; the bytes mapped to
-    the tree pending their verify; the record's output entry; the ``STEP saved`` event,
-    its ``elapsed`` read from the clock the model's ``done`` event reads),
-    has it verified (a build with no daemon waits for the answer and warns; a daemon's
-    verify finishes on the pool), then cuts the model's declared meshes from that file's
-    bytes. A kept STEP submits nothing and publishes only its sidecar; a current model has
-    its display data derived here too, after the STEP its file's bytes then map to; a
-    mesh-only model has only its meshes. An export that fails fails the command, and the
-    file on disk stays as it was.
+    the tree they were written from; the record's output entry; the ``STEP saved`` event,
+    its ``elapsed`` read from the clock the model's ``done`` event reads), then cuts the
+    model's declared meshes from that file's bytes. A kept STEP submits nothing and
+    publishes only its sidecar; a current model has its display data derived here too,
+    after the STEP its file's bytes then map to; a mesh-only model has only its meshes.
+    An export that fails fails the command, and the file on disk stays as it was.
 
     ``step`` is what the STEP needs, or None for a model that writes none: the plan
     (:func:`_export_plan`), the record to fill, the sidecar payload, the document pair
@@ -252,7 +238,7 @@ class _Export:
             step["staged"] = _stage(spec, self.stage) / spec.step_path.name
             plan: _ExportPlan = step["plan"]
             if plan.kept is None:
-                self.job = _submit_export(tree, step["staged"], names=not plan.plain, live=step["live"])
+                self.job = _submit_export(tree, step["staged"], live=step["live"])
         run.exports.append(self)
 
     def finish(self) -> None:
@@ -277,7 +263,7 @@ class _Export:
 
     def _publish_step(self) -> bool:
         """The STEP in place from the export's answer, or kept (STORE.md §3, *Exports*; §5,
-        publish order), then its verify. True when the file was written."""
+        publish order). True when the file was written."""
         from cadgen._internal.atomic_replace import replace_atomic
         from cadgen._internal.source_sidecar import source_sidecar_path, write_source_sidecar
         from cadgen.catalog import seed_artifact_hash
@@ -292,7 +278,6 @@ class _Export:
         step_path = spec.step_path.expanduser().resolve()
         model_path = _model_for_spec(spec)
         export = None
-        plain = plan.plain
         if self.job is not None:
             export = self.job.result()
             for label, seconds in export["spans"]:
@@ -300,8 +285,6 @@ class _Export:
             for warning in export["warnings"]:
                 logger.warning(warning)
             digest = str(export["sha256"])
-            # As written, not as planned: a worker that cannot name its producer writes plain.
-            plain = plain or export["producer"] is None
         else:
             digest = plan.kept_sha256
         if step["sidecar_payload"] is not None:
@@ -327,11 +310,10 @@ class _Export:
             raise RuntimeError(f"{spec.cad_ref}: saved files changed during publication; the build record was not updated")
         seed_artifact_hash(spec.step_path, digest)
         if export is not None:
-            # The bytes, mapped to the tree they were written from before any parse of them:
-            # pending until the verify answers.
-            note_document_tree(digest, tree, producer=export["producer"], verified=False, plain=plain)
+            # The bytes, mapped to the tree they were written from: the file is the result.
+            note_document_tree(digest, tree, producer=export["producer"])
         outputs = record["outputs"]
-        outputs[str(step_path)] = {**plan.output(), "sha256": digest, **({"plain": True} if plain else {})}
+        outputs[str(step_path)] = {**plan.output(), "sha256": digest}
         sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
         if sidecar is not None:
             outputs[sidecar_key] = {"sha256": sidecar}
@@ -347,32 +329,7 @@ class _Export:
         # The build tree drops an event that follows its model's done, so a person (or a
         # benchmark) reading --verbose finds the moment here, as for any stage.
         logger.timing(f"STEP saved {step_path.name}", saved_at)
-        if export is not None:
-            _verify_saved(tree, step_path, digest, producer=export["producer"])
         return export is not None
-
-
-def _verify_saved(tree: str, step_path: Path, digest: str, *, producer: dict | None) -> None:
-    """Have the build pool verify the saved STEP against the result it was written from
-    (``store/exports.py``) and hear its answer (``exports.verify_warnings``): a file that
-    does not hold the result, or a verify that could not answer, is a warning. With no
-    daemon the build waits for it and warns here; on the daemon the build returns first,
-    the answer reaches the daemon's log, and a mismatch the next touch of the file: a door,
-    ``store why``, the next run."""
-    from cadgen.daemon.artifacts import submit_artifact
-    from cadgen.daemon.executors import use_daemon
-    from cadgen.store.exports import verify_warnings
-
-    job = submit_artifact({"kind": "verify", "tree": tree, "document": str(step_path), "sha256": digest,
-                           "producer": producer})
-
-    def heard(done: object) -> None:
-        _note_warnings(verify_warnings(done, step_path, plain=producer is None))
-
-    if use_daemon():
-        job.add_done_callback(heard)
-    else:
-        heard(job)
 
 
 def _edge_visibility_classes_match_manifest(
@@ -427,16 +384,8 @@ def _package_descriptor_matches_spec(
     and source closure; artifact readers never do. Edge visibility policy, when
     explicitly requested, remains descriptor metadata rather than a mesh job.
     """
-    from cadgen.catalog import result_descriptor_for, result_snapshot_for
+    from cadgen.catalog import result_descriptor_for
 
-    if spec.source != "generated" and spec.entry_path is not None and spec.entry_path.is_file():
-        # A compile's current-check is a door's: an export's pending entry, confirmed first;
-        # one whose verify could not answer is compiled again from the bytes.
-        from cadgen.store.exports import confirm_document
-
-        snapshot = result_snapshot_for(spec.entry_path)
-        if snapshot is None or confirm_document(spec.entry_path, *snapshot) is None:
-            return False
     manifest = result_descriptor_for(spec.entry_path)
     if not isinstance(manifest, dict):
         return None
@@ -947,8 +896,8 @@ def _generate_part_outputs(
             scene.kernel_run = None
         if generated:
             # What the build still owes, queued: its STEP's export job starts now and the
-            # file is published, verified and its meshes cut when the run finishes its
-            # exports (_Export) -- after this build's done, while a parent's body goes on.
+            # file is published and its meshes cut when the run finishes its exports
+            # (_Export) -- after this build's done, while a parent's body goes on.
             kept = writes_step and export_plan.kept is not None
             summary = (f"kept STEP: {_display_path(spec.step_path)} (its bytes would not change)" if kept
                        else _generated_python_glb_summary(spec))
@@ -1154,8 +1103,7 @@ def _reused_display_producer(document_hash: str, tree: str, entry: Mapping[str, 
     The document ``entry``'s hint while this runtime implements it, or while the store
     holds every part under it (a view reads those). Otherwise -- the kernel was upgraded,
     or another cadgen wrote the hint -- this runtime's, and the document is re-attested
-    with it, keeping what else the entry says (whether its verify is pending, what
-    differs), so neither this build nor a view asks again for parts no worker can make.
+    with it, so neither this build nor a view asks again for parts no worker can make.
     Re-attesting is best effort: a store this process cannot write keeps the hint it has."""
     import contextlib
 
@@ -1173,9 +1121,7 @@ def _reused_display_producer(document_hash: str, tree: str, entry: Mapping[str, 
     from cadgen.store.records import note_document_tree
 
     with contextlib.suppress(OSError, StoreUnwritableError):
-        note_document_tree(document_hash, tree, kind=str(entry.get("kind") or "step"), producer=current,
-                           verified=entry.get("verified") is not False, plain=bool(entry.get("plain")),
-                           differ=entry.get("differ"))
+        note_document_tree(document_hash, tree, kind=str(entry.get("kind") or "step"), producer=current)
     return current
 
 
@@ -1200,10 +1146,9 @@ def _produce_declared_mesh_exports(
     A STEP model's meshes are keyed on its STEP's bytes as its record names them -- the
     build's own knowledge of the file it just wrote, or its current record's -- and cut
     from the tree those bytes map to (`index/document`): the result they were written
-    from, pending their verify, or, after a verify found the file its own content or an
-    annotation refresh re-keyed the record, the tree the entry names, which the bare mesh
-    doors cut from too. No door's lookup of the file, so no wait on its verify (STORE.md
-    §3, *Exports*). A mesh-only model writes no document: its result, ``source_tree``
+    from, or, after an annotation refresh re-keyed the record, the tree the entry names,
+    which the bare mesh doors cut from too. No door's lookup of the file (STORE.md §3,
+    *Exports*). A mesh-only model writes no document: its result, ``source_tree``
     (else its record's), IS the geometry the meshes are cut from, so the ledger keys on
     that.
     """
@@ -1695,10 +1640,11 @@ def build_model(
 ) -> _Built:
     """The one pipeline every decorated function goes through, root or child (STORE.md
     §9a): the gate, then either the stored result -- its parts' display data, its STEP
-    (where the file does not hold the result or another writer wrote it) and its
-    declared meshes owed without running its body -- or a run of the body, under a job
-    slot and the run's scopes, publishing its record. Either way the files it owes are
-    queued (``_Export``) and finished when the run that owns the command ends.
+    (where the file is not the one its record names, another writer wrote it or the
+    store lost its entry) and its declared meshes owed without running its body -- or a
+    run of the body, under a job slot and the run's scopes, publishing its record. Either
+    way the files it owes are queued (``_Export``) and finished when the run that owns the
+    command ends.
 
     ``generator`` is the model's function when its module is loaded already (a child a
     parent's body called); None loads the script. ``force`` and ``profile`` are the
@@ -1808,15 +1754,14 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
          healed: set[str] | None = None, display: bool = True) -> None:
     """A model whose stored result ``tree`` is current: its source result announced, what
     its children owe healed, then what it may still owe itself queued (``_Export``) --
-    none of it by running its body. Its STEP (a file that did not hold its result,
-    written plain this time; one another writer wrote; one whose entry the store lost;
-    one missing, or never written because its export failed) and, with it or alone, its
-    sidecar, written from the record (:func:`_recorded_sidecar`): a sidecar is a function
-    of the result, so one on disk that is not the record's -- deleted, foreign, the other
-    state's after a restore -- is written again even beside a kept STEP. Then its parts'
-    display data (a cleared store) and its declared mesh exports (a deleted file, a
-    changed declaration). The STEP first, so the display data derived is that of the
-    result its bytes then map to, never of a marked file's own content.
+    none of it by running its body. Its STEP (one another writer wrote; one whose entry
+    the store lost; one missing, or never written because its export failed) and, with
+    it or alone, its sidecar, written from the record (:func:`_recorded_sidecar`): a
+    sidecar is a function of the result, so one on disk that is not the record's --
+    deleted, foreign, the other state's after a restore -- is written again even beside a
+    kept STEP. Then its parts' display data (a cleared store) and its declared mesh
+    exports (a deleted file, a changed declaration). The STEP first, so the display data
+    derived is that of the result its bytes then map to.
 
     The children: a current model's body does not run, so it calls no child, yet its gate
     asked each one (``verdict``, clause 3). Every child whose result stands is healed the
@@ -1862,8 +1807,7 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
         recorded = (record.get("outputs") or {}).get(str(source_sidecar_path(spec.entry_path).resolve())) or {}
         sidecar_owed = pair[1] != (str(recorded.get("sha256") or "") or None)
         if plan.kept is None:
-            logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
-                        + (" without names" if plan.plain else ""))
+            logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again")
         elif sidecar_owed:
             logger.info(f"{_display_path(source_sidecar_path(spec.step_path))} is not the record's; writing it again")
         if plan.kept is None or sidecar_owed:

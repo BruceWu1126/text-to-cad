@@ -58,7 +58,7 @@ def readable_placement(trsf: Any) -> Any:
     itself when every entry a reader rebuilds rounds as ``trsf``'s does
     (``tree_tokens.rounded_placement``), as every translation does; else the first turn of
     ``trsf`` about its own origin, by at most a picoradian, that does; else ``trsf`` (a
-    reader's token then differs, which verifying the file reports)."""
+    reader's token then differs)."""
     from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Trsf
 
     from cadgen._internal.tree_tokens import rounded_placement

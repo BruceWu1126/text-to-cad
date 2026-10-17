@@ -7,18 +7,17 @@ tree (`AGENTS.md`). The three folders each have their own README:
 makes, end to end; warm model execution), [`mesh-scoreboard/`](mesh-scoreboard/README.md)
 (every solid of a STEP corpus scored on what a display mesh must have) and
 [`viewer-memory/`](viewer-memory/) (viewer loading and lifecycle; its helper
-units run in `scripts/test/test-js.sh`). The two scripts at this level are the
-0.8.0 migration's measurements, below.
+units run in `scripts/test/test-js.sh`). The script at this level,
+`compare_commits.py`, is the 0.8.0 migration's measurements, below.
 
 ## The 0.8.0 migration measurements
 
 The migration (identity by construction, files as exports, serial children)
-is measured at every stage by the same three numbers, each one command: the
+is measured at every stage by the same two numbers, each one command: the
 cold builds and the moonwatch edit loop compared between `main` and the
-branch, interleaved; the cold moonwatch build; and the sample corpus built
-and every exported STEP verified. Every number is wall-clock, so run one
-command at a time on an otherwise idle machine, and compare runs made on the
-same machine only.
+branch, interleaved; and the cold moonwatch build. Every number is
+wall-clock, so run one command at a time on an otherwise idle machine, and
+compare runs made on the same machine only.
 
 ### Setup, on a fresh Mac
 
@@ -35,8 +34,8 @@ source .venv/bin/activate         # or run each command below with .venv/bin/pyt
 The venv's Python must be 3.11 or later, and Node 22 with npm on `PATH`:
 `bundle.sh` builds the browser bundle with it, and `main`'s cadgen (0.7.21)
 still exports meshes through it. `npm ci` is not needed; nothing here reads
-the apps' `node_modules`. The two scripts find the venv themselves (the
-activated one, else `.venv/`) and refuse to run without the built runtime.
+the apps' `node_modules`. The script finds the venv itself (the activated
+one, else `.venv/`) and refuses to run without the built runtime.
 
 ### Compare main against the branch
 
@@ -116,38 +115,3 @@ fresh directory, `CADGEN_DAEMON=0` and `PYTHONPATH` on its
 through a four-slot pool; a cadgen that builds its children serially inside
 the parent's body reports the serial number the migration's brief asks for.
 `--rounds 2` doubles the time and gives medians.
-
-### The corpus verify
-
-```sh
-scripts/bench/corpus_verify.py
-PROJECTS=radial,hypercar scripts/bench/corpus_verify.py   # a subset
-```
-
-Hours for the whole corpus (`tendon_hand` alone has over a hundred models,
-`radial` an hour of builds); `PROJECTS` (or `--projects`) picks projects. The
-script copies each project's tracked files under the run directory, so
-nothing built earlier and no committed output is read and the builds' outputs
-land in the copy; runs every model script under `models/<project>/src` (at
-most two levels down, nothing under `lib/`, no `__init__.py` or
-`conftest.py`) one at a time with this checkout's cadgen, `CADGEN_DAEMON=0`,
-into one fresh store; then verifies every STEP the builds' records name
-against the tree it was written from (`cadgen.store.exports.verify_document`,
-the verify a build's own pool job runs), `--jobs` files at a time. It writes
-`tmp/bench/corpus/<UTC timestamp>/` (`--out` or `CORPUS_OUT` names it):
-`models/` (the copies and their outputs), `store/`, `logs/<project>/<script>.log`,
-`build.jsonl` (status and seconds per script), `verify.jsonl` (result per
-file) and `summary.md`, the summary it prints:
-
-- `models ... built`: scripts run, and how many exited zero; a build that
-  failed or ran past `--timeout` is listed with its log.
-- `STEP files`: the STEP outputs the builds' records name.
-- `verified`: files that hold the tree they were written from.
-- `failed`: each file that does not, with why: `differs` and what differs,
-  `file changed` (its bytes are no longer the record's), or the error.
-- `written plain`: files written without names, verified by their
-  occurrences alone.
-- `seconds`: building, verifying, and both; then each model's own seconds.
-
-The exit status is non-zero when any build or verify failed, so the command
-is the gate.

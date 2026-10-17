@@ -85,10 +85,10 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         self.assertEqual(build_tree_from_compound(shape, root_name="two-colors")[0], before)
 
         output = self.root / "two-colors.step"
-        result, _, stats, digest = save_step(shape, output, root_name="two-colors")
+        result, _, _, digest = save_step(shape, output, root_name="two-colors")
         first_bytes = output.read_bytes()
-        # The file holds the result, whose two components share one body.
-        self.assertEqual((result, {"ok": True}), (before, stats["verify"]))
+        # The file is the result, whose two components share one body.
+        self.assertEqual(result, before)
         self.assertEqual(document_entry_for_hash(digest)["tree"], result)
         _, cold, _ = build_document_tree(load_step_scene(output))
         self.assertEqual([self.faces(cold["components"][occ["component"]]) for occ in cold["occurrences"]],
@@ -108,8 +108,7 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         for name, colors in (("red", {1: RED}), ("blue", {1: BLUE}), ("plain", {})):
             with self.subTest(name=name):
                 output = self.root / "box.step"
-                _, _, stats, digest = save_step(self.box(colors), output, root_name="box")
-                self.assertEqual({"ok": True}, stats["verify"])
+                _, _, _, digest = save_step(self.box(colors), output, root_name="box")
                 document = get_tree(document_entry_for_hash(digest)["tree"])
                 component = next(iter(document["components"].values()))
                 self.assertEqual(self.faces(component), colors)
@@ -170,11 +169,11 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
             return Compound(children=[red, blue], label="colored-parent")
 
         output = self.root / "parent.step"
-        result, result_tree, stats, step_hash = save_step(parent(), output, root_name="colored-parent")
+        result, result_tree, _, step_hash = save_step(parent(), output, root_name="colored-parent")
         first_bytes = output.read_bytes()
         self.assertEqual([link["tree"] for link in result_tree["links"]], [red_tree, blue_tree])
         # The saved document is the linked result: a reader takes it flattened.
-        self.assertEqual(({"ok": True}, result), (stats["verify"], document_entry_for_hash(step_hash)["tree"]))
+        self.assertEqual(result, document_entry_for_hash(step_hash)["tree"])
         document = flatten(result)
         self.assertEqual([self.faces(document["components"][occ["component"]]) for occ in document["occurrences"]],
                          [{1: RED}, {1: BLUE}])
@@ -207,9 +206,8 @@ class ComponentFaceColorIdentityTest(unittest.TestCase):
         moved.cad_face_ordinal_colors[1] = RED
         self.assertEqual(original.cad_face_ordinal_colors, {1: BLUE})
         shape = Compound(children=[original, moved], label="overrides")
-        result_hash, result, stats, _ = save_step(shape, self.root / "override.step", root_name="overrides")
+        result_hash, result, _, _ = save_step(shape, self.root / "override.step", root_name="overrides")
         self.assertEqual([link["tree"] for link in result["links"]], [red_tree])
-        self.assertEqual({"ok": True}, stats["verify"])
         document = flatten(result_hash)
         self.assertEqual([self.faces(document["components"][occ["component"]]) for occ in document["occurrences"]],
                          [{1: BLUE}, {1: RED}])

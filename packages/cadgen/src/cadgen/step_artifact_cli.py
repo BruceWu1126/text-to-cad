@@ -121,12 +121,8 @@ def _current_artifact_for_spec(spec: EntrySpec) -> _ImportedArtifactSnapshot | N
     """The complete tree the store holds for this document's bytes, or None.
 
     A compile completes when its native geometry is available. Display
-    derivations belong to their consumers and must never run in this gate. An
-    export's pending entry is confirmed first, as at every door
-    (``store.exports.confirm_document``): one whose verify could not answer is
-    compiled again from the bytes."""
+    derivations belong to their consumers and must never run in this gate."""
     from cadgen.catalog import result_snapshot_for
-    from cadgen.store.exports import confirm_document
     from cadgen.store.objects import object_path
     from cadgen.store.trees import capture_tree
 
@@ -135,10 +131,6 @@ def _current_artifact_for_spec(spec: EntrySpec) -> _ImportedArtifactSnapshot | N
     snapshot = result_snapshot_for(spec.entry_path)
     if snapshot is None:
         return None
-    tree = confirm_document(spec.step_path, *snapshot)
-    if tree is None:
-        return None
-    snapshot = (snapshot[0], tree)
     try:
         manifest, _ = capture_tree(snapshot[1], retain_payloads=False)
     except (OSError, ValueError):

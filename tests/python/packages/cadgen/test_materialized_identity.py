@@ -56,9 +56,9 @@ class MaterializedIdentityTest(unittest.TestCase):
                 return export_build123d_step_file(document, *args, **kwargs)
 
             with mock.patch("cadgen.step_export.export_build123d_step_file", side_effect=export) as exported:
-                tree, descriptor, stats, _ = save_step(shape, self.root / "parent.step", root_name="parent")
-            # The file is written from the result, and holds it.
-            self.assertEqual((exported.call_count, stats["verify"]), (1, {"ok": True}))
+                tree, descriptor, _, _ = save_step(shape, self.root / "parent.step", root_name="parent")
+            # The file is written from the result.
+            self.assertEqual(exported.call_count, 1)
         else:
             tree, descriptor, _ = build_tree_from_compound(shape, root_name="parent")
         return descriptor, materialize(tree)
@@ -369,11 +369,11 @@ class MaterializedIdentityTest(unittest.TestCase):
         tree, child = self.child(curved=True)
         original = (get_tree(tree) or {})["components"]
         moved = child.moved(Location((20, -3, 7), (11, 23, 37)))
-        result, descriptor, stats, digest = save_step(moved, self.root / "parent.step", root_name="moved")
+        result, descriptor, _, digest = save_step(moved, self.root / "parent.step", root_name="moved")
         self.assertEqual(set(descriptor["components"]), set(original))
         self.assertTrue(tree_complete(result))
-        # The saved document is the result its preview showed, the file holding it.
-        self.assertEqual(({"ok": True}, result), (stats["verify"], document_entry_for_hash(digest)["tree"]))
+        # The saved document is the result its preview showed.
+        self.assertEqual(result, document_entry_for_hash(digest)["tree"])
         self.assertAlmostEqual(self.saved_step_volume(), self.signed_volume(moved), places=7)
 
     def test_missing_pinned_brep_rederives_identity_from_owned_geometry(self):

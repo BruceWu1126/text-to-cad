@@ -13,7 +13,7 @@ right.
 |---|---|---|
 | [1](#1-vocabulary) | The one word per concept, and the retired ones | naming anything |
 | [2](#2-layout) | What lives under the root, **the two sides law**, identity by construction and its versions | adding an entry or a reader, bumping any version |
-| [3](#3-tree-and-record) | Tree, record and provenance shapes; tokens and names, parts, meshes; exports, verify and the kept rule; each kind's schema history | changing what a build writes |
+| [3](#3-tree-and-record) | Tree, record and provenance shapes; tokens and names, parts, meshes; exports and the kept rule; each kind's schema history | changing what a build writes |
 | [4](#4-the-gate) | The freshness clauses, in order; restoring by key; healing a current tree | touching stale/current |
 | [5](#5-invariants) | Each invariant with the failure it prevents | any store write |
 | [6](#6-link-or-component) | Whether a child becomes a link or the parent's geometry | composition, materialize, packaging |
@@ -52,9 +52,8 @@ One word per concept; the code uses these words and no others.
 | **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
 | **lineage** | a component's account of its elements: the feature that made the body, per face, edge and vertex its **name** -- its derivation from the features that made it, from what the kernel's makers reported: `f:bracket.make_box1.6;M:bracket.cut1`, the sixth face of the first box, modified by the first cut -- and the **table** that spells each derivation folded to a short atom (§2); an object the component's tree entry names |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
-| **document** | a CAD file as a reader takes it, named by its bytes' hash: `index/document` maps a STEP's bytes to one tree -- the result it was exported from or, where verify finds it does not hold that result or no build wrote it, its own content (§3, *Exports*) |
-| **export** | a file a model owes that is written from its stored result, never by running its body: its STEP, by the build pool (`store/exports.py`), with the names writer -- each part's key and each face's and edge's name in the file -- or plain; its sidecar, from its record; its declared meshes, cut from the tree its STEP's bytes map to (a mesh-only model's, from its result). Queued as the result is recorded, finished by the run (§3, *Exports*) |
-| **verify** | a parse of an exported file compared with the tree it was written from, by the build pool (`store/exports.py`): every occurrence by token, every part's faces and edges named and placed within the display tolerance, drawn in the same colours; a file that verifies maps to that tree, one that does not to its own content (§3, *Exports*) |
+| **document** | a CAD file as a reader takes it, named by its bytes' hash: `index/document` maps a STEP's bytes to one tree -- the result it was exported from or, for bytes no build wrote, its own content (§3, *Exports*) |
+| **export** | a file a model owes that is written from its stored result, never by running its body: its STEP, by the build pool (`store/exports.py`), with the names writer -- each part's key and each face's and edge's name in the file; its sidecar, from its record; its declared meshes, cut from the tree its STEP's bytes map to (a mesh-only model's, from its result). Queued as the result is recorded, finished by the run (§3, *Exports*) |
 | **preview revision** | what a build announces the moment its result exists (§9b): the result tree its record names and its STEP is exported from, every component's part key and the annotations the sidecar will carry (articulation, finishes, keyframes), resolved against that tree -- artifact-side objects a viewer draws labelled as a preview until the written file replaces them in place, every part kept |
 | **provenance** | where a build's features ran: the run's trace, kept as a code-side entry per model, `index/provenance` (§3) -- each feature's name, operation, file, line and inputs, and the components the run made -- read by `store where` and by nothing on a render path |
 | **obsolete** | a part entry an older version of cadgen's derivation wrote, a result another cadgen stored by key, or a record, document or provenance entry at a key this cadgen does not own (another schema version's): no reader of this cadgen asks for it again, and the sweeper retires it once it is a week old (§2, §8) |
@@ -78,7 +77,7 @@ One word is NOT retired, and it has exactly one meaning:
 ```
 ~/.cache/cadgen/                      (CADGEN_CACHE_DIR overrides; else the platform cache dir)
   objects/ab/cdef…                    immutable, content-addressed, sharded like git
-  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, producer?, meshes?, verified?, plain?, differ?} for a file's bytes
+  index/document/<sha256(file bytes)>-v<schema>  ARTIFACT side: {schemaVersion, tree, kind, producer?, meshes?} for a file's bytes
   index/model/<sha256(script::function)>-v<schema>  records (input-addressed, mutable, atomic)
   index/output/<sha256(output path)>  {model}: which script wrote the file at this path
   index/provenance/<sha256(script::function)>-v<schema>  CODE side: which operation at which source frame made each component and element of the model's current result (§3)
@@ -220,11 +219,10 @@ immutable text. Three properties, each enforced by a test:
 
 `index/document` is written whenever a tree is published for a document: by a
 model's build for the bytes its export wrote (the result they were written
-from, pending until their verify answers), by a verify that finds a file does
-not hold that result (the compile of its bytes), by a compile job for the file
-it compiled. `index/output` is written with the record, for `store why` and
-`store where`, which follow it to the record and the provenance entry (§3);
-nothing in the viewer or on a render path reads the code side.
+from), by a compile job for the file it compiled. `index/output` is written
+with the record, for `store why` and `store where`, which follow it to the
+record and the provenance entry (§3); nothing in the viewer or on a render
+path reads the code side.
 
 There are exactly two ways a file is named, and that is the only distinction
 the store makes:
@@ -287,8 +285,8 @@ worker accumulated -- other models built before, other versions of this one --
 enters it, and `CADGEN_KERNEL_MEMO=0` (hits off) gives the same keys. A part's key hashes
 that construction key, the component's lineage object, its intrinsic face
 colours and the producer (the kernel its display data is derived under). A
-file that holds its result maps to that result (§3, *Exports*), so a view of
-the file draws the build's parts, the ones its preview named (§9b). A
+model's file maps to the result it was written from (§3, *Exports*), so a view
+of the file draws the build's parts, the ones its preview named (§9b). A
 construction the memo cannot key (an argument it
 cannot hash) has no construction key, and neither has a shape no construction
 of the run made (a child's decoded result, a file read): such a component's
@@ -523,8 +521,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   before it reports done; a model whose result stands asks for those of the
   tree its file maps to (a mesh-only model's own), links expanded, when the run
   finishes its exports (below), after the STEP it may owe and before its
-  declared meshes -- so a file that does not hold its result has the parts of
-  its own content derived, and the children healed under it ask for none (§4).
+  declared meshes, and the children healed under it ask for none (§4).
   Which parts lack display data is asked of the store alone (one probe per
   part, no kernel import), so a model whose display data is stored starts no
   job. While the build waits, its progress shows `Meshing parts`, and the time
@@ -600,7 +597,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   length and centre (no face's area or centroid: *A face's area*, above),
   each face's and edge's box (its display mesh's: a face's triangles', an edge's
   polyline's, so within the display chord of the exact box, which is measured
-  where it is read -- a geometric token's signature, a written STEP's verify),
+  where it is read -- a geometric token's signature),
   the plane normals, whether an edge can be referenced and its relevance, every adjacency
   (face–edge, edge–vertex), each edge's chain and each face's tangent group —
   the sets the viewer's connected selection grows a pick to. Ordinals stay in
@@ -665,17 +662,14 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   and a model that declares a STEP has it written from that stored tree once it
   is published (*Exports*, below): the file is a function of the tree and the
   writer. Its bytes map in `index/document` to the tree they were written
-  from, so a file that holds its result has no tree of its own -- its parts are
-  the build's, its names the result's -- which a parse of the file checks
-  (*verify*, below). OCCT's STEP translation is not lossless (a trimmed body can
-  come back from the file as its complement, with as many faces and the same
-  overall box): a file that does not verify is its own content. Its bytes map to
-  the tree a compile of them publishes -- its structure, names and placements as
-  the file has them, each component read from the file with no construction
-  key, its elements named by their geometric tokens -- and the entry lists what
-  differs; the build warns, naming the occurrences, and the model's next run
-  writes the file plain (*Exports*). A document compiled from its bytes alone,
-  with no build to pair it with, is read the same way.
+  from, so the file has no tree of its own -- its parts are the build's, its
+  names the result's. The file written from the result is the result, and
+  cadgen does not parse it to check: a file that reads back otherwise is a bug
+  in the writer, fixed in the writer, never something a build or a door checks.
+  A file no build of this store wrote is compiled from its bytes: the tree the
+  compile publishes has the structure, names and placements the file has, each
+  component read from the file with no construction key, its elements named by
+  their geometric tokens.
 
   **Names are in the file; what they stand for is in the store.** The names
   writer puts each part's key and each element's name in the file (README law
@@ -700,21 +694,25 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   published (§5, publish order), by the build pool (`store/exports.py`,
   artifact kind `export`, §9): the job names the stored tree and a staged path,
   never a script, materializes the tree (`store.materialize`) -- the build's own
-  process assembles no document for it -- and writes it with the names writer,
-  or plain, without part keys and element names, so its bytes claim nothing
-  about the store they came from. A result holding a component the store
-  cannot decode (an eager-only one, above) is exported in the build's own
-  process, from its live shape, by the same function. Publishing the file then
-  takes, in order: the expected pair checked (§7) and the publish rule asked
-  again (§5); the staged copy and its sidecar moved into place, each
-  atomically; the bytes mapped to the tree in `index/document` with the
-  producer the export wrote with (never an older entry's hint), pending their
-  verify (`verified: false`, and `plain` for a file written plain); the
-  record's output entry filled (`{sha256, writer, plain?}`, empty until then,
-  which the gate reads as never written); and the `STEP saved` event. `--verbose` relays the job's steps. The model's declared
-  meshes (`@stl`/`@glb`/`@threemf`) are then cut from the tree the file's bytes
-  map to, keyed on those bytes as the record names them -- never a door's
-  lookup of the file, so they wait on no verify.
+  process assembles no document for it -- and writes it with the names writer:
+  each part's key, under the producer the job runs (a runtime that cannot name
+  its producer writes no key), and each face's and edge's name. A result
+  holding a component the store cannot decode (an eager-only one, above) is
+  exported in the build's own process, from its live shape, by the same
+  function. Publishing the file then takes, in order: the expected pair checked
+  (§7) and the publish rule asked again (§5); the staged copy and its sidecar
+  moved into place, each atomically; the bytes mapped to the tree in
+  `index/document` with the producer the export wrote with (never an older
+  entry's hint), at once and finally; the record's output entry filled
+  (`{sha256, writer}`, empty until then, which the gate reads as never
+  written); and the `STEP saved` event. `--verbose` relays the job's steps.
+  Nothing waits on anything after the write: every door given the file -- the
+  CAD Viewer, `read_step` and `read_scene`, a snapshot, the mesh doors,
+  `step compile`'s current check -- reads that entry and uses its tree. When
+  two models write equal bytes, the last export's entry stands. The model's
+  declared meshes (`@stl`/`@glb`/`@threemf`) are then cut from the tree the
+  file's bytes map to, keyed on those bytes as the record names them -- never a
+  door's lookup of the file.
 
   **Exports are queued, and the run finishes them.** Every call of a model,
   root or child, queues what the model owes the moment its result is recorded
@@ -725,9 +723,9 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   beside it). The run that owns the command (`authoring.build_run`) finishes
   every export it queued once the command's bodies have returned, in the order
   queued -- children before the parent that called them -- each one publishing
-  its file, having it verified, then cutting its meshes. A model's `done` event
-  says its result is recorded; its `STEP saved` event follows when its file
-  lands, with the `elapsed` of the clock the `done` event reads (the build tree
+  its file, then cutting its meshes. A model's `done` event says its result is
+  recorded; its `STEP saved` event follows when its file lands, with the
+  `elapsed` of the clock the `done` event reads (the build tree
   drops an event after its model's done, so `--verbose` says it too:
   `STEP saved <file> completed in <elapsed>`). The command prints its result
   once every export is finished -- or,
@@ -744,58 +742,24 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   result stands queues what its files owe the same way, without running its
   body, and so does every child under it whose result stands (§4).
 
-  **Verify.** The verify job (kind `verify`, keyed by the bytes and the tree,
-  never the path) parses the file's exact bytes and compares them with the
-  tree (`_internal/step_verify.py`): every occurrence a compile of the file
-  names, by token, each holding the tree's part (by its key, or, in a plain
-  file, by occurrence); every part's faces and edges by name and place, within
-  the display chord tolerance of the part and each element's own tolerance; and
-  the colour each face is drawn in. A file that verifies is its tree: its entry
-  is written again without `verified` and `plain` (whether a file was written
-  plain is its record's output entry's to say). One that does not maps to its
-  own content as above, listing what differs (`differ`, and `plain` for a file
-  written plain); so does one the verify cannot compare with the tree (a
-  component the store cannot decode, a tree swept from under its entry),
-  `differ` saying why, so no entry stays pending on a verify that ran. A verify
-  that cannot parse the file raises, and the entry stays pending. A build with
-  no daemon waits for its verify's answer and warns (`exports.verify_warnings`)
-  -- of a file that does not hold the result, or of a verify that raised; a
-  daemon's build returns once its files are written, the verify finishes on the
-  pool, a failure of it goes to the daemon's log, and a mismatch reaches the
-  next touch of the file -- a door, `store why`, the next run. A door given an
-  entry still pending (`read_step`/`read_scene`, a snapshot, the mesh doors,
-  `step compile`'s current check) has that verify answered first and answers
-  with what the entry then says (`exports.confirm_document`): one job for every
-  door asking about the same bytes, asked again for the door's own file when
-  the copy it read was replaced meanwhile. An entry still pending after that --
-  its verify raised (the door warns once, naming the error), or the file's bytes
-  moved on -- answers nothing: the door compiles the file's bytes, as for a
-  miss, and the compile's entry stands. A view draws a pending entry at once.
-  When two models write equal bytes, the last export's entry stands.
-
-  **The kept rule.** A rebuild keeps its STEP -- writes and verifies nothing
-  -- when its record's last build had the same tree, wrote the file with this
-  writer (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on
-  disk when the build started still has the bytes recorded, the store maps
-  those bytes to a tree (their document entry), and they held the result
-  (their entry lists no differences) or were written plain -- the same result
-  is written plain to the same bytes, so a plain file that does not hold it
-  stays its own content; `--force` always writes (`generation._export_plan`).
-  The run says `kept STEP`. A rebuild that exports the bytes the file already
-  has leaves the file, and its stamp, in place. A model whose result stands has
-  its file exported again by its next run, with no body run (`generation._hit`,
-  which says why), where the file did not hold its result (plain, this time),
-  another writer wrote it, the store lost its entry (the same bytes, kept in
-  place, mapped and verified again), or it is missing or not the file the
-  record names; another result, a forced build or another writer writes the
-  names again. Bump `STEP_WRITER_SCHEME` with any change to the bytes cadgen
-  writes for the same tree. A sidecar is a function of the record -- the
-  kinematics, appearance and animation the build resolved -- and is written
-  only where its bytes change (viewers version a sidecar by its stamp, and a
-  new one reloads the model); a model whose result stands never takes the one
-  beside its file: one on disk that is not the record's (deleted, foreign,
-  another state's after a restore) is written again from the record, bound to
-  the STEP's digest, even beside a kept STEP.
+  **The kept rule.** A rebuild keeps its STEP -- writes nothing -- when its
+  record's last build had the same tree, wrote the file with this writer
+  (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on disk
+  when the build started still has the bytes recorded, and the store maps those
+  bytes (their document entry); `--force` always writes
+  (`generation._export_plan`). The run says `kept STEP`. A rebuild that exports
+  the bytes the file already has leaves the file, and its stamp, in place. A
+  model whose result stands has its file exported again by its next run, with
+  no body run (`generation._hit`, which says why), where another writer wrote
+  it, the store lost its entry (the same bytes, kept in place, mapped again), or
+  it is missing or not the file the record names. Bump `STEP_WRITER_SCHEME`
+  with any change to the bytes cadgen writes for the same tree. A sidecar is a
+  function of the record -- the kinematics, appearance and animation the build
+  resolved -- and is written only where its bytes change (viewers version a
+  sidecar by its stamp, and a new one reloads the model); a model whose result
+  stands never takes the one beside its file: one on disk that is not the
+  record's (deleted, foreign, another state's after a restore) is written again
+  from the record, bound to the STEP's digest, even beside a kept STEP.
 
   Finishes that STEP does not carry persist in the sidecar's named
   `appearance.materials` library and `appearance.assignments` map, keyed by the
@@ -1122,11 +1086,11 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   — `outputs` simply lists no document.
 - `outputs` may carry per-output facts a door needs (`declared`, the
   tessellation `chord`/`angle`); those are the door's, the store only keeps
-  them beside the sha. A STEP's entry says which writer wrote it (`writer`,
-  and `plain` for a file written without names); it and its sidecar's are
-  pending -- an empty sha256, which clause 5 reads as never written -- from the
-  record written at the result until the export lands (§3, *Exports*), and the
-  STEP's sha256 lives there and nowhere else in the record.
+  them beside the sha. A STEP's entry says which writer wrote it (`writer`);
+  it and its sidecar's are pending -- an empty sha256, which clause 5 reads as
+  never written -- from the record written at the result until the export lands
+  (§3, *Exports*), and the STEP's sha256 lives there and nowhere else in the
+  record.
 
 ### Provenance
 
@@ -1163,7 +1127,7 @@ says so rather than guessing.
 `cadgen store where <document> <ref>` is the one reader: path →
 `index/output` → the model → its record and its provenance entry, the file's
 hash checked against the record's output entry (the bytes the model's build
-wrote, which hold its result unless the document entry lists what differs), the
+wrote from its result), the
 ref resolved in the tree the record names (by the one resolver every ref goes
 through, `cadgen.refs`; a ref in geometric-token form is matched to its element
 by geometry first, §2) to its occurrence and its component, whose lineage
@@ -1197,11 +1161,12 @@ one goes). What each version changed:
   until the export lands; 11, 10 and 9 named trees of schemas 6, 5 and 4; 8
   keyed appearance assignments by position. A record of an earlier schema is a
   miss: the model's next run rebuilds it once.
-- **Document entry**, schema 12 (`DOCUMENT_SCHEMA_VERSION`): an exported file's
-  bytes map to the result they were written from, pending until their verify
-  answers, or to their own content with what differs. 11 to 7 named trees of
-  schemas 6 down to 2; 6 read names as §5 *Names a reader reads* says. An
-  entry of an earlier schema is never read, and its bytes compile again.
+- **Document entry**, schema 13 (`DOCUMENT_SCHEMA_VERSION`): an exported file's
+  bytes map to the result they were written from, at once and finally. 12 held
+  such an entry pending until a parse of the file confirmed it, and mapped a
+  file it found otherwise to its own content with what differed; 11 to 7 named
+  trees of schemas 6 down to 2; 6 read names as §5 *Names a reader reads* says.
+  An entry of an earlier schema is never read, and its bytes compile again.
 - **Provenance entry**, schema 5 (`PROVENANCE_SCHEMA_VERSION`): each occurrence
   of a component the build made, with the feature whose call made its shape. 4
   dropped the document digest; 3 counted features by place.
@@ -1373,8 +1338,8 @@ Each with the failure it prevents.
   under its key) and the provenance entry; the export job is submitted then and
   writes the file into a private staging folder beside the output, outside the
   store. When the run finishes that export (§3, *Exports*): the file moved into
-  place atomically, its digest-bound sidecar, the document entry (pending), the
-  record's output entry; then the verify. Prevents: a record pointing at a tree
+  place atomically, its digest-bound sidecar, the document entry, the record's
+  output entry. Prevents: a record pointing at a tree
   that does not exist yet, a `.step` whose sha the record has not seen, and a
   document entry naming a tree its bytes were not written from.
 - **Canonical STEP bytes.** Before a written STEP is published, the writer
@@ -1387,8 +1352,8 @@ Each with the failure it prevents.
 - **Names a reader reads.** OCCT's STEP reader ends a string at an escaped quote
   (`''`) followed by spaces and `,` or `)`, so a part named `post (6')` or
   `x('',y)` would lose its product or come back renamed in every OCCT-based
-  reader, and the file would fail verify: the writer spells every quote in such
-  a literal as Part 21's `\X\27` instead, which readers decode to the same name
+  reader: the writer spells every quote in such a literal as Part 21's `\X\27`
+  instead, which readers decode to the same name
   (`step_export.respell_misread_quotes`). OCCT writes a non-ASCII name as its
   UTF-8 read as Latin-1 and encoded again, trimming any byte its C library
   takes for a space from either end (`Bügel_ä` would come back `BÃ¼gel_Ã¤`), so
@@ -1819,7 +1784,7 @@ asked. A child a parent's body calls is no job: it is decoded from its stored
 result or built serially inside the parent's own process (§9a). What goes to
 the pool is a document compile (`cadgen.daemon.executors.submit_compile`: a
 door's, the CAD Viewer's, or a body's `read_step` of a file with no tree) and
-the artifact jobs (§3: display, measure, export, verify), with two executors that behave
+the artifact jobs (§3: display, measure, export), with two executors that behave
 identically:
 
 - **Daemon executor (default).** Workers are persistent and warm. The routing
@@ -2026,8 +1991,8 @@ CPU scheduling and reuse remain independent of memory admission:
    what a large batch is shared out over (§3). A job takes a slot before its body runs and
    holds it through its emit -- a child built inside the body runs in the slot
    its parent holds (§9a) -- and it **yields the slot while it waits for a pool
-   job** (its parts' display data, a compile, an export's or a verify's answer)
-   and reacquires -- queuing if it must -- when that wait ends.
+   job** (its parts' display data, a compile, an export) and reacquires --
+   queuing if it must -- when that wait ends.
    A waiting build holds no CPU slot, which is why a 1-slot pool still builds a
    tree and writes its files. Work under way goes first: a slot asked for to continue
    it -- an artifact job a build or a view waits on, a job taking back the slot
@@ -2053,11 +2018,10 @@ CPU scheduling and reuse remain independent of memory admission:
    on the document's bytes and shows in the tree. The tree shows `queued` when a
    slot did not come at once.
 2. **In-flight coalescing.** A compile or an artifact job matching one already
-   in flight (`(store, bytes)`; `(store, request)`, a verify by its bytes and
-   tree) attaches to that job instead of starting another. In flight only,
-   never a lookup into the past, and never a model build: a second `python a.py`
-   still runs, on an extra, and two parents needing one stale child build it
-   once per run (§9a), not per pool.
+   in flight (`(store, bytes)`; `(store, request)`) attaches to that job instead
+   of starting another. In flight only, never a lookup into the past, and never
+   a model build: a second `python a.py` still runs, on an extra, and two
+   parents needing one stale child build it once per run (§9a), not per pool.
 3. **Idle unbind — 10 minutes** (`CADGEN_DAEMON_IDLE_UNBIND`). A bound worker
    idle that long returns to the spare set (spares beyond K exit); its model's
    next build rebinds a spare — no import repaid.
@@ -2105,21 +2069,18 @@ data is derived by artifact jobs (§3), as a view's is. A display job for parts 
 store lacks uses the shared artifact-job admission and one private derivation
 per requested component; it has no model binding, declared output
 or editing-producer order. Writing a stored tree to a staged STEP (`kind:
-export`) and comparing a written document with the tree it was written from
-(`kind: verify`, `store/exports.py`) are artifact jobs too: a request names a
-tree and a staged file, or a tree, a document and its bytes' digest, never a
-script; one verify answers every request for the same bytes and tree, wherever
-the document is, and is finished whoever still waits for it. On the daemon,
-an artifact job is never killed when its caller leaves, as the CAD Viewer's do
-routinely: the worker stays warm rather than being replaced by a fresh kernel
-import. Before each derivation the worker asks its supervisor whether anyone
-still wants the job: its caller, or an identical request that attached to it
-since. When no one does, the job ends with what it has derived, all of it in
-the store, and a later identical request starts its own job, which finds those
-there. Prevents: a job no one wants keeping its worker busy for the rest of a
-64-component request while the next model's request waits for a kernel import.
-A build or a door whose caller leaves is stopped -- a build that released its
-caller (`--no-wait`, above) excepted.
+export`, `store/exports.py`) is an artifact job too: a request names a tree and
+a staged file, never a script. On the daemon, an artifact job is never killed
+when its caller leaves, as the CAD Viewer's do routinely: the worker stays warm
+rather than being replaced by a fresh kernel import. Before each derivation
+the worker asks its supervisor whether anyone still wants the job: its caller,
+or an identical request that attached to it since. When no one does, the job
+ends with what it has derived, all of it in the store, and a later identical
+request starts its own job, which finds those there. Prevents: a job no one
+wants keeping its worker busy for the rest of a 64-component request while the
+next model's request waits for a kernel import. A build or a door whose caller
+leaves is stopped -- a build that released its caller (`--no-wait`, above)
+excepted.
 
 **Browser resources.** Disposable decoded meshes, selectors, BVHs, GPU buffers,
 textures and worker work may have byte budgets and be reclaimed when unused;
@@ -2259,7 +2220,7 @@ jobs for them (§3) finish, before the file is written. The viewer reads those
 objects as it reads any tree and any part and draws them, labelled as a
 preview of the build in progress, then replaces them in place with the saved
 file when the catalog names it, keeping every part: the file's bytes map to the
-very tree the preview drew, wherever the file holds it (§3, *Exports*). What
+very tree the preview drew (§3, *Exports*). What
 the sidecar will carry travels with the preview as its **annotations**: the
 model's declarations resolved against the result tree as soon as it exists --
 the mates into the articulation a page plays, `materials=` into finishes on
@@ -2309,11 +2270,10 @@ The preview is the record's result: the model's final immutable result, which
 becomes `record.tree` once the publication checks pass, before its exports (its
 STEP output pending until written, §3), and which a parent composes before the
 child's file is written. `record.tree` is never replaced by geometry
-translated from the STEP: a file that does not verify maps to its own content
-beside it (§3). The bytes an export writes from the result map to it once they
-exist, pending their verify: no bytes are mapped to a tree before they are
-written from it. Successful explicit saves require all declared outputs;
-publishing a preview alone is not success.
+translated from the STEP. The bytes an export writes from the result map to it
+once they exist (§3): no bytes are mapped to a tree before they are written
+from it. Successful explicit saves require all declared outputs; publishing a
+preview alone is not success.
 
 An interactive viewer can retain a complete displayed component across a
 replacement when its part and origin agree. Tree-specific placements and
@@ -2378,13 +2338,6 @@ supersession does not cancel their exports.
   complete verification.
   Components carry `brep`, `codec` and `faceColors`; display data resolves
   separately, by each component's part, through `store.parts` and `index/part`.
-- Whether a STEP holds its result: `cadgen store why <model.py>` says
-  so beside the output -- `verify pending`, or `shows its own content:` and the
-  occurrences that differ (§3, *Exports*) -- and the document entry lists the
-  differences (`differ`); a build with no daemon warns in the same words, a
-  daemon's build at the next touch of the file. The model's next run writes
-  such a file plain, and keeps a plain one until its result changes or a
-  `--force` build writes the names again.
 - `cadgen store info` sizes the store against its cap, names any retired
   kind still present and any `index/` folder it does not know, and says when
   a newer cadgen's writes keep passes off the store. `cadgen store gc
@@ -2446,11 +2399,9 @@ supersession does not cancel their exports.
   written file, or read `index/provenance` from anything but `store where` and
   `store why` (§3).
 - Show a preview as the saved file, or bind a sidecar to one (§9b); map bytes
-  to a tree before they are written from it, or let a door answer an exact read
-  from an entry whose verify has not answered (§3, *Exports*).
+  to a tree before they are written from it (§3, *Exports*).
 - Give a model's file a tree of its own beside its result: its bytes map to the
-  result they were exported from, or, where verify finds they do not hold it,
-  to their own content (§3, *Exports*).
+  result they were exported from (§3, *Exports*).
 - Store a mesh no face of which was verified, or let a clock decide which faces
   are (§3; README law 1).
 - Memoize a kernel operation anywhere but in the warm worker's memory, or

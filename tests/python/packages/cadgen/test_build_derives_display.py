@@ -150,7 +150,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
             code = run_model_argv([str(self.script)])
         self.assertEqual(code, 0, output.getvalue())
         self.assertEqual(measured, [])
-        # The other pool jobs write the STEP from the result and verify it: no display data.
+        # The other pool job writes the STEP from the result: no display data.
         [job] = [call.args[0] for call in submitted.call_args_list if call.args[0]["kind"] == "display"]
         self.assertEqual(len(job["cids"]), 2)
         view = descriptor_for_view(job["tree"], producer=job["producer"])
@@ -168,7 +168,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
 
         self.assertEqual(self.build(), ("built", 2), "one display mesh a part; the STL is written from them")
         self.assertEqual([(job["kind"], len(job.get("cids") or ())) for job in self.jobs],
-                         [("display", 2), ("export", 0), ("verify", 0)], "one display job for both")
+                         [("display", 2), ("export", 0)], "one display job for both")
         self.assertTrue((self.root / "STL/pair.stl").is_file())
         with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=NO_JOB), \
                 mock.patch("cadgen.store.parts.derive", side_effect=NO_JOB):

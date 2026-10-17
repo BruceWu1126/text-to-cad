@@ -1,7 +1,7 @@
 """A saved document's readers take the tree its bytes map to, privately, and never one
 that does not read: a damaged or invalid tree is compiled again from the file's own bytes,
-and a build of the model writes its own objects again. A saved file holds its result
-where its verify says so."""
+and a build of the model writes its own objects again. A saved file is the result it was
+written from."""
 
 from __future__ import annotations
 
@@ -42,13 +42,12 @@ class SavedDocumentReadTest(unittest.TestCase):
         return shape
 
     def build(self, shape=None, *, force=False, materials=None):
-        """``(tree, digest)`` of the model's save, its file verified as its result. One part
-        is its document, named by its label (``generation._document_root_name``)."""
-        tree_hash, _tree, stats, digest = save_step(
+        """``(tree, digest)`` of the model's save. One part is its document, named by its
+        label (``generation._document_root_name``)."""
+        tree_hash, _tree, _stats, digest = save_step(
             self.shape() if shape is None else shape, self.root / "part.step", root_name="part",
             force=force, materials=materials,
         )
-        self.assertEqual({"ok": True}, stats["verify"])
         return tree_hash, digest
 
     def test_a_saved_read_has_private_geometry(self):
@@ -453,13 +452,12 @@ class SavedDocumentReadTest(unittest.TestCase):
         })
 
 
-class SavedFileVerifyTest(unittest.TestCase):
-    """A saved file is its result only where a parse of it verifies as the result, face by
-    face and edge by edge within the display tolerance, and drawn in the same colours; a
-    file that does not is its own content, and says which occurrences differ."""
+class SavedFileTest(unittest.TestCase):
+    """A saved file is the result it was written from: the names it carries resolve with the
+    store of the build that wrote it, and parts made alike are one product in it."""
 
     def setUp(self):
-        scratch = generated_cad_directory(prefix="saved-file-verify-")
+        scratch = generated_cad_directory(prefix="saved-file-")
         self.addCleanup(scratch.cleanup)
         self.root = Path(scratch.name)
         environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"),
@@ -468,31 +466,12 @@ class SavedFileVerifyTest(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def build(self, shape, name, *, namer=None):
-        """The result, the tree its file's bytes map to once verified, and the verify's answer."""
+        """The result, and the tree its file's bytes map to."""
         from cadgen.store.records import document_entry_for_hash
         from cadgen.store.trees import get_tree
 
-        tree_hash, tree, stats, digest = save_step(shape, self.root / f"{name}.step", root_name=name, namer=namer)
-        entry = document_entry_for_hash(digest)
-        return tree_hash, tree, get_tree(entry["tree"]), stats["verify"]
-
-    def test_a_body_the_file_trims_otherwise_is_the_files_own(self):
-        """An ellipsoid cap fused with two side boxes: OCCT reads the cap back as its
-        complement, with as many faces and the body's box unchanged -- only the cap's
-        own box tells (PR #370's lossy translations)."""
-        from build123d import Box, Matrix, Pos, Rot, Sphere
-
-        sphere = Rot(90, 0, 0) * Rot(0, 0, -90) * Sphere(1)
-        ellipsoid = sphere.transform_geometry(Matrix([[2.7, 0, 0, 0], [0, 2.7, 0, 0], [0, 0, 1.4, 0], [0, 0, 0, 1]]))
-        cap = (Pos(0, 0, 5.4) * ellipsoid) - (Pos(0, 0, 4.15 - 10) * Box(30, 30, 20))
-        body = cap + Pos(-5, 0, 5) * Box(1, 6, 10) + Pos(5, 0, 5) * Box(1, 6, 10)
-        body.label = "capped"
-        _tree_hash, tree, document, verify = self.build(body, "capped")
-        [written] = document["occurrences"]
-        self.assertNotIn(written["component"], tree["components"], "the file was taken for the result")
-        self.assertNotIn("lineage", document["components"][written["component"]])
-        self.assertFalse(verify["ok"])
-        self.assertTrue(verify["differ"] and all(line.startswith("capped (#") for line in verify["differ"]), verify)
+        tree_hash, tree, _stats, digest = save_step(shape, self.root / f"{name}.step", root_name=name, namer=namer)
+        return tree_hash, tree, get_tree(document_entry_for_hash(digest)["tree"])
 
     def test_a_name_resolves_with_the_store_of_the_build_that_wrote_the_file(self):
         """A compile names a file's elements by their geometry, whatever names the file
@@ -513,7 +492,7 @@ class SavedFileVerifyTest(unittest.TestCase):
         with kernel_memo.run(Path(__file__)) as run:
             body = block()
         body.label = "block"
-        self.assertEqual({"ok": True}, self.build(body, "block", namer=run)[3])
+        self.build(body, "block", namer=run)
         named = read_scene(self.root / "block.step")
         [leaf] = named.leaves()
         refs = [face.ref for face in leaf.entities("face")]
@@ -531,7 +510,7 @@ class SavedFileVerifyTest(unittest.TestCase):
     def test_screws_made_alike_and_labelled_apart_are_one_product_in_the_file(self):
         """A part is the construction that made it: screws made alike one by one and
         labelled apart are one component placed three times, written as one product with
-        an instance per screw, and the file holds that result."""
+        an instance per screw, and the file maps to that result."""
         import re
 
         from build123d import Compound, Pos, Solid
@@ -550,26 +529,14 @@ class SavedFileVerifyTest(unittest.TestCase):
         self.addCleanup(kernel_memo.clear)
         with kernel_memo.run(Path(__file__)) as run:
             assembly = screws()
-        tree_hash, tree, document, verify = self.build(assembly, "screws", namer=run)
+        tree_hash, tree, document = self.build(assembly, "screws", namer=run)
         self.assertEqual(sorted(occurrence["name"] for occurrence in tree["occurrences"]),
                          ["screw:0", "screw:1", "screw:2"])
         [(_cid, entry)] = tree["components"].items()
         self.assertIn("construction", entry)
         step = (self.root / "screws.step").read_text(encoding="utf-8", errors="replace")
         self.assertEqual(len(re.findall(r"= PRODUCT\(", step)), 2, "the assembly and one screw")
-        self.assertEqual(({"ok": True}, tree), (verify, document))
-
-    def test_a_placements_colour_read_on_its_faces_is_the_result(self):
-        """A coloured compound's colour comes back on each of its faces: drawn alike, the
-        file holds the result, coloured as the result's occurrence is."""
-        from build123d import Box, Compound, Pos
-
-        panel = Compound(obj=[Box(4, 4, 1), Pos(6, 0, 0) * Box(4, 4, 1)])
-        panel.label = "panel"
-        panel.color = (0.2, 0.3, 0.4, 1.0)
-        _tree_hash, tree, document, verify = self.build(Compound(children=[panel, Pos(0, 9, 0) * Box(2, 2, 2)]),
-                                                        "panels")
-        self.assertEqual(({"ok": True}, tree), (verify, document))
+        self.assertEqual(tree, document)
 
 
 class NativePlacementValidationTest(unittest.TestCase):

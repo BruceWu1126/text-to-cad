@@ -1,5 +1,5 @@
 """Canonical STEP packaging is independent of authored trees and filenames, and a saved
-file is the result it was written from where it holds it."""
+file is the result it was written from."""
 
 from __future__ import annotations
 
@@ -70,8 +70,7 @@ class DocumentTreePackagingTest(unittest.TestCase):
         }
         output = self.root / "original.step"
         # One part is its document, named by its label (generation._document_root_name).
-        result, tree, stats, _ = save_step(shape, output, root_name="authored-part-name", materials=materials)
-        self.assertEqual({"ok": True}, stats["verify"])
+        result, tree, _, _ = save_step(shape, output, root_name="authored-part-name", materials=materials)
         self.assertEqual(tree["occurrences"][0]["name"], "authored-part-name")
         self.assertEqual(tree["appearance"]["materials"]["finish"], finish)
         self.assertEqual(tree["appearance"]["assignments"], {root_id(tree): "finish"})
@@ -91,18 +90,16 @@ class DocumentTreePackagingTest(unittest.TestCase):
         group = Compound(children=[first, second], label="pair").moved(Location((20, 5, 0), (0, 0, 30)))
         shape = Compound(children=[group], label="assembly-root")
         output = self.root / "nested.step"
-        result, _, stats, _ = save_step(shape, output, root_name="assembly-root")
-        self.assertEqual({"ok": True}, stats["verify"])
+        result, _, _, _ = save_step(shape, output, root_name="assembly-root")
         compiled = self.assert_warm_and_cold_repackage(output, result)
         self.assertEqual([occurrence["name"] for occurrence in compiled["occurrences"]], ["red", "green"])
 
-    def test_non_ascii_product_names_verify(self):
+    def test_non_ascii_product_names_read_back(self):
         from build123d import Compound
 
         shape = Compound(children=[self.box("圆角2_1_2")], label="主装配")
         output = self.root / "unicode-label.step"
-        result, _, stats, _ = save_step(shape, output, root_name="主装配")
-        self.assertEqual({"ok": True}, stats["verify"])
+        result, _, _, _ = save_step(shape, output, root_name="主装配")
         compiled = self.assert_warm_and_cold_repackage(output, result)
         self.assertEqual(compiled["assembly"]["root"]["name"], "主装配")
         self.assertEqual(compiled["occurrences"][0]["name"], "圆角2_1_2")
@@ -114,8 +111,7 @@ class DocumentTreePackagingTest(unittest.TestCase):
         # wrapper children: one part, the way build123d handed it back.
         fused = Solid.make_box(2, 3, 4).fuse(Solid.make_box(2, 3, 4).moved(Location((10, 0, 0))))
         fused.label = "frame:underbone"
-        _, tree, stats, _ = save_step(fused, self.root / "fused.step", root_name="frame:underbone")
-        self.assertEqual({"ok": True}, stats["verify"])
+        _, tree, _, _ = save_step(fused, self.root / "fused.step", root_name="frame:underbone")
         self.assertEqual(tree["entryKind"], "part")
         self.assertEqual(tree["assembly"]["root"]["nodeType"], "part")
         self.assertEqual(len(tree["occurrences"]), 1)
@@ -240,8 +236,7 @@ class DocumentTreePackagingTest(unittest.TestCase):
         outer = Compound(children=[inner], label="outer")
         shape = Compound(children=[outer], label="root")
         output = self.root / "one-child.step"
-        result, tree, stats, _ = save_step(shape, output, root_name="root")
-        self.assertEqual({"ok": True}, stats["verify"])
+        result, tree, _, _ = save_step(shape, output, root_name="root")
         compiled = self.assert_warm_and_cold_repackage(output, result)
         # Every group of one is a node of the file, the token the result gives it.
         written = compiled["assembly"]["root"]
@@ -301,37 +296,6 @@ class DocumentTreePackagingTest(unittest.TestCase):
         self.assertEqual(first[0][0].transform[7], 2)
         self.assertTrue(next(iter(first[1].values())).Location().IsIdentity())
 
-    def test_a_file_read_with_a_moved_repeat_shows_its_own_content(self):
-        from build123d import Compound, Location
-        from cadgen._internal import step_scene_package
-        from cadgen.store.build import build_tree_from_compound
-        from cadgen.store.materialize import materialize
-        from cadgen.store.records import document_entry_for_hash
-
-        child_tree, _, _ = build_tree_from_compound(self.box("child"), root_name="child")
-        first = materialize(child_tree)
-        second = materialize(child_tree).moved(Location((8, 0, 0)))
-        second.label = "repeat"
-        shape = Compound(children=[first, second], label="parent")
-        parse = step_scene_package._scene_from_selected_bytes
-
-        def moved(*args, **kwargs):
-            scene = parse(*args, **kwargs)
-            repeated = scene.roots[0].children[1]
-            transform = list(repeated.transform)
-            transform[3] += 1
-            repeated.transform = tuple(transform)
-            return scene
-
-        with mock.patch.object(step_scene_package, "_scene_from_selected_bytes", side_effect=moved):
-            result, _, stats, digest = save_step(shape, self.root / "changed.step", root_name="parent")
-        self.assertFalse(stats["verify"]["ok"])
-        self.assertTrue(any(line.startswith("repeat (#") for line in stats["verify"]["differ"]), stats["verify"])
-        entry = document_entry_for_hash(digest)
-        self.assertNotEqual(entry["tree"], result)
-        self.assertEqual(entry["differ"], stats["verify"]["differ"])
-        self.assertNotIn("verified", entry)
-
     def test_products_read_in_another_order_keep_their_own_finishes(self):
         from build123d import Compound, Location
         from cadgen._internal import step_scene_package
@@ -358,13 +322,13 @@ class DocumentTreePackagingTest(unittest.TestCase):
             return scene
 
         output = self.root / "reordered.step"
+        result, tree, _, digest = save_step(shape, output, root_name="parent", materials=materials)
         with mock.patch.object(step_scene_package, "_scene_from_selected_bytes", side_effect=reordered):
-            result, tree, stats, digest = save_step(shape, output, root_name="parent", materials=materials)
             reread = build_document_tree(step_scene_package._scene_from_selected_bytes(output.resolve(),
                                                                                        output.read_bytes()))[1]
         # A finish names its part by token, which its name and placement make, never its
         # place among its siblings: read in another order, each part is still its own.
-        self.assertEqual(({"ok": True}, result), (stats["verify"], document_entry_for_hash(digest)["tree"]))
+        self.assertEqual(result, document_entry_for_hash(digest)["tree"])
         by_name = {occurrence["name"]: occurrence["id"] for occurrence in tree["occurrences"]}
         self.assertEqual(tree["appearance"]["assignments"], {by_name["first"]: "matte", by_name["second"]: "polished"})
         self.assertEqual({occurrence["name"]: occurrence["id"] for occurrence in reread["occurrences"]}, by_name)

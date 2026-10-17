@@ -170,29 +170,12 @@ def _closure_file_label(rel: str, names: dict, own: dict) -> str:
     return f"{rel}[{shown}]"
 
 
-def _shown(record: dict | None) -> dict[str, dict]:
-    """What each STEP the record names shows, by path, where its verify has not found it
-    to be the result (STORE.md §3): ``{"verified": False}`` while it is pending, and the
-    differences of a file that shows its own content (``differ``)."""
-    from cadgen.store.records import document_entry_for_hash
-
-    shown: dict[str, dict] = {}
-    for path, output in ((record or {}).get("outputs") or {}).items():
-        digest = str((output or {}).get("sha256") or "")
-        entry = document_entry_for_hash(digest) if digest else None
-        if entry is not None and (entry.get("verified") is False or entry.get("differ")):
-            shown[path] = {key: entry[key] for key in ("verified", "differ") if key in entry}
-    return shown
-
-
 def _why_one(model: str, as_json: bool) -> int:
     verdict = stale(model)
     record = read_record(model)
     tree = get_tree(str(record.get("tree"))) if record and record.get("tree") else None
-    shown = _shown(record)
     if as_json:
-        print(json.dumps({"model": str(model), "stale": verdict.stale, "clauses": verdict.clauses, "record": record,
-                          "documents": shown}, separators=(",", ":")))
+        print(json.dumps({"model": str(model), "stale": verdict.stale, "clauses": verdict.clauses, "record": record}, separators=(",", ":")))
         return 0 if not verdict.stale else 1
     print(f"model   {model}")
     print(f"verdict {'STALE' if verdict.stale else 'current'}  ({verdict.reason()})")
@@ -218,11 +201,6 @@ def _why_one(model: str, as_json: bool) -> int:
             for output in outputs:
                 omark = "x" if output.get("stale") else "ok"
                 print(f"        [{omark}] {output.get('path')}  {output.get('why') or ''}")
-                document = shown.get(str(output.get("path")))
-                if document is not None and document.get("differ"):
-                    print(f"              shows its own content: {'; '.join(document['differ'])}")
-                elif document is not None:
-                    print("              verify pending")
         elif number == 6:
             print(f"  [{mark}] 6 producer {clause.get('why') or 'this cadgen and kernel'}")
     if record:

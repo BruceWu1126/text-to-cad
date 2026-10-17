@@ -204,11 +204,9 @@ solid of a STEP corpus scored on the properties a display mesh must have and on
 cost, the table a mesher change opens its pull request with; and the 0.8.0
 migration's measurements ([`bench/README.md`](bench/README.md)):
 `compare_commits.py` (cold builds and the moonwatch edit loop between two
-commits, interleaved, each in its own worktree) and `corpus_verify.py` (the
-sample corpus built one model at a time into a fresh store, then every
-exported STEP verified). Reports and profiler captures are local output under
-`tmp/`, never committed here. The drivers are manual; their `*.test.mjs` helper
-units run in `test-js.sh`.
+commits, interleaved, each in its own worktree). Reports and profiler captures
+are local output under `tmp/`, never committed here. The drivers are manual;
+their `*.test.mjs` helper units run in `test-js.sh`.
 
 ## CI
 

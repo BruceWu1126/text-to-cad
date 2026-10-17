@@ -75,9 +75,8 @@ class StepColorRoundTripTest(unittest.TestCase):
         expected = [_occurrence_color(child) for child in children]
         output = root / "repeated.step"
         with mock.patch.dict("os.environ", {"CADGEN_CACHE_DIR": str(root / "store")}):
-            tree_hash, _, stats, digest = save_step(bd.Compound(children=children, label="repeated"), output,
-                                                    root_name="repeated")
-            self.assertEqual({"ok": True}, stats["verify"])
+            tree_hash, _, _, digest = save_step(bd.Compound(children=children, label="repeated"), output,
+                                                root_name="repeated")
             # The saved document is the result it was written from; a cold compile of
             # its bytes reads the same occurrences from the file.
             self.assertEqual(tree_hash, document_entry_for_hash(digest)["tree"])

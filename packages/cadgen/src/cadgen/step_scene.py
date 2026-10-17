@@ -305,11 +305,8 @@ def read_step(step_path: Path | str, *, label: str | None = None) -> Any:
     root itself, not a wrapper — with per-occurrence and prototype STEP colors
     applied. When the store holds a tree for the file's bytes the read is warm
     (tens of milliseconds instead of a full text-STEP parse): for a file a model's
-    build saved, the result it was written from, which a parse of the file verified
-    it holds -- face by face and edge by edge within the display tolerance, in the
-    same colours (``cadgen.store.exports``) -- so a warm read, a cold parse and
-    ``import_step`` draw alike; a file that does not hold its result reads as its
-    own content.
+    build saved, the result it was written from (``cadgen.store.exports``); for any
+    other file, the compile of its own bytes.
 
     Inside a build the file is an input, as every file a build reads is, and a
     model's own output is refused. A missing file raises here rather than deep inside the importer, because

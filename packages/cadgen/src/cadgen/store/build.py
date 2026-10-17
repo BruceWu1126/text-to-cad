@@ -22,10 +22,9 @@ nothing on the way measures its geometry for a name.
 
 A model's result is this tree, whether it declares STEP or only meshes: its STEP is
 written from the published tree afterwards, by the build pool (``store/exports.py``),
-and the written bytes map to it once a parse of them verifies as it. A compile of a
-STEP's bytes (:func:`build_document_tree`) builds the document's own tree: its
-structure, names and placements as the file has them, every component read from the
-file.
+and the written bytes map to it. A compile of a STEP's bytes (:func:`build_document_tree`)
+builds the document's own tree: its structure, names and placements as the file has
+them, every component read from the file.
 """
 
 from __future__ import annotations

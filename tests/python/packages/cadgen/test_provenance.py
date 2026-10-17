@@ -25,7 +25,7 @@ from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, verified, warm_entries
+from tests.python.support.warm_daemon import served, warm_entries
 
 add_repo_path("packages/cadgen/src")
 
@@ -486,26 +486,6 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertIsNotNone(self._entry())
         self.assertEqual(0, self._store("where", "STEP/pin.step", face).returncode)
 
-    def test_a_file_that_does_not_hold_its_result_is_unknown_and_says_what_the_next_run_does(self) -> None:
-        """A file that shows its own content is no export of the result: a named one the
-        next run writes without names; a plain one it keeps, so no rerun is promised."""
-        import hashlib
-
-        from cadgen.store.records import document_entry_for_hash, note_document_tree
-
-        self._build()
-        face = self._face()
-        digest = hashlib.sha256((self.root / "STEP" / "pin.step").read_bytes()).hexdigest()
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
-            tree = document_entry_for_hash(digest)["tree"]
-        for plain, remedy in ((False, "; run the model again, which writes it without names"), (True, "")):
-            with self.subTest(plain=plain):
-                with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.cache)}):
-                    note_document_tree(digest, tree, plain=plain, differ=["pin (#o:000000000000): faces off"])
-                answer = self._store("where", "STEP/pin.step", face)
-                self.assertEqual(1, answer.returncode)
-                self.assertIn("so it shows its own content" + remedy + "\n", answer.stdout)
-
     def test_the_same_bytes_written_again_are_answered_by_the_build_that_wrote_them(self) -> None:
         """Equal bytes map to the tree the last export wrote them from: a document entry an
         earlier build left for them names this build's result once it writes them again, and
@@ -553,7 +533,6 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertEqual(0, self._store("where", "STEP/pin.step", self._face()).returncode)
 
     def test_a_warm_rerun_writes_the_entry_a_cold_run_wrote(self) -> None:
-        self.addCleanup(verified, self.cache)
         self._build()
         cold = self._entry()
         self.assertIsNotNone(cold)

@@ -168,19 +168,11 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
 
 ## Saved STEP files are exports in 0.8
 
-- A model's STEP is written from its result by the build pool and checked
-  against it: a parse of the file must name every occurrence, face and edge as
-  the result does, each body within the display tolerance, drawn alike. The
-  file carries those names -- each part's key in its product's description, each
-  face's and edge's name on its entity -- for any reader.
-- A file whose translation changed a body (OCCT's STEP writer and reader are
-  not lossless) shows its own content, its elements named by their geometry.
-  The build warns (`<file> does not hold the result it was written from, so it
-  shows its own content; ...`): at once with no daemon, at the next touch of the
-  file through the daemon. `cadgen store why` says `shows its own content:`, and
-  the model's next run writes the file without names (a file already written
-  without names is kept until the model changes, or `--force` writes the names
-  again).
+- A model's STEP is written from its result by the build pool, and the file is
+  that result: its bytes map to it the moment it is saved, and every view,
+  snapshot and export of the file reads it. The file carries the result's names
+  -- each part's key in its product's description, each face's and edge's name
+  on its entity -- for any reader.
 - Every model rebuilds once after the upgrade and writes its STEP again; a
   rebuild whose result is unchanged keeps the file.
 

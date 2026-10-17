@@ -18,7 +18,7 @@ from pathlib import Path
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, verified, warm_entries
+from tests.python.support.warm_daemon import served, warm_entries
 
 CADGEN_SRC = add_repo_path("packages/cadgen/src")
 
@@ -69,8 +69,6 @@ class StartedPrograms(unittest.TestCase):
         scratch = generated_cad_directory(prefix="started-programs-")
         self.addCleanup(scratch.cleanup)
         project = Path(scratch.name).resolve()
-        if warm:
-            self.addCleanup(verified, project / "store")
         (project / "bolt.py").write_text(BOLT, encoding="utf-8")
         (project / "frame.py").write_text(FRAME, encoding="utf-8")
         environment = {**os.environ, "CADGEN_CACHE_DIR": str(project / "store"), "PYTHONPATH": str(CADGEN_SRC),

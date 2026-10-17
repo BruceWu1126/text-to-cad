@@ -73,9 +73,9 @@ class Fixture(unittest.TestCase):
 
     def result(self, shape, *, force=False, name="same"):
         path = self.root / f"{name}.step"
-        tree_hash, tree, stats, digest = save_step(shape, path, root_name="root", force=force)
+        tree_hash, tree, _stats, digest = save_step(shape, path, root_name="root", force=force)
         return {"sourceHash": tree_hash, "sourceTree": tree, "exportHash": digest,
-                "stepBytesHash": hashlib.sha256(path.read_bytes()).hexdigest(), "verify": stats["verify"]}
+                "stepBytesHash": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def _plain_state(shape):
@@ -137,7 +137,6 @@ class PlacementTests(Fixture):
                 mat.reset_memo()
             actual = self.result(self.parent(), force=state == "force", name=state)
             self.assertEqual(expected, actual, state)
-        self.assertEqual({"ok": True}, expected["verify"])
         tree = get_tree(expected["sourceHash"])
         self.assertEqual(len(tree["links"]), 3)
         self.assertEqual(tree["components"], {})

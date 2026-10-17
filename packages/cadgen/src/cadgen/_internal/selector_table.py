@@ -47,7 +47,7 @@ from cadgen._internal.glb_topology import (
 # row carries no volume (nothing read it: a view's part volume is its mesh's). 5: a face's
 # and an edge's ``bbox`` is its display mesh's -- a face's triangles', an edge's polyline's --
 # so within the display chord of its exact box (tessellation_policy); the exact boxes are
-# measured where they are read (a geometric token's signature, a written STEP's verify). 6: a
+# measured where they are read (a geometric token's signature). 6: a
 # face row carries no area, centre, relevance or flags, and a shape row no area: a face's area and
 # centroid are measured where a view asks for them (``store.parts.measure_face``), and its
 # relevance and flags, which its area alone decided, had no reader.

@@ -149,7 +149,7 @@ def where(document: Path | str, ref: str) -> Where:
     from cadgen.refs import descriptor_space, locate, resolve
     from cadgen.store.objects import read_verified_object
     from cadgen.store.parts import element_tokens
-    from cadgen.store.records import document_entry_for_hash, model_for_output, read_record
+    from cadgen.store.records import model_for_output, read_record
     from cadgen.store.trees import flatten
 
     path = Path(document).expanduser().resolve()
@@ -171,11 +171,6 @@ def where(document: Path | str, ref: str) -> Where:
     digest = step_file_hash(path)
     if ((record.get("outputs") or {}).get(str(path)) or {}).get("sha256") != digest:
         return answer.unknown("the file's bytes are not the ones the model's build wrote; run the model")
-    document = document_entry_for_hash(digest) or {}
-    if document.get("differ"):
-        return answer.unknown("the file does not hold the result it was written from, so it shows its own "
-                              "content" + ("" if document.get("plain") else
-                                           "; run the model again, which writes it without names"))
     # The file is an export of the record's tree: the file's tokens are the tree's.
     flat = flatten(str(record.get("tree") or ""))
     if flat is None:

@@ -4,8 +4,8 @@
    ``N = os.cpu_count()`` (``CADGEN_JOBS`` overrides). A job takes a slot
    before its body runs and holds it through its emit; a child model built
    inside the body runs in the slot its parent holds (``held`` nests); the job
-   YIELDS the slot while it waits for a pool job -- its display, export or
-   verify job -- and reacquires, queuing again if it must, when that is done.
+   YIELDS the slot while it waits for a pool job -- its display or export
+   job -- and reacquires, queuing again if it must, when that is done.
    That yield is the deadlock avoidance: a 1-slot pool still finishes a build
    that waits on its own pool jobs. Work already under way goes first: a slot
    asked for to continue it -- an artifact job a build or a view waits on, a job

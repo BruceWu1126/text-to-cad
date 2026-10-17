@@ -56,10 +56,10 @@ class NativeDocumentDoors(unittest.TestCase):
         from cadgen.daemon import artifacts
 
         def files_only(real, name):
-            # A build's file is an export of its result, verified by a parse: pool jobs
-            # that derive no display data.
+            # A build's file is an export of its result: a pool job that derives no
+            # display data.
             def call(request, **kwargs):
-                if request.get("kind") not in ("export", "verify"):
+                if request.get("kind") != "export":
                     raise AssertionError(f"native-only operation invoked {name}")
                 return real(request, **kwargs)
             return call

@@ -7,8 +7,8 @@ is the warm-load cache; there is no second geometry store. ``load_step_scene_cac
 skips the text-STEP parse by reading the tree; a STEP with no current tree pays one
 full parse, and the tree its compile publishes then makes the next load warm. The
 tree is the result a build wrote the file from, read flattened -- the hierarchy the
-writer wrote -- or, for a file that does not hold it or that no build of this store
-wrote, the compile of the file's own bytes.
+writer wrote -- or, for a file no build of this store wrote, the compile of the file's
+own bytes.
 """
 
 from __future__ import annotations
@@ -366,17 +366,9 @@ def load_step_scene_cached(step_path: Path, *, lazy: bool = False) -> LoadedStep
     while True:
         payload = read_bytes_with_ladder(resolved_step_path)
         step_hash = hashlib.sha256(payload).hexdigest()
-        # An export's entry is pending until its verify answers: confirmed first; one whose
-        # verify could not answer is compiled, as for a miss.
-        from cadgen.store.exports import confirm_document
-        from cadgen.store.records import tree_for_document_hash
-
-        damaged_document = False
-        tree = tree_for_document_hash(step_hash)
-        if tree is None or confirm_document(resolved_step_path, step_hash, tree) is not None:
-            from_package, damaged_document = lookup_document_scene(resolved_step_path, step_hash=step_hash, lazy=lazy)
-            if from_package is not None:
-                return from_package
+        from_package, damaged_document = lookup_document_scene(resolved_step_path, step_hash=step_hash, lazy=lazy)
+        if from_package is not None:
+            return from_package
 
         from cadgen.daemon import broker
         from cadgen.daemon.executors import submit_compile

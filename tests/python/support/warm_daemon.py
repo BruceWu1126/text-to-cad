@@ -114,29 +114,3 @@ def served(marker: str) -> bool:
     except OSError:
         return False
     return any("-> exit" in line and marker in line for line in text.splitlines())
-
-
-def verified(store: Path) -> None:
-    """Wait for the verify of every STEP a daemon build saved into ``store``.
-
-    A daemon build returns once its STEP is saved, and the file's verify goes on in the
-    daemon -- the module's private one, warm or not: a test that does not opt out
-    (``CADGEN_DAEMON=0``) builds through it -- reading the file and writing its document
-    entry into ``store`` when it answers (STORE.md §3, *Exports*). A test that removes
-    the store, or a workspace a build saved into, waits for those first, as a door does,
-    by joining the verify of each entry still pending
-    (``cadgen.store.exports.confirm_document``); ``IsolatedCadRoots`` does so for every
-    test that uses it. Nothing pending costs an index read per saved STEP."""
-    import json
-    from unittest import mock
-
-    from cadgen.store.exports import confirm_document
-    from cadgen.store.paths import index_dir
-
-    with mock.patch.dict(os.environ, {**warm_entries(), "CADGEN_CACHE_DIR": str(store)}):
-        records = index_dir("model")
-        for path in sorted(records.iterdir()) if records.is_dir() else ():
-            record = json.loads(path.read_text(encoding="utf-8"))
-            for document, output in (record.get("outputs") or {}).items():
-                if Path(document).suffix.lower() in (".step", ".stp") and output.get("sha256") and record.get("tree"):
-                    confirm_document(Path(document), output["sha256"], record["tree"])

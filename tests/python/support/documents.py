@@ -13,31 +13,24 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, names: bool = True,
-              namer: Any = None, materials: object = None) -> tuple[str, dict[str, Any], dict[str, Any], str]:
+def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, namer: Any = None,
+              materials: object = None) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """Save ``shape`` to ``path`` as a model's build saves its STEP
     (``_internal/generation.py``): its result tree published
     (``store.build.build_tree_from_compound``), the STEP exported from that tree in this
-    process (``store.exports.export_step``; ``names`` False writes it plain), its bytes
-    mapped to the tree pending their verify, then the verify
-    (``store.exports.verify_document``). Returns ``(tree_hash, tree, stats, sha256)``;
-    ``stats`` carries the export's answer (``export``) and the verify's (``verify``)."""
+    process (``store.exports.export_step``) and its bytes mapped to the tree. Returns
+    ``(tree_hash, tree, stats, sha256)``; ``stats`` carries the export's answer
+    (``export``)."""
     from cadgen.store.build import build_tree_from_compound
-    from cadgen.store.exports import export_step, verify_document
-    from cadgen.store.parts import producer_identity
+    from cadgen.store.exports import export_step
     from cadgen.store.records import note_document_tree
 
     live: dict[str, Any] = {}
     tree_hash, tree, stats = build_tree_from_compound(shape, root_name=root_name, force=force, namer=namer,
                                                      materials=materials, live=live)
-    export = export_step(tree_hash, Path(path), names=names, shapes=live)
-    try:
-        producer = producer_identity()
-    except ValueError:
-        producer = None
-    note_document_tree(export["sha256"], tree_hash, producer=producer, verified=False, plain=not names)
-    verify = verify_document(tree_hash, Path(path), export["sha256"], producer=export["producer"])
-    return tree_hash, tree, {**stats, "export": export, "verify": verify}, str(export["sha256"])
+    export = export_step(tree_hash, Path(path), shapes=live)
+    note_document_tree(export["sha256"], tree_hash, producer=export["producer"])
+    return tree_hash, tree, {**stats, "export": export}, str(export["sha256"])
 
 
 def _occurrences(tree: Mapping[str, Any]) -> list[Mapping[str, Any]]:

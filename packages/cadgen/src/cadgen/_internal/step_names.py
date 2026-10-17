@@ -28,9 +28,8 @@ What a file cannot name is known by construction (:func:`unnameable`): STEP has 
 for a degenerate edge (a sphere's pole, a cone's apex), OCCT writes a face bounded by one
 seam alone (a whole sphere) with its natural bounds and no edges, and a free wire as one
 curve set with no entity per edge. The writer names none of those and every other face and
-edge; a verifier expects exactly that. Named export never fails where plain export
-succeeds: a name the transfer gave no entity, or a key whose product it did not map, is
-not written, which verifying the file reports.
+edge. Named export never fails where export without names succeeds: a name the transfer
+gave no entity, or a key whose product it did not map, is not written.
 """
 
 from __future__ import annotations

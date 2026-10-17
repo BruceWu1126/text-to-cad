@@ -1075,8 +1075,8 @@ def _normalize_negative_zero_reals_in_file(path: Path) -> bool:
 
 # OCCT's STEP reader ends a string literal at an escaped quote ('') followed by spaces and ','
 # or ')'. A name such as "post (6')" or "x('',y)" then loses its product or comes back renamed,
-# in every OCCT-based reader, and the file does not verify. Such a literal is written
-# with Part 21's \X\27 for each quote instead, which every reader decodes to the same name.
+# in every OCCT-based reader. Such a literal is written with Part 21's \X\27 for each quote
+# instead, which every reader decodes to the same name.
 #
 # OCCT also writes a name's non-ASCII characters as bytes: its UTF-8 read as Latin-1 and
 # encoded again ("Bügel" as "BÃ¼gel"), with any byte its C library takes for a space trimmed
@@ -1381,7 +1381,7 @@ def write_xcaf_doc_step_file(
 #: with any change to the bytes cadgen writes for the same tree: XCAF construction, the
 #: header, a canonicalization pass or a name. 3: non-ASCII names are written as Part 21
 #: directives (``ascii_name``). 4: a file carries its parts' keys and its elements' names
-#: (``step_names``), unless written plain.
+#: (``step_names``).
 STEP_WRITER_SCHEME = "cadgen-step-writer-4"
 
 
