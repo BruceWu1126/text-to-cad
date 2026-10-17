@@ -143,6 +143,12 @@ test("RadiosityFloor.setAtlasRect maps the inner square into the atlas, repeatab
   }
   assert.deepEqual([...us].sort(), [100 / 1024, 400 / 1024]);
   assert.deepEqual([...vs].sort(), [200 / 1024, 500 / 1024]);
+  // Lookups clamp to the chart's baked texel centres (the horizon ring and
+  // antialiased edge fragments sit on, or just past, the chart's edge).
+  const u = floor._material.uniforms;
+  assert.deepEqual(u.uUvMin.value.toArray(), [100.5 / 1024, 200.5 / 1024]);
+  assert.deepEqual(u.uUvMax.value.toArray(), [399.5 / 1024, 499.5 / 1024]);
+  assert.ok(floor._material.fragmentShader.includes("clamp( vUv1, uUvMin, uUvMax )"));
   // A second mapping (quality change → new atlas) must come from the original
   // corner flags, not from the already-mapped attribute.
   floor.setAtlasRect(2, 6, 1020, 1020, 2048);
@@ -315,4 +321,20 @@ test("collectLitMeshes picks the PBR meshes under a root and nothing else", asyn
   root.add(lit, unlit, line, multi, nested);
   assert.deepEqual(collectLitMeshes(root), [lit, standard]);
   assert.deepEqual(collectLitMeshes(null), []);
+});
+
+test("RadiosityStage rebuilds when a geometry is re-tessellated in place", async () => {
+  const { RadiosityStage } = await import("./radiosityStage.js");
+  const stage = new RadiosityStage({ capabilities: { isWebGL2: true }, extensions: { has: () => true } });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshPhysicalMaterial());
+  const h0 = stage._computeSceneHash([mesh]);
+  assert.equal(stage._computeSceneHash([mesh]), h0, "stable for an unchanged scene");
+  mesh.geometry.getAttribute("position").needsUpdate = true;
+  const h1 = stage._computeSceneHash([mesh]);
+  assert.notEqual(h1, h0, "rewritten positions change the hash");
+  const finer = new THREE.SphereGeometry(1, 8, 8);
+  mesh.geometry.setAttribute("position", finer.getAttribute("position"));
+  mesh.geometry.setIndex(finer.getIndex());
+  assert.notEqual(stage._computeSceneHash([mesh]), h1, "new vertex and index counts change the hash");
+  stage.dispose();
 });

@@ -43,16 +43,24 @@ const FLOOR_FRAGMENT = /* glsl */ `
   uniform float uFogStart;
   uniform float uFogEnd;
   uniform vec2 uCenter;
+  // Texel centres of the chart's first and last baked texels.
+  uniform vec2 uUvMin;
+  uniform vec2 uUvMax;
   varying vec2 vUv1;
   varying vec2 vLocal;
 
   void main() {
-    vec4 lm = texture2D( uLightmap, vUv1 );
+    // The inner square's edge is the chart's edge: a multisampled fragment
+    // on it is shaded at a pixel centre that can lie outside the triangle,
+    // extrapolating uv1 past the chart into the next chart's texels. Keep
+    // every lookup on this chart.
+    vec2 uv = clamp( vUv1, uUvMin, uUvMax );
+    vec4 lm = texture2D( uLightmap, uv );
     float valid = lm.a > 1e-6 ? uWeight : 0.0;
     float lum = dot( lm.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
     float envShare = 1.0 - ( uDirectShare.x + uDirectShare.y + uDirectShare.z );
     float envVis = valid > 0.0 ? clamp( lum / lm.a, 0.0, 1.0 ) : 1.0;
-    vec4 dv = texture2D( uDirectMap, vUv1 );
+    vec4 dv = texture2D( uDirectMap, uv );
     float directVis = dv.a > 0.5 ? dot( uDirectShare, clamp( dv.rgb, 0.0, 1.0 ) ) : 1.0 - envShare;
     float vis = clamp( envShare * envVis + directVis, 0.0, 1.0 );
     float shadowVis = 1.0 - uShadow * ( 1.0 - vis );
@@ -94,7 +102,9 @@ export class RadiosityFloor {
         uShadow: { value: 0.5 },
         uFogStart: { value: 1 },
         uFogEnd: { value: 2 },
-        uCenter: { value: new THREE.Vector2() }
+        uCenter: { value: new THREE.Vector2() },
+        uUvMin: { value: new THREE.Vector2(0, 0) },
+        uUvMax: { value: new THREE.Vector2(1, 1) }
       },
       transparent: true,
       depthWrite: false,
@@ -218,6 +228,9 @@ export class RadiosityFloor {
   /** Map the inner square's uv1 to a packed atlas rect (texels). */
   setAtlasRect(x, y, w, h, resolution) {
     if (!this._geometry || !this._cornerUv) return;
+    const u = this._material.uniforms;
+    u.uUvMin.value.set((x + 0.5) / resolution, (y + 0.5) / resolution);
+    u.uUvMax.value.set((x + w - 0.5) / resolution, (y + h - 0.5) / resolution);
     const attr = this._geometry.getAttribute("uv1");
     // Always map from the original corner flags: the attribute itself holds
     // atlas coordinates after the first call, so it cannot be re-derived.

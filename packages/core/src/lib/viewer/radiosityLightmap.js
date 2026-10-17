@@ -41,7 +41,7 @@
  *         shadow-strength control)
  * Direct-light map texel layout (linear, float, same atlas):
  *   r, g, b = visibility (0..1) of direct light 0, 1, 2
- *   a       = 1 for a baked texel (0 marks an empty gutter for the dilation)
+ *   a       = 1 for a baked texel (0 where no gutter reaches)
  *
  * The display side is a shader patch for MeshPhysicalMaterial that replaces
  * the IBL diffuse irradiance with the lightmap, occludes the ambient and
@@ -396,25 +396,50 @@ const DILATE_VERTEX = /* glsl */ `
 const DILATE_FRAGMENT = /* glsl */ `
   precision highp float;
   uniform sampler2D uPrev;
+  uniform sampler2D uCoverage;
   uniform vec2 uTexel;
   varying vec2 vUv;
   ${GLSL_COMMON}
+  // Gutter texels copy the texels the gather draws (the coverage mask): the
+  // mean of the covered texels within one texel, else within two, so they
+  // track the converging solution and bilinear sampling at a chart border
+  // never bleeds black into the surface. Covered texels keep their value
+  // (the gather redraws them right after). Gutters never copy other gutters:
+  // averaged over the frames, that diffuses a ramp between the charts on the
+  // two sides of a gutter, and a border lookup then reads the neighbouring
+  // chart's lighting (the shadow catcher's horizon ring, which samples its
+  // chart's edge, darkened on the side facing the model's charts).
   void main() {
-    // Every texel becomes the average of its valid neighbours; chart texels
-    // are redrawn by the gather afterwards, so only the gutters keep this,
-    // and they track the converging solution instead of their first value.
-    // Bilinear sampling at a chart border then never bleeds black (or
-    // another chart) into the surface.
+    if ( texture2D( uCoverage, vUv ).r > 0.5 ) {
+      gl_FragColor = tcvSane( texture2D( uPrev, vUv ) );
+      return;
+    }
     vec4 sum = vec4( 0.0 );
     float cnt = 0.0;
     for ( int oy = -1; oy <= 1; oy ++ ) {
       for ( int ox = -1; ox <= 1; ox ++ ) {
-        if ( ox == 0 && oy == 0 ) continue;
-        vec4 s = tcvSane( texture2D( uPrev, vUv + uTexel * vec2( float( ox ), float( oy ) ) ) );
-        if ( s.a > 0.0 ) { sum += s; cnt += 1.0; }
+        vec2 uv = vUv + uTexel * vec2( float( ox ), float( oy ) );
+        if ( texture2D( uCoverage, uv ).r > 0.5 ) { sum += tcvSane( texture2D( uPrev, uv ) ); cnt += 1.0; }
+      }
+    }
+    if ( cnt == 0.0 ) {
+      for ( int oy = -2; oy <= 2; oy ++ ) {
+        for ( int ox = -2; ox <= 2; ox ++ ) {
+          if ( abs( ox ) < 2 && abs( oy ) < 2 ) continue;
+          vec2 uv = vUv + uTexel * vec2( float( ox ), float( oy ) );
+          if ( texture2D( uCoverage, uv ).r > 0.5 ) { sum += tcvSane( texture2D( uPrev, uv ) ); cnt += 1.0; }
+        }
       }
     }
     gl_FragColor = cnt > 0.0 ? sum / cnt : vec4( 0.0 );
+  }
+`;
+
+/** Marks the atlas texels the gather draws (same uv1 placement as the gather). */
+const COVERAGE_FRAGMENT = /* glsl */ `
+  precision highp float;
+  void main() {
+    gl_FragColor = vec4( 1.0 );
   }
 `;
 
@@ -1011,12 +1036,33 @@ export class RadiosityLightmap {
       fragmentShader: DILATE_FRAGMENT,
       uniforms: {
         uPrev: { value: null },
+        uCoverage: { value: null },
         uTexel: { value: new THREE.Vector2(1 / this.resolution, 1 / this.resolution) }
       },
       depthTest: false,
       depthWrite: false,
       blending: THREE.NoBlending
     });
+    // Coverage mask of the gather geometry, rendered once per object set.
+    this._coverage = new THREE.WebGLRenderTarget(this.resolution, this.resolution, {
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      depthBuffer: false,
+      stencilBuffer: false,
+      generateMipmaps: false
+    });
+    this._coverage.texture.name = "radiosityCoverage";
+    this._coverageMaterial = new THREE.ShaderMaterial({
+      vertexShader: GATHER_VERTEX,
+      fragmentShader: COVERAGE_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NoBlending
+    });
+    this._coverageMaterial.name = "radiosityCoverage";
+    this._coverageDirty = true;
     this._dilatePlane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._dilateMaterial);
     this._dilatePlane.frustumCulled = false;
     this._dilatePlane.renderOrder = -1;
@@ -1148,6 +1194,7 @@ export class RadiosityLightmap {
     if (floor) {
       this._floorProxy = this._makeProxy(floor, true);
     }
+    this._coverageDirty = true;
     const u = this._gatherMaterial.uniforms;
     u.uUp.value.copy(this._up);
     u.uEnvUp.value.copy(this._up);
@@ -1225,6 +1272,7 @@ export class RadiosityLightmap {
     try {
       if (this._needsClear) this._clearLightmaps();
       this._syncProxies();
+      if (this._coverageDirty) this._renderCoverage(renderer);
       if (this._frame === 0) this._computeBounds();
       this._frame++;
       this._updateDirections();
@@ -1303,6 +1351,8 @@ export class RadiosityLightmap {
     this._dilateMaterial.dispose();
     this._lightDilateMaterial.dispose();
     this._dilatePlane.geometry.dispose();
+    this._coverage.dispose();
+    this._coverageMaterial.dispose();
     this._disposeLights();
   }
 
@@ -1613,6 +1663,30 @@ export class RadiosityLightmap {
     this._gatherProxies = [];
     this._lightGatherProxies = [];
     this._floorProxy = null;
+  }
+
+  /**
+   * Rasterize every gather mesh (visible or not) into the coverage mask the
+   * dilation copies from; the mask only changes with the object set.
+   */
+  _renderCoverage(renderer) {
+    const scene = this._gatherScene;
+    const visible = this._gatherProxies.map((g) => g.visible);
+    for (const g of this._gatherProxies) g.visible = true;
+    this._dilatePlane.visible = false;
+    scene.overrideMaterial = this._coverageMaterial;
+    renderer.setRenderTarget(this._coverage);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, false, false);
+    renderer.render(scene, this._gatherCamera);
+    scene.overrideMaterial = null;
+    this._dilatePlane.visible = true;
+    this._gatherProxies.forEach((g, i) => {
+      g.visible = visible[i];
+    });
+    this._dilateMaterial.uniforms.uCoverage.value = this._coverage.texture;
+    this._lightDilateMaterial.uniforms.uCoverage.value = this._coverage.texture;
+    this._coverageDirty = false;
   }
 
   /** Mirror world matrices, visibility and albedo from the display meshes. */

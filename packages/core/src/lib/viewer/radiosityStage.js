@@ -833,7 +833,15 @@ export class RadiosityStage {
     for (const mesh of meshes) {
       if (!mesh?.isMesh) continue;
       h = hashInt(h, mesh.id);
-      h = hashInt(h, mesh.geometry?.id ?? 0);
+      const geometry = mesh.geometry;
+      h = hashInt(h, geometry?.id ?? 0);
+      // A geometry re-tessellated in place (same object, new attributes)
+      // needs new charts as much as a new geometry does.
+      const position = geometry?.getAttribute?.("position");
+      h = hashInt(h, position ? position.count : -1);
+      h = hashInt(h, position ? position.version : -1);
+      h = hashInt(h, geometry?.index ? geometry.index.count : -1);
+      h = hashInt(h, geometry?.index ? geometry.index.version : -1);
       h = hashInt(h, isLitMaterial(mesh.material) ? 1 : 0);
     }
     h = hashInt(h, this._floorParams ? 1 : 0);
