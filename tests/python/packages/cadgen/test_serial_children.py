@@ -289,6 +289,9 @@ class HitsHealTheTree(SerialChildrenCase):
         self.assertEqual(self.done(), [], "the revert ran a body")
         self.assertEqual(self.current(), ["child", "parent"])
         self.assertIn("restored", err)
+        saved = [e for e in self.events if e.get("saved")]
+        self.assertTrue(saved and all(isinstance(e.get("elapsed"), float) for e in saved),
+                        "a restored model's saved event carries an elapsed too")
         for name, path in (("child", self.child), ("parent", self.parent)):
             self.assertEqual(self.record(path)["key"], first[name], f"{name} is not at its first key")
             self.assertEqual((self.root / f"{name}.step").read_bytes(), files[name], f"{name}.step is not the first build's")
@@ -348,6 +351,9 @@ class QueuedExports(SerialChildrenCase):
             done = next(i for i, e in enumerate(events) if e.get("state") == "done" and Path(e["model"]).stem == name)
             saved = next(i for i, e in enumerate(events) if e.get("saved") and Path(e["model"]).stem == name)
             self.assertLess(done, saved, f"{name}: its result is recorded before its file is written")
+            self.assertIn("elapsed", events[saved], f"{name}: its saved event carries the build clock's elapsed")
+            self.assertGreaterEqual(events[saved]["elapsed"], events[done]["elapsed"],
+                                    f"{name}: its saved event reads the clock its done event reads")
             self.assertTrue((self.root / f"{name}.step").is_file())
         order = [Path(e["model"]).stem for e in events if e.get("saved")]
         self.assertEqual(order, ["child", "parent", "grand"], "children's files land first, as queued")

@@ -211,7 +211,8 @@ class _Export:
     in the order queued -- children before the parent that called them
     (``cadgen.authoring.build_run``). Finishing one publishes the written file (the file
     and its sidecar into place, the expected pair checked first, §7; the bytes mapped to
-    the tree pending their verify; the record's output entry; the ``STEP saved`` event),
+    the tree pending their verify; the record's output entry; the ``STEP saved`` event,
+    its ``elapsed`` read from the clock the model's ``done`` event reads),
     has it verified (a build with no daemon waits for the answer and warns; a daemon's
     verify finishes on the pool), then cuts the model's declared meshes from that file's
     bytes. A kept STEP submits nothing and publishes only its sidecar; a current model has
@@ -230,6 +231,7 @@ class _Export:
                  display: bool = False, announce: str | None = None) -> None:
         from contextlib import ExitStack
 
+        from cadgen._internal import build_timing
         from cadgen.authoring import current_run
 
         run = current_run()
@@ -237,6 +239,10 @@ class _Export:
             raise RuntimeError(f"{spec.cad_ref}: an export was queued outside a build run")
         self.spec, self.tree, self.logger = spec, tree, logger
         self.step, self.display, self.announce = step, display, announce
+        # The clock the model's ``done`` event reads, so its ``STEP saved`` event is on it
+        # too. A model restored rather than built has no build clock: its export's queueing.
+        clock = build_timing.current()
+        self.started = clock.started if clock is not None else time.perf_counter()
         # The summary line is the command's, in its logger's voice; the job's spans and
         # warnings are the build's (``logger``, verbose or not as the build was given it).
         self.command_logger = run.logger if run.logger is not None else logger
@@ -334,7 +340,7 @@ class _Export:
             forget_output(sidecar_key)
         write_record(model_path, record)
         executors.emit_event(executors.model_event(
-            model_path, "building", phase="STEP saved",
+            model_path, "building", phase="STEP saved", elapsed=time.perf_counter() - self.started,
             saved={"output": str(step_path), "tree": tree, "documentHash": digest},
         ))
         if export is not None:
