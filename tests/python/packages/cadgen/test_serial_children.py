@@ -359,6 +359,12 @@ class QueuedExports(SerialChildrenCase):
         self.assertEqual(order, ["child", "parent", "grand"], "children's files land first, as queued")
         self.assertEqual(saved_first, [3], "the result line follows the last file written")
 
+    def test_verbose_names_the_moment_each_file_landed_in_the_order_they_did(self):
+        code, err = self.build(self.parent, "--verbose")
+        self.assertEqual(code, 0, err)
+        landed = [line.split()[3] for line in err.splitlines() if line.startswith("[cadgen] STEP saved ")]
+        self.assertEqual(landed, ["child.step", "parent.step"], "children's files land first, as queued")
+
     def test_a_failed_export_fails_the_command_and_the_next_run_writes_the_file_without_a_run(self):
         from cadgen.store import exports
 

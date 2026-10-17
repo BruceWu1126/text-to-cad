@@ -658,7 +658,10 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   queued -- children before the parent that called them -- each one publishing
   its file, having it verified, then cutting its meshes. A model's `done` event
   says its result is recorded; its `STEP saved` event follows when its file
-  lands. The command prints its result once every export is finished -- or,
+  lands, with the `elapsed` of the clock the `done` event reads (the build tree
+  drops an event after its model's done, so `--verbose` says it too:
+  `STEP saved <file> completed in <elapsed>`). The command prints its result
+  once every export is finished -- or,
   with `--no-wait`, once every model's result is recorded, the files written
   after: a daemon worker releases its client (the `released` frame, §9) and
   writes them before its next job, a build with no daemon before it exits, and

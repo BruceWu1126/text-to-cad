@@ -339,10 +339,14 @@ class _Export:
             outputs.pop(sidecar_key, None)
             forget_output(sidecar_key)
         write_record(model_path, record)
+        saved_at = time.perf_counter() - self.started
         executors.emit_event(executors.model_event(
-            model_path, "building", phase="STEP saved", elapsed=time.perf_counter() - self.started,
+            model_path, "building", phase="STEP saved", elapsed=saved_at,
             saved={"output": str(step_path), "tree": tree, "documentHash": digest},
         ))
+        # The build tree drops an event that follows its model's done, so a person (or a
+        # benchmark) reading --verbose finds the moment here, as for any stage.
+        logger.timing(f"STEP saved {step_path.name}", saved_at)
         if export is not None:
             _verify_saved(tree, step_path, digest, producer=export["producer"])
         return export is not None
