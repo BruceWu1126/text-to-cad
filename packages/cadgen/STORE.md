@@ -571,9 +571,12 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   CAD Viewer reads the table when it needs it -- a pick, a measure, a node
   opened -- by the part's key, bound to the object its entry names
   (`GET /__tess_cache/<part>.selectors.json`), and joins it to the mesh by
-  ordinal; the CLI (`assembly_lookup`) reads the same table from a view's
-  `components/<cid>.selectors.json`. So a ref the page shows resolves in
-  `inspect` to the entity it names, and nothing in a browser mints one.
+  ordinal; a snapshot's `--focus` and `--hide` and a build's mate axes
+  (`assembly_lookup`) read the same table from a view's
+  `components/<cid>.selectors.json`, and `read_scene(path).resolve(ref)` names
+  each element by the same name (`.entities("face")` lists them). So a ref the
+  viewer's Copy gives resolves to the entity it names wherever it is read, and
+  nothing in a browser mints one.
 
   Meshes are derived the same way, and by cadgen alone. The mesher
   (`_internal/tessellate.py`) runs OCCT's `BRepMesh_IncrementalMesh` on the

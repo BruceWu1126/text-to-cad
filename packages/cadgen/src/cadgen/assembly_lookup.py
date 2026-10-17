@@ -108,8 +108,8 @@ def transform_bbox(matrix: list[float], bbox: object) -> dict[str, list[float]] 
 # `_surface_params`, which is what writes the `params` this places. A point is spelled `origin`
 # (plane/cylinder/cone/line) or `center` (circle/ellipse/hyperbola/parabola/sphere/torus),
 # never both, so a list that knows only one spelling silently leaves half the analytic types
-# in component-local coordinates -- which is what sent `inspect measure` between a circular
-# edge and a line 37 mm apart on an axis where they touch (tom-cad FEEDBACK issue 2). Any new
+# in component-local coordinates -- which is what once measured a circular edge and a line
+# 37 mm apart on an axis where they touch (tom-cad FEEDBACK issue 2). Any new
 # analytic type must land in one of these lists or be a scalar; that is the review question.
 _POINT_FIELDS = ("center",)
 _POINT_PARAM_KEYS = ("origin", "center", "location")
@@ -494,12 +494,10 @@ def merge_assembly_occurrences(
 
 def index_with_assembly_occurrences(index: SelectorIndex, artifact: object) -> SelectorIndex:
     """The whole instance tree -- occurrences AND their entities -- keyed off a
-    ``StepArtifact``.
-
-    Lives here rather than at either call site because there are TWO of them and they had already
-    drifted: ``snapshot_cli.artifact_selector_index`` serves ``--focus``/``--hide``, while
-    ``inspect refs`` builds its own index from the same bundle. Fixing one would have left the
-    other reporting the bug, which is how 0b presented as three separate tool failures.
+    ``StepArtifact``: what a snapshot's ``--focus`` and ``--hide`` resolve their refs in
+    (``snapshot_cli.artifact_selector_index``). It lives here, beside the composition a
+    build's mate axes use (:func:`merge_assembly_occurrences`, :func:`merge_assembly_entities`),
+    so that no reader of a ref builds an index of its own that can drift from the others.
     """
     if index is None or artifact is None:
         return index
