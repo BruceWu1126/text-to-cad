@@ -70,7 +70,7 @@ _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 # than doing work. Interrupting a parked poll costs the client one re-poll
 # after it reloads; interrupting a compile would cost a build, which is why
 # every other route, `POST /__cad/artifact` above all, is counted.
-_UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/preview", "/__cad/parts", "/__cad/parts/cancel",
+_UNCOUNTED_ROUTES = frozenset({"/__cad/server", "/__cad/preview", "/__cad/parts", "/__cad/parts/cancel", "/__cad/measure",
                                "/__cad/analytics", "/__cad/analytics/activity", "/__cad/version"})
 
 
@@ -261,10 +261,11 @@ class CadApp:
         from cadgen._internal.picker import available
 
         from .drawings import DrawingRenders
-        from .parts import PartSubscribers
+        from .parts import FaceMeasures, PartSubscribers
         from .warm import CatalogWarmer
 
         self.part_subscribers = PartSubscribers()
+        self.measures = FaceMeasures()
         # The drawing route's renders, off the request and one per drawing (``drawings.py``).
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
         # What a watched build saves, its catalog row computed before a read asks (``warm.py``).
@@ -611,6 +612,12 @@ class CadApp:
                         response.send_empty(413, [("connection", "close")])
                         return
                     response.send_json(200, self.part_subscribers.resolve(request.body()))
+                elif pathname == "/__cad/measure":
+                    if int(request.headers.get("content-length") or 0) > 4 * 1024:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    status, payload = self.measures.response(request.body())
+                    response.send_json(status, payload)
                 elif pathname == "/__cad/parts/cancel":
                     if int(request.headers.get("content-length") or 0) > 128 * 1024:
                         response.send_empty(413, [("connection", "close")])

@@ -22,7 +22,7 @@ from cadgen.store.build import build_tree_from_compound
 from cadgen.store.index import remove_entry
 from cadgen.store.objects import object_path
 from cadgen.store.view import descriptor_for_view
-from cadgen.viewer.parts import PartSubscribers, _request
+from cadgen.viewer.parts import FaceMeasures, PartSubscribers, _request
 
 
 class SubscriberFuture(Future):
@@ -452,6 +452,92 @@ print(json.dumps({cid: entry['part'] for cid, entry in view['components'].items(
         self.assertEqual((target / entry["selectors"]).read_bytes(),
                          object_path(parts.probe(self.part)["selectors"]["object"]).read_bytes())
         self.assertEqual(document_entry_for_hash(digest)["producer"], self.producer)
+
+
+
+class FaceMeasureRequests(unittest.TestCase):
+    """A face's exact area and centroid, which no part carries, measured when a view asks: one
+    pool job per face, joined by every request for it, its answer the store's afterwards."""
+
+    def setUp(self):
+        self.tmp = generated_cad_directory(prefix="face-measure-")
+        self.addCleanup(self.tmp.cleanup)
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.tmp.name) / "store"), "CADGEN_DAEMON": "0"})
+        env.start()
+        self.addCleanup(env.stop)
+        from build123d import Solid
+
+        self.body = Solid.make_box(10, 8, 4).cut(Solid.make_cylinder(2, 10))
+        self.tree, _, _ = build_tree_from_compound(self.body, root_name="plate")
+        self.producer = parts.producer_identity()
+        view = descriptor_for_view(self.tree, producer=self.producer)
+        self.cid, entry = next(iter(view["components"].items()))
+        self.request = {"tree": self.tree, "viewId": view["viewId"], "producer": self.producer, "cid": self.cid,
+                        "part": entry["part"], "face": 1}
+
+    def exact(self, face):
+        """GProps over the face as the stored component decodes, the live body's twin."""
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+        from OCP.TopAbs import TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.body.wrapped, TopAbs_FACE, faces)
+        props = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(faces.FindKey(face), props)
+        return props.Mass()
+
+    def ask(self, measures, **change):
+        return measures.response(json.dumps({**self.request, **change}).encode())
+
+    def test_each_face_is_measured_once_by_its_job_and_answered_by_the_store_after(self):
+        measures = FaceMeasures()
+        for face in (1, 7):
+            status, payload = self.ask(measures, face=face)
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload["face"], face)
+            self.assertAlmostEqual(payload["area"], self.exact(face), places=9)
+            self.assertEqual(len(payload["center"]), 3)
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("measured again")):
+            status, payload = self.ask(FaceMeasures(), face=7)
+        self.assertEqual((status, payload["face"]), (200, 7))
+        self.assertAlmostEqual(payload["area"], self.exact(7), places=9)
+
+    def test_a_job_still_running_answers_202_and_every_request_for_the_face_joins_it(self):
+        pending = Future()
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=pending) as submit:
+            measures = FaceMeasures(hold_seconds=0.01, retry_ms=250)
+            self.assertEqual(self.ask(measures), (202, {"state": "measuring", "retryMs": 250}))
+            self.assertEqual(self.ask(measures), (202, {"state": "measuring", "retryMs": 250}))
+            pending.set_result({"area": 2.5, "center": [1.0, 2.0, 3.0]})
+            self.assertEqual(self.ask(measures), (200, {"face": 1, "area": 2.5, "center": [1.0, 2.0, 3.0]}))
+        submit.assert_called_once()
+        self.assertEqual(submit.call_args.args[0], {"kind": "measure", "tree": self.tree, "cid": self.cid, "face": 1})
+
+    def test_a_face_the_component_does_not_have_is_its_jobs_failure(self):
+        status, payload = self.ask(FaceMeasures(), face=999)
+        self.assertEqual(status, 400)
+        self.assertIn("faces, not a face 999", payload["error"])
+
+    def test_a_request_not_naming_this_views_part_and_a_face_never_starts_a_job(self):
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("unexpected job")):
+            for change in ({"cid": "0" * 16}, {"part": "f" * 64 + "-v1"}, {"viewId": "0" * 64}, {"face": 0},
+                           {"face": True}, {"face": "1"}, {"extra": 1}):
+                with self.subTest(change=change), self.assertRaises(ValueError):
+                    self.ask(FaceMeasures(), **change)
+
+    def test_the_route_is_guarded_and_answers_the_face(self):
+        from tests.python.packages.cadgen.viewer.test_http_layer import ServerFixture
+
+        fixture = ServerFixture()
+        self.addCleanup(fixture.close)
+        body = json.dumps(self.request).encode()
+        self.assertEqual(fixture.request("POST", "/__cad/measure", body=body)[0], 403)
+        status, _, payload = fixture.request("POST", "/__cad/measure", body=body, headers={"x-cadgen-viewer": "1"})
+        self.assertEqual(status, 200, payload)
+        self.assertAlmostEqual(json.loads(payload)["area"], self.exact(1), places=9)
 
 
 if __name__ == "__main__":

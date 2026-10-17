@@ -142,6 +142,8 @@ export interface CadPartRequest {
   components: CadPartComponentRequest[];
   job?: string;
 }
+export interface CadMeasureRequest { tree: string; viewId: string; producer: CadProducer; cid: string; part: string; face: number }
+export interface CadFaceMeasure { face: number; area: number; center: [number, number, number] }
 export interface CadPartResponse {
   viewId: string; job?: string; replacementView?: CadRuntimeView;
   components: Record<string, {state: 'pending' | 'ready' | 'failed'; part: string; record?: Omit<PartRow, 'part'>; job?: string; error?: string; code?: string}>;
@@ -278,6 +280,8 @@ export interface CadClient extends CadWorkspaceService {
   readonly origin: string;
   requestParts(body: CadPartRequest, options?: CadRequestOptions): Promise<CadPartResponse>;
   cancelPartRequest(body: { job: string }, options?: CadRequestOptions): Promise<{ok?: boolean}>;
+  /** One face's exact area and centroid, measured by cadgen on its component's stored BREP. */
+  measureFace(body: CadMeasureRequest, options?: CadRequestOptions): Promise<CadFaceMeasure>;
   editingPreview(file: string, options?: CadRequestOptions & { after?: string }): Promise<CadEditingPreview>;
 }
 export interface CadClientOptions {

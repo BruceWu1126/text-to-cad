@@ -3,6 +3,12 @@
 made the tree derived. A part the store lacks is derived by ONE build-pool job for the
 request (``kind: display``); this server never derives.
 
+And one face's exact area and centroid (``POST /__cad/measure``, :class:`FaceMeasures`),
+which no part carries: the store's answer when it holds one, else one build-pool job
+(``kind: measure``, ``store.parts.measure_face``) that every request for the face joins
+while it runs, waited for only as long as the app's hold, then a 202 that has the page
+ask again; this server never measures.
+
 Tokens are disposable subscribers to that job, never persistent store
 entries or editing sessions. Every poll repeats and validates its immutable
 inputs. Disconnect/cancellation detaches that subscriber, not another reader,
@@ -13,6 +19,7 @@ and starts no other for a job nobody is subscribed to.
 from __future__ import annotations
 
 from collections import OrderedDict
+from concurrent.futures import wait as wait_for
 import json
 import logging
 import os
@@ -30,6 +37,12 @@ LOG = logging.getLogger("cadgen.viewer.parts")
 MAX_COMPONENTS = 64
 MAX_SUBSCRIBERS = 256
 SUBSCRIBER_IDLE_SECONDS = 120
+# How long a measure request waits on its job before it answers 202: a face measures inside it
+# but where its component is large to decode, which costs one request per hold.
+MEASURE_HOLD_SECONDS = 2.0
+# How long a finished measure's answer is kept for the requests that follow it, and how many.
+MEASURED_SECONDS = 30.0
+MEASURED_MAX = 64
 
 # A tree hash names its bytes, and those bytes name every component the tree pins
 # with its entry, so a tree's component map cannot change. The viewer verifies it
@@ -139,6 +152,90 @@ def _request(body: bytes) -> tuple[dict, dict, dict, str | None]:
     # The named components' objects, still on disk; the map itself is read-only.
     _pinned(tree, selected)
     return {"viewId": view_id}, selected, operation, job
+
+
+def _measure_request(body: bytes) -> tuple[dict, dict]:
+    """``(component entry, artifact operation)`` of a measure request: the view the page
+    holds (``tree``, ``viewId``, ``producer``), a component of its tree and the part key the
+    view gave it (``cid``, ``part``), and a face of it by ordinal (``face``)."""
+    if len(body) > 4 * 1024:
+        raise ValueError("measure request is too large")
+    value = json.loads(body)
+    fields = {"tree", "viewId", "producer", "cid", "part", "face"}
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError("measure request requires tree, viewId, producer, cid, part and face")
+    producer = parts.producer_fields(value["producer"])
+    tree = value["tree"]
+    if not _is_digest(tree):
+        raise ValueError("measure request names no tree")
+    pin = _pinned(tree)
+    if value["viewId"] != parts._view_id(tree, producer):
+        raise ValueError("measure request mixes runtime views")
+    cid = value["cid"]
+    entry = pin.components.get(cid) if type(cid) is str else None
+    if entry is None or value["part"] != parts.part_key(entry, producer):
+        raise ValueError("measure request names an unpinned component or part")
+    face = value["face"]
+    if type(face) is not int or face < 1:
+        raise ValueError("measure request names no face")
+    _pinned(tree, (cid,))
+    return entry, {"kind": "measure", "tree": tree, "cid": cid, "face": face}
+
+
+class FaceMeasures:
+    """``POST /__cad/measure``'s jobs: one per face, off the request, joined by every request
+    for it. ``hold_seconds`` is how long a request waits on a job before answering 202, and
+    ``retry_ms`` the wait the 202 asks of the page before it asks again: the CAD Viewer holds
+    and has the page ask again at once; the CAD app's tunnel, whose calls share a host's few
+    slots, holds briefly and has its page come back a moment later (``cadgen.mcp.tunnel``)."""
+
+    def __init__(self, *, hold_seconds: float = MEASURE_HOLD_SECONDS, retry_ms: int = 0, clock=time.monotonic):
+        self.hold_seconds = hold_seconds
+        self.retry_ms = retry_ms
+        self._clock = clock
+        self._lock = threading.Lock()
+        # request key -> (future, when it finished or None)
+        self._jobs: dict[str, list] = {}
+
+    def response(self, body: bytes) -> tuple[int, dict]:
+        """``(status, body)``: the face's ``{"face", "area", "center"}`` at 200, 202 while it is
+        measured, or ``{"error": ...}`` at 400 for a face its job could not measure."""
+        from cadgen.daemon.artifacts import request_key
+
+        entry, operation = _measure_request(body)
+        face = operation["face"]
+        remembered = parts.remembered_face_measure(entry, face)
+        if remembered is not None:
+            return 200, {"face": face, **remembered}
+        future = self._job(request_key(operation), operation)
+        if not wait_for([future], timeout=self.hold_seconds).done:
+            return 202, {"state": "measuring", "retryMs": self.retry_ms}
+        try:
+            value = future.result()
+        except Exception as error:  # noqa: BLE001 - the face's own failure, answered to the page
+            LOG.warning("face measure failed for %s face %d: %r", operation["cid"], face, error)
+            return 400, {"error": str(error) or type(error).__name__}
+        return 200, {"face": face, **value}
+
+    def _job(self, key: str, operation: dict):
+        """The job measuring this face: the one running, or finished recently enough to answer
+        from, else a new one."""
+        from cadgen.daemon.artifacts import submit_artifact
+
+        now = self._clock()
+        with self._lock:
+            finished = sorted((job[1], name) for name, job in self._jobs.items() if job[1] is not None)
+            surplus = len(finished) - MEASURED_MAX
+            for index, (finished_at, name) in enumerate(finished):
+                if index < surplus or now - finished_at > MEASURED_SECONDS:
+                    del self._jobs[name]
+            job = self._jobs.get(key)
+            if job is not None:
+                return job[0]
+            future = submit_artifact(operation, store_root=store_root())
+            job = self._jobs[key] = [future, None]
+        future.add_done_callback(lambda _future: job.__setitem__(1, self._clock()))
+        return future
 
 
 class PartSubscribers:

@@ -1,6 +1,8 @@
 """Build-pool artifact jobs, independent of source models: this runtime's producer
 (``kind: producer``); the display data of the parts a view found missing from the
-store (``kind: display``: one request, one job, one worker); a stored tree written to
+store (``kind: display``: one request, one job, one worker); one face's exact area and
+centroid, measured on its component's stored BREP for a view or a mate's axis that asks
+(``kind: measure``, ``store.parts.measure_face``); a stored tree written to
 a staged STEP (``kind: export``) and a written document checked against the tree it
 was written from (``kind: verify``, ``store/exports.py``). A job runs on a daemon
 worker, or, with no daemon (``CADGEN_DAEMON=0``), in the process that asks, on a
@@ -76,6 +78,12 @@ def normalize_request(request):
             raise ValueError("artifact names must be a boolean")
         return {"kind": kind, "tree": _digest(request["tree"], "tree"), "out": _path(request["out"], "out"),
                 "names": request["names"]}
+    if kind == "measure" and set(request) == {"kind", "tree", "cid", "face"}:
+        face = request["face"]
+        if type(face) is not int or face < 1:
+            raise ValueError("artifact face must be a face ordinal, an integer from 1")
+        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cid": _digest(request["cid"], "cid", _CID),
+                "face": face}
     if kind == "verify" and set(request) == {"kind", "tree", "document", "sha256", "producer"}:
         producer = request["producer"]
         return {"kind": kind, "tree": _digest(request["tree"], "tree"),
@@ -83,7 +91,8 @@ def normalize_request(request):
                 "producer": None if producer is None else _producer(producer)}
     if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
         raise ValueError("artifact request must be producer; display with exactly tree, cids and producer; "
-                         "export with tree, out and names; or verify with tree, document, sha256 and producer")
+                         "measure with tree, cid and face; export with tree, out and names; "
+                         "or verify with tree, document, sha256 and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
@@ -153,6 +162,8 @@ def execute(request, *, keep_going=None):
 
     if request["kind"] == "producer":
         return parts.producer_identity()
+    if request["kind"] == "measure":
+        return parts.measure_face(request["tree"], request["cid"], request["face"])
     if request["kind"] in ("export", "verify"):
         from cadgen.store import exports
 

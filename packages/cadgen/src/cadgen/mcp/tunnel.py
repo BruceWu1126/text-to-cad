@@ -77,6 +77,9 @@ KEPT_BODIES_MAX_BYTES = 256 * 1024 * 1024
 # docstring): about one call a second while a large drawing renders, as a view's sync makes.
 DRAWING_HOLD_SECONDS = 0.25
 DRAWING_RETRY_MS = 750
+# A face's measure (``POST /__cad/measure``) holds a call no longer than a drawing does.
+MEASURE_HOLD_SECONDS = 0.25
+MEASURE_RETRY_MS = 250
 _CONTENT_RANGE = re.compile(r"bytes [0-9]+-([0-9]+)/([0-9]+)")
 
 
@@ -145,6 +148,7 @@ class ViewerTunnel:
                 # The server's recorder: a person's answer on a card here is the CAD app's.
                 app.analytics, app.consent_by = self._analytics, "app"
                 app.drawings.hold_seconds, app.drawings.retry_ms = DRAWING_HOLD_SECONDS, DRAWING_RETRY_MS
+                app.measures.hold_seconds, app.measures.retry_ms = MEASURE_HOLD_SECONDS, MEASURE_RETRY_MS
                 self._app = app
             return self._app
 

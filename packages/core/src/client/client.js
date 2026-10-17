@@ -31,6 +31,8 @@ function abortError() {
 
 // The longest a drawing's 202 may ask the client to wait before it asks again.
 const DRAWING_RETRY_MAX_MS = 5000;
+// The longest a measure's 202 may have the client wait before it asks again.
+const MEASURE_RETRY_MAX_MS = 2000;
 
 /** `ms` of waiting that `signal` ends early, as an AbortError. */
 function pause(ms, signal) {
@@ -307,6 +309,21 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
         body, signal, method: 'POST', operation: 'parts',
         headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
       });
+    },
+    async measureFace(body, { signal } = {}) {
+      // A face's exact area and centroid, measured by cadgen on its component's stored BREP
+      // (`POST /__cad/measure`, no part carries them): the store's answer at once, else a
+      // build-pool job, whose 202 { state: 'measuring', retryMs } has the client ask again.
+      // `body` names the view, the component and its part, and the face by its ordinal.
+      for (;;) {
+        const reply = await request('/__cad/measure', {
+          body, signal, method: 'POST', operation: 'measure', timeoutMs: 10_000,
+          headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
+        });
+        if (reply?.state !== 'measuring') return reply;
+        await pause(Math.min(Math.max(Number(reply.retryMs) || 0, 0), MEASURE_RETRY_MAX_MS), signal);
+        if (disposed) throw abortError();
+      }
     },
     cancelPartRequest(body, { signal } = {}) {
       return request('/__cad/parts/cancel', {

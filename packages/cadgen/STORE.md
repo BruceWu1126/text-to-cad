@@ -84,7 +84,7 @@ One word is NOT retired, and it has exactly one meaning:
   index/provenance/<sha256(script::function)>-v<schema>  CODE side: which operation at which source frame made each component and element of the model's current result (§3)
   index/result/<key>                  CODE side: a model's result under its key -- the record and provenance written for it, and its tree (§3; derived, evictable, §8)
   index/component/<cid>               geometry-input entries → encoded BREP and intrinsic recipe
-  index/bounds/<sha256(bounds key)>   boxes, leaf layouts, topology counts and geometric tokens of stored geometry, inline
+  index/bounds/<sha256(bounds key)>   boxes, leaf layouts, topology counts, geometric tokens and faces' exact areas of stored geometry, inline
   index/part/<digest>-v<version>      a part's display data → its display mesh (GLB) and selector table objects
   index/drawing/<sha256(scheme + document hash)>  a 2D drawing's render payload → object hash
   index/skin/<sha256(scheme + document + animation + meshes)>  a document's tube skins → object hash
@@ -147,8 +147,10 @@ curved, its loose box), by which the adaptive edge policy classifies a result's
 components (`step_scene_mesh.prototype_topology`,
 `store.build._edge_rendering`) -- a build measures its own as it walks them and
 reads a linked child's by the BREP its tree names, decoding one only where the
-entry is missing, so no document of the result is assembled for them; and
-geometric tokens (below). Nothing in the index holds a value computed while a
+entry is missing, so no document of the result is assembled for them;
+geometric tokens (below); and a face's exact area and centroid, keyed by its
+component's BREP and the face's ordinal, measured when a view asks for them
+(§3, *A face's area*). Nothing in the index holds a value computed while a
 model runs (README law 18): a model's own checks and operations always execute.
 
 ### The two sides of the store — a law
@@ -515,6 +517,20 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   `store/view.py`), and one with nothing else to show fails. A mesh export
   fails instead, naming its file and the part: a file without a part is not
   the file asked for.
+
+  **A face's area** is no part's: no reader takes it but a person looking at
+  one face -- a view's Reference panel, its measure tool -- and a mate's axis
+  that falls back to a face's centroid. So a part's derivation measures no
+  face's area or centroid; the face is measured where it is asked for, exactly,
+  on its component's stored BREP (GProps), by ONE build-pool job per face
+  (`kind: measure`, `store.parts.measure_face`), remembered in `index/bounds` by
+  the component's BREP and the face's ordinal so each face is measured once. A
+  view asks `POST /__cad/measure` with the view it holds (`tree`, `viewId`,
+  `producer`), the component and its part key (`cid`, `part`) and the face's
+  ordinal (`face`): the store's answer at once, else the face's job, which
+  every request for it joins while it runs, waited for only as long as the
+  app's hold, then a 202 `{state: "measuring", retryMs}` that has the page ask
+  again (`viewer/parts.py`, `FaceMeasures`); the server never measures.
 
   A part's display data is ONE index entry, `index/part/<key>`
   (`store/parts.py`), naming TWO objects -- its display mesh and its selector
@@ -1754,7 +1770,7 @@ asked. A child a parent's body calls is no job: it is decoded from its stored
 result or built serially inside the parent's own process (§9a). What goes to
 the pool is a document compile (`cadgen.daemon.executors.submit_compile`: a
 door's, the CAD Viewer's, or a body's `read_step` of a file with no tree) and
-the artifact jobs (§3: display, export, verify), with two executors that behave
+the artifact jobs (§3: display, measure, export, verify), with two executors that behave
 identically:
 
 - **Daemon executor (default).** Workers are persistent and warm. The routing

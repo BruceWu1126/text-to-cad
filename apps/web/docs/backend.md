@@ -241,6 +241,7 @@ asked for through the part request, never tessellated in the page.
 | `POST /__cad/sketches?name=...` | Save a PNG a copied prompt names by path (a Quick Edit's sketch) as scratch in the system's temporary directory; answers its absolute path. |
 | `POST /__cad/shutdown` | Exit: a newer launch replacing this viewer, or `cadgen viewer stop`. Answers 202, then stops and frees the port. |
 | `POST /__cad/parts` | Read components' part records from the store; the parts it lacks, one build-pool job derives. |
+| `POST /__cad/measure` | One face's exact area and centroid (`{tree, viewId, producer, cid, part, face}`): the store's answer, else one build-pool job measures the component's stored BREP; 202 `{state: "measuring", retryMs}` while it runs. |
 | `POST /__tess_cache/probe` | The parts' records, for part keys. |
 | `GET /__tess_cache/<part>.glb` | Read a part's display mesh, a GLB body, bound to its object (POST answers 405: cadgen writes every part). |
 | `GET /__tess_cache/<part>.selectors.json` | Read a part's selector table, bound to its object. |

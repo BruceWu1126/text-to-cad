@@ -307,6 +307,23 @@ test('a drawing still rendering is asked for again after the server\'s retryMs, 
   waiting.dispose();
 });
 
+test('a face is measured by one POST naming its view, component, part and face, asked again while cadgen measures it', async () => {
+  const replies = [{ state: 'measuring', retryMs: 0 }, { face: 3, area: 12.5, center: [1, 2, 3] }];
+  const calls = [];
+  const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async (url, options) => {
+    calls.push({ url, options });
+    return Response.json(replies.shift(), { status: calls.length < 2 ? 202 : 200 });
+  } });
+  const body = { tree: 'a'.repeat(64), viewId: 'b'.repeat(64), producer: {}, cid: 'c'.repeat(16), part: `${'d'.repeat(64)}-v9`, face: 3 };
+  assert.deepEqual(await client.measureFace(body), { face: 3, area: 12.5, center: [1, 2, 3] });
+  assert.equal(calls.length, 2);
+  assert.equal(new URL(calls[0].url).pathname, '/__cad/measure');
+  assert.equal(calls[0].options.method, 'POST');
+  assert.equal(calls[0].options.headers['x-cadgen-viewer'], '1');
+  assert.deepEqual(JSON.parse(calls[0].options.body), body);
+  client.dispose();
+});
+
 test('a drawing refused by the server raises the classified failure an alert is built from', async () => {
   const client = createCadClient({ origin: 'http://one.test', pollIntervalMs: 0, fetch: async () => ({
     ok: false, status: 400, statusText: 'Bad Request',

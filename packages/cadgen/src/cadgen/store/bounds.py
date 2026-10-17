@@ -24,11 +24,16 @@ edge policy classifies a result by (``step_scene_mesh.prototype_topology``,
 walks them and reads a linked child's here, decoding one only where its entry
 is missing.
 
-Last, keyed by a component's codec and BREP object under the geometric token
-scheme, it remembers the GEOMETRIC TOKENS of its faces, edges and vertices
+Keyed by a component's codec and BREP object under the geometric token scheme, it
+remembers the GEOMETRIC TOKENS of its faces, edges and vertices
 (``_internal/geometric_tokens``): the fallback matcher's names, measured on
 demand -- where a part's display data is derived, or a reader resolves a ref in
 that form -- and once.
+
+Last, keyed by a component's codec, BREP object and a face's ordinal, it remembers
+that FACE'S EXACT AREA AND CENTROID (``store.parts.measure_face``): measured when a
+view asks (its Reference panel, its measure tool) or a mate's axis falls back to a
+face's centroid, by one build-pool job, and once.
 """
 from __future__ import annotations
 
@@ -57,6 +62,9 @@ PREPARED_OCCURRENCE_BOUNDS_ALGORITHM = "component_bbox.canonical_native_rotation
 #: Names ``step_scene_mesh.prototype_topology``: change what it counts or how
 #: it measures the loose box, and change this name with it.
 TOPOLOGY_ALGORITHM = "component_topology.faces_edges_curved_loose_box.algorithm1"
+#: Names ``store.parts.measure_face``: a face's area and centroid by GProps over the face of
+#: the decoded component. Change what it measures and change this name with it.
+FACE_MEASURE_ALGORITHM = "face_area_centroid.gprops.algorithm1"
 
 
 def _is_box(value: Any) -> bool:
@@ -194,6 +202,35 @@ def cached_tokens(codec: str, brep: str, measure: Callable[[], dict]) -> dict:
     from cadgen._internal.geometric_tokens import GEOMETRIC_TOKEN_SCHEME
 
     return _remember(f"element_tokens.{GEOMETRIC_TOKEN_SCHEME}", (str(codec), str(brep)), measure, _is_tokens)
+
+
+def _is_face_measure(value: Any) -> bool:
+    if type(value) is not dict or set(value) != {"area", "center"}:
+        return False
+    area, center = value["area"], value["center"]
+    try:
+        return (type(area) in (float, int) and math.isfinite(area) and area >= 0 and type(center) is list
+                and len(center) == 3 and all(type(v) in (float, int) and math.isfinite(v) for v in center))
+    except OverflowError:
+        return False
+
+
+def cached_face_measure(codec: str, brep: str, face: int, measure: Callable[[], dict]) -> dict:
+    """A stored component's face's exact area and centroid, ``{"area": a, "center": [x, y, z]}``
+    (``measure()``, ``store.parts.measure_face``), remembered by the component's codec, its BREP
+    object and the face's ordinal."""
+    return _remember(FACE_MEASURE_ALGORITHM, (str(codec), str(brep), int(face)), measure, _is_face_measure)
+
+
+def remembered_face_measure(codec: str, brep: str, face: int) -> dict | None:
+    """The face's area and centroid when the store already holds them: read without measuring, and
+    without the kernel (a view's route asks before it starts a job)."""
+    try:
+        key = bounds_key(FACE_MEASURE_ALGORITHM, (str(codec), str(brep), int(face)))
+    except ValueError:
+        return None
+    found, value = _remembered(key, _is_face_measure)
+    return value if found else None
 
 
 class NotRemembered(LookupError):

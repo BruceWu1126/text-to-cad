@@ -170,6 +170,16 @@ class ArtifactRequests(unittest.TestCase):
                     artifacts.submit_artifact(request)
             dispatch.assert_not_called()
 
+    def test_a_measure_names_a_tree_a_component_and_a_face_and_nothing_else(self):
+        request = {"kind": "measure", "tree": "a" * 64, "cid": "b" * 16, "face": 3}
+        self.assertEqual(artifacts.normalize_request(request), request)
+        self.assertNotEqual(artifacts.request_key(request), artifacts.request_key({**request, "face": 4}))
+        for broken in ({**request, "face": 0}, {**request, "face": True}, {**request, "face": "3"},
+                       {**request, "cid": "B" * 16}, {**request, "script": "model.py"},
+                       {name: value for name, value in request.items() if name != "face"}):
+            with self.subTest(broken=broken), self.assertRaises(ValueError):
+                artifacts.normalize_request(broken)
+
     def test_importing_artifact_client_supervisor_and_worker_is_kernel_free(self):
         script = """import sys
 from cadgen.daemon import artifacts, client, server, worker

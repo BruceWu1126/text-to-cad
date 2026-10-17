@@ -410,6 +410,51 @@ def element_tokens(entry: dict) -> dict[str, list[str]]:
     return component_tokens(topods, (entry["codec"], entry["brep"]))
 
 
+def measure_face(tree_hash: str, cid: str, face: int) -> dict:
+    """Face ``face`` (its ordinal) of component ``cid`` of ``tree_hash`` (links expanded),
+    measured exactly on the component's stored BREP: ``{"area": a, "center": [x, y, z]}``, its
+    area and centroid by GProps, in the component's own frame. What a view shows a face's area
+    by -- its Reference panel, its measure tool -- and what a mate's axis takes as its origin
+    where nothing else gives one (``_internal/kinematics_resolve``): measured where asked, by
+    one build-pool job (``kind: measure``), never with the part's display data, and remembered
+    in ``index/bounds`` by the component's BREP and the face (``bounds.cached_face_measure``),
+    so each face is measured once."""
+    from cadgen.store.bounds import cached_face_measure
+
+    descriptor, _producer = _captured(tree_hash, None)
+    entry = descriptor["components"].get(cid)
+    if entry is None:
+        raise ValueError("measure request names an unpinned component")
+    return cached_face_measure(entry["codec"], entry["brep"], face, lambda: _face_measure(entry, face))
+
+
+def _face_measure(entry: dict, face: int) -> dict:
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+    from OCP.TopoDS import TopoDS
+
+    topods, _colors = _decoded(entry)
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(topods, TopAbs_FACE, faces)
+    if not 1 <= face <= faces.Extent():
+        raise ValueError(f"the component has {faces.Extent()} faces, not a face {face}")
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(TopoDS.Face_s(faces.FindKey(face)), props)
+    center = props.CentreOfMass()
+    return {"area": float(props.Mass()), "center": [float(center.X()), float(center.Y()), float(center.Z())]}
+
+
+def remembered_face_measure(entry: dict, face: int) -> dict | None:
+    """:func:`measure_face`'s answer for a tree's component ``entry`` when the store holds it,
+    read without the kernel; None when it has yet to be measured."""
+    from cadgen.store.bounds import remembered_face_measure as remembered
+
+    return remembered(entry["codec"], entry["brep"], face)
+
+
 def _derive(entry: dict, key: str, keep_going: Callable[[], bool] | None = None) -> dict | None:
     """Store the part's display data when the store lacks it and return its record; None when
     ``keep_going`` said stop first. Any failure is the ``MeshProductionError`` naming it."""
