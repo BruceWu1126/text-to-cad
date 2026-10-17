@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DEFAULT_TOOL_STACK, TOOL_PANEL_MIN_HEIGHT, TOOL_PANEL_WIDTH,
-  clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack, toolPanelDefaultHeight
+  DEFAULT_TOOL_STACK, FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_MIN_HEIGHT, TOOL_PANEL_WIDTH,
+  clampToolPanelHeight, clampToolPanelWidth, fileSidebarSizeId, normalizeToolStack, toolPanelDefaultHeight
 } from "./toolStackLayout.js";
 
 test("the layout is the sizes a person set, by panel, and the folded panels — nothing else, whatever a store hands back", () => {
@@ -16,6 +16,12 @@ test("the layout is the sizes a person set, by panel, and the folded panels — 
   { panels: { tree: { width: 240, height: 300 }, position: { width: TOOL_PANEL_WIDTH, height: TOOL_PANEL_MIN_HEIGHT } }, collapsed: { tree: true, sdf: false } },
   "a size is rounded and bounded, a panel with neither is absent, only booleans fold, and an older record's closed panels are nobody's");
   assert.deepEqual(normalizeToolStack({ panels: { tree: { width: 99999 } } }).panels.tree, { width: 4000 }, "a stored size is bounded; the viewer bounds what is drawn");
+});
+
+test("each file sidebar section's panel keeps a size of its own, as narrow as the sidebar may be", () => {
+  assert.deepEqual([fileSidebarSizeId("tree"), fileSidebarSizeId(null)], ["sidebar:tree", "sidebar"]);
+  assert.deepEqual(normalizeToolStack({ panels: { "sidebar:tree": { width: 12, height: 300 }, "sidebar:position": { width: 240 }, "sidebar:": { width: 200 }, "sidebar:a:b": { width: 200 } } }).panels,
+    { "sidebar:tree": { width: FILE_SIDEBAR_MIN_WIDTH, height: 300 }, "sidebar:position": { width: 240 } });
 });
 
 test("every panel is a six-tool strip wide; a resizable one is only ever wider, up to half the viewer", () => {

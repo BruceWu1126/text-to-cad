@@ -3,9 +3,9 @@
 // nothing else (any other key a stored record carries is dropped):
 //
 //   panels     for each panel a person can size (`ToolPanel.jsx`'s `resizable`), the width and
-//              the height cap they dragged it to, by panel id, and the file sidebar's
-//              (`FILE_SIDEBAR_ID`) — only what they set; a panel opens at its defaults otherwise (`TOOL_PANEL_WIDTH`,
-//              and `toolPanelDefaultHeight`: the stack's height);
+//              the height cap they dragged it to, by panel id, and each file sidebar section's
+//              panel (`fileSidebarSizeId`: `sidebar:<id>`) — only what they set; a panel opens at its
+//              defaults otherwise (`TOOL_PANEL_WIDTH`, and `toolPanelDefaultHeight`: the stack's height);
 //   collapsed  which panels and sidebar sections are folded to their first row, by id.
 //
 // Importing this module has no environmental effects.
@@ -31,8 +31,9 @@ export const TOOL_PANEL_MIN_HEIGHT = 64;
 // A stored size is kept whatever the viewer it was chosen in; what is drawn is bounded by the
 // viewer at hand (`clampToolPanelWidth`, `clampToolPanelHeight`).
 const MAX_STORED_PX = 4000;
-// Panel ids are short words (`ToolPanel.jsx`'s `id`); a record full of anything else is not ours.
-const PANEL_ID = /^[a-z][a-z0-9-]{0,31}$/;
+// Panel ids are short words (`ToolPanel.jsx`'s `id`), and a sidebar section's size is kept under
+// `sidebar:<its id>` (`fileSidebarSizeId`); a record full of anything else is not ours.
+const PANEL_ID = /^[a-z][a-z0-9-]{0,31}(?::[a-z][a-z0-9-]{0,31})?$/;
 const MAX_PANELS = 32;
 
 export const DEFAULT_TOOL_STACK = Object.freeze({ panels: Object.freeze({}), collapsed: Object.freeze({}) });
