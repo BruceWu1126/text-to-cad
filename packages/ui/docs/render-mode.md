@@ -92,7 +92,8 @@ orbiting pays one draw and a few small passes a frame (about 1.5 ms more at 3024
 an M1 Max) and a still view converges in about half a second. A snapshot draws its still's
 32 samples at once (video frames one). Software WebGL has no frame: one draw, as before.
 
-The interactive viewer retains one WebGL renderer, canvas and camera controls
+Each interactive viewport keeps its renderer (a view of the page's one GPU device:
+[the GPU device](cad-renderer.md#the-gpu-device)), canvas and camera controls
 across every mode and settings edit. It uses shadow-compatible conventional
 depth throughout, fitting near/far planes to the current model, closeup records
 and floor/grid planes on every frame; a perspective near plane stays at or beyond
@@ -157,8 +158,9 @@ unchanged after a runtime replacement does not.
 
 Display settings are a dropdown from the Display button at the navbar's right end
 (the current mode's sphere, before Present: `kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
-modes are every offered mode but Render (`DisplayModeOptions.js`). The Studio draws the model
-in Render whatever the file's mode (the view settings store's `presentMode`), and the tools
+modes are every offered mode but Render (`DisplayModeOptions.js`). The Studio, a view of its own
+over the editor's, draws the model in Render whatever the file's mode (the store's
+`sceneFor("render")`, as `kit/viewport/studioViewScene.js` draws it), and the tools
 view never does: a file whose mode is Render is drawn there in Solid. Render's settings page is
 the Studio's settings panel (`kit/shell/StudioSettings.jsx`, under Orbit), its edits the file's
 Render settings. A file's model tree and Position are

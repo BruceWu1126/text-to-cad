@@ -763,7 +763,7 @@ hosts neither start nor observe it. Its button is a play triangle ("Present"), a
 right end after Display (the renderer's `navbarSlot`; a host with no navbar has both end the
 strip). A press covers the view at once
 ("Preparing studio…", in the scene's backdrop colour) and enters the Studio under the cover,
-which lifts once Render is on screen, detail has stopped refining for a moment and the studio
+which lifts once the Studio's view has presented its first frame, detail has stopped refining for a moment and the studio
 frame's picture has converged (every sample drawn: the viewport's `pictureProgress`; a view
 that is moving, a routine playing, has nothing to wait for) — at least 700ms, at most five
 seconds — fading from the finished picture. The navbar stays, so its menu and the explorer
@@ -782,9 +782,9 @@ file sidebar offers its **Position** and **Animation** alone, their tiles bare: 
 pose and routine. Escape leaves the Studio too, once an open dropdown has closed. Explode and
 Clip are the tools view's alone. Nothing sits under the model, nor at the bottom centre.
 
-**The Studio is drawn in Render**, whatever the file's display mode: the shell sets the view
-settings store's `presentMode` while it is up, and the file's own mode and its settings are left
-as they are. The tools view never draws Render: a file whose stored or sent mode is Render is
+**The Studio is drawn in Render**, whatever the file's display mode: it is a view of its own
+over the tools view, drawing the file's Render settings, and the file's own mode and its
+settings are left as they are. The tools view never draws Render: a file whose stored or sent mode is Render is
 drawn there in Solid. Render settings edited in the Studio are the file's Render settings;
 leaving returns the tools view to the file's mode.
 
@@ -797,9 +797,8 @@ Speed, a submenu, then Loop and Autoplay). In the tools view a routine is a moti
 (see [one motion at a time](#tools-and-lifecycle)): paused, its frame stays on the model. A
 routine opens at rest (a STEP's does not own the pose: `restingAnimationState`,
 `step/workbench/motionRestore.js`). Each view's routine is its own: entering the Studio sets the
-tools view's aside as it stands and starts at rest, playing only under Autoplay (off by default);
-leaving puts the Studio's back at rest (the runtime's `onRelease`) and hands the tools view's
-back. An update of the model that leaves its routines as they were neither stops nor rewinds
+tools view's untouched and starts its own at rest, playing only under Autoplay (off by default);
+leaving throws the Studio's away, and the tools view's is as it was left. An update of the model that leaves its routines as they were neither stops nor rewinds
 one that is playing; a changed routine starts at rest. Speed and Loop are the file's, one set,
 chosen in Playback settings and kept in its view once chosen — until then the routine's own
 apply. Orbit's speed (1×) and Autoplay are the file's too, remembered between leaving and
@@ -817,23 +816,24 @@ camera fitted at the default angle and still, its routine at rest. Leaving it th
 was done there — its camera, its pose, its routine — and the tools view comes back exactly as
 it was, in the file's display mode, its camera in the projection and lens the Display settings
 now hold. Nothing of the tools view is reset to make room for the Studio and nothing of the
-Studio's is kept: the next one starts clean again. A renderer holds this by drawing the Studio
-from its opening view rather than resetting its own state (`useRendererShell`'s `preview`). The
-viewport stays mounted throughout. What is not either state's is the file's settings, shared by
+Studio's is kept: the next one starts clean again. The Studio holds this by being a view of its
+own (`kit/shell/StudioView.jsx`): its own viewport, scene, camera, pose and routine, mounted
+over the tools view's while it is up and unmounted as it closes, sharing only the page's GPU
+device. The tools view's viewport stays mounted throughout and is never told: it draws nothing
+while covered and is uncovered with its own last frame. What is not either state's is the file's settings, shared by
 both and kept: its Display settings (an edit in the Studio's Render settings is the file's
 Render settings), Orbit's speed, Autoplay, Speed and Loop.
 
-**Render profiles.** One viewport draws the same Display settings two ways
-(`kit/viewport/renderProfile.js`). The tools view is drawn for working on the
+**Two views, two ways of drawing.** The tools view is drawn for working on the
 model: the scene quality its settings resolve to, and a lower pixel ratio while
-the camera moves so a gesture stays responsive. The Studio is drawn for looking at
-it, in Render: one scene-quality tier up (Interactive to Standard, Standard to High — a
-higher idle pixel ratio, and at High larger shadow and environment maps, at the
-same meshes), its full pixel ratio kept while it orbits, and nothing
-of the tools view's (no picking, overlays, cube or tool effects). The profile
-never changes a Display setting. Render's studio and environment are warmed a moment after a
-model is on screen (`useRendererShell`'s `previewPrepare`), so entering the Studio has less
-to do.
+the camera moves so a gesture stays responsive. The Studio's view is drawn for looking at
+it, in Render (`kit/viewport/studioViewScene.js`): one scene-quality tier up (Interactive to
+Standard, Standard to High — a higher idle pixel ratio, and at High larger shadow and
+environment maps, at the same meshes), its full pixel ratio kept while it orbits, and nothing
+of the tools view's (no picking, overlays, cube or tool effects). Neither changes a Display
+setting. Render's studio code and environment are prepared a moment after a model is on screen
+(`useRendererShell`'s `studioPrepare`), into the GPU device's cache the Studio draws from, so
+entering the Studio has less to do.
 
 ## Keyboard
 

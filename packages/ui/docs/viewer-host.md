@@ -96,11 +96,11 @@ is (the pose, the routine, the selection, hidden and isolated parts, Explode and
 measurements, the camera, the tool and its panels) and the Studio starts from the model as
 authored, with its own camera, still, and its routine at rest, drawn in Render whatever the
 file's display mode (the tools view never draws Render); leaving throws the Studio's state
-away, puts its routine back at rest and gives the tools view back exactly as it was, its
-routine included, in the file's mode. A renderer draws the Studio from its opening view
-instead of resetting its own state (`useRendererShell`'s `preview`), and the shell saves the
-tools view's camera and routine on the way in and restores them on the way out; nothing of
-the Studio is persisted. Routines play from the file sidebar's Animation section in either
+away and gives the tools view back exactly as it was, its routine included, in the file's
+mode. The Studio is a view of its own, mounted over the tools view's while it is open
+(`kit/shell/StudioView.jsx`), with its own scene, camera, pose and routine, sharing only the
+page's GPU device; the tools view's viewport stays mounted under it and nothing of it changes.
+Nothing of the Studio is persisted. Routines play from the file sidebar's Animation section in either
 view. The Studio opens still: Orbit is off every time it opens, and its settings panel turns it
 on. The file's view's `playback` — Orbit's speed, Autoplay, and the chosen speed and loop —
 is kept between visits to the Studio and across a reload, and a file's routine plays on entry
