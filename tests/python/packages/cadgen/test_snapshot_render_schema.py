@@ -37,12 +37,13 @@ def normalize(**settings: object) -> dict[str, object]:
 
 class RenderDisplaySchemaTest(unittest.TestCase):
     def test_presets_and_appearance_are_closed(self):
-        self.assertEqual({"solid", "render", "xray", "hidden-line", "wireframe"}, set(DISPLAY_MODES))
+        # Render is no display mode: it is its own request (`render`).
+        self.assertEqual({"solid", "xray", "hidden-line", "wireframe"}, set(DISPLAY_MODES))
         self.assertEqual({"light", "dark"}, set(DISPLAY_APPEARANCES))
         self.assertEqual({"preview", "final"}, set(RENDER_QUALITY_IDS))
         for mode in DISPLAY_MODES:
             self.assertEqual({"mode": mode}, load_display_option(mode, cwd=Path(".")))
-        for invalid in ("grid", "shaded", "transparent", "hidden_edges", "unshaded", None, True, [], {}):
+        for invalid in ("render", "grid", "shaded", "transparent", "hidden_edges", "unshaded", None, True, [], {}):
             with self.subTest(mode=invalid), self.assertRaises(SnapshotError):
                 load_display_option({"mode": invalid}, cwd=Path("."))
         for invalid in ("system", "LIGHT", None, False, [], {}):
@@ -52,8 +53,8 @@ class RenderDisplaySchemaTest(unittest.TestCase):
     def test_preset_names_do_not_depend_on_existing_output_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "render").mkdir()
-            self.assertEqual({"mode": "render"}, load_display_option("render", cwd=root))
+            (root / "wireframe").mkdir()
+            self.assertEqual({"mode": "wireframe"}, load_display_option("wireframe", cwd=root))
 
     def test_shared_and_per_mode_settings_stay_sparse(self):
         display = {
@@ -112,13 +113,15 @@ class RenderDisplaySchemaTest(unittest.TestCase):
 
     def test_default_job_is_light_solid_without_overriding_groups(self):
         self.assertEqual({"mode": "solid", "appearance": "light"}, normalize()["display"])
-        self.assertEqual({"mode": "render", "appearance": "light"}, normalize(display={"mode": "render"})["display"])
+        # Render is drawn over the same display settings, with Render's own.
+        self.assertEqual({"mode": "render", "appearance": "light"}, normalize(render=True)["display"])
+        self.assertEqual({"mode": "solid", "appearance": "light"}, normalize(render=False)["display"])
         self.assertEqual({"mode": "solid", "appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}},
                          normalize(display={"appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}})["display"])
 
     def test_animation_and_output_capture_controls_remain_composable(self):
         job = normalize(
-            camera={"preset": "front"}, display={"mode": "render"},
+            camera={"preset": "front"}, render=True,
             animation={"clip": "spin", "time": 0.5},
             output={"sizeProfile": "diagnostic", "viewLabels": True},
         )
@@ -127,12 +130,12 @@ class RenderDisplaySchemaTest(unittest.TestCase):
         self.assertEqual(job["animation"], {"clip": "spin", "time": 0.5})
         self.assertEqual(job["output"], {"sizeProfile": "diagnostic", "viewLabels": True})
 
-    def test_public_api_has_one_display_surface_and_no_render_parameter(self):
+    def test_public_api_has_a_display_surface_and_render_beside_it(self):
         from cadgen import step
         signature = inspect.signature(step.snapshot)
         self.assertIn("display", signature.parameters)
         self.assertIn("camera", signature.parameters)
-        self.assertNotIn("render", signature.parameters)
+        self.assertIs(signature.parameters["render"].default, False)
 
     def test_output_and_quality_are_closed(self):
         output = {

@@ -33,7 +33,7 @@ import {
 } from "../camera/viewportCameraKit.js";
 import {
   ACCELERATED_WHEEL_ZOOM_SPEED, COARSE_POINTER_PINCH_ZOOM_SPEED, COARSE_POINTER_ZOOM_SPEED, DEFAULT_ZOOM_SPEED,
-  TRACKPAD_PINCH_ZOOM_SPEED
+  TRACKPAD_PINCH_ZOOM_SPEED, restingZoomSpeed
 } from "../camera/zoomSpeeds.js";
 import { loadStudioScene, studioScene } from "../look/renderStudioChunk.js";
 import { DEFAULT_LIGHTING, syncRuntimeScaledLightingAndShadow, updateGridHelper, updateStageEffects } from "../look/stageEffects.js";
@@ -42,6 +42,7 @@ import { createStudioEnvironmentCache } from "../look/studioEnvironmentCache.js"
 import { isKitScene } from "../scene.js";
 import LoadingIndicator from "../status/LoadingIndicator.js";
 import AnnotationOverlay from "../tools/annotate/AnnotationOverlay.jsx";
+import { TOUCH_HIT_PX, prefersCoarsePointer } from "../viewport/dom.js";
 import { annotationAt } from "../../../annotation/geometry.js";
 import { annotationsOnScreen, mountAnnotations } from "../tools/annotate/annotation3d.js";
 import { createViewerRenderStateResolver } from "../view-settings/renderState.js";
@@ -234,8 +235,8 @@ const ShellViewport = forwardRef(function ShellViewport({
   const renderShadowMapSizeRef = useRef(renderShadowMapSize);
   renderShadowMapSizeRef.current = renderShadowMapSize;
 
-  // Render's studio is a lazy chunk. The shell normally warms it; this is the
-  // backstop for a cold cache and a session restored straight into Render.
+  // Render's studio is a lazy chunk. The shell warms it once a model is on screen; this is the
+  // backstop for a Studio entered before that warm-up has landed.
   const [studioSceneTick, setStudioSceneTick] = useState(() => (studioScene() ? 1 : 0));
   useEffect(() => {
     if (!renderMode || studioScene()) return undefined;
@@ -248,8 +249,8 @@ const ShellViewport = forwardRef(function ShellViewport({
           severity: "error",
           summary: "Render unavailable",
           title: "Couldn't load the Render studio",
-          message: "The photographic studio is fetched the first time Render is opened, and that request did not complete.",
-          recovery: "Check the connection to the viewer and reload the page, then switch to Render again.",
+          message: "The photographic studio is fetched the first time the Studio is opened, and that request did not complete.",
+          recovery: "Check the connection to the viewer and reload the page, then open the Studio again.",
           details: String(loadError?.message || loadError)
         });
         console.error("Failed to load the Render studio chunk", loadError);
@@ -385,6 +386,12 @@ const ShellViewport = forwardRef(function ShellViewport({
       }
     },
     presentViewSettings() { return runtimeRef.current?.viewUpdateGate?.present(); },
+    // How far the picture on screen has converged: Render's studio frame's samples drawn of those
+    // it takes (`studioFrame.js`), or null where there is no frame to converge (anything but lit Render).
+    pictureProgress() {
+      const studioFrame = runtimeRef.current?.photographicStudio?.frame;
+      return studioFrame ? { sample: studioFrame.sample, samples: studioFrame.samples } : null;
+    },
     // The viewport produces pixels. Its host owns clipboard and prompt delivery.
     // The view as it is on screen, the annotation's ink in it (it is in the model).
     async captureScreenshotBlob() {
@@ -416,14 +423,14 @@ const ShellViewport = forwardRef(function ShellViewport({
       });
     },
     // The annotation's mark under a point of the page (client pixels), by its id: what Select picks
-    // before a part. Null over no ink.
-    annotationAt(clientX, clientY) {
+    // before a part. Null over no ink. A touch reaches further (`TOUCH_HIT_PX`) than a cursor.
+    annotationAt(clientX, clientY, pointerType = "") {
       const runtime = runtimeRef.current, element = runtime?.renderer?.domElement;
       const marks = annotationRef.current?.items;
       if (!runtime || !element || !marks?.length) return null;
       const rect = element.getBoundingClientRect();
       const screen = annotationsOnScreen(runtime, marks, { width: rect.width, height: rect.height });
-      return annotationAt({ x: clientX - rect.left, y: clientY - rect.top }, screen)[0]?.id ?? null;
+      return annotationAt({ x: clientX - rect.left, y: clientY - rect.top }, screen, pointerType === "touch" ? TOUCH_HIT_PX : undefined)[0]?.id ?? null;
     },
     // The camera as a snapshot job says it, and the viewport's size: a prompt's view
     // (`annotation/views.js`). A snapshot is always orthographic, so a perspective view becomes the
@@ -503,7 +510,9 @@ const ShellViewport = forwardRef(function ShellViewport({
       const ground = active?.photographicStudio?.ground || null;
       return active ? { gridRadius: active.gridRadius ?? null, bounds: active.modelBounds || null,
         floorZ: active.modelFloorZBelowModel ?? null, studioGroundZ: active.photographicGroundZ ?? null,
-        studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null } : null;
+        studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null,
+        // How far Render's picture has converged (`pictureProgress`).
+        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
     };
     Object.assign(window, { __cadCamera: read, __cadStage: stage });
     return () => {
@@ -890,7 +899,9 @@ const ShellViewport = forwardRef(function ShellViewport({
     // The camera's reach covers the box it frames as well as what is placed: a package framed on
     // its declared box from its first publish may have only a corner of itself on screen yet.
     controls.maxDistance = Math.max(Math.max(radius, framingRadius) * 140, 50);
-    controls.zoomSpeed = DEFAULT_ZOOM_SPEED;
+    // At rest, between gestures: on a touch page a pinch is OrbitControls' own dolly at this speed, so
+    // a commit must not leave it at a desktop wheel's (a first pinch after a load zoomed ~22x for 2x).
+    controls.zoomSpeed = restingZoomSpeed(prefersCoarsePointer());
 
     // The camera is framed by the pass that runs AFTER this render's lens and projection have
     // been applied; a commit from a child's effect that lands ahead of them leaves it to that pass.

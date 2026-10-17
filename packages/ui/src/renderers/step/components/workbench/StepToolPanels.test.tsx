@@ -53,7 +53,7 @@ function Features({ mode = 'all', initialLayout = undefined as any, mobile = fal
   const [layout, change] = useLayout(initialLayout);
   const [expanded, setExpanded] = useState<string[]>([]);
   // The shell hands the sidebar the viewer's layout (`RendererShell.jsx`).
-  return <ViewerMobileContext.Provider value={mobile}><FileSidebar layout={layout} onLayoutChange={change}>
+  return <ViewerMobileContext.Provider value={mobile}><FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
@@ -123,7 +123,7 @@ function SelectPanels({ assembly = false, references = [] as any[] }) {
 }
 function Panels(props: any) {
   const [layout, change] = useLayout();
-  return <FileSidebar layout={layout} onLayoutChange={change}><SelectPanels {...props} /></FileSidebar>;
+  return <FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}><SelectPanels {...props} /></FileSidebar>;
 }
 
 it("a part file with no joints has no section, picked or not; an assembly its tree", () => {
@@ -254,7 +254,7 @@ function Position() {
     onResetMotion: () => { setActivePose(''); setValues({ hinge: 0 }); },
     onParameterChange: (id: string, value: number) => { setActivePose(''); setValues(current => ({ ...current, [id]: value })); } };
   const position = buildPositionSection({ poseRuntime: runtime })!;
-  return <FileSidebar layout={layout} onLayoutChange={change}>
+  return <FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}>
     <ToolPanel id="position" title={position.title} label="Position controls" fit="details">{position.content}</ToolPanel>
   </FileSidebar>;
 }

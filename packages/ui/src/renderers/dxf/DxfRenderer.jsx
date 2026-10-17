@@ -140,12 +140,11 @@ function DxfSurface({ view, data }) {
   runtimeRef.current = {
     readState: () => ({
       resource: { ...workspace.resource }, revision: String(workspace.resource.revision || ""),
-      loading: payload.loading || payload.updating, selection: [], camera: null, display: {}, renderMode: "inspect"
+      loading: payload.loading || payload.updating, selection: [], camera: null, display: {}
     }),
     setCamera() { throw new Error(NO_CAMERA); },
     resetCamera() { fit(); },
     setDisplaySettings() { throw new Error(NO_DISPLAY); },
-    setRenderMode() { throw new Error(NO_DISPLAY); },
     capture,
     thumbnail
   };

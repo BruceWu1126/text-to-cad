@@ -3,12 +3,15 @@ import { annotationAt, penMark, shapeMarks, textMark, withGroups } from "../../.
 import { DEFAULT_OVERLAY_ANNOTATION_COLOR } from "../../../../annotation/toolbar.jsx";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import { annotationsOnScreen, projectAnnotations } from "./annotation3d.js";
+import { TOUCH_HIT_PX } from "../../viewport/dom.js";
 
 // Someone who pressed Annotate came to draw: Annotate opens on the pen.
 export const CAD_ANNOTATION_DEFAULTS = Object.freeze({ tool: "freedraw", color: DEFAULT_OVERLAY_ANNOTATION_COLOR });
 
 const SHAPES = new Set(["line", "arrow", "rectangle", "ellipse"]);
 const ERASER_RADIUS = 8;
+// A finger's eraser is a fingertip across (`TOUCH_HIT_PX`).
+const eraserRadius = pointerType => pointerType === "touch" ? TOUCH_HIT_PX : ERASER_RADIUS;
 const FONT_PX = Object.freeze({ 1: 16, 2: 20, 4: 28 });
 const fontOf = px => `500 ${px}px ui-sans-serif, system-ui, sans-serif`;
 const DASH = Object.freeze({ solid: [], dashed: [8, 6], dotted: [1.5, 5] });
@@ -149,7 +152,7 @@ export default function AnnotationOverlay({ annotation, runtimeRef, viewOf = nul
       context.strokeStyle = "rgba(255,255,255,0.8)";
       context.lineWidth = 1;
       context.beginPath();
-      context.arc(last.x, last.y, ERASER_RADIUS, 0, Math.PI * 2);
+      context.arc(last.x, last.y, current.radius ?? ERASER_RADIUS, 0, Math.PI * 2);
       context.stroke();
       context.restore();
     }
@@ -199,7 +202,8 @@ export default function AnnotationOverlay({ annotation, runtimeRef, viewOf = nul
     else if (SHAPES.has(session.tool)) gesture.current = { kind: "shape", tool: session.tool, from: at, to: at };
     else if (session.tool === "eraser") {
       const screen = onScreen();
-      gesture.current = { kind: "erase", screen, path: [at], hits: new Set(annotationAt(at, screen, ERASER_RADIUS).map(ink => ink.id)) };
+      const radius = eraserRadius(event.pointerType);
+      gesture.current = { kind: "erase", screen, path: [at], radius, hits: new Set(annotationAt(at, screen, radius).map(ink => ink.id)) };
     } else if (session.tool === "text") {
       setText({ at, value: "", color: session.color, fontPx: FONT_PX[session.strokeWidth] ?? 20 });
     }
@@ -215,7 +219,7 @@ export default function AnnotationOverlay({ annotation, runtimeRef, viewOf = nul
     } else if (current.kind === "shape") current.to = at;
     else if (current.kind === "erase") {
       current.path.push(at);
-      for (const ink of annotationAt(at, current.screen, ERASER_RADIUS)) current.hits.add(ink.id);
+      for (const ink of annotationAt(at, current.screen, current.radius)) current.hits.add(ink.id);
     }
     paint();
   };

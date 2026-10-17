@@ -215,7 +215,7 @@ The shared [viewer design system](../../packages/ui/docs/settings-ui.md) is the
 authoritative contract for the [toolbar](../../packages/ui/docs/settings-ui.md#tools-and-lifecycle),
 [file sidebar and mobile layout](../../packages/ui/docs/settings-ui.md#the-file-sidebar-and-the-tool-stack),
 settings controls, selection and
-[preview](../../packages/ui/docs/settings-ui.md#camera-animation-and-preview).
+[the Studio](../../packages/ui/docs/settings-ui.md#camera-animation-and-the-studio).
 Keep those rules there rather than maintaining a separate web layout
 specification.
 
@@ -226,18 +226,20 @@ controls are one row under the strip. An assembly's Features (Links for a robot)
 and an SDF's metadata are the file sidebar's, down the left edge, whatever the tool. The
 file's name in the navbar opens the explorer.
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
-and a GLB with clips has the Animation tool up from the open, its row under the strip.
-Every 3D file's strip ends in Display (its settings, a dropdown that opens down) and
-Preview, with the view cube at the bottom-right and Quick Edit at the top-right. DXF is a
+a GLB's clips or not.
+Every 3D file's strip ends in Display (its settings, a popover that opens down) and
+the Studio, with the view cube at the bottom-right and Quick Edit at the top-right. DXF is a
 2D canvas with pan, zoom, snapshot and Quick Edit, without a 3D toolbar or file sidebar.
 
 The explorer is a popover under the file's name: the file's folder, one folder at a
-time, with "Filter files..." to find a file anywhere under it. Below 720px of
-FileViewer width a robot's Links and a STEP's Features show as on a desktop. Preview is the shared shell's button after Display on the strip: it takes the whole page,
-hiding the navbar, the tool strip, the file sidebar and
-Quick Edit, orbits by default, plays routines (on entry only with Autoplay on)
-and keeps its own row where the strip was — Orbit, Display, Exit preview — with
-the routines and their Playback settings on the playbar; the host passes no preview props.
+time, with "Filter files..." to find a file anywhere under it. Below 600px of
+FileViewer width (a phone) the chrome is touch-sized and there is no file sidebar. The Studio is the shared shell's button after Display on the strip: it takes the whole page,
+hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
+off at every entry), draws the model in Render — the one place it is drawn — and keeps its
+own controls in the view's top-right corner: Studio settings (Orbit, then Render's settings)
+and Exit studio, with the file sidebar's Position and Animation at its top-left. Routines play
+from the sidebar's Animation section, in either view (in the Studio, on entry only with
+Autoplay on); the host passes no Studio props.
 The file on screen keeps its view in the tab — its camera, Display settings
 (explode and clip included) and pose — so a refresh restores it; leaving the file for
 another or for the home drops it, and opening it again frames it anew (see
@@ -350,7 +352,7 @@ explorer, with its ⋯; at the right only the blue update button, while a newer 
 is out. The app menu holds Back to files (the home), the person's settings (Share anonymous usage data), Send feedback (a new issue titled "Feedback: "),
 GitHub, Discord and, in gray, the version (a link to its release notes) and "Made by @…"
 (X), as in the CAD app; the home shows GitHub, Discord and X under its wordmark instead.
-Display and Preview are the view's, at its tool strip's end. This host
+Display and the Studio are the view's, at its tool strip's end. This host
 supplies the links (`src/host/viewerLinks.js`): its version (with its build's id,
 `v0.7.15-dev.b80844940`, for any build but the release's own), the GitHub (where new
 issues open) and Discord its build names (`VIEWER_GITHUB_URL`, `VIEWER_DISCORD_URL`);

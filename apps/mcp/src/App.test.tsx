@@ -78,11 +78,10 @@ it('a tab host gets the page it always had, down to its bottom: the home, with n
   expect(typeof viewer.props!.library!.pick).toBe('function');
   expect(container.querySelector('[aria-label="Full size"]')).toBeNull();
   expect(sized(bridge.notify)).toEqual([]);
-  // The host's composer floats over the page's bottom: no strip is kept for it, preview's playbar
-  // sits on the composer's line, and lists scroll clear of it.
+  // The host's composer floats over the page's bottom: no strip is kept for it, and lists scroll
+  // clear of it.
   const frame = container.firstElementChild as HTMLElement;
   expect([frame.style.paddingTop, frame.style.paddingBottom]).toEqual(['4px', '0px']);
-  expect(frame.style.getPropertyValue('--cad-viewport-bottom-center')).toBe('40px');
   expect(frame.style.getPropertyValue('--cad-host-bottom-inset')).toBe('72px');
   // The sidebar's chat button floats in its bottom-right corner: the cube is lifted clear of it.
   expect(frame.style.getPropertyValue('--cad-viewport-corner-bottom')).toBe('52px');
@@ -180,10 +179,9 @@ it('an inline host gets the whole viewer in a card of a height it is told, with 
   expect(bridge.request).toHaveBeenCalledWith('ui/request-display-mode', { mode: 'fullscreen' });
   act(() => bridge.change({ displayMode: 'fullscreen', safeAreaInsets: { bottom: 72 } }));
   expect(container.querySelector('[aria-label="Full size"]')).toBeNull();
-  // Full size, the host's composer lies across the bottom: the view keeps clear of it, and its
-  // playbar keeps its own line.
+  // Full size, the host's composer lies across the bottom: the view keeps clear of it.
   expect((container.firstElementChild as HTMLElement).style.paddingBottom).toBe('72px');
-  expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--cad-viewport-bottom-center')).toBe('');
+  expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--cad-host-bottom-inset')).toBe('');
   // Full size keeps what was on the card: the same view, not a new one.
   expect(viewer.mounts).toBe(1);
 });

@@ -113,7 +113,8 @@ The viewer passes `lightingQuality: "preview"`; the CLI baseline is `final`.
 That environment default also feeds per-mode default comparison and does not pin a saved
 override. An explicit `modes.render.lighting.quality` wins in either context.
 Final uses the bounded L3 mesh rung, a 0.25px viewport target, 4096px spotlight
-shadows, a 512px procedural environment and 2x snapshot capture. Technical
+shadows, a 512px procedural environment and 2x snapshot capture, and a still view
+in the viewer converges over 64 samples of the studio's frame (Preview: 32). Technical
 `quality.tessellation` and `output.renderScale` remain explicit overrides.
 PNG output retains requested dimensions by resampling the full drawing buffer.
 
@@ -140,9 +141,60 @@ share a calibrated zero-EV lighting budget. Khronos PBR Neutral tone mapping is
 fixed; `toneMappingExposure` is `2 ** exposure`. Light and dark differ only in
 default backdrop color.
 
+#### The studio's frame
+
+Render's lighting is drawn through the studio's frame (`studioFrame.js`), which
+`applyPhotographicStudio` keeps as `state.frame` while its lighting is on, and the viewer
+and the snapshot both draw the scene through. Three draws the scene as before, but into an
+XR-flagged target of the frame's (`isXRRenderTarget`), which three draws exactly as the
+canvas, tone mapping and colour space included, so no material compiles a second program;
+its depth is kept. Small full-screen passes then add:
+
+- **Ambient occlusion.** Ground-truth AO (GTAO, after XeGTAO) from that depth alone, at half
+  the drawing buffer's resolution: the horizon either side of each pixel along three screen
+  directions, four steps each, within a radius of 0.1 of the model's rest radius (never more
+  than a fifth of the view's height). Every sample is read at a full-resolution pixel's
+  centre; a depth read from one pixel and placed at another turned sloped faces into
+  staircases of false horizons. A depth-aware blur smooths it, and the composite upsamples it
+  by depth, so it never bleeds across a silhouette, and darkens the scene's colour by it in
+  linear light (`power` 2). The floor writes no depth, so it keeps its own contact shadow;
+  the background is never darkened. This is what reads as a photograph rather than a
+  render: the seam between a cover and its housing, the space between stacked plates, a
+  bolt head on its plate, the inside of a bore.
+- **Convergence.** A still view is the average of `samples` samples, each blended into a
+  half-float accumulation at `1/(n+1)` and presented with a level of dither. Every sample but
+  the first moves the camera a fraction of a pixel (Halton 2, 3), so edges and fine
+  highlights are anti-aliased; turns the occlusion's directions (interleaved gradient noise
+  per sample), so it converges smooth; and moves the key light to a point of its softbox's
+  face (`sampleKey`: R2 over the key card's face, `PHOTOGRAPHIC_STUDIO_SOFT_SHADOW.spread`
+  of it, scaled by Size), so the key's shadows become a softbox's: crisp where a part meets
+  what it shades and soft away from it, on the model and, through the floor shadow's
+  composite, on the floor. A shadow pass that only moved the key holds the floor shadow's
+  heights (`holdHeights`) and re-composites its key shadow alone.
+
+The frame's caller says whether a frame is `still`: nothing but, perhaps, the camera changed
+since the last. A still frame is the next sample unless the camera has moved the model by
+more than `STUDIO_FRAME_DRIFT_PIXELS` (0.25) on screen since the picture's first sample, so the
+tail of a damped orbit still converges; anything else (a camera that moved, a pose, a
+routine's frame, a setting, a resize) starts again from the first sample, which is a whole
+picture of its own: the key at rest, the occlusion denoised in space. `render` answers whether
+samples are still owed (`refining`); the caller asks for the next frame while they are, and
+for none once the picture has converged. A moving view therefore pays for one draw and the
+small passes a frame; the samples only while it rests.
+
+Measured at 3024 × 1964 on an M1 Max over 0.6 M and 3 M triangles: a moving frame
+3.1 → 4.5 ms and 5.0 → 6.6 ms, a sample 5.2 and 7.8 ms, all 32 samples back to back 155
+and 240 ms (in the viewer, a sample a display frame: about half a second). Memory is the scene target (8-bit colour and depth-stencil, multisampled as
+the canvas is: four samples, two on a canvas of pixel ratio 2 or more), its resolve, a
+half-float accumulation and two half-resolution occlusion targets: about 200 MB at that
+size, released with the studio. Software rendering has no frame: three's single draw, as
+before, whose key casts no shadow to soften.
+
 `applyPhotographicStudio(THREE, runtime, configuration, options)` owns the
 synchronous light, ground and renderer state and updates those objects in place.
-`disposePhotographicStudio(runtime)` releases only those objects. The caller
+`disposePhotographicStudio(runtime)` releases only those objects, the studio's frame
+included (`applyPhotographicStudio`'s `frame`: false for none, or its `samples` and
+`multisample`). The caller
 separately owns the PMREM returned by
 `createEnvironmentResource(renderer, configuration, {size})` — synchronous GPU
 work, returned directly rather than as a promise — assigns its
@@ -489,7 +541,7 @@ positions or normals acquire writable attributes before deforming them;
 material refreshes leave component data unchanged. This keeps large assemblies
 from duplicating these buffers for display. Assemblies keep geometry in their
 component buffers; they allocate no combined copy of all positions, normals and
-indices. Rendering and section views visit the placed components directly, and
+indices. Rendering visits the placed components directly, and
 the Viewer accepts that component geometry.
 
 ### `common/renderModel.js`
@@ -587,6 +639,10 @@ widths. It returns a headless viewport:
 ```
 
 This `renderModel` is intentionally separate from `common/renderModel.js`.
+Render is drawn through the studio's frame, every sample of it at once
+(`renderStill`: `PHOTOGRAPHIC_STUDIO_FRAME.stillSamples`, 32, re-rendering shadows only for a
+sample that moved the key), with no MSAA of its own: the snapshot supersamples at its render
+scale. A video's frame and a software renderer draw one sample (`snapshotStudioSamples`).
 It uses snapshot sizing, studio environment, the shared stage floor/glow/shadow,
 model-scaled lights with a fitted shadow frustum, canonical camera projection,
 and deterministic renderer settings. Automatic perspective cameras fit the
@@ -601,7 +657,6 @@ that rest box.
 `captureModel(viewport, { job })` returns data only:
 
 - `mode: "view"`: PNG data URLs in `outputs`.
-- `mode: "section"`: PNG data URLs or SVG text in `outputs`.
 - `mode: "list"`: part list and bounds. A CAD model lists its composed part
   occurrences; a family scene lists what it drew, one row per mesh, in its scene
   graph's order (a robot's scene attaches a link's meshes before the joints it

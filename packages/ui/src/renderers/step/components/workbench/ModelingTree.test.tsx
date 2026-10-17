@@ -7,7 +7,7 @@ import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js'
 Object.assign(globalThis,{React});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
 // The tree as it ships: a section of the file sidebar, headed "Features" with its Find button.
-const inSidebar=(tree:React.ReactElement)=><FileSidebar layout={{panels:{},collapsed:{}}} onLayoutChange={()=>{}}>{tree}</FileSidebar>;
+const inSidebar=(tree:React.ReactElement)=><FileSidebar layout={{panels:{},collapsed:{}}} onLayoutChange={()=>{}} onToggle={()=>{}}>{tree}</FileSidebar>;
 // The filter is a find field that takes the heading's place once its magnifier is pressed.
 const openFind=()=>{fireEvent.click(screen.getByRole('button',{name:'Find in model'}));return screen.getByRole('textbox',{name:'Filter model'});};
 const refs=(o='o1')=>[1,2].map(n=>({id:`${o}.f${n}`,selectorType:'face',occurrenceId:o,normalizedSelector:`${o}.f${n}`}));

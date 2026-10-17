@@ -21,6 +21,19 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   assert.deepEqual(createViewSettingsStore(before.display).getSnapshot(), before);
 });
 
+test("a present mode draws the scene in that mode, the file's own mode and settings untouched, and back again", () => {
+  const store = createViewSettingsStore({});
+  store.patchMode("render", { lighting: { exposure: 1 } });
+  const before = store.getSnapshot();
+  assert.equal(before.scene.view.mode, "solid");
+  store.configure({ presentMode: "render" });
+  const presented = store.getSnapshot();
+  assert.deepEqual([presented.display, presented.scene.view.mode, presented.scene.view.lighting.exposure, presented.scene.render.enabled],
+    [before.display, "render", 1, true]);
+  store.configure({ presentMode: null });
+  assert.deepEqual(store.getSnapshot(), before);
+});
+
 test("inactive mode edits preserve the scene and no-op mode/reset actions publish nothing", () => {
   const store = createViewSettingsStore();
   const scene = store.getSnapshot().scene;

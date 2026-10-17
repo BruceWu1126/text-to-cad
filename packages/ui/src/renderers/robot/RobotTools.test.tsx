@@ -68,7 +68,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-async function openRobot() {
+async function openRobot({ phone = false } = {}) {
   // The file as the catalog lists it now: a save is a new revision, under a new version of its URL,
   // and the loader reads the URDF text of that revision.
   const served = { revision: 1, description: description() };
@@ -102,8 +102,9 @@ async function openRobot() {
   }
   render(<Pane />);
   const pane = screen.getByTestId('one');
-  // Its Links are in the file sidebar once the robot has loaded.
-  await waitFor(() => expect(pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull());
+  // Its Links are in the file sidebar once the robot has loaded; a phone has no sidebar, and the
+  // strip comes with the robot.
+  await waitFor(() => expect(phone ? within(pane).queryByRole('group', { name: 'Interaction tools' }) : pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull());
   const tools = () => within(pane).getByRole('group', { name: 'Interaction tools' });
   const robot = {
     pane, client,
@@ -177,10 +178,10 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   expect([robot.filter(), robot.knobs(), picks.latest!.enabled]).toEqual(['Selection filter: Position', 1, false]);
   expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // Display is not a tool: its settings (each mode's submenu), from the strip's end, open over Select
+  // Display is not a tool: its settings (each mode's page), from the strip's end, open over Select
   // and leave it the tool, with its knobs; Escape puts them away.
   await user.click(within(within(robot.pane).getByRole('group', { name: 'Interaction tools' })).getByRole('button', { name: /^Display mode: / }));
-  await user.click(screen.getByRole('menuitem', { name: 'Solid settings' }));
+  await user.click(screen.getByRole('button', { name: 'Solid settings' }));
   await waitFor(() => expect(document.querySelector('[data-display-settings]')).not.toBeNull());
   expect([robot.toolNames(), robot.knobs()]).toEqual([['Select:true'], 1]);
   fireEvent.keyDown(document.activeElement || document.body, { key: 'Escape' });
@@ -229,7 +230,7 @@ it('robot Links and Position are the file sidebar\'s whatever Select picks, a Po
   robot.client.dispose();
 });
 
-it('robot Links is on screen whatever Select picks, with no X to close it, folding at a press on its heading', async () => {
+it('robot Links is on screen whatever Select picks, with no X to close it, folding at a press on its name', async () => {
   const robot = await openRobot();
   const links = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Links"]')!;
   expect(within(links()).queryByRole('button', { name: /^Close/ })).toBeNull();
@@ -237,19 +238,19 @@ it('robot Links is on screen whatever Select picks, with no X to close it, foldi
   await robot.tick('links');
   expect([robot.filter(), robot.sidebar()]).toEqual(['Selection filter: Position', ['Links', 'Position controls']]);
   expect(robot.pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull();
-  fireEvent.click(within(links()).getByRole('heading', { name: 'Links' }));
+  fireEvent.click(within(links()).getByRole('button', { name: 'Links' }));
   expect(links().hasAttribute('data-collapsed')).toBe(true);
-  fireEvent.click(within(links()).getByRole('heading', { name: 'Links' }));
+  fireEvent.click(within(links()).getByRole('button', { name: 'Links' }));
   expect(links().hasAttribute('data-collapsed')).toBe(false);
   robot.client.dispose();
 });
 
-it('on a phone robot Links is on screen from the open, as on a desktop', async () => {
+it('on a phone a robot has no file sidebar, and no Links tool', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
-  const robot = await openRobot();
+  const robot = await openRobot({ phone: true });
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
-  expect(robot.sidebar()).toEqual(['Links', 'Position controls']);
+  expect([robot.pane.querySelector('aside[data-cad-file-sidebar]'), robot.pane.querySelector('button[aria-label="Links"]')]).toEqual([null, null]);
   robot.client.dispose();
 });
 

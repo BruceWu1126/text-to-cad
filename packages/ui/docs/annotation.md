@@ -22,9 +22,9 @@ were drawn from every angle. The STEP renderer is the one that offers Annotate
   or a new one.
 - `annotation/views.js` — a view as a prompt carries it, in a snapshot job's own
   words: the camera (always orthographic), Clip when on, the one motion on
-  screen (Explode, the pose off its default, or a routine's kept frame as
-  `animation: {clip, time}`), the parts hidden and isolated, and the picture's
-  size. Never how it looks.
+  screen (Explode, or the pose off its default as `kinematics` or
+  `jointValues`), the parts hidden and isolated, and the picture's size. Never
+  how it looks.
 - `annotation/toolbar.jsx` — `AnnotationToolbar`, Annotate's sub-toolbar: seven
   tool buttons (Pen, Line, Arrow, Rectangle, Ellipse, Text, Eraser), then Color,
   Stroke width, Line style and Placement, Undo, Redo and Clear. These form one row

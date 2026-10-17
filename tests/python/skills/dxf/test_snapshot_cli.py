@@ -72,7 +72,6 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
 
     def test_display_settings_describe_a_scene_a_drawing_does_not_have(self) -> None:
         for display in (
-            {"mode": "render"},
             {"mode": "hidden-line"},
             {"modes": {"solid": {"flat": True}}},
             {"modes": {"render": {"lighting": {"exposure": 1.2}}}},
@@ -90,7 +89,7 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
 
     def test_the_refusal_names_the_setting_and_the_flag_that_replaces_it(self) -> None:
         with self.assertRaises(snapshot.SnapshotError) as raised:
-            self.prepare(self.job(display={"mode": "render", "modes": {"render": {"floor": {"enabled": True}}}}))
+            self.prepare(self.job(display={"mode": "hidden-line", "modes": {"render": {"floor": {"enabled": True}}}}))
         message = str(raised.exception)
         self.assertIn("display.mode, display.modes", message)
         self.assertIn("a.dxf", message)
@@ -122,11 +121,10 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
                 self.assertEqual(sentence, str(raised.exception))
 
     def test_view_is_the_only_mode_a_drawing_renders_in(self) -> None:
-        # `list` reports a model's renderable parts and `section` cuts a solid;
-        # a drawing has neither. Both used to be accepted here.
-        self.refuses(self.job(mode="list", outputs=[]), r"no parts to list and no solid to section")
-        self.refuses(self.job(mode="section"), r"no parts to list and no solid to section")
-        self.refuses(self.job(section={"plane": "XY"}), r"no parts to list and no solid to section")
+        # `list` reports a model's renderable parts; a drawing has none.
+        self.refuses(self.job(mode="list", outputs=[]), r"no parts to list")
+        self.refuses(self.job(mode="section"), r"Unsupported render mode: section")
+        self.refuses(self.job(section={"plane": "XY"}), r"unknown render job key\(s\): section")
 
     def test_scene_scale_means_nothing_to_a_drawing(self) -> None:
         self.refuses(self.job(scale="urdf"), r"scale picks the units a 3D scene")
@@ -176,7 +174,7 @@ class DxfSnapshotRefusalTests(unittest.TestCase):
         # also be handed; a .dxf in the same packet still gets the drawing's
         # answer rather than a 3D render nobody could reproduce in the viewer.
         self.refuses(self.job(camera="top"), r"camera poses a model in space", kinds=ALL_KINDS)
-        self.refuses(self.job(display={"mode": "render"}), r"describes? a 3D scene", kinds=ALL_KINDS)
+        self.refuses(self.job(render=True), r"render describes a 3D scene", kinds=ALL_KINDS)
 
     def test_a_non_drawing_input_is_refused_by_what_it_is(self) -> None:
         (self.root / "part.step").write_text("ISO-10303-21;\n", encoding="utf-8")
@@ -263,7 +261,7 @@ class DxfSnapshotDoorSurfaceTests(unittest.TestCase):
         expected = {
             "--camera": ("poses a model in space", "no camera and no views to choose between"),
             "--display": ("describes a 3D scene", "--appearance light|dark"),
-            "--mode": ("view, section and list", "no parts to list and no solid to section"),
+            "--mode": ("view and list", "no parts to list"),
             "--view-labels": ("view name into the image", "no camera"),
         }
         self.assertEqual(sorted(expected), sorted(DRAWING_RETIRED_OPTIONS))

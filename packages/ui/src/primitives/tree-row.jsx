@@ -1,4 +1,5 @@
 import { forwardRef } from 'react';
+import { useViewerMobile } from '../file-viewer/responsive.js';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@text-to-cad/ui/utils';
 
@@ -6,6 +7,10 @@ import { cn } from '@text-to-cad/ui/utils';
 // tool stack (Features, Links) in the panels' 11px text (`dense`).
 export const TREE_ROW_HEIGHT = 24;
 export const TREE_ROW_DENSE_HEIGHT = 24;
+/** On a phone a row is a 36px line, big enough to take with a finger. */
+export const TREE_ROW_TOUCH_HEIGHT = 36;
+/** The height of a tree's row in the viewer at hand: a desktop's 24px, a phone's 36px. */
+export const useTreeRowHeight = () => (useViewerMobile() ? TREE_ROW_TOUCH_HEIGHT : TREE_ROW_DENSE_HEIGHT);
 /** What each level of a tree adds to a row's indent: little, its rows hung from a faint line (`TreeRowGuides`). */
 export const TREE_INDENT_PX = 10;
 /** Where a row's glyph starts: centred under the filter row's search icon, and as far in from the row's left end as
@@ -22,11 +27,12 @@ export const TREE_ROW_DENSE_ICON_CLASS = TREE_GLYPH_CLASS;
 export const TreeRowSurface = forwardRef(function TreeRowSurface({
   as: Component = 'div', active = false, cursor = false, dense = false, className, style, children, ...props
 }, ref) {
+  const touch = useViewerMobile();
   return <Component ref={ref} className={cn(
     'relative flex min-w-0 w-full items-center gap-1 rounded-md pr-2 text-left font-normal transition-colors', dense ? 'text-tiny' : 'text-xs',
     active ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/50',
     cursor && !active && 'bg-accent/30', className
-  )} style={{ height: dense ? TREE_ROW_DENSE_HEIGHT : TREE_ROW_HEIGHT, ...style }} {...props}>{children}</Component>;
+  )} style={{ height: touch ? TREE_ROW_TOUCH_HEIGHT : dense ? TREE_ROW_DENSE_HEIGHT : TREE_ROW_HEIGHT, ...style }} {...props}>{children}</Component>;
 });
 
 /** A branch's disclosure: one light chevron, turned down while it is open. A leaf keeps its place. */

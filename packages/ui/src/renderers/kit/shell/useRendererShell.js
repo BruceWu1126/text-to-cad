@@ -1,20 +1,20 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Play } from "lucide-react";
 import { clonePerspectiveSnapshot } from "@text-to-cad/core/lib/perspective.js";
 import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import { ViewerElementContext, useViewerHost, usePromptDestination } from "../../../host/context.js";
 import { hasOpenPopup } from "../../../lib/popups.js";
 import { useAnnotationSession } from "../../../annotation/session.js";
+import { annotationToolIcon } from "../../../annotation/toolbar.jsx";
 import { useViewerHistory } from "./useViewerHistory.js";
 import { promptView, promptViews } from "../../../annotation/views.js";
 import { sceneBackdropEdgeColor } from "../look/chromeBackdrop.js";
 import { useChromeBackdropColor } from "../look/useChromeBackdropColor.js";
-import { prefetchRenderStudio } from "../look/renderStudioChunk.js";
+import { VIEWER_RENDER_PROFILE, sceneForRenderProfile } from "../viewport/renderProfile.js";
 import { CAD_ANNOTATION_DEFAULTS } from "../tools/annotate/AnnotationOverlay.jsx";
 import { annotationDocumentOf } from "../tools/annotate/annotation3d.js";
 import { normalizeToolStack } from "../tools/toolStackLayout.js";
 import { normalizePlayback } from "../tools/playbar/playbackPreferences.js";
-import { animationControlsHaveContent } from "../tools/playbar/ViewportAnimationBar.js";
+import { animationControlsHaveContent } from "../tools/playbar/AnimationTimeControl.js";
 import { DisplayModeSettings } from "../view-settings/DisplayModeSettings.jsx";
 import { useAppliedViewSettings } from "../view-settings/useAppliedViewSettings.js";
 import { useViewSettings } from "../view-settings/useViewSettings.js";
@@ -30,8 +30,8 @@ import { useWhenSettled } from "./useWhenSettled.js";
 
 
 /**
- * Preview mode's one state: the viewer with its tools put away, orbiting the model and
- * playing its routines. The shell holds it unless the renderer passes it in
+ * Preview mode's one state: the viewer with its tools put away, the model drawn in Render, where its
+ * routines play and it orbits on request. The shell holds it unless the renderer passes it in
  * (`useRendererShell`'s `preview`).
  * `now()` is the state as last set, before React renders it: what a command preview's own crossing
  * calls (its routine played on the way in) asks of it.
@@ -69,11 +69,17 @@ export function presentationIsPending(state, { modelKey, key, renderMode }) {
  * The tool ids the shell itself understands. A renderer's own tools use any other id. A renderer
  * that offers one of these declares it in its `toolModes` too, as a mode that toggles.
  */
-export const SHELL_TOOL = Object.freeze({ ANNOTATE: "annotate", ANIMATE: "animate" });
+export const SHELL_TOOL = Object.freeze({ ANNOTATE: "annotate" });
 
 const SESSION_SAVE_DELAY_MS = 180;
 const EMPTY = Object.freeze({});
-const NO_CHOICE = Object.freeze({});
+
+/**
+ * The mode the view settings store draws instead of the file's (its `presentMode`): Render is the
+ * Studio's alone (preview), drawn whatever mode the file is in, and the tools view never draws it —
+ * a file left in Render is drawn there in Solid. Its Render settings are the file's either way.
+ */
+const presentModeFor = (previewing, fileMode) => (previewing ? "render" : fileMode === "render" ? "solid" : null);
 
 /**
  * Everything a file-family renderer needs from its host that is not about its
@@ -81,13 +87,13 @@ const NO_CHOICE = Object.freeze({});
  * the rest and hands back one `shell` object for `<RendererShell>`:
  *
  *  - the file's view through the host (`state` / `onStateChange`, `fileView.js`): the
- *    camera, the Display settings, preview's playback settings, and the renderer's own
+ *    camera, the Display settings, the playback settings, and the renderer's own
  *    slices of view state — written soon after a change and once more on unmount, and
  *    read back before the first paint, the camera restored in place of the open-time fit;
  *  - Display settings: store, resolution against the renderer's FEATURES, the
  *    queued application to the viewport, and the content of Display's dropdown;
- *  - tools: the mode state machine, Annotate's session and the Animation tool, or none
- *    at all for a renderer whose viewport is the camera's alone;
+ *  - tools: the mode state machine and Annotate's session, or none at all for a renderer
+ *    whose viewport is the camera's alone;
  *  - the host contract: prompt snapshots, clipboard screenshots,
  *    preview, alerts, shortcuts (a file's controls are tool-stack panels the renderer
  *    shows with its tools, never a host panel);
@@ -111,17 +117,15 @@ const NO_CHOICE = Object.freeze({});
  * @param {{ current: object | null }} [options.viewerRef]  The ref the viewport's handle lands in, when
  *   the renderer made it itself (see `viewSettings.applied`).
  * @param {ReturnType<typeof import("../tools/toolModes.js").createToolModes> | null} [options.toolModes]  Omitted
- *   by a renderer with no tools: the shell then has no active tool and a saved tab records none. A renderer
- *   whose one tool is Animation declares it as the default mode and puts nothing on its strip:
- *   the tool is up from the open and never put down, its panel at the top-left with no X.
- * @param {boolean} [options.previewable]  The renderer's view is 3D and offers Preview: the model fullscreen,
- *   orbiting, its tools put away. Each renderer of a 3D view declares it; without it (a 2D view) there is no
- *   Preview at all — no control in the navbar, not a disabled one — and anything that asks for Preview leaves
- *   the normal view on screen (`previewing` stays false, `setPreviewing` does nothing).
+ *   by a renderer with no tools: the shell then has no active tool and a saved tab records none.
+ * @param {boolean} [options.previewable]  The renderer's view is 3D and offers the Studio (preview): the model
+ *   fullscreen in Render, its tools put away. Each renderer of a 3D view declares it; without it (a 2D view)
+ *   there is no Studio at all — no button on the strip, not a disabled one — and anything that asks for it
+ *   leaves the normal view on screen (`previewing` stays false, `setPreviewing` does nothing).
  * @param {{ previewing: boolean, set: (previewing: boolean) => void }} [options.preview]  Preview mode
  *   (`usePreviewState`), when the renderer holds that state itself: a renderer whose own gates
  *   (picking, tool effects) and whose scene's inputs run before this hook cannot wait for it.
- *   Every gate reads this one state; the Preview button, Escape and its X write it, through the returned
+ *   Every gate reads this one state; the Studio button, Escape and its X write it, through the returned
  *   `setPreviewing`. Omitted: the shell holds it. While it is on, the renderer draws the model as it opens
  *   (at rest, nothing hidden, isolated, picked or measured) and leaves its own state as it is, so leaving
  *   finds the tools view exactly as it was.
@@ -134,15 +138,11 @@ const NO_CHOICE = Object.freeze({});
  *   editPending?: boolean, finding?: boolean }} options.load  The
  *   renderer's document load. `busy`: nothing to show yet. `updating`: a newer revision is loading behind the scene on
  *   screen. The rest are for a renderer whose document is more than a download — see `loadReport.js`.
- * @param {object | null} [options.animation]  A playbar runtime (with its own `clock`), when the file has
- *   routines. They play in preview — the shell puts them on the playbar under the model (its Routines, the
- *   transport, its Playback settings) — and, where the renderer puts `tools.animate` on its strip, under the
- *   Animation tool, whose panel is the shell's. Once neither holds the routine, the runtime's `onPutDown`
- *   pauses it where it is: a frame past its start is KEPT, the model staying there under every other tool
- *   until another motion is taken up, which puts it back at rest (`onRelease`); a routine at its start goes
- *   back to rest (a runtime with no `onPutDown` always does, by `onRelease`).
- *   Each mode's routine is its own: entering preview saves the tools view's
- *   (`savePlayback`) and starts at rest, and leaving hands it back (`restorePlayback`).
+ * @param {object | null} [options.animation]  A routine runtime (with its own `clock`), when the file has
+ *   routines. They play from the file sidebar's Animation section, in the tools view, whose frame stays
+ *   on the model as a pose does, and in the Studio (preview). Each mode's routine is its own: entering
+ *   the Studio saves the tools view's (`savePlayback`) and starts at rest, playing only under Autoplay,
+ *   and leaving hands it back (`restorePlayback`).
  * @param {{ commands?: Record<string, (...args: any[]) => void>, declined?: Record<string, string>,
  *   state?: () => object, resource?: () => object }} [options.live]  Live commands this renderer adds (by name) or
  *   declines (name to the error its caller reads), and extra fields for the live state. Every name in
@@ -214,35 +214,41 @@ export function useRendererShell({
   // Preview and the tools view are two states. The tools view's is never touched by preview: the
   // renderer draws preview from the model as it opens (`previewing`), and keeps its own work as it
   // is. The routine is the one thing both modes play on the same model, so it crosses here, on
-  // every way in and out: entering saves the tools view's routine as it stands — with the Speed and
-  // Loop it plays at — and puts it down, and preview opens at rest at the routine's own Speed and
-  // Loop (`resetPlayback`), playing only under Autoplay; leaving puts preview's down, forgets the
-  // Speed and Loop chosen there, and hands the saved routine back, as it was.
+  // every way in and out: entering saves the tools view's routine as it stands (`savePlayback`) and
+  // puts it down, preview opening at rest and playing only under Autoplay; leaving puts preview's
+  // down and hands the saved one back (`restorePlayback`), to the file it came from.
   const animationRef = useRef(animation);
   animationRef.current = animation;
   const modelKeyRef = useRef(modelKey);
   modelKeyRef.current = modelKey;
-  const autoplayRef = useRef(false);
   const toolsRoutine = useRef(null);
-  // Speed and Loop chosen in preview's Playback settings: preview's alone, forgotten on the way out.
-  const [previewChoice, setPreviewChoice] = useState(NO_CHOICE);
-  const setPreviewing = useCallback(next => {
-    const entering = Boolean(next);
-    // A view that does not offer Preview never enters it, whatever asks.
-    if ((entering && !previewable) || entering === previewingRef.current) return;
+  const autoplayRef = useRef(false);
+  // The Studio's Orbit, on or off: its alone, off each time it opens until its settings turn it on.
+  const [orbiting, setOrbiting] = useState(false);
+  // Preview's Render scene, prepared ahead of it (`previewPrepare`, below), so entering has less to do.
+  const previewPrepare = useRef(null);
+  // The view settings store (made below): a crossing draws its mode with the state it sets, so the
+  // Studio and its Render arrive in one render, not a second one after a layout effect.
+  const viewSettingsStoreRef = useRef(null);
+  const commitPreviewing = useCallback(entering => {
+    if (entering === previewingRef.current) return;
     previewingRef.current = entering;
     const runtime = animationControlsHaveContent(animationRef.current) ? animationRef.current : null;
-    // The routine is saved with the file it came from, and handed back only to that file: another
-    // file opened while preview was up starts at rest instead.
-    if (entering) toolsRoutine.current = runtime ? { file: modelKeyRef.current, playback: runtime.savePlayback() } : null;
-    if (entering) runtime?.resetPlayback();
-    else runtime?.onRelease();
-    if (!entering && runtime && toolsRoutine.current?.file === modelKeyRef.current) runtime.restorePlayback(toolsRoutine.current.playback);
+    if (entering) toolsRoutine.current = runtime?.savePlayback ? { file: modelKeyRef.current, playback: runtime.savePlayback() } : null;
+    runtime?.onRelease();
+    if (!entering && runtime?.restorePlayback && toolsRoutine.current?.file === modelKeyRef.current) runtime.restorePlayback(toolsRoutine.current.playback);
     if (!entering) toolsRoutine.current = null;
-    setPreviewChoice(NO_CHOICE);
+    setOrbiting(false);
+    const store = viewSettingsStoreRef.current;
+    store?.configure({ presentMode: presentModeFor(entering, store.getSnapshot().display.mode) });
     previewState.set(entering);
     if (entering && runtime && autoplayRef.current) runtime.onPlayToggle();
-  }, [previewable, previewState.set]);
+  }, [previewState.set]);
+  const setPreviewing = useCallback(next => {
+    // A view that does not offer Preview never enters it, whatever asks.
+    if (next && !previewable) return;
+    commitPreviewing(Boolean(next));
+  }, [previewable, commitPreviewing]);
   // A view that stops offering Preview while it is up leaves it the way every exit does.
   useEffect(() => {
     if (!previewable && previewState.previewing) {
@@ -259,7 +265,14 @@ export function useRendererShell({
   // — one that reads them while it is still deciding what to load — creates them itself and passes
   // them in. It is the same store either way; owning it here is a convenience, not a rule.
   const { display: displaySettings, scene: desiredScene, store: viewSettingsStore } = useViewSettings(colorScheme, viewSettings);
+  viewSettingsStoreRef.current = viewSettingsStore;
   useLayoutEffect(() => { viewSettingsStore.configure({ features }); }, [viewSettingsStore, features]);
+  // The mode drawn (`presentModeFor`): set by a crossing itself (`commitPreviewing`), and here for
+  // every other way it changes — the file's own mode, a renderer's own preview state.
+  const fileMode = displaySettings.mode;
+  useLayoutEffect(() => {
+    viewSettingsStore.configure({ presentMode: presentModeFor(previewing, fileMode) });
+  }, [viewSettingsStore, previewing, fileMode]);
   // Before the first paint, like every later edit: through the store, never around it.
   useLayoutEffect(() => { viewSettingsStore.restore(restored.display); }, [viewSettingsStore, restored]);
   const ownViewerRef = useRef(null);
@@ -271,7 +284,14 @@ export function useRendererShell({
   const viewUpdate = appliedByRenderer || ownViewUpdate;
   const resolvedScene = viewUpdate.scene;
   const rendering = resolvedScene.render.enabled;
-  useEffect(() => { if (rendering) prefetchRenderStudio(); }, [rendering]);
+  // Preview's scene, prepared ahead: Render's studio and environment at preview's quality, so
+  // entering it is one change on screen (`setPreviewing`). Warmed once the model is on screen.
+  previewPrepare.current = signal => {
+    if (resolvedScene.render.enabled) return null;
+    const prepare = viewerRef.current?.prepareViewSettings;
+    if (!prepare) return null;
+    return prepare(sceneForRenderProfile(viewSettingsStore.sceneFor("render"), VIEWER_RENDER_PROFILE.PREVIEW), signal);
+  };
 
   // The camera the file was left at, scoped to this model: the viewport applies it in place of
   // its open-time fit, and fits when there is none (or it is not a camera at all).
@@ -286,19 +306,10 @@ export function useRendererShell({
   const recordRef = useRef(null);
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
-  // The file's playback settings — preview's Orbit (on or off, and its speed), Autoplay, and the Speed
-  // and Loop the tools view's Animation tool chose — kept between leaving and re-entering preview,
-  // and in its view. Preview's own Speed and Loop are not among them (`previewChoice`).
+  // The file's playback settings — preview's Orbit speed, Autoplay, and the routine's Speed and Loop
+  // once chosen — kept between leaving and re-entering preview, and in its view.
   const [playback, setPlaybackState] = useState(() => restored.playback);
   const setPlayback = useCallback(patch => setPlaybackState(current => normalizePlayback({ ...current, ...patch })), []);
-  // The Speed and Loop the routine in hand plays at, as chosen in the mode on screen: the tools
-  // view's (the file's, above), or preview's own; unset, the routine's own apply.
-  const routinePlayback = useMemo(() => (previewing ? previewChoice : { speed: playback.speed, loop: playback.loop }),
-    [previewing, previewChoice, playback.speed, playback.loop]);
-  const chooseRoutinePlayback = useCallback(patch => {
-    if (previewingRef.current) setPreviewChoice(current => ({ ...current, ...patch }));
-    else setPlayback(patch);
-  }, [setPlayback]);
   const rendererStateRef = useRef(rendererState);
   rendererStateRef.current = rendererState;
   const latestRecord = useRef(null);
@@ -409,6 +420,13 @@ export function useRendererShell({
   const runtimeAlert = onRuntimeAlert ? null : ownRuntimeAlert;
   const viewerLoading = Boolean(load.busy);
   const hasContent = Boolean(scene) && !viewerLoading;
+  // Preview's scene warmed a moment after the model is on screen, before anyone asks for it.
+  useEffect(() => {
+    if (!previewable || !hasContent) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => { void Promise.resolve(previewPrepare.current?.(controller.signal)).catch(() => {}); }, 600);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [previewable, hasContent, modelKey]);
   const presentationKey = shellPresentationKey(modelKey, revisionKey);
   const ownPresentationReport = usePresentationReport();
   const { state: presentationState, report: handlePresentationChange } = presentationReport || ownPresentationReport;
@@ -424,11 +442,6 @@ export function useRendererShell({
   // ---- tools ----------------------------------------------------------------
   const idle = viewerLoading || !scene;
   const annotateToolActive = !previewing && toolMode === SHELL_TOOL.ANNOTATE;
-  // The Animation tool is a file's with routines; while it is up its panel plays them.
-  const routines = animationControlsHaveContent(animation);
-  const animateToolActive = !previewing && routines && toolMode === SHELL_TOOL.ANIMATE;
-  // Nothing plays in the tools view until it is asked to: taking the tool up, or opening a file
-  // whose one tool it is, plays nothing. Autoplay is preview's (entering it plays the routine).
   const selectTool = useCallback((mode) => setToolMode(current => (toolModes ? toolModes.next(current, mode) : mode)), [toolModes, setToolMode]);
   // A tool panel's X: back to the file's default tool (Select, where there is one), from any tool.
   const selectDefaultTool = useCallback(() => setToolMode(toolModes ? toolModes.defaultMode : ""), [toolModes, setToolMode]);
@@ -555,7 +568,7 @@ export function useRendererShell({
     // ⌘Z and ⇧⌘Z walk the annotation's history, whatever tool is in hand; never in preview.
     onUndo: () => !previewing && historyRef.current.undo(),
     onRedo: () => !previewing && historyRef.current.redo(),
-    escapeActive: Boolean(escape.active || previewing || annotation.selected.length),
+    escapeActive: Boolean(escape.active || previewing || annotation.selected.length || (toolModes && toolMode !== toolModes.defaultMode)),
     onEscape(event) {
       // A popup opened in THIS viewer (a menu, a Select, a colour picker, Display) owns Escape before
       // preview; another viewer's popup is not this one's business.
@@ -564,7 +577,9 @@ export function useRendererShell({
       // Annotate's surface spends its own Escape (its editor deselects, or drops the stroke in hand).
       if (annotateToolActive && event.target instanceof Element && event.target.closest("[data-cad-annotation-overlay]")) return;
       if (annotationRef.current.selected.length) { annotationRef.current.select([]); return; }
-      escapeRef.current?.();
+      if (escapeRef.current?.()) return;
+      // A renderer that left it: the tool in hand goes down, back to the file's default (Select).
+      if (toolModes && toolMode !== toolModes.defaultMode) selectDefaultTool();
     }
   });
 
@@ -584,7 +599,7 @@ export function useRendererShell({
         // vocabulary reports its selection through `live.state`, so it is never passed on raw.
         selection: promptContextRef.current === createViewPromptContext ? referencesRef.current?.() || [] : [],
         camera: clonePerspectiveSnapshot(viewerRef.current?.getPerspective?.() || activePerspectiveRef.current),
-        display, renderMode: display.mode === "render" ? "render" : "inspect",
+        display,
         ...rendererState,
         loading: Boolean(viewerLoading || !scene || load.updating || presentationPending || rendererState.loading)
       };
@@ -615,7 +630,6 @@ export function useRendererShell({
       if (!viewerRef.current?.resetZoom?.()) throw new Error("The viewer camera is unavailable.");
     },
     setDisplaySettings(patch) { viewSettingsStore.patch(patch); },
-    setRenderMode(enabled) { viewSettingsStore.selectMode(enabled ? "render" : "solid"); },
     capture() {
       if (!viewerRef.current?.captureScreenshotBlob) throw new Error("The viewer cannot capture this model yet.");
       return viewerRef.current.captureScreenshotBlob();
@@ -644,6 +658,7 @@ export function useRendererShell({
   const offeredModes = normalizeViewFeatures(features).modes;
   const displayMode = {
     value: desiredScene.view.mode,
+    // Render is the Studio's, never a display mode (`DisplayModeOptions.js`).
     options: DISPLAY_MODE_OPTIONS.filter(option => offeredModes.includes(option.value)),
     onChange: viewSettingsStore.selectMode,
   };
@@ -652,34 +667,30 @@ export function useRendererShell({
     onReset={() => viewSettingsStore.resetMode(mode)} />;
   const projection = {
     value: desiredScene.view.camera.projection,
-    disabled: desiredScene.view.mode === "render",
     onChange: value => viewSettingsStore.patch({ camera: { projection: value } }),
   };
   const stripTool = ({ id, label, icon, ...rest }) => ({
     id, label, icon, active: !previewing && toolMode === id, disabled: idle, onSelect: () => selectTool(id), ...rest
   });
+  const AnnotateIcon = annotationToolIcon(annotation.tool);
   const tools = {
     /** A tool of the renderer's own: `{ id, label, icon }` plus anything the strip reads. */
     own: stripTool,
     // Annotate: its tools, its history and what the next mark looks like are its panel in the tool stack
-    // while it is up (`RendererShell.jsx`, `annotation/toolbar.jsx`); the button is the pencil, whatever
-    // annotation tool is in hand. A second press does nothing.
-    annotate: stripTool({ id: SHELL_TOOL.ANNOTATE, label: "Annotate", icon: <Pencil className="size-3" strokeWidth={2} aria-hidden="true" />,
+    // while it is up (`RendererShell.jsx`, `annotation/toolbar.jsx`); the button is the annotation
+    // tool in hand (the pen, a shape, text or the eraser), which stays in hand when Annotate is put
+    // down. A second press does nothing.
+    annotate: stripTool({ id: SHELL_TOOL.ANNOTATE, label: "Annotate", icon: <AnnotateIcon className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => selectTool(SHELL_TOOL.ANNOTATE) }),
-    // The file's routines, played without leaving the tools view. Null for a file with none. Its
-    // button, Play, takes the tool up and plays nothing: its sub-toolbar, while it is
-    // up, has the transport and the settings (`RendererShell.jsx`, `AnimationToolbar`).
-    animate: routines ? stripTool({ id: SHELL_TOOL.ANIMATE, label: "Animation",
-      icon: <Play className="size-3" strokeWidth={2} aria-hidden="true" /> }) : null,
   };
 
   return {
     // Renderer-facing.
     toolMode, selectTool, selectDefaultTool, tools, idle, previewable, previewing, setPreviewing,
-    // The file's playback settings: orbit and its speed, Autoplay, and the tools view's chosen Speed and Loop.
+    // The file's playback settings: Orbit's speed, Autoplay, and the routine's chosen Speed and Loop.
     autoplay, setAutoplay, playback, setPlayback,
-    // The Speed and Loop chosen in the mode on screen (preview's are its own), and choosing them there.
-    routinePlayback, chooseRoutinePlayback,
+    // Preview's Orbit, on or off: off each time preview opens.
+    orbiting, setOrbiting,
     // Deliver a prompt context through the host, reporting a failure as the viewport's alert.
     reportActionError, deliverPrompt, requestRender: () => viewerRef.current?.requestRender?.(),
     // A frame that keeps the shadow maps, for what moves and reshapes no shadow caster (a highlight).
@@ -703,7 +714,7 @@ export function useRendererShell({
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      annotateToolActive, annotation, history, deletePicked, measurements, animation, animateToolActive, display, displayMode, projection
+      annotateToolActive, annotation, history, deletePicked, measurements, animation, display, displayMode, projection
     }
   };
 }

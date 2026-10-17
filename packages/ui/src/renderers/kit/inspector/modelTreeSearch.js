@@ -121,8 +121,7 @@ const NO_MATCHES = Object.freeze({ matches: Object.freeze([]), total: 0 });
  * A tree's filter box, as one hook for every file tree that has one: the query, the ranked
  * hits over `roots` (indexed only while there is a query, and searched at deferred
  * priority), the keyboard cursor over them, and the scroll position the tree had when the
- * search began, put back when it ends. `finding`: whether the find field is open in place of the
- * tree's heading (`openFind`; `closeFind` clears and closes it, as Escape does on an empty query).
+ * search began, put back when it ends. Escape clears the query.
  *
  * The tree renders the hits into `listRef`'s element; each hit row carries
  * `data-search-row={node.id}`, and Enter presses that row's `button[aria-pressed]`.
@@ -130,7 +129,7 @@ const NO_MATCHES = Object.freeze({ matches: Object.freeze([]), total: 0 });
  * @param {object[]} roots The presented tree's top-level nodes.
  */
 export function useTreeSearch(roots) {
-  const [query, setQuery] = useState(''), [cursor, setCursor] = useState(null), [finding, setFinding] = useState(false);
+  const [query, setQuery] = useState(''), [cursor, setCursor] = useState(null);
   const searching = query.trim() !== '', deferredQuery = useDeferredValue(query);
   const index = useMemo(() => (searching ? buildModelTreeSearchIndex(roots) : null), [searching, roots]);
   const found = useMemo(() => (index ? searchModelTree(index, deferredQuery) : NO_MATCHES), [index, deferredQuery]);
@@ -143,11 +142,8 @@ export function useTreeSearch(roots) {
   useLayoutEffect(() => { if (!searching && listRef.current) panelScroller(listRef.current).scrollTop = resumeScroll.current; }, [searching]);
   const cursorId = found.matches.some(match => match.entry.node.id === cursor) ? cursor : found.matches[0]?.entry.node.id ?? null;
   useEffect(() => { if (cursorId) listRef.current?.querySelector(`[data-search-row="${CSS.escape(cursorId)}"]`)?.scrollIntoView?.({ block: 'nearest' }); }, [cursorId]);
-  const openFind = () => setFinding(true);
-  const closeFind = () => { changeQuery(''); setFinding(false); };
   const onKeyDown = event => {
     if (event.key === 'Escape' && query) { event.preventDefault(); event.stopPropagation(); changeQuery(''); return; }
-    if (event.key === 'Escape' && finding) { event.preventDefault(); event.stopPropagation(); setFinding(false); return; }
     if (!found.matches.length) return;
     const at = found.matches.findIndex(match => match.entry.node.id === cursorId);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -158,5 +154,5 @@ export function useTreeSearch(roots) {
       listRef.current?.querySelector(`[data-search-row="${CSS.escape(cursorId)}"] button[aria-pressed]:not(:disabled)`)?.click();
     }
   };
-  return { query, searching, deferredQuery, index, found, cursorId, listRef, changeQuery, onKeyDown, finding, openFind, closeFind };
+  return { query, searching, deferredQuery, index, found, cursorId, listRef, changeQuery, onKeyDown };
 }

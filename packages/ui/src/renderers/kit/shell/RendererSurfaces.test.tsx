@@ -332,11 +332,10 @@ it('a view that has gone writes nothing more: its last write is the one it makes
 // The full reset crosses the renderer callback and the shell's tool/preview
 // lifecycle; it must reach the camera only after those changes commit.
 
-// A stand-in routine runtime: what preview puts down on the way in and hands back on the way out.
+// A stand-in routine runtime: preview plays it (under Autoplay) and puts it back at rest on the way out.
 function routineRuntime(name: string, calls: string[]) {
-  return { clips: [{ id: name }], clock: createAnimationClock(), savePlayback: () => { calls.push(`save ${name}`); return `${name}@3s`; },
-    resetPlayback: () => calls.push(`reset ${name}`), onRelease: () => calls.push(`release ${name}`),
-    restorePlayback: (saved: string) => calls.push(`restore ${name} ${saved}`), onPlayToggle: () => calls.push(`play ${name}`) };
+  return { clips: [{ id: name }], clock: createAnimationClock(), onRelease: () => calls.push(`release ${name}`),
+    onPlayToggle: () => calls.push(`play ${name}`) };
 }
 
 function mountRoutine(data: Record<string, unknown>) {
@@ -350,19 +349,15 @@ function mountRoutine(data: Record<string, unknown>) {
     <ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(extra) as any)} /></ViewerHostContext.Provider>);
 }
 
-it('the tools view\'s routine goes back only to the file it came from', () => {
+it('opening another file while preview is up leaves it, and the routine on screen goes back to rest', () => {
   const calls: string[] = [];
-  const first = routineRuntime('a', calls);
-  const rerender = mountRoutine({ animation: first, modelKey: 'a.glb' });
+  const rerender = mountRoutine({ animation: routineRuntime('a', calls), modelKey: 'a.glb' });
   act(() => { fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]); });
-  // Another file opened in this view while preview was up: its runtime starts at rest.
-  const second = routineRuntime('b', calls);
-  rerender({ animation: second, modelKey: 'b.glb' });
-  // Opening another file leaves preview; the routine saved from a is never posed on b, which
-  // starts at rest (put down, however many times).
+  // Autoplay is off: entering plays nothing.
+  expect(calls).toEqual([]);
+  rerender({ animation: routineRuntime('b', calls), modelKey: 'b.glb' });
   expect(screen.queryAllByRole('button', { name: 'Exit preview' })).toEqual([]);
-  expect(calls.filter(call => !call.startsWith('release'))).toEqual(['save a', 'reset a']);
-  expect(calls).toContain('release b');
+  expect(calls).toEqual(['release b']);
 });
 
 it('a view that stops offering Preview while it is up leaves it as every exit does', () => {
@@ -371,6 +366,5 @@ it('a view that stops offering Preview while it is up leaves it as every exit do
   const rerender = mountRoutine({ animation: runtime });
   act(() => { fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]); });
   rerender({ animation: runtime, previewable: false });
-  expect(calls.filter(call => !call.startsWith('release'))).toEqual(['save a', 'reset a', 'restore a a@3s']);
-  expect(calls).toContain('release a');
+  expect(calls).toEqual(['release a']);
 });

@@ -20,9 +20,7 @@ export const TAB_TOOL_MODE = {
   ANNOTATE: "annotate",
   MEASURE: "measure",
   EXPLODE: "exploded",
-  CLIP: "clip",
-  // Play the model's routines in the tools view: the shell's tool (`SHELL_TOOL.ANIMATE`), as Annotate is.
-  ANIMATE: "animate"
+  CLIP: "clip"
 };
 
 
@@ -38,7 +36,6 @@ export const CAD_TOOL_MODES = createToolModes({
     [TAB_TOOL_MODE.MEASURE]: {},
     [TAB_TOOL_MODE.EXPLODE]: {},
     [TAB_TOOL_MODE.CLIP]: {},
-    [TAB_TOOL_MODE.ANNOTATE]: {},
-    [TAB_TOOL_MODE.ANIMATE]: {}
+    [TAB_TOOL_MODE.ANNOTATE]: {}
   }
 });

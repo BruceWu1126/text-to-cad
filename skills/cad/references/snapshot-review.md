@@ -3,7 +3,7 @@
 Read this file when choosing visual checks for saved STEP/STP or mesh outputs.
 Use `cadgen step snapshot` for STEP, or the corresponding `stl`, `3mf` or `glb`
 snapshot command for meshes (see [mesh exports](supported-exports.md)). The
-CAD topology, selection, section and motion controls below apply to STEP.
+CAD topology, selection, clipping and motion controls below apply to STEP.
 
 ## Policy
 
@@ -29,7 +29,7 @@ Do not loop on snapshots. Rerender only when a source repair changed visible geo
 
 Choose views that expose the features being checked. One may be enough;
 add an opposing view for hidden exterior features, an orthographic view for
-a pattern or silhouette, or a section for internal geometry. No fixed set of
+a pattern or silhouette, or a clipped view for internal geometry. No fixed set of
 views proves every face or feature is correct.
 
 ## Small packet
@@ -57,7 +57,7 @@ Set `input` to the saved STEP/STP artifact using a relative or absolute path
 (documents only: run a `.py` model first). With no explicit display settings,
 snapshots use the `solid` preset, Light appearance and an orthographic isometric
 camera. Every mode defaults to 1600x1200 (the `diagnostic` profile). Job `mode`
-remains `view`, `section`, or `list`; display presets are a separate choice.
+is `view` or `list`; display presets are a separate choice.
 
 `--size-profile` (`output.sizeProfile` in a job) is one of exactly these names;
 anything else is refused with this list:
@@ -76,18 +76,19 @@ anything else is refused with this list:
 with a whole number of pixels from 1 to 8192; a larger request is refused rather
 than clamped. With `--job` they size every output in the packet.
 
-`--display` accepts a mode name, inline JSON, or a JSON file path. The five
-modes are `solid` (the default: shaded, with edge linework), `render`
-(perspective projection and photographic lighting), `xray` (translucent surfaces
-with occluded edges visible), `hidden-line` (linework with occluded edges
-suppressed), and `wireframe` (edges only). Render uses perspective; other modes
-use the shared projection, orthographic by default. `appearance` is `light`
+`--display` accepts a mode name, inline JSON, or a JSON file path. The four
+modes are `solid` (the default: shaded, with edge linework), `xray` (translucent
+surfaces with occluded edges visible), `hidden-line` (linework with occluded edges
+suppressed), and `wireframe` (edges only); they use the shared projection,
+orthographic by default. `--render` draws the photographic Render instead, in
+perspective with studio lighting, with Render's own settings from
+`display.modes.render`; it is view mode only. `appearance` is `light`
 (the CLI default) or `dark`. The Viewer and CLI accept the same sparse display
 object, with settings stored separately for each mode:
 
 ```bash
-cadgen step snapshot STEP/part.step tmp/review.png --display render
-cadgen step snapshot STEP/part.step tmp/review.png --display '{"mode":"render","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
+cadgen step snapshot STEP/part.step tmp/review.png --render
+cadgen step snapshot STEP/part.step tmp/review.png --render --display '{"modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
 cadgen step snapshot STEP/part.step tmp/review.png --display display.json --camera front
 ```
 
@@ -181,7 +182,7 @@ In a JSON job these two flags are the one exception to "job key = flag name with
 }
 ```
 
-`"selection": { "focus": ["#o1.2"] }` is the `--focus` form; `focus` and `hide` are the only selection keys. Every other flag keeps the plain rule (`--kinematics` → `"kinematics"`, `--animation CLIP --time S` → `"animation": {"clip": ..., "time": ...}`, `--section XZ:12.5` → `"section": {"plane": "XZ", "offset": 12.5}`).
+`"selection": { "focus": ["#o1.2"] }` is the `--focus` form; `focus` and `hide` are the only selection keys. Every other flag keeps the plain rule (`--kinematics` → `"kinematics"`, `--animation CLIP --time S` → `"animation": {"clip": ..., "time": ...}`).
 
 With `--job FILE`, other flags override every job in it; there is no stdin form.
 A TARGET given with `--job` replaces every job's `input`, so one job file renders
@@ -197,7 +198,7 @@ cadgen snapshot STEP/bracket_v2.step --job views.job.json
 `--annotation FILE` (a job's `annotation`: a path or the object) draws a person's ink
 over the model as they drew it in the CAD Viewer: each mark sits on its part,
 follows it when the view explodes or poses the model, and is cut by a clip.
-A DXF, `--mode list`, and `--mode section` take none.
+A DXF and `--mode list` take none.
 
 A Quick Edit prompt names the views the person looked at as a `.job.json` file,
 the PNGs it rendered, and their `.annotation.json` file when they drew. Every
@@ -209,29 +210,18 @@ file>` renders those views again: after an edit, run it to see the change from
 where the person looked, with their annotation still on it. Add a TARGET to aim the
 same views at another document.
 
-## Section planes
+## Clipped views
 
-`--mode section` cuts the model with a plane and draws the cut outline. Say where
-with `--section PLANE[:OFFSET]`:
+Use the viewer's Clip setting to reveal internal geometry in a normal view snapshot.
+`display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at` in model
+millimetres, and `invert`. The cut stays capped and uses the same scene as the viewer.
 
 ```bash
-cadgen step snapshot STEP/housing.step tmp/cut.png --mode section --section XZ:12.5
-cadgen step snapshot STEP/housing.step tmp/cut.svg --mode section --section YZ
+cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip":{"enabled":true,"axis":"y","at":12.5}}'
 ```
 
-`PLANE` is `XY`, `XZ` or `YZ` — the two axes the plane contains — and defaults to
-`XY`. `OFFSET` moves the plane along its own normal in model units (Z for `XY`,
-Y for `XZ`, X for `YZ`) and defaults to 0, so `XZ:12.5` cuts at Y = 12.5. In a job
-it is `"section": {"plane": "XZ", "offset": 12.5}` beside `"mode": "section"`;
-those are its only two keys, and a `section` on a job whose mode is not `section`
-is refused. A plane that misses the model renders an empty drawing with a
-warning that says so. Section mode is STEP-only, and takes no kinematics,
-animation or Render display.
-
-OUT's extension picks the format and nothing else does: section mode writes
-`.png` or `.svg`, view mode writes `.png`, and a video writes `.mp4` or `.gif`.
-Any other extension — a view named `.svg` or `.jpg` — is refused instead of
-writing PNG bytes under it.
+OUT's extension picks the format: a view writes `.png`, and a video writes
+`.mp4` or `.gif`. Other extensions are refused instead of writing PNG bytes under them.
 
 ## Output paths
 
@@ -260,7 +250,7 @@ Pass a directory (`tmp/` as OUT, or an output `path` that is one) only when the 
 Add views only when the brief or a failure mode calls for them:
 
 - reference-image reproduction: one snapshot from the reference image's viewpoint for side-by-side comparison
-- `--mode section --section PLANE[:OFFSET]`: shell, bore, internal cavity, passage, blind hole, enclosure, or wall/floor relationship (see [Section planes](#section-planes))
+- `display.clip` with a camera facing the cut: shell, bore, internal cavity, passage, blind hole, enclosure, or wall/floor relationship (see [Clipped views](#clipped-views))
 - `display.mode: "solid"`: shaded CAD view with visible edge linework
 - `display.edges.enabled: false`: shaded surfaces without the edge overlay
 - `display.mode: "xray"`: translucent surfaces with hidden/occluded edges visible
@@ -278,7 +268,7 @@ Visual review is diagnostic, not authoritative. Convert every visual concern int
 - hole pattern appears asymmetric -> measure hole centers and compare offsets
 - lid, child part, or occurrence appears offset -> inspect frames and mating deltas
 - gusset, boss, standoff, rib, or plate may be floating -> inspect solid count, labels, connectivity, contact, or relevant distances
-- cavity, bore, or blind hole looks wrong -> run section review, then measure wall thickness, depth, or through-condition
+- cavity, bore, or blind hole looks wrong -> review a clipped view, then measure wall thickness, depth, or through-condition
 - repeated pattern looks uneven -> measure pattern centers, angular spacing, or occurrence frames
 
 Final reports name what the snapshots showed, or the documented skip reason, and which deterministic checks support any visual finding. The PNGs are for your review; the user sees the model in the viewer, so attach one only when they ask for an image.

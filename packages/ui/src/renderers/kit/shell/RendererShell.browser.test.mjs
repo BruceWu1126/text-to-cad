@@ -164,7 +164,7 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
 
   // The file goes with its Display settings open.
   await displayButton(first).click();
-  await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Solid settings', exact: true }).click();
   await display.waitFor();
   await page.evaluate(() => window.cadHarness.mounted(false));
   await display.waitFor({ state: 'detached' });
@@ -580,7 +580,7 @@ test('a renderer says more about its load than a download: finding the file, edi
   // THE CUBE IS THE BOTTOM-RIGHT CORNER'S, far enough off the bottom that its axes stay inside the
   // view, and the tool stack stops above it. The view's controls, Display then Preview, end the
   // strip, after a rule; the navbar holds none. The right of the view is Quick Edit's, and the bottom middle the host's (a
-  // composer, on some) and preview's playbar.
+  // composer, on some).
   const frameBox = await canvasElement.boundingBox();
   const cubeBox = await pane.getByLabel('View cube', { exact: true }).boundingBox();
   const stackBox = await pane.locator('[data-cad-tool-groups]').boundingBox();
@@ -694,9 +694,9 @@ test('a renderer says more about its load than a download: finding the file, edi
   await quickEdit.waitFor();
   await quickEdit.evaluate(node => Promise.all(node.getAnimations().map(animation => animation.finished)));
   const opened = await quickEdit.boundingBox();
-  const topControls = await pane.locator('[data-cad-top-controls]').boundingBox();
-  assert.ok(opened.x + opened.width > frameBox.x + frameBox.width - 20 && opened.y >= topControls.y + topControls.height,
-    `Quick Edit clears the top controls at the right: ${JSON.stringify([opened, frameBox])}`);
+  // Its corner is the view's top-right, 8px in, whatever the strip's width: the two may overlap.
+  assert.ok(opened.x + opened.width > frameBox.x + frameBox.width - 20 && Math.abs(opened.y - frameBox.y - 8) <= 1,
+    `Quick Edit takes the view's top-right corner: ${JSON.stringify([opened, frameBox])}`);
   assert.equal(Math.round(opened.width), 240);
   const note = quickEdit.getByRole('textbox', { name: 'Describe your changes', exact: true });
   const noteHeight = (await note.boundingBox()).height;

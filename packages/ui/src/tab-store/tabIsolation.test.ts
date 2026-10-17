@@ -50,10 +50,10 @@ test('a new tab starts at the defaults and two tabs never meet: each reload brin
 test("preview's settings are the file's: kept across a reload of the tab, and another file has its own defaults", () => {
   const tab = browserTab();
   const store = createTabStore(tab.record());
-  // A fresh file: orbit on at 1×, the routine's own loop, Autoplay off.
-  expect(readFileView(store.files.read('/models/part.step', 'step')).playback).toEqual({ orbit: true, orbitSpeed: 1, autoplay: false });
-  // Orbit off, its speed 2×, Loop off, Autoplay on — the file's view as the shell writes it.
-  const chosen = { orbit: false, orbitSpeed: 2, autoplay: true, loop: false };
+  // A fresh file: orbit at 1× (preview opens still: on or off is not kept), the routine's own loop, Autoplay off.
+  expect(readFileView(store.files.read('/models/part.step', 'step')).playback).toEqual({ orbitSpeed: 1, autoplay: false });
+  // Orbit's speed 2×, Loop off, Autoplay on — the file's view as the shell writes it.
+  const chosen = { orbitSpeed: 2, autoplay: true, loop: false };
   store.files.write('/models/part.step', 'step', writeFileView({ playback: chosen }) as never);
   expect(readFileView(store.files.read('/models/part.step', 'step')).playback).toEqual(chosen);
 

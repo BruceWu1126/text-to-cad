@@ -27,8 +27,7 @@ import { FolderExplorer } from "./FolderExplorer.jsx";
  * Right, only what a host or a file adds: the host's update button while its install is behind
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
  * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
- * the view full size (`fullSize`), where it shows it small; and last, in the page's top-right
- * corner, the host's light/dark control (`colorSchemeControl`), where the host keeps its own. A renderer's own view
+ * the view full size (`fullSize`), where it shows it small. The colour scheme is the app menu's. A renderer's own view
  * controls (a 3D view's Display and Preview) are its own, at its tool strip's end, not the navbar's.
  *
  * Nothing here is drawn for its own sake: a control appears only where it does something.
@@ -118,7 +117,7 @@ function FileName({ path, explorer }) {
 /**
  * @param {object} props
  * @param {(() => void) | undefined} [props.onHome] The host's home, where it has one: the menu's Back to files.
- * @param {{ links?: import("../../host/types.js").ViewerLinks, appSettings?: readonly import("../types.js").AppSetting[], platform?: string } | null} [props.menu]
+ * @param {{ links?: import("../../host/types.js").ViewerLinks, appSettings?: readonly import("../types.js").AppSetting[], colorScheme?: import("../types.js").ColorSchemeSetting, platform?: string } | null} [props.menu]
  *   The rest of the app's menu: the host's links and the person's settings.
  * @param {import("../types.js").ViewerHistory | null} [props.history] The view's own history, where the host keeps one: Back and Forward after the logo.
  * @param {string | null} [props.file] The open file, by its absolute path.
@@ -129,10 +128,9 @@ function FileName({ path, explorer }) {
  * @param {import("react").ReactNode} [props.trailing] The file's actions.
  * @param {import("react").ReactNode} [props.update] The host's update button, first among the controls.
  * @param {import("react").ReactNode} [props.fullSize] The host's Full size button, where it shows the view small.
- * @param {import("react").ReactNode} [props.colorSchemeControl] The host's light/dark control, last.
  * @param {string} [props.className]
  */
-export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, colorSchemeControl = null, className }) {
+export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, className }) {
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
       <nav aria-label="Viewer" className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
@@ -147,7 +145,6 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
         {update}
         {trailing}
         {fullSize}
-        {colorSchemeControl}
       </div>
     </header>
   );

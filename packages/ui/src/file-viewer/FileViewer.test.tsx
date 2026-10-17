@@ -127,6 +127,19 @@ it('opens the app menu from the logo: Back to files where the host has a home, t
   expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Copy path']);
 });
 
+it('the app menu holds the person\'s theme in one row: System, Light and Dark as segments, the one in force checked, a press keeping the menu open', async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  open({ host, colorScheme: { preference: 'system', onPreferenceChange: change } } as any);
+  await screen.findByText('shown');
+  await user.click(screen.getByRole('button', { name: 'Menu' }));
+  const rows = screen.getAllByRole('menuitemradio');
+  expect(rows.map(row => [row.getAttribute('aria-label'), row.getAttribute('aria-checked')])).toEqual([['System', 'true'], ['Light', 'false'], ['Dark', 'false']]);
+  expect(new Set(rows.map(row => row.closest('[data-menu-theme]')))).toEqual(new Set([document.querySelector('[data-menu-theme]')]));
+  await user.click(screen.getByRole('menuitemradio', { name: 'Dark' }));
+  expect([change.mock.calls, Boolean(document.querySelector('[data-app-menu]'))]).toEqual([[['dark']], true]);
+});
+
 it('ends the app menu with the version the host runs, a link to its release notes: the release as it is, a custom build with its id', async () => {
   const user = userEvent.setup();
   const footer = async (links: object) => {

@@ -44,8 +44,9 @@ Viewer appearance inherits the host; snapshots default to light. Lighting qualit
 Preview in a viewer and Final in a snapshot. Disabled guides, edges and floor retain their
 chosen appearance for re-enabling. There is no Custom state, Grid mode, legacy alias or
 migration. Old-shaped saved display state is discarded at the file-session read boundary.
-The same shape powers live `setDisplaySettings` and snapshot `--display`; `--display render`
-is shorthand for `{ "mode": "render" }`. `--camera` holds pose/framing only.
+The same shape powers live `setDisplaySettings` and snapshot `--display`. A snapshot asks for
+Render with `--render` (a job's `"render": true`), beside a display that never names it as its
+mode; Render's own settings stay `display.modes.render`. `--camera` holds pose/framing only.
 
 ## State and updates
 
@@ -62,20 +63,34 @@ edits do not invalidate materials, lighting, geometry or camera. No-op actions p
 Do not merge captured props, persist resolved defaults or keep a second display state.
 
 The view injects offered `modes` and `settings`. Mesh views offer Solid and Render and no
-edges, Clip or Explode. Unsupported saved modes resolve to Solid without rewriting storage;
+edges, Clip or Explode. In the viewer Render is the Studio's alone (preview mode): Display
+offers the other modes, and the Studio draws Render whatever the file's mode. Unsupported saved modes resolve to Solid without rewriting storage;
 unoffered settings do not affect the scene. The shared UI discovers no host APIs.
 
 ## Rendering costs and camera behavior
 
-The photographic rig stays lazy. Selecting Render creates its photographic
+The photographic rig stays lazy. The Studio's Render creates its photographic
 softbox environment; the other modes use neutral CAD lighting. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 
-| Lighting quality | Screen error | Shadow map | Environment | Capture scale |
-| --- | --- | --- | --- | --- |
-| Preview | 1 px | 2048 px | 256 px | 1× |
-| Final | 0.25 px | 4096 px | 512 px | 2× |
+| Lighting quality | Screen error | Shadow map | Environment | Capture scale | Samples at rest |
+| --- | --- | --- | --- | --- | --- |
+| Preview | 1 px | 2048 px | 256 px | 1× | 32 |
+| Final | 0.25 px | 4096 px | 512 px | 2× | 64 |
+
+Render is drawn through the studio's frame (core's `studioFrame.js`, see
+[the render pipeline](../../core/docs/render-pipeline.md#the-studios-frame)): ambient
+occlusion from the frame's depth, and, while the view rests, a picture that converges over
+its samples: anti-aliased, its occlusion smooth, the key's shadows a softbox's (Softbox size
+sets how soft). The viewport's loop (`useViewerRuntime`) draws each frame through it and says
+whether anything but the camera changed (`runtime.requestRender`/`requestFrame` say so); while
+samples are owed it asks for the next frame itself, and once the picture has converged it
+draws nothing more. A drag, a routine's frame or a setting starts the picture again; the
+damped tail of an orbit, moving the model less than a quarter of a pixel, does not. So
+orbiting pays one draw and a few small passes a frame (about 1.5 ms more at 3024 × 1964 on
+an M1 Max) and a still view converges in about half a second. A snapshot draws its still's
+32 samples at once (video frames one). Software WebGL has no frame: one draw, as before.
 
 The interactive viewer retains one WebGL renderer, canvas and camera controls
 across every mode and settings edit. It uses shadow-compatible conventional
@@ -86,7 +101,7 @@ a near plane at the eye. The grid's bounds also fit the far plane;
 it is independent of the studio floor used by Render. Grid spacing is five cells across the
 default model framing. The grid, the stage and the Render studio's floor are
 SIZED from the model's rest placement for every renderer, STEP included: a pose, a
-playing routine, or entering Render while the model is posed never rescales or
+playing routine, or a pose set in the Studio never rescales or
 slides the ground; its height, the lighting and the shadow reach follow the model. Enabling photographic effects updates that live scene;
 it never clears or covers the canvas with a loading screen. Only actual context
 recovery replaces the renderer. Quality never changes a mesh: every mode draws
@@ -141,17 +156,21 @@ unchanged after a runtime replacement does not.
 ## Where the controls live
 
 Display settings are a dropdown from the Display button at the tool strip's end
-(the current mode's sphere, after the tools' rule and before Preview:
-`kit/shell/DisplayPopover.jsx`), which opens down from it — in preview from preview's own
-row in the strip's place — present for every 3D file. A file's model tree and Position are
+(the current mode's sphere, after the tools' rule and before the Studio's:
+`kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
+modes are every offered mode but Render (`DisplayModeOptions.js`). The Studio draws the model
+in Render whatever the file's mode (the view settings store's `presentMode`), and the tools
+view never does: a file whose mode is Render is drawn there in Solid. Render's settings page is
+the Studio's settings panel (`kit/shell/StudioSettings.jsx`, under Orbit), its edits the file's
+Render settings. A file's model tree and Position are
 sections of the file sidebar (see
 [settings-ui.md](./settings-ui.md#the-file-sidebar-and-the-tool-stack)); nothing in them is
 a display setting.
 
-Display and Preview, the view's controls at the strip's end, are offered by a 3D view
+Display and the Studio, the view's controls at the strip's end, are offered by a 3D view
 alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`):
 
-| Renderer | Files | Display and Preview |
+| Renderer | Files | Display and the Studio |
 | --- | --- | --- |
 | `step` | STEP, STP | Yes |
 | `glb` | GLB | Yes |
@@ -159,5 +178,5 @@ alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`
 | `robot` | URDF, SRDF, SDF | Yes |
 | `dxf` | DXF | No: a 2D drawing, on a surface of its own, without the shell |
 
-A view without them has no Display or Preview control, not a disabled one, and a
-request for Preview leaves its normal view as it is.
+A view without them has no Display or Studio control, not a disabled one, and a
+request for the Studio leaves its normal view as it is.

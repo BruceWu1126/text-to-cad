@@ -6,7 +6,7 @@ Worktree: `/Users/jakefitzgerald/.codex/worktrees/ui-redesign-split/text-to-cad`
 
 Base: `24573128ceaab564f497d7c12f995c41784c9539` (`origin/main`, fetched before branching). Completed source: `d92e3d8830629999e60cc34d79ebf612b3b90ab2` (`claude/568-ui-layout`). This split treated the source worktree as read-only. Final source UI and review fixes were synchronized before validation. No models, environment directories, generated runtime assets or release versions are committed.
 
-Implementation commit: `8b4ed42f12ec89d7a9a6c35361b1f07acab6bc91`. This report is the final separate commit. No PR was opened. Publication of the validated `claude/ui-redesign` branch is delegated to the parent task; no push to main or the engine PR branch is part of this split.
+Implementation commit: `8b4ed42f12ec89d7a9a6c35361b1f07acab6bc91`. The original split report was committed separately and the initial `claude/ui-redesign` branch was pushed at `0e3f7ef6122320f97e8e582286673d13aa1a7883`. This is now the canonical working branch. No PR or merge is planned until the user's UI/UX test; no push to main or the engine PR branch is part of this work.
 
 ## Scope and classification
 
@@ -14,7 +14,7 @@ The final source diff from the base contains 1,166 paths: **236 UI, 110 mixed, 8
 
 Included: centred toolbar and responsive file sidebar, Find headings, independent Select filters and Position knobs, native Annotate, Quick Edit reference chips and saved annotation/job handoff, per-mode Display settings with Projection in the same menu, independent preview/work states, single active motion, web/MCP host integration and associated documentation/tests.
 
-Excluded: display tessellator replacement, per-part GLB/selector-table store, OCCT mesher changes, source schema migration, Python animation baking/CUBICSPLINE/tube skins, daemon/token changes, model migrations, and unrelated engine snapshot parity work. Main's geometry, tessellation/LOD, SURF, JS animation, robot parser and snapshot section implementations remain.
+Excluded: display tessellator replacement, per-part GLB/selector-table store, OCCT mesher changes, source schema migration, Python animation baking/CUBICSPLINE/tube skins, daemon/token changes, model migrations, and unrelated engine snapshot parity work. Main's geometry, tessellation/LOD, SURF, JS animation and robot parser remain. Section snapshots were subsequently removed at the user's request, as described below.
 
 ### Mixed paths
 
@@ -28,16 +28,16 @@ Excluded: display tessellator replacement, per-part GLB/selector-table store, OC
 | `apps/web/docs/backend.md` | Port UI layout/display/annotation documentation; keep main engine and storage contracts. |
 | `apps/web/docs/storage.md` | Port UI layout/display/annotation documentation; keep main engine and storage contracts. |
 | `package-lock.json` | Regenerated workspace lock: remove Excalidraw/fonts and their unused dependencies; retain versions of remaining packages. |
-| `packages/cadgen/SNAPSHOTS.md` | Per-mode display and annotation/job replay; retain main section mode and engine output details. |
-| `packages/cadgen/src/cadgen/_internal/snapshot_door.py` | Add annotation and measurement flags/forwarding; preserve main section, animation and kernel interfaces. |
+| `packages/cadgen/SNAPSHOTS.md` | Per-mode display and annotation/job replay; retain engine output details; the follow-up removes section mode. |
+| `packages/cadgen/src/cadgen/_internal/snapshot_door.py` | Add annotation and measurement flags/forwarding; preserve main animation and kernel interfaces; remove section snapshot options in the follow-up. |
 | `packages/cadgen/src/cadgen/mcp/tunnel.py` | Use existing asynchronous polling cadence for prompt-file status only; no engine or protocol change. |
-| `packages/cadgen/src/cadgen/snapshot_cli.py` | Add annotation/job loading, absolute dependency replay and overlay refusal; replace display validation only; keep main sources, sections and JS animation. |
-| `packages/cadgen/src/cadgen/snapshot_core.py` | Strict per-mode display schema and annotation keys/evaluation error handling; retain main tessellation, scene, section and process machinery. |
+| `packages/cadgen/src/cadgen/snapshot_cli.py` | Add annotation/job loading, absolute dependency replay and overlay refusal; replace display validation only; keep main sources and JS animation; remove section snapshot options in the follow-up. |
+| `packages/cadgen/src/cadgen/snapshot_core.py` | Strict per-mode display schema and annotation keys/evaluation error handling; retain main tessellation, scene and process machinery; remove section snapshot validation in the follow-up. |
 | `packages/cadgen/src/cadgen/viewer/http_app.py` | Prompt-file create/save/status/file routes, request-size/restart/lifetime handling; remove retired sketch and font routes; keep all engine routes. |
 | `packages/cadgen/src/cadgen/viewer/main.py` | Close prompt-file browser session at server shutdown. |
 | `packages/cadgen/src/cadgen/viewer/sketches.py` | Remove retired UI drawing/attachment surface and its tests/docs; no replacement engine behavior. |
 | `packages/core/README.md` | Update display/prompt/annotation API descriptions; retain main source/scene/reconstruction laws. |
-| `packages/core/docs/render-pipeline.md` | Per-mode public settings and clip.at; keep main LOD, runtime pose and section pipeline. |
+| `packages/core/docs/render-pipeline.md` | Per-mode public settings and clip.at; keep main LOD, runtime pose and Clip pipeline. |
 | `packages/core/package.json` | Remove retired drawing entrypoint; normal compiled wildcard exports serve native annotation. |
 | `packages/core/src/client/attachments.js` | Remove retired UI drawing/attachment surface and its tests/docs; no replacement engine behavior. |
 | `packages/core/src/client/attachments.test.js` | Remove retired UI drawing/attachment surface and its tests/docs; no replacement engine behavior. |
@@ -46,7 +46,7 @@ Excluded: display tessellator replacement, per-part GLB/selector-table store, OC
 | `packages/core/src/common/cadScene.test.js` | Port recovered UI behavior assertions; use main parameters/description/SURF fixtures where needed. |
 | `packages/core/src/common/headlessScene.test.js` | Port recovered UI behavior assertions; use main parameters/description/SURF fixtures where needed. |
 | `packages/core/src/common/renderEdges.js` | Rename annotation overlay render ordering only. |
-| `packages/core/src/common/renderMeshScene.js` | Add per-viewport annotation/measurement overlays to still captures; preserve main SURF, LOD, tube deformation and section runtime. |
+| `packages/core/src/common/renderMeshScene.js` | Add per-viewport annotation/measurement overlays to still captures; preserve main SURF, LOD, tube deformation and Clip runtime; remove the standalone section renderer in the follow-up. |
 | `packages/core/src/common/renderMeshScene.test.js` | Port recovered UI behavior assertions; use main parameters/description/SURF fixtures where needed. |
 | `packages/core/src/common/renderOptions.js` | Expose owned annotation/measurement overlays during render; retain main tubeDeformationState/tubeGpuState close-up predicate. |
 | `packages/core/src/common/sceneSettings.test.js` | Port recovered UI behavior assertions; use main parameters/description/SURF fixtures where needed. |
@@ -117,12 +117,12 @@ Excluded: display tessellator replacement, per-part GLB/selector-table store, OC
 | `packages/ui/src/renderers/step/workbench/viewerAlerts.test.js` | Retained main unchanged; excluded the source engine delta. |
 | `packages/ui/src/renderers/step/workbench/viewerPickMode.test.js` | Keep Render picking coverage; remove source-only baked tube-skin fixture/imports. |
 | `skills/cad/SKILL.md` | Only Quick Edit annotation/job instructions changed; engine authoring instructions retained. |
-| `skills/cad/references/snapshot-review.md` | Per-mode display and annotation replay; preserve main tessellation and section syntax. |
+| `skills/cad/references/snapshot-review.md` | Per-mode display and annotation replay; preserve main tessellation; replace section snapshot instructions with Clip. |
 | `skills/sdf/SKILL.md` | Port UI layout/display/annotation documentation; keep main engine and storage contracts. |
 | `skills/srdf/SKILL.md` | Port UI layout/display/annotation documentation; keep main engine and storage contracts. |
 | `skills/urdf/SKILL.md` | Port UI layout/display/annotation documentation; keep main engine and storage contracts. |
 | `tests/python/global/test_snapshot_viewer_theme_parity.py` | Update only display/annotation fixtures and strict-contract assertions; preserve main engine cases. |
-| `tests/python/packages/cadgen/test_snapshot_family_scenes.py` | Per-mode fixtures plus real annotation/measurement pixel replay; retain main section and fixture engine. |
+| `tests/python/packages/cadgen/test_snapshot_family_scenes.py` | Per-mode fixtures plus real annotation/measurement pixel replay; retain the main fixture engine. |
 | `tests/python/packages/cadgen/test_snapshot_render_schema.py` | Update only display/annotation fixtures and strict-contract assertions; preserve main engine cases. |
 | `tests/python/packages/cadgen/test_snapshot_requests.py` | Update only display/annotation fixtures and strict-contract assertions; preserve main engine cases. |
 | `tests/python/packages/cadgen/viewer/test_http_layer.py` | Remove obsolete Excalidraw asset test, retain general static-asset and MIME coverage. |
@@ -141,7 +141,7 @@ Excluded: display tessellator replacement, per-part GLB/selector-table store, OC
 | Source robot payload / primitive GLBs | Use main XML description loading, `setJointValues`, mesh-path resolution and SRDF groups. Preview hides work selections/visibility and uses opening joint values; exit restores them. |
 | Selector graph data | Retain main `chainEndpoints`, `adjacentSelectors` and `visibilityClass` graph helpers. Exclude source-only selector-table tests; main graph tests remain. |
 | MCP protocol 7 | UI host remains protocol 5 to match main Python server. Prompt-file polling is the only tunnel change. |
-| Snapshot pipeline | Add overlays and job dependencies around main still rendering; retain main section, animation and DXF routing. Annotation and measurements are accepted only for view snapshots and rejected explicitly in unsupported modes. |
+| Snapshot pipeline | Add overlays and job dependencies around main still rendering; retain main animation and DXF routing; the follow-up removes section mode. Annotation and measurements are accepted only for view snapshots and rejected explicitly in unsupported modes. |
 | Display schema | Adopt the strict sparse per-mode public shape in JS/Python. Resolved internal scene view remains main's flat runtime shape; individual clip/exploded normalization bridges the UI. No legacy aliases. |
 | Clip positions | Public `clip.at` is a model-coordinate millimeter position. Adapt the existing main clip plane builder; no tessellation or geometry format change. |
 | Failed rebuild presentation | Keep main retained mesh state; sidebar kind/tree and permitted part actions reflect the last good visible revision after a build failure. |
@@ -150,11 +150,11 @@ Recommendations: keep these adapters at the UI boundary until main adopts any fu
 
 ## Capability differences and rename audit
 
-No intended UI feature is knowingly omitted. Engine-only capabilities remain those of main: no source per-part selector-table identity guarantee, baked Python animation/tube skins or source four-bar robot payload path. Corresponding source-only tests are excluded; main's animation, geometry, graph and robot tests are retained. Main continues to offer section snapshots; annotation/measurement overlays deliberately refuse that mode rather than being silently dropped.
+No intended UI feature is knowingly omitted. Engine-only capabilities remain those of main: no source per-part selector-table identity guarantee, baked Python animation/tube skins or source four-bar robot payload path. Corresponding source-only tests are excluded; main's animation, geometry, graph and robot tests are retained. Section snapshot mode, its plane option/job key and SVG output are removed. Viewer Clip and its capped cut remain available in normal PNG views, including annotation/measurement overlays. Non-snapshot geometry and engineering-drawing sections remain unchanged.
 
 The native annotation cutover removes the old drawing editor/Excalidraw assets and public drawing attachment client. Tool ids, labels, paths, prompt payloads, saved files, CLI and job keys use `annotation`/`--annotation`; persisted jobs name absolute annotation dependencies for replay from another directory. Tests reject old `sketch` inputs. Genuine DXF/engineering drawings, Canvas drawing-buffer terminology and main CAD reconstruction sketches remain correctly named. There are no backward-compatibility aliases or migrations.
 
-## Validation
+## Original split validation
 
 Test dependencies were installed in the target worktree; no `.venv` or `node_modules` was copied, and tests do not consume the model corpus. Browser suites ran at concurrency 1, serialized with snapshot rendering. Tests use generated or tiny owned fixtures and isolated cache stores; no viewer instance was started or stopped.
 
@@ -182,3 +182,46 @@ Browser results combine the initial complete discovery run with repaired files, 
 Python suite counts: cadgen package 2,366 (one skip), CAD 281, DfAM 19, DFM 51, DXF 77, G-code 6, SendCutSend 6, STEP Parts 9. The package suite includes the real saved-annotation and measurement pixel replay regression.
 
 On this main base, `bundle.sh --check` skips the viewer/MCP build stages. The final regular bundle above was therefore run explicitly after the final shared-package build; the normal implementation commit hook also passed its required `--check`. Generated output remains ignored.
+
+## Follow-up: remove section snapshots and fix prompt renderer ownership
+
+At the user's request, the section snapshot surface is removed with no compatibility alias or legacy routing. Snapshot modes are `view` and `list`; the generated public API/CLI no longer accepts `section`/`--section`, the job vocabulary no longer includes `section`, and still outputs are PNG only. Unknown mode, field and flag checks reject old requests before rendering or clearing an existing output.
+
+The removal deletes section-plane parsing/constants, section-only canvas/SVG rendering and text-output writing. The tests retain output-name validation and part listing while replacing section success cases with request rejection checks. Viewer Clip, capped clip rendering, geometry helpers and engineering-drawing sections remain unchanged. Review documentation demonstrates a clipped normal view.
+
+The live viewer benchmark also exposed a missing prompt-file adapter: `WarmSnapshotSession` passed `renderer` and `report` to `run_snapshot_async`, whose main-based signature did not accept them. The async entrypoint now forwards the borrowed renderer through `render_snapshot`, and `render_resolved_job_packet` closes only a renderer it created. Progress reporting can be disabled for viewer requests. A real pipeline regression replaces only the GPU renderer: two requests reuse the same open instance, a failed request closes and replaces it, and standalone success/failure paths close their owned instance. Request preparation, resolution, output writing and result conversion all execute in that test.
+
+Follow-up validation:
+
+- Six focused Python modules: 243 passed, including section rejection, generated API, output contracts and the warm-session integration.
+- Three focused core snapshot/source files: 58 passed, including retained Clip behavior.
+- Full core suite: 1,309 passed, 1 existing opt-in memory-probe skip.
+- `npm run build:packages` and the full regular `scripts/bundle/bundle.sh`: passed; viewer, MCP, browser, Node and native outputs rebuilt.
+- Final policy suite: 209 tests, 1 existing skip, zero failures/errors. This report is registered in the existing root-document CI routing rule.
+
+No follow-up commit or push has been made. PR and merge remain on hold for the user's UI/UX test.
+
+## Follow-up: Display settings popover
+
+The approved mockup is implemented in the shared viewer. The root picker and each mode's
+settings form use the same 232px popover, capped to the viewer. Display Mode and Projection
+both use right-aligned checkmarks. One settings button at the top right of the Display Mode
+heading edits the selected mode, with an accessible name and no tooltip. Details replace the picker in place, with Back, static section headings,
+all applicable controls visible, scrolling when needed and a pinned Reset action. Disabled
+features retain their controls. Each mode's settings, editable part palettes and independent
+reset behavior remain intact; the settings form follows the currently selected mode.
+
+Number edits cancel on Escape before the popover closes. Untouched number fields preserve
+sparse defaults and stored precision. Nested selects and colour pickers dismiss first.
+
+Validation before the heading-button revision: 1,149 shared UI tests passed (745 Node, 63 browser, 341 component tests), plus
+1,309 core tests with one existing skip and 57 web tests. Typecheck, package/kit boundaries,
+the full regular runtime bundle and `git diff --check` passed. Live `tom.step` verification
+confirmed equal widths, outside dismissal, back focus, nested popup dismissal, disabled
+retained controls, draft cancellation and untouched-field behavior.
+
+The heading-button revision passed all 32 focused display/settings, shell and robot-tool
+component tests, UI typecheck, the full runtime bundle and `git diff --check`. Live verification
+confirmed that the top-right button opens the selected mode, both pages remain 232px wide,
+and Back returns focus to the heading button. The viewer is running on port 49696.
+PR and merge remain on hold for the user's UI/UX test.

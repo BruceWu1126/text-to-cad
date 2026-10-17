@@ -2,7 +2,6 @@ import { RotateCcw } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../../../kit/tools/SubToolbar.jsx";
 import { ClipFlipButton, CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
-import { explodablePartCount } from "../../workbench/explodableParts.js";
 
 /** Separated assembly layers, distinct from an expand affordance. */
 function ExplodeIcon(props) {
@@ -25,8 +24,8 @@ function ClipIcon(props) {
  * hand does nothing; on one whose effect is set it takes it up again, as it is, and on one unset
  * it starts neutral. Its Reset removes the effect, idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
  *
- * A tool the file cannot offer is not on the strip: Explode needs two parts to separate. While
- * the mesh is still loading that is not known yet, so Explode is shown, idle, until it is.
+ * Every STEP has both, a part file too: Explode on a single part separates nothing (the viewport
+ * explodes only two parts or more), and the strip is the same for every STEP file.
  */
 export function useModelTools({ view, features, store, mesh, disabled, selectedTool, onSelect }) {
   const applied = [
@@ -40,7 +39,7 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
   const definitions = [
     { id: "exploded", label: "Explode", Icon: ExplodeIcon,
       // Named, as Clip's axis and Animation's Play lead theirs: a bare slider says nothing of what it moves.
-      lead: <span className="shrink-0 pl-1.5 pr-1 text-tiny text-foreground">Explode</span>, unavailable: Boolean(mesh) && explodablePartCount(mesh) <= 1,
+      lead: <span className="shrink-0 pl-1.5 pr-1 text-tiny text-foreground">Explode</span>,
       summary: `${Math.round((view.exploded.enabled ? view.exploded.amount : 0) * 100)}%`,
       controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} className={SUB_TOOLBAR_SLIDER_CLASS} /> },
     { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view, clipBounds),
@@ -51,7 +50,7 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
   const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false, axis: "x", invert: false } };
   const tool = definitions.find(value => value.id === selectedTool);
   return {
-    tools: definitions.filter(value => !value.unavailable).map(({ id, label, Icon }) => ({
+    tools: definitions.map(({ id, label, Icon }) => ({
       id, label, active: selectedTool === id, disabled,
       icon: <Icon className="size-3" strokeWidth={2} aria-hidden="true" />,
       onSelect: () => {

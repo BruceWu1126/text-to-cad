@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react';
 import { Circle, Eraser, MoveUpRight, Pencil, Redo2, Slash, Square, Trash2, Type, Undo2 } from 'lucide-react';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
+  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger
 } from '@text-to-cad/ui/primitives/dropdown-menu';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 import { cn } from '@text-to-cad/ui/utils';
 import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
 import SubToolbar, { SubToolbarSeparator } from '../renderers/kit/tools/SubToolbar.jsx';
+import { ToolSettingsMenu } from '../renderers/kit/tools/ToolModeMenu.jsx';
 
 /**
  * Annotate's sub-toolbar (`AnnotationToolbar`): its tools — the pen, each shape, the eraser — the colour,
@@ -32,8 +34,12 @@ export const ANNOTATION_SHAPE_TOOLS = [
   { id: 'ellipse', label: 'Ellipse', Icon: Circle },
   { id: 'text', label: 'Text', Icon: Type },
 ];
+/** @type {readonly AnnotationToolEntry[]} */
+const ANNOTATION_TOOL_ENTRIES = [PEN, ...ANNOTATION_SHAPE_TOOLS, ERASER];
 /** @type {readonly AnnotationTool[]} */
-export const ANNOTATION_TOOLS = [PEN, ...ANNOTATION_SHAPE_TOOLS, ERASER].map(tool => tool.id);
+export const ANNOTATION_TOOLS = ANNOTATION_TOOL_ENTRIES.map(tool => tool.id);
+/** The icon of an annotation tool (the pen's for one it does not know): the strip's Annotate shows the tool in hand. */
+export const annotationToolIcon = id => (ANNOTATION_TOOL_ENTRIES.find(tool => tool.id === id) || PEN).Icon;
 
 // Saturated enough to stand out from a shaded model in either theme; black and
 // white for the cases a neon cannot cover (a white page, a dark render).
@@ -254,4 +260,44 @@ export function AnnotationToolbar({ annotation, history, colorScheme = 'light' }
       </div>
     </div>
   </SubToolbar>;
+}
+
+const swatchGlyph = color => <span aria-hidden="true" className="block size-3.5 rounded-full shadow-[inset_0_0_0_1px_color-mix(in_oklab,currentColor_35%,transparent)]" style={{ backgroundColor: color }} />;
+const keepOpen = event => event.preventDefault();
+
+/**
+ * Annotate on a phone, where its sub-toolbar would cover the model: the chevron after its tile on the
+ * strip, as Select's filter is, and the menu it opens — the tools (choosing one takes Annotate up,
+ * `onTakeUp`), then what is drawn next, its Colour, Stroke width, Line style and Placement each a
+ * submenu, then Undo, Redo and Clear annotations. A choice of style or history keeps the menu open.
+ * @param {{ annotation: import('./session.js').AnnotationSession, colorScheme?: 'light' | 'dark', onTakeUp?: () => void,
+ *   history: { canUndo: boolean, canRedo: boolean, undo(): void, redo(): void } }} props
+ */
+export function AnnotationMenu({ annotation, history, colorScheme = 'light', onTakeUp }) {
+  const ready = annotation.ready;
+  const sub = (label, options, value, glyph, onChange) => <DropdownMenuSub>
+    <DropdownMenuSubTrigger className="gap-2">{glyph(value)}{label}</DropdownMenuSubTrigger>
+    <DropdownMenuSubContent aria-label={label} className={cn(FLOATING_SURFACE_CLASS, 'w-44')}>
+      <DropdownMenuRadioGroup value={String(value)} onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
+        {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} onSelect={keepOpen}>
+          {glyph(option.value)}{option.label}
+        </DropdownMenuRadioItem>)}
+      </DropdownMenuRadioGroup>
+    </DropdownMenuSubContent>
+  </DropdownMenuSub>;
+  const colors = annotationColors(colorScheme);
+  return <ToolSettingsMenu label="Annotation" triggerLabel="Annotation settings" trigger="chevron">
+    <DropdownMenuRadioGroup value={annotation.tool} onValueChange={id => { annotation.selectTool(id); onTakeUp?.(); }} aria-label="Annotation tools">
+      {ANNOTATION_TOOL_ENTRIES.map(({ id, label, Icon }) => <DropdownMenuRadioItem key={id} value={id}>{icon(Icon)}{label}</DropdownMenuRadioItem>)}
+    </DropdownMenuRadioGroup>
+    <DropdownMenuSeparator />
+    {sub('Color', colors, String(annotation.color).toLowerCase(), swatchGlyph, annotation.selectColor)}
+    {sub('Stroke width', ANNOTATION_STROKE_WIDTHS, annotation.strokeWidth ?? 2, strokeGlyph, annotation.selectStrokeWidth)}
+    {sub('Line style', ANNOTATION_STROKE_STYLES, annotation.strokeStyle ?? 'solid', styleGlyph, annotation.selectStrokeStyle)}
+    {sub('Placement', ANNOTATION_PLACEMENTS, annotation.placement ?? 'surface', placementGlyph, annotation.selectPlacement)}
+    <DropdownMenuSeparator />
+    <DropdownMenuItem disabled={!ready || !history.canUndo} onSelect={event => { keepOpen(event); history.undo(); }}>{icon(Undo2)}Undo</DropdownMenuItem>
+    <DropdownMenuItem disabled={!ready || !history.canRedo} onSelect={event => { keepOpen(event); history.redo(); }}>{icon(Redo2)}Redo</DropdownMenuItem>
+    <DropdownMenuItem disabled={!ready || !annotation.hasContent} onSelect={() => annotation.clear()}>{icon(Trash2)}Clear annotations</DropdownMenuItem>
+  </ToolSettingsMenu>;
 }

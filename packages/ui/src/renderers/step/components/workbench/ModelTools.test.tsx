@@ -46,17 +46,16 @@ it('a clip at zero keeps its row while in hand, and no tool leaves one behind', 
   expect(kept()).toBe(0);
 });
 
-it('offers Explode only where there are parts to separate, and idles it while that is unknown', () => {
+it('offers Explode and Clip on every STEP, a single part too, and idles them while the model loads', () => {
   const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [1, 1, 1] } });
   const props = { view: neutral(), features: { settings: ['exploded', 'clip'] }, store: { patch: vi.fn() },
     mesh: null as null | object, disabled: true, selectedTool: 'references', onSelect: vi.fn() };
   const { result, rerender } = renderHook(options => useModelTools(options), { initialProps: props });
   const offered = () => result.current.tools.map(tool => `${tool.id}:${tool.disabled}`);
-  // Loading: nothing is known about the parts yet, so the strip shows Explode, idle.
+  // Loading, idle; then every STEP has both, a single part too (its Explode separates nothing).
   expect(offered()).toEqual(['exploded:true', 'clip:true']);
-  // A single part has nothing to separate: Explode is not on the strip at all, never disabled.
   rerender({ ...props, disabled: false, mesh: { parts: [part('a')] } });
-  expect(offered()).toEqual(['clip:false']);
+  expect(offered()).toEqual(['exploded:false', 'clip:false']);
   rerender({ ...props, disabled: false, mesh: { parts: [part('a'), part('b')] } });
   expect(offered()).toEqual(['exploded:false', 'clip:false']);
 });

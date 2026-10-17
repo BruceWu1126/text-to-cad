@@ -9,12 +9,17 @@ import {
   PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX,
   PHOTOGRAPHIC_STUDIO_CONTACT_SHADOW,
   PHOTOGRAPHIC_STUDIO_FLOOR_FINISHES,
+  PHOTOGRAPHIC_STUDIO_CARD_DISTANCE,
+  PHOTOGRAPHIC_STUDIO_FRAME,
+  PHOTOGRAPHIC_STUDIO_KEY_CARD,
   PHOTOGRAPHIC_STUDIO_KEY_DIRECTION,
+  PHOTOGRAPHIC_STUDIO_SOFT_SHADOW,
   PHOTOGRAPHIC_STUDIO_KEY_ILLUMINANCE,
   PHOTOGRAPHIC_STUDIO_STAGE_RADIUS_MULTIPLIER
 } from "./photographicStudioRig.js";
 import { createStudioContactShadow, syncDitherScale } from "./studioContactShadow.js";
 import { createStudioFloorReflection } from "./studioFloorReflection.js";
+import { createStudioFrame } from "./studioFrame.js";
 
 function component(value, axis, fallback) {
   if (Array.isArray(value)) return finiteOr(value[axis], fallback);
@@ -161,6 +166,12 @@ function createState(THREE, runtime) {
     reflecting: false,
     scene: runtime.scene,
     groundKind: null,
+    frame: null,
+    // Where the key rests, and the softbox face its samples move it across (`sampleKey`).
+    keyRest: new THREE.Vector3(),
+    keyAcross: new THREE.Vector3(),
+    keyUp: new THREE.Vector3(),
+    keySample: 0,
     original: {
       toneMapping: runtime.renderer.toneMapping,
       toneMappingExposure: runtime.renderer.toneMappingExposure,
@@ -383,6 +394,45 @@ function updateKeyLight(THREE, state, configuration, bounds, shadowMapSize, soft
   state.keyLight.shadow.needsUpdate = true;
   state.keyLight.updateMatrixWorld(true);
   state.target.updateMatrixWorld(true);
+  // The softbox's face, square to the key: across it level with the floor, and up it. A
+  // still frame's samples move the key over it (`sampleKey`), so its shadows are a softbox's,
+  // crisp where a part meets what it shades and soft away from it. Size scales the face.
+  state.keyRest.copy(state.keyLight.position);
+  state.keyAcross.crossVectors(direction, new THREE.Vector3(0, 0, 1));
+  if (state.keyAcross.lengthSq() < 1e-8) state.keyAcross.set(1, 0, 0);
+  state.keyAcross.normalize();
+  state.keyUp.crossVectors(state.keyAcross, direction).normalize();
+  const reach = distance * configuration.lighting.size * PHOTOGRAPHIC_STUDIO_SOFT_SHADOW.spread
+    / PHOTOGRAPHIC_STUDIO_CARD_DISTANCE;
+  state.keyAcross.multiplyScalar(reach * PHOTOGRAPHIC_STUDIO_KEY_CARD.width / 2);
+  state.keyUp.multiplyScalar(reach * PHOTOGRAPHIC_STUDIO_KEY_CARD.height / 2);
+  state.keySample = 0;
+}
+
+/**
+ * Put the key where sample `index` of a still frame has it: at rest for the first (0), and for
+ * every other at a point of its softbox's face (a low-discrepancy R2 sequence, so any number of
+ * samples covers the face evenly). Answers whether the key moved, so its shadows are due.
+ */
+export function sampleKey(state, index) {
+  const sample = index > 0 ? index : 0;
+  if (sample === state.keySample) return false;
+  state.keySample = sample;
+  state.keyLight.position.copy(state.keyRest);
+  if (sample > 0) {
+    const [u, v] = softboxPoint(sample);
+    state.keyLight.position.addScaledVector(state.keyAcross, u).addScaledVector(state.keyUp, v);
+  }
+  state.keyLight.updateMatrixWorld(true);
+  return true;
+}
+
+/** Sample `index` (from 1) of the R2 sequence (Roberts 2018), as a point of [-1, 1]². */
+export function softboxPoint(index) {
+  return [
+    2 * ((0.5 + index * 0.7548776662466927) % 1) - 1,
+    2 * ((0.5 + index * 0.5698402909980532) % 1) - 1
+  ];
 }
 
 function updateRendererAndScene(THREE, runtime, state, configuration) {
@@ -416,6 +466,46 @@ function updateRendererAndScene(THREE, runtime, state, configuration) {
 }
 
 /**
+ * The studio's frame (`studioFrame.js`): what the studio's lighting is drawn through, so a
+ * still view converges to its occlusion and soft light. Only while that lighting is on, and
+ * never in software, which keeps three's single draw. `options` is `applyPhotographicStudio`'s
+ * `frame`: false for none, or the frame's `samples` and `multisample` (by default the canvas's
+ * own MSAA). Lighting quality Final converges over more samples than Preview.
+ */
+function updateFrame(THREE, runtime, state, configuration, bounds, options, quality) {
+  const wanted = options !== false && configuration.lighting.enabled && runtime.softwareRendering !== true;
+  if (!wanted) {
+    state.frame?.dispose();
+    state.frame = null;
+    return;
+  }
+  if (!state.frame) {
+    // MSAA as the canvas has it, but two samples on a high-density canvas: there a moving
+    // frame's edges are fine already, a still one's are the accumulation's, and the scene
+    // target's multisampled buffers are most of the frame's memory.
+    const antialias = runtime.renderer.getContext?.()?.getContextAttributes?.()?.antialias !== false;
+    const dense = (runtime.renderer.getPixelRatio?.() ?? 1) >= 2;
+    state.frame = createStudioFrame(THREE, {
+      multisample: options?.multisample ?? (antialias ? (dense ? 2 : 4) : 0),
+      occlusion: PHOTOGRAPHIC_STUDIO_FRAME.occlusion,
+      onSample(index, renderer, { castersChanged }) {
+        // A key that casts no shadow (software) has none to soften: it stays at rest.
+        if (!state.keyLight.castShadow || !state.keyLight.visible) return;
+        if (sampleKey(state, index) && renderer.shadowMap) renderer.shadowMap.needsUpdate = true;
+        // A shadow pass that only moved the key leaves the floor shadow's heights as they were.
+        state.contactShadow?.holdHeights(!castersChanged);
+      },
+      afterSample() {
+        state.contactShadow?.holdHeights(false);
+      }
+    });
+  }
+  const samples = options?.samples ?? PHOTOGRAPHIC_STUDIO_FRAME.samples[quality === "final" ? "final" : "preview"];
+  if (state.frame.samples !== samples) state.frame.configure({ samples });
+  state.frame.place({ radius: bounds.radius, center: bounds.center });
+}
+
+/**
  * Apply the synchronous, model-scaled half of the photographic Render rig.
  * The caller separately owns the PMREM returned by createEnvironmentResource.
  * Repeated calls update the existing objects, so exposure, rotation, framing,
@@ -434,6 +524,9 @@ function updateRendererAndScene(THREE, runtime, state, configuration) {
  * `ditherScale` is how many drawn pixels a kept pixel spans across: a snapshot passes its
  * render scale, so the floor's dither survives its downsampling (`syncDitherScale`); a viewer,
  * which shows its pixels as drawn, keeps 1.
+ *
+ * `frame` is the studio's frame (`state.frame`, `studioFrame.js`), which its caller draws the
+ * scene through: false for none, or its `samples` and `multisample`.
  */
 export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
   bounds = runtime?.modelBounds,
@@ -441,7 +534,8 @@ export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
   sceneScale = "cad",
   shadowMapSize = 2048,
   contactShadow = {},
-  ditherScale = 1
+  ditherScale = 1,
+  frame = {}
 } = {}) {
   if (!THREE || !runtime?.scene || !runtime?.renderer) {
     throw new Error("applyPhotographicStudio requires THREE and a runtime with scene and renderer");
@@ -463,10 +557,12 @@ export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
     shadowMapSize,
     runtime.softwareRendering === true
   );
-  updateGround(THREE, state, resolved, resolvedBounds, sceneScale,
-    groundBounds ? resolveBounds(groundBounds, runtime.modelRadius) : resolvedBounds,
+  const restBounds = groundBounds ? resolveBounds(groundBounds, runtime.modelRadius) : resolvedBounds;
+  updateGround(THREE, state, resolved, resolvedBounds, sceneScale, restBounds,
     { contactShadow, softwareRendering: runtime.softwareRendering === true,
       guides: () => [runtime.gridHelper, runtime.originAxis], ditherScale });
+  // Its occlusion is sized from the model at rest, so a pose never changes its reach.
+  updateFrame(THREE, runtime, state, resolved, restBounds, frame, configuration.quality);
 
   runtime.invalidateShadows?.();
   runtime.requestRender?.();
@@ -477,6 +573,8 @@ export function disposePhotographicStudio(runtime) {
   const state = runtime?.photographicStudio;
   if (!state) return;
   disposeGround(state);
+  state.frame?.dispose();
+  state.frame = null;
   state.keyLight.shadow?.map?.dispose?.();
   state.keyLight.shadow.map = null;
   runtime.scene?.remove?.(state.group);

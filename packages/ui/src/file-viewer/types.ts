@@ -72,6 +72,14 @@ export interface AppSetting {
   onCheckedChange: (checked: boolean) => void;
 }
 /**
+ * The person's colour scheme: System, Light or Dark, in the app menu over every file. The host keeps
+ * it and resolves System (the web against the OS, the CAD app against its host's theme).
+ */
+export interface ColorSchemeSetting {
+  preference: "system" | "light" | "dark";
+  onPreferenceChange: (preference: "system" | "light" | "dark") => void;
+}
+/**
  * A view's own history, where the host keeps one: what it showed, in order, as a browser keeps a
  * tab's. The navbar draws Back and Forward over it; a host whose page has a browser's history (the
  * web) hands none.
@@ -133,12 +141,8 @@ export interface FileViewerProps {
   renderers: readonly RendererRegistration[];
   state: FileViewerState;
   onStateChange: (next: FileViewerState) => void;
-  /**
-   * The host's light/dark control, where the host keeps its own appearance (the web viewer; a host
-   * whose page inherits its app's, as the CAD app does, has none): last at the navbar's right end,
-   * the page's top-right corner, over every file, and last in the home's row.
-   */
-  colorSchemeControl?: ReactNode;
+  /** The person's colour scheme, its rows in the app menu the navbar's logo opens over every file. */
+  colorScheme?: ColorSchemeSetting;
   /**
    * The person's on/off settings, in the app menu the navbar's logo opens over every file, with
    * the host's links (`host.links`).
@@ -151,7 +155,7 @@ export interface FileViewerProps {
   update?: ReactNode;
   /**
    * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * at the navbar's right end, before `colorSchemeControl`.
+   * last at the navbar's right end.
    */
   fullSize?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward, between the navbar's logo and the file's name. */

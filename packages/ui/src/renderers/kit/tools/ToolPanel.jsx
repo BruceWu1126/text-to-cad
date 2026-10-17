@@ -1,8 +1,9 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, ChevronUp, PanelLeft, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
+import { TREE_GLYPH_CLASS, TREE_GLYPH_STROKE } from "@text-to-cad/ui/primitives/tree-row";
 import { FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
@@ -89,9 +90,8 @@ const REVEAL_CLASS = "animate-in fade-in-0 zoom-in-75 duration-150 motion-reduce
 const HeadSlotContext = createContext(null);
 
 /**
- * A control of a section's body drawn in its heading, at its right end before its actions (Position's
- * Pose): there while the section is folded too, since the body stays mounted. Nothing outside a
- * sidebar section's heading.
+ * A control of a section's body drawn in its heading, before its X (Position's Reset). Nothing
+ * outside a sidebar section's heading.
  */
 export function ToolPanelHeadAction({ children }) {
   const slot = useContext(HeadSlotContext);
@@ -103,12 +103,20 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   const [headSlot, setHeadSlot] = useState(null);
   const stack = useContext(ToolStackContext);
   const kept = Boolean(stack && id);
-  // In the file sidebar (`FileSidebar.jsx`) a panel is one of its sections: the bar's width, its
-  // content's height, no surface, scroller or grip of its own, always headed, and folding where
-  // there are other sections (`sectionsFold`); the first carries the bar's own button.
+  // In the file sidebar (`FileSidebar.jsx`) a panel is one of its sections: a tile of the sidebar's
+  // toolbar opens it, alone, in the panel under it — the panel's width, its content's height, no
+  // surface, scroller or grip of its own, always headed, never folding, and closed by its collapse
+  // button or its tile. Closed, it stays mounted out of sight.
   const inSidebar = Boolean(stack?.sidebar);
-  if (inSidebar) collapsible = stack.sectionsFold;
+  if (inSidebar) collapsible = false;
+  // A section the sidebar does not offer just now (the Studio's are Position and Animation) is as
+  // a hidden one: mounted, out of sight, and no tile.
+  if (inSidebar && stack.allowed && !stack.allowed(id)) hidden = true;
   if (inSidebar && !title) title = name || label;
+  const closedInSidebar = inSidebar && stack.openSection !== id;
+  const register = inSidebar ? stack.register : null;
+  const tileTitle = typeof title === "string" ? title : name || label;
+  useLayoutEffect(() => { if (register && id && !hidden) register(id, { title: tileTitle, fit }); }, [register, id, hidden, tileTitle, fit]);
   // Folded: the person's, kept by the stack across files; a panel drawn alone keeps its own.
   const [ownCollapsed, setOwnCollapsed] = useState(defaultCollapsed);
   const collapsed = collapsible && (kept ? stack.collapsed(id, defaultCollapsed) : ownCollapsed);
@@ -216,9 +224,9 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
     </div> : null;
 
   // A sidebar section's head, under a rule: its heading row — its name; where the section folds, the
-  // row is its fold, wherever it is pressed but on its other buttons (the name the fold's button,
-  // as an accordion's is), its chevron in the padding before the name, shown while the pointer is
-  // on the row or the fold has the keyboard, and no hover of the row's own; its actions, its X and,
+  // name and the chevron after it are the fold's button and nothing else of the row is (the
+  // chevron, a tree row's size, shown while the pointer is on the button or it has the keyboard,
+  // turned down while open); its actions, its X and,
   // on the first, the bar's own toggle at its right end. A header (a tree's find field, while it
   // is open) takes the row's place, the bar's toggle still after it. The head docks at the bar's bottom while the section is below
   // the view, and pins to its top while the view is in the section (`FileSidebar.jsx`); a press on
@@ -232,27 +240,26 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
     }
     folding.toggle();
   };
-  // The bar's own toggle ends the first section's head, whether its heading or its find field is up.
-  const sidebarToggle = inSidebar && stack.firstSection === id ? <button type="button" aria-label="Hide file sidebar" data-file-sidebar-close=""
-    className={TOOL_PANEL_BUTTON_CLASS} onClick={stack.closeSidebar}><PanelLeft className="size-3" aria-hidden="true" /></button> : null;
+  // The section's X ends its head, whether its heading or its search box is up: it closes the
+  // panel, its tile no longer pressed.
+  const sidebarToggle = inSidebar && stack.closeSection ? <button type="button" aria-label={`Close ${tileTitle.toLowerCase()}`} data-file-sidebar-close=""
+    className={TOOL_PANEL_BUTTON_CLASS} onClick={stack.closeSection}><X className="size-3" aria-hidden="true" /></button> : null;
   const sidebarHead = inSidebar ? <div data-sidebar-head=""
     className="sticky z-10 border-t border-border/60 px-1 pb-0.5 pt-1 data-[pinned]:z-20 data-[pinned]:bg-background data-[stuck]:bg-background data-[stuck]:shadow-[0_-1px_3px_rgb(0_0_0/0.12)] data-[pinned]:shadow-[0_1px_3px_rgb(0_0_0/0.12)]">
     {header ? <div className="flex min-w-0 items-center gap-1 pr-0.5"><div className="min-w-0 flex-1">{header}</div>{sidebarToggle}</div>
-      : <div data-tool-panel-heading="" data-tool-panel-fold-row={folding ? "" : undefined}
-      // The name is as far in from the bar's left edge as from its top (12px), the chevron in that room.
-      className={cn("group/head relative flex h-6 min-w-0 items-center gap-1 pl-2 pr-0.5 text-foreground", folding && "select-none")}
-      onClick={folding ? event => { if (!(event.target instanceof Element) || !event.target.closest("button")) pressHead(event); } : undefined}>
+      : <div data-tool-panel-heading=""
+      // The name is as far in from the bar's left edge as from its top (12px).
+      className={cn("relative flex h-6 min-w-0 items-center gap-1 pl-2 pr-0.5 text-foreground", folding && "select-none")}>
       <h3 className={cn("flex min-w-0 flex-1", TOOL_PANEL_HEADING_TEXT_CLASS)}>
         {folding ? <button type="button" aria-expanded={!collapsed} data-tool-panel-collapse=""
-          className="relative flex min-w-0 items-center rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={pressHead}>
-          {/* In the 12px the name is set in from the bar's edge: a small chevron, close to the name. */}
-          <ChevronRight aria-hidden="true" className={cn("absolute -left-2.5 size-2.5 text-muted-foreground opacity-0 transition-[opacity,rotate] duration-100 group-hover/head:opacity-100 group-has-[[data-tool-panel-collapse]:focus-visible]/head:opacity-100 group-has-[button:not([data-tool-panel-collapse]):hover]/head:opacity-0",
-            !collapsed && "rotate-90")} />
+          className="group/fold flex min-w-0 cursor-pointer items-center gap-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/45" onClick={pressHead}>
           <span className="min-w-0 truncate">{title}</span>
+          <ChevronRight aria-hidden="true" strokeWidth={TREE_GLYPH_STROKE} className={cn(TREE_GLYPH_CLASS, "opacity-0 transition-[opacity,rotate] duration-100 group-hover/fold:opacity-100 group-focus-visible/fold:opacity-100",
+            !collapsed && "rotate-90")} />
         </button> : <span className="min-w-0 truncate">{title}</span>}
       </h3>
       {summary ? <span className="shrink-0 text-tiny text-muted-foreground">{summary}</span> : null}
-      {/* What the section's body puts in its heading (`ToolPanelHeadAction`: Position's Pose). */}
+      {/* What the section's body puts in its heading (`ToolPanelHeadAction`: Position's Reset). */}
       <span ref={setHeadSlot} className="contents" data-tool-panel-head-slot="" />
       {actions}
       {closeButton}
@@ -263,11 +270,11 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   const dragging = draft !== null;
   return <section ref={section} aria-label={label} hidden={hidden} data-tool-panel={fit} data-tool-panel-id={id || undefined}
     data-collapsed={collapsed ? "" : undefined} data-resizable={sized ? "" : undefined} data-tool-panel-lead={lead ? "" : undefined}
-    data-sidebar-section={inSidebar ? "" : undefined}
+    data-sidebar-section={inSidebar ? "" : undefined} data-sidebar-closed={closedInSidebar ? "" : undefined}
     className={inSidebar
-      // A section draws no box of its own: its heading, header and body are rows of the bar's one
-      // scrolling column, so its heading can dock at the column's bottom wherever the section is.
-      ? (hidden ? undefined : "contents text-tiny")
+      // A section draws no box of its own: its heading, header and body are rows of the panel's one
+      // scrolling column, its head pinned to the column's top.
+      ? (hidden ? undefined : closedInSidebar ? "hidden" : "contents text-tiny")
       : cn("pointer-events-auto relative flex max-w-full flex-col rounded-md text-tiny", FLOATING_CHROME_SURFACE_CLASS, collapsed ? "shrink-0" : FIT[fit])}
     style={{ width, maxHeight: inSidebar || collapsed || cap === null ? undefined : `${cap}px`, minHeight, order: lead && !inSidebar ? -1 : undefined }}>
     {/* Where a section's heading sits when it is not docked: what the sidebar scrolls to. */}

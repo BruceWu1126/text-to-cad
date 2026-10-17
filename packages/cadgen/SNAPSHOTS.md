@@ -2,15 +2,19 @@
 
 ## Display modes
 
-`--display` accepts `solid` (the default), `render`, `xray`, `hidden-line`,
+`--display` accepts `solid` (the default), `xray`, `hidden-line`,
 `wireframe`, a JSON object, or a JSON file path. The CLI defaults to
 `appearance: "light"`; use `"dark"` to request dark appearance. Settings are
 sparse: omitted parameters inherit the active mode's defaults. Each mode keeps
 its own settings under `modes`; editing an inactive mode does not select it.
 
+`--render` (a job's `"render": true`) draws the photographic Render instead of
+the display mode: studio lighting, floor and environment, in perspective, with
+Render's own settings from `display.modes.render`. It is view mode only.
+
 ```bash
-cadgen step snapshot part.step review.png --display render
-cadgen step snapshot part.step review.png --display '{"mode":"render","appearance":"dark","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
+cadgen step snapshot part.step review.png --render
+cadgen step snapshot part.step review.png --render --display '{"appearance":"dark","modes":{"render":{"floor":{"enabled":false},"background":{"opacity":0.5}}}}'
 cadgen step snapshot part.step review.png --display display.json --camera front
 ```
 
@@ -52,7 +56,7 @@ snapshot's own.
 - A GLB is its own glTF scene: nodes, skins, morph targets and authored
   materials, drawn where its skins and morph weights put them. `solid` wears the
   viewer's surface over its colours, maps and opacity; `render` shows the finish
-  the file authored. Its clips are the viewer's playbar: a snapshot draws the file
+  the file authored. Its clips play in the viewer's preview: a snapshot draws the file
   at rest, lights and grounds it on the box its clips sweep, as the viewer does,
   and refuses `--animation` and `--video`.
 - An STL is one object and a 3MF one per object (and per material within one),
@@ -95,7 +99,7 @@ ignored, and gone is not silent. `--camera`, `--display`, `--mode` and
 refused by name — what the flag meant, why a flat drawing has no such thing, and
 what to pass instead — rather than reported as an unrecognized argument. A job
 (or `cadgen snapshot` routing a `.dxf`) that carries `camera`,
-any `display` key but `appearance`, `mode` other than `view`, `section`,
+any `display` key but `appearance`, `mode` other than `view`,
 `scale`, an output `label`/`viewLabel`, or `output.padding`, `output.viewLabels`
 or `output.tightFrame` is refused by name with what a drawing is — in the same
 words, because the flag and the job key are one request arriving two ways.
@@ -112,7 +116,7 @@ rather than the previous one. Occurrence refs are the one request check that
 needs the built tree, so they are checked after the clear.
 
 OUT's extension decides the encoding, and no job key does: view mode writes
-`.png`, section mode `.png` or `.svg`, a video `.mp4` or `.gif`. Any other
+`.png`, a video `.mp4` or `.gif`. Any other
 extension is refused.
 
 A job comes from `--job FILE` or from `TARGET OUT` and the flags; there is no
@@ -130,7 +134,7 @@ annotation object itself. The CAD Viewer's Annotate tool writes one with a Quick
 prompt, beside a job file that renders the views the person looked at with it
 (`cadgen.viewer.prompt_files`). Snapshot reads the file and hands the object to
 the page, which draws it with the viewer's own code: what an agent renders is
-what the person drew. A drawing (DXF), `--mode list`, and `--mode section` take no annotation.
+what the person drew. A drawing (DXF) and `--mode list` take no annotation.
 
 ```json
 { "units": "mm",
@@ -172,7 +176,7 @@ Quick Edit chip copies it in this form; a Quick Edit prompt's job carries every
 measurement the person took, so an agent sees and reads the exact distances
 they meant. Each is drawn by the viewer's own code, every one labelled, its
 lines as heavy against the image's height as against a viewer 900 pixels tall.
-A drawing (DXF), `--mode list`, and `--mode section` take none.
+A drawing (DXF) and `--mode list` take none.
 
 ```json
 "measurements": [
@@ -187,20 +191,6 @@ A drawing (DXF), `--mode list`, and `--mode section` take none.
 
 At most 64. Every field is checked before the model loads, and a refusal names
 the measurement and the field (`measurements[0].start is [x, y, z]`).
-
-## Section planes
-
-`--mode section` draws the outline a plane cuts through a STEP model.
-`--section PLANE[:OFFSET]` (job key `"section": {"plane", "offset"}`) places it:
-`PLANE` is `XY` (the default), `XZ` or `YZ`, and `OFFSET` moves it along its own
-normal in model units, defaulting to 0.
-
-```bash
-cadgen step snapshot part.step cut.svg --mode section --section XZ:12.5
-```
-
-Those are the only two keys, a `section` outside section mode is refused, and a
-plane that misses the model returns an empty drawing with a warning.
 
 ## Sizes
 
@@ -275,7 +265,7 @@ include waiting for that work; these fields are browser wall times, not GPU
 profiler measurements. `captureMs` contains `waitViewportMs` and the output
 stages, so do not add those overlapping durations together.
 
-Only stages actually reported by the runtime are included. List, section and
+Only stages actually reported by the runtime are included. List and
 video results do not invent still-image measurements. Invalid/nonfinite
 values and image payloads are excluded from diagnostic output. Measurements
 belong to one render call and cannot carry over from a previous job.
@@ -292,7 +282,7 @@ translucent floor stands at the model's lowest point. To place it at the
 document's Z=0 plane instead:
 
 ```bash
-cadgen step snapshot part.step review.png --display '{"mode":"render","modes":{"render":{"floor":{"placement":"origin"}}}}'
+cadgen step snapshot part.step review.png --render --display '{"modes":{"render":{"floor":{"placement":"origin"}}}}'
 ```
 
 `display.modes.render.floor.placement` accepts `lowest` (the default) or
@@ -300,3 +290,9 @@ cadgen step snapshot part.step review.png --display '{"mode":"render","modes":{"
 `display.modes.render.floor.finish` accepts `matte` (the default) or `glossy`,
 the Viewer's Floor finish: a glossy floor also reflects the model.
 `display.modes.render.floor.enabled: false` removes the floor.
+
+A Render still is the Viewer's converged picture: 32 samples of its studio frame, a
+fraction of a pixel apart, with ambient occlusion in the seams and recesses and the key
+light's shadows as soft as its softbox (`lighting.size`). On a GPU that adds a fraction of
+a second to the render; a video's frames, and a renderer that runs in software, draw one
+sample each.

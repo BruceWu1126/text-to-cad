@@ -116,16 +116,16 @@ const noTools = async (pane) => {
   }
 };
 const displayButton = pane => pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button', { name: /^Display mode: / });
-// Display's settings: its per-mode settings submenu.
+// Display's settings: its per-mode settings page.
 async function openDisplay(pane) {
   await displayButton(pane).click();
-  await pane.page().getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+  await pane.page().getByRole('button', { name: 'Solid settings', exact: true }).click();
   await pane.page().locator('[data-display-settings="solid"]').waitFor();
 }
 // The display modes Display's menu offers, by id.
 async function displayModes(pane) {
   await displayButton(pane).click();
-  const menu = pane.page().locator('[role=menu][aria-label="Display mode"]');
+  const menu = pane.page().locator('[role=dialog][aria-label="Display mode"]');
   const modes = await menu.locator('[data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option')));
   await pane.page().keyboard.press('Escape');
   await menu.waitFor({ state: 'detached' });
@@ -171,6 +171,14 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+// Render is the Studio's: in by its button on the strip and out by its X, each once the view has
+// come together under its cover.
+async function studio(page, pane, enter) {
+  await pane.getByRole('button', { name: enter ? 'Studio' : 'Exit studio', exact: true }).click();
+  await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Studio', exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
+    && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
+}
 const display = (page, patch) => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch);
 // Grid lines, axes and the stage floor are a share of the picture too; with them off,
 // only the model's own colours are counted.
@@ -194,16 +202,16 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   // A mesh has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
   assert.equal(await pane.locator('[data-tool-panel]').count(), 0, 'nothing in the tool stack');
-  assert.deepEqual(await displayModes(pane), ['solid', 'render']);
+  assert.deepEqual(await displayModes(pane), ['solid']);
   await openDisplay(pane);
   assert.equal(await displayPanel(pane).getByRole('tab').count(), 0, 'Display has no tabs inside it');
   assert.equal(await pane.locator('[data-tool-panel]').count(), 0, 'and nothing joins the tool stack');
   const displayMenu = displayPanel(pane);
   assert.equal(await displayMenu.getByRole('combobox', { name: 'Mode', exact: true }).count(), 0, 'its menu chooses the mode');
-  for (const control of ['Flat shading', 'Grid', 'Axes']) assert.equal(await displayMenu.getByRole('menuitemcheckbox', { name: control, exact: true }).count(), 1, control);
-  assert.equal(await displayMenu.getByRole('menuitem', { name: 'Part colours', exact: true }).count(), 1);
-  for (const absent of ['Edges', 'Lighting', 'Floor']) assert.equal(await displayMenu.getByRole('menuitemcheckbox', { name: absent, exact: true }).count(), 0, absent);
-  assert.equal(await displayMenu.getByRole('menuitem', { name: 'Reset Solid', exact: true }).count(), 1);
+  for (const control of ['Flat shading', 'Grid', 'Axes']) assert.equal(await displayMenu.getByRole('checkbox', { name: control, exact: true }).count(), 1, control);
+  assert.equal(await displayMenu.getByRole('combobox', { name: 'Colour source', exact: true }).count(), 1);
+  for (const absent of ['Edges', 'Lighting', 'Floor']) assert.equal(await displayMenu.getByRole('checkbox', { name: absent, exact: true }).count(), 0, absent);
+  assert.equal(await displayMenu.getByRole('button', { name: 'Reset to default', exact: true }).count(), 1);
   await displayButton(pane).click();
   await displayPanel(pane).waitFor({ state: 'detached' });
   // The column closing reaches the scene as a resize; let that frame land before comparing pictures.
@@ -211,13 +219,11 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   await settle(page);
 
   await display(page, GUIDES_OFF);
-  // Solid <-> Render through the host's live surface.
-  const solid = await capture(page);
-  assert.equal((await page.evaluate(() => window.cadHarness.a.controller.setRenderMode(true))).renderMode, 'render');
-  await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy="false"]'));
-  assert.ok(differingPixels(solid, await capture(page)) > 5000, 'Render re-lights the model');
-  assert.equal((await page.evaluate(() => window.cadHarness.a.controller.setRenderMode(false))).renderMode, 'inspect');
-  await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy="false"]'));
+  // The Studio draws the model in Render, on the studio's floor; leaving it takes the studio down.
+  await studio(page, pane, true);
+  await page.waitForFunction(() => window.__cadStage()?.studioGround);
+  await studio(page, pane, false);
+  await page.waitForFunction(() => !window.__cadStage()?.studioGround);
 
   // Surfaces. An STL authors no colour, so Original is the viewer's surface colour; Flat is unlit, one colour.
   const shaded = await capture(page);
@@ -347,11 +353,9 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   assert.equal(dominantColors(await capture(page)).length, 1);
   await display(page, { modes: { solid: { flat: false, parts: { colorMode: 'original' } } } });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
-  // Render keeps the colours and re-lights them.
-  await page.evaluate(() => window.cadHarness.a.controller.setRenderMode(true));
-  await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy="false"]'));
+  // The Studio's Render keeps the colours and re-lights them.
+  await studio(page, pane, true);
   const rendered = await capture(page);
-  assert.ok(differingPixels(shaded, rendered) > 5000);
   assert.ok(dominantColors(rendered, { minShare: 0.002 }).some(([r, g, b]) => r > g + 60 && r > b + 60), 'the red object is still red under the studio');
   assert.deepEqual(errors, []);
 

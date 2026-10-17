@@ -5,10 +5,13 @@ import * as THREE from "three";
 
 import {
   applyPhotographicStudio,
-  disposePhotographicStudio
+  disposePhotographicStudio,
+  sampleKey,
+  softboxPoint
 } from "./photographicStudio.js";
 import {
   PHOTOGRAPHIC_STUDIO_FLOOR_FINISHES,
+  PHOTOGRAPHIC_STUDIO_FRAME,
   PHOTOGRAPHIC_STUDIO_GROUND_DIFFUSE_WEIGHT,
   PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_INTENSITY,
   PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX,
@@ -529,4 +532,52 @@ test("background and floor updates retain the neutral owner's current reflection
     applyPhotographicStudio(THREE, value, recipe);
     assert.equal(value.scene.environmentIntensity, 0.5);
   } finally { disposePhotographicStudio(value); }
+});
+
+test("the studio's lighting is drawn through its frame, more samples at Final, none in software or without the lighting", () => {
+  const value = runtime();
+  const state = applyPhotographicStudio(THREE, value, configuration());
+  assert.ok(state.frame, "a frame while the studio lights the model");
+  assert.equal(state.frame.samples, PHOTOGRAPHIC_STUDIO_FRAME.samples.preview);
+  applyPhotographicStudio(THREE, value, { ...configuration(), quality: "final" });
+  assert.equal(state.frame.samples, PHOTOGRAPHIC_STUDIO_FRAME.samples.final);
+  const frame = state.frame;
+  applyPhotographicStudio(THREE, value, { ...configuration(), lighting: { ...configuration().lighting, enabled: false } });
+  assert.equal(state.frame, null, "an unlit studio is one draw");
+  assert.throws(() => frame.render(value.renderer, value.scene, new THREE.PerspectiveCamera()), /disposed/);
+  applyPhotographicStudio(THREE, value, configuration(), { frame: false });
+  assert.equal(state.frame, null, "a caller may draw it as one draw");
+
+  const software = { ...runtime(), softwareRendering: true };
+  assert.equal(applyPhotographicStudio(THREE, software, configuration()).frame, null);
+
+  const disposed = runtime();
+  const owned = applyPhotographicStudio(THREE, disposed, configuration()).frame;
+  disposePhotographicStudio(disposed);
+  assert.throws(() => owned.render(disposed.renderer, disposed.scene, new THREE.PerspectiveCamera()), /disposed/);
+});
+
+test("a still frame's samples move the key across its softbox, square to it and as wide as Size makes it, and back to rest", () => {
+  const value = runtime();
+  const state = applyPhotographicStudio(THREE, value, configuration());
+  const rest = state.keyLight.position.clone();
+  const direction = rest.clone().sub(state.target.position).normalize();
+  assert.equal(sampleKey(state, 0), false, "the first sample is the key at rest");
+  const offsets = [];
+  for (let index = 1; index <= 16; index += 1) {
+    assert.equal(sampleKey(state, index), true);
+    const offset = state.keyLight.position.clone().sub(rest);
+    assert.ok(Math.abs(offset.dot(direction)) < 1e-6 * rest.length(), "across the softbox's face");
+    offsets.push(offset.length());
+  }
+  assert.equal(sampleKey(state, 16), false, "the same sample moves nothing");
+  assert.equal(sampleKey(state, 0), true);
+  assert.ok(state.keyLight.position.equals(rest));
+  for (const point of [1, 2, 3, 40].map(softboxPoint)) for (const value of point) assert.ok(value >= -1 && value <= 1);
+
+  // A larger softbox spreads the samples, so its shadows are softer.
+  applyPhotographicStudio(THREE, value, configuration({ size: 2 }));
+  const wider = state.keyLight.position.clone();
+  sampleKey(state, 5);
+  assert.ok(Math.abs(state.keyLight.position.distanceTo(wider) - 2 * offsets[4]) < 1e-6 * wider.length());
 });

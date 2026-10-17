@@ -61,8 +61,7 @@ VIDEO_TEARDOWN_TIMEOUT_SECONDS = 30
 # How often a video says where it is when nothing is painting a progress bar.
 VIDEO_NARRATE_INTERVAL_SECONDS = 15.0
 RENDER_BROWSER_STARTUP_TIMEOUT_MS = 15_000
-SUPPORTED_RENDER_MODES = {"view", "section", "list"}
-MESH_SUPPORTED_RENDER_MODES = {"view", "list"}
+SUPPORTED_RENDER_MODES = {"view", "list"}
 SUPPORTED_JOB_KEYS = frozenset(
     {
         "annotation",
@@ -71,6 +70,9 @@ SUPPORTED_JOB_KEYS = frozenset(
         "mode",
         "outputs",
         "display",
+        # The photographic Render instead of the display mode: studio lighting, floor and
+        # environment, as `display.modes.render` sets them. View mode only.
+        "render",
         "output",
         "quality",
         "camera",
@@ -92,9 +94,6 @@ SUPPORTED_JOB_KEYS = frozenset(
         # {fps, seconds, start, quality, loop}, encoded to the .mp4/.gif the
         # output names. Meaningless without `animation` (cadgen.snapshot_video).
         "video",
-        # Where `mode: "section"` cuts: {"plane": "XY"|"XZ"|"YZ", "offset": <model
-        # units along the plane's normal>}. Spelled the same as the --section flag.
-        "section",
         "scale",
         "debug",
         "timeoutSeconds",
@@ -168,15 +167,13 @@ RETIRED_SIZE_PROFILES = {
 # photographic preset's 2x render scale this is the 16384 px renderbuffer limit.
 MAX_OUTPUT_DIMENSION = 8192
 SIMPLE_RENDER_WIDTH, SIMPLE_RENDER_HEIGHT = SIZE_PROFILES["simple"]
-# Where section mode cuts. Mirrored as SECTION_PLANES in
-# packages/core/src/common/renderMeshScene.js (the parity is tested).
-SECTION_PLANES = ("XY", "XZ", "YZ")
-SECTION_KEYS = frozenset({"plane", "offset"})
 # What an output's extension may be, per mode. The extension decides the
 # encoding; nothing in a job does.
-STILL_OUTPUT_SUFFIXES = {"view": (".png",), "section": (".png", ".svg")}
+STILL_OUTPUT_SUFFIXES = {"view": (".png",)}
 DISPLAY_OPTION_KEYS = frozenset({"mode", "appearance", "camera", "clip", "exploded", "modes"})
-DISPLAY_MODES = frozenset({"solid", "render", "xray", "hidden-line", "wireframe"})
+# The working looks `display.mode` picks. Render is no display mode: it is its own request
+# (`--render`, a job's `"render": true`), drawn with Render's own settings, `display.modes.render`.
+DISPLAY_MODES = frozenset({"solid", "xray", "hidden-line", "wireframe"})
 PART_COLOR_MODES = frozenset({"original", "single", "by-part"})
 DISPLAY_CAMERA_KEYS = frozenset({"projection", "focalLength"})
 DISPLAY_PART_KEYS = frozenset({"colorMode", "color", "colors"})
@@ -558,7 +555,8 @@ def validate_display_settings_values(
             _validate_display_group(payload[name], keys, f"display.{name}")
     if "modes" not in payload:
         return
-    _display_object(payload["modes"], DISPLAY_MODES, "display.modes")
+    # Every mode's settings, Render's among them (`render` draws with them).
+    _display_object(payload["modes"], frozenset(DISPLAY_MODE_SETTING_KEYS), "display.modes")
     for mode, settings in payload["modes"].items():
         path = f"display.modes.{mode}"
         _display_object(settings, DISPLAY_MODE_SETTING_KEYS[mode], path)
@@ -598,7 +596,7 @@ def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input
 
     A drawing is skipped, not exempt: its own check refuses the whole of
     ``display`` but ``appearance``, and would otherwise be pre-empted here by a
-    message offering it the 'solid' and 'render' presets it cannot take either.
+    message offering it the 'solid' preset it cannot take either.
     """
     if kind in CAD_MODEL_KINDS or kind in DRAWING_KINDS or not is_plain_object(display):
         return
@@ -615,7 +613,7 @@ def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input
         raise SnapshotError(
             f"{', '.join(requested)} {'applies' if len(requested) == 1 else 'apply'} to STEP models only; "
             f"{input_label} has no CAD edges, parts to explode or solids to section. "
-            "Remove the setting; the modes available here are 'solid' and 'render'."
+            "Remove the setting; this input's display mode is 'solid' (or render it with --render)."
         )
 
 
@@ -768,57 +766,6 @@ def validate_size_profile(value: object) -> str:
         )
     sizes = ", ".join(f"{name} ({width}x{height})" for name, (width, height) in SIZE_PROFILES.items())
     raise SnapshotError(f"Unknown size profile: {value!r}. Size profiles: {sizes}")
-
-
-def validate_section(value: object) -> dict[str, object]:
-    """``{"plane": "XY"|"XZ"|"YZ", "offset": <number>}`` — where section mode cuts.
-
-    The plane is named by the two axes it contains; the offset moves it along its
-    own normal (Z for XY, Y for XZ, X for YZ) in model units, and defaults to 0.
-    These are exactly the two fields the renderer reads.
-    """
-    if not is_plain_object(value):
-        raise SnapshotError(
-            'section must be a {"plane": "XY"|"XZ"|"YZ", "offset": number} object, '
-            f"got {json.dumps(value)}"
-        )
-    unknown = sorted(set(value) - SECTION_KEYS)
-    if unknown:
-        raise SnapshotError(
-            f"section has unknown key(s): {', '.join(unknown)}; "
-            f"supported keys: {', '.join(sorted(SECTION_KEYS))}"
-        )
-    plane = value.get("plane", SECTION_PLANES[0])
-    if not isinstance(plane, str) or plane not in SECTION_PLANES:
-        raise SnapshotError(f"section.plane must be one of: {', '.join(SECTION_PLANES)}; got {plane!r}")
-    offset = value.get("offset", 0)
-    if isinstance(offset, bool) or not isinstance(offset, (int, float)) or not isfinite(float(offset)):
-        raise SnapshotError(f"section.offset must be a finite number in model units; got {offset!r}")
-    return {"plane": plane, "offset": offset}
-
-
-def parse_section_option(raw_section: object) -> dict[str, object]:
-    """``--section PLANE[:OFFSET]`` in job form.
-
-    Already an object when it came from a ``step.snapshot(section={...})`` call.
-    From argv it is one string shaped like ``--camera``'s angle pair: the plane,
-    then optionally a colon and the offset along its normal (``XZ:12.5``).
-    """
-    if is_plain_object(raw_section):
-        return validate_section(raw_section)
-    text = str(raw_section or "").strip()
-    if not text:
-        raise SnapshotError("--section requires PLANE[:OFFSET], for example XZ or XZ:12.5")
-    plane, separator, raw_offset = text.partition(":")
-    request: dict[str, object] = {"plane": plane.strip()}
-    if separator:
-        try:
-            request["offset"] = float(raw_offset)
-        except ValueError as exc:
-            raise SnapshotError(
-                f"--section offset must be a number in model units, got {raw_offset!r} (PLANE[:OFFSET])"
-            ) from exc
-    return validate_section(request)
 
 
 def normalize_render_mode(value: object) -> str:
@@ -1138,7 +1085,7 @@ def normalize_common_job(
     job_count: int = 1,
 ) -> dict[str, object]:
     """Kind-independent job normalization shared by every input kind: the outputs
-    guard, output/quality/section validation, output-path resolution, and the
+    guard, output/quality validation, output-path resolution, and the
     common return shape.
     Job preparation runs the kind's capability checks first, then calls this, so a
     STEP/mesh/robot job all normalize identically; the kind resolver attaches its
@@ -1190,16 +1137,13 @@ def normalize_common_job(
     # Every mode shares its preset defaults with the Viewer; only appearance is
     # fixed to Light for deterministic CLI output.
     display = {"mode": "solid", "appearance": "light", **job.get("display", {})}
+    # Render is its own request, drawn over the same display settings: the page draws Render
+    # where its display says so, with Render's own settings (`display.modes.render`).
+    if "render" in job:
+        _render_boolean(job["render"], "render")
+        if job["render"]:
+            display["mode"] = "render"
 
-    # Where section mode cuts. The key means nothing to a view or a list, and a
-    # request that carries it there expected a cut it would not get.
-    if mode == "section":
-        job["section"] = validate_section(job.get("section", {}))
-    elif "section" in job:
-        raise SnapshotError(
-            f"section positions the cut of section mode, and this job's mode is {mode}; "
-            'set "mode": "section" (--mode section), or clip a view with display.clip'
-        )
     if "timeoutSeconds" in job:
         job["timeoutSeconds"] = validate_timeout_seconds(job["timeoutSeconds"])
     if "debug" in job:
@@ -1283,7 +1227,6 @@ def normalize_common_job(
                 raise SnapshotError(
                     f"{mode} mode writes {' or '.join(allowed)}: render output {index} names "
                     f"{output_path.strip()!r}"
-                    + ("; a section can also be written as .svg with --mode section" if mode == "view" and suffix == ".svg" else "")
                 )
         explicit_camera = output_object.get("camera")
         if explicit_camera is None:
@@ -1292,8 +1235,9 @@ def normalize_common_job(
             normalized_output["camera"] = parse_camera_option(explicit_camera)
         normalized_outputs.append(normalized_output)
 
+    # `render` is said by the display from here on (its mode, above): the page draws a display.
     return {
-        **job,
+        **{key: value for key, value in job.items() if key != "render"},
         "mode": mode,
         "output": output_settings,
         "quality": quality,
@@ -1347,7 +1291,6 @@ def selection_filter_values(job: Mapping[str, object]) -> list[str]:
 def refuse_cad_model_requests(
     job: Mapping[str, object],
     *,
-    mode: str,
     subject: str,
     pose_hint: str,
     tessellation_hint: str,
@@ -1385,9 +1328,6 @@ def refuse_cad_model_requests(
         raise SnapshotError(
             f"quality.tessellation requires an exact-surface STEP package; {tessellation_hint}"
         )
-    if mode not in MESH_SUPPORTED_RENDER_MODES or job.get("section") is not None:
-        supported = ", ".join(sorted(MESH_SUPPORTED_RENDER_MODES))
-        raise SnapshotError(f"section mode requires STEP topology; {subject} support: {supported}")
 
 
 def check_mesh_render_job(job: Mapping[str, object], *, kind: str, mode: str, **_context: object) -> None:
@@ -1395,7 +1335,6 @@ def check_mesh_render_job(job: Mapping[str, object], *, kind: str, mode: str, **
     label = kind.upper()
     refuse_cad_model_requests(
         job,
-        mode=mode,
         subject=f"{label} mesh inputs",
         pose_hint=f"{label} mesh inputs are not parametric",
         tessellation_hint=f"{label} is an existing mesh",
@@ -2233,7 +2172,8 @@ async def render_resolved_job_packet(
                 result = {**result, "debug": debug_info}
             results.append(result if packet["single"] else {"input": job.get("input"), **result})
     finally:
-        await snapshot_renderer.close()
+        if renderer is None:
+            await snapshot_renderer.close()
     if packet["single"]:
         return results[0]
     return {
@@ -2263,10 +2203,6 @@ def write_output_payload(output: Mapping[str, object]) -> None:
         # point: a 1800-frame sequence has no payload that could ride a result.
         return
     path = Path(output_path)
-    text = output.get("text")
-    if isinstance(text, str):
-        write_bytes_atomic(path, text.encode("utf-8"))
-        return
     data_url = str(output.get("dataUrl") or "")
     match = re.match(r"^data:([^;]+);base64,(.+)$", data_url)
     if not match:
@@ -2306,12 +2242,12 @@ def _output_kind(output: Mapping[str, object], path: Path) -> str:
     """What was actually encoded: the mime subtype, else the path's suffix.
 
     The renderer's mime type is authoritative because the encoding follows the
-    RENDER, not the request -- an SVG served under a ``.png`` name is still SVG.
+    RENDER, not the request -- a PNG keeps its encoding even if its path is renamed.
     """
     mime = str(output.get("mimeType") or "")
     subtype = mime.rsplit("/", 1)[-1].strip().lower() if "/" in mime else ""
     if subtype:
-        return "svg" if subtype.startswith("svg") else subtype
+        return subtype
     return path.suffix.lstrip(".").lower()
 
 

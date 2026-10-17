@@ -19,16 +19,16 @@ function clipRows(document) {
 const REST = Object.freeze({ activeClipId: "", enabled: false, playing: false, elapsedSec: 0, speed: 1, loopEnabled: true });
 
 /**
- * The file's glTF clips as the kit playbar's runtime, driven by this renderer's
+ * The file's glTF clips as the kit's routine runtime, driven by this renderer's
  * own clock: ONE `AnimationMixer` on the native scene, alive only while a routine
- * owns the pose. The file opens at rest with no mixer at all, so the playbar
- * appearing under the model changes nothing on screen; the mixer is built by the
+ * owns the pose. The file opens at rest with no mixer at all, so preview's Animation
+ * row appearing changes nothing on screen; the mixer is built by the
  * first play, scrub or clip choice, and disposing it restores every animated
  * property to the value it had at rest.
  *
  * @param {object | null} document  The native GLB document on screen.
  * @param {() => void} requestRender  Asks the viewport for a frame.
- * @returns the playbar runtime, or null for a file without playable clips.
+ * @returns the routine runtime, or null for a file without playable clips.
  */
 export function useGlbAnimation(document, requestRender) {
   const clock = useMemo(() => createAnimationClock(), []);
@@ -75,25 +75,19 @@ export function useGlbAnimation(document, requestRender) {
     clock.resetAnimationClock();
     update({ enabled: false, playing: false, elapsedSec: 0 });
   }, [clock, update]);
-  // Preview's routine is its own (`kit/shell/useRendererShell.js`): the Animation tool's is saved
-  // as it stands — which clip, where its clock is, whether it plays, its Speed and Loop — and handed
-  // back as it was; preview's opens at rest at the clip's own Speed and Loop.
+  // Preview's routine is its own (`kit/shell/useRendererShell.js`): the tools view's is saved as it
+  // stands — which clip, where its clock is, whether it plays — and handed back as it was.
   const savePlayback = useCallback(() => {
-    const { activeClipId, enabled, playing, elapsedSec, speed, loopEnabled } = stateRef.current;
-    return { activeClipId, enabled, playing, elapsedSec: playing ? clock.getAnimationClock() : elapsedSec, speed, loopEnabled };
+    const { activeClipId, enabled, playing, elapsedSec } = stateRef.current;
+    return { activeClipId, enabled, playing, elapsedSec: playing ? clock.getAnimationClock() : elapsedSec };
   }, [clock]);
-  const resetPlayback = useCallback(() => {
-    onRelease();
-    update({ speed: REST.speed, loopEnabled: REST.loopEnabled });
-  }, [onRelease, update]);
   const restorePlayback = useCallback((saved) => {
     const clip = clips.find((candidate) => candidate.id === saved?.activeClipId);
     if (!clip) return;
     const enabled = saved.enabled === true;
     const elapsedSec = clampAnimationElapsed(saved.elapsedSec, clip.duration);
     clock.setAnimationClock(elapsedSec);
-    update({ activeClipId: clip.id, enabled, playing: enabled && saved.playing === true, elapsedSec,
-      speed: clampAnimationSpeed(saved.speed), loopEnabled: saved.loopEnabled !== false });
+    update({ activeClipId: clip.id, enabled, playing: enabled && saved.playing === true, elapsedSec });
   }, [clips, clock, update]);
   const onScrub = useCallback((value) => {
     if (!activeClip) return;
@@ -151,8 +145,8 @@ export function useGlbAnimation(document, requestRender) {
     clips, activeClipId: activeClip?.id || "", enabled: state.enabled, playing: state.playing,
     elapsedSec: state.elapsedSec, speed: state.speed, loopEnabled: state.loopEnabled,
     clock, showRestart: false,
-    onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, resetPlayback, restorePlayback,
+    onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, restorePlayback,
     onSpeedChange: (speed) => update({ speed: clampAnimationSpeed(speed) }),
     onLoopToggle: (loopEnabled) => update({ loopEnabled: loopEnabled !== false })
-  } : null), [clips, activeClip, state, clock, onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, resetPlayback, restorePlayback, update]);
+  } : null), [clips, activeClip, state, clock, onClipSelect, onPlayToggle, onRestart, onScrub, onRelease, savePlayback, restorePlayback, update]);
 }

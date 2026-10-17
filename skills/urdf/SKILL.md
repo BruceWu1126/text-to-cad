@@ -106,9 +106,9 @@ fails it rather than leaving the link out. Robots are authored in metres and are
 robot scene scale automatically.
 
 A normal snapshot uses Solid mode and Light appearance; omitted settings inherit
-mode defaults. Pass `--display render` for the shared photographic scene. Inline
-display JSON and JSON files store per-mode settings under `modes`, for example
-`{"mode":"render","modes":{"render":{"floor":{"enabled":false}}}}`.
+mode defaults. Pass `--render` for the shared photographic scene. Inline
+display JSON and JSON files store per-mode settings under `modes`, Render's among them,
+for example `--render --display '{"modes":{"render":{"floor":{"enabled":false}}}}'`.
 Render offers `parts`, `lighting`, `background` and `floor`; Solid offers `parts`,
 `flat`, `grid` and `axes`. `appearance` is `light` (default) or `dark`.
 Projection and focal length belong in `display.camera`; Render uses perspective.

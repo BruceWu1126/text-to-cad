@@ -34,9 +34,6 @@ export function useHostContext(bridge: Pick<Bridge, 'hostContext' | 'onHostConte
   return useSyncExternalStore(listener => bridge.onHostContext(listener), () => bridge.hostContext, () => bridge.hostContext);
 }
 
-// A tab host's composer floats over the bottom of the page, its middle this far above the edge: the
-// viewer's playback bars sit on that same line (Codex: a 45px box, 17px up).
-const TAB_BOTTOM_CENTER = '40px';
 // Codex's sidebar page has its own chat's button floating in its bottom-right corner, where the
 // viewer's cube sits: the cube is lifted this far clear of it (`--cad-viewport-corner-bottom`).
 const SIDEBAR_CORNER_BOTTOM = '52px';
@@ -58,12 +55,12 @@ export function inlineHeight(width: number, maxHeight?: number): number {
  * Room for what the host draws over the page (`insets`). Inline, a card whose height the host is
  * told. The one element either way, so going full size keeps the view (and its model) as it is.
  */
-function Frame({ bridge, context, insets, inline = false, bottomCenter, cornerBottom, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; bottomCenter?: string; cornerBottom?: string; overlay?: ReactNode; children: ReactNode }) {
-  // Where the host's composer floats over the page instead of taking room from it: the line the
-  // viewer's playback bars sit on, and the strip lists scroll clear of; and the room a control of
-  // the host's takes from the bottom-right corner, which the cube keeps clear of.
+function Frame({ bridge, context, insets, inline = false, floatingComposer = false, cornerBottom, overlay = null, children }: { bridge: Bridge; context: HostContext; insets: NonNullable<HostContext['safeAreaInsets']>; inline?: boolean; floatingComposer?: boolean; cornerBottom?: string; overlay?: ReactNode; children: ReactNode }) {
+  // Where the host's composer floats over the page instead of taking room from it: the room it
+  // covers, which lists scroll clear of; and the room a control of the host's takes from the
+  // bottom-right corner, which the cube keeps clear of.
   const floating = {
-    ...(bottomCenter ? { '--cad-viewport-bottom-center': bottomCenter, '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } : {}),
+    ...(floatingComposer ? { '--cad-host-bottom-inset': `${context.safeAreaInsets?.bottom || 0}px` } : {}),
     ...(cornerBottom ? { '--cad-viewport-corner-bottom': cornerBottom } : {}),
   } as CSSProperties;
   const [width, setWidth] = useState(() => window.innerWidth);
@@ -87,7 +84,7 @@ function Frame({ bridge, context, insets, inline = false, bottomCenter, cornerBo
 
 /**
  * Inline, the card's way to full size: the last of the navbar's own controls (the view's follow it), and the home's.
- * Corner brackets, never the diagonal arrows: those are Preview's, a button along.
+ * Corner brackets, the host's own way to full size.
  */
 function FullSizeButton({ bridge }: { bridge: Bridge }) {
   const expand = () => void bridge.request('ui/request-display-mode', { mode: 'fullscreen' }).catch(() => {});
@@ -120,14 +117,25 @@ export default function App({ bridge, server, launch: initial, presentation = 't
   const live = useMemo(createLiveRegistry, []);
   const tabStore = useMemo(() => createTabStore(memoryTabRecord()), []);
   const context = useHostContext(bridge);
-  const colorScheme = context.theme === 'dark' ? 'dark' : 'light';
+  // The person's theme, from the app menu: System follows the host's; Light or Dark is theirs, over
+  // it, for as long as this view is open (its tab store is the view's own).
+  const tabSettings = useSyncExternalStore(tabStore.settings.subscribe, tabStore.settings.getSnapshot, tabStore.settings.getSnapshot);
+  const preference = tabSettings.appearance;
+  const colorScheme = preference === 'light' || preference === 'dark' ? preference : context.theme === 'dark' ? 'dark' : 'light';
+  // After every host context too: the page's first theme is the host's (`main.tsx`), and a host
+  // change of theme must not undo the person's.
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', colorScheme === 'dark');
+    document.documentElement.style.colorScheme = colorScheme;
+  }, [colorScheme, context]);
+  const theme = useMemo(() => ({ preference, onPreferenceChange: (value: typeof preference) => tabStore.settings.update({ appearance: value }) }), [preference, tabStore]);
   const inline = presentation === 'inline' && context.displayMode !== 'fullscreen';
-  // A tab runs the page's full height: what a tab host draws over its bottom (its composer) sits
-  // clear of the viewer's centred playbar. A host that mounts views inline draws its composer
+  // A tab runs the page's full height, its host's composer floating over its bottom; nothing of the
+  // viewer sits at the bottom centre under it. A host that mounts views inline draws its composer
   // across the bottom of a full-size view, so that view keeps clear of it.
   const insets = presentation === 'inline' ? context.safeAreaInsets || {} : { ...context.safeAreaInsets, bottom: 0 };
   const chat = useMemo(() => chatReach(bridge.hostCapabilities, presentation), [bridge, presentation]);
-  const bottomCenter = presentation === 'tabs' ? TAB_BOTTOM_CENTER : undefined;
+  const floatingComposer = presentation === 'tabs';
   const cornerBottom = presentation === 'tabs' && surface === 'sidebar' ? SIDEBAR_CORNER_BOTTOM : undefined;
   // Once a newer view of this chat is up: this one's last frame (or null), and nothing else.
   const [still, setStill] = useState<string | null | undefined>(undefined);
@@ -213,15 +221,15 @@ export default function App({ bridge, server, launch: initial, presentation = 't
     [bridge]);
   const { launch } = showing;
   if (superseded) {
-    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}><Superseded still={still} /></Frame>;
+    return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer} cornerBottom={cornerBottom}><Superseded still={still} /></Frame>;
   }
-  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} bottomCenter={bottomCenter} cornerBottom={cornerBottom}
+  return <Frame bridge={bridge} context={context} insets={insets} inline={inline} floatingComposer={floatingComposer} cornerBottom={cornerBottom}
     overlay={lost ? <Banner message={LOST[presentation]} /> : null}>
     <ModelView launch={launch} sequence={showing.sequence} alone={alone} bridge={bridge} client={client} tunnel={tunnel}
       tabStore={tabStore} live={live} links={links} appSettings={appSettings}
       update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
         onLink={openLink} /> : null}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
-      colorScheme={colorScheme} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
+      colorScheme={colorScheme} theme={theme} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
   </Frame>;
 }

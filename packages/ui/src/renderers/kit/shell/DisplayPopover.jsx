@@ -1,71 +1,109 @@
-import { useRef, useState } from "react";
-import { Settings2 } from "lucide-react";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem,
-  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger
-} from "@text-to-cad/ui/primitives/dropdown-menu";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Check, Settings2 } from "lucide-react";
+import { RadioGroup } from "radix-ui";
+import { Button } from "@text-to-cad/ui/primitives/button";
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { OrthographicProjectionIcon, PerspectiveProjectionIcon } from "../camera/ProjectionModeIcons.js";
-import { STRIP_BUTTON_CLASS } from "../tools/FloatingToolBar.js";
+import { useStripButtonClass } from "../tools/FloatingToolBar.js";
 
-// Inside the viewer, 8px clear of its edges.
-const COLLISION_PADDING = 8;
+const ROW_CLASS = "relative flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-left text-tiny leading-4 outline-none hover:bg-accent focus-visible:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-50";
 
-function ModeRow({ value, name, Icon, onChange, boundary, children }) {
-  const [open, setOpen] = useState(false);
-  const trigger = useRef(null);
-  return <div className="relative">
-    <DropdownMenuRadioItem value={value} className="pr-16" data-display-mode-option={value} onSelect={() => onChange(value)}>
-      <Icon className="size-3.5" aria-hidden="true" />{name}
-    </DropdownMenuRadioItem>
-    <DropdownMenuSub open={open} onOpenChange={setOpen}>
-      <DropdownMenuSubTrigger ref={trigger} aria-label={`${name} settings`} className="absolute top-0 right-7 size-7 justify-center p-0 [&>svg:last-child]:hidden">
-        <Settings2 className="size-3.5" aria-hidden="true" />
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent sideOffset={4} collisionPadding={COLLISION_PADDING} collisionBoundary={boundary || undefined}
-        onEscapeKeyDown={event => { event.preventDefault(); setOpen(false); trigger.current?.focus(); }}
-        aria-label={`${name} settings`} data-display-settings={value}
-        className={cn(FLOATING_SURFACE_CLASS, "max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-60 flex flex-col overflow-hidden data-[state=closed]:animate-none!")}>
-        <ScrollArea className="min-h-0 flex-1">{children(value)}</ScrollArea>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  </div>;
+function ModeChoice({ value, Icon, children, ...props }) {
+  return <RadioGroup.Item value={value} className={ROW_CLASS} {...props}>
+    <Icon className="size-3.5 shrink-0" aria-hidden="true" />{children}
+    <span className="pointer-events-none absolute right-2 flex size-3.5 items-center justify-center" aria-hidden="true">
+      <RadioGroup.Indicator><Check className="size-3.5" /></RadioGroup.Indicator>
+    </span>
+  </RadioGroup.Item>;
 }
 
-/** The selected mode's sphere opens the modes; each row's settings trigger edits that mode independently. */
-export default function DisplayPopover({ disabled = false, boundary = null, tooltipSide = "top", onOpenChange, mode, projection, children }) {
+/**
+ * One surface: choose a mode, or edit the selected mode. Its own tile opens it; on a phone's strip
+ * with no room for that tile it opens from the strip's More button instead (`anchor`, its ref, with
+ * `open` held by the strip).
+ */
+export default function DisplayPopover({ disabled = false, boundary = null, tooltipSide = "top", onOpenChange, mode, projection, anchor = null, open: held, children }) {
+  const [ownOpen, setOpen] = useState(false);
+  const open = held ?? ownOpen;
+  const tileClass = useStripButtonClass();
+  const [editing, setEditing] = useState(false);
+  const back = useRef(null);
+  const settingsButton = useRef(null);
+  const returningToSettings = useRef(false);
   const current = mode.options.find(option => option.value === mode.value) || mode.options[0];
+  const detail = editing ? current : null;
   const Icon = current?.Icon;
   const label = current?.label || "Solid";
-  return <DropdownMenu modal={false} onOpenChange={onOpenChange}>
-    <DropdownMenuTrigger asChild>
-      <ToolbarButton label={`Display mode: ${label}`} tooltipSide={tooltipSide} disabled={disabled} className={STRIP_BUTTON_CLASS}
+  const changeOpen = next => {
+    setOpen(next);
+    if (!next) {
+      returningToSettings.current = false;
+      setEditing(false);
+    }
+    onOpenChange?.(next);
+  };
+  useEffect(() => {
+    if (editing) back.current?.focus();
+    else if (returningToSettings.current) {
+      settingsButton.current?.focus();
+      returningToSettings.current = false;
+    }
+  }, [editing]);
+  const goBack = () => {
+    returningToSettings.current = true;
+    setEditing(false);
+  };
+  return <Popover open={open} onOpenChange={changeOpen}>
+    {anchor ? <PopoverAnchor virtualRef={anchor} /> : <PopoverTrigger asChild>
+      <ToolbarButton label={`Display mode: ${label}`} tooltip="Display" tooltipSide={tooltipSide} disabled={disabled} className={tileClass}
         data-display-mode={current?.value}>
         {Icon ? <Icon /> : null}
       </ToolbarButton>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="center" sideOffset={6} collisionPadding={COLLISION_PADDING} aria-label="Display mode"
-      className={cn(FLOATING_SURFACE_CLASS, "min-w-44 data-[state=closed]:animate-none!")}>
-      <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Display Mode</DropdownMenuLabel>
-      <DropdownMenuRadioGroup value={current?.value}>
-        {mode.options.map(({ value, label: name, Icon }) => <ModeRow key={value} value={value} name={name} Icon={Icon}
-          onChange={mode.onChange} boundary={boundary}>{children}</ModeRow>)}
-      </DropdownMenuRadioGroup>
-      {projection && <>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Projection</DropdownMenuLabel>
-        <DropdownMenuRadioGroup aria-label="Projection" value={projection.value} onValueChange={projection.onChange}>
-          <DropdownMenuRadioItem value="orthographic" disabled={projection.disabled} onSelect={event => event.preventDefault()}>
-            <OrthographicProjectionIcon className="size-3.5" />Orthographic
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="perspective" disabled={projection.disabled} onSelect={event => event.preventDefault()}>
-            <PerspectiveProjectionIcon className="size-3.5" />Perspective
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </>}
-    </DropdownMenuContent>
-  </DropdownMenu>;
+    </PopoverTrigger>}
+    <PopoverContent align="center" sideOffset={6} collisionPadding={8} collisionBoundary={boundary || undefined}
+      aria-label={detail ? `${detail.label} settings` : "Display mode"} data-display-settings={detail?.value}
+      onEscapeKeyDown={event => {
+        // Committed value inputs cancel their draft on Escape before this surface closes.
+        if (event.target instanceof HTMLInputElement && event.target.type === "text") event.preventDefault();
+      }}
+      className={cn(FLOATING_SURFACE_CLASS, "flex max-h-[var(--radix-popover-content-available-height)] w-52 max-w-[var(--radix-popover-content-available-width)] flex-col overflow-hidden p-0 text-tiny data-[state=closed]:animate-none!")}>
+      {detail ? <>
+        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border px-1">
+          <Button ref={back} type="button" variant="ghost" size="icon-xs" aria-label="Back to Display"
+            onClick={goBack} className="size-6 shrink-0"><ArrowLeft className="size-3.5" aria-hidden="true" /></Button>
+          <span className="text-tiny">Settings</span>
+        </div>
+        <div key={detail.value} className="flex min-h-0 flex-1 flex-col">{children(detail.value)}</div>
+      </> : <ScrollArea className="min-h-0 flex-1">
+        <div className="p-1">
+          <div className="flex min-h-7 items-center justify-between py-0.5 pr-1 pl-2 text-muted-foreground">
+            <span>Display Mode</span>
+            <Button ref={settingsButton} type="button" variant="ghost" size="icon-xs"
+              aria-label={`${label} settings`} onClick={() => setEditing(true)} disabled={!current}
+              className="size-5 shrink-0 hover:text-foreground">
+              <Settings2 className="size-3" aria-hidden="true" />
+            </Button>
+          </div>
+          <RadioGroup.Root aria-label="Display Mode" value={current?.value} onValueChange={value => { mode.onChange(value); changeOpen(false); }}>
+            {mode.options.map(({ value, label: name, Icon: ModeIcon }) =>
+              <ModeChoice key={value} value={value} Icon={ModeIcon} data-display-mode-option={value}
+                onClick={() => { if (value === current?.value) changeOpen(false); }}>{name}</ModeChoice>)}
+          </RadioGroup.Root>
+          {projection && <>
+            <div className="-mx-1 my-1 h-px bg-border" />
+            <div className="px-2 py-1.5 text-muted-foreground">Projection</div>
+            <RadioGroup.Root aria-label="Projection" value={projection.value} onValueChange={projection.onChange}>
+              <ModeChoice value="orthographic" Icon={OrthographicProjectionIcon}>Orthographic</ModeChoice>
+              <ModeChoice value="perspective" Icon={PerspectiveProjectionIcon}>Perspective</ModeChoice>
+            </RadioGroup.Root>
+          </>}
+        </div>
+      </ScrollArea>}
+    </PopoverContent>
+  </Popover>;
 }
+

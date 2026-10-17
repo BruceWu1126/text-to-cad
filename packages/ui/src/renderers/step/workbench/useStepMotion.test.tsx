@@ -98,18 +98,19 @@ it('an update that leaves the routine as it was neither stops nor rewinds it, a 
   await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
-  // Using a routine returns Position to its default; nothing is kept to restore.
+  // A routine plays in preview, over the model as it opens: the tools view's pose stays.
   act(() => result.current.onPlayToggle());
-  expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 0 }]);
+  expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 30 }]);
 
   rerender({ entry: saved(2, { routine: 'swing-1' }) });
   await loaded(result, 2);
   expect(compiled.loads).toBe(1);
   expect(result.current.animationState).toMatchObject({ activeClipId: 'swing', enabled: true, playing: true });
   expect(result.current.animationControls.clips).toHaveLength(1);
-  // Releasing the routine keeps the default pose across the update.
+  // Releasing the routine leaves the pose as it is.
+  const pose = result.current.parameterValues;
   act(() => result.current.releaseAnimation());
-  expect(result.current.parameterValues).toEqual({ swing: 0 });
+  expect(result.current.parameterValues).toEqual(pose);
 
   // A routine the save changed is compiled again, and is at rest.
   act(() => result.current.onPlayToggle());

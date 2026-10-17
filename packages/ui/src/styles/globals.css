@@ -10,6 +10,44 @@
 
 @import "./tokens.css";
 
+/* The chrome's type sizes: 10, 11, 12 and 13px at a desktop's pointer. */
+:root {
+  --cad-text-micro: 10px;
+  --cad-text-tiny: 11px;
+  --cad-text-xs: 0.75rem;
+  --cad-text-ui: 0.8125rem;
+}
+
+/* A phone's view (`data-viewer-layout="mobile"`: the viewer under 720px) is read at arm's length and
+ * worked with a finger, so its chrome takes one step up: type 12, 13, 14 and 15px (the platforms'
+ * floor is 11pt; body text 15-17pt), rows and menu items 40px, controls 36px, and text entry at 16px,
+ * under which iOS Safari zooms the page into the field. The whole page follows, so a menu, a select
+ * or a hint portalled out of the viewer is the same size as the chrome it opened from. */
+:root:has([data-viewer-layout="mobile"]) {
+  --cad-text-micro: 12px;
+  --cad-text-tiny: 13px;
+  --cad-text-xs: 14px;
+  --cad-text-ui: 15px;
+}
+:root:has([data-viewer-layout="mobile"]) :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"], [data-menu-theme]) {
+  min-height: 40px;
+}
+:root:has([data-viewer-layout="mobile"]) :is(input, textarea, [contenteditable]:not([contenteditable="false"])) {
+  font-size: max(16px, 1em);
+}
+/* The navbar a 48px row of 36px controls; a section's heading in the file sidebar 36px, its buttons 32px. */
+[data-viewer-layout="mobile"] [data-viewer-navbar] { height: 48px; }
+[data-viewer-layout="mobile"] [data-viewer-navbar] :is(button, a) { min-height: 36px; min-width: 36px; }
+[data-viewer-layout="mobile"] [data-sidebar-head] [data-tool-panel-heading] { height: 36px; }
+[data-viewer-layout="mobile"] [data-sidebar-head] button { min-height: 32px; min-width: 32px; }
+[data-viewer-layout="mobile"] [data-select-trigger], [data-viewer-layout="mobile"] [data-slot="select-trigger"] { min-height: 36px; }
+/* A slider anywhere on a phone (Position's joints, Display's settings, a tool's row): shadcn's
+ * slider in a 36px band to press in, its thumb 20px, a finger's. The selected ink's bar: 36px buttons. */
+:root:has([data-viewer-layout="mobile"]) [data-slot="slider"] { height: 36px; }
+:root:has([data-viewer-layout="mobile"]) [data-slot="slider-thumb"] { width: 20px; height: 20px; }
+[data-viewer-layout="mobile"] [data-annotation-selection-bar] button { min-width: 36px; min-height: 36px; }
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

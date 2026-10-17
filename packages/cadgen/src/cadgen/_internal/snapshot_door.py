@@ -12,7 +12,7 @@ Four signature shapes cover the seven doors honestly (the old shared
 signature advertised STEP-only options to every door and refused them at
 runtime):
 
-- STEP: the full surface — section mode and its plane, display, kinematics, animation, focus/hide.
+- STEP: the full surface — display, kinematics, animation, focus/hide.
 - mesh (stl/3mf/glb): view/list renders of untyped geometry.
 - robot (urdf/sdf): the mesh shape plus ``joint_values``.
 - dxf: a DRAWING, not a scene. Where, how big, and light or dark — nothing
@@ -85,11 +85,11 @@ def _run(
     mode: str,
     camera: object,
     display: object = None,
+    render: bool = False,
     kinematics: object = None,
     animation: object = None,
     time: float | None = None,
     video: object = None,
-    section: object = None,
     joint_values: object = None,
     annotation: object = None,
     measurements: object = None,
@@ -124,6 +124,7 @@ def _run(
     # keyword), so this is the library caller's rule.
     if display is not None:
         options.display, options.display_specified = display, True
+    options.render = bool(render)
     if camera is not None:
         options.camera, options.camera_specified = camera, True
     if kinematics is not None:
@@ -147,8 +148,6 @@ def _run(
         options.animation, options.animation_time, options.animation_specified = animation, time, True
     if video is not None:
         options.video, options.video_specified = video, True
-    if section is not None:
-        options.section, options.section_specified = section, True
     if joint_values is not None:
         options.joint_values, options.joint_values_specified = joint_values, True
     if annotation is not None:
@@ -190,9 +189,9 @@ def step_snapshot_verb(door: str):
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        render: bool = False,
         annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         kinematics: str | dict | None = None,
@@ -218,25 +217,24 @@ def step_snapshot_verb(door: str):
 
         target: the model to render — a .step/.stp document (a model script
             is refused by naming the run that writes the document).
-        out: destination path, written EXACTLY there — .png (section mode
-            also writes .svg, --video writes .mp4/.gif) — or a directory for
+        out: destination path, written EXACTLY there — .png
+            (--video writes .mp4/.gif) — or a directory for
             a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}. When given it wins: target/out are ignored, and
             the other flags override every job in it.
-        mode: view (default), section, or list.
-        section: where --mode section cuts, as PLANE[:OFFSET] — the plane is
-            XY, XZ or YZ (default XY) and the offset moves it along its normal
-            in model units (default 0): XZ:12.5 cuts at Y=12.5. In a job,
-            {"plane": "XZ", "offset": 12.5}.
+        mode: view (default) or list.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
         display: a mode name, sparse display JSON, or JSON file path. Modes
-            are solid (default), render, xray, hidden-line and wireframe.
+            are solid (default), xray, hidden-line and wireframe.
             Per-mode settings live under modes; omitted parameters inherit the
             mode's defaults. appearance is light (default) or dark.
+        render: draw the photographic Render — studio lighting, floor and
+            environment, perspective — instead of the display mode, with
+            Render's own settings from display's modes.render. View mode only.
         kinematics: pose values — a declared preset name or {dof: value}
             JSON, validated against the model's kinematics declaration;
             available in every display mode.
@@ -274,9 +272,9 @@ def step_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, kinematics=kinematics,
+            camera=camera, display=display, render=render, kinematics=kinematics,
             annotation=annotation, measurements=measurements,
-            animation=animation, time=time, video=video, section=section,
+            animation=animation, time=time, video=video,
             focus=focus, hide=hide, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -320,7 +318,7 @@ def drawing_camera_refusal(subject: str) -> str:
 def drawing_mode_refusal(subject: str) -> str:
     """Why ``view`` is the only render mode a drawing has."""
     return (
-        f"{DRAWING_IS}: it has no parts to list and no solid to section, so view is the "
+        f"{DRAWING_IS}: it has no parts to list, so view is the "
         f"only mode {subject} renders in."
     )
 
@@ -344,7 +342,7 @@ DRAWING_RETIRED_OPTIONS: dict[str, str] = {
     ),
     "--display": drawing_scene_refusal("display", "a drawing", plural=False),
     "--mode": (
-        f"mode chose between view, section and list; {drawing_mode_refusal('a drawing')} "
+        f"mode chose between view and list; {drawing_mode_refusal('a drawing')} "
         "Drop the flag."
     ),
     "--view-labels": (
@@ -363,7 +361,7 @@ def drawing_snapshot_verb(door: str):
     every option that describes a 3D scene is absent from this signature
     rather than accepted and ignored: no ``camera`` (nothing to pose), no
     ``display`` (no surfaces, lighting or render mode), no ``mode`` (a drawing
-    has no parts to list and no solid to section), no ``view_labels`` (no view
+    has no parts to list), no ``view_labels`` (no view
     to label). ``appearance`` is what survives of display, because a default
     pen has no colour until a background is chosen.
 
@@ -447,7 +445,7 @@ def drawing_snapshot_verb(door: str):
 
 def mesh_snapshot_verb(door: str):
     """The mesh-shaped verb: view/list renders of untyped geometry —
-    no kinematics, section mode, or selection (nothing to act on)."""
+    no kinematics or selection (nothing to act on)."""
     kinds = DOOR_KINDS[door]
     suffixes = ", ".join(f".{kind}" for kind in kinds)
 
@@ -460,6 +458,7 @@ def mesh_snapshot_verb(door: str):
         mode: str = "view",
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        render: bool = False,
         annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         width: int | None = None,
@@ -486,11 +485,14 @@ def mesh_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, sparse display JSON, or a JSON file
-            path. Per-mode settings live under modes and inherit that mode's
+        display: solid (default), sparse display JSON, or a JSON file path.
+            Per-mode settings live under modes and inherit that mode's
             defaults; appearance defaults to light. Projection belongs in
-            display.camera; Render uses perspective. edges, clip, exploded,
-            xray, hidden-line and wireframe are STEP-only and refused here.
+            display.camera. edges, clip, exploded, xray, hidden-line and
+            wireframe are STEP-only and refused here.
+        render: draw the photographic Render — studio lighting, floor and
+            environment, perspective — instead of the display mode, with
+            Render's own settings from display's modes.render. View mode only.
         measurements: dimensions drawn over the picture, as the CAD Viewer's
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
@@ -513,7 +515,7 @@ def mesh_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, width=width, height=height,
+            camera=camera, display=display, render=render, width=width, height=height,
             annotation=annotation, measurements=measurements,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -537,6 +539,7 @@ def robot_snapshot_verb(door: str):
         joint_values: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        render: bool = False,
         annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         width: int | None = None,
@@ -566,11 +569,14 @@ def robot_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, sparse display JSON, or a JSON file
-            path. Per-mode settings live under modes and inherit that mode's
+        display: solid (default), sparse display JSON, or a JSON file path.
+            Per-mode settings live under modes and inherit that mode's
             defaults; appearance defaults to light. Projection belongs in
-            display.camera; Render uses perspective. edges, clip, exploded,
-            xray, hidden-line and wireframe are STEP-only and refused here.
+            display.camera. edges, clip, exploded, xray, hidden-line and
+            wireframe are STEP-only and refused here.
+        render: draw the photographic Render — studio lighting, floor and
+            environment, perspective — instead of the display mode, with
+            Render's own settings from display's modes.render. View mode only.
         measurements: dimensions drawn over the picture, as the CAD Viewer's
             Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
             "label": "...", "color": "#rrggbb"} (one such object for one), or a path
@@ -593,7 +599,7 @@ def robot_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            joint_values=joint_values, camera=camera, display=display,
+            joint_values=joint_values, camera=camera, display=display, render=render,
             annotation=annotation, measurements=measurements,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
@@ -615,9 +621,9 @@ def polymorphic_snapshot_verb():
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        render: bool = False,
         annotation: str | dict | None = None,
         measurements: str | dict | None = None,
         kinematics: str | dict | None = None,
@@ -638,28 +644,30 @@ def polymorphic_snapshot_verb():
         target: the document to render — STEP/STP, STL/3MF/GLB, DXF, or a
             robot description (URDF/SRDF/SDF). Run model scripts first, then
             snapshot the document they write.
-        out: destination path, written EXACTLY there — .png (a STEP section
-            also writes .svg, a STEP --video writes .mp4/.gif) — or a directory
+        out: destination path, written EXACTLY there — .png
+            (a STEP --video writes .mp4/.gif) — or a directory
             for a generated timestamped name. A refused request leaves an
             existing OUT untouched; an accepted one clears it first.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}; jobs may mix formats. When given it wins, and the
             other flags override every job in it.
-        mode: view (default), section (STEP only), or list (not DXF: a
+        mode: view (default) or list (not DXF: a
             drawing has no parts to list).
-        section: where a STEP --mode section cuts, as PLANE[:OFFSET] — XY, XZ
-            or YZ, offset along the plane's normal in model units: XZ:12.5.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
             A DXF is drawn flat and head on, and refuses a camera.
-        display: solid (default), render, xray, hidden-line or wireframe, sparse
+        display: solid (default), xray, hidden-line or wireframe, sparse
             display JSON, or a JSON file path. appearance defaults to light.
             Per-mode settings live under modes and inherit that mode's defaults.
             edges, clip, exploded, xray, hidden-line and wireframe describe a STEP
-            model; every other scene input takes solid or render. A DXF takes
+            model; every other scene input takes solid. A DXF takes
             appearance alone (`cadgen dxf snapshot --appearance`).
+        render: draw the photographic Render — studio lighting, floor and
+            environment, perspective — instead of the display mode, with
+            Render's own settings from display's modes.render. View mode only;
+            not a DXF, which is drawn flat.
         kinematics: pose values for a STEP model's kinematics — a preset
             name or {dof: value} JSON; available in every display mode.
         animation: one still frame of a STEP model's clip — the clip name
@@ -696,8 +704,8 @@ def polymorphic_snapshot_verb():
         return _run(
             ALL_KINDS,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, section=section,
+            camera=camera, display=display, render=render, kinematics=kinematics,
+            animation=animation, time=time, video=video,
             joint_values=joint_values, focus=focus, hide=hide,
             annotation=annotation, measurements=measurements,
             width=width, height=height, size_profile=size_profile,

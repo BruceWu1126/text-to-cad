@@ -23,11 +23,11 @@ function advance(ms = 100) {
   const queued = [...frames.values()]; frames.clear();
   act(() => queued.forEach(frame => frame(performance.now() + ms)));
 }
-// The host's side: which motion each claim named, and whether preview is up when it is asked.
-function setup(initialClips: any = clips, { previewing = false } = {}) {
+// The host's side: which motion each claim named.
+function setup(initialClips: any = clips) {
   const clock = createAnimationClock();
   const used: string[] = [];
-  const host = { previewing: () => previewing, onUse: (motion: string) => used.push(motion) };
+  const host = { onUse: (motion: string) => used.push(motion) };
   const hook = renderHook(({ modelClips }) => {
     const [animation, setAnimation] = useState(buildDefaultAnimationState(modelClips));
     const [values, setValues] = useState(definition.defaultParameterValues);
@@ -45,7 +45,7 @@ function setup(initialClips: any = clips, { previewing = false } = {}) {
   return { ...hook, clock, used };
 }
 
-// The transport preferences the Animation tool and preview set: not the defaults, so keeping them shows.
+// The transport preferences the Playback settings set: not the defaults, so keeping them shows.
 const preferences = { activeClipId: 'close', speed: 2, loopEnabled: true };
 const pickPreferences = (result: any) => act(() => {
   result.current.handleAnimationClipSelect('close'); result.current.handleAnimationSpeedChange(2); result.current.handleAnimationLoopToggle(true);
@@ -69,7 +69,7 @@ it('a parameter edit stops live playback, keeps its transport preferences, reset
   expect(result.current.animation).toEqual({ ...preferences, enabled: true, playing: true, elapsedSec: 0 });
 });
 
-it('leaving Animation for another tool keeps the transport preferences too', () => {
+it('leaving preview keeps the transport preferences too', () => {
   const { result, clock } = setup();
   pickPreferences(result);
   act(() => result.current.handleAnimationPlayToggle()); advance();
@@ -78,11 +78,9 @@ it('leaving Animation for another tool keeps the transport preferences too', () 
   expect(clock.getAnimationClock()).toBe(0);
 });
 
-it.each(['play', 'scrub', 'restart'])('%s uses the routine: a posed model goes back to its authored values, and the host takes Explode off', command => {
-  const { result, clock, used } = setup();
+it.each(['play', 'scrub', 'restart'])("%s plays in preview, over the model as it opens: the tools view's pose and Explode stay", command => {
+  const { result, used } = setup();
   act(() => result.current.handleApplyPose('open'));
-  expect(result.current.values.hinge).toBe(80);
-  const stale = [...frames.values()];
   act(() => {
     const actions: Record<string, () => void> = {
       play: () => result.current.handleAnimationPlayToggle(), scrub: () => result.current.handleAnimationScrub(1),
@@ -90,13 +88,8 @@ it.each(['play', 'scrub', 'restart'])('%s uses the routine: a posed model goes b
     };
     actions[command]();
   });
-  expect(result.current.values).toEqual(definition.defaultParameterValues);
-  expect(result.current.pose).toBe(''); expect(result.current.animation.enabled).toBe(true);
-  expect(used).toEqual(['position', 'animation']);
-  const time = clock.getAnimationClock();
-  act(() => stale.forEach(frame => frame(performance.now() + 2000)));
-  expect(result.current.values).toEqual(definition.defaultParameterValues);
-  expect(clock.getAnimationClock()).toBe(time);
+  expect([result.current.values.hinge, result.current.pose, result.current.animation.enabled]).toEqual([80, 'open', true]);
+  expect(used).toEqual(['position']);
 });
 
 it.each(['clip', 'speed', 'loop'])('%s is how the routine plays, not a use of it: the pose and Explode stay', command => {
@@ -162,11 +155,11 @@ it.each(['playback', 'position'])('global motion reset clears %s and all pending
   expect(clock.getAnimationClock()).toBe(0);
 });
 
-it('rapid animation → parameters → animation resumes from zero with authored parameters', () => {
+it('rapid animation → parameters → animation resumes from zero, the parameters kept', () => {
   const { result, clock } = setup();
   act(() => result.current.handleAnimationPlayToggle()); advance();
   act(() => { result.current.handleStepModuleParameterChange('hinge', 45); result.current.handleAnimationPlayToggle(); });
-  expect(result.current.values).toEqual(definition.defaultParameterValues);
+  expect(result.current.values).toEqual({ hinge: 45, slide: 2 });
   expect(result.current.animation.playing).toBe(true); expect(clock.getAnimationClock()).toBe(0);
   advance(500); expect(clock.getAnimationClock()).toBeGreaterThan(0);
 });
@@ -208,48 +201,11 @@ it('every pose write lands at once and asks for no frame: a value, a named pose,
   expect(frames.size).toBe(0);
 });
 
-it('one motion at a time: a routine played sets the pose back to its default for good, and Position used puts the routine at rest', () => {
+it('Position used puts the routine at rest, and tells the host to take Explode off', () => {
   const { result, used } = setup();
-  act(() => result.current.handleStepModuleParameterChange('hinge', 45));
-  act(() => result.current.handleAnimationPlayToggle());
-  expect(result.current.values, 'a routine plays from the model at rest').toEqual(definition.defaultParameterValues);
-  act(() => { result.current.handleAnimationScrub(1); result.current.handleAnimationPlayToggle(); });
-  act(() => result.current.releaseAnimation());
-  // Nothing was set aside: at rest, the pose is the default.
-  expect(result.current.values).toEqual(definition.defaultParameterValues);
-  expect(result.current.animation.enabled).toBe(false);
   act(() => result.current.handleAnimationScrub(2));
   act(() => result.current.handleStepModuleParameterChange('slide', 9));
   expect(result.current.values).toEqual({ hinge: 5, slide: 9 });
   expect(result.current.frame).toBeNull();
-  expect(used).toEqual(['position', 'animation', 'animation', 'animation', 'animation', 'position']);
-});
-
-it("preview's routine is its own: playing it there moves nothing of the tools view's", () => {
-  const { result, used } = setup(clips, { previewing: true });
-  act(() => result.current.handleApplyPose('open'));
-  act(() => { result.current.handleAnimationPlayToggle(); result.current.handleAnimationScrub(1); });
-  expect(result.current.values.hinge).toBe(80);
-  expect(result.current.animation.enabled).toBe(true);
   expect(used).toEqual(['position']);
-});
-
-it('putting the routine down keeps a frame past its start, paused where it was; one at its start goes back to rest', () => {
-  const { result, clock } = setup();
-  act(() => result.current.handleAnimationPlayToggle()); advance(500);
-  const time = clock.getAnimationClock();
-  expect(time).toBeGreaterThan(0);
-  act(() => result.current.putDownAnimation());
-  expect(result.current.animation).toMatchObject({ enabled: true, playing: false, elapsedSec: time });
-  expect(result.current.frame).toEqual({ clip: clips.turn, elapsedSec: time, playing: false });
-  expect(frames.size, 'nothing plays on').toBe(0);
-  // Kept and put down again: nothing changes.
-  act(() => result.current.putDownAnimation());
-  expect(result.current.animation.elapsedSec).toBe(time);
-  // Its X: back to rest.
-  act(() => result.current.releaseAnimation());
-  expect(result.current.frame).toBeNull();
-  act(() => result.current.handleAnimationScrub(0));
-  act(() => result.current.putDownAnimation());
-  expect(result.current.animation).toMatchObject({ enabled: false, playing: false, elapsedSec: 0 });
 });

@@ -5,16 +5,17 @@ import ReferenceChips from '../../../../../dist/renderers/kit/tools/quick-edit/R
 import { InfoRow } from '../../../../../dist/renderers/kit/inspector/referenceRows.js';
 import { ViewerHostContext } from '../../../../../dist/host/context.js';
 import { testHost } from '../../../../../dist/host/testing/host.js';
+import { ViewerMobileContext } from '../../../../../dist/file-viewer/responsive.js';
 
 Object.assign(globalThis, { React });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 const chip = (n: number, extra = {}) => ({ key: `run:${n}`, label: `base · face ${n}`, id: `o1.f${n}`, copy: `/models/base.step#o1.f${n}`,
   card: <InfoRow label="Area" title="Face area">{`${n * 10} mm²`}</InfoRow>, ...extra });
-function mount(chips: any[]) {
+function mount(chips: any[], mobile = false) {
   const copied: string[] = [];
   const host = testHost({ clipboard: { writeText: async (text: string) => { copied.push(text); }, readText: async () => '', writeImage: async () => {} } });
-  render(<ViewerHostContext.Provider value={host}><ReferenceChips chips={chips} /></ViewerHostContext.Provider>);
+  render(<ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ReferenceChips chips={chips} /></ViewerHostContext.Provider></ViewerMobileContext.Provider>);
   return copied;
 }
 const settle = () => act(async () => { await Promise.resolve(); });
@@ -89,4 +90,14 @@ it('a chip that makes what it copies (the Annotation: its annotation file) copie
 it('without a host clipboard nothing offers a copy', () => {
   render(<ReferenceChips chips={[chip(1)]} />);
   expect(screen.getByRole('button', { name: 'base · face 1' }).className).not.toContain('cursor-pointer');
+});
+
+it('on a phone a tap on a chip opens its card above it and copies nothing; the card\'s title copies', async () => {
+  const copied = mount([chip(4)], true);
+  const label = screen.getByRole('button', { name: 'base · face 4' });
+  fireEvent.pointerDown(label, { pointerType: 'touch' });
+  fireEvent.click(label);
+  await settle();
+  const card = document.querySelector<HTMLElement>('[data-quick-edit-ref-card]')!;
+  expect([copied, card.getAttribute('data-side')]).toEqual([[], 'top']);
 });

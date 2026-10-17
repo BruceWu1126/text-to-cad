@@ -282,3 +282,20 @@ it('keeps its note through a reload of the view: out of sight while it loads, an
   update({ hidden: false });
   expect(note()).toBe('Thicker here.');
 });
+
+it('docked on a phone it is a bottom sheet peeking at its header and chips, keeps the keyboard down on a pick, and opens from its write button', async () => {
+  const { update } = mount(testHost(), { docked: true });
+  press();
+  update({ references: [face] });
+  // A bottom sheet (shadcn's drawer), peeking: its note and buttons are out of reach until it opens.
+  expect(document.querySelector('[data-quick-edit-sheet]')).not.toBeNull();
+  // Peeking, its way in is a field-like button under the chips; the note and buttons are out of reach.
+  const opener = () => within(box()!).queryByRole('button', { name: 'Describe your changes…' });
+  const compose = () => box()!.querySelector('[data-quick-edit-compose]')!;
+  const note = () => box()!.querySelector<HTMLElement>('[data-quick-edit-note]')!;
+  expect([opener()?.getAttribute('aria-expanded'), compose().hasAttribute('inert'), document.activeElement === note()]).toEqual(['false', true, false]);
+  fireEvent.click(opener()!);
+  await waitFor(() => expect(document.activeElement).toBe(note()));
+  expect([opener(), compose().hasAttribute('inert')]).toEqual([null, false]);
+  expect(box()!.querySelector('[data-quick-edit-resize]')).toBeNull();
+});

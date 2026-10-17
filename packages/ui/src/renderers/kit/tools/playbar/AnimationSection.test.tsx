@@ -2,8 +2,9 @@ import React from 'react';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AnimationToolbar } from '../../../../../dist/renderers/kit/tools/playbar/AnimationPanel.js';
+import AnimationSection from '../../../../../dist/renderers/kit/tools/playbar/AnimationSection.js';
 import { createAnimationClock } from '../../../../../dist/renderers/kit/tools/playbar/animationClock.js';
+import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
 
 const restores: (() => void)[] = [];
 function override(target: object, key: string, descriptor: PropertyDescriptor) {
@@ -13,7 +14,7 @@ function override(target: object, key: string, descriptor: PropertyDescriptor) {
 }
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  // A Select's listbox, which jsdom cannot lay out or point at.
+  // A menu's content, which jsdom cannot lay out or point at.
   override(Element.prototype, 'scrollIntoView', { value() {} });
   for (const name of ['setPointerCapture', 'releasePointerCapture']) override(Element.prototype, name, { value() {} });
   override(Element.prototype, 'hasPointerCapture', { value: () => false });
@@ -22,26 +23,34 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) rest
 
 const TURN = { id: 'turn', label: 'Turn', duration: 8 };
 const OPEN = { id: 'open', label: 'Open', duration: 3 };
+// The section where it lives, the file sidebar's, its tile pressed: its Reset is in the heading
+// the sidebar draws.
+async function openSection(user: ReturnType<typeof userEvent.setup>, section: React.ReactElement) {
+  const view = render(<FileSidebar layout={{ panels: {}, collapsed: {} }} onLayoutChange={() => {}}>{section}</FileSidebar>);
+  await user.click(screen.getByRole('button', { name: 'Animation' }));
+  return view;
+}
 const routines = (clips: object[], patch = {}) => ({ clips, activeClipId: 'turn', elapsedSec: 2, playing: false, speed: 1, loopEnabled: true,
   clock: createAnimationClock(), onPlayToggle: vi.fn(), onScrub: vi.fn(), onSpeedChange: vi.fn(), onLoopToggle: vi.fn(), onClipSelect: vi.fn(), onRelease: vi.fn(), ...patch });
 
-it("the tool's row is the playbar's, compact: no routines for one, Play, the scrubber, its Playback settings, then Reset", async () => {
+it('one routine is its transport alone: Reset in the heading, then Play, the scrubber and its Playback settings', async () => {
   const user = userEvent.setup();
   const runtime = routines([TURN], { speed: 0.5 });
   const onAutoplayChange = vi.fn();
-  render(<AnimationToolbar runtime={runtime} autoplay={false} onAutoplayChange={onAutoplayChange} />);
-  const row = screen.getByRole('toolbar', { name: 'Animation controls' });
-  expect(within(row).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-    .toEqual(['Play animation', 'Playback settings', 'Reset animation']);
-  expect(row.querySelector('[data-animation-time]')).toBeNull();
+  const { container } = await openSection(user, <AnimationSection runtime={runtime} autoplay={false} onAutoplayChange={onAutoplayChange} />);
+  expect(container.querySelector('[data-animation-routine]')).toBeNull();
+  const transport = container.querySelector<HTMLElement>('[data-animation-transport]')!;
+  expect(within(transport).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+    .toEqual(['Play animation', 'Playback settings']);
+  expect(within(transport).getByRole('slider', { name: 'Animation time' })).toBeTruthy();
   // Reset puts the routine back at rest, and can only while it is under way.
-  const reset = within(row).getByRole('button', { name: 'Reset animation' });
+  const reset = screen.getByRole('button', { name: 'Reset animation' });
   expect(reset.hasAttribute('disabled')).toBe(false);
   await user.click(reset);
   expect(runtime.onRelease).toHaveBeenCalledTimes(1);
-  await user.click(within(row).getByRole('button', { name: 'Play animation' }));
+  await user.click(within(transport).getByRole('button', { name: 'Play animation' }));
   expect(runtime.onPlayToggle).toHaveBeenCalledTimes(1);
-  await user.click(within(row).getByRole('button', { name: 'Playback settings' }));
+  await user.click(within(transport).getByRole('button', { name: 'Playback settings' }));
   const menu = screen.getByRole('menu');
   expect(within(menu).getByRole('menuitem', { name: 'Animation speed: 0.5×' })).toBeTruthy();
   await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Loop' }));
@@ -50,13 +59,11 @@ it("the tool's row is the playbar's, compact: no routines for one, Play, the scr
   expect(onAutoplayChange).toHaveBeenLastCalledWith(true);
 });
 
-it('a file with several routines leads the row with their playlist, the one in hand checked; choosing one plays it', async () => {
+it('several routines lead with the one in hand, a list to choose another from', async () => {
   const user = userEvent.setup();
   const runtime = routines([TURN, OPEN]);
-  render(<AnimationToolbar runtime={runtime} autoplay={false} onAutoplayChange={vi.fn()} />);
-  const row = screen.getByRole('toolbar', { name: 'Animation controls' });
-  expect(within(row).getAllByRole('button')[0].getAttribute('aria-label')).toBe('Routines');
-  await user.click(within(row).getByRole('button', { name: 'Routines' }));
+  await openSection(user, <AnimationSection runtime={runtime} autoplay={false} onAutoplayChange={vi.fn()} />);
+  await user.click(screen.getByRole('button', { name: 'Routine: Turn' }));
   const menu = screen.getByRole('menu');
   expect(within(menu).getAllByRole('menuitemradio').map(item => [item.textContent, item.getAttribute('aria-checked')]))
     .toEqual([['Turn', 'true'], ['Open', 'false']]);
@@ -64,7 +71,7 @@ it('a file with several routines leads the row with their playlist, the one in h
   expect(runtime.onClipSelect).toHaveBeenLastCalledWith('open');
 });
 
-it('Reset is idle at rest: nothing playing and no time elapsed', () => {
-  render(<AnimationToolbar runtime={routines([TURN], { elapsedSec: 0 })} autoplay={false} onAutoplayChange={vi.fn()} />);
+it('Reset is idle at rest: nothing playing and no time elapsed', async () => {
+  await openSection(userEvent.setup(), <AnimationSection runtime={routines([TURN], { elapsedSec: 0 })} autoplay={false} onAutoplayChange={vi.fn()} />);
   expect(screen.getByRole('button', { name: 'Reset animation' }).hasAttribute('disabled')).toBe(true);
 });

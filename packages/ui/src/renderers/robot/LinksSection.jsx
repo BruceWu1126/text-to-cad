@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box } from "lucide-react";
 import { ROW_NAME_UNDER_ACTIONS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_DENSE_ICON_CLASS, TreeRowSurface, TreeRowChevron, TreeRowGuides, TreeRowLabel } from "@text-to-cad/ui/primitives/tree-row";
-import { TreeFilterHighlight, TreeFilterInput, TreeFindButton } from "@text-to-cad/ui/primitives/tree-filter";
+import { TreeFilterHighlight, TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
 import { cn } from "@text-to-cad/ui/utils";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import RobotVisibilityButton, { ROBOT_ROW_ACTIONS_WIDTH } from "./RobotVisibilityButton.jsx";
@@ -143,7 +143,7 @@ export default function LinksSection({ description = null, components = EMPTY, p
 
   // Search is a second view of the same tree: typing never touches expansion, and
   // the tree's rows unmount so a large open robot is not re-rendered per keystroke.
-  const { query, searching, deferredQuery, found, cursorId, listRef, changeQuery, onKeyDown: onSearchKeyDown, finding, openFind, closeFind } = useTreeSearch(tree.roots);
+  const { query, searching, deferredQuery, found, cursorId, listRef, changeQuery, onKeyDown: onSearchKeyDown } = useTreeSearch(tree.roots);
   const rowRefs = useRef(new Map());
 
   // A selection is always a row the tree holds: its owners open at once, whether it
@@ -163,10 +163,9 @@ export default function LinksSection({ description = null, components = EMPTY, p
   const clearSelection = () => selection.select("");
 
   return <>
-    {/* Headed "Links", with Find, whose field takes the heading's place while it is open. */}
+    {/* Headed by its search box (the sidebar's Search tile focuses it). */}
     <ToolPanel id="tree" label="Links" fit="tree" resizable collapsible={false} hidden={!active}
-      actions={<TreeFindButton label="Find in links" onClick={openFind}/>}
-      header={finding ? <TreeFilterInput label="Filter links" placeholder="Find…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} onClose={closeFind}/> : null}>
+      header={<TreeFilterInput label="Filter links" placeholder="Search…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense className="px-0 shadow-none"/>}>
       <div className="flex flex-col text-tiny" aria-label="Robot links">
         <div ref={listRef} className="px-1 py-1" aria-label="Robot tree area"
           onClick={event => { if (!event.target.closest("li,button,input")) clearSelection(); }}>

@@ -7,10 +7,9 @@ import {
   viewerDisplaySettingsForCamera
 } from './viewerDisplaySettings.js';
 
-test('the viewer offers the canonical presets in their intended order', () => {
+test('the viewer offers the working display modes in their intended order: Render is the Studio\'s, no display mode', () => {
   assert.deepEqual(DISPLAY_MODE_OPTIONS.map(({ value, label }) => [value, label]), [
-    ['solid', 'Solid'], ['render', 'Render'], ['xray', 'X-ray'],
-    ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe']
+    ['solid', 'Solid'], ['xray', 'X-ray'], ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe']
   ]);
 });
 
@@ -46,11 +45,11 @@ test('the viewer Preview baseline is inherited without an override or Custom sta
 });
 
 test('camera commands activate explicit projection and lens while pose-only updates leave View unchanged', () => {
-  const current = { mode: 'render', camera: { projection: 'orthographic' }, clip: { enabled: true, axis: 'z', at: 0.2 } };
+  const current = { mode: 'xray', camera: { projection: 'orthographic' }, clip: { enabled: true, axis: 'z', at: 0.2 } };
   const pose = { position: [30, 40, 50], target: [3, 4, 5], up: [0, 0, 1], zoom: 1.4 };
   assert.deepEqual(viewerDisplaySettingsForCamera(current, pose), current);
   const next = viewerDisplaySettingsForCamera(current, { ...pose, projection: 'perspective', focalLength: 85 });
-  assert.deepEqual(next, { ...current, camera: { projection: 'orthographic', focalLength: 85 } });
+  assert.deepEqual(next, { ...current, camera: { projection: 'perspective', focalLength: 85 } });
   assert.equal(resolveViewSettings(next).camera.projection, 'perspective');
   assert.equal(resolveViewSettings(next).camera.focalLength, 85);
   assert.deepEqual(current.camera, { projection: 'orthographic' });

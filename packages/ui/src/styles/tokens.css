@@ -4,15 +4,19 @@
   /* A 13px default at the normal 16px root. Rems preserve the desktop's UI
    * scale without shrinking the spacing/radius system. Stock shadcn controls
    * use text-sm/text-base, so both resolve to this shared UI size. */
-  --text-ui: 0.8125rem;
+  /* Each size is a variable (`--cad-text-*`, `globals.css`) so a phone's view can take one step
+   * up the scale, menus and selects portalled out of the viewer included. */
+  --text-ui: var(--cad-text-ui);
   --text-ui--line-height: 1.5;
   --text-sm: var(--text-ui);
   --text-sm--line-height: 1.5;
   --text-base: var(--text-ui);
   --text-base--line-height: 1.5;
-  --text-micro: 10px;
+  --text-xs: var(--cad-text-xs);
+  --text-xs--line-height: 1.34;
+  --text-micro: var(--cad-text-micro);
   --text-micro--line-height: 1.2;
-  --text-tiny: 11px;
+  --text-tiny: var(--cad-text-tiny);
   --text-tiny--line-height: 1.3;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

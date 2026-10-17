@@ -7,6 +7,8 @@ the files are served from the prompt-files directory and nowhere else.
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import http.client
 import json
 import shutil
@@ -78,7 +80,7 @@ class PromptFilesRouteTest(unittest.TestCase):
 
     def request(self, **overrides) -> dict:
         return {"name": "part.stl", "input": str(self.model), "annotation": ANNOTATION, "views": [
-            {"label": "current", "camera": CAMERA, "display": {"mode": "render"}, "width": 640, "height": 480},
+            {"label": "current", "camera": CAMERA, "display": {"appearance": "dark"}, "width": 640, "height": 480},
             {"label": "View 1", "camera": "iso"},
         ], **overrides}
 
@@ -114,7 +116,7 @@ class PromptFilesRouteTest(unittest.TestCase):
         common = {"input": str(self.model), "annotation": str(annotation_path)}
         settings = {"output": {"padding": 0, "tightFrame": False}}
         self.assertEqual(json.loads(job_path.read_text(encoding="utf-8")), {"jobs": [
-            {**common, "camera": CAMERA, "display": {"mode": "render"}, **settings,
+            {**common, "camera": CAMERA, "display": {"appearance": "dark"}, **settings,
              "outputs": [{"path": str(current), "label": "current", "width": 640, "height": 480}]},
             {**common, "camera": "iso", **settings, "outputs": [{"path": str(view_1), "label": "View 1"}]},
         ]})
@@ -205,37 +207,83 @@ class PromptFilesRouteTest(unittest.TestCase):
 
 
 class WarmSnapshotSessionTest(unittest.TestCase):
-    """One browser across prompts; a failed render's is never reused; closed at exit."""
+    """The real snapshot call chain borrows a session and owns a standalone render."""
 
-    def test_the_session_keeps_its_browser_until_a_render_fails_or_it_is_closed(self) -> None:
-        renderers, closed = [], []
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="warm-snapshot-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        (self.root / "part.stl").write_text(
+            "solid part\nfacet normal 0 0 1\nouter loop\n"
+            "vertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\n"
+            "endloop\nendfacet\nendsolid part\n", encoding="utf-8")
+        self.renderers = []
+        owner = self
 
         class Renderer:
             def __init__(self, runtime_dir) -> None:
-                renderers.append(self)
+                self.closed = 0
+                self.jobs = []
+                owner.renderers.append(self)
+
+            async def render(self, job):
+                owner.assertEqual(0, self.closed, "a borrowed renderer was closed between prompts")
+                owner.assertEqual("stl", job["resolved"]["kind"])
+                self.jobs.append(job)
+                if Path(job["outputs"][0]["path"]).stem == "bad":
+                    raise SnapshotError("render failed")
+                return {"ok": True, "mode": "view", "outputs": [
+                    {"path": output["path"], "mimeType": "image/png",
+                     "dataUrl": "data:image/png;base64," + base64.b64encode(PNG).decode("ascii")}
+                    for output in job["outputs"]
+                ]}
 
             async def close(self) -> None:
-                closed.append(self)
+                self.closed += 1
 
-        async def run(options, *, kinds, cwd, renderer, report):
-            self.assertFalse(report)
-            if options.job.endswith("bad.job.json"):
-                raise SnapshotError("bad")
-            return renderer
+        patcher = mock.patch("cadgen.snapshot_core.BatchSnapshotRenderer", Renderer)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
+    def job(self, name: str) -> Path:
+        path = self.root / f"{name}.job.json"
+        path.write_text(json.dumps({"input": "part.stl", "outputs": [{"path": f"{name}.png"}]}), encoding="utf-8")
+        return path
+
+    def test_real_pipeline_reuses_the_borrowed_renderer_until_failure_or_close(self) -> None:
         session = WarmSnapshotSession()
         self.addCleanup(session.close)
-        with mock.patch("cadgen.snapshot_core.BatchSnapshotRenderer", Renderer), \
-                mock.patch("cadgen.snapshot_cli.run_snapshot_async", run):
-            first, second = session.render(Path("/tmp/a.job.json")), session.render(Path("/tmp/b.job.json"))
-            self.assertIs(first, second)
-            with self.assertRaises(SnapshotError):
-                session.render(Path("/tmp/bad.job.json"))
-            self.assertEqual(closed, [first])
-            third = session.render(Path("/tmp/c.job.json"))
-            self.assertIsNot(third, first)
-            session.close()
-        self.assertEqual(closed, [first, third])
+        for name in ("first", "second"):
+            result = session.render(self.job(name))
+            self.assertTrue(result.ok)
+            self.assertEqual((self.root / f"{name}.png").read_bytes(), PNG)
+        self.assertEqual(len(self.renderers), 1)
+        first = self.renderers[0]
+        self.assertEqual((len(first.jobs), first.closed), (2, 0))
+        with self.assertRaisesRegex(SnapshotError, "render failed"):
+            session.render(self.job("bad"))
+        self.assertEqual(first.closed, 1)
+        self.assertTrue(session.render(self.job("third")).ok)
+        self.assertEqual(len(self.renderers), 2)
+        self.assertEqual(self.renderers[1].closed, 0)
+        session.close()
+        self.assertEqual([renderer.closed for renderer in self.renderers], [1, 1])
+
+    def test_real_pipeline_closes_its_own_renderer_on_success_and_failure(self) -> None:
+        from cadgen._internal.snapshot_door import ALL_KINDS
+        from cadgen.snapshot_cli import SnapshotOptions, run_snapshot_async
+
+        def render(name):
+            return asyncio.run(run_snapshot_async(
+                SnapshotOptions(job=str(self.job(name))), kinds=ALL_KINDS,
+                cwd=self.root, report=False))
+
+        self.assertTrue(render("owned").ok)
+        self.assertEqual((self.root / "owned.png").read_bytes(), PNG)
+        self.assertEqual(self.renderers[0].closed, 1)
+        with self.assertRaisesRegex(SnapshotError, "render failed"):
+            render("bad")
+        self.assertEqual([renderer.closed for renderer in self.renderers], [1, 1])
 
 
 if __name__ == "__main__":

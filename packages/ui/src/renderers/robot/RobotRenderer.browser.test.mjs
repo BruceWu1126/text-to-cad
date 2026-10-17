@@ -182,11 +182,11 @@ async function open(t, file, { panel = true } = {}) {
     },
     // A selection is React state: it is on screen a render after whatever changed it.
     waitPressed: count => page.waitForFunction(wanted => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === wanted, count),
-    // Display: its button at the strip's end, before Preview, the mode in hand; its settings, its per-mode settings submenu.
+    // Display: its button at the strip's end, before Preview, the mode in hand; its settings, its per-mode settings page.
     displayButton: () => tools.locator('[data-view-controls]').getByRole('button', { name: /^Display mode: / }),
     async openDisplay() {
       await robot.displayButton().click();
-      await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+      await page.getByRole('button', { name: 'Solid settings', exact: true }).click();
       await robot.displayPanel().waitFor();
     },
     // Display's settings: a dropdown from the strip, portaled out of the viewer.
@@ -688,14 +688,7 @@ test('preview draws the robot as it opens, and leaving it finds the tools view a
     await pane.getByRole('button', { name: 'Exit preview', exact: true }).click();
     await pane.getByRole('button', { name: 'Preview', exact: true }).waitFor();
   };
-  // Preview orbits by default: Orbit off (the file's setting, kept for the next preview) holds its camera still.
-  await pane.getByRole('button', { name: 'Preview', exact: true }).click();
-  await pane.locator('[data-preview-corner]').getByRole('button', { name: 'Orbit', exact: true }).click();
-  await page.getByRole('menu', { name: 'Orbit', exact: true }).getByRole('menuitemcheckbox', { name: 'Orbit', exact: true }).press('Enter');
-  await page.keyboard.press('Escape');
-  await page.getByRole('menu', { name: 'Orbit', exact: true }).waitFor({ state: 'detached' });
-  await exitPreview();
-  // The robot as preview draws a file opened afresh.
+  // Preview opens still (Orbit off): the robot as preview draws a file opened afresh.
   await away();
   await enterPreview();
   const authored = (await robot.capture()).data;
@@ -750,16 +743,15 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   assert.equal(round6(translation(links.arm)[2]), round6(0.2 - 0.05 * Math.sin((40 * Math.PI) / 180)));
   // Display offers no mode, and no setting, made of Edges, Cross-section or Explode.
   await robot.displayButton().click();
-  assert.deepEqual(await page.locator('[role=menu][aria-label="Display mode"] [data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
-    ['solid', 'render']);
-  await page.getByRole('menuitem', { name: 'Solid settings', exact: true }).click();
+  assert.deepEqual(await page.locator('[role=dialog][aria-label="Display mode"] [data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
+    ['solid']);
+  await page.getByRole('button', { name: 'Solid settings', exact: true }).click();
   const displayMenu = robot.displayPanel();
   await displayMenu.waitFor();
   for (const absent of ['Edges', 'Cross-section', 'Explode']) assert.equal(await displayMenu.getByRole('heading', { name: absent, exact: true }).count(), 0, absent);
-  await page.keyboard.press('Escape');
-  await displayMenu.waitFor({ state: 'detached' });
-  const rootMenu = page.locator('[role=menu][aria-label="Display mode"]');
-  assert.deepEqual(await rootMenu.getByRole('group', { name: 'Projection', exact: true }).getByRole('menuitemradio').allInnerTexts(), ['Orthographic', 'Perspective']);
+  await displayMenu.getByRole('button', { name: 'Back to Display' }).click();
+  const rootMenu = page.locator('[role=dialog][aria-label="Display mode"]');
+  assert.deepEqual(await rootMenu.getByRole('radiogroup', { name: 'Projection', exact: true }).getByRole('radio').allInnerTexts(), ['Orthographic', 'Perspective']);
   await page.keyboard.press('Escape');
   await rootMenu.waitFor({ state: 'detached' });
   // Display was never the tool: Select was in hand throughout, picking links, and still is.

@@ -20,6 +20,11 @@ export const TOOL_PANEL_WIDTH = STRIP_TOOLS * BUTTON_PX + (STRIP_TOOLS - 1) * GA
 // tool panel's width, as tall as its sections, and may be made narrower, down to room for a
 // heading's name, its chevron and the bar's toggle (a tree's names truncate).
 export const FILE_SIDEBAR_ID = "sidebar";
+/** Where the sidebar keeps the size of one section's panel: each section is sized on its own. */
+export function fileSidebarSizeId(sectionId) {
+  return sectionId ? `${FILE_SIDEBAR_ID}:${sectionId}` : FILE_SIDEBAR_ID;
+}
+const isFileSidebarSize = id => id === FILE_SIDEBAR_ID || id.startsWith(`${FILE_SIDEBAR_ID}:`);
 export const FILE_SIDEBAR_MIN_WIDTH = 120;
 // The shortest a person can drag a panel's cap: its first row and a row of content under it.
 export const TOOL_PANEL_MIN_HEIGHT = 64;
@@ -52,7 +57,7 @@ export function normalizeToolStack(value) {
   const panels = {};
   for (const [id, size] of record(value?.panels)) {
     if (!PANEL_ID.test(id) || !size || typeof size !== "object") continue;
-    const width = bounded(size.width, id === FILE_SIDEBAR_ID ? FILE_SIDEBAR_MIN_WIDTH : TOOL_PANEL_WIDTH), height = bounded(size.height, TOOL_PANEL_MIN_HEIGHT);
+    const width = bounded(size.width, isFileSidebarSize(id) ? FILE_SIDEBAR_MIN_WIDTH : TOOL_PANEL_WIDTH), height = bounded(size.height, TOOL_PANEL_MIN_HEIGHT);
     if (width !== undefined || height !== undefined) panels[id] = { ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}) };
   }
   return { panels, collapsed: flags(value?.collapsed) };

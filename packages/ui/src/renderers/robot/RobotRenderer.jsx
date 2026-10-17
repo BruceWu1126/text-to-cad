@@ -139,13 +139,19 @@ function RobotSurface({ view, data }) {
   const handlesRef = useRef(NO_HANDLES);
   const handleLayoutRef = useRef(null);
   const presentPoseRef = useRef(null);
+  // The Studio's own pose: the robot as it opens, each time the Studio opens, moved by the Studio's
+  // Position section and gone as it closes — the tools view's pose (`pose`) is never touched.
+  const studioPose = useMemo(() => (previewing && robot ? createPoseStore(robot.description) : null), [previewing, robot]);
+  const studioPoseRef = useRef(studioPose);
+  studioPoseRef.current = studioPose;
   useLayoutEffect(() => {
     if (!scene || !pose || !robot) { handlesRef.current = NO_HANDLES; return undefined; }
     const prepared = prepareRobotJointHandles(THREE, robot.description, scene);
     let boundsFrame = 0;
     const readHandles = () => { handlesRef.current = robotJointHandles(THREE, prepared, scene, pose.getSnapshot().values, pose.write); };
     const present = () => {
-      if (!scene.setJointValues(previewingRef.current ? pose.defaults : pose.getSnapshot().values)) return;
+      const shown = previewingRef.current ? studioPoseRef.current?.getSnapshot().values ?? pose.defaults : pose.getSnapshot().values;
+      if (!scene.setJointValues(shown)) return;
       readHandles();
       shellRef.current?.requestRender();
       // Lighting, shadows and the floor follow the posed robot: once per frame, however many writes landed in it.
@@ -161,7 +167,10 @@ function RobotSurface({ view, data }) {
       if (presentPoseRef.current === present) presentPoseRef.current = null;
     };
   }, [scene, pose, robot]);
-  useLayoutEffect(() => { presentPoseRef.current?.(); }, [previewing]);
+  useLayoutEffect(() => {
+    presentPoseRef.current?.();
+    return studioPose?.subscribe(() => presentPoseRef.current?.());
+  }, [previewing, studioPose]);
 
   // Read-only debug/test seams: where the Pose knobs are (CSS pixels, with each joint's
   // value), where every link group IS (so a test asserts what is drawn, not what was asked
@@ -231,7 +240,8 @@ function RobotSurface({ view, data }) {
     </ToolPanel> : null}
     {/* Headed "Position"; its Pose row's Default puts the joints back. */}
     {posable && pose ? <ToolPanel id="position" title="Position" label="Position controls" fit="details">
-      <PositionControls key={robot.revision} pose={pose} />
+      {/* The Studio poses its own robot (`studioPose`). */}
+      <PositionControls key={`${robot.revision}:${studioPose ? "studio" : "tools"}`} pose={studioPose || pose} />
     </ToolPanel> : null}
   </>;
 

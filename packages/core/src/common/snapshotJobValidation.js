@@ -3,11 +3,13 @@ import { normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 import { normalizeViewSettings, resolveViewSettings } from "./viewSettings.js";
 
 export function validateSnapshotRenderJob(job = {}) {
-  if (Object.hasOwn(job, "theme")) {
-    throw new Error("Unsupported snapshot field: theme");
+  const mode = String(job.mode || "view").trim().toLowerCase();
+  if (!["view", "list"].includes(mode)) {
+    throw new Error(`Unsupported render mode: ${mode}. Modes: list, view`);
   }
-  if (Object.hasOwn(job, "render")) {
-    throw new Error("Unsupported snapshot field: render; use display.mode 'render'");
+  // A snapshot's `render` reaches the page as its display's mode (cadgen's job normalisation).
+  for (const field of ["theme", "section", "render"]) {
+    if (Object.hasOwn(job, field)) throw new Error(`Unsupported snapshot field: ${field}`);
   }
   normalizeViewSettings(Object.hasOwn(job, "display") ? job.display : {});
   // The ink drawn over the model (`annotation.js`): refused before anything loads, by what is wrong.

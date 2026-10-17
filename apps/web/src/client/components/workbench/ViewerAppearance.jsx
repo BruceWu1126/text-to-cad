@@ -9,9 +9,8 @@ import { COLOR_SCHEMES } from "../../ui/colorScheme.js";
 const ICONS = { system: Monitor, light: Sun, dark: Moon };
 
 /**
- * The web viewer's light/dark control, the page's own (a host that inherits its app's appearance
- * has none): an icon button in the navbar's top-right corner, last, as its other controls look,
- * and a dropdown of System, Light and Dark. Its icon is always the sun or the moon of the look on
+ * The web viewer's light/dark control on its home, last in the home's row (over a file the same
+ * choice is the app menu's Theme rows): an icon button and a dropdown of System, Light and Dark. Its icon is always the sun or the moon of the look on
  * screen — under System, the one the system resolves to — never the System monitor.
  * @param {{ colorSchemePreference?: string, resolvedColorSchemeMode?: 'light' | 'dark', onColorSchemePreferenceChange?: (value: string) => void }} props
  */

@@ -16,9 +16,10 @@ import {
   renderMeshJob,
   resolveOutputCameraProjection,
   resolveOutputCameraSpec,
-  SECTION_PLANES,
+  snapshotStudioSamples,
   stepParametersForSnapshotOutput
 } from "./renderMeshScene.js";
+import { PHOTOGRAPHIC_STUDIO_FRAME } from "./photographicStudioRig.js";
 import { evaluateAnimationClip, normalizeAnimationClips } from "./animationRuntime.js";
 import { resolveAnimationFrame } from "./animationClock.js";
 import { stepModuleFromKinematics } from "./kinematicsModule.js";
@@ -76,7 +77,7 @@ function twoPartMeshData() {
   };
 }
 
-test("component-only packages render and section every placed occurrence", async () => {
+test("component-only packages list selected placed occurrences", async () => {
   const makeComponent = () => ({
     vertices: new Float32Array([-1, 0, -1, 1, 0, 1, 0, 1, -1]),
     indices: new Uint32Array([0, 1, 2]),
@@ -93,39 +94,12 @@ test("component-only packages render and section every placed occurrence", async
   assert.equal(mesh.indices.length, 0);
   const list = await renderMeshJob(mesh, { mode: "list", selection: { focus: ["b"] } });
   assert.deepEqual(list.parts.map((part) => part.ref), ["#b"]);
-  const result = await renderMeshJob(mesh, { mode: "section", section: { plane: "XY", offset: 0 },
-    outputs: [{ path: "section.svg" }] });
-  assert.equal(result.section.segmentCount, 2);
-  assert.match(result.outputs[0].text, /10\.0000 0\.0000/);
-  assert.match(result.outputs[0].text, /10\.5000 0\.5000/);
-  assert.deepEqual(result.warnings, []);
+
 });
 
-test("a section is cut where job.section says, and an output's extension is its only format switch", async () => {
-  // One triangle standing in the XZ plane (y = 0), spanning z = -1..1 and x = -1..1.
-  const mesh = {
-    vertices: new Float32Array([-1, 0, -1, 1, 0, 1, 0, 0, -1]),
-    indices: new Uint32Array([0, 1, 2]),
-    normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
-    parts: [],
-    bounds: { min: [-1, 0, -1], max: [1, 0, 1] }
-  };
-  const cut = (section, path = "cut.svg") => renderMeshJob(mesh, { mode: "section", section, outputs: [{ path }] });
-  assert.deepEqual(SECTION_PLANES, ["XY", "XZ", "YZ"]);
-  // XY at Z=0 and YZ at X=0 both cross it; the offset moves the plane along its normal.
-  assert.equal((await cut({ plane: "XY", offset: 0 })).section.segmentCount, 1);
-  assert.equal((await cut({ plane: "YZ", offset: 0.5 })).section.segmentCount, 1);
-  const missed = await cut({ plane: "XY", offset: 5 });
-  assert.equal(missed.section.segmentCount, 0);
-  assert.match(missed.warnings[0], /SECTION XY @ Z=5\.000 does not intersect the model/);
-  // The default cut is XY at 0, the same thing Python fills in.
-  assert.equal((await cut(undefined)).section.segmentCount, 1);
-  // Only the two axis-aligned fields exist: an unknown plane is an error, not an XY cut.
-  await assert.rejects(cut({ plane: "XW" }), /section\.plane must be one of: XY, XZ, YZ/);
-  await assert.rejects(cut({ plane: "xy" }), /section\.plane must be one of/);
-  // `format` is not a key: a .svg name is SVG text whatever else the output says.
-  const svg = await renderMeshJob(mesh, { mode: "section", outputs: [{ path: "CUT.SVG", format: "png" }] });
-  assert.equal(svg.outputs[0].mimeType, "image/svg+xml");
+test("snapshot jobs reject unknown modes and removed fields before building a model", async () => {
+  await assert.rejects(() => renderMeshJob(null, { mode: "section" }), /Unsupported render mode: section\. Modes: list, view/);
+  await assert.rejects(() => renderMeshJob(null, { section: { plane: "XY" } }), /Unsupported snapshot field: section/);
 });
 
 test("renderMeshJob list capture uses buildModel selection", async () => {
@@ -328,8 +302,8 @@ test("render display retains CAD runtimes and animation", () => {
   model.dispose();
 });
 
-test("photographic Render rejects CAD-only capture modes", () => {
-  for (const mode of ["list", "section"]) {
+test("photographic Render rejects list mode", () => {
+  for (const mode of ["list"]) {
     assert.throws(() => renderJobContext(twoPartMeshData(), { mode, display: { mode: "render" } }), /Render display supports only view mode/);
   }
 });
@@ -608,15 +582,21 @@ test("a locked frame fits the same camera on every frame of a clip", async () =>
 });
 
 // The renderer a photographic studio configures, with only what captureModel and the studio touch.
+// A renderer as the studio and its frame use one (`studioFrame.js` draws the scene into a target
+// of its own and passes over it): what it draws is counted, nothing is rasterized.
 function studioRendererStub() {
   const clearColor = new THREE.Color();
   let clearAlpha = 1;
+  let target = null;
   return {
     toneMapping: THREE.NoToneMapping, toneMappingExposure: 1, outputColorSpace: THREE.LinearSRGBColorSpace,
-    shadowMap: { enabled: false, type: null },
+    shadowMap: { enabled: false, type: null }, autoClear: true, sceneDraws: 0,
     getClearColor(target) { target.copy(clearColor); }, getClearAlpha() { return clearAlpha; },
     setClearColor(color, alpha) { clearColor.copy(color); clearAlpha = alpha; },
-    setSize() {}, getPixelRatio() { return 1; }, render() {},
+    getRenderTarget() { return target; }, setRenderTarget(next) { target = next; },
+    getDrawingBufferSize(size) { return size.set(64, 64); },
+    setSize() {}, getPixelRatio() { return 1; },
+    render(scene) { if (scene.children.some((child) => child.name === "cadgen-photographic-studio")) this.sceneDraws += 1; },
     domElement: { width: 64, height: 64, toDataURL() { return "data:image/png;base64,AAAA"; } }
   };
 }
@@ -719,6 +699,7 @@ test("a snapshot drawn at a render scale above 1 spreads its floor's dither by i
   try {
     assert.equal(context.sharedRenderOptions.renderScale, 2, "Final draws at twice the size it keeps");
     await captureModel(viewport, { job });
+    assert.equal(renderer.sceneDraws, PHOTOGRAPHIC_STUDIO_FRAME.stillSamples, "a Render still converges over its frame's samples");
     const studio = studioRuntime.photographicStudio;
     assert.equal(studio.ground.material.defines?.STUDIO_DITHER_SCALE, "2.0000");
     assert.equal(studio.contactShadow.layer.material.defines?.STUDIO_DITHER_SCALE, "2.0000");
@@ -862,4 +843,11 @@ test("a snapshot draws the job's annotation on its parts as the scene places the
     viewport.annotationLayer?.layer.dispose();
     model.dispose();
   }
+});
+
+test("a snapshot's Render still converges over every sample of its studio frame; a video frame and a software renderer draw one", () => {
+  assert.equal(snapshotStudioSamples(), PHOTOGRAPHIC_STUDIO_FRAME.stillSamples);
+  assert.ok(PHOTOGRAPHIC_STUDIO_FRAME.stillSamples > 1);
+  assert.equal(snapshotStudioSamples({ video: true }), 1);
+  assert.equal(snapshotStudioSamples({ softwareRendering: true }), 1);
 });

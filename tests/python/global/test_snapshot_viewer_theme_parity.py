@@ -54,7 +54,9 @@ def python_accepts(values, validator):
 class SharedDisplayContractParityTests(unittest.TestCase):
     def test_exported_closed_key_sets_and_enums_match(self):
         expected = {
-            "VIEW_MODE_VALUES": DISPLAY_MODES,
+            # The shared core draws Render as a mode (the Studio's, and a snapshot's `render`);
+            # the snapshot's display vocabulary is the working modes, Render its own request.
+            "VIEW_MODE_VALUES": DISPLAY_MODES | {"render"},
             "VIEW_SETTINGS_KEYS": DISPLAY_OPTION_KEYS,
             "VIEW_COLOR_MODE_VALUES": PART_COLOR_MODES,
             **{f"VIEW_{name.upper()}_KEYS": keys for name, keys in DISPLAY_GROUP_KEYS.items()
@@ -127,7 +129,12 @@ class SharedDisplayContractParityTests(unittest.TestCase):
             {"mode": "solid", "camera": {"projection": "perspective"}, "modes": {"solid": {"grid": {"enabled": True, "color": "#abc"}}}},
             {"mode": "render", "modes": {"render": {"floor": {"finish": "glossy", "placement": "origin"}}}},
         ]
-        packets = [normalize_common_job({"input": "part.step", "outputs": [{"path": "out.png"}], "display": value},
+        # A snapshot asks for Render with `render`, beside a display without it.
+        def job(value):
+            if value.get("mode") != "render":
+                return {"display": value}
+            return {"render": True, "display": {key: entry for key, entry in value.items() if key != "mode"}}
+        packets = [normalize_common_job({"input": "part.step", "outputs": [{"path": "out.png"}], **job(value)},
                                       mode="view", resolved_cwd=Path("."), timestamp="parity")["display"] for value in cases]
         expected = javascript("cases.map(value => view.resolveViewSettings(value))", cases)
         actual = javascript("cases.map(value => view.resolveViewSettings(value))", packets)

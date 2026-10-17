@@ -29,6 +29,7 @@ leaves no file at all.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import functools
 import json
@@ -70,6 +71,7 @@ from cadgen.occurrence_groups import (
 from cadgen.cli_progress import cli_progress_line
 from cadgen.results import SnapshotResult
 from cadgen.snapshot_core import (
+    BatchSnapshotRenderer,
     SELECTION_KEYS,
     SUPPORTED_JOB_KEYS,
     SnapshotError,
@@ -85,7 +87,6 @@ from cadgen.snapshot_core import (
     normalize_render_mode,
     normalize_snapshot_job_packet,
     parse_camera_option,
-    parse_section_option,
     path_is_inside_or_equal,
     refuse_cad_model_requests,
     render_snapshot,
@@ -128,6 +129,7 @@ class SnapshotOptions:
     mode_specified: bool = False
     display: object = ""
     display_specified: bool = False
+    render: bool = False
     camera: object = None
     camera_specified: bool = False
     width: int | None = None
@@ -140,8 +142,6 @@ class SnapshotOptions:
     animation_specified: bool = False
     video: object = None
     video_specified: bool = False
-    section: object = None
-    section_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
     annotation: object = None
@@ -398,9 +398,9 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
             options.kinematics_specified,
             options.animation_specified,
             options.video_specified,
-            options.section_specified,
             options.joint_values_specified,
             options.display_specified,
+            options.render,
             options.camera_specified,
             option_focus_hide_specified(options),
         ]
@@ -424,14 +424,14 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
         next_job["jointValues"] = parse_joint_values_option(options.joint_values)
     if options.display_specified:
         next_job["display"] = load_display_option(options.display, cwd=cwd)
+    if options.render:
+        next_job["render"] = True
     if options.camera_specified:
         next_job["camera"] = parse_camera_option(options.camera)
     if options.animation_specified:
         next_job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         next_job["video"] = parse_video_option(options.video, cwd=cwd)
-    if options.section_specified:
-        next_job["section"] = parse_section_option(options.section)
     if options.width is not None or options.height is not None:
         # Size lives on each output, so the override lands on every one of them —
         # the same "every job in the packet" reach the other overrides have.
@@ -523,14 +523,14 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["display"] = load_display_option(
             options.display, cwd=resolved_cwd, modes=option_display_modes(options)
         )
+    if options.render:
+        job["render"] = True
     if options.kinematics_specified:
         job["kinematics"] = parse_kinematics_option(options.kinematics)
     if options.animation_specified:
         job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         job["video"] = parse_video_option(options.video, cwd=resolved_cwd)
-    if options.section_specified:
-        job["section"] = parse_section_option(options.section)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
     if options.annotation_specified:
@@ -948,7 +948,6 @@ def check_robot_render_job(
     label = kind.upper()
     refuse_cad_model_requests(
         job,
-        mode=mode,
         subject=f"{label} robots",
         pose_hint=f"pose a {label} robot with jointValues",
         tessellation_hint="a robot's link meshes are existing meshes",
@@ -1122,9 +1121,10 @@ def prepare_render_job(
     validate_display_for_kind(display, kind=kind, input_label=input_path.name)
     job["display"] = display
     mode = normalize_render_mode(job.get("mode"))
-    lighting_enabled = display.get("mode") == "render"
-    if lighting_enabled and mode != "view":
-        raise SnapshotError("Render display supports only view mode")
+    if "render" in job and not isinstance(job["render"], bool):
+        raise SnapshotError("render must be a boolean")
+    if job.get("render") is True and mode != "view":
+        raise SnapshotError("render draws one view: it supports only view mode")
 
     validate_selection_keys(job)
     selection = job.get("selection") if is_plain_object(job.get("selection")) else {}
@@ -1489,13 +1489,15 @@ def check_drawing_render_job(
         raise SnapshotError(f"measurements are dimensions between points in 3D; {DRAWING_IS}, so {label} has no space to draw them in.")
     display = job.get("display") if is_plain_object(job.get("display")) else {}
     scene = sorted(f"display.{key}" for key in set(display) - DRAWING_DISPLAY_KEYS)
+    if job.get("render") is not None:
+        scene.insert(0, "render")
     if scene:
         raise SnapshotError(
             drawing_scene_refusal(", ".join(scene), label, plural=len(scene) != 1)
         )
     if job.get("camera") is not None or _drawing_output_cameras(job):
         raise SnapshotError(drawing_camera_refusal(label))
-    if mode != "view" or job.get("section") is not None:
+    if mode != "view":
         raise SnapshotError(drawing_mode_refusal(label))
     if job.get("scale") is not None:
         raise SnapshotError(
@@ -1523,11 +1525,10 @@ def check_drawing_render_job(
             f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
         )
     # The refusals every non-STEP input shares (selection, poses, clips, videos,
-    # tessellation). Mode and section are already decided above, with a sentence
+    # tessellation). Mode is already decided above, with a sentence
     # about drawings rather than about mesh inputs.
     refuse_cad_model_requests(
         job,
-        mode=mode,
         subject="DXF drawings",
         pose_hint="a DXF drawing has no kinematics",
         tessellation_hint="a DXF drawing is line work, not a tessellated surface",
@@ -1771,12 +1772,19 @@ async def run_snapshot_async(
     kinds: Sequence[str],
     runtime_dir: Path | None = None,
     cwd: Path | None = None,
+    renderer: BatchSnapshotRenderer | None = None,
+    report: bool = True,
 ) -> SnapshotResult:
     """Render whatever ``options`` describes and report what was written.
 
     THE snapshot implementation: the CLI parses argv into ``options`` and prints
     what comes back, and the public ``<format>.snapshot()`` verbs build the same
     options object. Nothing here prints, so the two cannot report differently.
+
+    ``renderer`` is a browser session the caller keeps open across runs (the CAD
+    Viewer's prompt renders, ``cadgen.viewer.prompt_files``): this run uses it and
+    leaves it open. ``report=False`` paints no progress and narrates nothing, for
+    a caller that is not a terminal command.
     """
     enabled = enabled_kinds(kinds)
     with _failing_as("bad_request"):
@@ -1800,9 +1808,12 @@ async def run_snapshot_async(
     with _failing_as("input_error"):
         packet = resolve_prepared_job_packet(single, prepared)
     logger = CliLogger("snapshot", verbose=False)
-    with _failing_as("render_error"), cli_progress_line(
-        snapshot_progress_label(packet), logger=logger, fallback="Rendering..."
-    ) as sink:
+    painter = (
+        cli_progress_line(snapshot_progress_label(packet), logger=logger, fallback="Rendering...")
+        if report
+        else contextlib.nullcontext(None)
+    )
+    with _failing_as("render_error"), painter as sink:
         progress = ProgressReporter(
             sinks=[sink] if sink is not None else (),
             phases=SNAPSHOT.phases,
@@ -1812,8 +1823,9 @@ async def run_snapshot_async(
         result = await render_snapshot(
             packet,
             runtime_dir=browser_runtime_dir(runtime_dir),
+            renderer=renderer,
             progress=progress,
-            narrate=snapshot_narrator(logger),
+            narrate=snapshot_narrator(logger) if report else None,
         )
         progress.finish()
     return result

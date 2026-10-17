@@ -90,9 +90,6 @@ export function useAnnotationSession(active = true, initial = {}, history = null
     setViews(viewsRef.current);
     return label;
   }, []);
-  useEffect(() => {
-    if (!active) setTool(start.tool);
-  }, [active, start.tool]);
   const put = useCallback(next => { itemsRef.current = next; setItems(next); }, []);
   const step = useCallback(change => {
     const before = itemsRef.current;

@@ -221,7 +221,7 @@ export function stepCatalogEntry({ view, sidecar, assembly, file }) {
     // never fetches the sidecar. The scanner only supplies it when the sidecar
     // declares the current schema AND a `documentHash` equal to the digest of
     // the STEP's bytes; a fixture failing either gate silently has no Position
-    // tab and no Animate tool.
+    // section and no Animation section.
     sourceSidecar: sidecar,
     poseUrl: `/${file}.json`,
     animationHash: 'fixture-animation',
@@ -397,7 +397,7 @@ export async function serveStepHarness(t, { onRequest, progressive = false, sing
     page.on('pageerror', error => errors.push(error.message));
     // No Worker: the surf tessellator falls back to the main thread, which is
     // what `renderAssetClient` does for a host without one.
-    await page.addInitScript(() => { window.Worker = undefined; window.__cadPreviewChromeIdleMs = 5000; });
+    await page.addInitScript(() => { window.Worker = undefined; });
     if (record) await page.addInitScript(stored => { window.__cadTabRecord = stored; }, record);
     // A script of the test's own that must run before the app does (a render counter on
     // React's devtools hook, say).

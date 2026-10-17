@@ -37,7 +37,7 @@ import {
 // anything else's scene from its family's shared builder), and the stage, the camera and
 // the encoding are the same for all of them.
 async function captureWithModel(model, context, job, stageTimings) {
-  if (context.mode === "list" || context.mode === "section") {
+  if (context.mode === "list") {
     try {
       return await captureModel({ model, context }, { job });
     } finally {

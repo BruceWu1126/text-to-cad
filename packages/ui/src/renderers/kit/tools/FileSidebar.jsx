@@ -1,58 +1,59 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PanelLeft } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Clapperboard, FileText, ListTree, Spline } from "lucide-react";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { cn } from "@text-to-cad/ui/utils";
-import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
+import { FILE_SIDEBAR_SURFACE_CLASS, FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
+import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import { STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
-import { TOOL_PANEL_BUTTON_CLASS } from "./ToolPanel.jsx";
 import { ToolStackContext } from "./ToolStack.jsx";
-import { VIEWPORT_INSET_PX } from "../shell/viewportLayout.js";
-import { FILE_SIDEBAR_ID, FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack } from "./toolStackLayout.js";
+import { FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, fileSidebarSizeId, clampToolPanelHeight, clampToolPanelWidth, normalizeToolStack } from "./toolStackLayout.js";
 
 const KEY_NUDGE_PX = 16;
-// How far the bar's toggle sits in from the bar's top edge on its first heading: the border, the
-// head's 4px inset, and the 20px button centred in the 24px row. Put away, the toggle that brings
-// it back is that far down from the corner the bar hung from, and centred under the navbar's logo
-// above it: its 24px button 8px in from the viewer's left (`NAVBAR_ROW_CLASS`'s padding), so 20px
-// to its centre, where the bar's room starts `VIEWPORT_INSET_PX` in.
-const TOGGLE_INSET_PX = 7, TOGGLE_PX = 20;
-const NAVBAR_LOGO_CENTRE_PX = 8 + 24 / 2;
-const SHOW_TOGGLE_LEFT_PX = NAVBAR_LOGO_CENTRE_PX - VIEWPORT_INSET_PX - TOGGLE_PX / 2;
+// A phone's panel: a joint's name and its slider side by side, within the view's inset.
+const PHONE_PANEL_WIDTH = 256;
+
 /**
- * The file's sidebar: one solid floating bar at the viewer's top-left, holding what there is to
- * read of the file, its hierarchy, properties and controls, whatever tool is in hand. The toolbar is for using tools; this is for the file. Each
- * of its sections is a `ToolPanel` drawn as a section (`ToolStackContext`'s `sidebar`): a heading
- * row that folds it at a press anywhere on it (a tree row in shape), then its body. It is read for as long as a file is
- * open, so it has the opaque surface (`FLOATING_SURFACE_CLASS`).
+ * The file's sidebar: what there is to read of the file, its hierarchy, properties and controls,
+ * whatever tool is in hand. The toolbar is for using tools; this is for the file. It is a toolbar
+ * of its own at the viewer's top-left, one tile per section (`ToolPanel`s drawn as sections,
+ * `ToolStackContext`'s `sidebar`): a tree by its name (**Features**, **Links**: a tree icon, its
+ * search box heading the panel), **Position**
+ * for a model's joints, **Animation** for its routines, and any other section by its name. None is open as a file opens; a tile
+ * opens its section in a panel under the toolbar, a second press on it closes it, and so does the
+ * section's own collapse button; another tile opens its section instead. One section at a time.
+ * The panel is read for as long as it is open, so it has its own surface (`FILE_SIDEBAR_SURFACE_CLASS`):
+ * lighter than a menu's, heavier than the strip's. Every section stays mounted, closed or not, so
+ * a tree keeps its expansion, filter and scroll.
  *
- * Each section is its content's height (a folded one its heading alone), and none scrolls on its
- * own: the bar is as tall as its sections, up to its cap — the viewer's full height within its
- * inset, unless the person has set one — and past that the whole bar scrolls, as one. A tree's rows are mounted
- * as the bar's scroll brings them into view (`VirtualRows.jsx`). The heading of a section below the
- * view docks at the bar's bottom, over those of the sections after it (`dock`), so every section
- * is a press away: a press on a docked heading opens its section, if it is folded, and brings it
- * to the top of the view at once (`reveal`). The head of the section the view is in — its heading
- * and, for a tree, its filter — pins to the top until the next one pushes it off. The pinned and
- * docked heads are the scroller's padding, so a row revealed in a section (`revealRow`) is never
- * left under them. A section folds
- * only where there are others: one alone is its heading and its body.
- *
- * The whole bar slides out to the left and back (`layout.collapsed.sidebar`): its toggle ends the
- * first section's heading, and while it is away the same toggle, bare, is in the top-left corner.
+ * The open section is its content's height, up to the panel's cap — the room under the toolbar
+ * within the viewer's inset, unless the person has set one — and past that it scrolls. A tree's
+ * rows are mounted as the panel's scroll brings them into view (`VirtualRows.jsx`); the section's
+ * head — its heading and, for a tree, its filter — pins to the top.
  *
  * Its size is the person's, from its bottom-right corner (Quick Edit's grip, as a resizable panel
  * has): width and cap together, by pointer, or by keyboard (arrows by 16px; Home and End to the
- * bounds), written back once a gesture lets go (`layout.panels.sidebar`). It opens a tool panel's
- * width, and may be made narrower than that (`FILE_SIDEBAR_MIN_WIDTH`). Which sections are folded is the person's too, by section id, across files
- * (`layout.collapsed`).
+ * bounds), written back once a gesture lets go — each section's own (`layout.panels["sidebar:<id>"]`). It opens a tool panel's
+ * width, and may be made narrower than that (`FILE_SIDEBAR_MIN_WIDTH`).
+ *
+ * On a phone the tiles are the tool strip's first group, there being no room beside it for a
+ * toolbar of their own: `onTiles` hands them to the frame, which draws them there (each `{ id,
+ * label, Icon, active, onSelect }`), and this draws the panel alone, under the strip, at a phone's
+ * own width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
+ *
+ * `sections` limits the sections on offer to those ids (the Studio's: Position and Animation; the
+ * rest stay mounted, out of sight), and `bare` draws its toolbar's tiles with no surface under
+ * them, the model showing through, as the Studio's corners are.
  *
  * @param {{ layout: { panels: object, collapsed: object },
  *   onLayoutChange(patch: object | ((layout: object) => object)): void, hidden?: boolean,
+ *   sections?: string[] | null, bare?: boolean, onTiles?: ((tiles: object[]) => void) | null,
  *   style?: import("react").CSSProperties, children?: import("react").ReactNode }} props
- *   `style` places the room the bar may take; the bar hangs from its top-left corner.
+ *   `style` places the room the toolbar and its panel may take; they hang from its top-left corner.
  */
-export default function FileSidebar({ layout: stored, onLayoutChange, hidden = false, style, children }) {
+export default function FileSidebar({ layout: stored, onLayoutChange, hidden = false, sections: allowedSections = null, bare = false,
+  onTiles = null, style, children }) {
   const layout = useMemo(() => normalizeToolStack(stored), [stored]);
   const room = useRef(null), bar = useRef(null), scroller = useRef(null), column = useRef(null);
   // The room's height, the most the bar may take, and the viewer's width, which bounds the bar's.
@@ -75,11 +76,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   const clampWidth = value => clampToolPanelWidth(value, measured.viewer || window.innerWidth, FILE_SIDEBAR_MIN_WIDTH);
   const clampHeight = value => clampToolPanelHeight(value, measured.room || Infinity);
   const [draft, setDraft] = useState(null);
-  const size = { ...layout.panels[FILE_SIDEBAR_ID], ...draft };
-  const width = clampWidth(size.width ?? TOOL_PANEL_WIDTH);
-  const cap = size.height !== undefined ? clampHeight(size.height) : measured.room || null;
 
-  const open = !layout.collapsed[FILE_SIDEBAR_ID];
   const settle = useCallback((id, change) => onLayoutChange(current => {
     const patch = {};
     if (change.width !== undefined || change.height !== undefined) {
@@ -102,7 +99,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   // The pinned and docked heads pad the scroller, so what is scrolled into view clears them.
   const dock = useCallback(() => {
     const element = scroller.current;
-    const heads = [...(column.current?.querySelectorAll(":scope > section:not([hidden]) > [data-sidebar-head]") ?? [])];
+    const heads = [...(column.current?.querySelectorAll(":scope > section:not([hidden]):not([data-sidebar-closed]) > [data-sidebar-head]") ?? [])];
     if (!element || !heads.length) return;
     const viewTop = element.getBoundingClientRect().top;
     const anchorTop = head => head.previousElementSibling?.getBoundingClientRect().top ?? 0;
@@ -157,22 +154,62 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     snap(pending.current);
     pending.current = null;
   });
-  const toggleOpen = useCallback(() => settle(FILE_SIDEBAR_ID, { collapsed: open, fallback: false }), [settle, open]);
   const ids = order ? order.split(" ") : [];
+  // The open section: none as a file opens, and none once the one open is gone.
+  const [openId, setOpenId] = useState(null);
+  const open = openId !== null && ids.includes(openId) ? openId : null;
+  // The section the panel shows: the open one, and while the panel slides away, the one it held.
+  const lastOpen = useRef(null);
+  if (open) lastOpen.current = open;
+  const shown = open ?? (ids.includes(lastOpen.current) ? lastOpen.current : null);
+  // Each section's panel has a size of its own, the person's, kept under its id.
+  const sizeId = fileSidebarSizeId(shown);
+  const size = { ...layout.panels[sizeId], ...draft };
+  const phone = Boolean(onTiles);
+  const width = phone ? Math.min(PHONE_PANEL_WIDTH, (measured.viewer || window.innerWidth) - 16) : clampWidth(size.width ?? TOOL_PANEL_WIDTH);
+  const cap = size.height !== undefined ? clampHeight(size.height) : measured.room || null;
+  const closeSection = useCallback(() => setOpenId(null), []);
+  // What each section's tile says, as the section reports it (`register`, from `ToolPanel.jsx`).
+  const meta = useRef(new Map());
+  const [metaTick, setMetaTick] = useState(0);
+  const register = useCallback((id, next) => {
+    const current = meta.current.get(id);
+    if (current && current.title === next.title && current.fit === next.fit) return;
+    meta.current.set(id, next);
+    setMetaTick(tick => tick + 1);
+  }, []);
   const sections = useMemo(() => ({
     sidebar: true,
     reveal,
-    // Folding needs another section to give the room to; the bar's own button rides the first.
-    sectionsFold: ids.length > 1,
-    firstSection: ids[0] ?? null,
-    closeSidebar: toggleOpen,
+    // Which sections are on offer (the Studio's: Position and Animation); null, every one.
+    allowed: allowedSections ? id => allowedSections.includes(id) : null,
+    openSection: shown,
+    closeSection,
+    register,
     viewerWidth: measured.viewer,
     size: () => null,
     defaultHeight: () => null,
     collapsed: (id, fallback) => layout.collapsed[id] ?? fallback,
     settle,
     room: () => room.current?.clientHeight || 0,
-  }), [reveal, order, toggleOpen, measured.viewer, layout, settle]);
+  }), [reveal, shown, closeSection, register, measured.viewer, layout, settle, allowedSections]);
+  const tiles = ids.map(id => {
+    const section = meta.current.get(id) || {};
+    const tile = section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
+      : id === "position" ? { label: "Position", Icon: Spline }
+        : id === "animation" ? { label: "Animation", Icon: Clapperboard }
+        : { label: section.title || id, Icon: FileText };
+    return { id, ...tile };
+  });
+  void metaTick;
+  // A press of a tile: its section opens, or closes if it was the open one.
+  const toggle = useCallback(id => setOpenId(current => (current === id ? null : id)), []);
+  const tileKey = tiles.map(tile => `${tile.id}:${tile.label}`).join(" ");
+  useEffect(() => {
+    onTiles?.(tiles.map(({ id, label, Icon }) => ({ id, label, Icon, active: open === id, onSelect: () => toggle(id) })));
+    // `tileKey` stands for `tiles`, rebuilt each render.
+  }, [onTiles, tileKey, open, toggle]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onTiles?.([]), [onTiles]);
 
   // The corner moves both: the width and the cap, from the size on screen.
   const drag = useRef(null);
@@ -198,7 +235,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     drag.current = null;
     releasePointer(event.currentTarget, event.pointerId);
     setDraft(null);
-    if (current.next) settle(FILE_SIDEBAR_ID, current.next);
+    if (current.next) settle(sizeId, current.next);
   };
   const keyDrag = event => {
     const from = drawn(), change = {};
@@ -208,31 +245,38 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     if (nextHeight !== undefined) change.height = clampHeight(nextHeight);
     if (!Object.keys(change).length) return;
     event.preventDefault();
-    settle(FILE_SIDEBAR_ID, change);
+    settle(sizeId, change);
   };
 
-  return <div ref={room} hidden={hidden} className="pointer-events-none absolute z-20 @max-5xl/cad-viewport:top-[var(--cad-tools-bottom,3.125rem)]! @max-5xl/cad-viewport:w-[calc(50%-0.75rem)]" style={style} data-file-sidebar-room="">
-    {/* Put away, the bar leaves its toggle in the corner it hung from, under the navbar's logo, bare
-        and the same size; it fades in as the bar slides out. */}
-    <button type="button" aria-label="Show file sidebar" inert={open} data-file-sidebar-open=""
-      className={cn(TOOL_PANEL_BUTTON_CLASS, "absolute transition-opacity duration-200 motion-reduce:transition-none",
-        open ? "pointer-events-none opacity-0" : "pointer-events-auto opacity-100")}
-      style={{ top: TOGGLE_INSET_PX, left: SHOW_TOGGLE_LEFT_PX }}
-      onClick={toggleOpen}><PanelLeft className="size-3" aria-hidden="true" /></button>
-    {/* Away, it slides out past the viewer's left edge, and nothing in it can be reached. */}
-    <aside ref={bar} aria-label="File" data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
-      className={cn("relative flex max-w-full flex-col overflow-hidden rounded-md text-tiny transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none",
-        FLOATING_SURFACE_CLASS, open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
-      style={{ width, maxHeight: cap ?? undefined }}>
-      <ScrollArea className="min-h-0 flex-1" viewportRef={scroller} viewportProps={{ "data-file-sidebar-scroller": "" }}>
-        {/* The first section's head needs no rule above it: the bar's edge is there. */}
-        <div ref={column} className="flex flex-col [&>section:first-child>[data-sidebar-head]]:border-t-0">
-          <ToolStackContext.Provider value={sections}>{children}</ToolStackContext.Provider>
-        </div>
-      </ScrollArea>
-      <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label="Resize file sidebar"
-        data-file-sidebar-corner="" data-dragging={draft !== null ? "" : undefined}
-        onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onKeyDown={keyDrag} />
-    </aside>
-  </div>;
+  const aside = <aside ref={bar} aria-label="File" data-cad-file-sidebar="" data-open={open ? "" : undefined} inert={!open}
+    className={cn("relative flex max-w-full flex-col overflow-hidden text-tiny transition-[translate,opacity] duration-200 ease-out motion-reduce:transition-none",
+      "rounded-md", FILE_SIDEBAR_SURFACE_CLASS,
+      open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
+    style={{ width, maxHeight: cap ?? undefined }}>
+    <ScrollArea className="min-h-0 flex-1" viewportRef={scroller} viewportProps={{ "data-file-sidebar-scroller": "" }}>
+      {/* The section's head needs no rule above it: the panel's edge is there. */}
+      <div ref={column} className="flex flex-col [&>section>[data-sidebar-head]]:border-t-0">
+        <ToolStackContext.Provider value={sections}>{children}</ToolStackContext.Provider>
+      </div>
+    </ScrollArea>
+    {phone ? null : <ResizeGrip corner="bottom-right" role="separator" tabIndex={0} aria-label="Resize file sidebar"
+      data-file-sidebar-corner="" data-dragging={draft !== null ? "" : undefined}
+      onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag} onKeyDown={keyDrag} />}
+  </aside>;
+  return <>
+    <div hidden={hidden} className="pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={style} data-file-sidebar-room="">
+      {/* The sidebar's toolbar: the tool strip's surface, padding and tiles, on the strip's line. */}
+      {tiles.length && !onTiles ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+        className={cn("pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-md p-1", bare ? "border border-transparent" : FLOATING_CHROME_SURFACE_CLASS)}>
+        {tiles.map(({ id, label, Icon }) => <ToolbarButton key={id} label={label} tooltipSide="bottom" className={STRIP_BUTTON_CLASS}
+          active={open === id} aria-pressed={open === id} onClick={() => toggle(id)} data-file-sidebar-tool={id}>
+          <Icon aria-hidden="true" />
+        </ToolbarButton>)}
+      </div> : null}
+      {/* The panel under it, the open section's; closed, its sections stay mounted out of sight. It
+          slides in from the left as a section opens with none open before, and back out as the last
+          one closes; from one section to another it stays where it is. */}
+      <div ref={room} className="relative min-h-0 w-full flex-1">{aside}</div>
+    </div>
+  </>;
 }

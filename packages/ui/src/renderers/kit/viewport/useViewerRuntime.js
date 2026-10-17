@@ -313,6 +313,10 @@ export function useViewerRuntime({
         pixelRatio: getPixelRatioCap(idlePixelRatioCap),
         renderQueued: false,
         renderQueuedAt: 0,
+        // Whether anything but the camera changed since the last frame drawn: a scene
+        // mutation or a highlight (`runtime.requestRender`/`requestFrame`). The Render studio's
+        // frame starts its picture again then; a camera that moved it judges for itself.
+        sceneChanged: true,
         renderFallbackTimerId: 0,
         restoreTimerId: 0,
         shadowsDirty: true,
@@ -511,6 +515,10 @@ export function useViewerRuntime({
           emitPerspectiveChange(runtimeRef.current);
         }
         fitCameraDepthRange(runtimeRef.current);
+        // Nothing changed but, perhaps, the camera: the Render studio's frame may draw the next
+        // sample of the picture on screen (it starts again itself if the camera really moved).
+        const still = interactionState.sceneChanged !== true && interactionState.shadowsDirty !== true;
+        let refining = false;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
           renderer.shadowMap.needsUpdate = interactionState.shadowsDirty === true;
           interactionState.shadowsDirty = false;
@@ -520,11 +528,21 @@ export function useViewerRuntime({
               if (viewportBuffer.flush()) {
                 syncScreenSpaceLineMaterials();
               }
-              renderer.render(scene, runtimeRef.current?.camera || camera);
+              const drawCamera = runtimeRef.current?.camera || camera;
+              // Render's lighting is drawn through its studio's frame, which converges a still
+              // view over its next frames (`photographicStudio.js`); anything else is one draw.
+              const studioFrame = runtimeRef.current?.photographicStudio?.frame;
+              if (studioFrame) refining = studioFrame.render(renderer, scene, drawCamera, { still }).refining;
+              else renderer.render(scene, drawCamera);
             },
             presentationRequestRef?.current,
           );
-          if (didDraw) runtimeRef.current?.viewUpdateGate?.didDraw();
+          if (didDraw) {
+            interactionState.sceneChanged = false;
+            runtimeRef.current?.viewUpdateGate?.didDraw();
+          } else {
+            refining = false;
+          }
         }
         perfMeasure(PERF_MEASURE_NAMES.frame, frameStartedAt, { interacting: interactionState.active === true });
         const previewOrbitActive = !!runtimeRef.current?.previewOrbitEnabled;
@@ -550,6 +568,9 @@ export function useViewerRuntime({
           (interactionState.active && runtimeRef.current?.renderOnDemandOnly !== true) ||
           previewOrbitActive
         ) {
+          requestRender();
+        } else if (refining) {
+          // The next sample of a still view: a frame nothing else asked for.
           requestRender();
         }
       }
@@ -913,12 +934,14 @@ export function useViewerRuntime({
         // last shadow map.
         requestRender: () => {
           interactionState.shadowsDirty = true;
+          interactionState.sceneChanged = true;
           requestRender();
         },
         // A frame for a change that moves, shows, hides and reshapes no shadow caster (a
         // highlight's colour, an overlay, the floor shadow's deferred bake): the shadow maps
         // it has are kept, as on a frame that only moved the camera.
         requestFrame: () => {
+          interactionState.sceneChanged = true;
           requestRender();
         },
         invalidateShadows: () => {

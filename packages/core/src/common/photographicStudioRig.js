@@ -12,6 +12,14 @@ export const PHOTOGRAPHIC_STUDIO_FILL_DIRECTION = Object.freeze([-0.65, 0.8, 0.6
 // rear fill card.
 export const PHOTOGRAPHIC_STUDIO_BOUNCE_DIRECTION = Object.freeze([0.95, 0.33, 0.45]);
 
+// The key's softbox in the reflection environment (environmentMap.js): a card this wide and
+// tall at Size 1, hung this far from the model in the environment's units.
+export const PHOTOGRAPHIC_STUDIO_KEY_CARD = Object.freeze({ width: 2.5, height: 3.6 });
+export const PHOTOGRAPHIC_STUDIO_CARD_DISTANCE = 6;
+// A still frame's soft shadows: its samples move the key over this share of that softbox's
+// face (studioFrame.js, `sampleKey`), so its shadows are as soft as a softbox of that size.
+export const PHOTOGRAPHIC_STUDIO_SOFT_SHADOW = Object.freeze({ spread: 0.35 });
+
 // Calibrated together at 0 EV. PMREM also supplies diffuse illumination, so
 // its key card and the shadow-casting spotlight share the illumination budget.
 export const PHOTOGRAPHIC_STUDIO_KEY_ILLUMINANCE = 2.4;
@@ -70,6 +78,17 @@ export const PHOTOGRAPHIC_STUDIO_FLOOR_FINISHES = Object.freeze({
       resolution: 0.5, blur: 2, sharpBlur: 0, blurHeight: 0.8, fadeHeight: 1, strength: 0.75, normalWeight: 0.45
     })
   })
+});
+
+// The studio's frame (studioFrame.js). A still view converges over `samples` samples, more at
+// lighting quality Final: each a fraction of a pixel apart, its occlusion turned, its key moved
+// across the softbox. A snapshot's still converges over `stillSamples` (it is supersampled at
+// its render scale besides). The ambient occlusion reaches `radius` of the model's (rest)
+// radius, never more than `maxScreen` of the view's height, at `strength` and `power`.
+export const PHOTOGRAPHIC_STUDIO_FRAME = Object.freeze({
+  samples: Object.freeze({ preview: 32, final: 64 }),
+  stillSamples: 32,
+  occlusion: Object.freeze({ strength: 1, radius: 0.1, power: 2, maxScreen: 0.2 })
 });
 
 // Full square-ground width relative to model-bounds radius. Keep the camera's

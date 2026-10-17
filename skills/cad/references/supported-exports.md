@@ -127,20 +127,20 @@ cadgen glb snapshot meshes/bracket.glb tmp/bracket_glb.png
 ```
 
 A mesh carries no CAD topology. Its snapshot door accepts `--display solid`
-(the default) and `--display render` for the photographic view. Inline JSON and
-JSON files use the grouped display object (`camera`, `surfaces`, `lighting`,
-`background`, `floor`, `grid`, `axes`). Omitted groups inherit the preset.
+(the default), and `--render` for the photographic view. Inline JSON and
+JSON files use per-mode settings under `modes`, with shared `appearance` and
+`camera`. Omitted settings inherit the active mode's defaults.
 `edges`, `clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets
-and the `hidden`/`off` surface styles are STEP-only and are refused by name.
+are STEP-only and are refused by name.
 Mesh doors do not have
-`--focus`/`--hide`, `--kinematics`, or `--animation`/`--time`, and reject
-`--mode section`; meshes have no canonical CAD occurrences, kinematics,
+`--focus`/`--hide`, `--kinematics`, or `--animation`/`--time`; meshes have no
+canonical CAD occurrences, kinematics,
 or render-module clips for those controls to act on. `cadgen step snapshot`
 refuses a mesh input and names the door that takes it.
 
 The picture is the scene the CAD Viewer draws for the same file, built by the same code:
 an STL or a 3MF is its objects in their colours, and a GLB is its own glTF scene (nodes,
-skins, morph targets and authored materials), so `--display render` shows the finish the
+skins, morph targets and authored materials), so `--render` shows the finish the
 file authored. A GLB's clips play in the viewer; its snapshot is the file at rest.
 
 For a mesh-only model, this is its required visual review. When a STEP is also

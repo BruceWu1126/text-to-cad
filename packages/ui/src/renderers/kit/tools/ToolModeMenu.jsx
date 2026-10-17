@@ -3,6 +3,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@text-to
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { TOOL_PANEL_BUTTON_CLASS } from "./ToolPanel.jsx";
+import { useStripTouch } from "./stripTouch.js";
 
 // The strip's chevron: a small button of its own after its tool's, lit by its own hover and while
 // its menu is open, never with the tool. As tall as the strip's 24px tile and touching it, so the
@@ -16,16 +17,18 @@ const CHEVRON_CLASS = "grid h-6 w-3 shrink-0 place-items-center rounded-sm text-
  * strip right after the tool's own button ("chevron"), its menu dropping from it.
  *
  * @param {{ label: string, triggerLabel?: string, disabled?: boolean, trigger?: "chevron" | "settings",
- *   triggerProps?: object, children: import("react").ReactNode }} props
+ *   triggerProps?: object, onOpenChange?(open: boolean): void, children: import("react").ReactNode }} props
  */
-export function ToolSettingsMenu({ label, triggerLabel = label, disabled = false, trigger = "settings", triggerProps = null, children }) {
+export function ToolSettingsMenu({ label, triggerLabel = label, disabled = false, trigger = "settings", triggerProps = null, onOpenChange, children }) {
   const chevron = trigger === "chevron";
-  return <DropdownMenu modal={false}>
+  // On a phone's strip the chevron is the 44px tile's height and wide enough to touch.
+  const touch = useStripTouch();
+  return <DropdownMenu modal={false} onOpenChange={onOpenChange}>
     <DropdownMenuTrigger asChild>
       <button type="button" aria-label={triggerLabel} disabled={disabled} {...triggerProps}
-        className={chevron ? CHEVRON_CLASS
+        className={chevron ? cn(CHEVRON_CLASS, touch && "h-9 w-5 rounded-md")
           : cn(TOOL_PANEL_BUTTON_CLASS, "disabled:pointer-events-none disabled:opacity-50 aria-expanded:bg-accent aria-expanded:text-foreground")}>
-        {chevron ? <ChevronDown className="size-2 shrink-0" strokeWidth={3} aria-hidden="true" /> : <SlidersHorizontal className="size-3" aria-hidden="true" />}
+        {chevron ? <ChevronDown className={cn("shrink-0", touch ? "size-3" : "size-2")} strokeWidth={3} aria-hidden="true" /> : <SlidersHorizontal className="size-3" aria-hidden="true" />}
       </button>
     </DropdownMenuTrigger>
     {/* Closes with no exit animation, so a quick second press always reaches the button. */}

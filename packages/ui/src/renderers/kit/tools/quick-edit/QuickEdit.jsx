@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, Copy, ListPlus, X } from "lucide-react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Check, Copy, ListPlus, PenLine, X } from "lucide-react";
 import { Button } from "@text-to-cad/ui/primitives/button";
+import { Drawer, DrawerContent, DrawerTitle } from "@text-to-cad/ui/primitives/drawer";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { cn } from "@text-to-cad/ui/utils";
 import { promptReferenceIds } from "@text-to-cad/core/prompt";
-import { usePromptDestination, useViewerHost } from "../../../../host/context.js";
+import { usePromptDestination, useViewerHost, ViewerElementContext } from "../../../../host/context.js";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import ResizeGrip from "../ResizeGrip.jsx";
@@ -14,6 +15,10 @@ import { copiedQuickEdit, createQuickEditContext, pastedLines, quickEditSelectio
 import { insertAtCaret, markSelectedPills, noteText, pasteNodes, selectPillAt } from "./noteEditor.js";
 import ReferenceChips from "./ReferenceChips.jsx";
 
+// The sheet's open stop: most of the screen, so the note has room; the box fills it, the note
+// taking what its header and buttons leave. Its handle is the sheet's top 24px.
+const SHEET_OPEN = 0.62;
+const SHEET_HANDLE_PX = 24, SHEET_BOTTOM_PX = 16;
 const EMPTY = Object.freeze([]);
 // A press of the person's in this view leads the selection it made; an agent's selection (the live
 // controller's `select`) follows none, and opens the box without taking their keyboard.
@@ -83,7 +88,7 @@ export function quickEditReferenceIds(selection) {
  *   sight with all it holds (the view is loading).
  */
 export default function QuickEdit({ resource, references = EMPTY, chips = null, annotation = null, measurements = null, prompt = null, nameReference = null, onCopy, onEscape, onClear, disabled = false,
-  hidden = false, className, style }) {
+  hidden = false, docked = false, className, style }) {
   const host = useViewerHost();
   const destination = usePromptDestination();
   const [text, setText] = useState("");
@@ -100,6 +105,13 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   const attached = referenceIds.length > 0 || annotated || measured > 0;
   const written = Boolean(text.trim());
   const open = written || attached;
+  // Docked (a phone's) it is a bottom sheet, opening at a peek of its header and chips; a swipe up,
+  // or a tap on its title, brings up the note and its buttons, and a swipe down puts them away again,
+  // what is written kept.
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = docked && !unfolded;
+  useEffect(() => { if (!open) setUnfolded(false); }, [open]);
+  const viewerElement = useContext(ViewerElementContext);
 
   // The person's presses: a stroke is under way while one is down, and a pick follows one in this view.
   const pressed = useRef(false);
@@ -126,7 +138,11 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   // Opening for the person takes the keyboard: now, and again once the press that opened it has
   // finished, since a view that keeps its own keys focuses itself as a pick lands. A field the
   // person has moved to since keeps it.
+  const foldedRef = useRef(folded);
+  foldedRef.current = folded;
   const takeKeyboard = useCallback(() => {
+    // Folded, a pick leaves the keyboard down: the note is a tap away.
+    if (foldedRef.current) return;
     const focus = () => {
       const note = field.current;
       const active = document.activeElement;
@@ -155,6 +171,33 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     takeKeyboard();
     return undefined;
   }, [referenceKey, annotated, measured, takeKeyboard]);
+
+  // Unfolded by its title, the note takes the keyboard.
+  const unfold = () => { setUnfolded(current => !current); };
+  // The sheet's two stops, measured from its top: the peek (the handle, the header and the chips)
+  // and the whole box.
+  const compose = useRef(null);
+  const [stops, setStops] = useState(null);
+  // The box mounts with the sheet's portal, after this view's own render: its node is state.
+  const [boxNode, setBoxNode] = useState(null);
+  const bindBox = useCallback(node => { box.current = node; setBoxNode(node); }, []);
+  useLayoutEffect(() => {
+    const element = boxNode, rest = compose.current;
+    if (!docked || !open || !element || !rest) return undefined;
+    const measure = () => {
+      // The peek is measured while the sheet peeks: open, its way in has given its place to the note.
+      if (!foldedRef.current) return;
+      const top = element.getBoundingClientRect().top - (element.parentElement?.getBoundingClientRect().top ?? 0);
+      const next = [`${Math.ceil(top + rest.offsetTop)}px`, SHEET_OPEN];
+      setStops(current => current?.[0] === next[0] ? current : next);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [docked, open, boxNode]);
+  useEffect(() => { if (docked && unfolded) takeKeyboard(); }, [docked, unfolded, takeKeyboard]);
 
   // A pill the selection takes in is highlighted as its text is: it shows no selection of its own.
   useEffect(() => {
@@ -322,15 +365,16 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       return value;
     } } : chip));
   }, [annotationChip, measurements?.chips, chips]);
-  return <div ref={root} className={cn("pointer-events-none shrink-0 flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
-    {open ? <section ref={box} aria-label="Quick Edit" data-quick-edit-box=""
+  const section = open ? <section ref={bindBox} aria-label="Quick Edit" data-quick-edit-box=""
       // The side column caps the box on a narrow view, clear of the toolbar and sidebar.
       // It opens in 150ms, animate-in's own: a `duration-*` class would also ease every width a drag
       // writes (the transition is of `all`), and the box would trail its corner.
-      className={cn("pointer-events-auto relative flex w-[min(15rem,100%)] max-w-full origin-top-right flex-col gap-2 rounded-lg p-2.5 text-tiny animate-in fade-in-0 zoom-in-95",
-        FLOATING_SURFACE_CLASS)}>
+      className={cn("pointer-events-auto relative flex max-w-full flex-col gap-2 text-tiny",
+        docked ? "w-full px-4 pt-3 [&_[data-quick-edit-compose]]:min-h-0 [&_[data-quick-edit-compose]]:flex-1" : cn("w-[min(15rem,100%)] origin-top-right rounded-lg p-2.5 animate-in fade-in-0 zoom-in-95", FLOATING_SURFACE_CLASS))} data-folded={folded ? "" : undefined}
+      style={docked ? { height: `calc(${SHEET_OPEN * 100}dvh - ${SHEET_HANDLE_PX + SHEET_BOTTOM_PX}px)` } : undefined}>
       <div className="flex min-h-5 min-w-0 items-center gap-2">
-        <h3 className="shrink-0 pl-0.5 text-xs font-medium leading-5 text-foreground">Quick Edit</h3>
+        {/* On a phone the title is a step up: the sheet's own heading. */}
+        {docked ? <h3 className="shrink-0 text-ui font-semibold leading-6 text-foreground">Quick Edit</h3> : <h3 className="shrink-0 pl-0.5 text-xs font-medium leading-5 text-foreground">Quick Edit</h3>}
         {/* What goes with the note, as it is now; the file always does. */}
         <p className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-tiny text-muted-foreground" data-quick-edit-attachments="">
           {referenceCount ? <TooltipHint content={<span className="block whitespace-pre-line text-left">{referenceIds.join("\n")}</span>}>
@@ -344,14 +388,20 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
         </button>
       </div>
       {shownChips.length ? <ReferenceChips chips={shownChips} className="-mt-0.5" /> : null}
+      {/* Peeking, the sheet's way in: a field to write in, which opens it with the keyboard in the note. */}
+      {docked && folded ? <button type="button" aria-expanded={false} onClick={unfold} data-quick-edit-fold=""
+        className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background/80 px-3 text-left text-ui text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
+        <PenLine className="size-4 shrink-0" aria-hidden="true" />Describe your changes…
+      </button> : null}
       {/* Plain text with references inline. It grows with what is written, up to 10rem, until a drag of
           the corner gives it a height, and scrolls in the chrome's own ScrollArea past that; its
           placeholder shows while it is empty. */}
-      <ScrollArea ref={noteBox} data-quick-edit-note-box=""
-        className="max-h-40 min-h-14 w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20">
+      <div ref={compose} className="flex flex-col gap-2" data-quick-edit-compose="" aria-hidden={folded || undefined} inert={folded || undefined}>
+      <ScrollArea ref={noteBox} data-quick-edit-note-box="" data-vaul-no-drag=""
+        className={cn(docked ? "min-h-14 flex-1 [&_[data-slot=scroll-area-viewport]>div]:h-full" : "max-h-40 min-h-14", "w-full rounded-md border border-input bg-background/80 transition-[border-color,box-shadow] focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/20 dark:focus-within:border-blue-400 dark:focus-within:ring-blue-400/20")}>
         <div ref={field} role="textbox" aria-multiline="true" aria-label="Describe your changes" tabIndex={0}
           contentEditable="plaintext-only" suppressContentEditableWarning data-placeholder="Describe your changes" data-quick-edit-note=""
-          className="min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]"
+          className={cn("min-h-[3.375rem] w-full whitespace-pre-wrap break-words px-2 py-1.5 text-xs leading-5 text-foreground outline-none empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]", docked && "h-full")}
           onInput={event => readNote(event.currentTarget)} onKeyDown={onKeyDown} onPaste={onPaste} onMouseDown={onNoteMouseDown} />
       </ScrollArea>
       {error ? <p role="alert" className="text-tiny text-destructive">{error}</p> : null}
@@ -369,8 +419,22 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
           </Button>
         </TooltipHint>)}
       </div>
-      {/* The grip every resizable box over the viewport has (`ResizeGrip.jsx`), in this one's bottom-left. */}
-      <ResizeGrip corner="bottom-left" aria-hidden="true" onPointerDown={startResize} data-quick-edit-resize="" className="@max-md/cad-viewport:hidden" />
-    </section> : null}
+      </div>
+      {/* The grip every resizable box over the viewport has (`ResizeGrip.jsx`), in this one's bottom-left; docked, it spans the view. */}
+      {docked ? null : <ResizeGrip corner="bottom-left" aria-hidden="true" onPointerDown={startResize} data-quick-edit-resize="" className="@max-md/cad-viewport:hidden" />}
+    </section> : null;
+  const sheet = docked ? <Drawer open={open && !hidden} modal={false} dismissible={false} noBodyStyles autoFocus={false}
+    snapPoints={stops || undefined} activeSnapPoint={stops ? stops[folded ? 0 : 1] : undefined}
+    setActiveSnapPoint={point => { if (stops && point != null) setUnfolded(point === stops[1]); }}>
+    {/* The sheet runs the screen's height, its box at its top: a stop shows that much of it. */}
+    <DrawerContent overlay={false} container={viewerElement?.current || undefined} aria-describedby={undefined}
+      onOpenAutoFocus={event => event.preventDefault()} onCloseAutoFocus={event => event.preventDefault()}
+      className="h-full data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-none" data-quick-edit-sheet="">
+      <DrawerTitle className="sr-only">Quick Edit</DrawerTitle>
+      {section}
+    </DrawerContent>
+  </Drawer> : null;
+  return <div ref={root} className={cn("pointer-events-none shrink-0 flex-col items-end", hidden ? "hidden" : "flex", className)} style={style} data-quick-edit="">
+    {docked ? sheet : section}
   </div>;
 }

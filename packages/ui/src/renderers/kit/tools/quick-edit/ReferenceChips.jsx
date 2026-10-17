@@ -3,6 +3,7 @@ import { Check, Copy, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { cn } from "@text-to-cad/ui/utils";
+import { useViewerMobile } from "../../../../file-viewer/responsive.js";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
 import { useCopyFlash } from "../../inspector/copyFlash.js";
 import { InfoRow } from "../../inspector/referenceRows.jsx";
@@ -96,6 +97,8 @@ function useChip(chip) {
   const [width, setWidth] = useState(0);
   const copyable = Boolean(chip.copy) && flash.canCopy;
   const copied = copyable && flash.copied;
+  // On a phone a tap is for reading: it opens the card, whose title copies.
+  const tapCopies = !useViewerMobile();
   return {
     card, hover, copyable, copied,
     // A press on the chip is not one outside its card: the card stays while the chip copies.
@@ -111,7 +114,7 @@ function useChip(chip) {
       style: copied && width ? { minWidth: width } : undefined,
       onPointerDown: event => { pointer.current = event.pointerType; },
       onClick: () => {
-        if (copyable) { setWidth(label.current?.offsetWidth || 0); void copyChip(flash, chip); }
+        if (copyable && tapCopies) { setWidth(label.current?.offsetWidth || 0); void copyChip(flash, chip); }
         if (pointer.current !== "mouse" && card) hover.setOpen(open => !open);
         pointer.current = "";
       },
@@ -143,8 +146,15 @@ function CardTitle({ chip }) {
 }
 
 // A chip's card: its name, its id, then what the renderer says of it (or its picture).
+// Beside the box, a card opens to its left, over the view; on a phone the box is the bottom sheet
+// across the screen, so the card opens above the chip, inside the screen.
+function useCardPlace() {
+  return useViewerMobile() ? { side: "top", align: "start", sideOffset: 6 } : { side: "left", align: "start", sideOffset: 14 };
+}
+
 function ChipCard({ chip, state }) {
-  return state.card ? <PopoverContent side="left" align="start" sideOffset={14} collisionPadding={8} className={cn(POPOVER_CLASS, "w-56")}
+  const place = useCardPlace();
+  return state.card ? <PopoverContent {...place} collisionPadding={8} className={cn(POPOVER_CLASS, "w-56 max-w-[calc(100vw-1rem)]")}
     onOpenAutoFocus={event => event.preventDefault()} onCloseAutoFocus={event => event.preventDefault()}
     onPointerEnter={state.hover.stay} onPointerLeave={state.hover.leave} onInteractOutside={state.keepOnChip} data-quick-edit-ref-card={chip.key}>
     <CardTitle chip={chip} />
@@ -188,12 +198,13 @@ function MoreChip({ chip }) {
 // The rest, under one chip: a narrow list of them, each a chip in all but its look.
 function MoreChips({ chips }) {
   const [open, setOpen] = useState(false);
+  const place = useCardPlace();
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <button type="button" className={cn(CHIP_CLASS, CHIP_LABEL_CLASS, "text-muted-foreground hover:text-foreground")}
         data-quick-edit-ref-more="">+{chips.length} more</button>
     </PopoverTrigger>
-    <PopoverContent side="left" align="start" sideOffset={14} collisionPadding={8} className={cn(POPOVER_CLASS, "w-max min-w-28 max-w-44")}
+    <PopoverContent {...place} collisionPadding={8} className={cn(POPOVER_CLASS, "w-max min-w-28 max-w-44")}
       onOpenAutoFocus={event => event.preventDefault()} aria-label="More references">
       <ScrollArea className="min-w-0" viewportProps={{ style: LIST_STYLE }}>
         <ul className="flex flex-col p-1">

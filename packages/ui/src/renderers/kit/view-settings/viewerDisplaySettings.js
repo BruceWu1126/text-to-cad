@@ -29,12 +29,11 @@ export function mergeViewerDisplaySettings(current, patch) {
 }
 
 // A camera command carries both pose and optional View controls. Explicit lens
-// or projection edits change the shared camera; a pose-only command leaves it alone. Render is
-// always in perspective, so a projection sent under it is no edit of the other modes' camera.
+// or projection edits change the shared camera; a pose-only command leaves it alone. The tools
+// view, where a camera command edits them, is never in Render (the Studio's alone).
 export function viewerDisplaySettingsForCamera(current, camera) {
-  const rendering = normalizeViewSettings(current).mode === "render";
   const controls = {
-    ...(camera?.projection && !rendering ? { projection: camera.projection } : {}),
+    ...(camera?.projection ? { projection: camera.projection } : {}),
     ...(camera?.focalLength != null ? { focalLength: camera.focalLength } : {})
   };
   return Object.keys(controls).length

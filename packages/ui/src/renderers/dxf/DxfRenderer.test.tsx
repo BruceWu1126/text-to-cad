@@ -183,7 +183,6 @@ it('host commands a flat drawing cannot answer are declined in words', async () 
   await expect(controller.select({ selectors: ['o1.f1'] })).rejects.toThrow(/A DXF is a 2D drawing without CAD references/);
   await expect(controller.clearSelection()).rejects.toThrow(/never has a selection to clear/);
   await expect(controller.setCamera({ position: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0] })).rejects.toThrow(/no camera to pose/);
-  await expect(controller.setRenderMode(true)).rejects.toThrow(/no Display settings/);
   await expect(controller.setDisplaySettings({ modes: { solid: { edges: { enabled: false } } } })).rejects.toThrow(/no Display settings/);
 
   // What it CAN do: report itself, fit again, and hand over a PNG. No zoom command, no zoom readout.
