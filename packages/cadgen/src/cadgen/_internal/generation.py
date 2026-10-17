@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -47,34 +47,6 @@ from cadgen._internal.generation_spec import (
     _entry_spec_from_source,
     _selector_options_for_part,
 )
-
-def _pinned_child_records(scene: object) -> Iterator[tuple[str, dict]]:
-    """Each child the body composed, by the tree of its record, only while that record
-    still holds the key the parent composed: a child rebuilt since the parent called
-    it yields nothing, and the parent's export writes it whole."""
-    from cadgen.store.records import read_record
-
-    for child in getattr(scene, "store_children", None) or ():
-        model, key = child.get("model"), child.get("key")
-        record = read_record(model) if model and key else None
-        if record and record.get("key") == key and record.get("tree"):
-            yield str(record["tree"]), record
-
-
-def _pinned_child_steps(scene: object) -> dict[str, object]:
-    """Each pinned child tree mapped to the saved STEP its record names as its output
-    (one written: its sha256 is empty until its export lands), from which the parent may
-    be spliced (``cadgen.store._splice_step``)."""
-    from cadgen.store._splice_step import ChildStep
-
-    steps: dict[str, object] = {}
-    for tree, record in _pinned_child_records(scene):
-        for path, entry in (record.get("outputs") or {}).items():
-            if Path(path).suffix.lower() in (".step", ".stp") and isinstance(entry, dict) and entry.get("sha256"):
-                steps[tree] = ChildStep(Path(path), str(entry["sha256"]))
-                break
-    return steps
-
 
 def _stage(spec: EntrySpec, cleanup: object) -> Path:
     """A folder beside the saved STEP for the export to write into, removed with ``cleanup``.
@@ -208,8 +180,7 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
                        why=why)
 
 
-def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
-            children: Mapping[str, object], logger: CliLogger) -> dict:
+def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object], logger: CliLogger) -> dict:
     """The export job's answer for ``tree`` written to ``staged`` (``store/exports.py``):
     the build pool's, or this process's for a result holding a component only its live
     shape stands for. Its spans and warnings are told to ``logger``."""
@@ -220,15 +191,9 @@ def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
     else:
         from cadgen.daemon.artifacts import resolve_artifact
 
-        request = {"kind": "export", "tree": tree, "out": str(staged), "names": names}
-        if children:
-            request["children"] = {child: {"path": str(step.path), "sha256": step.step_hash}
-                                   for child, step in children.items()}
-        export = resolve_artifact(request)
+        export = resolve_artifact({"kind": "export", "tree": tree, "out": str(staged), "names": names})
     for label, seconds in export["spans"]:
         logger.timing(label, seconds)
-    if export.get("unspliced"):
-        logger.debug(f"{staged.name} spliced from its children: no ({export['unspliced']})")
     for warning in export["warnings"]:
         logger.warning(warning)
     return export
@@ -236,8 +201,8 @@ def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object],
 
 def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, sidecar_payload: dict | None,
                expected_document_pair: tuple[str | None, str | None] | None, producer: dict | None,
-               live: Mapping[str, object], children: Callable[[], Mapping[str, object]],
-               stage: Callable[[], Path], still_saves: Callable[[], None], logger: CliLogger) -> bool:
+               live: Mapping[str, object], stage: Callable[[], Path], still_saves: Callable[[], None],
+               logger: CliLogger) -> bool:
     """Save the model's STEP from its result ``tree`` (STORE.md §3, *Exports*): the export
     (or the file kept), then the publication tail -- the file and its sidecar in place,
     its bytes mapped to the tree pending its verify, the record's output entry, the
@@ -256,8 +221,7 @@ def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, s
     export = None
     plain = plan.plain
     if plan.kept is None:
-        export = _export(tree, staged, names=not plan.plain, live=live,
-                         children={} if plan.plain else children(), logger=logger)
+        export = _export(tree, staged, names=not plan.plain, live=live, logger=logger)
         digest = str(export["sha256"])
         # As written, not as planned: a worker that cannot name its producer writes plain.
         plain = plain or export["producer"] is None
@@ -896,7 +860,6 @@ def _generate_part_outputs(
             stats["stepKept"] = _save_step(
                 spec, tree_hash, export_plan, record=record, sidecar_payload=sidecar_payload,
                 expected_document_pair=expected_document_pair, producer=producer, live=live,
-                children=lambda: _pinned_child_steps(scene) if not force and not tree.get("occurrences") else {},
                 stage=lambda: _stage(spec, publication_cleanup), still_saves=still_saves, logger=logger,
             )
         # Every part of the result is stored before the build reports done (the pool's
@@ -1103,8 +1066,7 @@ def _reexport(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
     with ExitStack() as cleanup:
         _save_step(spec, tree, plan, record=copy.deepcopy(record), sidecar_payload=_raw_source_sidecar(spec.step_path),
                    expected_document_pair=pair, producer=(document_entry_for_hash(pair[0] or "") or {}).get("producer"),
-                   live={}, children=dict, stage=lambda: _stage(spec, cleanup), still_saves=lambda: None,
-                   logger=logger)
+                   live={}, stage=lambda: _stage(spec, cleanup), still_saves=lambda: None, logger=logger)
     return True
 
 

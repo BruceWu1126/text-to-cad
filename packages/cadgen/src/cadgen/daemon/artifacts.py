@@ -71,21 +71,11 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
-    if kind == "export" and set(request) in ({"kind", "tree", "out", "names"},
-                                             {"kind", "tree", "out", "names", "children"}):
+    if kind == "export" and set(request) == {"kind", "tree", "out", "names"}:
         if not isinstance(request["names"], bool):
             raise ValueError("artifact names must be a boolean")
-        normalized = {"kind": kind, "tree": _digest(request["tree"], "tree"), "out": _path(request["out"], "out"),
-                      "names": request["names"]}
-        if "children" in request:
-            children = request["children"]
-            if not isinstance(children, dict) or not children or not all(
-                    isinstance(step, dict) and set(step) == {"path", "sha256"} for step in children.values()):
-                raise ValueError("artifact children must map child trees to their saved STEP path and sha256")
-            normalized["children"] = {_digest(child, "child tree"): {"path": _path(step["path"], "child path"),
-                                                                     "sha256": _digest(step["sha256"], "sha256")}
-                                      for child, step in sorted(children.items())}
-        return normalized
+        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "out": _path(request["out"], "out"),
+                "names": request["names"]}
     if kind == "verify" and set(request) == {"kind", "tree", "document", "sha256", "producer"}:
         producer = request["producer"]
         return {"kind": kind, "tree": _digest(request["tree"], "tree"),
@@ -93,8 +83,7 @@ def normalize_request(request):
                 "producer": None if producer is None else _producer(producer)}
     if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
         raise ValueError("artifact request must be producer; display with exactly tree, cids and producer; "
-                         "export with tree, out, names and its children's files; or verify with tree, document, "
-                         "sha256 and producer")
+                         "export with tree, out and names; or verify with tree, document, sha256 and producer")
     cids = request["cids"]
     if not isinstance(cids, (list, tuple)) or not cids:
         raise ValueError("artifact cids must be a nonempty list")
@@ -168,8 +157,7 @@ def execute(request, *, keep_going=None):
         from cadgen.store import exports
 
         if request["kind"] == "export":
-            return exports.export_step(request["tree"], Path(request["out"]), names=request["names"],
-                                       children=request.get("children"))
+            return exports.export_step(request["tree"], Path(request["out"]), names=request["names"])
         return exports.verify_document(request["tree"], Path(request["document"]), request["sha256"],
                                        producer=request["producer"])
     return parts.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)

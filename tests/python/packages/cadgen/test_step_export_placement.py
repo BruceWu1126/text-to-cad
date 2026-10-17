@@ -134,16 +134,6 @@ class NonAsciiNamesTests(unittest.TestCase):
             self.assertIn(b"'plain'", data)
             self.assertIn(b"'it''s'", data)
 
-    def test_the_splice_spells_names_as_the_writer_does(self):
-        from cadgen.step_export import spell_name
-
-        self.assertEqual(spell_name("plain"), b"plain")
-        self.assertEqual(spell_name("Bügel_ä"), b"B\\X2\\00FC\\X0\\gel_\\X2\\00E4\\X0\\")
-        self.assertEqual(spell_name("日本🔩x"), b"\\X2\\65E5672C\\X0\\\\X4\\0001F529\\X0\\x")
-        self.assertEqual(spell_name("post (6')"), b"post (6\\X\\27)")
-        with self.assertRaises(ValueError):
-            spell_name("back\\slash")
-
     def test_an_ascii_file_is_written_as_occt_writes_it(self):
         from unittest import mock
 

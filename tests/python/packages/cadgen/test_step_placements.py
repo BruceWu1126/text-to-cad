@@ -113,7 +113,7 @@ class ReadablePlacementTest(unittest.TestCase):
 
 class StatedRealTest(unittest.TestCase):
     """``step_reals.stated_real`` is what the reader returns for what the writer printed
-    (``written_text``, which the splice spells every translation with)."""
+    (``written_text``)."""
 
     def test_emulation_matches_the_writer_and_reader(self):
         import build123d as bd

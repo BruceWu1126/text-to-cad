@@ -14,14 +14,11 @@ from typing import Any, Mapping
 
 
 def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, names: bool = True,
-              namer: Any = None, materials: object = None,
-              children: Mapping[str, Any] | None = None) -> tuple[str, dict[str, Any], dict[str, Any], str]:
+              namer: Any = None, materials: object = None) -> tuple[str, dict[str, Any], dict[str, Any], str]:
     """Save ``shape`` to ``path`` as a model's build saves its STEP
     (``_internal/generation.py``): its result tree published
     (``store.build.build_tree_from_compound``), the STEP exported from that tree in this
-    process (``store.exports.export_step``; ``names`` False writes it plain, and
-    ``children``, each linked child's tree mapped to its saved file as a
-    ``_splice_step.ChildStep``, lets an eligible parent be spliced from those), its bytes
+    process (``store.exports.export_step``; ``names`` False writes it plain), its bytes
     mapped to the tree pending their verify, then the verify
     (``store.exports.verify_document``). Returns ``(tree_hash, tree, stats, sha256)``;
     ``stats`` carries the export's answer (``export``) and the verify's (``verify``)."""
@@ -33,9 +30,7 @@ def save_step(shape: Any, path: Path, *, root_name: str, force: bool = False, na
     live: dict[str, Any] = {}
     tree_hash, tree, stats = build_tree_from_compound(shape, root_name=root_name, force=force, namer=namer,
                                                      materials=materials, live=live)
-    export = export_step(tree_hash, Path(path), names=names, shapes=live,
-                         children=None if children is None else {
-                             child: {"path": str(step.path), "sha256": step.step_hash} for child, step in children.items()})
+    export = export_step(tree_hash, Path(path), names=names, shapes=live)
     try:
         producer = producer_identity()
     except ValueError:

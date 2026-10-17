@@ -51,7 +51,7 @@ One word per concept; the code uses these words and no others.
 | **construction key** | what made a component: the kernel memo's key for the construction whose result it is -- the operation, its parameters by value and the keys of its inputs, restated stably with cadgen's version (`kernel_memo.construction_key`, README law 18). A component no construction of a run made (a child's decoded result, a file read) has none and goes by its content hash (§2) |
 | **lineage** | a component's account of its elements: the feature that made the body and, per face, edge and vertex, its **name** -- `f:dial.extrude1.3`, the third face the feature made -- and the feature that last modified it (§2); an object the component's tree entry names |
 | **token** | half of a ref, opaque: an occurrence's `o:` (hashed from its parent's token, its name and its rounded placement; an ordinal only tells identical siblings apart). An element no construction names -- every element of a file read -- goes by its **geometric token**, `f:`/`e:`/`v:` and twelve hex characters hashed from its geometry within its body: the fallback matcher, measured on demand (§2) |
-| **export** | a model's STEP written from its stored result tree by the build pool (`store/exports.py`): with the names writer -- each part's key and each face's and edge's name in the file -- or plain, without them; spliced from its children's saved files where an all-link parent is eligible (§3, *Exports*) |
+| **export** | a model's STEP written from its stored result tree by the build pool (`store/exports.py`): with the names writer -- each part's key and each face's and edge's name in the file -- or plain, without them (§3, *Exports*) |
 | **verify** | a parse of an exported file compared with the tree it was written from, by the build pool (`store/exports.py`): every occurrence by token, every part's faces and edges named and placed within the display tolerance, drawn in the same colours; a file that verifies maps to that tree, one that does not to its own content (§3, *Exports*) |
 | **preview revision** | what a build announces the moment its result exists (§9b): its result tree -- the tree its STEP is then written from -- the part key of every component in it and its annotations (the articulation, finishes and keyframes the sidecar will carry, resolved against that tree), artifact-side objects a viewer draws labelled as a preview until the saved file replaces them in place, every part kept |
 | **provenance** | where a build's features ran: the run's trace, kept as a code-side entry per model, `index/provenance` (§3) -- each feature's name, operation, file, line and inputs, and the components the run made -- read by `store where` and by nothing on a render path |
@@ -680,9 +680,7 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   kind `export`, §9): the job names the stored tree and a staged path, never a
   script, materializes the tree (`store.materialize`) and writes it with the
   names writer -- or plain, without part keys and element names, so its bytes
-  claim nothing about the store they came from. An all-link parent may instead
-  be spliced from its children's saved files (*Spliced documents*, below);
-  anything ineligible, and a forced build, is exported whole. A component the
+  claim nothing about the store they came from. A component the
   store cannot decode (an eager-only one, above) exists only as the build's
   live shape, so a result holding one is exported in the build's own process
   with that shape, by the same function. The build then publishes the file:
@@ -691,8 +689,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   `index/document` pending their verify (`verified: false`, and `plain` for a
   file written plain), the record's output entry filled (`{sha256, writer,
   plain?}`, empty until then, which the gate reads as never written), and the
-  `STEP saved` event. `--verbose` relays the job's steps, and says why a parent
-  was not spliced. A model's declared meshes (`@stl`/`@glb`/`@threemf` beside
+  `STEP saved` event. `--verbose` relays the job's steps. A model's declared
+  meshes (`@stl`/`@glb`/`@threemf` beside
   its `@step`) are then cut from the result and keyed on the STEP's bytes as
   the record names them -- the build's own knowledge of the file it just
   wrote, never a door's lookup of it, so they wait on no verify -- and the
@@ -756,44 +754,8 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   writes the names again. Bump `STEP_WRITER_SCHEME` with any change to the
   bytes cadgen writes for the same tree.
 
-  **Spliced documents.** An all-link parent's STEP is almost entirely its
-  children's: OCCT writes the root's product tree, then every child's products
-  and geometry exactly as the child's own save emitted them. The export job
-  therefore writes such a parent from those files instead of exporting its
-  whole document (`store/_splice_step.py`). It generates the parent's own
-  records, OCCT's layout record for record: the header the children share,
-  renamed for the file; the root and group products; one instance block per
-  link. It then copies each child's DATA section verbatim, with its entity ids
-  under a fixed-width prefix and its literals untouched. NAUO instance ids run
-  1..N in file order. A translated link rewrites its leaf placements' points to
-  the text the writer prints for the parent's leaf translations, once the
-  emulation reproduces each child's own text.
-
-  It splices only when all of this holds, and exports otherwise:
-  - no geometry of its own;
-  - uncoloured pure-translation links;
-  - each child linked once (OCCT shares a repeated child, a splice would copy
-    it);
-  - every child's file still has the bytes its record pins;
-  - one writer and kernel wrote every child, in the same units;
-  - names without a backslash or a control character, which take the
-    writer's own escapes;
-  - ids below 10^9;
-  - OCCT's layout is recognised at every record the splice reads.
-
-  A forced build, and a plain export, exports. The build's own process
-  assembles no document for its STEP: the export job does, and only for a
-  parent it cannot splice.
-
-  The spliced file's cold compile is the exported file's, and it is verified
-  like any export. Its bytes differ from OCCT's:
-  - ids are numbered differently;
-  - geometry that two children share is written once per child;
-  - the root context's uncertainty is the first child's.
-
-  Those bytes are a function of the children's saved bytes, which their
-  records pin: a child kept from an earlier writer is spliced as saved, which
-  is a valid document of the same tree.
+  The build's own process assembles no document for its STEP: the export
+  job does, from the stored tree, after the preview is published.
 
   Finishes that STEP does not carry persist in the sidecar's named
   `appearance.materials` library and `appearance.assignments` map, keyed by the
@@ -1355,8 +1317,7 @@ Each with the failure it prevents.
   canonicalizes what OCCT emitted: NAUO instance ids, presentation-style
   order, and the sign of zero — `-0.` is rewritten `0.`, because which IEEE
   zero a coordinate lands on follows the operation path that produced it, not
-  the geometry. A spliced STEP (§3) is canonical by construction: its children
-  are, it numbers NAUO instances 1..N, adds no styles and prints no `-0.`.
+  the geometry.
   Prevents: one model writing two documents, so the packages and index
   entries keyed by the other spelling's bytes are orphaned.
 - **Names a reader reads.** OCCT's STEP reader ends a string at an escaped quote
@@ -1364,16 +1325,14 @@ Each with the failure it prevents.
   `x('',y)` then lost its product or came back renamed, in every OCCT-based
   reader, and the file failed verify. The writer spells every quote in
   such a literal as Part 21's `\X\27` instead, which readers decode to the
-  same name (`step_export.respell_misread_quotes`, which the splice applies
-  to the names it writes). OCCT also writes a non-ASCII name as its UTF-8 read
+  same name (`step_export.respell_misread_quotes`). OCCT also writes a non-ASCII name as its UTF-8 read
   as Latin-1 and encoded again, trimming any byte its C library takes for a
   space from either end, so `Bügel_ä` came back `BÃ¼gel_Ã¤` and `à` lost a
   byte, and both failed verify. A non-ASCII name therefore reaches OCCT in
   ASCII, each run of non-ASCII characters as a Part 21 `\X2\` (basic plane)
   or `\X4\` directive (`step_export.ascii_name`); the name pass restores the
-  single backslashes OCCT doubles, the splice spells names the same way
-  (`step_export.spell_name`), and every reader decodes the directives to the
-  same name. A written document is ASCII. Every other literal keeps OCCT's
+  single backslashes OCCT doubles, and every reader decodes the directives to
+  the same name. A written document is ASCII. Every other literal keeps OCCT's
   spelling, and a file without such a name is never read again
   (`STEP_WRITER_SCHEME` 3). Where a STEP gave a product or a usage no name,
   OCCT writes its label's address instead (`0:1:1:2`, `=>[0:1:1:2]`; a

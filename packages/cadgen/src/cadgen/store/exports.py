@@ -70,17 +70,14 @@ class _Spans:
         pass
 
 
-def export_step(tree_hash: str, out: Path, *, names: bool = True, shapes: Mapping[str, Any] | None = None,
-                children: Mapping[str, Mapping[str, str]] | None = None) -> dict[str, Any]:
+def export_step(tree_hash: str, out: Path, *, names: bool = True,
+                shapes: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Write the stored tree ``tree_hash`` to ``out`` and return the file's ``sha256``, the
-    producer whose part keys it carries (``producer``, None when written plain), whether it
-    was spliced (``spliced``, and ``unspliced``: why not, when ``children`` were offered) and
-    the writer's ``spans`` and ``warnings``. ``names`` False writes it plain: no part key and
-    no element name. ``shapes`` gives the build's own live shapes by cid for components the
+    producer whose part keys it carries (``producer``, None when written plain) and the
+    writer's ``spans`` and ``warnings``. ``names`` False writes it plain: no part key and no
+    element name. ``shapes`` gives the build's own live shapes by cid for components the
     store cannot decode (an eager-only component's), which only the build's own process
-    holds (STORE.md §3). ``children``, each linked child's tree mapped to its saved STEP
-    (``{"path", "sha256"}``), lets an all-link parent be spliced from those files
-    (``store/_splice_step.py``) where it is eligible."""
+    holds (STORE.md §3)."""
     from cadgen.store.parts import producer_identity
     from cadgen.store.trees import capture_tree
 
@@ -95,22 +92,6 @@ def export_step(tree_hash: str, out: Path, *, names: bool = True, shapes: Mappin
             # A part key names its producer: a runtime that cannot name its own writes
             # the file plain, as a named export never fails where a plain one succeeds.
             names = False
-    unspliced = None
-    if children:
-        from cadgen.store._splice_step import ChildStep, Ineligible, splice_step
-        from cadgen.store.trees import get_tree
-
-        try:
-            with spans.timed(f"splice STEP {out.name}"):
-                tree = get_tree(tree_hash) or {}
-                digest = splice_step(out=out, root_name=str(tree.get("label") or ""), tree=tree,
-                                     descriptor=capture_tree(tree_hash, retain_payloads=False)[0],
-                                     children={child: ChildStep(Path(step["path"]), str(step["sha256"]))
-                                               for child, step in children.items()})
-            return {"sha256": digest, "producer": producer, "spliced": True, "spans": spans.rows,
-                    "warnings": spans.warnings}
-        except Ineligible as reason:
-            unspliced = str(reason)
     from cadgen.step_export import export_build123d_step_file
     from cadgen.store.materialize import materialize_descriptor
 
@@ -122,11 +103,7 @@ def export_step(tree_hash: str, out: Path, *, names: bool = True, shapes: Mappin
         document = materialize_descriptor(descriptor, captured_objects=payloads, shapes=shapes, placed=placed)
     namer = _namer(descriptor, payloads, placed, producer) if names else None
     digest = export_build123d_step_file(document, out, logger=spans, names=namer)
-    answer = {"sha256": digest, "producer": producer, "spliced": False, "spans": spans.rows,
-              "warnings": spans.warnings}
-    if unspliced is not None:
-        answer["unspliced"] = unspliced
-    return answer
+    return {"sha256": digest, "producer": producer, "spans": spans.rows, "warnings": spans.warnings}
 
 
 def _namer(descriptor: Mapping[str, Any], payloads: Mapping[str, bytes], placed: Mapping[int, str],

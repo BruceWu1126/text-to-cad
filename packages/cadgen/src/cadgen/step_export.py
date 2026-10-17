@@ -1122,16 +1122,6 @@ def ascii_name(name: str) -> str:
     return "".join(piece if index % 2 == 0 else unicode_directives(piece) for index, piece in enumerate(pieces))
 
 
-def spell_name(name: str) -> bytes:
-    """The body of the literal cadgen's writer gives a product or occurrence ``name``: its
-    quotes doubled, its non-ASCII characters as Part 21 directives and a quote OCCT's
-    reader would misread as \\X\\27. A backslash or a control character takes OCCT's own
-    escapes, which this does not spell (ValueError)."""
-    if "\\" in name or any(ord(char) < 0x20 or ord(char) == 0x7F for char in name):
-        raise ValueError(f"the name {name!r} needs the writer's escape directives")
-    return respell_misread_quotes(ascii_name(name).encode("ascii").replace(b"'", b"''"))
-
-
 # The records that carry the names cadgen writes: products and their occurrences.
 _NAMED_RECORDS = (b" = PRODUCT(", b" = NEXT_ASSEMBLY_USAGE_OCCURRENCE(")
 
@@ -1390,7 +1380,7 @@ def write_xcaf_doc_step_file(
 #: output entry, STORE.md §3): a file another version wrote is written again. Bump it
 #: with any change to the bytes cadgen writes for the same tree: XCAF construction, the
 #: header, a canonicalization pass or a name. 3: non-ASCII names are written as Part 21
-#: directives (``spell_name``). 4: a file carries its parts' keys and its elements' names
+#: directives (``ascii_name``). 4: a file carries its parts' keys and its elements' names
 #: (``step_names``), unless written plain.
 STEP_WRITER_SCHEME = "cadgen-step-writer-4"
 
