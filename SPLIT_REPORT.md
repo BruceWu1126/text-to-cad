@@ -6,7 +6,7 @@ Worktree: `/Users/jakefitzgerald/.codex/worktrees/ui-redesign-split/text-to-cad`
 
 Base: `24573128ceaab564f497d7c12f995c41784c9539` (`origin/main`, fetched before branching). Completed source: `d92e3d8830629999e60cc34d79ebf612b3b90ab2` (`claude/568-ui-layout`). This split treated the source worktree as read-only. Final source UI and review fixes were synchronized before validation. No models, environment directories, generated runtime assets or release versions are committed.
 
-Implementation commit: `8b4ed42f12ec89d7a9a6c35361b1f07acab6bc91`. The original split report was committed separately and the initial `claude/ui-redesign` branch was pushed at `0e3f7ef6122320f97e8e582286673d13aa1a7883`. This is now the canonical working branch. No PR or merge is planned until the user's UI/UX test; no push to main or the engine PR branch is part of this work.
+Implementation commit: `8b4ed42f12ec89d7a9a6c35361b1f07acab6bc91`. The original split report was committed separately and the initial `claude/ui-redesign` branch was pushed at `0e3f7ef6122320f97e8e582286673d13aa1a7883`. This is now the canonical working branch, open as a pull request against main: https://github.com/earthtojake/text-to-cad/pull/643. Merging it is the user's call; no push to main or the engine PR branch is part of this work.
 
 ## Scope and classification
 
@@ -199,7 +199,7 @@ Follow-up validation:
 - `npm run build:packages` and the full regular `scripts/bundle/bundle.sh`: passed; viewer, MCP, browser, Node and native outputs rebuilt.
 - Final policy suite: 209 tests, 1 existing skip, zero failures/errors. This report is registered in the existing root-document CI routing rule.
 
-No follow-up commit or push has been made. PR and merge remain on hold for the user's UI/UX test.
+
 
 ## Follow-up: Display settings popover
 
@@ -224,4 +224,23 @@ The heading-button revision passed all 32 focused display/settings, shell and ro
 component tests, UI typecheck, the full runtime bundle and `git diff --check`. Live verification
 confirmed that the top-right button opens the selected mode, both pages remain 232px wide,
 and Back returns focus to the heading button. The viewer is running on port 49696.
-PR and merge remain on hold for the user's UI/UX test.
+
+## Follow-up: Render Studio, sidebar tiles and phone layout
+
+Commit `3cf1fc79a`: Preview becomes the Render Studio (Render only, fullscreen, its own pose and
+routine from the sidebar's Position and Animation tiles, Studio settings and Exit studio at the
+top-right, a cover that lifts once the progressive studio frame has converged); Render leaves
+Display (the snapshot CLI renders with `--render`; the live `setRenderMode` command is removed);
+the file sidebar is a toolbar of section tiles, one open section at a time, each sized on its
+own; on phones the tiles lead the touch strip; every slider is shadcn's stock Slider; the
+Animation tool, playbar and preview row are removed.
+
+Its tests and docs followed in five commits: a fix so each sidebar section's size is kept (the
+layout record dropped `sidebar:<id>` keys, so every resize snapped back), removal of the trees'
+find-field mode, the unit and browser suites rewritten for the tiles, the phone strip and the
+Studio (tests of removed behaviour deleted; new cases for `touchStripFit`'s sections group, the
+Studio cover waiting for `pictureProgress` and per-section sizes), and the UI docs.
+
+Validation on this branch: `packages/ui` vitest 337/337 (was 292/337), node 751/751, browser
+62/62 (was 29/62); `packages/core`, `apps/web`, `apps/mcp`, UI typecheck, `check:boundaries` and
+`test-global.sh` pass. The PR is https://github.com/earthtojake/text-to-cad/pull/643.
