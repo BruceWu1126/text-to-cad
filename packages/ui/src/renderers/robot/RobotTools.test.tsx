@@ -102,8 +102,8 @@ async function openRobot({ phone = false } = {}) {
   }
   render(<Pane />);
   const pane = screen.getByTestId('one');
-  // Its Links are in the file sidebar once the robot has loaded; a phone has no sidebar, and the
-  // strip comes with the robot.
+  // Its Links are in the file sidebar once the robot has loaded; on a phone the sidebar's tiles
+  // lead the strip, which comes with the robot.
   await waitFor(() => expect(phone ? within(pane).queryByRole('group', { name: 'Interaction tools' }) : pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull());
   const tools = () => within(pane).getByRole('group', { name: 'Interaction tools' });
   const robot = {
@@ -188,24 +188,23 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   await waitFor(() => expect(document.querySelector('[data-display-settings]')).toBeNull());
   expect(robot.toolNames()).toEqual(['Select:true']);
 
-  // A pose off its default stays in the section when the filter puts the knobs away; its heading is
-  // its name and its Pose menu, which says the joints were set by hand.
-  const heading = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Position controls"] [data-sidebar-head]')!;
+  // A pose off its default stays in the section when the filter puts the knobs away; its Pose row
+  // says the joints were set by hand.
   robot.type('shoulder', '25');
   await robot.tick('links', 'position');
   expect([robot.filter(), robot.knobs()]).toEqual(['Selection filter: Links', 0]);
   expect(robot.jointField('shoulder').value).toBe('25°');
-  expect([within(heading()).getByRole('heading').textContent, heading().querySelector('[data-pose-menu]')!.getAttribute('aria-label')]).toEqual(['Position', 'Pose: Custom']);
+  expect(robot.position().getByRole('button', { name: /^Pose: / }).getAttribute('aria-label')).toBe('Pose: Custom');
   // Select is the only tool: pressing it again leaves it the tool, and its filter as it was.
   robot.open('Select');
   expect([robot.toolNames(), robot.filter(), robot.knobs()]).toEqual([['Select:true'], 'Selection filter: Links', 0]);
   robot.client.dispose();
 });
 
-it('a robot is a 3D view: Display and Preview end its strip', async () => {
+it('a robot is a 3D view: Display and the Studio end its strip', async () => {
   const robot = await openRobot();
   const actions = within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector<HTMLElement>('[data-view-controls]')!;
-  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Preview']);
+  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Studio']);
   robot.client.dispose();
 });
 
@@ -230,27 +229,42 @@ it('robot Links and Position are the file sidebar\'s whatever Select picks, a Po
   robot.client.dispose();
 });
 
-it('robot Links is on screen whatever Select picks, with no X to close it, folding at a press on its name', async () => {
+it('robot Links and Position are the file sidebar\'s tiles whatever Select picks: a tile opens its section alone, its X or the tile closes it, and it never folds', async () => {
   const robot = await openRobot();
+  const tiles = () => within(within(robot.pane).getByRole('group', { name: 'File sidebar' })).getAllByRole('button');
+  const pressed = () => tiles().filter(tile => tile.getAttribute('aria-pressed') === 'true').map(tile => tile.getAttribute('aria-label'));
   const links = () => robot.pane.querySelector<HTMLElement>('[data-tool-panel][aria-label="Links"]')!;
-  expect(within(links()).queryByRole('button', { name: /^Close/ })).toBeNull();
-  expect([robot.sidebar(), robot.toolNames()]).toEqual([['Links', 'Position controls'], ['Select:true']]);
+  expect([tiles().map(tile => tile.getAttribute('aria-label')), pressed(), robot.toolNames()]).toEqual([['Links', 'Position'], [], ['Select:true']]);
   await robot.tick('links');
   expect([robot.filter(), robot.sidebar()]).toEqual(['Selection filter: Position', ['Links', 'Position controls']]);
-  expect(robot.pane.querySelector('[aria-label="Robot links"] li')).not.toBeNull();
-  fireEvent.click(within(links()).getByRole('button', { name: 'Links' }));
-  expect(links().hasAttribute('data-collapsed')).toBe(true);
-  fireEvent.click(within(links()).getByRole('button', { name: 'Links' }));
-  expect(links().hasAttribute('data-collapsed')).toBe(false);
+  fireEvent.click(tiles()[0]);
+  expect([pressed(), links().hasAttribute('data-sidebar-closed'), robot.pane.querySelector('aside[data-cad-file-sidebar]')!.hasAttribute('data-open')]).toEqual([['Links'], false, true]);
+  expect(within(links()).queryByRole('button', { name: /^(?:Collapse|Expand) links$/ })).toBeNull();
+  // One section at a time: Position's tile takes Links' place.
+  fireEvent.click(tiles()[1]);
+  expect([pressed(), links().hasAttribute('data-sidebar-closed')]).toEqual([['Position'], true]);
+  fireEvent.click(tiles()[0]);
+  fireEvent.click(within(links()).getByRole('button', { name: 'Close links' }));
+  expect([pressed(), robot.pane.querySelector('aside[data-cad-file-sidebar]')!.hasAttribute('data-open')]).toEqual([[], false]);
   robot.client.dispose();
 });
 
-it('on a phone a robot has no file sidebar, and no Links tool', async () => {
+it('on a phone a robot\'s sidebar tiles lead the strip, ruled off from Select, and open the panel under it', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
     { x: 0, y: 0, left: 0, top: 0, right: 390, bottom: 844, width: 390, height: 844, toJSON: noop } as DOMRect);
   const robot = await openRobot({ phone: true });
   expect(robot.pane.querySelector('[data-viewer-layout]')!.getAttribute('data-viewer-layout')).toBe('mobile');
-  expect([robot.pane.querySelector('aside[data-cad-file-sidebar]'), robot.pane.querySelector('button[aria-label="Links"]')]).toEqual([null, null]);
+  const strip = within(robot.pane).getByRole('group', { name: 'Interaction tools' });
+  // No toolbar of the sidebar's own: its tiles are the strip's first group, then a rule, then Select.
+  expect(robot.pane.querySelectorAll('[data-file-sidebar-tools]')).toHaveLength(1);
+  const group = strip.querySelector<HTMLElement>('[data-file-sidebar-tools]')!;
+  expect([within(group).getAllByRole('button').map(tile => tile.getAttribute('aria-label')), group.nextElementSibling!.hasAttribute('data-strip-rule')])
+    .toEqual([['Links', 'Position'], true]);
+  fireEvent.click(within(group).getByRole('button', { name: 'Links' }));
+  await waitFor(() => expect(robot.pane.querySelector('aside[data-cad-file-sidebar]')!.hasAttribute('data-open')).toBe(true));
+  // A phone's panel: its own width, and no grip.
+  const aside = robot.pane.querySelector<HTMLElement>('aside[data-cad-file-sidebar]')!;
+  expect([aside.style.width, aside.querySelector('[data-file-sidebar-corner]')]).toEqual(['256px', null]);
   robot.client.dispose();
 });
 
@@ -280,16 +294,16 @@ it('a new revision of the robot keeps its pose while its controls and named pose
 });
 
 
-it('preview draws the opening pose and leaving it restores the tools pose without resetting its values', async () => {
+it('the Studio draws the opening pose and leaving it restores the tools pose without resetting its values', async () => {
   const robot = await openRobot();
   const matrix = () => Array.from(picks.latest!.scene.linkFrames().get('upper_arm'));
   const opening = matrix();
   robot.type('shoulder', '30');
   const posed = matrix();
   expect(posed).not.toEqual(opening);
-  await userEvent.setup().click(robot.tool('Preview'));
+  await userEvent.setup().click(robot.tool('Studio'));
   await waitFor(() => expect(matrix()).toEqual(opening));
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Exit preview', exact: true }));
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Exit studio', exact: true }));
   await waitFor(() => expect(matrix()).toEqual(posed));
   expect(robot.jointField('shoulder').value).toBe('30°');
   robot.client.dispose();

@@ -23,16 +23,23 @@ const render = (controls: React.ReactElement) => mount(<FileSidebar layout={{ pa
 const poseLabel = () => screen.getByRole('button', { name: /^Pose: / }).getAttribute('aria-label');
 const field = (name: string, unit: string) => screen.getByRole('textbox', { name: `${name} value in ${unit}` }) as HTMLInputElement;
 
-it('lists the named pose on a labelled row, then a slider per joint a person can drive: no sections, and no Reset of its own', () => {
-  render(<PositionControls pose={createPoseStore(description)}/>);
+it('opens on the pose row, full width over a slider per joint a person can drive, and Reset in the section\'s heading', () => {
+  const pose = createPoseStore(description);
+  render(<PositionControls pose={pose}/>);
   // One section's rows: the Position section around them is the panel's.
   expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Position']);
   expect(poseLabel()).toBe('Pose: Default');
-  expect(document.querySelector('[data-sidebar-head] [data-pose-menu]')).not.toBeNull();
+  // The pose is the body's first row, not the heading's.
+  expect([document.querySelector('[data-sidebar-head] [data-pose-menu]'), document.querySelector('[data-tool-panel-body] [data-pose-row] [data-pose-menu]') !== null]).toEqual([null, true]);
   expect([field('shoulder', 'deg').value, field('lift', 'm').value]).toEqual(['0°', '0 m']);
   expect(screen.queryByRole('textbox', { name: /mount|follower/ })).toBeNull();
-  // Reset is the Position panel heading's (RobotRenderer), not a row here.
-  expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+  // Reset is the heading's, idle at the default pose, and takes a moved joint back.
+  const reset = screen.getByRole('button', { name: 'Reset position' });
+  expect([reset.closest('[data-sidebar-head]') !== null, (reset as HTMLButtonElement).disabled]).toEqual([true, true]);
+  act(() => { pose.write(pose.joints[0], 30); });
+  expect([poseLabel(), (reset as HTMLButtonElement).disabled]).toEqual(['Pose: Custom', false]);
+  fireEvent.click(reset);
+  expect([pose.getSnapshot().values, poseLabel()]).toEqual([{ shoulder: 0, lift: 0 }, 'Pose: Default']);
   // Each thumb is named for its joint, as its number field is.
   expect(screen.getAllByRole('slider').map(thumb => thumb.getAttribute('aria-label'))).toEqual(['shoulder', 'lift']);
 });

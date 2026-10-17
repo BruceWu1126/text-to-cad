@@ -38,13 +38,13 @@ function saved(revision: number, { mates = [swing], poses = OPEN, routine = '' }
     ...(routine ? { animationHash: routine } : {}) };
 }
 
-/** The hook over one entry, as StepSurface mounts it; `offered` is whether Position is offered (its `poseAvailable`), at every render. */
-function mount(entry: ReturnType<typeof saved>) {
+/** The hook over one entry, as StepSurface mounts it; `offered` is whether Position is offered (its `poseAvailable`), at every render. `host`: the frame's side (whether the Studio is up). */
+function mount(entry: ReturnType<typeof saved>, host: { previewing(): boolean, onUse(motion: string): void } | null = null) {
   const clock = createAnimationClock();
   const offered: boolean[] = [];
   const hook = renderHook(({ entry }) => {
     const motion = useStepMotion({ entry, fileKey: entry.file, resources: null, meshData: null, meshPartial: false,
-      readStored: () => ({ pose: null }), clipboard: null, reportError: () => {} });
+      readStored: () => ({ pose: null }), clipboard: null, reportError: () => {}, host });
     offered.push(stepPosableDofs(motion.definition).length > 0);
     return motion;
   }, { initialProps: { entry },
@@ -94,11 +94,11 @@ it('a rebuild keeps the named pose chosen while the joints and named poses are t
 });
 
 it('an update that leaves the routine as it was neither stops nor rewinds it, a changed routine is compiled again, at rest', async () => {
-  const { result, rerender } = mount(saved(1, { routine: 'swing-1' }));
+  // In the Studio: its routine plays over the model as it opens, and the tools view's pose stays.
+  const { result, rerender } = mount(saved(1, { routine: 'swing-1' }), { previewing: () => true, onUse() {} });
   await loaded(result, 1);
   await waitFor(() => expect(result.current.animationControls.clips).toHaveLength(1));
   act(() => result.current.onParameterChange('swing', 30));
-  // A routine plays in preview, over the model as it opens: the tools view's pose stays.
   act(() => result.current.onPlayToggle());
   expect([result.current.animationState.playing, result.current.parameterValues]).toEqual([true, { swing: 30 }]);
 

@@ -25,7 +25,7 @@ const root = { id: '__step_model__', nodeType: 'assembly', displayName: 'Documen
 const source = { list: async () => [{ path: '/models/part.step', name: 'part.step', kind: 'file' }],
   search: async () => ({ paths: ['/models/part.step'], truncated: false }) };
 
-// `sidebar`: the tree in the file sidebar, as it ships, where its heading has the Find button.
+// `sidebar`: the tree in the file sidebar, as it ships, headed by its search box.
 function Trees({ expanded = [] as string[], sidebar = false }) {
   const [selected, setSelected] = useState<string[]>([]);
   const tree = <ModelingTree active disabled={false} stepRoot={root}
@@ -79,7 +79,6 @@ it('model search hits keep the tree\'s row and its inset', async () => {
   const model = screen.getByTestId('model');
   const shared = { list: ['px-1'], between: [], box: ['w-full'] };
   // "part 1" ranks the nested Part 1 — inside the still-collapsed Subassembly — above Part 10 and 11.
-  fireEvent.click(within(model).getByRole('button', { name: 'Find in model' }));
   fireEvent.change(within(model).getByRole('textbox', { name: 'Filter model' }), { target: { value: 'part 1' } });
   const results = await within(model).findByRole('list', { name: 'Model search results' });
   const first = within(results).getAllByRole('button', { name: /^Select / })[0];

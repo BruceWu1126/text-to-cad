@@ -68,7 +68,7 @@ function Harness({ spy = {} as Record<string, (...args: any[]) => void>, payload
   };
   const { references, chips } = useRobotReferences({ robot: payload, components, selection: observed, groupNamesByLink, meshPath, resource: { kind: 'workspace-file', path: '/work/arm.urdf' }, onOpenFile });
   return <>
-    {/* In the file sidebar, as it ships: headed "Links", with its Find button. */}
+    {/* In the file sidebar, as it ships: a section its Links tile opens, headed by its search box. */}
     <FileSidebar layout={{ panels: {}, collapsed: {} }} onLayoutChange={() => {}}>
       <LinksSection description={payload} components={components} parts={parts} selection={observed} hiddenPartIds={hiddenPartIds} onVisibilityChange={onVisibilityChange}/>
     </FileSidebar>
@@ -83,18 +83,17 @@ const chipLabels = () => within(screen.getByRole('region', { name: 'Reference de
   .map(chip => chip.getAttribute('aria-label'));
 const rows = () => within(screen.getByRole('list', { name: 'Robot links' })).getAllByRole('button', { name: /^Select / }).map(row => row.getAttribute('aria-label'));
 const filter = () => screen.getByRole('textbox', { name: 'Filter links' });
-// The filter is a find field that takes the Links heading's place once its magnifier is pressed.
-const openFind = () => { fireEvent.click(screen.getByRole('button', { name: 'Find in links' })); return filter(); };
 
 it('draws the kinematic tree collapsed below the first real choice, with each link’s joint beside it', () => {
   render(<Harness/>);
-  // No filter until Find is pressed; then it is the field, focused, in the heading's place.
-  expect(screen.queryByRole('textbox', { name: 'Filter links' })).toBeNull();
-  expect(within(document.querySelector<HTMLElement>('[data-tool-panel-heading]')!).getByRole('heading').textContent).toBe('Links');
-  const find = openFind();
-  expect([find.getAttribute('placeholder'), document.activeElement, document.querySelector('[data-tool-panel-heading]')]).toEqual(['Find…', find, null]);
-  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
-  expect(screen.queryByRole('textbox', { name: 'Filter links' })).toBeNull();
+  // Its tile is named for the section and opens it; its head is the search box, no heading, and the X that closes it.
+  const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Links' });
+  fireEvent.click(tile);
+  expect(tile.getAttribute('aria-pressed')).toBe('true');
+  const head = document.querySelector<HTMLElement>('[data-sidebar-head]')!;
+  expect([head.contains(filter()), filter().getAttribute('placeholder'), head.querySelector('[data-tool-panel-heading]')]).toEqual([true, 'Search…', null]);
+  fireEvent.click(within(head).getByRole('button', { name: 'Close links' }));
+  expect(tile.getAttribute('aria-pressed')).toBe('false');
   // base_footprint is only a frame (no geometry, no mass, base_link fixed to it): it has nothing
   // to select or read back, so it gets no row and base_link leads the tree.
   expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
@@ -204,7 +203,7 @@ it('reads a link’s inertial and geometry back, opens the mesh files it names b
 
 it('filters to a flat ranked list by link, joint or object name without expanding anything', () => {
   render(<Harness/>);
-  fireEvent.change(openFind(), { target: { value: 'wrist' } });
+  fireEvent.change(filter(), { target: { value: 'wrist' } });
   expect(screen.queryByRole('list', { name: 'Robot links' })).toBeNull();
   const results = within(screen.getByRole('list', { name: 'Link search results' }));
   expect(screen.getByText('1 match').getAttribute('role')).toBe('status');
@@ -224,7 +223,7 @@ it('filters to a flat ranked list by link, joint or object name without expandin
   expect(screen.getByText('No link matches “nothing here”')).toBeTruthy();
 
   // Typing never touched the tree's expansion.
-  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
   expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
 });
 
@@ -232,7 +231,7 @@ it('reveals a selected hit with its ancestors expanded when the filter is cleare
   const scrollIntoView = vi.fn();
   Element.prototype.scrollIntoView = scrollIntoView;
   render(<Harness/>);
-  fireEvent.change(openFind(), { target: { value: 'wrist_roll' } });
+  fireEvent.change(filter(), { target: { value: 'wrist_roll' } });
   fireEvent.keyDown(filter(), { key: 'Enter' });
   expect(drawn()).toBe('[["wrist_link"],[]]');
   expect(within(screen.getByRole('region', { name: 'Reference details' })).getByLabelText('Parent joint').textContent).toContain('continuous');
@@ -301,10 +300,10 @@ it('a row that draws something has the Hide/Reveal eye: a link hides its own vis
   fireEvent.click(screen.getByRole('button', { name: 'Reveal wrist_link' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0', 'wrist_link:v1/object/1'], true);
   // A search hit carries the eye too, and a visual's eye is its own.
-  fireEvent.change(openFind(), { target: { value: 'flange' } });
+  fireEvent.change(filter(), { target: { value: 'flange' } });
   fireEvent.click(within(screen.getByRole('list', { name: 'Link search results' })).getByRole('button', { name: 'Reveal flange' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0'], true);
-  fireEvent.click(screen.getByRole('button', { name: 'Close find' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
   // Two visuals selected: a chip each, and one reference, to the link they share.
   fireEvent.click(screen.getByRole('button', { name: 'Expand wrist_link' }));
   fireEvent.click(screen.getByRole('button', { name: 'Select flange' }));

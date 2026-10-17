@@ -23,11 +23,11 @@ function advance(ms = 100) {
   const queued = [...frames.values()]; frames.clear();
   act(() => queued.forEach(frame => frame(performance.now() + ms)));
 }
-// The host's side: which motion each claim named.
-function setup(initialClips: any = clips) {
+// The host's side: which motion each claim named, and whether the Studio is up (`previewing`).
+function setup(initialClips: any = clips, { previewing = false } = {}) {
   const clock = createAnimationClock();
   const used: string[] = [];
-  const host = { onUse: (motion: string) => used.push(motion) };
+  const host = { onUse: (motion: string) => used.push(motion), previewing: () => previewing };
   const hook = renderHook(({ modelClips }) => {
     const [animation, setAnimation] = useState(buildDefaultAnimationState(modelClips));
     const [values, setValues] = useState(definition.defaultParameterValues);
@@ -78,16 +78,23 @@ it('leaving preview keeps the transport preferences too', () => {
   expect(clock.getAnimationClock()).toBe(0);
 });
 
-it.each(['play', 'scrub', 'restart'])("%s plays in preview, over the model as it opens: the tools view's pose and Explode stay", command => {
+const routineCommands = (result: any): Record<string, () => void> => ({
+  play: () => result.current.handleAnimationPlayToggle(), scrub: () => result.current.handleAnimationScrub(1),
+  restart: () => result.current.handleAnimationRestart(),
+});
+
+it.each(['play', 'scrub', 'restart'])("%s in the tools view is a use of the routine: it plays from the model at rest, and the host takes Explode off", command => {
   const { result, used } = setup();
   act(() => result.current.handleApplyPose('open'));
-  act(() => {
-    const actions: Record<string, () => void> = {
-      play: () => result.current.handleAnimationPlayToggle(), scrub: () => result.current.handleAnimationScrub(1),
-      restart: () => result.current.handleAnimationRestart(),
-    };
-    actions[command]();
-  });
+  act(() => routineCommands(result)[command]());
+  expect([result.current.values.hinge, result.current.pose, result.current.animation.enabled]).toEqual([5, '', true]);
+  expect(used).toEqual(['position', 'animation']);
+});
+
+it.each(['play', 'scrub', 'restart'])("%s in the Studio plays over the model as it opens: the tools view's pose and Explode stay", command => {
+  const { result, used } = setup(clips, { previewing: true });
+  act(() => result.current.handleApplyPose('open'));
+  act(() => routineCommands(result)[command]());
   expect([result.current.values.hinge, result.current.pose, result.current.animation.enabled]).toEqual([80, 'open', true]);
   expect(used).toEqual(['position']);
 });
@@ -155,11 +162,11 @@ it.each(['playback', 'position'])('global motion reset clears %s and all pending
   expect(clock.getAnimationClock()).toBe(0);
 });
 
-it('rapid animation → parameters → animation resumes from zero, the parameters kept', () => {
+it('rapid animation → parameters → animation plays again from zero, from the model at rest', () => {
   const { result, clock } = setup();
   act(() => result.current.handleAnimationPlayToggle()); advance();
   act(() => { result.current.handleStepModuleParameterChange('hinge', 45); result.current.handleAnimationPlayToggle(); });
-  expect(result.current.values).toEqual({ hinge: 45, slide: 2 });
+  expect(result.current.values).toEqual({ hinge: 5, slide: 2 });
   expect(result.current.animation.playing).toBe(true); expect(clock.getAnimationClock()).toBe(0);
   advance(500); expect(clock.getAnimationClock()).toBeGreaterThan(0);
 });
@@ -201,11 +208,11 @@ it('every pose write lands at once and asks for no frame: a value, a named pose,
   expect(frames.size).toBe(0);
 });
 
-it('Position used puts the routine at rest, and tells the host to take Explode off', () => {
+it('Position used puts the routine at rest, and each use tells the host to take Explode off', () => {
   const { result, used } = setup();
   act(() => result.current.handleAnimationScrub(2));
   act(() => result.current.handleStepModuleParameterChange('slide', 9));
   expect(result.current.values).toEqual({ hinge: 5, slide: 9 });
   expect(result.current.frame).toBeNull();
-  expect(used).toEqual(['position']);
+  expect(used).toEqual(['animation', 'position']);
 });

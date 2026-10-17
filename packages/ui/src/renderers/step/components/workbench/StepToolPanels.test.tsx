@@ -9,7 +9,6 @@ import { buildPositionSection } from '../../../../../dist/renderers/step/compone
 import FloatingToolBar from '../../../../../dist/renderers/kit/tools/FloatingToolBar.js';
 import ToolPanel from '../../../../../dist/renderers/kit/tools/ToolPanel.js';
 import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
-import { ViewerMobileContext } from '../../../../../dist/file-viewer/responsive.js';
 
 // The STEP renderer's sections in the file sidebar — an assembly's Features, Position — and the
 // panels of its tools in the tool stack (Explode, Clip), each where it is decided, under what holds
@@ -45,19 +44,21 @@ const features = () => document.querySelector<HTMLElement>('section[data-tool-pa
 const sections = () => [...document.querySelectorAll<HTMLElement>('[data-cad-file-sidebar] section[data-tool-panel]')].filter(node => !node.hidden).map(node => node.getAttribute('aria-label'));
 
 /** The layout a host keeps, applying what the stack writes back. */
-function useLayout(initial: any = { panels: {}, collapsed: {}, closed: {} }) {
+function useLayout(initial: any = { panels: {}, collapsed: {} }) {
   const [layout, setLayout] = useState<any>(initial);
   return [layout, (patch: any) => setLayout((current: any) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }))] as const;
 }
-function Features({ mode = 'all', initialLayout = undefined as any, mobile = false }) {
-  const [layout, change] = useLayout(initialLayout);
+// `mobile`: a phone's sidebar, whose tiles the strip draws (`onTiles`), its panel alone here.
+function Features({ mode = 'all', mobile = false }) {
+  const [layout, change] = useLayout();
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [, setTiles] = useState<any[]>([]);
   // The shell hands the sidebar the viewer's layout (`RendererShell.jsx`).
-  return <ViewerMobileContext.Provider value={mobile}><FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}>
+  return <FileSidebar layout={layout} onLayoutChange={change} onTiles={mobile ? setTiles : null}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
-  </FileSidebar></ViewerMobileContext.Provider>;
+  </FileSidebar>;
 }
 
 it("the geometry Select picks shapes the tree: Parts, Faces or Edges alone every assembly open, locked; all of it the person's own tree again", () => {
@@ -79,27 +80,31 @@ it("the geometry Select picks shapes the tree: Parts, Faces or Edges alone every
   expect(locks()).toEqual([]);
 });
 
-it("Features is its heading, its tree and the find field its magnifier opens — Select's modes are the strip's — with no X, nothing to fold alone, and no stored choice closes it, on a desktop or a phone", async () => {
+it("Features is its search box over its tree — Select's modes are the strip's — opened by its tile, closed by its X or the tile again, never folding, its search kept while closed", async () => {
   const user = userEvent.setup();
-  render(<Features initialLayout={{ panels: {}, collapsed: {}, closed: { tree: true } }} />);
-  expect(sections()).toEqual(['Features']);
-  expect(within(features()).getByRole('heading').textContent).toBe('Features');
-  // Its heading row: Find and the bar's own toggle, with no X and no fold.
-  const heading = () => features().querySelector('[data-tool-panel-heading]');
-  expect([...heading()!.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Find in model', 'Hide file sidebar']);
-  expect(within(features()).queryByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ })).toBeNull();
-  expect(screen.queryByRole('textbox', { name: 'Filter model' })).toBeNull();
-  // Find opens the field in the heading's place, focused, with only its Close find beside it.
-  await user.click(within(features()).getByRole('button', { name: 'Find in model' }));
-  const search = screen.getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
-  expect([heading(), search.closest('[data-sidebar-head]'), document.activeElement]).toEqual([null, features().querySelector('[data-sidebar-head]'), search]);
-  expect(search.getAttribute('placeholder')).toBe('Find…');
-  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label'))).toEqual(['Close find']);
-  await user.keyboard('ba');
+  render(<Features />);
+  const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Features' });
+  // Open: its tile pressed, the panel out with the section in it. Closing, the panel slides away with it.
+  const open = () => [tile.getAttribute('aria-pressed'), document.querySelector('[data-cad-file-sidebar]')!.hasAttribute('data-open')];
+  // None is open as the file opens; the tile opens it.
+  expect([sections(), open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['Features'], ['false', false], true]);
+  await user.click(tile);
+  expect([open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['true', true], false]);
+  // Its head: the search box and the section's X; no heading, nothing to fold.
+  const head = features().querySelector<HTMLElement>('[data-sidebar-head]')!;
+  const search = within(head).getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
+  expect([head.querySelector('[data-tool-panel-heading]'), search.getAttribute('placeholder')]).toEqual([null, 'Search…']);
+  expect([...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Close features']);
+  expect(within(features()).queryByRole('button', { name: /^(?:Collapse|Expand) features$/ })).toBeNull();
+  await user.type(search, 'ba');
   expect(within(features()).getByRole('status').textContent).toMatch(/match/);
-  cleanup();
-  render(<Features mobile />);
-  expect(sections()).toEqual(['Features']);
+  // Its X closes it; the tile opens it again, as it was left; a second press of the tile closes it.
+  await user.click(within(head).getByRole('button', { name: 'Close features' }));
+  expect(open()).toEqual(['false', false]);
+  await user.click(tile);
+  expect([open(), search.value]).toEqual([['true', true], 'ba']);
+  await user.click(tile);
+  expect(open()).toEqual(['false', false]);
 });
 
 it("Features is as tall as its rows, on desktop and phone alike: no cap, scroller or grip of its own, its rows scrolling with the sidebar", () => {
@@ -123,7 +128,7 @@ function SelectPanels({ assembly = false, references = [] as any[] }) {
 }
 function Panels(props: any) {
   const [layout, change] = useLayout();
-  return <FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}><SelectPanels {...props} /></FileSidebar>;
+  return <FileSidebar layout={layout} onLayoutChange={change}><SelectPanels {...props} /></FileSidebar>;
 }
 
 it("a part file with no joints has no section, picked or not; an assembly its tree", () => {
@@ -254,21 +259,23 @@ function Position() {
     onResetMotion: () => { setActivePose(''); setValues({ hinge: 0 }); },
     onParameterChange: (id: string, value: number) => { setActivePose(''); setValues(current => ({ ...current, [id]: value })); } };
   const position = buildPositionSection({ poseRuntime: runtime })!;
-  return <FileSidebar layout={layout} onLayoutChange={change} onToggle={() => {}}>
+  return <FileSidebar layout={layout} onLayoutChange={change}>
     <ToolPanel id="position" title={position.title} label="Position controls" fit="details">{position.content}</ToolPanel>
   </FileSidebar>;
 }
 
-it("Position's Pose is a menu in its heading — Default, then the named poses, the way back — and every joint's slider is named", async () => {
+it("Position's Pose is the body's first row — Default, then the named poses — its Reset the heading's, and every joint's slider is named", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   render(<Position />);
   const panel = screen.getByRole('region', { name: 'Position controls' });
   const head = panel.querySelector<HTMLElement>('[data-sidebar-head]')!;
-  const pose = () => within(head).getByRole('button', { name: /^Pose: / });
+  const pose = () => within(panel.querySelector<HTMLElement>('[data-tool-panel-body] [data-pose-row]')!).getByRole('button', { name: /^Pose: / });
+  const reset = () => within(head).getByRole('button', { name: 'Reset position' }) as HTMLButtonElement;
   const value = within(panel).getByLabelText('hinge slider value') as HTMLInputElement;
-  // In the heading, after the name; no row of its own in the body.
-  expect([within(head).getByRole('heading').textContent, pose().getAttribute('aria-label'), pose().hasAttribute('data-pose-menu')])
-    .toEqual(['Position', 'Pose: Default', true]);
+  // The heading: its name, then Reset (idle at Default) and the section's X; the pose a full-width row under it.
+  expect([within(head).getByRole('heading').textContent, [...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))])
+    .toEqual(['Position', ['Reset position', 'Close position']]);
+  expect([pose().getAttribute('aria-label'), pose().hasAttribute('data-pose-menu'), reset().disabled]).toEqual(['Pose: Default', true, true]);
   expect(panel.querySelector('[data-position-header]')).toBeNull();
   expect(within(panel).getAllByRole('slider').map(thumb => thumb.getAttribute('aria-label'))).toEqual(['hinge']);
   const choose = async (name: string) => {
@@ -281,14 +288,13 @@ it("Position's Pose is a menu in its heading — Default, then the named poses, 
     .map(item => [item.textContent, item.getAttribute('aria-checked')])).toEqual([['Default', 'true'], ['open', 'false']]);
   await user.keyboard('{Escape}');
   await choose('open');
-  expect([value.value, pose().getAttribute('aria-label')]).toEqual(['90.0°', 'Pose: open']);
+  expect([value.value, pose().getAttribute('aria-label'), reset().disabled]).toEqual(['90.0°', 'Pose: open', false]);
   await choose('Default');
   expect([value.value, pose().getAttribute('aria-label')]).toEqual(['0.00°', 'Pose: Default']);
-  // A joint set by hand is Custom; Default puts it back.
+  // A joint set by hand is Custom; Reset puts it back.
   await user.clear(value);
   await user.type(value, '25{Enter}');
   expect(pose().getAttribute('aria-label')).toBe('Pose: Custom');
-  await choose('Default');
-  expect([value.value, pose().getAttribute('aria-label')]).toEqual(['0.00°', 'Pose: Default']);
+  await user.click(reset());
+  expect([value.value, pose().getAttribute('aria-label'), reset().disabled]).toEqual(['0.00°', 'Pose: Default', true]);
 });
-
