@@ -1884,9 +1884,8 @@ Frames leave a worker on a descriptor of their own, never fd 1 itself: a job may
 point fd 1 at stderr for a while (a STEP read sends the kernel's diagnostics
 there), and a beat written there would reach the daemon's log, not the
 supervisor, and get a long read killed as hung. A beat no one reads ends the
-worker at once: its supervisor is gone, and its client is already running the
-job again in its own process, as it says (`lost the build service … Running it
-cold now`). A job whose caller
+worker at once: its supervisor is gone, and with it its client's request, which
+failed saying so (`lost the build service …`). A job whose caller
 left is cancelled, not a crash, in the job ledger and in `cadgen daemon
 status` alike, though its worker is killed.
 
@@ -1917,7 +1916,9 @@ between those two steps, or, when an upgrade replaces an earlier version, still
 shutting its pool down with the lock held — and otherwise stands down, touching
 nothing; the winner is by construction alone, so a socket file it finds is dead
 and may be removed. Clients elect one spawner the same way and the rest wait
-for the address. The lock holder creates that address's authkey once via a
+for the address; a spawner whose daemon stood down for a predecessor still
+holding the lock starts it again, until the address answers or its wait ends.
+The lock holder creates that address's authkey once via a
 linked temp file and republishes its in-memory key if an external cleanup
 replaces the file. This is the one lock cadgen keeps — a singleton for
 the daemon, never a build lock (§7). Prevents: twenty clients starting at
@@ -1936,6 +1937,17 @@ used, and every door says so and names the remedy (a shorter
 `CADGEN_DAEMON_STATE_DIR`). The key stays in the state directory, so a socket
 planted in the short folder could not answer the handshake either. On Windows
 the address is a pipe name, which has no path to outgrow.
+
+**No daemon, no job.** A request no daemon takes fails, naming why
+(`client.DaemonUnavailable`): what a start needs and this machine lacks, found
+before any start (`client.unavailable`: no local IPC family, a socket folder
+another user owns, a state directory this user cannot write), a start that
+failed, a daemon that exited instead of answering, or one that did not answer
+within thirty seconds of its start -- those two name its log. A request the
+daemon lost mid-job -- its worker died, the daemon was killed or stopped
+answering -- fails and says so, naming the log. Nothing runs a job anywhere
+else, and nothing runs it again: a job that ran half an hour and is then
+silently rerun is worse than its failure.
 
 **A client that never answers holds up no one.** Each connection proves the
 authkey, and the daemon proves it back, on a thread of its own
@@ -1976,8 +1988,9 @@ When the daemon's runtime changes, a request carrying the new version is told
 to restart. With nothing running, the old daemon releases its address and lock
 before it answers, so the client's respawn binds at once. During a build, it
 keeps its listener and singleton lock until active jobs and their dependencies
-finish. New top-level requests run cold during that drain — artifact requests,
-which have no cold path, keep asking until the successor binds; dependency
+finish. New top-level requests keep asking during that drain until the successor
+binds, for as long as a request waits on a silent daemon (the client's request
+timeout), and then fail saying so; dependency
 requests -- a pool job a running job waits on, a worker's slot -- remain
 serviceable, so the work under way finishes.
 

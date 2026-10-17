@@ -326,18 +326,19 @@ class DeepStateDirTest(unittest.TestCase):
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": str(short / "d.sock")}))
         self.enterContext(mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("spawned")))
         payload = {"tool": "step-compile", "prog": "cadgen step compile", "argv": ["x.step"], "token": "t"}
-        chunks: list[str] = []
-        self.assertIsNone(client._run_with_retry(payload, on_stream=chunks.append, strict=True))
-        self.assertIn("is not a folder of this user's", "".join(chunks))
-        self.assertIn("CADGEN_DAEMON_STATE_DIR", "".join(chunks))
+        for strict in (True, False):
+            with self.subTest(strict=strict), \
+                    self.assertRaisesRegex(client.DaemonUnavailable, "is not a folder of this user's.*CADGEN_DAEMON_STATE_DIR"):
+                client._run_with_retry(payload, on_stream=lambda text: None, strict=strict)
         import io
         from contextlib import redirect_stderr
 
         err = io.StringIO()
-        with redirect_stderr(err):
-            self.assertIsNone(client._run_with_retry(payload))
+        with redirect_stderr(err), mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}):
+            os.environ.pop("CADGEN_DAEMON_CHILD", None)
+            self.assertEqual(client.run_via_daemon("step-compile", ["x.step"], prog="cadgen step compile"), 1)
+        self.assertIn("cadgen-daemon: ", err.getvalue())
         self.assertIn("CADGEN_DAEMON_STATE_DIR", err.getvalue())
-        self.assertIn("Running this in this process", err.getvalue())
         self.assertIsNone(client.status())
 
     def test_a_daemon_in_a_deep_state_dir_binds_its_short_address_and_serves(self):

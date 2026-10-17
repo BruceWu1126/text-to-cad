@@ -135,9 +135,9 @@ def _heartbeat():
 
     A beat nobody reads ends the worker. The frame channel's reader is the supervisor,
     so it is gone (killed, or crashed), and with it everyone waiting on this job: its
-    client is already running the job again without the daemon, and a body that ran on
-    would only build the same model alongside that rerun. Between jobs, stdin's EOF does
-    the same. What the job leaves behind is swept by pid (``_internal.temp_leftovers``).
+    client's request has failed, saying so, and a body that ran on would build for no
+    one. Between jobs, stdin's EOF does the same. What the job leaves behind is swept by
+    pid (``_internal.temp_leftovers``).
     """
     _PHASE[0] = None
     stop = threading.Event()

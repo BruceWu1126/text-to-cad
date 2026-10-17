@@ -161,8 +161,7 @@ class DaemonTelemetryTest(unittest.TestCase):
             def close(self) -> None:
                 pass
 
-        with mock.patch.object(client, "daemon_supported", return_value=True), \
-                mock.patch.object(client, "_connect", return_value=Channel()):
+        with mock.patch.object(client, "_connect", return_value=Channel()):
             client.hand_over({"snapshots": [{"format": "step", "ok": True, "seconds": 1.5},
                                             {"format": "stl", "ok": False, "seconds": 0.5},
                                             {"format": "docx", "ok": True, "seconds": 1.0},
@@ -188,14 +187,12 @@ class DaemonTelemetryTest(unittest.TestCase):
         spawn.assert_not_called()
         hang = threading.Event()
         self.addCleanup(hang.set)
-        with mock.patch.object(client, "daemon_supported", return_value=True), \
-                mock.patch.object(client, "_connect", side_effect=lambda address: hang.wait(30)):
+        with mock.patch.object(client, "_connect", side_effect=lambda address: hang.wait(30)):
             began = time.monotonic()
             client.hand_over({"snapshots": []})  # one that never answers is given up on
             self.assertLess(time.monotonic() - began, client.HAND_OVER_SECONDS + 1)
         for environment in ({"DO_NOT_TRACK": "1"}, {"CADGEN_DAEMON": "0"}):
             with self.subTest(environment=environment), mock.patch.dict(os.environ, environment), \
-                    mock.patch.object(client, "daemon_supported", return_value=True), \
                     mock.patch.object(client, "_connect") as connect:
                 client.hand_over({"snapshots": []})
             connect.assert_not_called()
@@ -206,8 +203,7 @@ class DaemonTelemetryTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), mock.patch.object(client, "_connect") as connect:
             client.hand_over(counts)  # the daemon turned off: never asked
         connect.assert_not_called()
-        with mock.patch.object(client, "daemon_supported", return_value=True), \
-                mock.patch.object(client, "_connect", side_effect=ConnectionRefusedError):
+        with mock.patch.object(client, "_connect", side_effect=ConnectionRefusedError):
             client.hand_over({"features": ["kinematics"]})  # none running
             client.hand_over({"snapshots": []})  # nothing counted: nothing kept
         self.assertEqual(len(kept.read_text(encoding="utf-8").splitlines()), 2)

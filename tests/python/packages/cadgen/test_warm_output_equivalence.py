@@ -175,8 +175,8 @@ from cadgen.daemon import client as daemon_client  # noqa: E402
 
 
 def _daemon_available() -> bool:
-    """Whether a daemon can be reached at all on this platform."""
-    return daemon_client.daemon_supported()
+    """Whether a daemon can start at all here."""
+    return daemon_client.unavailable() is None
 
 
 class _Daemon:

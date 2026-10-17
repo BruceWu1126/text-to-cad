@@ -418,8 +418,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     try:
         worker = _POOL.acquire(model, dependency=bool(request.get("dependency")), on_start=starting_worker)
     except (pool_mod.WorkerGone, pool_mod.MemoryAdmissionError) as exc:
-        # Failed spawn or memory admission. Return an explicit failure; a cold
-        # retry here would bypass the daemon's aggregate admission policy.
+        # Failed spawn or memory admission: the request fails, saying why.
         _JOBS.waiting(job, None)
         _log(f"{tool}: could not start a worker: {exc}")
         if isinstance(exc, pool_mod.WorkerGone) and pool_mod.installation_gone():
@@ -825,9 +824,9 @@ def serve() -> int:
                         # Keep the old address and singleton lock together while its
                         # jobs finish. Their workers can still submit compile and artifact
                         # dependencies; fresh top-level calls are told to restart until
-                        # the drain completes (ordinary ones run cold, artifact requests
-                        # ask again until the successor binds). Closing the listener here
-                        # deadlocked a long job against its own final artifact request.
+                        # the drain completes (they ask again until the successor binds).
+                        # Closing the listener here deadlocked a long job against its own
+                        # final artifact request.
                         state["draining"] = True
                         _log(f"{why}; finishing {len(active)} job(s) in flight before exiting")
                         with contextlib.suppress(OSError):

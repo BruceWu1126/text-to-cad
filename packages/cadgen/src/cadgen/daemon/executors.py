@@ -204,14 +204,8 @@ def model_event(model: Path | str, state: str, **extra: Any) -> dict:
 
 
 def use_daemon() -> bool:
-    """The daemon executor unless the caller opted out or the platform cannot."""
-    if os.environ.get("CADGEN_DAEMON") == "0":
-        return False
-    try:
-        from cadgen.daemon.client import daemon_supported
-    except ImportError:
-        return False
-    return daemon_supported()
+    """The daemon executor unless the caller opted out."""
+    return os.environ.get("CADGEN_DAEMON") != "0"
 
 
 # --- transient executor -----------------------------------------------------------------
@@ -342,10 +336,8 @@ def _submit_daemon(
 ) -> None:
     """Run the daemon tool ``tool`` with ``argv`` as a job the daemon coalesces by
     ``closure`` (a compile: the document's bytes), and finish ``job`` with its exit;
-    a daemon that cannot take it runs the same tool transiently."""
+    a daemon that cannot take it fails the job, its output saying why."""
     from cadgen.daemon import client
-
-    fallback = [sys.executable, "-P", "-m", f"cadgen.cli.{tool.replace('-', '_')}", *argv]
 
     def run() -> None:
         code = client.run_nested(
@@ -358,11 +350,6 @@ def _submit_daemon(
             on_stream=job._say,
             on_event=emit_event,
         )
-        if code is None:
-            # The daemon could not take the job (spawn failure, unsupported
-            # platform mid-flight): run it transiently rather than fail the caller.
-            _submit_transient(job, store_root, command=fallback)
-            return
         if code != 0:
             emit_event(model_event(job.model, "failed", exit=code))
         job._finish(code)

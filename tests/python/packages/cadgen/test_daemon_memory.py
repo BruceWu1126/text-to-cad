@@ -363,9 +363,7 @@ class DependencyRequest(unittest.TestCase):
         self.assertFalse(child["coalesce"])
 
     def test_run_nested_sets_dependency_without_a_closure(self):
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}), \
-             mock.patch.object(client, "daemon_supported", return_value=True), \
-             mock.patch.object(client, "_request_payload", return_value={}) as payload, \
+        with mock.patch.object(client, "_request_payload", return_value={}) as payload, \
              mock.patch.object(client, "_run_with_retry", return_value=0):
             self.assertEqual(client.run_nested("run", ["b.py"], "/work"), 0)
         self.assertTrue(payload.call_args.kwargs["dependency"])

@@ -163,7 +163,6 @@ class WatchTransport(unittest.TestCase):
 
         channel = Channel({"status": {"jobsCursor": "epoch:2", "jobs": []}})
         with (
-            mock.patch.object(client, "daemon_supported", return_value=True),
             mock.patch.object(client, "_connect", return_value=channel),
             mock.patch.object(client, "_connect_or_spawn", side_effect=AssertionError("spawn")),
             mock.patch.object(client, "compute_version_token", side_effect=AssertionError("source scan")),

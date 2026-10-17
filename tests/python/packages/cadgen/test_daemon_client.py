@@ -85,41 +85,43 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertIn("out of memory", err)
         self.assertIn("`cadgen step compile tmp/noexh/noexh.step --force`", err)
         self.assertIn("NOT retried", err)
-        # The rerun spelling is the platform's, so ask the helper that composes it.
-        # That makes this assertion only "the message carries the rerun"; the
-        # exact text of BOTH spellings is pinned in ColdRerunSpelling below.
-        self.assertIn(client.cold_rerun_command(PAYLOAD), err)
+        # Where the worker's own last words are: the daemon's log, which its stderr goes to.
+        self.assertIn(f"build daemon's log: {client.log_path(client.daemon_address())}", err)
         self.assertNotIn("worker closed the connection", err)
 
-    def test_a_death_the_client_runs_cold_says_so_instead_of_advising_a_cold_run(self):
-        """No exit frame means the daemon itself is gone, and the ordinary
-        non-strict path then runs this job cold in this process. The message
-        used to say "The job was NOT retried. Run it cold ... CADGEN_DAEMON=0"
-        and the run then succeeded at exit 0 — a failure notice above a success,
-        with nothing to tell the reader which one had happened."""
+    def test_a_death_the_daemon_never_follows_up_fails_the_job_and_is_told_once(self):
+        """No exit frame after the death: the daemon itself is gone too. The job fails;
+        the death is the one thing said, never a second notice that the service was lost."""
         outcome, out, err = self._run([
             {"workerDied": {"pid": 4242, "detail": "worker 4242 was killed by SIGKILL (signal 9)",
                             "exitStatus": -9}},
-        ])  # the connection closes without an exit frame: the fallback follows
+        ])  # the connection closes without an exit frame
 
-        self.assertIsNone(outcome, "a closed connection still means run cold")
+        self.assertEqual(outcome, 1)
         self.assertEqual(out, "")
-        self.assertIn("died mid-job", err)
+        self.assertEqual(err.count("died mid-job"), 1, err)
         self.assertIn("killed by SIGKILL (signal 9)", err)
-        self.assertEqual(err.count("Running it cold now"), 1, err)
-        self.assertNotIn("NOT retried", err)
-        self.assertNotIn("CADGEN_DAEMON=0", err)
+        self.assertIn("NOT retried", err)
+        self.assertNotIn("lost the build service", err)
 
-    def test_a_daemon_lost_mid_request_says_the_job_runs_again_cold(self):
-        """The daemon itself killed mid-build: the client reran the whole build in its
-        own process and said nothing, so a rerun from the start read as a slow build."""
+    def test_a_daemon_lost_mid_request_fails_the_job_and_says_so(self):
+        """The daemon itself killed mid-build: the job fails, named, and is never run again
+        somewhere else -- a rerun from the start would read as a slow build."""
         outcome, out, err = self._run([{"stream": "stdout", "data": ""}])  # then the connection closes
 
-        self.assertIsNone(outcome, "the ordinary fallback still runs it cold")
+        self.assertEqual(outcome, 1)
         self.assertEqual(out, "")
         self.assertIn("lost the build service running `cadgen step compile tmp/noexh/noexh.step --force`", err)
         self.assertIn("closed the connection", err)
-        self.assertIn("Running it cold now, in this process", err)
+        self.assertIn("NOT retried", err)
+
+    def test_a_daemon_that_falls_silent_fails_the_job(self):
+        with mock.patch.object(client, "request_timeout", return_value=0.01), \
+                mock.patch.object(client, "_recv_json", return_value=client._TIMED_OUT):
+            outcome, _out, err = self._run([])
+        self.assertEqual(outcome, 1)
+        self.assertIn("stopped responding", err)
+        self.assertIn("NOT retried", err)
 
     def test_ctrl_c_while_waiting_on_the_daemon_is_the_interrupt_a_cold_run_raises(self):
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}), \
@@ -134,18 +136,13 @@ class DeadWorkerMessage(unittest.TestCase):
         text = client.worker_died_message(payload, {"detail": "worker 1 exited with code 139"})
         self.assertIn("`cadgen probe a b.step`", text)
         self.assertIn("exited with code 139", text)
-        if sys.platform != "win32":
-            # The rerun quotes what the shell needs quoted.
-            self.assertIn("CADGEN_DAEMON=0 cadgen probe 'a b.step'", text)
 
-    def test_a_model_script_run_is_named_and_rerun_as_python(self):
+    def test_a_model_script_run_is_named_as_python(self):
         # The decorator's warm handoff: prog `python <name>`, argv `[<path>, *args]`.
         payload = {"tool": "run", "prog": "python box.py", "argv": ["/work/src/box.py", "--force"]}
         text = client.worker_died_message(payload, {"detail": "worker 3 was killed by SIGKILL (signal 9)"})
         self.assertIn("`python box.py --force` died mid-job", text)
         self.assertNotIn("box.py /work/src/box.py", text)
-        if sys.platform != "win32":
-            self.assertIn("CADGEN_DAEMON=0 python /work/src/box.py --force", text)
 
     def test_an_ordinary_stderr_frame_is_still_just_relayed(self):
         outcome, _out, err = self._run([{"stream": "stderr", "data": "hello\n"}, {"exit": 0}])
@@ -233,7 +230,6 @@ class ResidentProcessLifecycle(unittest.TestCase):
     def test_prewarm_replaces_a_daemon_left_by_older_code(self):
         stale, current = _ScriptedChannel([{"restart": True}]), _ScriptedChannel([{"status": {}}])
         with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}), \
-                mock.patch.object(client, "daemon_supported", return_value=True), \
                 mock.patch.object(client, "daemon_address", return_value="test-address"), \
                 mock.patch.object(client, "_connect_or_spawn", side_effect=[stale, current]) as connect:
             import os
@@ -293,6 +289,98 @@ class ResidentProcessLifecycle(unittest.TestCase):
         client._reap_detached(process)
         self.assertTrue(finished.wait(1.0), "the detached process was not handed to its reaper")
         process.wait.assert_called_once_with()
+
+
+class ADaemonThatCannotTakeTheRequest(unittest.TestCase):
+    """Where no daemon takes a request, the request fails, saying why: nothing runs it
+    anywhere else."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="cadgen-daemon-start-")
+        self.addCleanup(tmp.cleanup)
+        self.log = pathlib.Path(tmp.name) / "daemon.log"
+        for patcher in (
+            mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}),
+            mock.patch.object(client, "daemon_address", return_value="test-address"),
+            mock.patch.object(client, "log_path", return_value=self.log),
+            mock.patch.object(client, "_connect", side_effect=FileNotFoundError("no daemon listens there")),
+            mock.patch.object(client, "unavailable", return_value=None),
+            mock.patch.object(client.transport, "spawn_lock", return_value=mock.Mock(acquire=lambda: True)),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        os.environ.pop("CADGEN_DAEMON_CHILD", None)
+
+    def _command(self) -> tuple[int | None, str]:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = client.run_via_daemon("step-build", ["in.step", "out.step"], "/work", prog="cadgen step build")
+        return code, err.getvalue()
+
+    def test_where_none_can_start_the_command_fails_naming_why_and_starts_none(self):
+        with mock.patch.object(client, "unavailable", return_value="no local IPC family here"), \
+                mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("a daemon was started")):
+            code, err = self._command()
+        self.assertEqual(code, 1)
+        self.assertIn("cadgen-daemon: no local IPC family here", err)
+
+    def test_a_start_that_fails_names_why(self):
+        from cadgen.daemon import executors
+
+        with mock.patch.object(executors, "worker_env", return_value={}), \
+                mock.patch.object(client.subprocess, "Popen", side_effect=FileNotFoundError(2, "No such file or directory")):
+            code, err = self._command()
+        self.assertEqual(code, 1)
+        self.assertIn("could not be started", err)
+        self.assertIn("No such file or directory", err)
+
+    def test_a_daemon_that_exits_without_answering_is_named_with_its_log(self):
+        exited = mock.Mock(returncode=1)
+        exited.poll.return_value = 1
+        with mock.patch.object(client, "_spawn_daemon", return_value=exited), \
+                mock.patch.object(client, "_address_held", return_value=False):
+            code, err = self._command()
+        self.assertEqual(code, 1)
+        self.assertIn("exited (status 1) before it answered", err)
+        self.assertIn(str(self.log), err)
+
+    def test_one_that_stood_down_for_a_predecessor_is_started_again_once_it_lets_go(self):
+        stood_down, serving = mock.Mock(returncode=0), mock.Mock()
+        stood_down.poll.return_value = 0
+        serving.poll.return_value = None
+        channel = _ScriptedChannel([])
+        spawned = []
+
+        def spawn(address):
+            spawned.append(address)
+            return stood_down if len(spawned) == 1 else serving
+
+        def connect(address):
+            if len(spawned) < 2:
+                raise FileNotFoundError("no daemon listens there yet")
+            return channel
+
+        with mock.patch.object(client, "_spawn_daemon", side_effect=spawn), \
+                mock.patch.object(client, "_connect", side_effect=connect), \
+                mock.patch.object(client, "_address_held", return_value=True):
+            self.assertIs(client._connect_or_spawn("test-address"), channel)
+        self.assertEqual(spawned, ["test-address", "test-address"])
+
+    def test_a_nested_job_fails_with_the_reason_on_its_own_stream(self):
+        said = []
+        with mock.patch.object(client, "unavailable", return_value="the state directory is not writable"):
+            code = client.run_nested("step-compile", ["doc.step"], "/work", prog="cadgen step compile",
+                                     on_stream=said.append)
+        self.assertEqual(code, 1)
+        self.assertEqual(said, ["cadgen-daemon: the state directory is not writable\n"])
+
+    def test_a_request_waits_out_a_daemon_finishing_its_builds_then_fails_naming_it(self):
+        with mock.patch.object(client, "_connect_or_spawn", side_effect=lambda address: _ScriptedChannel([{"restart": True}])), \
+                mock.patch.object(client, "request_timeout", return_value=0.0):
+            code, err = self._command()
+        self.assertEqual(code, 1)
+        self.assertIn("finishing its builds before it updates", err)
+        self.assertIn("updating while existing builds finish", err)
 
 
 class ServerRelaysTheDeath(unittest.TestCase):
@@ -512,49 +600,6 @@ class DescribeExit(unittest.TestCase):
         kill comes back as the exit CODE, never as a negative signal."""
         self.assertEqual(pool_mod.describe_exit(9), "exited with code 9")
 
-
-class ColdRerunSpelling(unittest.TestCase):
-    """The rerun has to be paste-able in the shell the user is actually in.
-
-    `cold_rerun_command` returns the COMMAND only: the env prefix is
-    shell-specific and this code cannot know the shell. `set X=0 && cmd` works
-    in cmd.exe and, in PowerShell, assigns a variable literally named `X=0`
-    before failing on `&&` -- so the message offers both spellings under a
-    neutral instruction instead of guessing.
-    """
-
-    COMMAND = "cadgen step compile tmp/noexh/noexh.step --force"
-
-    def test_the_command_carries_no_env_prefix_on_either_platform(self):
-        for name in ("posix", "nt"):
-            with self.subTest(os_name=name), mock.patch.object(client.os, "name", name):
-                spelled = client.cold_rerun_command(PAYLOAD)
-                self.assertEqual(self.COMMAND, spelled)
-                self.assertNotIn("CADGEN_DAEMON", spelled)
-
-    def test_posix_keeps_the_one_line_env_prefix(self):
-        with mock.patch.object(client.os, "name", "posix"):
-            self.assertEqual(
-                f"  CADGEN_DAEMON=0 {self.COMMAND}\n",
-                client.cold_rerun_instructions(PAYLOAD),
-            )
-
-    def test_windows_offers_both_shells_under_a_neutral_instruction(self):
-        with mock.patch.object(client.os, "name", "nt"):
-            spelled = client.cold_rerun_instructions(PAYLOAD)
-        self.assertIn("Set CADGEN_DAEMON=0 in the environment", spelled)
-        self.assertIn(f"set CADGEN_DAEMON=0 && {self.COMMAND}", spelled)
-        self.assertIn(f"$env:CADGEN_DAEMON='0'; {self.COMMAND}", spelled)
-        # The bare command stands alone on its own line, so it is paste-able in
-        # a shell neither spelling covers (Git Bash, fish, csh).
-        self.assertIn(f"\n    {self.COMMAND}\n", spelled)
-
-    def test_the_message_carries_the_spelling_for_the_running_platform(self):
-        for name in ("posix", "nt"):
-            with self.subTest(os_name=name), mock.patch.object(client.os, "name", name):
-                message = client.worker_died_message(PAYLOAD, {"detail": "worker 1 exited with code 1"})
-                self.assertIn(client.cold_rerun_instructions(PAYLOAD), message)
-                self.assertIn("was NOT", message)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,10 @@
 """Stdlib-only client for the warm CAD CLI daemon.
 
-The tool launchers' ``CADGEN_DAEMON`` shim imports this module BEFORE any heavy
-import, so it must stay dependency-free and cheap to import. Ordinary CLI paths
-retain their cold fallback. Artifact requests require a matched result and
-report transport failures without replaying the work.
+The front door (``cadgen.cli``) and a model script's top-level call import this module
+BEFORE any heavy import, so it must stay dependency-free and cheap to import. The daemon
+is where every job runs: a build, a compile, a display derivation, an export. A daemon
+that cannot be reached or started is an error that names why (:class:`DaemonUnavailable`),
+never a slower path, and a request the daemon lost is reported, never replayed.
 """
 
 from __future__ import annotations
@@ -27,19 +28,17 @@ from cadgen.daemon import transport
 # wheel install at site-packages.
 CADGEN_DIR = Path(__file__).resolve().parents[1]
 
-SPAWN_WAIT_SECONDS = 30.0  # first daemon start pays the full OCP import
+SPAWN_WAIT_SECONDS = 30.0  # how long a started daemon has to answer at its address
 # A daemon still finishing the jobs it was running when its code changed keeps its address
-# and answers every new request "restart" until they end. A strict request has no cold
-# path, so it asks again this often until the successor takes it.
+# and answers every new request "restart" until they end. A request asks again this often
+# until the successor takes it.
 RESTART_POLL_SECONDS = 0.5
 
-# The daemon handles requests STRICTLY SEQUENTIALLY. A client that connects while
-# the daemon is still finishing someone else's build — including an orphaned one
-# whose client was killed — is accepted by the listen backlog and then simply
-# waits. Without a deadline that wait is unbounded, which is how a warm call ends
-# up hanging for minutes on a model that builds cold in seconds. Bound it: a
-# legitimate large build can be silent for a long time, so the default is
-# generous, but it is finite, so the documented cold fallback actually happens.
+# How long a request waits on a daemon that sends it nothing at all. A job that runs is
+# never silent -- the daemon probes its client every half second meanwhile
+# (``server._watch_client``) -- so this is a daemon that stopped answering, and the request
+# fails rather than hanging. Generous, because a request waiting to be admitted, or for
+# its predecessor's drain, hears nothing meanwhile.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
 # What makes a running daemon stale. The distribution version alone is not enough in a
 # checkout, where an editable install keeps one version across every edit; .py mtimes alone
@@ -51,6 +50,11 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
 _RESTART = object()
 # A frame did not arrive in time, as distinct from the channel closing.
 _TIMED_OUT = object()
+
+
+class DaemonUnavailable(RuntimeError):
+    """No build daemon could take a request. The message names why, and what to do."""
+
 
 # A job runs in its CALLER's environment, never the daemon's. A worker inherits the
 # environment of whichever build spawned the daemon, so a model that read
@@ -121,15 +125,30 @@ def forwarded_env() -> dict[str, str]:
     return env
 
 
-def daemon_supported() -> bool:
-    """Whether this platform can reach a daemon at all.
+def unavailable() -> str | None:
+    """Why no build daemon can start for this installation here, or None when one can.
 
-    Delegated to the transport, which answers for the family it would actually use:
-    AF_UNIX on POSIX, AF_PIPE on Windows. It stays a CHECK rather than a caught exception
-    because the callers' fallbacks are keyed on OSError or on a None return, and an absent
-    address family raises neither.
+    Answered without starting one, from what a start needs: a local IPC family (the
+    transport's: AF_UNIX on POSIX, AF_PIPE on Windows), a socket folder of this user's own
+    (``transport.claim_folder``), and a state directory this user can write, where the key,
+    the locks and the log go. ``cadgen doctor`` reports it, the CAD Viewer refuses to start
+    on it, and a request that finds no daemon raises it before spawning one.
     """
-    return transport.supported()
+    if not transport.supported():
+        return ("This Python offers no local IPC family for the build daemon (AF_UNIX on POSIX, "
+                "AF_PIPE on Windows), so cadgen cannot build with it; use an interpreter that has one.")
+    try:
+        transport.claim_folder(daemon_address(), create=False)
+    except transport.AddressUnusable as error:
+        return str(error)
+    folder = transport.state_dir()
+    existing = folder
+    while not existing.exists() and existing.parent != existing:
+        existing = existing.parent
+    if not existing.is_dir() or not os.access(existing, os.W_OK | os.X_OK):
+        return (f"The build daemon keeps its key, locks and log in {folder}, which this user cannot "
+                "write; set CADGEN_DAEMON_STATE_DIR to a folder this user can write.")
+    return None
 
 
 def daemon_identity() -> str:
@@ -164,7 +183,7 @@ def log_path(address: str | None = None) -> Path:
 
 
 def request_timeout() -> float:
-    """Seconds to wait for the daemon before giving up and running cold."""
+    """Seconds a request waits on a daemon that sends it nothing before it fails."""
     return DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
@@ -258,30 +277,23 @@ def _request_payload(
 def run_via_daemon(
     tool: str, argv: list[str], cwd: str | None = None, prog: str | None = None
 ) -> int | None:
-    """Run one CLI invocation on the warm daemon; ``None`` means run inline instead."""
-    # Warm by DEFAULT. It was opt-in while the daemon could only hold one job, because
-    # turning it on serialised parallel builds -- the moonwatch README told people to
-    # avoid it for exactly that. The pool removed the reason: a burst borrows or spawns
-    # workers while their memory reservations fit. Admission refusal is an explicit
-    # failure, never a cold retry that bypasses the daemon's memory budget.
+    """Run one CLI invocation on the warm daemon and return its exit code: a daemon that
+    cannot take it fails it (exit 1), saying why on stderr. ``None`` means run it here:
+    ``CADGEN_DAEMON=0`` says so, and so does a daemon worker, which is where a job runs."""
     if os.environ.get("CADGEN_DAEMON") == "0" or os.environ.get("CADGEN_DAEMON_CHILD"):
-        return None
-    if not daemon_supported():
-        return None
-    argv = [str(arg) for arg in argv]
-    if "-" in argv:
-        # "-" conventionally reads a payload from stdin; the daemon has no stdin
-        # channel, so such an invocation runs inline.
         return None
     from cadgen.daemon.executors import emit_event
 
-    payload = _request_payload(tool, argv, cwd, prog)
+    payload = _request_payload(tool, [str(arg) for arg in argv], cwd, prog)
     try:
         return _run_with_retry(payload, on_event=emit_event)
+    except DaemonUnavailable as error:
+        _say(f"cadgen-daemon: {error}\n")
+        return 1
     except KeyboardInterrupt:
         # Ctrl-C while this process only waits on the daemon: the build service stops the
-        # job when its caller leaves. The same KeyboardInterrupt a cold run raises, so a
-        # script's own handler catches it either way, without the transport's wait in it.
+        # job when its caller leaves. Raised fresh, so a script's own handler catches the
+        # interrupt without the transport's wait in its traceback.
         raise KeyboardInterrupt from None
 
 
@@ -295,21 +307,33 @@ def run_nested(
     closure: str | None = None,
     on_stream: Callable[[str], None] | None = None,
     on_event: Callable[[dict], None] | None = None,
-) -> int | None:
+) -> int:
     """A job submitted from INSIDE a build or a door (a worker or a client): a
     document's compile, coalesced by ``closure`` (the document's bytes).
 
     Unlike :func:`run_via_daemon` this ignores ``CADGEN_DAEMON_CHILD``: a worker
     submitting a compile is the pool's nesting, not recursion into itself. Stream
     frames go to ``on_stream`` (captured for the error path), events to
-    ``on_event``. ``None`` still means "the daemon could not take it".
+    ``on_event``. A daemon that cannot take the job fails it (exit 1), saying why
+    on ``on_stream``.
     """
-    if os.environ.get("CADGEN_DAEMON") == "0" or not daemon_supported():
-        return None
     payload = _request_payload(
         tool, argv, cwd, prog, store_root=store_root, closure=closure, coalesce=True, dependency=True,
     )
-    return _run_with_retry(payload, on_stream=on_stream, on_event=on_event)
+    try:
+        return _run_with_retry(payload, on_stream=on_stream, on_event=on_event)
+    except DaemonUnavailable as error:
+        _say(f"cadgen-daemon: {error}\n", on_stream)
+        return 1
+
+
+def _say(text: str, on_stream: Callable[[str], None] | None = None) -> None:
+    """A line about the request itself, where its stream goes: ``on_stream``, or stderr."""
+    if on_stream is not None:
+        on_stream(text)
+        return
+    sys.stderr.write(text)
+    sys.stderr.flush()
 
 
 def artifact_payload(request: dict, *, store_root: str, dependency: bool = False) -> dict:
@@ -322,7 +346,7 @@ def artifact_payload(request: dict, *, store_root: str, dependency: bool = False
 
 
 def run_artifact(payload: dict, *, subscriber=None):
-    """Run exactly this artifact request; protocol failure never replays cold."""
+    """Run exactly this artifact request; a failure is reported, never replayed."""
     from cadgen.daemon.artifacts import ArtifactJobError, validate_result
 
     results, chunks = [], []
@@ -339,43 +363,31 @@ def run_artifact(payload: dict, *, subscriber=None):
     try:
         code = _run_with_retry(payload, on_stream=chunks.append, on_artifact_result=receive, strict=True,
                                on_connection=connected, cancelled=(lambda: subscriber.detached) if subscriber is not None else None)
-    except transport.AuthenticationError as error:
+    except DaemonUnavailable as error:
         raise ArtifactJobError(f"artifact request failed: {error}") from error
-    if code is None or code != 0 or not results:
+    if code != 0 or not results:
         detail = "".join(chunks).strip()
         if not detail:
             detail = ("The geometry service completed without returning the requested geometry."
-                      if code == 0 else f"The geometry service failed (exit {code})."
-                      if code is not None else "The geometry service could not accept the request.")
+                      if code == 0 else f"The geometry service failed (exit {code}).")
         raise ArtifactJobError(f"artifact request failed: {detail}")
     return results[0]
 
 
 def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
-                    on_artifact_result=None, strict: bool = False, on_connection=None, cancelled=None) -> int | None:
+                    on_artifact_result=None, strict: bool = False, on_connection=None, cancelled=None) -> int:
+    """Send ``payload`` to this installation's daemon, starting it when none answers, and
+    return the job's exit code. Raises :class:`DaemonUnavailable` when no daemon takes it:
+    none could start, or one updating while its builds finish did not hand over in time."""
     address = daemon_address()
     restarted, deadline = False, None
     while True:
         if cancelled is not None and cancelled():
-            return None
+            return 1  # whoever asked has left: no one waits for this answer
         try:
             conn = _connect_or_spawn(address)
-        except transport.AuthenticationError:
-            if strict:
-                raise
-            # No request was submitted: preserve the ordinary source/CLI
-            # fallback, without spawning repeatedly over a live listener.
-            return None
-        except transport.AddressUnusable as error:
-            # No daemon can listen there and none was asked: say why, once, and fall back.
-            if strict:
-                if on_stream is not None:
-                    on_stream(f"{error}\n")
-            else:
-                print(f"cadgen-daemon: {error} Running this in this process.", file=sys.stderr, flush=True)
-            return None
-        if conn is None:
-            return None
+        except (transport.AuthenticationError, transport.AddressUnusable) as error:
+            raise DaemonUnavailable(str(error)) from error
         try:
             if on_connection is not None:
                 on_connection(conn)
@@ -391,7 +403,7 @@ def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
             if on_connection is not None:
                 on_connection(None)
         if outcome is not _RESTART:
-            return outcome if isinstance(outcome, int) else None
+            return outcome
         # Ask again as the code on disk is now. The token was stamped when the request was
         # built, and a successor takes its own at start: a request built before an edit and
         # resent as it was made every successor exit on it, until the deadline.
@@ -400,16 +412,14 @@ def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
             restarted = True
             continue  # the stale daemon is going; an idle one already released its address
         # Told to restart again: the stale daemon is finishing jobs and keeps its address
-        # until they end. An ordinary request runs cold meanwhile; a strict one waits for
-        # the successor as long as it would wait on a silent daemon.
-        if not strict:
-            return None
+        # until they end. Wait for its successor as long as a silent daemon is waited on.
         if deadline is None:
             deadline = time.monotonic() + request_timeout()
+            _say("cadgen-daemon: the build daemon is finishing its builds before it updates; waiting for it.\n",
+                 on_stream)
         if time.monotonic() >= deadline:
-            if on_stream is not None:
-                on_stream("The geometry service is updating while existing builds finish. Retry after those builds finish.")
-            return None
+            raise DaemonUnavailable("The build daemon is updating while existing builds finish. "
+                                    "Retry after those builds finish.")
         time.sleep(RESTART_POLL_SECONDS)
 
 
@@ -440,13 +450,19 @@ def _connect(address: str) -> transport.Channel:
 _FINAL = (transport.AuthenticationError, transport.AddressUnusable)
 
 
-def _connect_or_spawn(address: str) -> transport.Channel | None:
+def _connect_or_spawn(address: str) -> transport.Channel:
+    """A channel to the daemon at ``address``, started here when none answers. Raises
+    :class:`DaemonUnavailable` naming why there is none: what :func:`unavailable` finds,
+    a start that failed, or a daemon that exited or stayed silent instead of answering."""
     try:
         return _connect(address)
     except _FINAL:
         raise
     except OSError:
         pass
+    reason = unavailable()
+    if reason is not None:
+        raise DaemonUnavailable(reason)
     # Never unlink the address here. Only the daemon that holds the singleton lock
     # may remove a leftover socket (server._bind). And only ONE client spawns: the
     # first to take the spawn lock starts the daemon; the others just wait for the
@@ -466,30 +482,49 @@ def _connect_or_spawn(address: str) -> transport.Channel | None:
             except OSError:
                 pass
             process = _spawn_daemon(address)
-            if process is None:
-                return None
             _reap_detached(process)
         deadline = time.monotonic() + SPAWN_WAIT_SECONDS
-        while time.monotonic() < deadline:
+        while True:
             try:
                 return _connect(address)
             except _FINAL:
                 raise
             except OSError:
-                if process is not None and process.poll() is not None:
-                    # Our daemon exited: it failed, or it stood down because one is
-                    # already bound. One more connect tells the two apart.
-                    try:
-                        return _connect(address)
-                    except _FINAL:
-                        raise
-                    except OSError:
-                        return None
-                time.sleep(0.05)
-        return None
+                pass
+            if process is not None and process.poll() is not None:
+                # Our daemon exited without answering. It stood down, because the address's
+                # lock was held -- by a daemon serving it now (one more connect finds it),
+                # or by one still letting go of it, whose successor this client starts
+                # again -- or it failed, and its log says why.
+                try:
+                    return _connect(address)
+                except _FINAL:
+                    raise
+                except OSError:
+                    pass
+                if not _address_held(address):
+                    raise DaemonUnavailable(
+                        f"The build daemon exited (status {process.returncode}) before it answered at "
+                        f"{address}; its log says why: {log_path(address)}")
+                process = _spawn_daemon(address)
+                _reap_detached(process)
+            if time.monotonic() >= deadline:
+                raise DaemonUnavailable(f"No build daemon answered at {address} within "
+                                        f"{SPAWN_WAIT_SECONDS:.0f} s; its log says why: {log_path(address)}")
+            time.sleep(0.05)
     finally:
         if spawner:
             election.release()
+
+
+def _address_held(address: str) -> bool:
+    """Whether a daemon holds ``address``'s singleton lock: one serving it, or one still
+    letting go of it (``server._bind``)."""
+    lock = transport.daemon_lock(address)
+    if lock.acquire():
+        lock.release()
+        return False
+    return True
 
 
 def detach_kwargs() -> dict:
@@ -533,7 +568,10 @@ def _reap_detached(process: subprocess.Popen) -> None:
     ).start()
 
 
-def _spawn_daemon(address: str) -> subprocess.Popen | None:
+def _spawn_daemon(address: str) -> subprocess.Popen:
+    """Start the daemon for ``address``, its output to its log. Raises
+    :class:`DaemonUnavailable` when it cannot be started: its log cannot be written, or the
+    interpreter cannot be run."""
     from cadgen.analytics import for_others
     from cadgen.daemon.executors import worker_env
 
@@ -547,11 +585,17 @@ def _spawn_daemon(address: str) -> subprocess.Popen | None:
     env.pop("CADGEN_INSTALL_CHANNEL", None)
     env["CADGEN_DAEMON_CHILD"] = "1"
     env.setdefault("CADGEN_DAEMON_SOCKET", str(address))
+    log_file_path = log_path(address)
     try:
-        log_file_path = log_path(address)
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_file_path, "ab") as log_file:
-            return subprocess.Popen(
+        log_file = open(log_file_path, "ab")
+    except OSError as error:
+        raise DaemonUnavailable(
+            f"The build daemon cannot write its log at {log_file_path} ({error.strerror or error}); "
+            "set CADGEN_DAEMON_STATE_DIR to a folder this user can write.") from error
+    with log_file:
+        try:
+            process = subprocess.Popen(
                 # -P: cadgen's own modules, never the working folder's (STORE.md §9).
                 [sys.executable, "-P", "-m", "cadgen.daemon"],
                 stdin=subprocess.DEVNULL,
@@ -564,8 +608,11 @@ def _spawn_daemon(address: str) -> subprocess.Popen | None:
                 env=env,
                 **detach_kwargs(),
             )
-    except OSError:
-        return None
+        except OSError as error:
+            raise DaemonUnavailable(
+                f"The build daemon could not be started ({sys.executable} -P -m cadgen.daemon: "
+                f"{error.strerror or error}).") from error
+    return process
 
 
 def _send_json(channel: transport.Channel, payload: dict) -> bool:
@@ -593,145 +640,67 @@ def _recv_json(channel: transport.Channel, timeout: float | None):
     return message if isinstance(message, dict) else None
 
 
-def _job_words(payload: dict) -> tuple[str, list[str], list[str]]:
-    """``(how the user spelled the command, its arguments, the cold argv)``.
+def _job_words(payload: dict) -> tuple[str, list[str]]:
+    """``(how the user spelled the command, its arguments)``.
 
     The ``run`` tool is the decorator's warm handoff for ``python <script>``: its
     argv carries the SCRIPT PATH first and its prog is ``python <name>``, so the
-    job reads ``python <name> <args>`` and the rerun is ``python <path> <args>``.
-    Every other tool is a ``cadgen`` command whose argv is exactly what follows it.
+    job reads ``python <name> <args>``. Every other tool is a ``cadgen`` command
+    whose argv is exactly what follows it.
     """
     argv = [str(arg) for arg in payload.get("argv") or []]
     tool = str(payload.get("tool") or "")
     prog = str(payload.get("prog") or f"cadgen {tool}")
-    if tool == "run" and argv:
-        return prog, argv[1:], ["python", *argv]
-    return prog, argv, [*prog.split(), *argv]
+    return prog, argv[1:] if tool == "run" and argv else argv
 
 
-def cold_rerun_command(payload: dict) -> str:
-    """The job's command alone, quoted for this platform's shell -- no env prefix.
-
-    The prefix is the caller's business because it is shell-specific, and this
-    function cannot know the shell: `set X=0 && cmd` is cmd.exe only, and in
-    PowerShell it assigns a variable literally named `X=0` and then fails on
-    `&&` (a syntax error in 5.1). Guessing produces a line the user pastes and
-    that silently does the wrong thing, at the worst possible moment.
-    """
-    import shlex
-
-    _prog, _args, cold = _job_words(payload)
-    return subprocess.list2cmdline(cold) if os.name == "nt" else shlex.join(cold)
-
-
-def cold_rerun_instructions(payload: dict) -> str:
-    """The rerun, spelled for whatever shell the user is in.
-
-    POSIX keeps the one-liner. Windows gets a shell-neutral instruction first --
-    which is what makes Git Bash, fish and csh users safe without enumerating
-    them -- and then both paste-able forms, because the two shells that ship
-    with Windows need different syntax and no signal reliably distinguishes them.
-    """
-    command = cold_rerun_command(payload)
-    if os.name != "nt":
-        return f"  CADGEN_DAEMON=0 {command}\n"
-    return (
-        "  Set CADGEN_DAEMON=0 in the environment, then run:\n"
-        f"    {command}\n"
-        "  Or in one line:\n"
-        f"    cmd.exe      set CADGEN_DAEMON=0 && {command}\n"
-        f"    PowerShell   $env:CADGEN_DAEMON='0'; {command}\n"
-    )
-
-
-def worker_died_message(payload: dict, death: dict, *, falling_back: bool = False) -> str:
+def worker_died_message(payload: dict, death: dict) -> str:
     """What the user reads when the warm worker running THEIR job dies.
 
     Says that the worker died and how (the pool's evidence: exit code or signal),
-    names the job, and suspects the likely causes. What it says next depends on
-    what actually happens next, which is why the caller reports the death only
-    once the outcome is known:
-
-    - the daemon followed with an exit frame, so this run ends here: nothing was
-      retried -- a 35-minute job silently re-running cold is worse than the
-      failure -- and the rerun is spelled out verbatim;
-    - the daemon itself went away, so the ordinary non-strict cold fallback is
-      about to run this job in THIS process: say that instead. Telling someone
-      the job was not retried and to run it cold, and then running it cold, left
-      a failure message above an exit 0 with no way to tell which one was true.
-
+    names the job, suspects the likely causes, says the job was not retried -- a
+    35-minute job silently re-running is worse than the failure -- and names where
+    the worker's own last words are: the daemon's log, where a worker's stderr goes.
     Every clause is load-bearing; the tests pin them.
     """
-    prog, args, _cold = _job_words(payload)
-    job = " ".join([prog, *args])
+    prog, args = _job_words(payload)
     detail = str(death.get("detail") or "worker closed the connection")
-    opening = (
-        f"cadgen-daemon: the warm worker running `{job}` died mid-job ({detail}) -- "
-        "most likely out of memory, or a crash in the geometry kernel. "
-    )
-    if falling_back:
-        return opening + "Running it cold now, in this process; what follows is that run.\n"
     return (
-        opening
-        + "The job was NOT retried. Run it cold, in its own process, to see the "
-        "failure directly:\n"
-        f"{cold_rerun_instructions(payload)}"
+        f"cadgen-daemon: the warm worker running `{' '.join([prog, *args])}` died mid-job ({detail}) -- "
+        "most likely out of memory, or a crash in the geometry kernel. The job was NOT retried; "
+        f"what the worker printed as it died is in the build daemon's log: {log_path(daemon_address())}\n"
     )
 
 
 def daemon_lost_message(payload: dict, reason: str) -> str:
     """What the user reads when the build service itself goes away mid-request (it was
-    killed, or crashed) and the job is about to run again, cold, in this process."""
-    prog, args, _cold = _job_words(payload)
+    killed, or crashed): the job is not run again, and the daemon's log may say why."""
+    prog, args = _job_words(payload)
     return (f"cadgen-daemon: lost the build service running `{' '.join([prog, *args])}` (it {reason}). "
-            "Running it cold now, in this process; what follows is that run.\n")
+            f"The job was NOT retried; the build daemon's log may say why: {log_path(daemon_address())}\n")
 
 
 def _run_request(
     channel: transport.Channel, payload: dict, *, on_stream=None, on_event=None,
     on_artifact_result=None, strict: bool = False, cancelled=None,
-) -> int | object | None:
-    """Send one request and stream the response; int exit code, ``_RESTART``, or
-    ``None`` on any protocol fault.
+) -> int | object:
+    """Send one request and stream the response: the job's exit code, or ``_RESTART``.
+    A request the daemon lost -- a protocol fault, a silence past ``request_timeout``, a
+    worker that died -- fails (exit 1) and says so; it is never run again.
 
     Stream frames go to the process's own stdout/stderr unless ``on_stream`` is
     given (a nested child build captures them); ``event`` frames — the build
     tree's model transitions — go to ``on_event``."""
     def protocol_failure(reason):
         if strict:
-            if on_stream is not None:
-                on_stream(f"The geometry service {reason}.\n")
-        elif pending_death is None:
-            # The ordinary fallback runs this job again, cold, in this process: say so,
-            # or a rerun from the start reads as a slow build. A worker's death says it
-            # itself (``settled``).
-            emit(daemon_lost_message(payload, reason))
-        return None
+            _say(f"The geometry service {reason}.\n", on_stream)
+        elif not died:  # a worker's death has said what happened already
+            _say(daemon_lost_message(payload, reason), on_stream)
+        return 1
 
-    def emit(text: str) -> None:
-        if on_stream is not None:
-            on_stream(text)
-        else:
-            sys.stderr.write(text)
-            sys.stderr.flush()
-
-    def settled(outcome):
-        """Report a deferred worker death now that the outcome says what follows.
-
-        An exit code means the daemon finished the request and this run ends
-        here; anything else means the caller falls back to a cold in-process
-        run, and the message has to say which. There is no third case: a
-        ``restart`` frame is sent at dispatch, before the job runs, so it can
-        never follow a worker death on the same connection.
-        """
-        if pending_death is not None:
-            emit(worker_died_message(payload, pending_death,
-                                     falling_back=not isinstance(outcome, int)))
-        return outcome
-
-    pending_death: dict | None = None
+    died = False
     if cancelled is not None and cancelled():
-        return None
+        return 1
     if not _send_json(channel, payload):
         return protocol_failure("disconnected before the request was sent")
     # Applies per frame, not to the whole request: a daemon that is streaming output keeps
@@ -742,43 +711,31 @@ def _run_request(
     deadline = time.monotonic() + timeout if timeout else None
     while True:
         if cancelled is not None and cancelled():
-            return settled(None)
+            return 1
         message = _recv_json(channel, .1 if strict else timeout)
         if message is _TIMED_OUT:
-            if strict:
-                if deadline is not None and time.monotonic() >= deadline:
-                    return protocol_failure(f"stopped responding for {timeout:.0f} seconds")
+            if strict and (deadline is None or time.monotonic() < deadline):
                 continue
-            # Silent past the deadline: either the daemon is wedged, or it is still
-            # grinding through a queued build we cannot see. Either way, fall back to
-            # a cold in-process run so THIS invocation still completes. Say so on
-            # stderr — a silent 10-minute stall that then "just works" is the exact
-            # confusion this deadline exists to prevent.
-            print(
-                f"cadgen-daemon: no response for {timeout:.0f}s; running cold",
-                file=sys.stderr,
-                flush=True,
-            )
-            return settled(None)
+            return protocol_failure(f"stopped responding for {timeout:.0f} seconds")
         if message is None:
-            return settled(protocol_failure("closed the connection before the request finished"))
+            return protocol_failure("closed the connection before the request finished")
         deadline = time.monotonic() + timeout if timeout else None
         if message.get("restart"):
             if strict and observed_work:
                 # An uncertain completed/partial operation cannot replay.
                 return protocol_failure("restarted before confirming the completed request")
-            return settled(_RESTART)
+            return _RESTART
         if "exit" in message:
-            return settled(int(message["exit"]))
+            return int(message["exit"])
         if "released" in message:
             # The command's answer is complete (--no-wait): the worker writes the files
             # after this, and the exit frame it sends then reaches nobody.
             if strict:
                 return protocol_failure("released a geometry request")
-            return settled(int(message["released"]))
+            return int(message["released"])
         if "artifactResult" in message:
             if on_artifact_result is None:
-                return settled(None)
+                return protocol_failure("sent a geometry result for a build")
             on_artifact_result(message["artifactResult"])
             observed_work = True
             continue
@@ -790,22 +747,18 @@ def _run_request(
             continue
         if "workerDied" in message:
             # The worker running this job is gone. This is the one place the loss is
-            # explained, and the daemon never retries it silently -- the caller's job
-            # may have run for half an hour. A strict request has no fallback, so it
-            # says so immediately. An ordinary one does: the supervisor normally
-            # follows with the exit frame, but if the daemon itself is gone the client
-            # runs this job cold in its own process, and the message must not tell the
-            # reader the opposite. Hold it until the outcome is known.
-            observed_work = True
+            # explained, and it is never retried -- the caller's job may have run for half
+            # an hour. The supervisor follows with the exit frame.
+            observed_work = died = True
             if strict:
-                emit(f"artifact worker died: {message['workerDied']}; no retry\n")
+                _say(f"artifact worker died: {message['workerDied']}; no retry\n", on_stream)
             else:
-                pending_death = message["workerDied"] or {}
+                _say(worker_died_message(payload, message["workerDied"] or {}), on_stream)
             continue
         data = message.get("data")
         stream = message.get("stream")
         if stream not in streams or not isinstance(data, str):
-            return settled(protocol_failure("sent an invalid response"))
+            return protocol_failure("sent an invalid response")
         observed_work = observed_work or bool(data)
         if on_stream is not None:
             on_stream(data)
@@ -815,16 +768,12 @@ def _run_request(
         target.flush()
 
 
-
-
 def watch_jobs(after: str | None = None, *, output: str | None = None, store_root: str | None = None) -> dict | None:
     """Read changes from the running ledger, with at most a one-second wait.
 
     Like status(), this never starts or restarts a daemon. No model, source
     path, build request or kernel worker is involved in this read-only request.
     """
-    if not daemon_supported():
-        return None
     try:
         channel = _connect(daemon_address())
     except OSError:
@@ -854,19 +803,16 @@ def prewarm() -> bool:
     The first build of a session otherwise pays for both: spawning the daemon and
     importing build123d in a worker, seconds before any model code runs. Submits
     nothing. A daemon that answers is only asked its status, which also replaces one
-    left running by older cadgen code. True once a current daemon answers.
+    left running by older cadgen code. True once a current daemon answers; raises
+    :class:`DaemonUnavailable` naming why none could start.
     """
     if os.environ.get("CADGEN_DAEMON") == "0" or os.environ.get("CADGEN_DAEMON_CHILD"):
-        return False
-    if not daemon_supported():
         return False
     for _attempt in range(2):  # a stale daemon answers "restart" and gives up its address
         try:
             channel = _connect_or_spawn(daemon_address())
-        except OSError:
-            return False
-        if channel is None:
-            return False
+        except (transport.AuthenticationError, transport.AddressUnusable) as error:
+            raise DaemonUnavailable(str(error)) from error
         answer = _ask_status(channel)
         if answer is not _RESTART:
             return answer is not None
@@ -880,8 +826,8 @@ HAND_OVER_SECONDS = 0.5
 def hand_over(counts: dict) -> None:
     """Hand a command's counts to the running daemon, which sends them with its own telemetry
     (``cadgen.daemon.telemetry.counted``): a command sends nothing itself. Like ``status`` it
-    never starts a daemon: with none to take them -- ``CADGEN_DAEMON=0``, a platform without one,
-    or none running -- they are kept for the next process that sends (``analytics.spool``). One
+    never starts a daemon: with none to take them -- ``CADGEN_DAEMON=0``, or none running --
+    they are kept for the next process that sends (``analytics.spool``). One
     that does not answer within ``HAND_OVER_SECONDS``, or is gone mid-send, may have taken them,
     so they are not kept twice. The command goes on either way. Never raises."""
     try:
@@ -891,7 +837,7 @@ def hand_over(counts: dict) -> None:
             return
     except Exception:  # noqa: BLE001 - telemetry never fails the command it counts
         return
-    if os.environ.get("CADGEN_DAEMON") == "0" or not daemon_supported():
+    if os.environ.get("CADGEN_DAEMON") == "0":
         spool(counts)
         return
 
@@ -920,8 +866,6 @@ def status() -> dict | None:
     Deliberately does NOT spawn one: "is anything warm?" must be answerable without
     changing the answer.
     """
-    if not daemon_supported():
-        return None
     try:
         channel = _connect(daemon_address())
     except OSError:

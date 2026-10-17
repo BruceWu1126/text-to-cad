@@ -88,14 +88,11 @@ def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
         sys.stdout.write(json.dumps(status or {}, separators=(",", ":")) + "\n")
         return 0
     if not status:
-        # "One starts on the next build" is false where the daemon cannot run at all, and
-        # a user following it would keep waiting for a warm process that never appears.
-        if not daemon_client.daemon_supported():
-            sys.stdout.write(
-                "The CAD daemon cannot run on this platform, so builds are always cold. "
-                "It needs a local IPC family — AF_UNIX or AF_PIPE — and this Python "
-                "offers neither; nothing needs switching off.\n"
-            )
+        # "One starts on the next build" is false where none can start, and a user
+        # following it would keep waiting for a daemon that never appears.
+        reason = daemon_client.unavailable()
+        if reason is not None:
+            sys.stdout.write(f"No CAD daemon is running, and none can start here: {reason}\n")
             return 0
         sys.stdout.write(
             "No CAD daemon is running. One starts on the next build "

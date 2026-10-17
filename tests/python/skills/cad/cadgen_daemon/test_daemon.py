@@ -356,12 +356,12 @@ class CadgenDaemonTests(unittest.TestCase):
             )
         self.assertEqual(exit_code, 0, self.log_path.read_text(encoding="utf-8"))
 
-    def test_e_a_worker_killed_mid_job_is_reported_with_the_cold_rerun(self) -> None:
+    def test_e_a_worker_killed_mid_job_is_reported_with_where_it_said_why(self) -> None:
         """The 35-minute validate that ended in `worker closed the connection`.
 
         A real worker, a real kill (SIGKILL is what the OOM killer sends), the
         real relay: the client must say the worker died and how, name the job,
-        and print the exact cold rerun -- and must NOT quietly run the job cold."""
+        and name the log its last words went to -- and must NOT quietly run it again."""
         import threading
 
         if self.server is None or self.server.poll() is not None:
@@ -416,22 +416,16 @@ class CadgenDaemonTests(unittest.TestCase):
         self.assertEqual(outcome["exit"], 1, outcome["output"])
         output = outcome["output"]
         self.assertIn("the warm worker running `python box_sleepy.py --force` died mid-job", output)
-        # How the death reads, and how the rerun is spelled, are both the
-        # platform's: a POSIX wait status is the negated signal, a Windows one is
-        # the exit code TerminateProcess was given. Ask the same helpers the
-        # production message uses instead of hardcoding the POSIX answers.
+        # How the death reads is the platform's: a POSIX wait status is the negated
+        # signal, a Windows one is the exit code TerminateProcess was given. Ask the
+        # same helper the production message uses instead of hardcoding the POSIX answer.
         from cadgen.daemon import pool as pool_mod
 
         status_code = int(KILL_SIGNAL) if os.name == "nt" else -int(KILL_SIGNAL)
         self.assertIn(pool_mod.describe_exit(status_code), output)
         self.assertIn("out of memory", output)
         self.assertIn("NOT retried", output)
-        self.assertIn(
-            daemon_client.cold_rerun_command(
-                {"tool": "run", "prog": "python box_sleepy.py", "argv": [str(script), "--force"]}
-            ),
-            output,
-        )
+        self.assertIn("in the build daemon's log", output)
         self.assertNotIn("worker closed the connection", output)
         # And the supervisor is still up, serving the next request.
         self.assertIsNone(self.server.poll())

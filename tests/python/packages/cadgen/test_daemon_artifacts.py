@@ -465,8 +465,8 @@ class ArtifactTransport(unittest.TestCase):
              mock.patch.object(transport, "spawn_lock") as election:
             with self.assertRaisesRegex(artifacts.ArtifactJobError, "connection key"):
                 client.run_artifact(self.payload())
-            self.assertIsNone(client._run_with_retry({"tool": "run", "argv": []}),
-                              "ordinary source requests keep their pre-submission fallback")
+            with self.assertRaisesRegex(client.DaemonUnavailable, "connection key"):
+                client._run_with_retry({"tool": "run", "argv": []})
         spawn.assert_not_called()
         election.assert_not_called()
 
@@ -523,7 +523,8 @@ class ArtifactStartup(unittest.TestCase):
                  mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted cold retry")), \
                  mock.patch.object(artifacts, "execute", side_effect=AssertionError("native work in caller")):
                 future = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root / "store")
-                with self.assertRaisesRegex(artifacts.ArtifactJobError, "geometry service could not accept"):
+                with self.assertRaisesRegex(artifacts.ArtifactJobError,
+                                            r"exited \(status 0\) before it answered.*its log says why"):
                     future.result(timeout=10)
                 self.assertTrue(future.done())
                 self.assertEqual(launched.call_count, 1)
@@ -559,7 +560,7 @@ class ArtifactStartup(unittest.TestCase):
              mock.patch.object(artifacts, "_run_here", side_effect=AssertionError("unaccounted cold retry")):
             future = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root / "store")
             try:
-                with self.assertRaisesRegex(artifacts.ArtifactJobError, "geometry service could not accept"):
+                with self.assertRaisesRegex(artifacts.ArtifactJobError, "No build daemon answered at .* within"):
                     future.result(timeout=3)
                 self.assertTrue(future.done())
                 spawn.assert_not_called()

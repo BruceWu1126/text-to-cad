@@ -66,7 +66,7 @@ REQUIRED=(
   "cadgen/daemon/__init__.py"
   "cadgen/daemon/server.py"
   # The warm-worker pool. Without these the daemon supervisor starts and then
-  # cannot spawn a worker, so every build silently falls back to cold.
+  # cannot spawn a worker, so every build fails.
   "cadgen/daemon/pool.py"
   "cadgen/daemon/worker.py"
   "cadgen/cli/daemon_status.py"
