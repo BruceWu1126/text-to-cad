@@ -25,9 +25,12 @@ starts the daemon. Then, from a current baseline, each iteration runs `noop`;
 a leaf part, so the leaf and its parents rebuild) and `revert-leaf`; `parent`
 (a parent-only edit, such as a placement literal) and `revert-parent`; and
 `label` (a label-only edit) and `revert-label`. Each `--*-to` value is used by
-one iteration, so every edit is new to the store and every revert returns to
-sources it has built. Point it at a disposable copy of a project: it edits the
-sources and restores them in `finally`.
+one iteration, so every edit is new to the store and is built, and every revert
+returns to sources it has built, which cadgen 0.8.0 restores: outcome
+`current`, nothing built, the STEP files written back to the baseline's bytes
+(`changedSteps` lists them). A run that does otherwise is reported as a problem
+and left out of the medians. Point it at a disposable copy of a project: it
+edits the sources and restores them in `finally`.
 
 ```sh
 ./.venv/bin/python scripts/bench/cadgen-performance/agent_edits.py \

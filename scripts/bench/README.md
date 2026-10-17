@@ -77,15 +77,22 @@ What the numbers in `table.md` mean, all medians over the rounds:
   load is higher ran on a busier machine.
 - `failures`: runs that exited non-zero or printed neither line; read their
   logs.
-- `preview` and `saved`, per edit scenario: seconds after the edit's command
-  starts at which the root model's source was ready (its preview is
-  published then) and at which its STEP was saved, from the run's event
-  lines; `—` where a side's log has no such event.
+- `preview`, `done` and `saved`, per edit scenario: seconds into the root
+  model's own run at which its source was ready (its preview is published
+  then), at which it was done (`current` when nothing built) and at which its
+  STEP was saved. Only the root's own events count; its children report too.
+  `main` prints the STEP saved event before the root's done, the branch a
+  `STEP saved <file> completed in` line after it. `—` where no run of the
+  scenario has the mark (a run that writes no file saves none).
 - The edit loop's own table: the median wall per scenario, `noop` (nothing
   changed), `comment` (a comment in a leaf source), `leaf` (a dimension in a
   leaf part, so the leaf and its parents rebuild), `parent` (a placement
   literal in the parent alone), `label` (a label alone) and each `revert-*`
-  (back to sources the store has built).
+  (back to sources the store has built). The branch restores those, outcome
+  `current` with nothing built and the STEP files written back to the
+  baseline's bytes, where `main` rebuilds them; the loop reports a revert on
+  the branch that builds or leaves a file unlike the baseline's as a problem
+  and leaves it out of the medians.
 
 `--models` takes the names `aft`, `nozzles`, `dial` and `moonwatch`, or a model
 script's path relative to the checkout; `--max-load L` makes the edit loop

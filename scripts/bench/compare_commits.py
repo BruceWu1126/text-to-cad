@@ -43,10 +43,13 @@ the "built ... in" line alone, so a side that prints none shows a dash there and
 names what it could not report; load is the one-minute load average when each run started;
 failures counts runs that exited non-zero or printed neither line (read their logs).
 
-With --edits, per scenario: the seconds after the command starts at which the root model's
-source was ready (its preview is published then) and at which its STEP was saved, read from the
-run's event lines; then the edit loop's own table, the median wall per scenario
-(agent_edits.py --compare).
+With --edits, per scenario, from the root model's own events in the run's log (its children
+report too, so only its file's events count): the seconds into its run at which its source was
+ready (its preview is published then), at which it was done (or current: nothing to build) and
+at which its STEP was saved, as the STEP saved event 0.7 prints before the done or the "STEP
+saved <file> completed in" line 0.8.0 prints after it; a dash where no run of the scenario has
+the mark (a run that writes no file saves none). Then the edit loop's own table, the median wall
+per scenario (agent_edits.py --compare): a revert on 0.8.0 is a restore, outcome current.
 """
 from __future__ import annotations
 
@@ -83,6 +86,8 @@ EDIT_LOOP = [
 # `generated <script> completed in 6.70s` (the total alone), and 0.7 prints nothing else.
 BUILT = re.compile(r"built (\S+) in ([^:\n]+): model code ([^,\n]+), cadgen ([^,\n]+)")
 GENERATED = re.compile(r"generated (\S+) completed in (.+)")
+# When a file landed, as cadgen 0.8.0 says it with --verbose (0.7 has the event instead).
+SAVED = re.compile(r"^\[cadgen\] STEP saved (\S+) completed in (.+)$", re.MULTILINE)
 
 
 def git(*args: str) -> str:
@@ -232,29 +237,52 @@ def edits(python: Path, tree: Path, side: str, out: Path, iterations: int, max_l
     return report
 
 
-def milestones(logs: Path) -> dict[str, list[dict]]:
-    """Per scenario, when the root model's source was ready (its preview is published then) and when
-    its STEP was saved, from the event lines of each run's log (agent_edits.py names logs
-    NN-<scenario>-<iteration>.log)."""
+def milestones(logs: Path, root: str) -> dict[str, list[dict]]:
+    """Per scenario, from each run's log (agent_edits.py names them NN-<scenario>-<iteration>.log),
+    the seconds into the root model's own run at which its source was ready (its preview is
+    published then), at which it was done (or current: nothing to build) and at which its STEP was
+    saved; a mark a run does not have is missing. Only the model whose file is `root` counts: its
+    children's events say the same things, and under 0.8.0 a current child reports itself with no
+    parent, so the first event of a phase is not the root's. 0.7 prints the root's STEP saved event
+    before its done; 0.8.0 prints a `STEP saved <file> completed in` line after it."""
     found: dict[str, list[dict]] = {}
     for log in sorted(logs.glob("*.log")):
         scenario = log.stem.split("-", 1)[1].rsplit("-", 1)[0]
-        mark: dict = {"preview": None, "saved": None}
-        for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+        text = log.read_text(encoding="utf-8", errors="replace")
+        mark: dict[str, float] = {}
+        for line in text.splitlines():
             if not line.startswith("{"):
                 continue
             try:
                 event = json.loads(line)
             except ValueError:
                 continue
-            if event.get("parent") is not None:
+            at = event.get("elapsed")
+            if Path(str(event.get("model") or "").split("::")[0]).name != root or not isinstance(at, (int, float)):
                 continue
-            if event.get("phase") == "Source ready" and mark["preview"] is None:
-                mark["preview"] = event.get("elapsed")
-            if event.get("phase") == "STEP saved" and mark["saved"] is None:
-                mark["saved"] = event.get("elapsed")
+            if event.get("phase") == "Source ready":
+                mark.setdefault("preview", at)
+            if event.get("state") in ("done", "current"):
+                mark.setdefault("done", at)
+            if event.get("phase") == "STEP saved" and event.get("state") == "building":
+                mark.setdefault("saved", at)
+        for name, value in SAVED.findall(text):
+            if name == f"{Path(root).stem}.step":
+                mark.setdefault("saved", seconds(value))
         found.setdefault(scenario, []).append(mark)
     return found
+
+
+def milestone_table(marks: dict[str, dict[str, list[dict]]]) -> list[str]:
+    """The root model's marks per edit scenario, in the order the loop ran them: medians over the
+    iterations, a dash where no run of the scenario has the mark."""
+    lines = ["| scenario | base preview | head preview | base done | head done | base saved | head saved |",
+             "|---|---:|---:|---:|---:|---:|---:|"]
+    for scenario in dict.fromkeys([*marks["base"], *marks["head"]]):
+        cells = [median(marks[side].get(scenario, []), key) for key in ("preview", "done", "saved")
+                 for side in ("base", "head")]
+        lines.append(f"| {scenario} | " + " | ".join(cells) + " |")
+    return lines
 
 
 def output_dir(value: str) -> Path:
@@ -312,12 +340,10 @@ def main() -> int:
         if args.edits:
             reports = {side: edits(python, trees[side], side, out, args.edit_iterations, args.max_load)
                        for side in ("base", "head")}
-            lines += ["", "moonwatch edit loop, root model events (medians, seconds after the command starts):", "",
-                      "| scenario | base preview | head preview | base saved | head saved |", "|---|---:|---:|---:|---:|"]
-            marks = {side: milestones(out / f"edits-{side}-logs") for side in ("base", "head")}
-            for scenario in sorted(set(marks["base"]) | set(marks["head"])):
-                cell = lambda side, key: (f"{statistics.median(v):.1f}" if (v := [m[key] for m in marks[side].get(scenario, []) if m.get(key) is not None]) else "—")  # noqa: E731
-                lines.append(f"| {scenario} | {cell('base', 'preview')} | {cell('head', 'preview')} | {cell('base', 'saved')} | {cell('head', 'saved')} |")
+            marks = {side: milestones(out / f"edits-{side}-logs", Path(MODELS["moonwatch"]).name)
+                     for side in ("base", "head")}
+            lines += ["", "moonwatch edit loop, the root model's own events (medians, seconds into its run):", "",
+                      *milestone_table(marks)]
             compare = subprocess.run([str(python), str(trees["head"] / "scripts/bench/cadgen-performance/agent_edits.py"),
                                       "--compare", str(reports["base"]), str(reports["head"])],
                                      capture_output=True, text=True)
