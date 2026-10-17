@@ -501,16 +501,17 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   parts of its own components the store lacks (`parts.request_display`): one
   job (`kind: display`, `daemon/artifacts.py`), or, for a batch past half a
   megabyte of BREP, one job per such share, balanced by size, a pool slot each
-  but the build's own, which pool workers derive while the build exports its
-  STEP -- with no daemon, threads of the build's own process, each in a slot of
+  but the build's own, which pool workers derive while the build writes its
+  record -- with no daemon, threads of the build's own process, each in a slot of
   its pool -- and the build waits for them, as one, before it reports done. A
   saved file that does not hold its result shows its own content, whose parts
   a view derives like any part the store lacks (below).
   Every other build job (`_internal/generation.py`: a no-op build that reuses
   its tree, a compile of an imported STEP, a re-emit) asks for the parts of
   the tree a view of its output reads -- the saved document's, a mesh-only
-  model's own -- the same way, before it reports done and before its declared
-  mesh exports. Which parts lack display data is asked of the store alone (one
+  model's own -- the same way, a compile before it reports done, a no-op build
+  when the run finishes its exports (below), after the STEP it may owe and
+  before its declared mesh exports. Which parts lack display data is asked of the store alone (one
   probe per part, no kernel import), so a no-op build of a model whose display
   data is stored starts no job; one whose store was cleared has it derived
   again. While the build waits, its progress shows `Meshing parts`, and the
@@ -693,8 +694,27 @@ identity. A real one (`link_arm`: a bar plus two placements of a pin model):
   meshes (`@stl`/`@glb`/`@threemf` beside
   its `@step`) are then cut from the result and keyed on the STEP's bytes as
   the record names them -- the build's own knowledge of the file it just
-  wrote, never a door's lookup of it, so they wait on no verify -- and the
-  command returns once its exports are written.
+  wrote, never a door's lookup of it, so they wait on no verify.
+
+  **Exports are queued, and the run finishes them.** Every model's build, root
+  or child, queues what it owes the moment its result is recorded
+  (`generation._Export`): the export job is submitted then, so a child's STEP
+  is written on the pool while its parent's body goes on, and the run that
+  owns the command (`authoring.build_run`) finishes every export it queued once
+  its own body has returned, in the order queued -- children before the parent
+  that called them -- each one publishing its file as above, having it
+  verified, then cutting its meshes. A model's `done` event says its result is
+  recorded; its `STEP saved` event follows when its file lands. The command
+  returns, and prints its result, once every export is finished; an export that
+  fails fails the command, every other export still gets its turn, the file on
+  disk stays as it was, and the record keeps owing the file (its output entry
+  pending), which the model's next run exports without running the body. A
+  current model's file written again (the kept rule, below), its display data
+  and its meshes are queued the same way -- and so is what its children owe: a
+  current model's body calls no child, but its gate asked each one (§4, clause
+  3), and a child whose result stands with an export owed (its export failed,
+  its file was deleted) is healed by the same path, its own children after it,
+  so one run of the root leaves no file of the tree owed.
 
   The **verify** job (kind `verify`, keyed by the bytes and the tree, never
   the path) parses the file's exact bytes and compares them with the tree
@@ -1199,8 +1219,10 @@ of:
    stands under another key than the one recorded (`child rebuilt`).**
    Protects against a child built from other inputs than the parent composed
    -- a child source edit rebuilds its parent, whatever geometry it yields,
-   and the parent relinks the child's stored result. Recursion is memoized
-   per request.
+   and the parent relinks the child's stored result. A child that owes only
+   an export stands (its parent's run queues it, §3 *Exports*); one that owes
+   a run does not, and the parent's run calls it. Recursion is memoized per
+   request.
 4. **The tree object, or any component it (transitively) references, is
    missing.** Protects against a collected or half-copied store.
 5. **A declared output does not match `outputs`.** Protects against a deleted,
@@ -1209,16 +1231,19 @@ of:
    changed: cadgen 0.7.21 -> 0.8.0`). Protects against a result another
    cadgen or kernel made: an upgrade rebuilds every model once.
 
-A model's stored result **stands** when clauses 1–4 and 6 hold and clause 5
-finds at most its STEP or a declared mesh to owe (`Verdict.key`, the record's
-key): a decorated call takes that result as it is, exporting what the files
-owe without running the body -- a deleted STEP is exported again, not rebuilt.
+A model's stored result is in the store when clauses 1–4 and 6 hold
+(`Verdict.stored`, the record's key). It **stands** when clause 5 then finds at
+most its STEP or a declared mesh to owe (`Verdict.key`, the same key): a
+decorated call takes that result as it is, exporting what the files owe without
+running the body -- a deleted STEP is exported again, not rebuilt -- and a
+parent depends on the child by it (clause 3).
 A missing sidecar or drawing is a run's. Before a body runs, the gate also
 names the key the source has NOW (`Verdict.candidate`: this model, the record's
 closure as it hashes now, its constants as they read now, its children's keys
 as they stand, this producer); a result stored under that key (§3, `index/result`) is
 restored -- record and provenance -- and taken as current, so a source brought
-back to a state already built never runs again.
+back to a state already built never runs again. A record whose result stands
+is that candidate itself, and is never restored over what it owes a run for.
 
 Clauses 4 and 5 verify each object and each output once per process. One
 build evaluates the gate many times over the same closures, and a large
@@ -1307,8 +1332,9 @@ Each with the failure it prevents.
   the first build that reads it.
 - **Publish order.** Objects first (components, then the complete tree), the
   record (its STEP output pending), output mappings and the provenance entry;
-  then, per export, the file (staged in a private sibling directory outside the
-  store, moved into place atomically), its digest-bound sidecar, the
+  then, per export, once the run finishes it (§3, *Exports*), the file (staged
+  in a private sibling directory outside the store, moved into place
+  atomically), its digest-bound sidecar, the
   document-byte mapping (pending), the record's output entry; then the verify
   (§3, *Exports*). Prevents: a record pointing at a tree that does not exist
   yet, a `.step` whose sha the record has not seen, and a document entry
@@ -2106,6 +2132,11 @@ caller's own process, there and then:
   exception the child's body raised: no wrapper. The body may catch it, but the
   run still fails with the child (`authoring.BuildFrame.failed`): a parent never
   publishes over a child it could not build, and its previous document stays.
+- **Exports queued.** A child's files are its own build's: its STEP's export
+  job is submitted as its result is recorded and runs on the pool while the
+  parent's body goes on; the run finishes every export it queued, children
+  first, once the root's body has returned (§3, *Exports*). A child's `done`
+  says its result is recorded and its parent may compose it; its file follows.
 - **Cycles.** A model called while it is itself being built is an error: a
   model may not depend on itself.
 

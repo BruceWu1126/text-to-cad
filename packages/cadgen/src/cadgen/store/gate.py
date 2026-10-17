@@ -18,15 +18,19 @@
 5. any declared output does not match ``outputs``;
 6. the producer that built the record -- cadgen, the kernel -- is not this one.
 
-A model's stored result STANDS when clauses 1–4 and 6 hold and clause 5 finds at
-most a STEP or a declared mesh to owe: ``Verdict.key`` is then the record's key,
-and a decorated call takes the result as it is, exporting what the files owe
-without running the body. Anything else the gate finds is a rebuild. The verdict
-also names the key the source has NOW (``Verdict.candidate``): what a result would
-be keyed by if this source were built, from this model, the record's closure as it
-hashes now, its constants as they read now, its children's keys as they stand now
-and this producer -- what a stored result is looked up by before the body runs
-(``store.results``).
+A model's stored result is in the store when clauses 1–4 and 6 hold
+(``Verdict.stored``, the record's key). It STANDS when clause 5 then finds at most a
+STEP or a declared mesh to owe: ``Verdict.key`` is that key, a decorated call takes
+the result as it is, exporting what the files owe without running the body, and a
+parent depends on the child by it (clause 3); a missing sidecar or drawing is a
+run's, as is anything else the gate finds, and a child that owes one does not stand
+for its parent, whose run calls it. The verdict also names the key the source has
+NOW (``Verdict.candidate``): what a result would be keyed by if this source were
+built, from this model, the record's closure as it hashes now, its constants as
+they read now, its children's keys as they stand now and this producer -- what a
+stored result is looked up by before the body runs (``store.results``); a record
+whose result is in the store is that candidate itself, never restored over what it
+owes a run for.
 
 Evaluated once in the requesting process (fast, no kernel import) and again on
 the worker immediately before building. Recursion in (3) is memoized per request.
@@ -66,9 +70,16 @@ class Verdict:
     closure: str | None = None
     #: Exact result from the record this verdict checked, never a later lookup.
     tree: str | None = None
-    #: The record's key while its stored result stands (the module docstring); None
+    #: The record's key while its stored result is in the store (the module docstring:
+    #: clauses 1-4 and 6); None when the source has moved on from it.
+    stored: str | None = None
+    #: ``stored`` while the files owe at most an export (the module docstring); None
     #: when the model must run.
     key: str | None = None
+    #: Every verdict this evaluation took, by model ref -- this one and its descendants'
+    #: (clause 3), each asked once -- for a caller that heals what a current model's
+    #: children owe without asking again (``generation._hit``).
+    descendants: dict[str, "Verdict"] = field(default_factory=dict, repr=False)
     #: The key the source has now, when the record can say (the module docstring);
     #: None without a record, when a child's result does not stand, or when a
     #: constant's module cannot be read.
@@ -184,8 +195,11 @@ def _hash_file(path: Path) -> str | None:
 def stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verdict:
     # What the gate reads -- a child's files and outputs, inside a parent's build --
     # is its own bookkeeping, never the build's input.
+    memo = memo if memo is not None else {}
     with filetrace.paused():
-        return _stale(model, memo=memo)
+        verdict = _stale(model, memo=memo)
+    verdict.descendants = memo
+    return verdict
 
 
 def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verdict:
@@ -323,9 +337,10 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
     if changed is not None:
         verdict.stale = True
 
-    stands = not any(clause["stale"] for clause in clauses if clause["clause"] in (1, 2, 3, 4, 6)) and not owed_a_run
     key = str(record.get("key") or "")
-    verdict.key = key if stands and key else None
+    stands = bool(key) and not any(clause["stale"] for clause in clauses if clause["clause"] in (1, 2, 3, 4, 6))
+    verdict.stored = key if stands else None
+    verdict.key = key if stands and not owed_a_run else None
     readable = all(constants_now.get(rel) is not None and all(name in constants_now[rel] for name in names)
                    for rel, names in recorded_constants.items())
     if now and readable and len(child_keys) == len(child_clauses):

@@ -477,15 +477,7 @@ def write_source_sidecar(
     The written ``documentHash`` describes the adjacent STEP bytes, or the
     caller's already-verified digest for those bytes. Only the FILE: the
     build's provenance record stays."""
-    body = {k: v for k, v in payload.items() if k in _SIDECAR_SECTIONS}
-    if "appearance" in body:
-        body["appearance"] = normalize_appearance(body["appearance"])
-        if body["appearance"] is None:
-            body.pop("appearance")
-    if "animation" in body:
-        body["animation"] = normalize_animation(body["animation"])
-        if body["animation"] is None:
-            body.pop("animation")
+    body = sidecar_sections(payload)
     if not sidecar_is_warranted(body):
         source_sidecar_path(step_path).unlink(missing_ok=True)
         return
@@ -500,6 +492,21 @@ def write_source_sidecar(
     temp = target.with_name(f".{target.name}{temp_suffix()}")
     temp.write_text(json.dumps(body, sort_keys=True), encoding="utf-8")
     replace_atomic(temp, target)
+
+
+def sidecar_sections(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The sections of ``payload`` a sidecar carries, normalized: what
+    :func:`write_source_sidecar` writes, and what decides whether one is warranted."""
+    body = {k: v for k, v in payload.items() if k in _SIDECAR_SECTIONS}
+    if "appearance" in body:
+        body["appearance"] = normalize_appearance(body["appearance"])
+        if body["appearance"] is None:
+            body.pop("appearance")
+    if "animation" in body:
+        body["animation"] = normalize_animation(body["animation"])
+        if body["animation"] is None:
+            body.pop("animation")
+    return body
 
 
 def remove_source_sidecar(step_path: Path | str) -> None:

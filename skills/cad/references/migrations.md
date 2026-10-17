@@ -204,7 +204,9 @@ A child a parent's body calls is decoded from its stored result when the store
 holds one for its inputs as they are, else built there and then, in the parent's
 own process, before the call returns. Children build one at a time, in the order
 the body calls them; nothing runs in parallel, and the time line counts a child's
-build under `children`.
+build under `children`. A child's STEP is written while its parent's body runs,
+and the command returns once every file is written: in the build tree a model's
+`done` says its result is recorded, and its file follows.
 
 A parent records each child by its **key** -- a hash of the child (its script and
 function) and everything it was built from: its sources, data files, constants,

@@ -126,7 +126,7 @@ class _ExportPlan:
     whose recorded output entry is ``kept``, or export the result -- ``plain``, without
     names, where the file the same result was last written to did not hold it. ``why`` says
     why a file the same result was last written to, still on disk, is written again (a
-    current model's re-export, :func:`_reexport`); empty otherwise."""
+    current model's re-export, :func:`_hit`); empty otherwise."""
 
     kept: dict | None
     plain: bool
@@ -176,98 +176,169 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
         why = ("did not hold its result" if marked and not prior.get("plain")
                else "was written by another writer" if not this_writer
                else "has no entry in the store" if entry is None else "")
+    elif not force and same:
+        why = ("was never written" if not sha else "is missing" if on_disk is None
+               else "is not the file the record names")
     return _ExportPlan(kept=None, plain=not force and same and this_writer and (marked or bool(prior.get("plain"))),
                        why=why)
 
 
-def _export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object], logger: CliLogger) -> dict:
-    """The export job's answer for ``tree`` written to ``staged`` (``store/exports.py``):
-    the build pool's, or this process's for a result holding a component only its live
-    shape stands for. Its spans and warnings are told to ``logger``."""
+def _submit_export(tree: str, staged: Path, *, names: bool, live: Mapping[str, object]) -> object:
+    """The export job writing ``tree`` to ``staged`` (``store/exports.py``), started now:
+    the build pool's, or, for a result holding a component only this process's live shape
+    stands for, this process's own, done here and now. Its ``result()`` is the job's answer."""
     if live:
+        from concurrent.futures import Future
+
         from cadgen.store.exports import export_step
 
-        export = export_step(tree, staged, names=names, shapes=live)
-    else:
-        from cadgen.daemon.artifacts import resolve_artifact
+        done: Future = Future()
+        done.set_result(export_step(tree, staged, names=names, shapes=live))
+        return done
+    from cadgen.daemon.artifacts import submit_artifact
 
-        export = resolve_artifact({"kind": "export", "tree": tree, "out": str(staged), "names": names})
-    for label, seconds in export["spans"]:
-        logger.timing(label, seconds)
-    for warning in export["warnings"]:
-        logger.warning(warning)
-    return export
+    return submit_artifact({"kind": "export", "tree": tree, "out": str(staged), "names": names})
 
 
-def _save_step(spec: EntrySpec, tree: str, plan: _ExportPlan, *, record: dict, sidecar_payload: dict | None,
-               expected_document_pair: tuple[str | None, str | None] | None, producer: dict | None,
-               live: Mapping[str, object], stage: Callable[[], Path], still_saves: Callable[[], None],
-               logger: CliLogger) -> bool:
-    """Save the model's STEP from its result ``tree`` (STORE.md §3, *Exports*): the export
-    (or the file kept), then the publication tail -- the file and its sidecar in place,
-    its bytes mapped to the tree pending its verify, the record's output entry, the
-    `saved` event -- then the verify, which a build with no daemon waits for and a
-    daemon's finishes after the build returns. True when the file was kept."""
-    from cadgen._internal.atomic_replace import replace_atomic
-    from cadgen._internal.source_sidecar import source_sidecar_path, write_source_sidecar
-    from cadgen.catalog import seed_artifact_hash
-    from cadgen.daemon import executors
-    from cadgen.store.gate import file_stamp, remember_renamed_digest
-    from cadgen.store.records import forget_output, note_document_tree, write_record
+class _Export:
+    """What a model's build owes beside its record, finished after it (STORE.md §3,
+    *Exports*; §9a).
 
-    step_path = spec.step_path.expanduser().resolve()
-    model_path = _model_for_spec(spec)
-    staged = stage() / spec.step_path.name
-    export = None
-    plain = plan.plain
-    if plan.kept is None:
-        export = _export(tree, staged, names=not plan.plain, live=live, logger=logger)
-        digest = str(export["sha256"])
-        # As written, not as planned: a worker that cannot name its producer writes plain.
-        plain = plain or export["producer"] is None
-    else:
-        digest = plan.kept_sha256
-    if sidecar_payload is not None:
-        write_source_sidecar(staged, sidecar_payload, document_hash=digest)
-    staged_sidecar = source_sidecar_path(staged)
-    sidecar = _sha256_of(staged_sidecar) if staged_sidecar.is_file() else None
-    if expected_document_pair is not None:
-        current = _document_pair_state(spec.step_path)
-        if current != expected_document_pair and current != (digest, sidecar):
-            raise RuntimeError(f"{spec.cad_ref}: result was not saved: the STEP file or its annotations changed "
-                               "during the build")
-    still_saves()
-    if _document_pair_state(spec.step_path)[0] != digest:
-        # Separate atomic writes, not a multi-file transaction. Equal bytes stay in place,
-        # with their stamp. The written copy's identity survives the rename, so its digest
-        # needs no second read of the saved document.
-        staged_identity = file_stamp(staged)
-        replace_atomic(staged, spec.step_path)
-        remember_renamed_digest(step_path, digest, staged_identity)
-    _publish_sidecar(staged, spec.entry_path)
-    if _document_pair_state(spec.step_path) != (digest, sidecar):
-        raise RuntimeError(f"{spec.cad_ref}: saved files changed during publication; the build record was not updated")
-    seed_artifact_hash(spec.step_path, digest)
-    if plan.kept is None:
-        # The bytes, mapped to the tree they were written from before any parse of them:
-        # pending until the verify answers.
-        note_document_tree(digest, tree, producer=producer, verified=False, plain=plain)
-    outputs = record["outputs"]
-    outputs[str(step_path)] = {**plan.output(), "sha256": digest, **({"plain": True} if plain else {})}
-    sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
-    if sidecar is not None:
-        outputs[sidecar_key] = {"sha256": sidecar}
-    else:
-        outputs.pop(sidecar_key, None)
-        forget_output(sidecar_key)
-    write_record(model_path, record)
-    executors.emit_event(executors.model_event(
-        model_path, "building", phase="STEP saved",
-        saved={"output": str(step_path), "tree": tree, "documentHash": digest},
-    ))
-    if export is not None:
-        _verify_saved(tree, step_path, digest, producer=export["producer"])
-    return plan.kept is not None
+    Queued by the one pipeline the moment the model's result is recorded, root or child
+    alike: the export job writing its STEP from the stored tree is submitted to the build
+    pool then, so a child's file is written while its parent's body goes on, and the run
+    that owns the command finishes every export it queued once its own body has returned,
+    in the order queued -- children before the parent that called them
+    (``cadgen.authoring.build_run``). Finishing one publishes the written file (the file
+    and its sidecar into place, the expected pair checked first, §7; the bytes mapped to
+    the tree pending their verify; the record's output entry; the ``STEP saved`` event),
+    has it verified (a build with no daemon waits for the answer and warns; a daemon's
+    verify finishes on the pool), then cuts the model's declared meshes from that file's
+    bytes. A kept STEP submits nothing and publishes only its sidecar; a current model has
+    its display data derived here too, after the STEP its file's bytes then map to; a
+    mesh-only model has only its meshes. An export that fails fails the command, and the
+    file on disk stays as it was.
+
+    ``step`` is what the STEP needs, or None for a model that writes none: the plan
+    (:func:`_export_plan`), the record to fill, the sidecar payload, the document pair
+    expected on disk, the producer the file's part keys name, the build's live shapes
+    (``live``) and the publish rule to ask again (``still_saves``).
+    """
+
+    def __init__(self, spec: EntrySpec, tree: str, *, logger: CliLogger, step: dict | None = None,
+                 display: bool = False, announce: str | None = None) -> None:
+        from contextlib import ExitStack
+
+        from cadgen.authoring import current_run
+
+        run = current_run()
+        if run is None:
+            raise RuntimeError(f"{spec.cad_ref}: an export was queued outside a build run")
+        self.spec, self.tree, self.logger = spec, tree, logger
+        self.step, self.display, self.announce = step, display, announce
+        # The summary line is the command's, in its logger's voice; the job's spans and
+        # warnings are the build's (``logger``, verbose or not as the build was given it).
+        self.command_logger = run.logger if run.logger is not None else logger
+        self.stage = ExitStack()
+        self.job: object | None = None
+        if step is not None:
+            step["staged"] = _stage(spec, self.stage) / spec.step_path.name
+            plan: _ExportPlan = step["plan"]
+            if plan.kept is None:
+                self.job = _submit_export(tree, step["staged"], names=not plan.plain, live=step["live"])
+        run.exports.append(self)
+
+    def finish(self) -> None:
+        """Publish what the model owes, in order (the class docstring), and say so."""
+        from cadgen.daemon.telemetry import job_reused
+
+        try:
+            written = self._publish_step() if self.step is not None else False
+            if self.display:
+                _ensure_reused_display(self.spec, self.tree, logger=self.logger)
+            written = bool(_produce_declared_mesh_exports(self.spec, logger=self.logger, source_tree=self.tree)) or written
+            if self.announce:
+                self.command_logger.info(self.announce)
+            if written:
+                job_reused(False)  # a file written now: not all of it was the store's
+        finally:
+            self.stage.close()
+
+    def abandon(self) -> None:
+        """Leave the file as it is: the staged copy goes, and the next run exports again."""
+        self.stage.close()
+
+    def _publish_step(self) -> bool:
+        """The STEP in place from the export's answer, or kept (STORE.md §3, *Exports*; §5,
+        publish order), then its verify. True when the file was written."""
+        from cadgen._internal.atomic_replace import replace_atomic
+        from cadgen._internal.source_sidecar import source_sidecar_path, write_source_sidecar
+        from cadgen.catalog import seed_artifact_hash
+        from cadgen.daemon import executors
+        from cadgen.store.gate import file_stamp, remember_renamed_digest
+        from cadgen.store.records import forget_output, note_document_tree, write_record
+
+        spec, tree, logger, step = self.spec, self.tree, self.logger, self.step
+        plan: _ExportPlan = step["plan"]
+        record: dict = step["record"]
+        staged: Path = step["staged"]
+        step_path = spec.step_path.expanduser().resolve()
+        model_path = _model_for_spec(spec)
+        export = None
+        plain = plan.plain
+        if self.job is not None:
+            export = self.job.result()
+            for label, seconds in export["spans"]:
+                logger.timing(label, seconds)
+            for warning in export["warnings"]:
+                logger.warning(warning)
+            digest = str(export["sha256"])
+            # As written, not as planned: a worker that cannot name its producer writes plain.
+            plain = plain or export["producer"] is None
+        else:
+            digest = plan.kept_sha256
+        if step["sidecar_payload"] is not None:
+            write_source_sidecar(staged, step["sidecar_payload"], document_hash=digest)
+        staged_sidecar = source_sidecar_path(staged)
+        sidecar = _sha256_of(staged_sidecar) if staged_sidecar.is_file() else None
+        expected_document_pair = step["expected_document_pair"]
+        if expected_document_pair is not None:
+            current = _document_pair_state(spec.step_path)
+            if current != expected_document_pair and current != (digest, sidecar):
+                raise RuntimeError(f"{spec.cad_ref}: result was not saved: the STEP file or its annotations changed "
+                                   "during the build")
+        step["still_saves"]()
+        if _document_pair_state(spec.step_path)[0] != digest:
+            # Separate atomic writes, not a multi-file transaction. Equal bytes stay in place,
+            # with their stamp. The written copy's identity survives the rename, so its digest
+            # needs no second read of the saved document.
+            staged_identity = file_stamp(staged)
+            replace_atomic(staged, spec.step_path)
+            remember_renamed_digest(step_path, digest, staged_identity)
+        _publish_sidecar(staged, spec.entry_path)
+        if _document_pair_state(spec.step_path) != (digest, sidecar):
+            raise RuntimeError(f"{spec.cad_ref}: saved files changed during publication; the build record was not updated")
+        seed_artifact_hash(spec.step_path, digest)
+        if export is not None:
+            # The bytes, mapped to the tree they were written from before any parse of them:
+            # pending until the verify answers.
+            note_document_tree(digest, tree, producer=step["producer"], verified=False, plain=plain)
+        outputs = record["outputs"]
+        outputs[str(step_path)] = {**plan.output(), "sha256": digest, **({"plain": True} if plain else {})}
+        sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
+        if sidecar is not None:
+            outputs[sidecar_key] = {"sha256": sidecar}
+        else:
+            outputs.pop(sidecar_key, None)
+            forget_output(sidecar_key)
+        write_record(model_path, record)
+        executors.emit_event(executors.model_event(
+            model_path, "building", phase="STEP saved",
+            saved={"output": str(step_path), "tree": tree, "documentHash": digest},
+        ))
+        if export is not None:
+            _verify_saved(tree, step_path, digest, producer=export["producer"])
+        return export is not None
 
 
 def _verify_saved(tree: str, step_path: Path, digest: str, *, producer: dict | None) -> None:
@@ -691,7 +762,6 @@ def _generate_part_outputs(
             # The record is written at the source result, its STEP pending until the
             # export lands (an empty sha256 the gate reads as never written).
             outputs[step_key] = export_plan.output()
-            outputs[sidecar_key] = {"sha256": ""}
         # An imported document and anything beside it are authored inputs. Cache
         # publication must not add, rewrite, or remove either one.
 
@@ -791,6 +861,14 @@ def _generate_part_outputs(
                 record["animation"] = sidecar_payload["animation"]
             if sidecar_payload is not None and sidecar_payload.get("appearance") is not None:
                 record["appearance"] = copy.deepcopy(sidecar_payload["appearance"])
+            if writes_step:
+                from cadgen._internal.source_sidecar import sidecar_is_warranted, sidecar_sections
+
+                # A sidecar this build will write is pending with the STEP until the export
+                # lands; a missing one is then a run's to write again (gate clause 5). A
+                # model that declares nothing lists none.
+                if sidecar_is_warranted(sidecar_sections(sidecar_payload)):
+                    outputs[sidecar_key] = {"sha256": ""}
         if record["sourceKind"] == "python" and spec.script_path is not None:
             from cadgen._internal.annotation_refresh import capture_geometry_closure
 
@@ -856,14 +934,19 @@ def _generate_part_outputs(
         if kernel_run is not None:
             # The run's trace was this job's: nothing after it reads the run.
             scene.kernel_run = None
-        if writes_step:
-            stats["stepKept"] = _save_step(
-                spec, tree_hash, export_plan, record=record, sidecar_payload=sidecar_payload,
-                expected_document_pair=expected_document_pair, producer=producer, live=live,
-                stage=lambda: _stage(spec, publication_cleanup), still_saves=still_saves, logger=logger,
-            )
+        if generated:
+            # What the build still owes, queued: its STEP's export job starts now and the
+            # file is published, verified and its meshes cut when the run finishes its
+            # exports (_Export) -- after this build's done, while a parent's body goes on.
+            kept = writes_step and export_plan.kept is not None
+            summary = (f"kept STEP: {_display_path(spec.step_path)} (its bytes would not change)" if kept
+                       else _generated_python_glb_summary(spec))
+            _Export(spec, tree_hash, logger=logger, announce=None if reemit_source_hash else summary,
+                    step={"plan": export_plan, "record": record, "sidecar_payload": sidecar_payload,
+                          "expected_document_pair": expected_document_pair, "producer": producer, "live": live,
+                          "still_saves": still_saves} if writes_step else None)
         # Every part of the result is stored before the build reports done (the pool's
-        # job for them ran while the STEP was written), so a view of what it built only
+        # job for them runs while the record is written), so a view of what it built only
         # reads.
         while display_jobs:
             _await_display(display_jobs.pop(0), progress=progress, logger=logger)
@@ -873,11 +956,8 @@ def _generate_part_outputs(
 
     jobs.append(_ArtifactJob("tree", component_package_job))
 
-    from contextlib import ExitStack
-
     try:
-        with ExitStack() as publication_cleanup:
-            artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
+        artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
     except Exception:
         # A build that failed after its preview leaves the preview standing under the
         # failure, its parts announced as the pool derives them.
@@ -890,7 +970,7 @@ def _generate_part_outputs(
         raise
     tree_result = artifact_results.get("tree") or {}
     return GeneratedStepResult(spec=spec, scene=scene, tree=str(tree_result.get("tree") or "") or None,
-                               step_kept=bool(tree_result.get("stepKept")), key=tree_result.get("key"))
+                               key=tree_result.get("key"))
 
 
 def _children_by_key(called: object) -> list[dict[str, str]]:
@@ -927,9 +1007,7 @@ def _generate_step_outputs(
         if refreshed_tree is not None:
             from cadgen.store.records import read_record
 
-            _current_source_result(spec, refreshed_tree)
-            _ensure_reused_display(spec, refreshed_tree, progress=progress, logger=logger)
-            _produce_declared_mesh_exports(spec, logger=logger, source_tree=refreshed_tree)
+            _hit(spec, refreshed_tree, logger=logger or CliLogger("cadgen"), verdict=verdict)
             refreshed = read_record(_model_for_spec(spec)) or {}  # the record the refresh just wrote
             return GeneratedStepResult(spec=spec, scene=None, tree=refreshed_tree, key=refreshed.get("key"))
     reuse_tree = _checked_source_tree(spec, verdict) if not force else None
@@ -946,17 +1024,15 @@ def _generate_step_outputs(
     ):
         if logger is not None:
             logger.debug(f"reused current tree: {_display_path(spec.step_path)}")
-        # Declared mesh exports are content-gated, not build-gated: a current
-        # model with a deleted/stale STL heals it here from the store package
-        # without a rebuild.
         if spec.source == "generated":
-            _current_source_result(spec, reuse_tree)
+            # A peer published the model while this run waited for its slot: what it may
+            # still owe is queued as for any current model.
+            _hit(spec, reuse_tree, logger=logger or CliLogger("cadgen"), verdict=verdict)
         else:
             from cadgen.catalog import result_tree_for
 
             reuse_tree = result_tree_for(spec.step_path)
-        _ensure_reused_display(spec, reuse_tree, progress=progress, logger=logger)
-        _produce_declared_mesh_exports(spec, logger=logger, source_tree=reuse_tree)
+            _ensure_reused_display(spec, reuse_tree, progress=progress, logger=logger)
         return GeneratedStepResult(spec=spec, scene=None, tree=reuse_tree,
                                    key=verdict.key if verdict is not None else None)
     output_kwargs: dict[str, object] = {
@@ -988,9 +1064,7 @@ def _generate_step_outputs(
         # tree. Without this branch the function fell off the end and silently
         # returned None — no package written — while the CLI still reported success.
         output_kwargs["require_step_file"] = True
-    result = _generate_part_outputs(spec, **output_kwargs)
-    _produce_declared_mesh_exports(spec, logger=logger, source_tree=result.tree)
-    return result
+    return _generate_part_outputs(spec, **output_kwargs)
 
 
 def _request_display(tree: str, *, producer: dict | None = None, cids: list[str] | None = None):
@@ -1044,38 +1118,12 @@ def _note_warnings(texts: list[str]) -> None:
             print(f"[cadgen] warning: {text}", file=sys.stderr)
 
 
-def _reexport(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
-    """Write again the STEP of a current model that owes it -- a file that did not hold its
-    result, written plain this time, one another writer wrote, or one whose entry the store
-    lost (STORE.md §3) -- without running its body: an export of the recorded result, its
-    publication and its verify. True when it was written."""
-    if spec.source != "generated" or not spec.step_output or spec.step_path is None:
-        return False
-    from contextlib import ExitStack
-
-    from cadgen._internal.source_sidecar import _raw_source_sidecar
-    from cadgen.store.records import document_entry_for_hash, read_record
-
-    record = read_record(_model_for_spec(spec)) or {}
-    pair = _document_pair_state(spec.step_path)
-    plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
-    if plan.kept is not None:
-        return False
-    logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
-                + (" without names" if plan.plain else ""))
-    with ExitStack() as cleanup:
-        _save_step(spec, tree, plan, record=copy.deepcopy(record), sidecar_payload=_raw_source_sidecar(spec.step_path),
-                   expected_document_pair=pair, producer=(document_entry_for_hash(pair[0] or "") or {}).get("producer"),
-                   live={}, stage=lambda: _stage(spec, cleanup), still_saves=lambda: None, logger=logger)
-    return True
-
-
 def _ensure_reused_display(spec: EntrySpec, tree: str | None, *, progress: object | None = None,
                            logger: CliLogger | None = None) -> None:
     """The display data of a build that reuses its tree, derived by the pool where the store
-    lacks it (:func:`_request_display`) before the build reports done: the tree its saved
-    document selects, under the producer that document names -- what a view of it reads --
-    or a mesh-only model's own tree."""
+    lacks it (:func:`_request_display`) before the command returns (``_Export``): the tree
+    its saved document selects, under the producer that document names -- what a view of
+    it reads -- or a mesh-only model's own tree."""
     producer = None
     if spec.step_output and spec.entry_path is not None:
         from cadgen.catalog import result_snapshot_for
@@ -1515,14 +1563,17 @@ def _stale_after_build(spec: EntrySpec) -> str | None:
     if model is None or spec.source != "generated":
         return None
     try:
-        from cadgen.store.gate import stale
+        from cadgen.store.gate import Verdict, stale
 
         verdict = stale(model)
     except Exception:  # noqa: BLE001 - a notice never fails a build
         return None
-    if not verdict.stale:
+    # The sources: an output the run still owes (its STEP, exported once the run finishes
+    # its exports) is no change.
+    moved = [clause for clause in verdict.clauses if clause.get("stale") and clause.get("clause") != 5]
+    if not moved:
         return None
-    reason = verdict.reason()
+    reason = Verdict(model=verdict.model, stale=True, clauses=moved).reason()
     return f"{reason}; changed during the build" if reason else "changed during the build"
 
 
@@ -1612,12 +1663,10 @@ def _assembly_glb_package_current(spec: EntrySpec) -> bool:
 class _Built:
     """What :func:`build_model` answers: the model's result tree, how it came about
     (``current``: the stored result; ``built``: its body ran; ``skipped-peer``: a
-    concurrent run published it first), whether its STEP was kept, and where a built
-    model's time went."""
+    concurrent run published it first), and where a built model's time went."""
 
     tree: str | None
     outcome: str
-    step_kept: bool = False
     timings: dict[str, float] | None = None
     #: The key the result is stored under (store/results.py); a parent records the
     #: child by it.
@@ -1637,7 +1686,8 @@ def build_model(
     §9a): the gate, then either the stored result -- its parts' display data, its STEP
     (where the file does not hold the result or another writer wrote it) and its
     declared meshes owed without running its body -- or a run of the body, under a job
-    slot and the run's scopes, publishing its record and exporting its files.
+    slot and the run's scopes, publishing its record. Either way the files it owes are
+    queued (``_Export``) and finished when the run that owns the command ends.
 
     ``generator`` is the model's function when its module is loaded already (a child a
     parent's body called); None loads the script. ``force`` and ``profile`` are the
@@ -1658,7 +1708,7 @@ def build_model(
         if tree is None:
             tree = _restore_result(spec, verdict(), logger=logger)
         if tree is not None:
-            _hit(spec, tree, logger=logger)
+            _hit(spec, tree, logger=logger, verdict=verdict())
             _tree_event(spec, "current")
             return _Built(tree, "current", key=verdict().key)
 
@@ -1698,7 +1748,7 @@ def build_model(
             return _Built(result.tree, "skipped-peer", key=verdict().key)
         if spec.source == "generated":
             result.tree = captured.wait_result()
-    return _Built(result.tree, "built", step_kept=result.step_kept, timings=timed.get("timings"), key=result.key)
+    return _Built(result.tree, "built", timings=timed.get("timings"), key=result.key)
 
 
 def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> str | None:
@@ -1708,7 +1758,9 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     current one, exporting what the files owe. None when there is none to restore,
     or its tree is gone; the verdict then names the restored key."""
     candidate = getattr(verdict, "candidate", None)
-    if spec.source != "generated" or spec.step_path is None or not candidate:
+    if spec.source != "generated" or spec.step_path is None or not candidate or verdict.stored is not None:
+        # A record whose stored result stands is the candidate itself: what it owes
+        # beyond an export (a sidecar, a drawing) is a run's, not a restore's.
         return None
     from cadgen.store.provenance import write_provenance
     from cadgen.store.records import note_output, write_record
@@ -1731,22 +1783,64 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     return tree
 
 
-def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger) -> bool:
-    """A model whose stored result ``tree`` is current: what it may still owe, healed
-    without running its body -- its STEP (a file that did not hold its result, one
-    another writer wrote, one whose entry the store lost), its parts' display data (a
-    cleared store) and its declared mesh exports (a deleted file, a changed declaration).
-    The STEP first, so the display data derived is that of the result its bytes then map
-    to, never of a marked file's own content. True when a file was written."""
-    _current_source_result(spec, tree)
-    rewritten = _reexport(spec, tree, logger=logger)
-    _ensure_reused_display(spec, tree, logger=logger)
-    written = bool(_produce_declared_mesh_exports(spec, logger=logger, source_tree=tree)) or rewritten
-    if written:
-        from cadgen.daemon.telemetry import job_reused
+def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,
+         healed: set[str] | None = None) -> None:
+    """A model whose stored result ``tree`` is current: its source result announced, and
+    what it may still owe queued (``_Export``), healed without running its body -- its
+    STEP (a file that did not hold its result, written plain this time; one another
+    writer wrote; one whose entry the store lost; one missing, or never written because
+    its export failed), its parts' display data (a cleared store) and its declared mesh
+    exports (a deleted file, a changed declaration). The STEP first, so the display data
+    derived is that of the result its bytes then map to, never of a marked file's own
+    content.
 
-        job_reused(False)  # a file written now: not all of it was the store's
-    return written
+    Then what its children owe: a current model's body does not run, so it calls no
+    child, yet its gate asked each one (``verdict``, clause 3) -- a child whose stored
+    result stands but whose files owe an export (its export failed, its file was
+    deleted) is healed the same way, by this path, and its own children after it. A
+    child that owes a run does not stand, and the parent's run would have called it."""
+    from cadgen.store.records import read_record
+
+    model = _model_for_spec(spec)
+    healed = healed if healed is not None else set()
+    healed.add(model)
+    _current_source_result(spec, tree)
+    record = read_record(model) or {}
+    step = None
+    if spec.source == "generated" and spec.step_output and spec.step_path is not None:
+        from cadgen._internal.source_sidecar import _raw_source_sidecar
+        from cadgen.store.records import document_entry_for_hash
+
+        pair = _document_pair_state(spec.step_path)
+        plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
+        if plan.kept is None:
+            logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again"
+                        + (" without names" if plan.plain else ""))
+            step = {"plan": plan, "record": copy.deepcopy(record), "sidecar_payload": _raw_source_sidecar(spec.step_path),
+                    "expected_document_pair": pair,
+                    "producer": (document_entry_for_hash(pair[0] or "") or {}).get("producer"),
+                    "live": {}, "still_saves": lambda: None}
+    _Export(spec, tree, logger=logger, step=step, display=True)
+    from cadgen.store.gate import stale
+    from cadgen.store.index import split_model_ref
+
+    asked = getattr(verdict, "descendants", None) or {}
+    for child in record.get("children") or []:
+        child_model = str((child or {}).get("model") or "")
+        if not child_model or child_model in healed:
+            continue
+        child_verdict = asked.get(child_model) or stale(child_model)
+        owed = any(output.get("stale") for clause in child_verdict.clauses if clause.get("clause") == 5
+                   for output in clause.get("outputs") or [])
+        if child_verdict.key is None or child_verdict.tree is None or not owed:
+            continue
+        script, function = split_model_ref(child_model)
+        source = source_from_path(script, function=function)
+        if source is None:
+            continue
+        child_spec = _entry_spec_from_source(source)
+        _hit(child_spec, child_verdict.tree, logger=logger, verdict=child_verdict, healed=healed)
+        _tree_event(child_spec, "current")
 
 
 def build_child(defn: object) -> tuple[str, str]:
@@ -1833,7 +1927,9 @@ def generate_step_targets(
     from cadgen.authoring import build_run
 
     # The targets are the roots of the run: a child is built when its parent's body
-    # calls it (cadgen.authoring), by the same pipeline, in this process.
+    # calls it (cadgen.authoring), by the same pipeline, in this process. The run
+    # finishes every export its calls queued -- each model's STEP, meshes and summary
+    # line -- as it ends, children first, before the results are printed.
     with build_run(logger):
         for spec in selected_specs:
             logger.debug(f"Generating... {spec.source_ref}")
@@ -1846,10 +1942,6 @@ def generate_step_targets(
                 logger.info(f"{_display_path(Path(document)) if document else spec.cad_ref} is current; not rebuilt")
             elif built.outcome == "skipped-peer":
                 logger.info(f"{spec.cad_ref} was built by a concurrent run; skipped")
-            elif built.step_kept and spec.step_path is not None:
-                logger.info(f"kept STEP: {_display_path(spec.step_path)} (its bytes would not change)")
-            else:
-                logger.info(_generated_python_glb_summary(spec))
             _emit(spec, built)
     logger.total()
     _flush()

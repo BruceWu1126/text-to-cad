@@ -32,9 +32,11 @@ Semantics:
   any thread of this process), calling a decorated name is how an assembly uses
   its children: the call is a CHILD, decoded from its stored result when the
   store holds one for its inputs as they are, else run -- serially, in this
-  process, as its own build with its own record and outputs -- and the shape
-  handed back is its stored result, decoded (STORE.md §9a). A drawing's body
-  runs inline. The root model is only the first call.
+  process, as its own build with its own record -- and the shape handed back is
+  its stored result, decoded (STORE.md §9a). The files a call owes (its STEP,
+  its meshes) are queued and finished when the run that owns the command ends,
+  children first (``build_run``). A drawing's body runs inline. The root model
+  is only the first call.
 - **A model is ``script::function``.** A file may hold several models; each is
   its own record, output and job (``cadgen.store.index.model_ref``), and they
   share the file's closure. ``__main__`` builds the ones it calls -- there is no
@@ -159,11 +161,39 @@ class BuildFrame:
 class BuildRun:
     """One top-level build in this process, shared by every frame nested in it:
     the models decoded or run so far, each once per run (``results``: model ->
-    (key, tree)), and what the root command owns for the run (its logger)."""
+    (key, tree)), the files those calls owe (``exports``: each a
+    ``generation._Export``, queued as its model's result is recorded and finished
+    when the run ends, in that order) and what the root command owns for the run
+    (its logger)."""
 
     def __init__(self, logger: Any = None) -> None:
         self.logger = logger
         self.results: dict[str, tuple[str, str]] = {}
+        self.exports: list[Any] = []
+
+    def finish(self) -> None:
+        """Finish every export queued in this run, in the order queued -- children before
+        the parent that called them -- each writing the files its model owes. Every export
+        has its turn; the first failure is raised after the last one, the others printed."""
+        failure: Exception | None = None
+        for export in self.exports:
+            try:
+                export.finish()
+            except Exception as error:  # noqa: BLE001 - the next export still gets its turn
+                if failure is None:
+                    failure = error
+                else:
+                    print(f"[cadgen] {type(error).__name__}: {error}", file=sys.stderr)
+        self.exports.clear()
+        if failure is not None:
+            raise failure
+
+    def abandon(self) -> None:
+        """Leave every queued export unfinished: its file stays as it was, and the next
+        run exports again what is owed."""
+        for export in self.exports:
+            export.abandon()
+        self.exports.clear()
 
 
 def current_run() -> BuildRun | None:
@@ -173,12 +203,27 @@ def current_run() -> BuildRun | None:
 @contextlib.contextmanager
 def build_run(logger: Any = None) -> Iterator[BuildRun]:
     """The run a top-level command owns (``generation``): every decorated call made
-    inside it, at any depth, belongs to this run. Nests for a build started inside a
+    inside it, at any depth, belongs to this run, and the run finishes the exports
+    those calls queued as it ends -- after the command's own body, before it reports
+    its result. A run that failed still finishes them (the children built before the
+    failure owe their files, and the pool is writing them), its own failure the one
+    reported; an interrupted one abandons them. Nests for a build started inside a
     build (a test's), each its own."""
     previous = current_run()
     run = _BUILD_STATE.run = BuildRun(logger)
     try:
-        yield run
+        try:
+            yield run
+        except Exception:
+            try:
+                run.finish()
+            except Exception as error:  # noqa: BLE001 - the run's own failure is the one reported
+                print(f"[cadgen] {type(error).__name__}: {error}", file=sys.stderr)
+            raise
+        except BaseException:
+            run.abandon()
+            raise
+        run.finish()
     finally:
         _BUILD_STATE.run = previous
 

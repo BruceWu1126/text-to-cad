@@ -125,9 +125,12 @@ class RetainedRevisionPublication(unittest.TestCase):
             observed["tree"] = tree
             return result
 
+        from cadgen.authoring import build_run
+
         executors.set_event_sink(lambda _event: None)
         self.addCleanup(executors.set_event_sink, None)
-        with mock.patch.object(exports, "export_step", side_effect=injecting_export):
+        # The run that owns the command finishes the export it queued as it ends.
+        with mock.patch.object(exports, "export_step", side_effect=injecting_export), build_run():
             result = generation._generate_part_outputs(
                 spec,
                 preloaded_scene=scene,

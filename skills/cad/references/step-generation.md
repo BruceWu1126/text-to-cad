@@ -360,9 +360,10 @@ Every model a run builds, its children included, prints where its time went:
 ```
 
 Model code is the decorated function's call, less its waits for child builds;
-cadgen is loading the script, storing parts, writing outputs and meshing the
-parts every view draws (`Meshing parts n/total`), which a build finishes before
-it reports done. A `--json`
+cadgen is loading the script, storing parts and meshing the parts every view
+draws (`Meshing parts n/total`), which a build finishes before it reports done.
+Its STEP and meshes are written after that, by the time the command returns (a
+child's while its parent's body runs), so the line does not count them. A `--json`
 result carries the same numbers in `timings` (`null` for a current model). A
 model whose code took more than twice its last build's, and 30 s more, gets a
 warning. `python part.py --profile` rebuilds that model with its own code under

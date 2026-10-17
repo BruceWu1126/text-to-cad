@@ -958,7 +958,12 @@ _IMPORTING = threading.local()
 
 
 def _exec_hash_hook(event: str, args: tuple) -> None:
-    if _ACTIVE is None or event != "exec" or not args:
+    # The scope is the build's thread's: what another thread of the process executes
+    # meanwhile -- a pool job of this process writing a STEP or deriving a part -- is
+    # cadgen's own, never the build's input. Read once: the owning thread may leave the
+    # scope while this runs.
+    scope = _ACTIVE
+    if scope is None or event != "exec" or not args or scope.thread != threading.get_ident():
         return
     file_name = getattr(args[0], "co_filename", None)
     if not file_name:
@@ -968,7 +973,7 @@ def _exec_hash_hook(event: str, args: tuple) -> None:
     except (OSError, ValueError):
         return
     key = str(path)
-    if key in _ACTIVE.facts or not path.is_file() or not is_first_party_source_file(path):
+    if key in scope.facts or not path.is_file() or not is_first_party_source_file(path):
         return
     try:
         payload = path.read_bytes()
@@ -1026,6 +1031,7 @@ class ExecutionHashes:
         self.hashes: dict[str, str] = {}  # what this scope's build executed, by path, as it ran
         self.facts: dict[str, str] = {}  # every file the build executed, by path, as it ran
         self.sources: dict[str, bytes] = {}  # the bytes each of those ran with
+        self.thread = threading.get_ident()  # the build's thread: the only one whose executions are its
         self._imported = imported
         self._previous: ExecutionHashes | None = None
 

@@ -368,7 +368,9 @@ class KeptRuleTest(unittest.TestCase):
         kept = self.plan()
         self.assertEqual(({"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME}, ""), (kept.kept, kept.why))
         for why, plan, said in (("another result", self.plan(tree="c" * 64), ""),
-                                ("other bytes on disk", self.plan(on_disk="f" * 64), ""),
+                                ("other bytes on disk", self.plan(on_disk="f" * 64), "is not the file the record names"),
+                                ("never written", self.plan(output={"sha256": "", "writer": STEP_WRITER_SCHEME}),
+                                 "was never written"),
                                 ("forced", self.plan(force=True), ""),
                                 ("another writer", self.plan(output={"sha256": self.DIGEST, "writer": "cadgen-step-writer-3"}),
                                  "was written by another writer")):

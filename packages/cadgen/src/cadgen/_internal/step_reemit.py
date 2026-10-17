@@ -305,6 +305,7 @@ def _emit(
 ) -> None:
     """Read IN, re-path the scene to OUT, and run the ONE build pipeline."""
     from cadgen._internal.generation import _generate_part_outputs
+    from cadgen.authoring import build_run
     from cadgen._internal.step_scene_package import load_step_scene_exact
     from cadgen.step_artifact_cli import _build_entry_spec
 
@@ -352,7 +353,9 @@ def _emit(
     # package-keyed record would land where no reader (the viewer polls the model's
     # build scope) looks. Two concurrent re-emits of one output both proceed; every
     # store write is atomic and idempotent, so neither can tear the other.
-    with cli_progress_line(
+    # The run that owns the command: the document's export is queued by the pipeline
+    # and finished as the run ends (cadgen.authoring.build_run).
+    with build_run(logger), cli_progress_line(
         spec.source_ref, logger=logger, fallback="Building..."
     ) as progress_sink, artifact_build(
         STEP_PACKAGE,

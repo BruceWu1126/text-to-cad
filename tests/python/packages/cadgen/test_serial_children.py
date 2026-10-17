@@ -200,5 +200,72 @@ class SerialChildren(unittest.TestCase):
         self.assertIn("a model may not depend on itself", err)
 
 
+class QueuedExports(SerialChildren):
+    """A call's files are queued as its result is recorded and finished by the run that
+    owns the command, children first: a child's STEP is written while its parent's body
+    goes on, the command's result is printed once every file is written, and an export
+    that fails fails the command, keeps the file on disk and is owed to the next run,
+    which exports it without running the body (STORE.md §3, *Exports*; §9a)."""
+
+    def test_a_childs_file_lands_after_its_done_and_before_the_result_is_printed(self):
+        from cadgen.cli._run_model import run_model_argv
+
+        class Stdout(io.StringIO):
+            """Notes, as the result line is printed, how many files had been saved."""
+
+            def write(self, text):
+                if text.startswith('{"ok":'):
+                    saved_first.append(len([e for e in self.events if e.get("saved")]))
+                return super().write(text)
+
+        saved_first: list[int] = []
+        out = Stdout()
+        out.events = self.events
+        self.events.clear()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(run_model_argv([str(self.grand), "--json"]), 0, err.getvalue())
+        events = list(self.events)
+        for name in ("child", "parent", "grand"):
+            done = next(i for i, e in enumerate(events) if e.get("state") == "done" and Path(e["model"]).stem == name)
+            saved = next(i for i, e in enumerate(events) if e.get("saved") and Path(e["model"]).stem == name)
+            self.assertLess(done, saved, f"{name}: its result is recorded before its file is written")
+            self.assertTrue((self.root / f"{name}.step").is_file())
+        order = [Path(e["model"]).stem for e in events if e.get("saved")]
+        self.assertEqual(order, ["child", "parent", "grand"], "children's files land first, as queued")
+        self.assertEqual(saved_first, [3], "the result line follows the last file written")
+
+    def test_a_failed_export_fails_the_command_and_the_next_run_writes_the_file_without_a_run(self):
+        from cadgen.store import exports
+
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        before = {name: (self.root / f"{name}.step").read_bytes() for name in ("child", "parent")}
+        (self.root / "size.txt").write_text("5.0", encoding="utf-8")
+        writer = exports.export_step
+
+        def failing(tree, out, **kwargs):
+            if Path(out).name == "child.step":
+                raise RuntimeError("the export failed on purpose")
+            return writer(tree, out, **kwargs)
+
+        with mock.patch.object(exports, "export_step", side_effect=failing):
+            code, err = self.build(self.parent)
+        self.assertNotEqual(code, 0)
+        self.assertIn("the export failed on purpose", err)
+        self.assertEqual(sorted(self.done()), ["child", "parent"], "both bodies ran before the export failed")
+        self.assertEqual((self.root / "child.step").read_bytes(), before["child"], "the file on disk stays")
+        self.assertNotEqual((self.root / "parent.step").read_bytes(), before["parent"], "the other export landed")
+        self.assertEqual(self.record(self.child)["outputs"][str(self.root / "child.step")]["sha256"], "",
+                         "the record owes the file")
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.done(), [], "nothing ran again")
+        self.assertIn("child.step was never written; writing it again", err)
+        self.assertNotEqual((self.root / "child.step").read_bytes(), before["child"])
+        self.assertEqual(self.record(self.child)["outputs"][str(self.root / "child.step")]["sha256"],
+                         __import__("hashlib").sha256((self.root / "child.step").read_bytes()).hexdigest())
+
+
 if __name__ == "__main__":
     unittest.main()
