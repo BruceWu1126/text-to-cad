@@ -29,11 +29,14 @@ const description = () => `<robot name="arm">
 
 // ---- the WebGL stand-ins ------------------------------------------------------------------------
 const picks = vi.hoisted(() => ({ latest: null as null | { enabled: boolean; scene: any; onPick: (hit: unknown, modifiers: { multiSelect: boolean }) => void } }));
+// The scene the Studio's own viewport draws, while it is open (`StudioView.jsx`).
+const studioView = vi.hoisted(() => ({ scene: null as any }));
 vi.mock('../../../dist/renderers/kit/shell/ShellViewport.js', async () => {
   const { createElement, forwardRef: forward, useImperativeHandle: handle, useRef: ref } = await import('react');
   return {
-    default: forward(function ShellViewport({ children }: { children?: (viewport: object) => unknown }, viewerRef) {
+    default: forward(function ShellViewport({ children, studio, scene }: { children?: (viewport: object) => unknown, studio?: boolean, scene?: any }, viewerRef) {
       const runtimeRef = ref(null), hostRef = ref(null), mountRef = ref(null);
+      if (studio) studioView.scene = scene ?? null;
       handle(viewerRef, () => ({
         prepareViewSettings: async () => {}, presentViewSettings() {}, requestRender() {}, syncSceneBounds() {},
         getPerspective: () => null, captureScreenshotBlob: async () => new Blob(['png'], { type: 'image/png' }),
@@ -297,17 +300,22 @@ it('a new revision of the robot keeps its pose while its controls and named pose
 });
 
 
-it('the Studio draws the opening pose and leaving it restores the tools pose without resetting its values', async () => {
+it("the Studio draws a robot of its own at the opening pose; the tools view's robot keeps its pose throughout, and its values", async () => {
   const robot = await openRobot();
-  const matrix = () => Array.from(picks.latest!.scene.linkFrames().get('upper_arm'));
+  const frameOf = (scene: any) => Array.from(scene.linkFrames().get('upper_arm'));
+  const matrix = () => frameOf(picks.latest!.scene);
   const opening = matrix();
   robot.type('shoulder', '30');
   const posed = matrix();
   expect(posed).not.toEqual(opening);
+  studioView.scene = null;
   await userEvent.setup().click(within(robot.pane).getByRole('button', { name: 'Present' }));
-  await waitFor(() => expect(matrix()).toEqual(opening));
+  await waitFor(() => expect(studioView.scene).not.toBeNull());
+  expect(studioView.scene).not.toBe(picks.latest!.scene);
+  await waitFor(() => expect(frameOf(studioView.scene)).toEqual(opening));
+  expect(matrix()).toEqual(posed);
   await userEvent.setup().click(screen.getByRole('button', { name: 'Exit studio', exact: true }));
-  await waitFor(() => expect(matrix()).toEqual(posed));
+  expect(matrix()).toEqual(posed);
   expect(robot.jointField('shoulder').value).toBe('30°');
   robot.client.dispose();
 });

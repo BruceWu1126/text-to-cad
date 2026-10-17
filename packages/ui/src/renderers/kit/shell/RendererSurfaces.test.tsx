@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
@@ -9,10 +9,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
 // The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
-const viewport = vi.hoisted(() => ({ props: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
+// `props`: the editor's viewport; `studio`: the Studio's, a viewport of its own while it is open.
+const viewport = vi.hoisted(() => ({ props: null as any, studio: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
-    viewport.props = props;
+    if (props.studio) viewport.studio = props; else viewport.props = props;
+    useEffect(() => () => { if (props.studio) viewport.studio = null; }, []);
     useImperativeHandle(ref, () => ({
       captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
       annotationAt: (x: number, y: number) => viewport.annotationAt?.(x, y) ?? null,
@@ -36,7 +38,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; viewport.studio = null; });
 
 
 function mount(host = testHost(), state?: unknown, name = 'one.harness', element: { current: HTMLElement | null } | null = null) {
@@ -301,12 +303,13 @@ it('the renderer is told the camera settled, through what the viewport reports: 
   // So is the viewport's own settle (a preview camera, a resize), which records nothing.
   act(() => { viewport.props.onCameraSettled(); });
   expect(overlay('camera-settles')).toBe('2');
-  // The Studio: the camera that moves records no perspective, and the renderer still hears of it.
+  // The Studio's own view keeps no camera (it records no perspective), and the renderer still hears
+  // its camera settle.
   fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-  await waitFor(() => expect(viewport.props.previewMode).toBe(true));
-  act(() => { viewport.props.onPerspectiveChange({ position: [4, 5, 6], target: [0, 0, 0], up: [0, 0, 1], zoom: 2, projection: 'orthographic' }); });
-  act(() => { viewport.props.onCameraSettled(); });
-  expect(overlay('camera-settles')).toBe('4');
+  await waitFor(() => expect(viewport.studio).not.toBeNull());
+  expect(viewport.studio.onPerspectiveChange ?? null).toBeNull();
+  act(() => { viewport.studio.onCameraSettled(); });
+  expect(overlay('camera-settles')).toBe('3');
 });
 
 it('a view that has gone writes nothing more: its last write is the one it makes as it unmounts, and a camera report after it writes no view again', () => {
@@ -332,43 +335,53 @@ it('a view that has gone writes nothing more: its last write is the one it makes
 // The full reset crosses the renderer callback and the shell's tool/preview
 // lifecycle; it must reach the camera only after those changes commit.
 
-// A stand-in routine runtime: the Studio plays it (under Autoplay) and puts it back at rest on the way out.
+// A stand-in routine runtime: it says what was asked of it.
 function routineRuntime(name: string, calls: string[]) {
   return { clips: [{ id: name }], clock: createAnimationClock(), onRelease: () => calls.push(`release ${name}`),
     onPlayToggle: () => calls.push(`play ${name}`) };
 }
 
-function mountRoutine(data: Record<string, unknown>) {
+function mountRoutine(data: Record<string, unknown>, state: unknown = undefined) {
   const settings = { toolStack: { panels: {}, collapsed: {} } };
   const preferences = { getSnapshot: () => settings, subscribe: () => () => {}, update() {} };
   const props = (extra: Record<string, unknown>) => ({ source: { id: 'one' }, file: { path: '/models/one.harness', name: 'one.harness', kind: 'file' },
-    document: null, onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' }, state: undefined,
+    document: null, onReady() {}, onOpenFile() {}, appearance: { colorScheme: 'light' }, state,
     onStateChange() {}, onNavigationActionsChange() {}, reload() {}, data: { services: { preferences }, ...extra } });
   const view = render(<ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(data) as any)} /></ViewerHostContext.Provider>);
   return (extra: Record<string, unknown>) => view.rerender(
     <ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(extra) as any)} /></ViewerHostContext.Provider>);
 }
 
-it('opening another file while the Studio is up leaves it, and the routine on screen goes back to rest', async () => {
+it('opening another file while the Studio is up leaves it; crossing touches neither the tools view\'s routine nor the Studio\'s', async () => {
   const calls: string[] = [];
-  const rerender = mountRoutine({ animation: routineRuntime('a', calls), modelKey: 'a.glb' });
+  const rerender = mountRoutine({ animation: routineRuntime('tools-a', calls), studioAnimation: routineRuntime('studio-a', calls), modelKey: 'a.glb' });
   fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await screen.findByRole('button', { name: 'Exit studio' });
-  // Entering puts the tools view's routine down, and with Autoplay off plays nothing.
-  expect(calls).toEqual(['release a']);
-  rerender({ animation: routineRuntime('b', calls), modelKey: 'b.glb' });
+  // With Autoplay off, entering plays nothing and puts nothing down.
+  expect(calls).toEqual([]);
+  rerender({ animation: routineRuntime('tools-b', calls), studioAnimation: routineRuntime('studio-b', calls), modelKey: 'b.glb' });
   expect(screen.queryAllByRole('button', { name: 'Exit studio' })).toEqual([]);
-  expect(calls).toEqual(['release a', 'release b']);
+  expect([calls, viewport.studio]).toEqual([[], null]);
 });
 
-it('a view that stops offering the Studio while it is up leaves it as every exit does', async () => {
+it("under Autoplay the Studio plays its own routine as it opens; the tools view's is not touched", async () => {
   const calls: string[] = [];
-  const runtime = routineRuntime('a', calls);
-  const rerender = mountRoutine({ animation: runtime });
+  mountRoutine({ animation: routineRuntime('tools', calls), studioAnimation: routineRuntime('studio', calls) },
+    { version: 2, playback: { orbitSpeed: 1, autoplay: true } });
   fireEvent.click(screen.getByRole('button', { name: 'Present' }));
   await screen.findByRole('button', { name: 'Exit studio' });
-  rerender({ animation: runtime, previewable: false });
-  // Put down on the way in, and again on the way out.
-  expect(calls).toEqual(['release a', 'release a']);
+  await waitFor(() => expect(calls).toEqual(['play studio']));
+  fireEvent.click(screen.getByRole('button', { name: 'Exit studio' }));
+  expect(calls).toEqual(['play studio']);
+});
+
+it('a view that stops offering the Studio while it is up leaves it as every exit does: its view goes, and nothing else', async () => {
+  const calls: string[] = [];
+  const tools = routineRuntime('tools', calls), studio = routineRuntime('studio', calls);
+  const rerender = mountRoutine({ animation: tools, studioAnimation: studio });
+  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
+  await screen.findByRole('button', { name: 'Exit studio' });
+  rerender({ animation: tools, studioAnimation: studio, previewable: false });
+  expect([calls, viewport.studio, viewport.props.suspended]).toEqual([[], null, false]);
   expect(screen.queryAllByRole('button', { name: 'Exit studio' })).toEqual([]);
 });

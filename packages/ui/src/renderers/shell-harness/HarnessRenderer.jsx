@@ -2,9 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as THREE from "three";
 import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { createSurfaceLook } from "@text-to-cad/core/lib/viewer/surfaceLook.js";
+import { releaseGeometry, shareGeometry } from "@text-to-cad/core/lib/render/sharedGeometry.js";
 import { createPromptContext, referencePart, textPart } from "@text-to-cad/core/prompt";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
+import { useStudioScene } from "../kit/shell/useStudioScene.js";
 import { createToolModes } from "../kit/tools/toolModes.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
@@ -75,11 +77,13 @@ const LOAD_STAGES = Object.freeze({
   unready: { load: {}, scene: false }
 });
 
-/** One triangle, as the kit's scene contract (`kit/scene.js`) sees it. */
-function createTriangleScene() {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0, 20, 0, 0, 0, 20, 0]), 3));
-  geometry.computeVertexNormals();
+/** One triangle, as the kit's scene contract (`kit/scene.js`) sees it; a sibling (the Studio's) draws `shared`'s. */
+function createTriangleScene(shared = null) {
+  const geometry = shared ? shareGeometry(THREE, shared) : new THREE.BufferGeometry();
+  if (!shared) {
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([0, 0, 0, 20, 0, 0, 0, 20, 0]), 3));
+    geometry.computeVertexNormals();
+  }
   const material = new THREE.MeshPhysicalMaterial({ color: 0x8899aa, side: THREE.DoubleSide });
   const root = new THREE.Group();
   root.name = "harness-document";
@@ -104,7 +108,9 @@ function createTriangleScene() {
       this.complete = complete;
     },
     setSurfaceLook(next) { look.apply(next ? { ...next, authored: false } : null); },
-    dispose() { root.removeFromParent(); look.dispose(); material.dispose(); geometry.dispose(); }
+    // The Studio's own scene over this one's triangle (`useStudioScene`).
+    createSibling: () => createTriangleScene(geometry),
+    dispose() { root.removeFromParent(); look.dispose(); material.dispose(); releaseGeometry(geometry); }
   };
 }
 
@@ -208,8 +214,15 @@ function HarnessSurface({ view, data }) {
     </> : null;
   const toolPanels = kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null;
 
+  // The Studio draws a scene of its own, the triangle's sibling, and plays a routine of its own
+  // (`data.studioAnimation`); its camera's settles reach the renderer as the editor's do.
+  const studioScene = useStudioScene(scene, shell.previewing);
+  const studio = useMemo(() => ({ scene: studioScene, animation: data.studioAnimation ?? null, onCameraSettled }),
+    [studioScene, data.studioAnimation, onCameraSettled]);
+
   // Its test controls sit at the bottom centre, clear of the view cube (bottom-right) and the file sidebar (down the left).
   return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.annotate, keepTool, poseTool] : [shell.tools.annotate]}
+    studio={studio}
     toolPanels={toolPanels} sidebar={sidebar} references={references} onClearReferences={() => setPicked("")}
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}

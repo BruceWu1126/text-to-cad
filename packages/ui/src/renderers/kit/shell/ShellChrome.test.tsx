@@ -8,15 +8,21 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // replaced by an empty box: nothing asserted here is drawn by it. What the viewport is handed is
 // recorded, so a test can read what the shell asked of it, and a view update it is handed is
 // acknowledged at once, as the real one does once it holds the frame.
+// The editor's viewport and, while it is open, the Studio's (`StudioView.jsx`, a viewport of its own).
 const viewportProps: { current: any } = { current: null };
+const studioProps: { current: any } = { current: null };
 // What the viewport's handle answers, where a test gives it one (the Studio's picture, `pictureProgress`).
 const viewportHandle: { current: any } = { current: null };
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function MockViewport(props: any, ref) {
-    viewportProps.current = props;
+    const record = props.studio ? studioProps : viewportProps;
+    record.current = props;
+    useEffect(() => () => { if (props.studio) studioProps.current = null; }, []);
     useImperativeHandle(ref, () => viewportHandle.current, []);
     const update = props.viewUpdate;
     useEffect(() => { if (update?.revision) update.binding.complete(update.revision); }, [update?.revision, update?.binding]);
+    // Its first frame drawn, as the real one reports it.
+    useEffect(() => { props.onPresentationChange?.({ file: props.modelKey, key: props.presentationKey, preparing: false }); }, [props.presentationKey]);
     return <div data-mock-viewport=""><canvas />{typeof props.children === 'function'
       ? props.children({ runtimeRef: { current: null }, hostRef: { current: null }, mountRef: { current: null }, viewerReadyTick: 0, commitScene: () => true })
       : null}</div>;
@@ -57,7 +63,9 @@ beforeEach(() => {
   override(Element.prototype, 'hasPointerCapture', { value: () => true });
   override(Element.prototype, 'scrollIntoView', { value() {} });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; viewportHandle.current = null; });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; studioProps.current = null; viewportHandle.current = null; });
+// The Studio is up: its own view mounted over the editor's, which draws nothing under it.
+const inStudio = () => studioProps.current !== null && viewportProps.current.suspended === true;
 
 /** The tab's settings as a host hands them over, counting every write. */
 function tabSettings(initial: object = {}) {
@@ -284,7 +292,7 @@ it("Display and the Studio are a 3D view's, as its renderer declares: a view tha
   frame();
   expect(barButtons()).toEqual(['Display mode', 'Present']);
   ask();
-  expect(viewportProps.current.previewMode).toBe(true);
+  expect(inStudio()).toBe(true);
   cleanup();
   // A view whose renderer does not declare it (`flat.harness`, a 2D view's stand-in): neither on the
   // strip, no rule, and the same request leaves the normal view on screen, its tools up.
@@ -293,7 +301,7 @@ it("Display and the Studio are a 3D view's, as its renderer declares: a view tha
   for (const name of [/^Display mode: /, 'Present']) expect(screen.queryByRole('button', { name })).toBeNull();
   expect(document.querySelector('[data-strip-rule]')).toBeNull();
   ask();
-  expect(viewportProps.current.previewMode).toBe(false);
+  expect(inStudio()).toBe(false);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
   expect(strip()).toEqual(['Annotate']);
 });
@@ -449,6 +457,7 @@ it("the Studio is in Render: the strip, the view's controls and the stack step a
   await user.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
   await openDisplay(user);
+  const editor = viewportProps.current;
   await enterStudio(user);
   const chrome = document.querySelector<HTMLElement>('[data-preview-chrome]')!;
   expect([chrome.hidden, chrome.hasAttribute('inert')]).toEqual([true, true]);
@@ -465,7 +474,11 @@ it("the Studio is in Render: the strip, the view's controls and the stack step a
   const corner = document.querySelector<HTMLElement>('[data-preview-corner]')!;
   expect([corner.parentElement!.style.top, corner.parentElement!.style.right]).toEqual(['8px', '8px']);
   expect(within(corner).getByRole('button', { name: 'Exit studio' }).querySelector('svg.lucide-x')).not.toBeNull();
-  expect(viewportProps.current.previewMode).toBe(true);
+  // The Studio draws Render in a view of its own; the editor's viewport is asked for nothing new.
+  expect([inStudio(), studioProps.current.renderMode, studioProps.current.projection, viewportProps.current.renderMode]).toEqual([true, true, 'perspective', false]);
+  const unchanged = () => ['renderMode', 'renderConfiguration', 'displaySettings', 'quality', 'projection', 'themeSettings', 'appearance']
+    .filter(key => viewportProps.current[key] !== editor[key]);
+  expect(unchanged()).toEqual([]);
   // Its settings are closed as it opens; they are Orbit, then Render's own, the file's.
   expect(studioSettings()).toBeNull();
   await user.click(within(corner).getByRole('button', { name: 'Studio settings' }));
@@ -473,12 +486,13 @@ it("the Studio is in Render: the strip, the view's controls and the stack step a
   const floor = () => within(studioSettings()!).getByRole('checkbox', { name: 'Floor', exact: true });
   expect(floor().getAttribute('aria-checked')).toBe('true');
   fireEvent.click(floor());
-  expect([viewportProps.current.previewMode, chrome.hidden]).toEqual([true, true]);
+  expect([inStudio(), chrome.hidden]).toEqual([true, true]);
   await user.click(within(corner).getByRole('button', { name: 'Exit studio' }));
   expect(chrome.hidden).toBe(false);
-  expect(viewportProps.current.previewMode).toBe(false);
+  // The Studio's view is gone, and the editor's is as it was: nothing the Studio did reached it.
+  expect([inStudio(), studioProps.current, viewportProps.current.suspended, unchanged()]).toEqual([false, null, false, []]);
   expect(barButtons()).toEqual(['Display mode', 'Present']);
-  // The tools view is back in the file's own mode (the Studio drew Render over it: `presentMode`).
+  // The tools view is in the file's own mode, as it always was.
   expect(displayButton().getAttribute('aria-label')).toBe('Display mode: Solid');
   // The tool in hand is as it was, its section's tile with it; Display, put away, stays shut.
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
@@ -486,7 +500,7 @@ it("the Studio is in Render: the strip, the view's controls and the stack step a
   expect([displayPopover(), displayLit()]).toEqual([null, false]);
   // What was set in the Studio is the file's Render settings: the next visit has it.
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
-  expect(viewportProps.current.previewMode).toBe(true);
+  expect(inStudio()).toBe(true);
   await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Studio settings' }));
   expect(floor().getAttribute('aria-checked')).toBe('false');
   await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Exit studio' }));
@@ -506,11 +520,11 @@ it("the Studio is covered from the press until its picture has converged, then s
     // The press is answered at once, before the Studio itself is entered under it.
     expect(cover()?.textContent).toBe('Preparing studio…');
     await wait(100);
-    expect([viewportProps.current.previewMode, cover() !== null]).toEqual([true, true]);
+    expect([inStudio(), cover() !== null]).toEqual([true, true]);
     // In Render, and still converging well past the shortest cover: it holds.
     picture.sample = 9;
     await wait(2000);
-    expect([viewportProps.current.renderMode, cover() !== null]).toEqual([true, true]);
+    expect([studioProps.current.renderMode, cover() !== null]).toEqual([true, true]);
     // Every sample drawn: it lifts.
     picture.sample = 16;
     await wait(100);
@@ -530,18 +544,18 @@ it("the Studio opens still: Orbit, in its settings, turns the camera, and Orbit'
   const speedOnceOn = async () => { if (orbit().getAttribute('aria-checked') !== 'true') await user.click(orbit()); return speed(); };
   const first = frame({ onStateChange: state => states.push(state) });
   await enter();
-  expect([orbit().getAttribute('aria-checked'), viewportProps.current.orbitPreview, within(studioSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
+  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit, within(studioSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
   await user.click(orbit());
-  expect([orbit().getAttribute('aria-checked'), viewportProps.current.orbitPreview]).toEqual(['true', true]);
+  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit]).toEqual(['true', true]);
   // A fresh file orbits at 1×; 2× chosen.
   expect(speed()).toBe('1×');
   await user.click(within(studioSettings()!).getByRole('combobox', { name: 'Orbit speed' }));
   await user.click(screen.getByRole('option', { name: '2×' }));
-  expect(viewportProps.current.previewOrbitSpeed).toBe(2);
+  expect(studioProps.current.orbitSpeed).toBe(2);
   // Leaving and coming back: still again, at 2×.
   await user.click(screen.getByRole('button', { name: 'Exit studio' }));
   await enter();
-  expect([orbit().getAttribute('aria-checked'), viewportProps.current.orbitPreview, await speedOnceOn()]).toEqual(['false', false, '2×']);
+  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
   // The file's view holds the speed, and no Orbit on or off.
   first.unmount();
   const saved = states.at(-1);
