@@ -1570,12 +1570,24 @@ def _representations(tshape: Any, kind: int) -> Any:
 
 def _appended(tshape: Any, kind: int, count: int) -> tuple:
     """The representations an edge or a vertex holds past the first ``count``:
-    the ones the operation appended."""
-    found = []
-    for position, representation in enumerate(_representations(tshape, kind)):
-        if position >= count:
-            found.append(representation)
-    return tuple(found)
+    the ones the operation appended. The kernel's list reads from its head, and
+    iterating it from Python costs milliseconds however short it is: it is
+    reversed in place, its head taken as many times, reversed back and the tail
+    put back -- nothing rebuilt, every read a step."""
+    representations = _representations(tshape, kind)
+    extra = representations.Extent() - count
+    if extra <= 0:
+        return ()
+    representations.Reverse()
+    taken = []
+    for _ in range(extra):
+        taken.append(representations.First())
+        representations.RemoveFirst()
+    representations.Reverse()
+    taken.reverse()
+    for representation in taken:
+        representations.Append(representation)
+    return tuple(taken)
 
 
 def _truncate(representations: Any, count: int) -> None:
