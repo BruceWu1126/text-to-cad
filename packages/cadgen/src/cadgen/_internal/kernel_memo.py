@@ -15,10 +15,11 @@ calls are the ones seen. Each call seen is a **feature** for provenance
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are
-what the parameters do not say: what build123d set on a boolean's OCC operation
-object before the call (its fuzzy value, its glue mode), the class-wide
-``SkipClean``, and the font file a text reads, by its bytes as an imported
-file is (a hit that ignored one would hand back another operation's geometry).
+what the parameters do not say: what a boolean's OCC operation object was set
+to before the call (its fuzzy value and glue mode by build123d, the
+non-destructive mode by this layer, below), the class-wide ``SkipClean``, and
+the font file a text reads, by its bytes as an imported file is (a hit that
+ignored one would hand back another operation's geometry).
 A shape's key is where it came from: the memo key of the operation that made
 its ``TShape`` (the registry, pointer to key) and its position among the
 shapes that call returned (a split kept both ways returns two), or, for a
@@ -47,10 +48,13 @@ new TShape. A constructor cannot return another object, so its hit hands the
 first run's ``TopoDS`` to the kernel helper the constructor calls, and the
 object the model just made wraps that same TShape.
 
-**Effects.** The kernel modifies its INPUTS: a boolean raises a tool vertex's
-tolerance, an extrusion clears its profile's ``Free`` flag and appends curve
-representations to the profile's edges, and those bytes reach the components a
-model emits. A miss serializes each input before and after the operation; a
+**Effects.** The kernel modifies its INPUTS: an extrusion clears its profile's
+``Free`` flag and appends curve representations to the profile's edges, and
+those bytes reach the components a model emits. A boolean does not: the layer
+sets every boolean it sees non-destructive (``BOPAlgo_Options``), so the kernel
+copies the sub-shapes it would change and shares the rest, a boolean's inputs
+are left as they were given, and what it left alone keeps its identity in the
+result. A miss serializes each input before and after the operation; a
 change is captured as a sparse delta per sub-shape (tolerance, flags, the
 representations appended), proven exact by undoing and redoing it on the live
 shape, and noted in a ledger by sub-shape. A hit replays the delta, so a hot
@@ -337,6 +341,8 @@ def _patch(cls: type, attr: str, label: str, kind: str) -> None:
 def _wrap(label: str, function: Any, kind: str) -> Any:
     @functools.wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if label == "bool_op":
+            _non_destructive(args, kwargs)
         state = getattr(_LOCAL, "run", None)
         if state is None or state.depth:
             return function(*args, **kwargs)
@@ -344,6 +350,17 @@ def _wrap(label: str, function: Any, kind: str) -> Any:
 
     wrapper.__kernel_memo__ = True
     return wrapper
+
+
+def _non_destructive(args: tuple, kwargs: dict) -> None:
+    """Every boolean the layer sees runs non-destructive (``BOPAlgo_Options``):
+    the kernel copies the sub-shapes it would change and shares the rest, so a
+    boolean leaves its inputs as they were given, and what it leaves alone keeps
+    its identity in the result (``kernel_trace``). Set before the call is keyed,
+    so its key says what ran."""
+    operation = args[3] if len(args) > 3 else kwargs.get("operation")
+    if operation is not None:
+        operation.SetNonDestructive(True)
 
 
 def _helper(slot: str, function: Any) -> Any:

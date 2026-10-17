@@ -280,34 +280,35 @@ class MissTest(KernelMemoCase):
 
 
 class EffectTest(KernelMemoCase):
-    """The kernel's changes to its inputs: a boolean raises a tool vertex's
-    tolerance, an extrusion appends representations to its profile's edges."""
+    """The kernel's changes to its inputs: an extrusion clears its profile's ``Free``
+    flag and appends representations to the profile's edges (a boolean, run
+    non-destructive, changes none: ``BooleanTest``)."""
 
     def test_effects_on_inputs_are_replayed_on_a_hit_and_undone_when_the_operation_is_gone(self) -> None:
-        from build123d import Solid
+        from build123d import Face, Solid, Vector, Wire
 
-        pristine = _bytes(Solid.make_cylinder(3, 30).wrapped)
+        pristine = _bytes(Face(Wire.make_circle(4)).wrapped)
 
-        def with_cut():
-            box, tool, body = _bored_plate()
-            return tool, body
+        def with_boss():
+            profile = Face(Wire.make_circle(4))
+            return profile, Solid.extrude(profile, Vector(0, 0, 4))
 
-        def without_cut():
-            Solid.make_box(20, 20, 8)
-            return Solid.make_cylinder(3, 30)  # 3 for the plate's 3.0: one parameter, by value
+        def without_boss():
+            return Face(Wire.make_circle(4))
 
-        (tool, body), cold, _ = _run(with_cut)
-        mutated = _bytes(tool.wrapped)
-        self.assertNotEqual(mutated, pristine, "the cut changed its tool")
-        (tool2, body2), hot, _ = _run(with_cut)
-        self.assertIs(tool2, tool)
+        (profile, boss), cold, _ = _run(with_boss)
+        mutated = _bytes(profile.wrapped)
+        self.assertNotEqual(mutated, pristine, "the extrusion changed its profile")
+        (profile2, boss2), hot, _ = _run(with_boss)
+        self.assertIs(boss2, boss)
+        self.assertTrue(profile2.wrapped.IsPartner(profile.wrapped), "constructed anew, around the first run's TShape")
         self.assertEqual(hot["misses"], 0)
-        self.assertEqual(_bytes(tool2.wrapped), mutated, "a hit leaves the tool as the cut left it")
-        self.assertEqual(_bytes(body2.wrapped), _bytes(body.wrapped))
-        tool3, edited, _ = _run(without_cut)
-        self.assertIs(tool3, tool)
+        self.assertEqual(_bytes(profile2.wrapped), mutated, "a hit leaves the profile as the extrusion left it")
+        self.assertEqual(_bytes(boss2.wrapped), _bytes(boss.wrapped))
+        profile3, edited, _ = _run(without_boss)
+        self.assertTrue(profile3.wrapped.IsPartner(profile.wrapped))
         self.assertEqual(edited["hits"], 2)
-        self.assertEqual(_bytes(tool3.wrapped), pristine, "with the cut edited out, the tool is as it was made")
+        self.assertEqual(_bytes(profile3.wrapped), pristine, "with the extrusion edited out, the profile is as it was made")
         self.assertEqual((cold["unreplayable"], hot["unreplayable"], edited["unreplayable"]), (0, 0, 0))
 
     def test_an_extruded_profile_ends_as_a_cold_run_leaves_it(self) -> None:
@@ -905,6 +906,26 @@ class ConstructionKeyTest(KernelMemoCase):
         (_box, _tool, body), _, _run1 = _run(_bored_plate)
         self.assertRegex(there.stdout.strip(), r"^[0-9a-f]{64}$")
         self.assertEqual(there.stdout.strip(), kernel_memo.construction_key(body))
+
+
+class BooleanTest(KernelMemoCase):
+    """Every boolean the layer sees runs non-destructive (``BOPAlgo_Options``): the kernel
+    copies the sub-shapes it changes and shares the rest, so a boolean's inputs are left as
+    they were given, and lineage by identity (``kernel_trace``) follows what it left alone."""
+
+    def test_a_boolean_leaves_its_inputs_as_given_and_shares_what_it_leaves_alone(self) -> None:
+        from build123d import Axis, Solid
+
+        pristine = _bytes(Solid.make_cylinder(3, 30).wrapped)
+        (box, tool, body), stats, _ = _run(_bored_plate)
+        self.assertEqual(stats["unreplayable"], 0)
+        self.assertEqual(_bytes(tool.wrapped), pristine, "the cut left its tool as it was given")
+        side = box.faces().sort_by(Axis.X)[-1]
+        bottom = box.faces().sort_by(Axis.Z)[0]
+        self.assertTrue(any(face.wrapped.IsSame(side.wrapped) for face in body.faces()),
+                        "a face the cut leaves alone keeps its TShape in the result")
+        self.assertFalse(any(face.wrapped.IsPartner(bottom.wrapped) for face in body.faces()),
+                         "a face the cut modifies is a new one")
 
 
 if __name__ == "__main__":
