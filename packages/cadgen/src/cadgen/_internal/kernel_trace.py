@@ -174,6 +174,8 @@ class Feature:
     # label had never been set.
     label: str | None = None
     pinned_at: int | None = None
+    # What the makers the call ran report of its results (``kernel_history.History``).
+    history: Any = field(default=None, repr=False)
     _tables: dict[tuple[int, str], dict[int, tuple]] = field(default_factory=dict, repr=False)
     # Per element kind, each element this feature made (its key where the result
     # holding it was returned: :func:`_placed`) -> its number among them, in the

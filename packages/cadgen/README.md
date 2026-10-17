@@ -589,6 +589,8 @@ src/cadgen/
   _internal/             # the engine: generation pipeline, tree builder,
                          #   kernel_memo (law 18: the memo at the kernel
                          #   boundary, whose keys are parts' identities),
+                         #   kernel_history (what the kernel's makers report
+                         #   of each feature's results),
                          #   kernel_trace (its features, and the lineage
                          #   that names elements),
                          #   filetrace (every file a build opens),

@@ -72,6 +72,15 @@ representation rewritten in place) is not seen. A call that runs uncached still
 captures what it does to a memoized input, and a memoized shape embedded in a
 foreign one that the call changed is forgotten the same way.
 
+**History.** While a call from the model's code runs, the OCCT makers it runs
+record what they were given and what they made (``kernel_history``, installed
+with this layer), and right after it the call's history is composed from them:
+which elements of its results each maker modified, generated or copied from which
+elements of its inputs, by ordinal. The feature carries it, and so does the entry,
+like the effects and for as long: a hit hands back the miss's shapes, so it hands
+the feature the miss's history too, and runs no maker; the names the trace gives
+(``kernel_trace``) are the same either way.
+
 **Construction keys.** A key is this process's: its shape inputs are interned
 ids, and an effect is numbered as it happens. ``construction_key`` restates the
 key of whatever made a shape in terms no process owns -- the operation, its
@@ -118,9 +127,10 @@ from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
 from OCP.TopExp import TopExp
 from OCP.TopTools import TopTools_IndexedMapOfShape
 
+from cadgen._internal import kernel_history
 from cadgen._internal.kernel_trace import Trace
 
-__all__ = ["CAPACITY", "clear", "construction_key", "enabled", "install", "run", "stats", "uninstall"]
+__all__ =["CAPACITY", "clear", "construction_key", "enabled", "install", "run", "stats", "uninstall"]
 
 # Entries of live results: a model's intermediate geometry for a few models at
 # once, so an edit loop over a large model keeps every unchanged step.
@@ -284,6 +294,7 @@ def install() -> bool:
             setattr(importers, name, wrapped)
             if getattr(build123d, name, None) is original:
                 setattr(build123d, name, wrapped)
+        kernel_history.install()
         _installed = True
         return True
 
@@ -324,6 +335,7 @@ def uninstall() -> bool:
                 setattr(importers, name, wrapped.__wrapped__)
                 if getattr(build123d, name, None) is wrapped:
                     setattr(build123d, name, wrapped.__wrapped__)
+        kernel_history.uninstall()
         _installed = False
         return True
 
@@ -534,6 +546,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         if entry is not None:
             result = _hit(state, entry, kind, function, args, kwargs, shapes)
             feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
+            # The very shapes the miss made, so the history it captured is theirs: no maker runs.
+            feature.history = entry.history
             entry.refresh(feature.index, state.id)
             _STATS["hits"] += 1
             return None if kind == "constructor" else result
@@ -545,10 +559,13 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         # The inputs as given, before the call: an in-place operation (clean)
         # leaves its input wrapping the result's TShape.
         given = [_wrapped(shape).TShape() for shape in shapes]
-        function_result = function(*args, **kwargs)
+        with kernel_history.recording() as makers:
+            function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
         feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
+        feature.history = _history(feature, makers)
+        del makers
         snapshot = None
         try:
             effects, sound = _effects(captured, state)
@@ -570,7 +587,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         for index, effect in effects:
             effect.origin = (key_id, n, index)
         entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
-                       in_place=kind != "constructor" and bool(args) and result is args[0])
+                       history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
         with _LOCK:
             replaced = _MEMO.pop(entry.key, None)
             if replaced is not None:
@@ -598,9 +615,12 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     except Exception:  # noqa: BLE001
         _STATS["errors"] += 1
         captured = []
-    function_result = function(*args, **kwargs)
+    with kernel_history.recording() as makers:
+        function_result = function(*args, **kwargs)
     result = args[0] if kind == "constructor" else function_result
     feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
+    feature.history = _history(feature, makers)
+    del makers
     if captured:
         try:
             _effects(captured, state)
@@ -608,6 +628,16 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
             _STATS["errors"] += 1
     _register(result, None, feature.index, state, None)
     return function_result
+
+
+def _history(feature: Any, makers: list) -> "kernel_history.History | None":
+    """What the makers the call ran report of its results (``kernel_history``), or None
+    where it cannot be composed: the feature is then named without it, never failed."""
+    try:
+        return kernel_history.compose(feature.handles, feature.results, makers)
+    except Exception:  # noqa: BLE001
+        kernel_history._STATS["errors"] += 1
+        return None
 
 
 def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kwargs: dict, shapes: list) -> Any:
@@ -1297,14 +1327,17 @@ def _result_shapes(result: Any) -> list:
 
 
 class _Entry:
-    __slots__ = ("key", "inputs", "snapshot", "effects", "made", "in_place")
+    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place")
 
     def __init__(self, *, key: tuple[int, int], inputs: list, snapshot: Any, effects: list,
-                 in_place: bool = False) -> None:
+                 history: Any = None, in_place: bool = False) -> None:
         self.key = key
         self.inputs = inputs
         self.snapshot = snapshot
         self.effects = effects
+        # What the makers reported of the results (``kernel_history.History``), captured on
+        # the miss and kept, like the effects, as long as the entry: a hit names from it.
+        self.history = history
         self.made: list[_Made] = []
         # The operation changed ``self`` and returned it (``clean``): a hit asked
         # by another object wrapping the same TShape changes THAT object, as the

@@ -30,7 +30,7 @@ from tests.python.support.tmp_root import generated_cad_directory
 
 add_repo_path("packages/cadgen/src")
 
-from cadgen._internal import kernel_memo, kernel_trace  # noqa: E402
+from cadgen._internal import kernel_history, kernel_memo, kernel_trace  # noqa: E402
 from cadgen._internal.component_package import _shape_brep_bytes as _bytes  # noqa: E402
 
 COUNTS = ("hits", "misses", "unkeyable", "unreplayable", "errors")
@@ -909,6 +909,73 @@ class ConstructionKeyTest(KernelMemoCase):
         (_box, _tool, body), _, _run1 = _run(_bored_plate)
         self.assertRegex(there.stdout.strip(), r"^[0-9a-f]{64}$")
         self.assertEqual(there.stdout.strip(), kernel_memo.construction_key(body))
+
+
+class HistoryCaptureTest(KernelMemoCase):
+    """What the kernel's makers report while a feature runs (``kernel_history``): recorded
+    for the feature that ran them, composed through their chain, kept with the memo's entry."""
+
+    def test_a_maker_a_nested_call_runs_belongs_to_the_enclosing_feature(self) -> None:
+        """``split`` runs build123d's own boolean (a patched call, nested) and its makers: one
+        feature, whose history is the splitter's and the clean's, from the torus's face."""
+        from build123d import Keep, Plane, Solid
+
+        def model():
+            return Solid.make_torus(10, 2).split(Plane.XZ, keep=Keep.BOTH)
+
+        halves, _, run = _run(model)
+        self.assertEqual(len(halves), 2)
+        self.assertEqual([feature.op for feature in run.trace.features], ["Solid.make_torus", "split"])
+        origins = run.trace.features[1].history.origins
+        face = 2  # kernel_history.KINDS: vertex, edge, face
+        self.assertTrue(origins, "the split's pieces were reported")
+        self.assertIn((0, face, 1, "M"), {source for found in origins.values() for source in found},
+                      "each half's face is the torus's one face, modified")
+
+    def test_a_copy_is_the_same_elements(self) -> None:
+        """``located`` places a copy (``BRepBuilderAPI_Copy``): every element of the result is
+        its input's element at the same ordinal, copied -- not modified."""
+        from build123d import Location, Solid
+
+        def model():
+            return Solid.make_box(2, 3, 4).located(Location((10, 0, 0)))
+
+        _placed, _, run = _run(model)
+        located = run.trace.features[-1]
+        self.assertEqual(located.op, "located")
+        origins = located.history.origins
+        for kind, count in enumerate((8, 12, 6)):  # a box's vertices, edges and faces
+            for ordinal in range(1, count + 1):
+                self.assertEqual(origins.get((0, kind, ordinal)), ((0, kind, ordinal, "I"),), (kind, ordinal))
+
+    def test_no_maker_is_asked_about_a_shape_it_never_saw_and_a_hit_asks_none(self) -> None:
+        """Every query is about a sub-shape of the maker's own inputs: none raises. A hot run
+        hands back the miss's shapes and its history with them, running no maker."""
+        from build123d import (Axis, Box, Cylinder, Edge, Face, Keep, Location, Plane, Pos, Rot, Solid, Vector,
+                               Wire)
+
+        def model():
+            body = Box(30, 20, 10) - Pos(5, 0, 0) * Cylinder(3, 30) + Pos(0, 0, 5) * Box(10, 10, 4)
+            body = body.fillet(1.0, body.edges().filter_by(Axis.Z)[:2])
+            body = body.chamfer(0.5, None, body.edges().filter_by(Axis.X)[:1])
+            square = Wire([Edge.make_line((0, 0), (8, 0)), Edge.make_line((8, 0), (8, 4)),
+                           Edge.make_line((8, 4), (0, 4)), Edge.make_line((0, 4), (0, 0))])
+            tab = Solid.extrude(Face(square), Vector(0, 0, 3))
+            ring = Solid.revolve(Face(square).moved(Location((10, 0, 0))), 270, Axis.Y)
+            loft = Solid.make_loft([Wire.make_circle(4), Wire.make_circle(2).moved(Location((0, 0, 6)))])
+            halves = Rot(0, 0, 15) * Solid.make_box(4, 4, 4)
+            return body, tab, ring, loft, halves.split(Plane.YZ, keep=Keep.TOP), body.mirror(Plane.XZ)
+
+        before = kernel_history.stats()
+        cold, _, run = _run(model)
+        middle = kernel_history.stats()
+        self.assertGreater(middle["queries"], before["queries"])
+        self.assertEqual((middle["raised"], middle["errors"]), (before["raised"], before["errors"]))
+        hot, stats, again = _run(model)
+        self.assertEqual(stats["misses"], 0)
+        self.assertEqual(kernel_history.stats()["queries"], middle["queries"], "a hit runs no maker")
+        self.assertTrue(all(second.history is first.history
+                            for first, second in zip(run.trace.features, again.trace.features)))
 
 
 class BooleanTest(KernelMemoCase):
