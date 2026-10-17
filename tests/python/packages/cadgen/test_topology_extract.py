@@ -18,7 +18,7 @@ from tests.python.support.paths import add_repo_path
 
 add_repo_path("packages/cadgen/src")
 
-SHAPE_KEYS = {"ord", "kind", "volume"}
+SHAPE_KEYS = {"ord", "kind"}
 FACE_KEYS = {"ord", "shape", "surfaceType", "area", "center", "bbox", "loops"}
 FACE_OPTIONAL = {"normal", "params"}
 EDGE_KEYS = {"ord", "shape", "class", "continuity", "dihedralDeg", "flags", "adjacentFaceCount", "curveType",
@@ -95,7 +95,7 @@ class TopologyFactsTest(unittest.TestCase):
         self.assertEqual([f["ord"] for f in self.facts["faces"]], list(range(1, self.face_map.Extent() + 1)))
         self.assertEqual([e["ord"] for e in self.facts["edges"]], list(range(1, self.edge_map.Extent() + 1)))
         self.assertEqual([s["ord"] for s in self.facts["shapes"]], [1, 2, 3, 4, 5], "one entity per solid")
-        self.assertTrue(all(s["kind"] == "solid" and s["volume"] > 0 for s in self.facts["shapes"]))
+        self.assertTrue(all(s["kind"] == "solid" for s in self.facts["shapes"]))
         self.assertEqual({f["shape"] for f in self.facts["faces"]}, {1, 2, 3, 4, 5})
         self.assertEqual({e["shape"] for e in self.facts["edges"]}, {1, 2, 3, 4, 5})
 
@@ -188,7 +188,7 @@ class TopologyFactsObjectTest(unittest.TestCase):
 
     def facts(self) -> dict:
         return {
-            "shapes": [{"ord": 1, "kind": "solid", "volume": 6.0}],
+            "shapes": [{"ord": 1, "kind": "solid"}],
             "faces": [{"ord": 1, "shape": 1, "surfaceType": "plane", "area": 1.0, "center": [0.5, 0.5, 0.0],
                        "bbox": [0.0, 0.0, 0.0, 1.0, 1.0, 0.0], "normal": [0.0, 0.0, -1.0],
                        "params": {"origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0]}, "loops": [[1]]}],
@@ -222,7 +222,7 @@ class TopologyFactsObjectTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "invalid topology facts"):
                 topology_facts_bytes(broken)
         with self.assertRaises(ValueError):
-            topology_facts_bytes({**self.facts(), "shapes": [{"ord": 1, "kind": "solid", "volume": math.nan}]})
+            topology_facts_bytes({**self.facts(), "edges": [{**self.facts()["edges"][0], "length": math.nan}]})
 
     def test_the_table_takes_the_pinned_object_as_it_takes_the_live_facts(self) -> None:
         from build123d import Box, Cylinder

@@ -52,8 +52,9 @@ from cadgen.store.objects import is_object_hash, object_path, put_object, read_v
 # 6: a part keyed by its component's geometry fingerprint, its table naming every element by a
 # geometric token. 7: a part is keyed by its component's construction key (or its content, for
 # geometry no construction made) and lineage, and its selector table names every element by its
-# lineage, or its geometric token where it has none (README law 20).
-PART_VERSION = 7
+# lineage, or its geometric token where it has none (README law 20). 8: the selector table carries no
+# solid volume.
+PART_VERSION = 8
 INDEX_KIND = "part"
 MAX_INDEX_BYTES = 16 * 1024
 _KEY = re.compile(rf"[0-9a-f]{{64}}-v{PART_VERSION}")

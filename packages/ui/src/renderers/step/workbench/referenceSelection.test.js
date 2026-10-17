@@ -47,7 +47,7 @@ function selectorBundle() {
       cadRef: "models/assy",
       tables: {
         occurrenceColumns: ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"],
-        shapeColumns: ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"],
+        shapeColumns: ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"],
         faceColumns: ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"],
         edgeColumns: ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"]
       },
@@ -55,7 +55,7 @@ function selectorBundle() {
         [null, null, 0, 1, 0, 1, 0, 1, 0, 0]
       ],
       shapes: [
-        [1, "solid", null, [0, 0, 0], 1, 1, 0, 1, 0, 1]
+        [1, "solid", null, [0, 0, 0], 1, 0, 1, 0, 1]
       ],
       faces: [
         [F1, 1, 1, "plane", 4, [0, 0, 0], [0, 0, 1], null, 0, 0, 0, 0, {}, 1, 0, 0]

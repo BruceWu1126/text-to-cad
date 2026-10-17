@@ -1,7 +1,7 @@
 """A component's topology facts: what its selector table is built from.
 
 The facts of one unlocated component's exact topology, read off the BREP with
-OCCT and never meshed: each solid's ordinal, kind and volume; each face's
+OCCT and never meshed: each solid's ordinal and kind; each face's
 surface type, exact area, centroid and tight box (GProps, BndLib), a plane's
 oriented normal, its analytic parameters and its loops as ordered edge
 ordinals; each edge's visibility class, continuity, dihedral angle, flags,
@@ -305,7 +305,7 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
     }
 
     # Shape (solid/shell) membership: the selector tables group faces/edges
-    # by solid; record each solid's ordinal + volume and every face/edge's
+    # by solid; record each solid's ordinal and kind and every face/edge's
     # owning solid. Mirrors the prototype extraction's decomposition.
     shapes: list[dict[str, Any]] = []
     shape_by_face: dict[int, int] = {}
@@ -317,15 +317,7 @@ def extract_topology_facts(shape, *, brep: str | None = None) -> dict[str, Any]:
 
     def _record_shape(sub, kind: str) -> None:
         ordinal = len(shapes) + 1
-        volume = None
-        if kind == "solid":
-            try:
-                props = GProp_GProps()
-                BRepGProp.VolumeProperties_s(sub, props)
-                volume = float(props.Mass())
-            except Exception:
-                volume = None
-        shapes.append({"ord": ordinal, "kind": kind, "volume": volume})
+        shapes.append({"ord": ordinal, "kind": kind})
         sub_faces = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(sub, TopAbs_FACE, sub_faces)
         for i in range(1, sub_faces.Extent() + 1):

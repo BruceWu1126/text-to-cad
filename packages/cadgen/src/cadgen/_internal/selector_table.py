@@ -40,8 +40,9 @@ from cadgen._internal.glb_topology import (
 # (cadgen.store.parts.PART_VERSION) is bumped with it, and for any change in
 # what the same columns hold. 2: no row carries an occurrence id, a local id or a
 # shape id (the table is one unplaced component's; the occurrence placing it is the
-# tree's to name). 3: every face, edge and vertex row leads with its name.
-SELECTOR_TABLE_SCHEMA_VERSION = 3
+# tree's to name). 3: every face, edge and vertex row leads with its name. 4: a shape
+# row carries no volume (nothing read it: a view's part volume is its mesh's).
+SELECTOR_TABLE_SCHEMA_VERSION = 4
 _IDENTITY = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
 # The one row of a component's table: the whole component, at the identity.
@@ -53,7 +54,7 @@ OCCURRENCE_COLUMNS = [
 # A solid (or shell, or the bare shape) of the component: ``shape`` on an element row
 # is its ordinal here. Shapes carry no name; the occurrence names a body.
 SHAPE_COLUMNS = [
-    "ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount",
+    "ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount",
 ]
 FACE_COLUMNS = [
     "name", "ordinal", "shape", "surfaceType", "area",
@@ -377,7 +378,7 @@ def build_selector_table(shape, facts: Mapping[str, Any], names: Mapping[str, An
         shape_rows.append([
             ordinal, str(shape_meta.get("kind") or "shape"), box,
             [(box["min"][i] + box["max"][i]) / 2 for i in range(3)],
-            shape_area.get(ordinal, 0.0), shape_meta.get("volume"),
+            shape_area.get(ordinal, 0.0),
             0, counts["face"].get(ordinal, 0), 0, counts["edge"].get(ordinal, 0),
         ])
 

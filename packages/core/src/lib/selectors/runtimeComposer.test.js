@@ -25,7 +25,7 @@ function random(seed) {
 // them with each face's triangle range and each edge's segment range. Element rows lead with
 // their name; `shape` is the owning solid's ordinal; no row names an occurrence.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
-const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"];
+const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"];
 const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance",
   "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
 const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart",
@@ -70,7 +70,7 @@ function makeBundle(seed, { faces: faceCount = 4, shapes: shapeCount = 2, detail
   };
   for (let s = 0; s < shapeCount; s += 1) {
     shapes.push([s + 1, "solid", { min: [-100, -100, -100], max: [100, 100, 100] },
-      [coord(), coord(), coord()], 1000 * rand(), 100 * rand(), 0, 0, 0, 0]);
+      [coord(), coord(), coord()], 1000 * rand(), 0, 0, 0, 0]);
   }
   for (let f = 0; f < faceCount; f += 1) {
     const shape = (f % shapeCount) + 1;

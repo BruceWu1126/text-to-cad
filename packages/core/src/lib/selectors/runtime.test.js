@@ -18,17 +18,17 @@ const F7 = "f:plate.fillet1.3.2";
 const E1 = "e:plate.extrude1.1";
 const E4 = "e:9d2e8c1b5a70";
 
-// The selector table's wire columns (cadgen selector_table.py, schema 3) as `joinSelectorTable`
+// The selector table's wire columns (cadgen selector_table.py, schema 4) as `joinSelectorTable`
 // extends them: a face gains its triangle range, an edge its segment range.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];
-const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "volume", "faceStart", "faceCount", "edgeStart", "edgeCount"];
+const SHAPE_COLUMNS = ["ordinal", "kind", "bbox", "center", "area", "faceStart", "faceCount", "edgeStart", "edgeCount"];
 const FACE_COLUMNS = ["name", "ordinal", "shape", "surfaceType", "area", "center", "normal", "bbox", "edgeStart", "edgeCount", "relevance", "flags", "params", "tangentGroup", "triangleStart", "triangleCount"];
 const EDGE_COLUMNS = ["name", "ordinal", "shape", "curveType", "length", "center", "bbox", "faceStart", "faceCount", "vertexStart", "vertexCount", "relevance", "flags", "params", "adjacentFaceCount", "continuity", "dihedralDeg", "visibilityClass", "chain", "segmentStart", "segmentCount"];
 const TABLES = { occurrenceColumns: OCCURRENCE_COLUMNS, shapeColumns: SHAPE_COLUMNS, faceColumns: FACE_COLUMNS, edgeColumns: EDGE_COLUMNS };
 
 const box = (x0, x1, y1) => ({ min: [x0, 0, 0], max: [x1, y1, 0] });
 const occurrenceRow = (bbox, shapes, faces, edges) => [null, bbox, 0, shapes, 0, faces, 0, edges, 0, 0];
-const shapeRow = (ordinal, bbox, center, volume, faces, edges) => [ordinal, "solid", bbox, center, 1, volume, 0, faces, 0, edges];
+const shapeRow = (ordinal, bbox, center, faces, edges) => [ordinal, "solid", bbox, center, 1, 0, faces, 0, edges];
 const faceRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, edges = 0, tangentGroup = 1, triangles = [0, 0] } = {}) =>
   [name, ordinal, shape, "plane", 1, center, [0, 0, 1], bbox, 0, edges, 0, 0, {}, tangentGroup, ...triangles];
 const edgeRow = (name, ordinal, shape, { center = [0, 0, 0], bbox = null, faces = 0, chain = null, visibilityClass = "feature", segments = [0, 0] } = {}) =>
@@ -111,7 +111,7 @@ test("buildSelectorRuntime composes the placing occurrence with each row's own n
       cadRef: "parts/source",
       tables: TABLES,
       occurrences: [occurrenceRow(null, 1, 3, 1)],
-      shapes: [shapeRow(1, null, null, 1, 3, 1)],
+      shapes: [shapeRow(1, null, null, 3, 1)],
       faces: [
         faceRow(F1, 1, 1, { tangentGroup: 1 }),
         faceRow(F7, 7, 1, { center: [1, 0, 0], tangentGroup: 3 }),
@@ -150,7 +150,7 @@ test("a part placed by no occurrence composes the bare element name", () => {
       cadRef: "parts/alone",
       tables: TABLES,
       occurrences: [occurrenceRow(null, 1, 1, 1)],
-      shapes: [shapeRow(1, null, null, 1, 1, 1)],
+      shapes: [shapeRow(1, null, null, 1, 1)],
       faces: [faceRow(F1, 1, 1)],
       edges: [edgeRow(E1, 1, 1)]
     },
@@ -173,7 +173,7 @@ test("a shape row is no reference", () => {
       cadRef: "parts/labeled",
       tables: TABLES,
       occurrences: [occurrenceRow(null, 1, 0, 0)],
-      shapes: [shapeRow(1, null, null, 12, 0, 0)],
+      shapes: [shapeRow(1, null, null, 0, 0)],
       faces: [],
       edges: []
     },
@@ -182,7 +182,7 @@ test("a shape row is no reference", () => {
 
   const runtime = buildSelectorRuntime(bundle, { copyCadPath: "parts/labeled", occurrenceId: A });
   assert.deepEqual(runtime.references.map((reference) => reference.selectorType), ["occurrence"]);
-  assert.deepEqual(runtime.shapes.map((row) => [row.ordinal, row.kind, row.volume, row.occurrenceId]), [[1, "solid", 12, A]]);
+  assert.deepEqual(runtime.shapes.map((row) => [row.ordinal, row.kind, row.occurrenceId]), [[1, "solid", A]]);
 });
 
 test("buildSelectorRuntime exposes v1 GLB face runs from selector buffers", () => {
@@ -196,7 +196,7 @@ test("buildSelectorRuntime exposes v1 GLB face runs from selector buffers", () =
       },
       tables: TABLES,
       occurrences: [occurrenceRow(null, 1, 1, 0)],
-      shapes: [shapeRow(1, null, null, 1, 1, 0)],
+      shapes: [shapeRow(1, null, null, 1, 0)],
       faces: [faceRow(F1, 1, 1, { triangles: [2, 4] })],
       edges: []
     },
@@ -221,7 +221,7 @@ function componentBundle(xOffset) {
       cadRef: "parts/source",
       tables: TABLES,
       occurrences: [occurrenceRow(bbox, 1, 1, 1)],
-      shapes: [shapeRow(1, bbox, [xOffset + 0.5, 0.5, 0], 1, 1, 1)],
+      shapes: [shapeRow(1, bbox, [xOffset + 0.5, 0.5, 0], 1, 1)],
       faces: [faceRow(F1, 1, 1, { center: [xOffset + 0.5, 0.5, 0], bbox, edges: 1, triangles: [0, 1] })],
       edges: [edgeRow(E1, 1, 1, { center: [xOffset + 0.5, 0, 0], bbox: box(xOffset, xOffset + 1, 0), faces: 1, segments: [0, 1] })],
       relations: { faceEdgeRows: [0], edgeFaceRows: [0] }

@@ -455,8 +455,8 @@ function buildSelectorTables(bundle, {
     countKey: "faceCount",
     targetSelectorType: "face",
   })));
-  // A shape (a solid of the part) is a row -- it groups faces and carries a volume -- but
-  // never a reference: a ref names an occurrence, a face, an edge or a vertex.
+  // A shape (a solid of the part) is a row -- it groups faces -- but never a reference: a
+  // ref names an occurrence, a face, an edge or a vertex.
   const visibleReferences = references.filter((reference) => String(reference?.normalizedSelector || "").trim());
   const occurrenceIdByRowIndex = new Map(occurrences.map((row, rowIndex) => [rowIndex, placedBy]));
   return {

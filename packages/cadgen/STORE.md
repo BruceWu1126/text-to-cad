@@ -532,7 +532,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   Nothing stores the facts but that pin, and nothing outside a derivation reads
   them.
 
-  The **selector table** (`_internal/selector_table.py`, schema 3) is the one
+  The **selector table** (`_internal/selector_table.py`, schema 4) is the one
   place a ref's facts are minted. From the exact BREP and the topology facts,
   per face, edge and vertex, the **element name** a ref ends in, which leads
   each row -- its lineage (§2), `f:bracket.extrude1.3`, or, for an element no
