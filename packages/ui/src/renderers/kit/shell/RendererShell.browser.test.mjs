@@ -167,7 +167,16 @@ test('a shell renderer restores isolated view state on a remount', async (t) => 
   await page.getByRole('button', { name: 'Solid settings', exact: true }).click();
   await display.waitFor();
   await page.evaluate(() => window.cadHarness.mounted(false));
-  await display.waitFor({ state: 'detached' });
+  await display.waitFor({ state: 'detached' }).catch(async (error) => {
+    const left = await page.evaluate(() => ({
+      open: [...document.querySelectorAll('[data-display-settings]')].map(node => ({ settings: node.getAttribute('data-display-settings'), state: node.getAttribute('data-state'),
+        pane: node.closest('[data-testid]')?.getAttribute('data-testid') ?? 'body' })),
+      viewerOne: Boolean(document.querySelector('[data-testid="one"] [data-viewer-layout]')),
+      layouts: [...document.querySelectorAll('[data-viewer-layout]')].map(node => `${node.closest('[data-testid]')?.getAttribute('data-testid')}:${node.getAttribute('data-viewer-layout')}`),
+      triggers: [...document.querySelectorAll('button[aria-label^="Display mode"]')].map(node => `${node.closest('[data-testid]')?.getAttribute('data-testid')}:${node.closest('[data-viewer-navbar]') ? 'navbar' : 'view'}:${node.getAttribute('aria-expanded')}`),
+    }));
+    throw new Error(`${error.message}; still on the page: ${JSON.stringify(left)}; page errors: ${errors.join('; ')}`);
+  });
   await first.locator('[data-slot="cad-file-view"]').waitFor({ state: 'detached' });
   // Unmount persists the display settings and the camera, under the file and the renderer.
   const before = await page.evaluate(() => window.cadHarness.state);
