@@ -18,7 +18,7 @@ a source, and a reader (door, viewer, snapshot) finds a tree through
 A **model** is a parameterless ``@step`` function; its identity is its resolved
 script path. Its result is a **tree** object: the components it made itself plus
 **links** to its children's trees. Its **record** says which tree is current, what
-closure produced it, which children it pinned, and what outputs it wrote.
+closure produced it, which children it composed and by what key, and what outputs it wrote.
 
 Everything in ``objects/`` is content-addressed and never rewritten; everything in
 ``index/`` is small JSON written temp + rename. No directories per result, no

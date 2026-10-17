@@ -594,7 +594,7 @@ def _run_script_generator_body(
     # build's done event names it, and the root warns (cadgen.cli_tree).
     note_programs(trace.programs)
     # The closure a record carries: the script + its static closure (stopping at
-    # child models — a result edge is tracked by pin, not by file), every file
+    # child models — a result edge is tracked by key, not by file), every file
     # that executed (hashed AT execution), the data files and folders the run
     # read, as it read them, and the environment variables its code read. Paths
     # are relative to the GENERATOR's folder, never

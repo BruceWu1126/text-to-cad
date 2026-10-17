@@ -172,6 +172,25 @@ class SerialChildren(unittest.TestCase):
         self.assertEqual(Path(parents["child"]).name, "parent.py", "the child's build is reported under its first caller")
         self.assertEqual(Path(parents["parent"]).name, "grand.py")
 
+    def test_a_child_has_one_tree_and_key_with_the_memo_cold_hot_or_off(self):
+        """The kernel memo's hits change no identity: a cold run, a hot one (a second run in
+        this process, every construction a hit) and one with hits off (``CADGEN_KERNEL_MEMO=0``)
+        store the same tree under the same key."""
+        code, err = self.build(self.child)
+        self.assertEqual(code, 0, err)
+        cold = self.record(self.child)
+        code, err = self.build(self.child, "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.done(), ["child"], "--force ran the body again, hot")
+        hot = self.record(self.child)
+        self.fresh_store()
+        with mock.patch.dict(os.environ, {"CADGEN_KERNEL_MEMO": "0"}):
+            code, err = self.build(self.child)
+        self.assertEqual(code, 0, err)
+        off = self.record(self.child)
+        self.assertEqual((hot["tree"], hot["key"]), (cold["tree"], cold["key"]))
+        self.assertEqual((off["tree"], off["key"]), (cold["tree"], cold["key"]))
+
     def test_a_childs_failure_reaches_the_body_as_itself_and_fails_the_run(self):
         self.child.write_text(
             "from cadgen import step\n\n\n@step\ndef child():\n    raise ValueError('the size is wrong on purpose')\n",

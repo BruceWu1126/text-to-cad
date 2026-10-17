@@ -1555,9 +1555,9 @@ attributes unchanged.
 
 ## 7. Concurrency
 
-No persistent build locks. CPU admission and identical child coalescing may
-wait; memory admission waits on builds in flight and fails only when nothing
-running could make room (§9). Explicit builds
+No persistent build locks. CPU admission, and the coalescing of compiles and
+artifact jobs, may wait; memory admission waits on builds in flight and fails
+only when nothing running could make room (§9). Explicit builds
 are not cancelled merely because a newer editing request exists.
 
 - **Same model twice.** Both builds run. Each publishes objects (idempotent)
@@ -1578,13 +1578,6 @@ are not cancelled merely because a newer editing request exists.
   sweeper deletes by rename, then recheck (§5, §8), so no record is written
   naming an object a concurrent pass took. The daemon runs its own passes
   only while it has no request in flight.
-- **Dependency waits** release the parent's CPU slot but retain its geometry
-  and memory reservation. A coalesced child may have been started by another
-  consumer; it must remain alive while any required consumer uses it.
-  The daemon tracks the producer and attached consumers separately. A lost
-  producer connection does not cancel work an attached caller still needs.
-  The last disconnect retires that particular in-flight entry before its
-  worker is stopped; late completion cannot finish a replacement request.
 - **No locks.** There is no lock layer: every store write is atomic
   (temp + rename) and idempotent, the document is written to a temp file and
   moved into place, the record cross-validates the outputs by sha (gate
@@ -1985,11 +1978,12 @@ CPU scheduling and reuse remain independent of memory admission:
    `N = os.cpu_count()` slots per executor (`CADGEN_JOBS` overrides; daemon-wide
    for the daemon executor, per top-level build for the transient one, whose
    root process runs a private broker its workers inherit). A job takes a slot
-   before its body runs and holds it through its emit; it **yields the slot
-   while it waits for a child's source result or declared outputs** and reacquires
-   — queuing if it must — when that wait ends. A waiting parent holds no CPU slot, which is
-   why a 1-slot pool still builds a 3-level tree. It retains its geometry and
-   memory reservation. Work under way goes first: a slot asked for to continue
+   before its body runs and holds it through its emit -- a child built inside
+   the body runs in the slot its parent holds (§9a) -- and it **yields the slot
+   while it waits for a pool job** (its parts' display data, a compile, an
+   export's answer) and reacquires -- queuing if it must -- when that wait ends.
+   A waiting build holds no CPU slot, which is why a 1-slot pool still builds a
+   tree and writes its files. Work under way goes first: a slot asked for to continue
    it -- an artifact job a build or a view waits on, a job taking back the slot
    it yielded -- is granted ahead of every job not yet started, in order among
    themselves, and the rest in order (FIFO), so a build's display job runs in
@@ -2012,12 +2006,12 @@ CPU scheduling and reuse remain independent of memory admission:
    a job: it runs on a spare, holds a slot through its read and emit, coalesces
    on the document's bytes and shows in the tree. The tree shows `queued` when a
    slot did not come at once.
-2. **In-flight coalescing.** A child submit carries its source's closure hash;
-   a submit for `(store, model, closure)` matching a job already in flight attaches to
-   that job instead of starting another. In flight only, identical source only,
-   never a lookup into the past — and never the model a top-level request named
-   (a second `python a.py` still runs, on an extra). Two parents needing one
-   stale child build it once.
+2. **In-flight coalescing.** A compile or an artifact job matching one already
+   in flight (`(store, bytes)`; `(store, request)`, a verify by its bytes and
+   tree) attaches to that job instead of starting another. In flight only,
+   never a lookup into the past, and never a model build: a second `python a.py`
+   still runs, on an extra, and two parents needing one stale child build it
+   once per run (§9a), not per pool.
 3. **Idle unbind — 10 minutes** (`CADGEN_DAEMON_IDLE_UNBIND`). A bound worker
    idle that long returns to the spare set (spares beyond K exit); its model's
    next build rebinds a spare — no import repaid.
@@ -2037,11 +2031,9 @@ headroom; nested requests can spend it. A known oversized root reservation or
 retained worker may use that headroom only as the sole worker charge, and
 only within the total allowance. A request that cannot fit waits while builds
 hold run slots or spawns are still starting, since each hands its charge back
-when it finishes; a parent fanning out its children submits them all at once
-and only a core's worth run. It fails explicitly, with the parent's geometry
-still owned, only when nothing is in flight that could release memory, so a
-tree of parents all waiting on children they cannot admit errors instead of
-hanging.
+when it finishes. It fails explicitly, with the build's geometry still owned,
+only when nothing is in flight that could release memory, so builds all
+waiting on jobs they cannot admit error instead of hanging.
 Reclamation drops process state only; it never runs persistent-store GC.
 Reservations and sampled RSS form a soft operating budget. Arbitrary future
 native allocations cannot be predicted or stopped by this admission check;

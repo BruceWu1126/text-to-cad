@@ -262,10 +262,10 @@ def _model_formats_of(payload: bytes, filename: str) -> dict[str, str]:
     return formats
 
 
-def _pinned(formats: Mapping[str, str]) -> frozenset[str]:
-    """The models a call PINS. A drawing is not one: called inside another
-    build, a ``@dxf`` function runs its body inline, so taking it is taking
-    source."""
+def _composed(formats: Mapping[str, str]) -> frozenset[str]:
+    """The models a call COMPOSES, by key. A drawing is not one: called inside
+    another build, a ``@dxf`` function runs its body inline, so taking it is
+    taking source."""
     return frozenset(name for name, fmt in formats.items() if fmt != "dxf")
 
 
@@ -496,8 +496,8 @@ class _Walk:
             formats = self._formats[path] = _model_formats_of(payload, str(path)) if payload else {}
         return formats
 
-    def _pinned_models(self, path: Path) -> frozenset[str]:
-        return _pinned(self._formats_of(path))
+    def _composed_models(self, path: Path) -> frozenset[str]:
+        return _composed(self._formats_of(path))
 
     def _declared_models(self, path: Path) -> frozenset[str]:
         return frozenset(self._formats_of(path))
@@ -575,7 +575,7 @@ class _Walk:
         """A module that executes (its preamble), by import."""
         if path == self.root or not is_first_party_source_file(path):
             return
-        if self.model_boundaries and self._pinned_models(path):
+        if self.model_boundaries and self._composed_models(path):
             self.model_taken.setdefault(path, set())
             self._reclassify(path)
             return
@@ -773,9 +773,9 @@ class _Walk:
             state.names.add(name)
 
     def _beyond_call(self, module: Path, name: str) -> None:
-        """``arm.__wrapped__``: an attribute of a pinned model function can reach
-        what the pin stands for -- its body -- so the file is taken as source."""
-        if self.model_boundaries and name in self._pinned_models(module):
+        """``arm.__wrapped__``: an attribute of a composed model function can reach
+        what the call stands for -- its body -- so the file is taken as source."""
+        if self.model_boundaries and name in self._composed_models(module):
             self.escape(module)
 
     def import_edge(self, importer: Path, alias: Alias, *, whole: bool = False) -> None:
@@ -851,7 +851,7 @@ class _Walk:
     def name_edge(self, target: Path, name: str) -> None:
         if target == self.root or not is_first_party_source_file(target):
             return
-        if self.model_boundaries and self._pinned_models(target):
+        if self.model_boundaries and self._composed_models(target):
             taken = self.model_taken.setdefault(target, set())
             if taken is not None and name not in taken:
                 taken.add(name)
@@ -865,7 +865,7 @@ class _Walk:
         module bound in it (it is reachable by any name too)."""
         if target == self.root or not is_first_party_source_file(target):
             return
-        if self.model_boundaries and self._pinned_models(target):
+        if self.model_boundaries and self._composed_models(target):
             if self.model_taken.get(target, set()) is not None:
                 self.model_taken[target] = None
                 self._reclassify(target)
@@ -885,14 +885,14 @@ class _Walk:
     def _reclassify(self, target: Path) -> None:
         """Constants by value, functions by reach, every decorated model by
         result. A module import with no statically taken names is also a
-        result edge; actual model calls supply the exact function pins."""
+        result edge; actual model calls supply the exact functions composed."""
         if target in self.model_source:
             return
         taken = self.model_taken[target]
         if taken is None:
             source = True
         else:
-            beyond = taken - self._pinned_models(target)
+            beyond = taken - self._composed_models(target)
             literals = (module_constant_hashes(target, beyond) or {}) if beyond else {}
             source = set(literals) != beyond
             if not source and literals:
@@ -1170,7 +1170,7 @@ def build_closure(
 
     # Runtime calls carry exact script::function identities. Ownership of
     # executed source remains file-based, while the record keeps those exact
-    # function pins independently in its children list.
+    # functions, by key, in its children list.
     called_files = {split_model_ref(child)[0] for child in children}
     ours, child_owned = _child_ownership(script, statics, called_files)
     # What executed but static reach never saw — a plugin imported for its side
