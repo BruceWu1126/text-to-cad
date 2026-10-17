@@ -6,26 +6,12 @@ import { cn } from '@text-to-cad/ui/utils';
  * file tree and the Model tree so the two filters are one control; each caller
  * owns its corpus, ranking and keyboard. `yieldWhileTyping`: the `trailing` controls step aside
  * while the box has focus, so the whole row is the box (a narrow panel's filter). `dense`: a file
- * sidebar section's filter, part of its head, close under its heading — a tree row's 24px and 11px
- * text, and no box of its own drawn on focus: the caret says where typing goes. `onClose`: the find
- * field a sidebar section opens in place of its heading (`TreeFindButton`), as a design tool's is —
- * a bordered box, focused as it opens, its ring while it has focus, then `trailing` (what the
- * heading it stands in for says meanwhile: loading), and an X that clears and closes it. Either way its search icon is centred over the
- * rows' glyph column and its text starts where their names do: the rows sit 4px in (their list's
- * padding), each glyph 5px further (`TREE_ROW_INSET_PX`) and 12px wide, its name 4px after it.
+ * sidebar section's search box, the head of its section — a tree row's 24px and 11px text, and no
+ * box of its own drawn on focus: the caret says where typing goes. Its search icon is centred over
+ * the rows' glyph column and its text starts where their names do: the rows sit 4px in (their
+ * list's padding), each glyph 5px further (`TREE_ROW_INSET_PX`) and 12px wide, its name 4px after it.
  */
-export function TreeFilterInput({ label, placeholder, value, onChange, onKeyDown, trailing, yieldWhileTyping = false, dense = false, onClose = null, closeLabel = 'Close find', clearLabel = 'Clear filter', className, ...props }) {
-  if (onClose) return <div {...props} data-slot="tree-filter" data-find="" className={cn('flex h-6 shrink-0 items-center gap-1', className)}>
-    <div className="relative flex min-w-0 flex-1 items-center">
-      <Search className="pointer-events-none absolute left-1.5 size-3 text-muted-foreground" />
-      <input aria-label={label} autoFocus spellCheck={false} value={value} placeholder={placeholder}
-        className="h-6 w-full min-w-0 rounded-md border border-border bg-transparent pl-6 pr-1.5 text-tiny outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring/45"
-        onChange={event => onChange(event.target.value)} onKeyDown={onKeyDown} />
-    </div>
-    {trailing}
-    <button type="button" aria-label={closeLabel} onClick={onClose}
-      className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"><X className="size-3" /></button>
-  </div>;
+export function TreeFilterInput({ label, placeholder, value, onChange, onKeyDown, trailing, yieldWhileTyping = false, dense = false, clearLabel = 'Clear filter', className, ...props }) {
   return <div {...props} data-slot="tree-filter" className={cn('group/filter flex shrink-0 items-center gap-1',
     // Dense, the separator is an inset line rather than a border, so the row's full 24px centre its
     // buttons (a border would take a pixel from under them).
@@ -53,12 +39,6 @@ export function TreeFilterInput({ label, placeholder, value, onChange, onKeyDown
     {trailing ? <div data-tree-filter-trailing="" className={cn('flex shrink-0 items-center gap-0.5',
       yieldWhileTyping && 'group-has-[input:focus]/filter:hidden')}>{trailing}</div> : null}
   </div>;
-}
-
-/** The magnifier at the right of a sidebar section's heading that opens its find field (`TreeFilterInput`'s `onClose`). */
-export function TreeFindButton({ label = 'Find', onClick }) {
-  return <button type="button" aria-label={label} onClick={onClick} data-tree-find=""
-    className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"><Search className="size-3" /></button>;
 }
 
 /** Matched characters use the primary text color without changing weight. */

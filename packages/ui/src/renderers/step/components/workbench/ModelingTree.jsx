@@ -337,7 +337,7 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
       selected={on} joinAbove={on && at > 0 && highlighted.has(matches[at-1].entry.node.id)} joinBelow={on && at < matches.length-1 && highlighted.has(matches[at+1].entry.node.id)}
       choose={choose} disabled={disabled} partControls={rowControls}/>;
   };
-  // Headed by its search box (the sidebar's Search tile focuses it), then what is loading and Show
+  // Headed by its search box, always there, then what is loading and Show
   // all while parts are hidden.
   return <ToolPanel id="tree" label="Features" fit="tree" resizable collapsible={false} hidden={!active}
     header={<TreeFilterInput label="Filter model" placeholder="Search…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense

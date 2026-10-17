@@ -7,7 +7,7 @@ import RendererShell from "../kit/shell/RendererShell.jsx";
 import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { createToolModes } from "../kit/tools/toolModes.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
-import { TreeFindButton } from "@text-to-cad/ui/primitives/tree-filter";
+import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
 
 // TEST SCAFFOLDING. This renderer is never registered in a product: it exists so
 // the shell's own tools can be driven in a real browser under a frame that is
@@ -181,15 +181,14 @@ function HarnessSurface({ view, data }) {
     { id: "clear", label: "Clear the note", separatorBefore: true, disabled: !picked, onSelect: () => setPicked("") }
   ]), [picked]);
 
-  // `panel*.harness` stands in for a file whose tool stack is full: a tree far taller than any
-  // viewer; the Reference for a
-  // selection, sized on its own; a retained effect — "Keep" keeps a small panel under them,
-  // highlighted, whatever tool is up — and "Pose", a tool whose panel is the person's to size
-  // like the tree.
+  // `panel*.harness` stands in for a file whose sidebar is full: a tree far taller than any
+  // viewer and a Reference, each a section of the file sidebar; a retained effect — "Keep" keeps a
+  // small panel in the tool stack, highlighted, whatever tool is up — and "Pose", a tool that adds
+  // a Position section to the sidebar while it is up.
   const [kept, setKept] = useState(false);
   const [posing, setPosing] = useState(false);
-  // The tree's filter, as a model tree's: a find field its heading's magnifier opens in the heading's place.
-  const [finding, setFinding] = useState(false);
+  // The tree's search box, as a model tree's: the head of its section.
+  const [filter, setFilter] = useState("");
   // `panel-short.harness` turns the heights round: a tree of two rows and a Reference of many.
   const short = view.file.name.startsWith("panel-short");
   const [treeRows, referenceRows] = short ? [2, 40] : [120, 8];
@@ -203,11 +202,9 @@ function HarnessSurface({ view, data }) {
   // The file sidebar: a tree, a Reference and, while posing, Position; the tool stack: the kept panel.
   const sidebar = withPanel ? <>
       <ToolPanel id="tree" label="Harness tree" fit="tree" resizable collapsible={false}
-        actions={<TreeFindButton label="Find in tree" onClick={() => setFinding(true)} />}
-        header={finding ? <p className="flex h-6 items-center px-2"><span className="flex-1">Filter</span>
-          <button type="button" aria-label="Close find" onClick={() => setFinding(false)}>×</button></p> : null}>{rows(treeRows, "Row")}</ToolPanel>
-      <ToolPanel id="reference" title="Reference" label="Harness reference" fit="details" resizable onClose={() => {}}>{rows(referenceRows, "Fact")}</ToolPanel>
-      {posing ? <ToolPanel id="position" title="Position" label="Harness position" fit="details" resizable collapsible={false} onClose={() => setPosing(false)}>{rows(30, "Joint")}</ToolPanel> : null}
+        header={<TreeFilterInput label="Filter tree" placeholder="Search…" value={filter} onChange={setFilter} dense className="px-0 shadow-none" />}>{rows(treeRows, "Row")}</ToolPanel>
+      <ToolPanel id="reference" title="Reference" label="Harness reference" fit="details" resizable>{rows(referenceRows, "Fact")}</ToolPanel>
+      {posing ? <ToolPanel id="position" title="Position" label="Harness position" fit="details" resizable collapsible={false}>{rows(30, "Joint")}</ToolPanel> : null}
     </> : null;
   const toolPanels = kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null;
 
