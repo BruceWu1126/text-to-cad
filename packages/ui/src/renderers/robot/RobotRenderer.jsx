@@ -155,6 +155,8 @@ function RobotSurface({ view, data }) {
     return () => { unsubscribe(); window.cancelAnimationFrame(boundsFrame); };
   }, [studioScene, studioPose]);
   const studio = useMemo(() => ({ scene: studioScene }), [studioScene]);
+  const studioSceneRef = useRef(studioScene);
+  studioSceneRef.current = studioScene;
   useLayoutEffect(() => {
     if (!scene || !pose || !robot) { handlesRef.current = NO_HANDLES; return undefined; }
     const prepared = prepareRobotJointHandles(THREE, robot.description, scene);
@@ -183,7 +185,8 @@ function RobotSurface({ view, data }) {
   surfaceRenders.current += 1;
   useEffect(() => {
     const handles = () => handleLayoutRef.current?.() || [];
-    const links = () => [...(scene?.linkFrames() || [])].map(([link, matrixWorld]) => ({ link, matrixWorld }));
+    // The robot on screen: the Studio's own while it is open.
+    const links = () => [...((studioSceneRef.current || scene)?.linkFrames() || [])].map(([link, matrixWorld]) => ({ link, matrixWorld }));
     // What a pose step cost: the matrices it wrote, and whether this component rendered for it (it must not).
     const stats = () => ({ ...(scene?.stats || {}), surfaceRenders: surfaceRenders.current });
     Object.assign(window, { __cadJointHandles: handles, __robotLinks: links, __robotPoseStats: stats });

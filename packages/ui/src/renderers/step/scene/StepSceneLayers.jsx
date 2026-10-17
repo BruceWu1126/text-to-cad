@@ -276,8 +276,9 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const placementRef = useRef(null);
   placementRef.current = { modelKey, renderMode, floor: normalizedThemeSettings.floor || {}, renderConfiguration: props.renderConfiguration };
   useEffect(() => {
-    // The editor's layers answer them: the Studio's (`studio`) draw a second scene of the same model.
-    if (studio) return undefined;
+    // The view on screen answers them: the Studio's layers while it is open, and as it closes the
+    // layers it covered (the editor's) answer again. The memory probe is the editor's alone: the
+    // Studio's scene shares its geometry, and the file's accounting is the editor's.
     // Byte attribution for the headless memory harness (read, never polled here).
     const memoryProbe = () => renderMemoryAccounting(runtimeRef.current);
     // The LIVE record transforms, so a browser test can assert where a posed occurrence
@@ -310,13 +311,20 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
           : current.floor.enabled === true && current.floor.followModel !== false
       };
     };
-    Object.assign(window, { __cadRenderMemoryProbe: memoryProbe, __cadDisplayRecords: displayRecords, __cadJointHandles: jointHandleLayout });
+    const seams = { __cadDisplayRecords: displayRecords, __cadJointHandles: jointHandleLayout, ...(studio ? {} : { __cadRenderMemoryProbe: memoryProbe }) };
+    const covered = Object.fromEntries(Object.keys(seams).map(name => [name, window[name]]));
+    const coveredPlacement = Object.getOwnPropertyDescriptor(window, "__cadModelPlacement");
+    Object.assign(window, seams);
     Object.defineProperty(window, "__cadModelPlacement", { configurable: true, get: placement });
     return () => {
-      if (window.__cadRenderMemoryProbe === memoryProbe) delete window.__cadRenderMemoryProbe;
-      if (window.__cadDisplayRecords === displayRecords) delete window.__cadDisplayRecords;
-      if (window.__cadJointHandles === jointHandleLayout) delete window.__cadJointHandles;
-      if (Object.getOwnPropertyDescriptor(window, "__cadModelPlacement")?.get === placement) delete window.__cadModelPlacement;
+      for (const [name, own] of Object.entries(seams)) {
+        if (window[name] !== own) continue;
+        if (covered[name]) window[name] = covered[name]; else delete window[name];
+      }
+      if (Object.getOwnPropertyDescriptor(window, "__cadModelPlacement")?.get === placement) {
+        if (coveredPlacement) Object.defineProperty(window, "__cadModelPlacement", coveredPlacement);
+        else delete window.__cadModelPlacement;
+      }
     };
   }, [runtimeRef, stepScene, studio]);
 
