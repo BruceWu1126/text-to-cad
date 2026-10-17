@@ -1,5 +1,6 @@
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { buildMeshObjects } from "./meshObjects.js";
+import { releaseGeometry, shareGeometry } from "./sharedGeometry.js";
 
 function boundsOf(THREE, objects) {
   const box = new THREE.Box3();
@@ -20,7 +21,7 @@ function boundsOf(THREE, objects) {
  *
  * @param {typeof import("three")} THREE
  * @param {import("./meshObjects.js").MeshObject[]} objects  `buildMeshObjects`.
- *   The scene owns their geometries from here on.
+ *   The scene owns their geometries from here on (a sibling's share its source's: `createSibling`).
  * @returns {import("../viewer/sceneContract.js").KitScene & { meshCount: number }}
  */
 export function createMeshScene(THREE, objects) {
@@ -48,13 +49,21 @@ export function createMeshScene(THREE, objects) {
     // Nothing here was authored, so Render is a look like any other: the studio's
     // surface over the same colours, never a finish "kept".
     setSurfaceLook(next) { if (!disposed) look.apply(next ? { ...next, authored: false } : null); },
+    /**
+     * A second scene of the same file (the viewer's Studio beside its editor): its own meshes,
+     * materials and look over this scene's geometry (`sharedGeometry.js`). This scene stays the
+     * geometry's owner, so the sibling is disposed first.
+     */
+    createSibling() {
+      return createMeshScene(THREE, objects.map(object => ({ ...object, geometry: shareGeometry(THREE, object.geometry) })));
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       root.removeFromParent();
       look.dispose();
       for (const material of materials) material.dispose();
-      for (const { geometry } of objects) geometry.dispose();
+      for (const { geometry } of objects) releaseGeometry(geometry);
     }
   };
 }

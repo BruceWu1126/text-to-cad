@@ -218,7 +218,9 @@ export async function buildCompositeScreenshotBlob(runtime, {
     throw new Error("Screenshot capture failed");
   }
 
-  paintScreenshotSourceCanvas(context, renderer.domElement, width, height, {
+  // A view of a shared GPU device draws in the device's buffer and hands its canvas the frame
+  // later: the pixels just drawn are read from where they were drawn.
+  paintScreenshotSourceCanvas(context, renderer.drawingCanvas || renderer.domElement, width, height, {
     backgroundColor,
     crop: cropRect
   });

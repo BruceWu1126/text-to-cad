@@ -6,6 +6,7 @@ import {
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { REFERENCE_HOVER_COLOR } from "../viewer/referenceGeometry.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
+import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
 import { shapeSourceColor } from "../viewer/surfaceMaterials.js";
 import { jointMotionTransform, resolveUrdfJointValues } from "./kinematics.js";
 
@@ -86,7 +87,7 @@ function boxOf(bounds) {
  *   `setHiddenPartIds(ids)`, `linkCentre(name)`, `motionFrame(jointName)`, `linkFrames()`, `hasComponent(id)`,
  *   and `stats` (test seam: matrix writes per pose).
  */
-export function createRobotScene(THREE, { description, parts }) {
+export function createRobotScene(THREE, { description, parts }, { shareFrom = null } = {}) {
   let hiddenPartIds = new Set();
   const isVisible = record => !hiddenPartIds.has(record.mesh.userData.partId);
   const root = new THREE.Group();
@@ -153,7 +154,13 @@ export function createRobotScene(THREE, { description, parts }) {
     const described = hex(part.descriptionColor);
     const wearsVertexColors = !described && Boolean(part.hasSourceColors);
     const key = `${String(part.sourceMeshKey || part.meshUrl || part.id)}:${wearsVertexColors ? "source-colors" : "flat"}`;
-    if (!geometries.has(key)) geometries.set(key, partGeometry(THREE, part, wearsVertexColors));
+    if (!geometries.has(key)) {
+      // A sibling draws its source's buffers; vertex colours, which its look grades, are its own.
+      const source = shareFrom?.get(key);
+      geometries.set(key, source
+        ? { geometry: shareGeometry(THREE, source.geometry, { own: source.sourceColors ? ["color"] : [] }), sourceColors: source.sourceColors }
+        : partGeometry(THREE, part, wearsVertexColors));
+    }
     const entry = geometries.get(key);
     if (!entry) continue;
     const vertexColors = Boolean(entry.sourceColors);
@@ -353,6 +360,12 @@ export function createRobotScene(THREE, { description, parts }) {
       applyHighlight();
     },
     setJointValues(values) { return disposed ? false : setJointValues(values); },
+    /**
+     * A second scene of the same robot (the viewer's Studio beside its editor): its own links,
+     * pose, materials and look over this scene's geometry (`sharedGeometry.js`). This scene stays
+     * the geometry's owner, so the sibling is disposed first.
+     */
+    createSibling() { return createRobotScene(THREE, { description, parts }, { shareFrom: geometries }); },
     /** The value each joint is posed at now (mimic followers included). */
     jointValue(name) { return motions.get(name)?.value ?? null; },
     /** A joint's frame AFTER its motion, relative to the robot: `THREE.Matrix4`, or null for a joint off the tree. */
@@ -427,7 +440,7 @@ export function createRobotScene(THREE, { description, parts }) {
       }
       look.dispose();
       for (const material of materials) material.dispose();
-      for (const entry of geometries.values()) entry?.geometry.dispose();
+      for (const entry of geometries.values()) releaseGeometry(entry?.geometry);
     }
   };
 }

@@ -25,7 +25,13 @@ The stages keep ownership narrow:
 - A family builder owns its scene: `createGlbScene` (`lib/render/glbScene.js`),
   `buildMeshScene` (`lib/render/meshScene.js`), `createRobotScene`
   (`lib/urdf/robotScene.js`). Each returns the scene contract of
-  `lib/viewer/sceneContract.js`.
+  `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
+  second scene of the same file with its own objects, materials and look over the first's
+  geometry (`lib/render/sharedGeometry.js`), which the viewer's Render Studio draws beside
+  its editor. A GLB's sibling is a SkeletonUtils clone wearing copies of the file's authored
+  materials, kept before any look, with a sibling `document` for its own routine; a robot's
+  has its own links and pose, and its own vertex colours. Ownership is
+  [resource-ownership §1](resource-ownership.md#1-shared-ownership-and-disposal).
 - `renderModel` owns renderer, scene, camera, lighting, background, floor,
   framing, resizing, and render loop concerns.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
