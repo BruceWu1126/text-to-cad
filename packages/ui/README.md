@@ -64,7 +64,7 @@ The file explorer is a popover under the navbar's file name (`FolderExplorer.jsx
 18rem wide, no taller than 28rem or the room below it, with no resize handle. It
 floats over the view and never resizes it or moves its tools. A file's controls are
 the viewer's own: the tool strip at the view's top centre, the tool in hand's sub-toolbar
-under it, and the file sidebar down its left edge, bounded by the viewer's height.
+under it, and the file sidebar's tiles at its top-left, a section's panel under them bounded by the viewer's height.
 FileViewer is mobile below 600px of its own width; progress indicators use this same
 breakpoint. The sidebar never scrolls sideways: Position's labels truncate to preserve its
 sliders and inputs.
@@ -248,13 +248,13 @@ Annotate, Measure, Explode and Clip; a robot's Select — then, after a thin rul
 3D view's Display (its settings, a popover that opens down) and the Studio. The tool in hand's
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
 Annotate's tools, style and history; Explode's and Clip's slider rows.
-What there is to read of the file is the file sidebar down the left edge, whatever the tool
+What there is to read of the file is the file sidebar at the top-left, whatever the tool
 (`kit/tools/FileSidebar.jsx`): an assembly's Features, a robot's Links, Position, an SDF's
 metadata, and Animation for a file with routines, a tile each at the top-left, a tile opening its
-section in a panel under them, one at a time; the panel is sized from its bottom-right grip,
-Quick Edit's. Sidebar sections stay mounted, so a tree keeps its scroll and expansion;
+section in a panel under them, one at a time; each section's panel is sized from its
+bottom-right grip, Quick Edit's, and keeps its own size. On a phone the tiles lead the strip. Sidebar sections stay mounted, so a tree keeps its scroll and expansion;
 only what is on screen does background work. What is picked is Quick Edit's chips. Links is
-the description's link tree, with the Model tree's rows and find; see
+the description's link tree, with the Model tree's rows and search box; see
 [robot links](docs/cad-renderer.md#robot-links).
 The binding [viewer design system](docs/settings-ui.md) defines tool lifecycle,
 the file sidebar, mobile layout, section density, keyboard scope, tooltips

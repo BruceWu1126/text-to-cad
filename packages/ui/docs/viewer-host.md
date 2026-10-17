@@ -74,8 +74,8 @@ The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the vi
 tool strip, the view's controls at the strip's end (Display, the Studio), the tool in hand's
 sub-toolbar and its file sidebar (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
 DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
-file's name opens that). The layout a person gives the file sidebar — its size, whether it
-is put away, its folded sections — and the tool stack's panels is one
+file's name opens that). The layout a person gives the file sidebar — each section's size —
+and the tool stack's panels is one
 of the tab's settings (`settings.toolStack` of the tab record, `@text-to-cad/ui/tab-store`),
 beside the appearance and the home's layout.
 

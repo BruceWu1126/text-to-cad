@@ -223,7 +223,7 @@ The web host owns URL/history, the tab's persistence, appearance, version links
 and native service adapters. Shared renderers own all model interaction. STEP and
 robots open in Select, its selection filter the chevron after its button; the tool in hand's
 controls are one row under the strip. An assembly's Features (Links for a robot), Position
-and an SDF's metadata are the file sidebar's, down the left edge, whatever the tool. The
+and an SDF's metadata are the file sidebar's, a tile each at the top-left, whatever the tool. The
 file's name in the navbar opens the explorer.
 STEP and robot files have tools on a strip at the top centre; GLB, STL and 3MF have none,
 a GLB's clips or not.
@@ -233,7 +233,7 @@ the Studio, with the view cube at the bottom-right and Quick Edit at the top-rig
 
 The explorer is a popover under the file's name: the file's folder, one folder at a
 time, with "Filter files..." to find a file anywhere under it. Below 600px of
-FileViewer width (a phone) the chrome is touch-sized and there is no file sidebar. The Studio is the shared shell's button after Display on the strip: it takes the whole page,
+FileViewer width (a phone) the chrome is touch-sized and the file sidebar's tiles lead the tool strip. The Studio is the shared shell's button after Display on the strip: it takes the whole page,
 hiding the navbar, the tool strip and Quick Edit, opens still (Orbit, in its settings, is
 off at every entry), draws the model in Render — the one place it is drawn — and keeps its
 own controls in the view's top-right corner: Studio settings (Orbit, then Render's settings)
