@@ -17,6 +17,7 @@ dispatch and of the decorator.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -98,36 +99,20 @@ assert not any(name.split(".")[0] in {"build123d", "OCP", "cadquery"} for name i
         )
 
     def test_a_step_command_hands_off_and_never_imports_the_module(self):
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}, clear=False), \
-                mock.patch("cadgen.daemon.client.run_via_daemon", return_value=7) as daemon, \
-                mock.patch.object(cli.importlib, "import_module") as imported:
-            self.assertEqual(cli.main(["stl", "build", "part.step"]), 7)
-        daemon.assert_called_once()
-        self.assertEqual(daemon.call_args.args[0], "stl-build")
-        self.assertEqual(daemon.call_args.args[1], ["part.step"])
-        imported.assert_not_called()  # the whole point: no OCP import
-
-    def test_a_daemon_that_declines_falls_through_to_the_module(self):
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}, clear=False), \
-                mock.patch("cadgen.daemon.client.run_via_daemon", return_value=None), \
-                mock.patch.object(cli.importlib, "import_module") as imported:
-            imported.return_value.main.return_value = 0
-            self.assertEqual(cli.main(["stl", "build", "part.step"]), 0)
-        imported.assert_called_once()
-
-    def test_no_handoff_when_explicitly_disabled(self):
-        # Warm is the default now; CADGEN_DAEMON=0 is the opt-out.
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "0"}, clear=False), \
-                mock.patch("cadgen.daemon.client.run_via_daemon") as daemon, \
-                mock.patch.object(cli.importlib, "import_module") as imported:
-            imported.return_value.main.return_value = 0
-            cli.main(["stl", "build", "x"])
-        daemon.assert_not_called()
+        for code in (7, 1):  # the job's exit, or a daemon that could not take it: either is the command's
+            with self.subTest(code=code), mock.patch.dict("os.environ", {}, clear=False), \
+                    mock.patch("cadgen.daemon.client.run_via_daemon", return_value=code) as daemon, \
+                    mock.patch.object(cli.importlib, "import_module") as imported:
+                os.environ.pop("CADGEN_DAEMON_CHILD", None)
+                self.assertEqual(cli.main(["stl", "build", "part.step"]), code)
+            daemon.assert_called_once()
+            self.assertEqual(daemon.call_args.args[0], "stl-build")
+            self.assertEqual(daemon.call_args.args[1], ["part.step"])
+            imported.assert_not_called()  # the whole point: no OCP import, and no run here
 
     def test_the_daemon_child_never_routes_back_to_itself(self):
-        with mock.patch.dict(
-            "os.environ", {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_CHILD": "1"}, clear=False
-        ), mock.patch("cadgen.daemon.client.run_via_daemon") as daemon, \
+        with mock.patch.dict("os.environ", {"CADGEN_DAEMON_CHILD": "1"}, clear=False), \
+                mock.patch("cadgen.daemon.client.run_via_daemon") as daemon, \
                 mock.patch.object(cli.importlib, "import_module") as imported:
             imported.return_value.main.return_value = 0
             cli.main(["stl", "build", "x"])
@@ -138,8 +123,7 @@ assert not any(name.split(".")[0] in {"build123d", "OCP", "cadquery"} for name i
         # in the worker.
         for command in (["snapshot", "x"], ["step", "snapshot", "part.step"], ["doctor"]):
             with self.subTest(command=command):
-                with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}, clear=False), \
-                        mock.patch("cadgen.daemon.client.run_via_daemon") as daemon, \
+                with mock.patch("cadgen.daemon.client.run_via_daemon") as daemon, \
                         mock.patch.object(cli.importlib, "import_module") as imported:
                     imported.return_value.main.return_value = 0
                     cli.main(command)
@@ -158,17 +142,15 @@ def _defn(fmt: str) -> authoring.ModelDef:
     )
 
 
-class ColdRunsStayInProcess(unittest.TestCase):
+class NoFormatReexecs(unittest.TestCase):
     """No format re-execs the interpreter any more.
 
-    A cold ``@dxf`` run used to restart itself with ``PYTHONHASHSEED=0``, because
+    A ``@dxf`` run used to restart itself with ``PYTHONHASHSEED=0``, because
     ezdxf's emitted order followed string hashing. The engine's emitter makes DXF
     bytes a function of the drawing's geometry
-    (:mod:`cadgen._internal.dxf_emit`), so both formats now reach the pipeline by
-    the same route and a directly-run model costs one interpreter, not two.
-
-    Every case sets ``CADGEN_DAEMON=0``: the warm handoff comes first, and without
-    the opt-out these would route past the code they are about.
+    (:mod:`cadgen._internal.dxf_emit`), so both formats reach the pipeline by the
+    same route: handed to the daemon, and run in a process the daemon started
+    (``CADGEN_DAEMON_CHILD``) in that one interpreter.
     """
 
     def test_neither_format_spawns_a_second_interpreter(self):
@@ -177,7 +159,7 @@ class ColdRunsStayInProcess(unittest.TestCase):
                 with self.subTest(fmt=fmt, seed=seed):
                     with mock.patch.dict(
                         "os.environ",
-                        {"PYTHONHASHSEED": seed, "CADGEN_DAEMON": "0"},
+                        {"PYTHONHASHSEED": seed, "CADGEN_DAEMON_CHILD": "1"},
                         clear=False,
                     ), mock.patch("subprocess.run") as run, mock.patch.object(
                         sys, "argv", ["preimport-model.py"]
@@ -190,20 +172,24 @@ class ColdRunsStayInProcess(unittest.TestCase):
 
     def test_the_pipelines_exit_code_reaches_the_caller(self):
         # Swallowing it would turn every failed generator into a success.
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "0"}, clear=False), \
+        with mock.patch.dict("os.environ", {"CADGEN_DAEMON_CHILD": "1"}, clear=False), \
                 mock.patch.object(sys, "argv", ["preimport-model.py"]), \
                 mock.patch("cadgen.cli._run_model.run_model_argv", return_value=3):
             self.assertEqual(authoring._build(_defn("dxf")), 3)
 
-    def test_a_warm_dxf_run_still_hands_off(self):
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}, clear=False), \
-                mock.patch("cadgen.daemon.client.run_via_daemon", return_value=0) as daemon, \
-                mock.patch("subprocess.run") as rerun, \
-                mock.patch.object(sys, "argv", ["preimport-model.py"]):
-            self.assertEqual(authoring._build(_defn("dxf")), 0)
-        daemon.assert_called_once()
-        self.assertEqual(daemon.call_args.args[0], "run")
-        rerun.assert_not_called()
+    def test_a_run_hands_off_and_the_daemons_answer_is_its_exit(self):
+        for fmt, code in (("dxf", 0), ("step", 1)):  # 1: a daemon that could not take it
+            with self.subTest(fmt=fmt), mock.patch.dict("os.environ", {}, clear=False), \
+                    mock.patch("cadgen.daemon.client.run_via_daemon", return_value=code) as daemon, \
+                    mock.patch("cadgen.cli._run_model.run_model_argv") as pipeline, \
+                    mock.patch("subprocess.run") as rerun, \
+                    mock.patch.object(sys, "argv", ["preimport-model.py"]):
+                os.environ.pop("CADGEN_DAEMON_CHILD", None)
+                self.assertEqual(authoring._build(_defn(fmt)), code)
+            daemon.assert_called_once()
+            self.assertEqual(daemon.call_args.args[0], "run")
+            pipeline.assert_not_called()  # nothing builds in the asking process
+            rerun.assert_not_called()
 
 
 if __name__ == "__main__":

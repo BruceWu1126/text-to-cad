@@ -94,10 +94,7 @@ def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
         if reason is not None:
             sys.stdout.write(f"No CAD daemon is running, and none can start here: {reason}\n")
             return 0
-        sys.stdout.write(
-            "No CAD daemon is running. One starts on the next build "
-            "(set CADGEN_DAEMON=0 to keep builds cold).\n"
-        )
+        sys.stdout.write("No CAD daemon is running. One starts on the next build.\n")
         return 0
     sys.stdout.write(_render(status) + "\n")
     return 0

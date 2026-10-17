@@ -47,11 +47,10 @@ exits, each batch under an id of its own and stamped with the time it was made:
   reports its own (``report``, ``collect_crashes``); a build worker's go to the daemon with its exit
   frame, a command's are handed to a running daemon, and a page's to the server that served it.
 
-A command sends nothing itself. What it counts -- a build it made with no daemon to ask, a snapshot, a
-drawing, a crash -- is handed to a running daemon (``cadgen.daemon.client.hand_over``), or, with none to
-take it (``CADGEN_DAEMON=0``, a platform without one, none running), kept beside the settings for the next
-process that sends (``spool``): only while sharing is on, under the answer in force, capped, and deleted by
-a no.
+A command sends nothing itself. What it counts -- a snapshot, a drawing, a crash -- is handed to a running
+daemon (``cadgen.daemon.client.hand_over``), or, with none running to take it, kept beside the settings for
+the next process that sends (``spool``): only while sharing is on, under the answer in force, capped, and
+deleted by a no.
 
 Never a path or a file name of the person's, a model, an argument, a message, a prompt or anything
 typed. A batch with nothing in it is never sent: a process the host started and nobody used counts
@@ -978,8 +977,8 @@ def report(error: BaseException, where: str, *, tool: str | None = None, handled
 
 def spool(counts: dict[str, Any], *, path: Path | None = None) -> bool:
     """Keep a command's counts for the next process that sends (``Recorder.take``, by way of its flush):
-    what it would have handed a running daemon (``cadgen.daemon.client.hand_over``), when there is none --
-    ``CADGEN_DAEMON=0``, a platform without one, or none running. One line, under the answer in force
+    what it would have handed a running daemon (``cadgen.daemon.client.hand_over``), when none is
+    running. One line, under the answer in force
     (``_answer``), and only while sharing is on: a sender takes a line only under that same answer, and a
     no deletes them all (``choose``). Past ``SPOOL_BYTES`` nothing more is kept. Never raises."""
     try:
@@ -1307,8 +1306,9 @@ class Recorder:
     @_guarded(lambda: None)
     def take(self, counts: Any) -> None:
         """A command's counts, handed to this process (``cadgen.daemon.client.hand_over``) or kept for the
-        next one that sends (``spool``): the builds it made itself, the snapshots it rendered, the features it
-        used and its crashes. Anything else in it, or past ``HANDED`` of any, is not counted."""
+        next one that sends (``spool``): the snapshots it rendered, the features it used, its crashes, and
+        the builds an earlier cadgen's command made itself. Anything else in it, or past ``HANDED`` of any,
+        is not counted."""
         if not isinstance(counts, dict):
             return
 

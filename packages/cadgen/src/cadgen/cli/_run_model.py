@@ -2,11 +2,10 @@
 
 NOT a user-facing CLI — the user interface is ``python <model>.py``, whose
 ``__main__`` calls the decorated model; that top-level call (cadgen.authoring)
-dispatches here either in-process or through the warm daemon (tool ``"run"``).
-The argv shape is ``[script, flags...]`` so the daemon can replay exactly what
-the call saw.
+hands it to the warm daemon (tool ``"run"``), whose worker runs it here. The argv
+shape is ``[script, flags...]`` so the daemon can replay exactly what the call saw.
 
-This module exists so BOTH dispatch paths drive the one existing pipeline
+This module drives the one existing pipeline
 (``cadgen.generation.generate_step_targets`` / ``generate_dxf_targets``) —
 progress records, the no-op gate, incremental package build, ``.step``
 assembly — with zero forked logic.
@@ -58,8 +57,7 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Return once every model's result is recorded (its preview is on screen), before its "
-            "files are written: the build service writes them after it has answered; with no "
-            "service this process writes them after printing the result, before it exits."
+            "files are written: the build service writes them after it has answered."
         ),
     )
     return parser
@@ -67,10 +65,9 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
 
 def check_user_flags(flags: Sequence[str], *, prog: str, called: str) -> list[str]:
     """Parse what the USER typed after ``python <model>.py`` and return the flags
-    to forward to the pipeline. Runs in the process the user started, before any
-    handoff, so ``--help`` and a usage error behave identically warm and cold:
-    they end the run here (exit 0 / exit 2) instead of becoming a daemon job that
-    "succeeds" without building anything.
+    to forward to the pipeline. Runs in the process the user started, before the
+    handoff, so ``--help`` and a usage error end the run here (exit 0 / exit 2)
+    instead of becoming a daemon job that "succeeds" without building anything.
 
     ``called`` is the decorated function ``__main__`` called. ``--model`` is not a
     selector: a script builds what its ``__main__`` calls, so naming a different
@@ -101,8 +98,8 @@ def check_user_flags(flags: Sequence[str], *, prog: str, called: str) -> list[st
 
 
 def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> int:
-    # The other CLI entry point: `python model.py` reaches the pipeline here,
-    # never through cadgen.cli.main, so it needs the same UTF-8 streams.
+    # The pipeline's entry outside cadgen.cli.main (a worker's run job, this module run
+    # directly), so it needs the same UTF-8 streams.
     from cadgen.cli import _harden_std_stream_errors
 
     _harden_std_stream_errors()

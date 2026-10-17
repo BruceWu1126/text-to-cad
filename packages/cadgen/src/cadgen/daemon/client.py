@@ -58,7 +58,7 @@ class DaemonUnavailable(RuntimeError):
 
 # A job runs in its CALLER's environment, never the daemon's. A worker inherits the
 # environment of whichever build spawned the daemon, so a model that read
-# ``os.environ["SIZE"]`` saw that build's SIZE warm and its own caller's cold, and the
+# ``os.environ["SIZE"]`` saw that build's SIZE, not its own caller's, and the
 # first build's cache root silently became every later build's, across projects. So
 # the caller's whole environment travels with every request and the worker applies it
 # per JOB: a name the caller has is set, a name it lacks is unset, which also clears
@@ -76,7 +76,6 @@ class DaemonUnavailable(RuntimeError):
 INTERNAL_ENV_VARS = frozenset({
     # A daemon worker's own: that it serves a daemon, and that daemon's address and
     # key, which live in its own state directory (pool.Worker, worker.serve).
-    "CADGEN_DAEMON",
     "CADGEN_DAEMON_CHILD",
     "CADGEN_DAEMON_SOCKET",
     "CADGEN_DAEMON_STATE_DIR",
@@ -259,9 +258,8 @@ def _request_payload(
     return {
         "tool": str(tool),
         # The name the caller is known by. Without it the daemon invented
-        # "scripts/<tool>", so `cadgen step build --help` printed a different
-        # usage line warm than cold -- the same command answering to two names
-        # depending on whether a daemon happened to be running.
+        # "scripts/<tool>", so `cadgen step build --help` printed a usage line naming
+        # a command nobody typed.
         "prog": str(prog) if prog else None,
         "argv": [str(arg) for arg in argv],
         "cwd": str(cwd) if cwd else os.getcwd(),
@@ -281,14 +279,10 @@ def _request_payload(
     }
 
 
-def run_via_daemon(
-    tool: str, argv: list[str], cwd: str | None = None, prog: str | None = None
-) -> int | None:
+def run_via_daemon(tool: str, argv: list[str], cwd: str | None = None, prog: str | None = None) -> int:
     """Run one CLI invocation on the warm daemon and return its exit code: a daemon that
-    cannot take it fails it (exit 1), saying why on stderr. ``None`` means run it here:
-    ``CADGEN_DAEMON=0`` says so, and so does a daemon worker, which is where a job runs."""
-    if os.environ.get("CADGEN_DAEMON") == "0" or os.environ.get("CADGEN_DAEMON_CHILD"):
-        return None
+    cannot take it fails it (exit 1), saying why on stderr. Never called in a daemon worker,
+    which is where a job runs (``CADGEN_DAEMON_CHILD``): its callers run the job there."""
     from cadgen.daemon.executors import emit_event
 
     payload = _request_payload(tool, [str(arg) for arg in argv], cwd, prog)
@@ -813,7 +807,7 @@ def prewarm() -> bool:
     left running by older cadgen code. True once a current daemon answers; raises
     :class:`DaemonUnavailable` naming why none could start.
     """
-    if os.environ.get("CADGEN_DAEMON") == "0" or os.environ.get("CADGEN_DAEMON_CHILD"):
+    if os.environ.get("CADGEN_DAEMON_CHILD"):
         return False
     for _attempt in range(2):  # a stale daemon answers "restart" and gives up its address
         try:
@@ -833,19 +827,16 @@ HAND_OVER_SECONDS = 0.5
 def hand_over(counts: dict) -> None:
     """Hand a command's counts to the running daemon, which sends them with its own telemetry
     (``cadgen.daemon.telemetry.counted``): a command sends nothing itself. Like ``status`` it
-    never starts a daemon: with none to take them -- ``CADGEN_DAEMON=0``, or none running --
-    they are kept for the next process that sends (``analytics.spool``). One
-    that does not answer within ``HAND_OVER_SECONDS``, or is gone mid-send, may have taken them,
-    so they are not kept twice. The command goes on either way. Never raises."""
+    never starts a daemon: with none running to take them they are kept for the next process
+    that sends (``analytics.spool``). One that does not answer within ``HAND_OVER_SECONDS``,
+    or is gone mid-send, may have taken them, so they are not kept twice. The command goes on
+    either way. Never raises."""
     try:
         from cadgen.analytics import refused, spool
 
         if refused():
             return
     except Exception:  # noqa: BLE001 - telemetry never fails the command it counts
-        return
-    if os.environ.get("CADGEN_DAEMON") == "0":
-        spool(counts)
         return
 
     def send() -> None:

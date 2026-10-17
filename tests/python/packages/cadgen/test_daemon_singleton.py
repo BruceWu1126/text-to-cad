@@ -334,8 +334,7 @@ class DeepStateDirTest(unittest.TestCase):
         from contextlib import redirect_stderr
 
         err = io.StringIO()
-        with redirect_stderr(err), mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}):
-            os.environ.pop("CADGEN_DAEMON_CHILD", None)
+        with redirect_stderr(err):
             self.assertEqual(client.run_via_daemon("step-compile", ["x.step"], prog="cadgen step compile"), 1)
         self.assertIn("cadgen-daemon: ", err.getvalue())
         self.assertIn("CADGEN_DAEMON_STATE_DIR", err.getvalue())

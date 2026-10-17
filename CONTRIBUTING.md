@@ -224,20 +224,18 @@ pass, `UI_BROWSER_TEST_CONCURRENCY` files at a time (4 by default; the CI
 at once saturate the runner). `CAD_TEST_SWIFTSHADER=1` makes a macOS run use that same
 software renderer, to reproduce a CI-only browser failure locally.
 
-A test's COST is part of its design. A cold `python <model>.py` spends ~2.6 s
-importing the CAD kernel before it draws a box, so a file that runs one per
-assertion is mostly paying for imports: build a fixture the tests only READ once
-for the class and copy it in, keep each test's store, roots and freshness state
-private, and add a subprocess only where the subject IS the process. Model runs
-in tests are cold (`CADGEN_DAEMON=0`): routing them through a warm daemon was
-measured on CI and moved the kernel import into a daemon process rather than
-removing it (the runners are CPU-bound at four files), and cost more than it
-saved on Windows. `tests/python/support/warm_daemon.py` is for the opposite
-purpose — a test that deliberately exercises the WARM path, the production
-default, through a daemon private to its module — and only where the test's
-subject is what a warm worker does. Repeating a non-deterministic case N times
-is not coverage — if the underlying property can be pinned directly, pin it and
-run the case once.
+A test's COST is part of its design. Model runs in tests go through the daemon,
+as every build does: the runner gives each test file a daemon of its own -- its
+own store, state directory and endpoint -- and retires it when the file
+finishes. A file's first build pays ~2.6 s importing the CAD kernel in a worker,
+and every subprocess a test starts pays an interpreter's start: build a fixture
+the tests only READ once for the class and copy it in, keep each test's store,
+roots and freshness state private, and add a subprocess only where the subject
+IS the process. A test of what a pool job does, rather than how it is
+dispatched, runs the job where it is submitted
+(`tests/python/support/inline_artifacts.py`). Repeating a non-deterministic case
+N times is not coverage — if the underlying property can be pinned directly, pin
+it and run the case once.
 
 `scripts/test/test-python.sh --print-weights` prints what the slow files cost,
 the first thing to read when a run is slow.

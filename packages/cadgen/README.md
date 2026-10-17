@@ -425,8 +425,8 @@ command has said so, and never after the person's no) and the daily version chec
 (`updates.py`). Both run in the background and fail silently: no start,
 command, build, request or tool call waits on them, and one that fails changes
 nothing but what is counted or offered. A command sends nothing itself: it hands
-what it counted -- a build it made with no daemon to ask, a snapshot, a drawing, a
-crash -- to a running build daemon over its local socket, never starting one, and
+what it counted -- a snapshot, a drawing, a crash -- to a running build daemon over
+its local socket, never starting one, and
 gives up after a moment (`daemon.client.HAND_OVER_SECONDS`); with no daemon to take
 it, it keeps it in a small file beside the settings for the next process that sends
 (`analytics.spool`). A process that exits sends nothing either: its last batch --

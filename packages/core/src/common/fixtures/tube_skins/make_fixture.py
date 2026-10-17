@@ -74,7 +74,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="tube-skins-fixture-") as folder:
         root = Path(folder)
         (root / "cord.py").write_text(MODEL, encoding="utf-8")
-        env = {**os.environ, "CADGEN_DAEMON": "0", "CADGEN_TELEMETRY": "0", "CADGEN_CACHE_DIR": str(root / "store"),
+        env = {**os.environ, "CADGEN_TELEMETRY": "0", "CADGEN_CACHE_DIR": str(root / "store"),
                "CADGEN_STATE_DIR": str(root / "state"), "PYTHONPATH": str(REPO / "packages/cadgen/src")}
         subprocess.run([sys.executable, "cord.py"], cwd=root, env=env, check=True)
         subprocess.run([sys.executable, "-c", PROBE, str(root / "cord.step"), str(HERE / "cord.skins.glb"),

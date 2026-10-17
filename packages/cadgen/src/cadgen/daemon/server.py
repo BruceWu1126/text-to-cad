@@ -882,8 +882,8 @@ def serve() -> int:
 USAGE = """\
 cadgen-daemon takes no arguments.
 
-It is the warm-process server, started for you by the first build that needs it
-(set CADGEN_DAEMON=0 to build without it) -- not a command to run by hand.
+It is the warm-process server every build runs on, started for you by the first
+build that needs it -- not a command to run by hand.
 `cadgen daemon status` shows what it is doing. The commands you probably meant:
 python <model>.py, cadgen step build, cadgen stl build, cadgen snapshot. Each of
 those takes --help.\

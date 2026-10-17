@@ -802,7 +802,6 @@ def _child(defn: ModelDef, frame: BuildFrame) -> Any:
     from cadgen._internal.build_timing import cadgen_work, child_build
     from cadgen._internal.filetrace import paused
     from cadgen._internal.generation import build_child
-    from cadgen.daemon import telemetry
     from cadgen.store.materialize import materialize
 
     child = defn.ref
@@ -811,7 +810,6 @@ def _child(defn: ModelDef, frame: BuildFrame) -> Any:
             f"{defn.script_path.name}::{defn.name} is called while it is itself being built: "
             "a model may not depend on itself"
         )
-    telemetry.job_child()  # an assembly, for a build this process counts itself (``cold_build``)
     try:
         with child_build(), paused():
             key, tree = build_child(defn)
@@ -830,11 +828,11 @@ def _frames() -> list[BuildFrame]:
 
 def _build(defn: ModelDef) -> int:
     """Run the pipeline for a top-level call of a model and return its exit code."""
-    # The user's flags are parsed HERE, in the process they started, before any
-    # handoff: `--help` and a usage error end the run now (exit 0 / exit 2) on the
-    # warm path exactly as on the cold one. Handed to the daemon unparsed, `--help`
-    # came back as a job that exited 0 having built nothing, and the wait for its
-    # source result raised. The parser is argparse over stdlib -- no CAD import.
+    # The user's flags are parsed HERE, in the process they started, before the
+    # handoff: `--help` and a usage error end the run now (exit 0 / exit 2). Handed to
+    # the daemon unparsed, `--help` came back as a job that exited 0 having built
+    # nothing, and the wait for its source result raised. The parser is argparse over
+    # stdlib -- no CAD import.
     from cadgen.cli._run_model import check_user_flags
 
     argv = check_user_flags(
@@ -843,47 +841,27 @@ def _build(defn: ModelDef) -> int:
     _maybe_hint_eager_imports(defn)
 
     # This process is the ROOT of a build tree: it owns the terminal and renders the
-    # graph as child events come back through the pool (cadgen.cli_tree). Warm or
-    # cold, the tree is drawn here; the daemon relays its workers' events to us.
+    # graph as child events come back through the pool (cadgen.cli_tree); the daemon
+    # relays its workers' events to us.
     from cadgen.cli_tree import build_tree
 
     with build_tree(json_lines="--json" in argv):
-        # Warm handoff BEFORE any heavy import. The daemon worker imports the module
+        # The handoff comes BEFORE any heavy import. The daemon worker imports the module
         # under a loader name (never __main__), so its `__main__` block does not run
         # there; the runner executes the model body inside `building()`.
         # A file holding several models names the one this call builds.
         target = [str(defn.script_path)]
         if len(registered_models_in(defn.script_path)) > 1:
             target += ["--model", defn.name]
-        if os.environ.get("CADGEN_DAEMON") != "0" and not os.environ.get("CADGEN_DAEMON_CHILD"):
-            try:
-                from cadgen.daemon.client import run_via_daemon
-            except ModuleNotFoundError:
-                warm_exit: int | None = None
-            else:
-                warm_exit = run_via_daemon(
-                    "run",
-                    [*target, *argv],
-                    os.getcwd(),
-                    prog=f"python {defn.script_path.name}",
-                )
-            if warm_exit is not None:
-                return warm_exit
+        if os.environ.get("CADGEN_DAEMON_CHILD"):
+            # A process the daemon started (a worker, or a program its job started) is
+            # the daemon's own: it builds here and never recurses into the daemon.
+            from cadgen.cli._run_model import run_model_argv
 
-        # A cold @dxf run used to re-exec itself here with PYTHONHASHSEED=0, because
-        # ezdxf's emitted order depended on string hashing. The engine's emitter makes
-        # DXF bytes a function of the drawing's geometry instead
-        # (cadgen._internal.dxf_emit), so a cold run needs no interpreter restart and
-        # @dxf reaches the pipeline by exactly the route @step does.
-        from cadgen.cli._run_model import run_model_argv
-        from cadgen.daemon import telemetry
+            return run_model_argv([*target, *argv], prog=f"python {defn.script_path.name}")
+        from cadgen.daemon.client import run_via_daemon
 
-        # Counted here as the daemon counts the builds it answers: no daemon answered this one.
-        return telemetry.cold_build(
-            "dxf" if defn.fmt == "dxf" else "step", "script",
-            lambda: run_model_argv([*target, *argv], prog=f"python {defn.script_path.name}"),
-            meshes=bool(defn.mesh_exports),
-        )
+        return run_via_daemon("run", [*target, *argv], os.getcwd(), prog=f"python {defn.script_path.name}")
 
 
 def _built_geometry(defn: ModelDef, *, tree: str | None) -> Any:

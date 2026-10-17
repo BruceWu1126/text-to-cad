@@ -76,8 +76,9 @@ The command primes each edit before measuring it. Repeated
 `--novel-geometry-to` and `--novel-placement-to` values measure distinct new
 edits separately; use a fresh store to exclude previous runs. `--geometry-model`
 and `--placement-model` select child sources when edits live outside the root.
-`--child-daemon-socket` selects a dedicated caller-owned daemon; the default
-uses transient child workers. See `--help` for child-pin checks and import timing.
+`--child-daemon-socket` selects a dedicated caller-owned daemon for the build's
+pool jobs; the default is this cadgen's own daemon. See `--help` for child-pin
+checks and import timing.
 
 The report records individual samples, output identities, stage events and
 source fingerprints. The timing excludes root Python/kernel startup and browser

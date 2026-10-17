@@ -1,10 +1,10 @@
 """No locks: concurrent builds both run, and the disk ends at the current source.
 
-Real processes on the transient executor (``CADGEN_DAEMON=0``), which is the unbrokered
-mode -- the one where the publish rule and atomic writes are all that stand between two
-builders of one model. Also the parent/child snapshot-isolation story: a child rebuilt
-while its parent is mid-body leaves the parent built against the child's earlier key and
-flagged stale.
+Real processes, each a request to the daemon: a second build of a model whose worker is
+busy runs on an extra worker beside the first, and no lock stands between them -- the
+publish rule and atomic writes are all that do. Also the parent/child snapshot-isolation
+story: a child rebuilt while its parent is mid-body leaves the parent built against the
+child's earlier key and flagged stale.
 """
 
 from __future__ import annotations
@@ -122,7 +122,8 @@ class PublishRuleTest(unittest.TestCase):
         # record, entries and document at about the same moment: the byte-identical race
         # STORE.md §7 calls idempotent. (Each worker imports the script when it gets there,
         # so an edit between the starts would not reliably give the first an older source;
-        # the stale-build rejection is decide()'s, pinned in test_store.)
+        # the stale-build rejection is decide()'s, pinned in test_store.) The second may
+        # also find the first's result already recorded, and be current.
         script = self.root / "widget.py"
         script.write_text(PART.format(size=11.0), encoding="utf-8")
         first = self._start(script)
@@ -132,7 +133,7 @@ class PublishRuleTest(unittest.TestCase):
             out, err = proc.communicate(timeout=600)
             self.assertEqual(proc.returncode, 0, out + err)
             outputs.append(json.loads(out.strip().splitlines()[-1])["outcome"])
-        self.assertTrue(all(o in {"built", "skipped-peer"} for o in outputs), outputs)
+        self.assertTrue(all(o in {"built", "skipped-peer", "current"} for o in outputs), outputs)
         self.assertIn("built", outputs)
         # Whatever order they finished in, a rerun sees the newer source as current:
         # the record on disk describes the sources as they are now.

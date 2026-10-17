@@ -40,7 +40,7 @@ def main() -> None:
     try:
         (scratch / "src").mkdir()
         shutil.copy(MODEL, scratch / "src" / MODEL.name)
-        environment = {**os.environ, "CADGEN_CACHE_DIR": str(scratch / "cache"), "CADGEN_DAEMON": "0"}
+        environment = {**os.environ, "CADGEN_CACHE_DIR": str(scratch / "cache")}
         subprocess.run([sys.executable, "src/hinge_block.py"], cwd=scratch, env=environment, check=True)
         os.environ["CADGEN_CACHE_DIR"] = environment["CADGEN_CACHE_DIR"]
 

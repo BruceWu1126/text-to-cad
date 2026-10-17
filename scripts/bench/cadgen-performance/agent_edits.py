@@ -195,7 +195,7 @@ def main() -> int:
                CADGEN_DAEMON_SOCKET=str(Path(args.daemon_socket).expanduser()),
                CADGEN_DAEMON_STATE_DIR=str(Path(args.daemon_state or store.parent / "daemon").expanduser().resolve()),
                CADGEN_DAEMON_IDLE_TIMEOUT=str(args.idle_timeout))
-    for name in ("CADGEN_DAEMON", "PYTHONDONTWRITEBYTECODE", "CADGEN_JOBS"):
+    for name in ("PYTHONDONTWRITEBYTECODE", "CADGEN_JOBS"):
         env.pop(name, None)
     if args.node_bin:
         env["PATH"] = f"{Path(args.node_bin).expanduser().resolve()}{os.pathsep}{env.get('PATH', '')}"

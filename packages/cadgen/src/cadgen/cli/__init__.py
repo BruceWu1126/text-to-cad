@@ -105,8 +105,8 @@ def read_skill_pin(skill_path) -> str | None:
     return match.group("pin") if match else None
 
 
-# Commands the warm daemon can serve, mapped to its tool names. The daemon exists to
-# avoid paying the multi-second OCP/build123d import per invocation, so the handoff has to
+# Commands the warm daemon runs, mapped to its tool names. The daemon exists to avoid
+# paying the multi-second OCP/build123d import per invocation, so the handoff has to
 # happen BEFORE the command's module is imported -- which is why it lives here in dispatch
 # rather than inside each command.
 #
@@ -123,24 +123,6 @@ _DAEMON_TOOLS = {command: command.replace(" ", "-") for command in _WARM_COMMAND
 def daemon_tool_modules() -> dict[str, str]:
     """``{daemon tool name: parser module}`` for every warm-served door."""
     return {tool: _COMMANDS[command][0] for command, tool in _DAEMON_TOOLS.items()}
-
-
-def _run_via_daemon(tool: str, rest: list[str], prog: str) -> int | None:
-    """Exit code when the daemon handled it, None to run in this process.
-
-    CADGEN_DAEMON_CHILD is set in the process the daemon serves from, so this cannot
-    recurse. A daemon that is not installed or not running just falls through.
-    """
-    # Warm by default; CADGEN_DAEMON=0 opts out. There are two gates on this path -- this
-    # one and the client's -- and only changing the client's left the default a no-op,
-    # which a live check caught rather than any test.
-    if os.environ.get("CADGEN_DAEMON") == "0" or os.environ.get("CADGEN_DAEMON_CHILD"):
-        return None
-    try:
-        from cadgen.daemon.client import run_via_daemon
-    except ModuleNotFoundError:
-        return None
-    return run_via_daemon(tool, rest, os.getcwd(), prog=prog)
 
 
 _USAGE_HEAD = "usage: cadgen <command> [args...]\n\ncommands:\n"
@@ -320,13 +302,15 @@ def _tell() -> None:
 
 
 def _run(command: str, module_name: str, rest: list[str]) -> int:
-    # Before the command's module is imported: the daemon exists to avoid paying the
-    # multi-second OCP/build123d import, so the handoff cannot wait until afterwards.
+    # A door is a daemon job, handed over before the command's module is imported: the
+    # daemon exists to avoid paying the multi-second OCP/build123d import. Only a process
+    # the daemon started (CADGEN_DAEMON_CHILD: a worker, or a program its job started) runs
+    # a door here, as the daemon's own work: it never recurses into the daemon.
     daemon_tool = _DAEMON_TOOLS.get(command)
-    if daemon_tool is not None:
-        exit_code = _run_via_daemon(daemon_tool, rest, f"cadgen {command}")
-        if exit_code is not None:
-            return exit_code
+    if daemon_tool is not None and not os.environ.get("CADGEN_DAEMON_CHILD"):
+        from cadgen.daemon.client import run_via_daemon
+
+        return run_via_daemon(daemon_tool, rest, os.getcwd(), prog=f"cadgen {command}")
 
     module = importlib.import_module(module_name)
 
@@ -337,22 +321,5 @@ def _run(command: str, module_name: str, rest: list[str]) -> int:
     import inspect  # only the dispatcher needs it; `--help` and the daemon handoff do not.
 
     if "prog" in inspect.signature(module.main).parameters:
-        def run() -> int:
-            return int(module.main(rest, prog=f"cadgen {command}") or 0)
-    else:
-        def run() -> int:
-            return int(module.main(rest) or 0)
-    kind = None if daemon_tool is None or "-h" in rest or "--help" in rest else _build_kind(daemon_tool)
-    if kind is None:
-        return run()
-    from cadgen.daemon import telemetry
-
-    return telemetry.cold_build(kind, "command", run)  # no daemon answered it: counted here
-
-
-def _build_kind(tool: str) -> str | None:
-    try:
-        from cadgen.daemon.telemetry import command_kind
-    except Exception:  # noqa: BLE001 - counting never stops a command
-        return None
-    return command_kind(tool)
+        return int(module.main(rest, prog=f"cadgen {command}") or 0)
+    return int(module.main(rest) or 0)

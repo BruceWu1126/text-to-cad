@@ -41,7 +41,7 @@ def main() -> int:
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--geometry-model", help="Source containing the geometry substitution; defaults to --model")
     parser.add_argument("--placement-model", help="Source containing the placement substitution; defaults to --model")
-    parser.add_argument("--child-daemon-socket", help="Use a caller-owned dedicated warm daemon for child builds; default uses transient workers")
+    parser.add_argument("--child-daemon-socket", help="Use a caller-owned dedicated warm daemon for the build's pool jobs; default: this cadgen's own daemon")
     parser.add_argument("--skip-imports", action="store_true", help="Measure builds only, omitting the separate import study")
     parser.add_argument("--assert-child-keys", action="store_true", help="Require a geometry edit to change only the edited child's key and a placement edit to keep every key")
     parser.add_argument("--geometry-from", required=True)
@@ -87,9 +87,9 @@ def main() -> int:
             variant_kinds[name] = kind
             novel_variants.append(name)
     store.mkdir(parents=True, exist_ok=True)
-    os.environ.update(CADGEN_CACHE_DIR=str(store), CADGEN_DAEMON="0", PYTHONDONTWRITEBYTECODE="1")
+    os.environ.update(CADGEN_CACHE_DIR=str(store), PYTHONDONTWRITEBYTECODE="1")
     if args.child_daemon_socket:
-        os.environ.update(CADGEN_DAEMON="1", CADGEN_DAEMON_SOCKET=str(Path(args.child_daemon_socket).expanduser().resolve()))
+        os.environ.update(CADGEN_DAEMON_SOCKET=str(Path(args.child_daemon_socket).expanduser().resolve()))
     from cadgen.cli._run_model import run_model_argv
     from cadgen.daemon import executors
     from cadgen.store.records import read_record, tree_for_document_hash
@@ -100,8 +100,8 @@ def main() -> int:
     report = {"metadata": metadata(), "model": str(model), "sourceSha256": sha256(original),
               "sourceFiles": {str(path): sha256(saved[0]) for path, saved in originals.items()},
               "geometryModel": str(geometry_model), "placementModel": str(placement_model),
-              "childWorkers": "dedicated warm daemon" if args.child_daemon_socket else "transient",
-              "store": str(store), "timingBoundary": "same interpreter, kernel imported; excludes startup, source writes and daemon IPC; no profiler",
+              "childWorkers": "dedicated warm daemon" if args.child_daemon_socket else "this cadgen's daemon",
+              "store": str(store), "timingBoundary": "same interpreter, kernel imported; excludes startup and source writes; pool jobs on this cadgen's daemon, their IPC included; no profiler",
               "substitutions": {"geometry": [args.geometry_from, args.geometry_to],
                                 "placement": [args.placement_from, args.placement_to],
                                 "novelGeometry": args.novel_geometry_to,

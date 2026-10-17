@@ -123,10 +123,8 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertIn("stopped responding", err)
         self.assertIn("NOT retried", err)
 
-    def test_ctrl_c_while_waiting_on_the_daemon_is_the_interrupt_a_cold_run_raises(self):
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}), \
-                mock.patch.object(client, "_run_with_retry", side_effect=KeyboardInterrupt):
-            os.environ.pop("CADGEN_DAEMON_CHILD", None)
+    def test_ctrl_c_while_waiting_on_the_daemon_is_a_plain_interrupt(self):
+        with mock.patch.object(client, "_run_with_retry", side_effect=KeyboardInterrupt):
             with self.assertRaises(KeyboardInterrupt) as stop:
                 client.run_via_daemon("run", ["/w/box.py"], "/w", prog="python box.py")
         self.assertTrue(stop.exception.__suppress_context__, "no traceback through the wait")
@@ -220,20 +218,17 @@ class ResidentProcessLifecycle(unittest.TestCase):
         self.assertEqual(worker.pid, 1234)
         self.assertEqual(popen.call_args.kwargs["cwd"], tempfile.gettempdir())
 
-    def test_prewarm_starts_nothing_when_the_daemon_is_off(self):
-        # The viewer warms the daemon at every launch. CADGEN_DAEMON=0 must mean none
-        # starts: the launcher tests rely on it to keep dozens of launches daemon-free.
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "0"}), \
+    def test_prewarm_starts_nothing_in_a_process_the_daemon_started(self):
+        # A worker never warms the daemon it belongs to.
+        with mock.patch.dict("os.environ", {"CADGEN_DAEMON_CHILD": "1"}), \
                 mock.patch.object(client, "_connect_or_spawn", side_effect=AssertionError("a daemon was started")):
             self.assertFalse(client.prewarm())
 
     def test_prewarm_replaces_a_daemon_left_by_older_code(self):
         stale, current = _ScriptedChannel([{"restart": True}]), _ScriptedChannel([{"status": {}}])
-        with mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}), \
+        with mock.patch.dict("os.environ", {}), \
                 mock.patch.object(client, "daemon_address", return_value="test-address"), \
                 mock.patch.object(client, "_connect_or_spawn", side_effect=[stale, current]) as connect:
-            import os
-
             os.environ.pop("CADGEN_DAEMON_CHILD", None)
             self.assertTrue(client.prewarm())
         self.assertEqual(connect.call_count, 2)
@@ -310,7 +305,6 @@ class ADaemonThatCannotTakeTheRequest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.log = pathlib.Path(tmp.name) / "daemon.log"
         for patcher in (
-            mock.patch.dict(os.environ, {"CADGEN_DAEMON": "1"}),
             mock.patch.object(client, "daemon_address", return_value="test-address"),
             mock.patch.object(client, "log_path", return_value=self.log),
             mock.patch.object(client, "_connect", side_effect=FileNotFoundError("no daemon listens there")),
@@ -319,7 +313,6 @@ class ADaemonThatCannotTakeTheRequest(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
-        os.environ.pop("CADGEN_DAEMON_CHILD", None)
 
     def _command(self) -> tuple[int | None, str]:
         err = io.StringIO()

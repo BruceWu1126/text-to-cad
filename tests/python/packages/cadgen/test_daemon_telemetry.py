@@ -28,8 +28,7 @@ class DaemonTelemetryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        environment = mock.patch.dict(os.environ, {"CADGEN_STATE_DIR": str(self.tmp), "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": "",
-                                                   "CADGEN_DAEMON": ""})
+        environment = mock.patch.dict(os.environ, {"CADGEN_STATE_DIR": str(self.tmp), "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": ""})
         environment.start()
         self.addCleanup(environment.stop)
         analytics.choose(True, by="cli", path=self.tmp / "settings.json")
@@ -191,20 +190,16 @@ class DaemonTelemetryTest(unittest.TestCase):
             began = time.monotonic()
             client.hand_over({"snapshots": []})  # one that never answers is given up on
             self.assertLess(time.monotonic() - began, client.HAND_OVER_SECONDS + 1)
-        for environment in ({"DO_NOT_TRACK": "1"}, {"CADGEN_DAEMON": "0"}):
-            with self.subTest(environment=environment), mock.patch.dict(os.environ, environment), \
-                    mock.patch.object(client, "_connect") as connect:
-                client.hand_over({"snapshots": []})
-            connect.assert_not_called()
+        with mock.patch.dict(os.environ, {"DO_NOT_TRACK": "1"}), mock.patch.object(client, "_connect") as connect:
+            client.hand_over({"snapshots": []})
+        connect.assert_not_called()
 
     def test_with_no_daemon_a_commands_counts_wait_for_the_next_process_that_sends(self) -> None:
         settings, kept = self.tmp / "settings.json", self.tmp / analytics.SPOOL
         counts = {"snapshots": [{"format": "step", "ok": True, "seconds": 1.5}], "features": ["drawing"]}
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), mock.patch.object(client, "_connect") as connect:
-            client.hand_over(counts)  # the daemon turned off: never asked
-        connect.assert_not_called()
         with mock.patch.object(client, "_connect", side_effect=ConnectionRefusedError):
-            client.hand_over({"features": ["kinematics"]})  # none running
+            client.hand_over(counts)  # none running
+            client.hand_over({"features": ["kinematics"]})
             client.hand_over({"snapshots": []})  # nothing counted: nothing kept
         self.assertEqual(len(kept.read_text(encoding="utf-8").splitlines()), 2)
         # Any process that sends takes them all, once, and the file with them.
@@ -229,46 +224,19 @@ class DaemonTelemetryTest(unittest.TestCase):
             self.assertTrue(analytics.spool(counts, path=settings))
             self.assertFalse(analytics.spool(counts, path=settings))
 
-    def test_a_build_no_daemon_answered_is_counted_where_it_ran(self) -> None:
-        handed: list[dict] = []
-        with mock.patch.object(client, "hand_over", side_effect=handed.append):
-            def assembly() -> int:
-                telemetry.job_child()
-                telemetry.job_reused(False)
-                # A build inside it is its own work, not another build.
-                self.assertEqual(telemetry.cold_build("step", "script", lambda: 0), 0)
-                return 0
-
-            def current() -> int:
-                telemetry.job_reused(True)
-                return 0
-
-            def interrupted() -> int:
-                raise KeyboardInterrupt
-
-            self.assertEqual(telemetry.cold_build("step", "script", assembly, meshes=True), 0)
-            self.assertEqual(telemetry.cold_build("stl", "command", current), 0)
-            self.assertEqual(telemetry.cold_build("dxf", "script", lambda: 1), 1)
-            with self.assertRaises(KeyboardInterrupt):
-                telemetry.cold_build("step", "script", interrupted)
-            with mock.patch.dict(os.environ, {"CADGEN_DAEMON_CHILD": "1"}):
-                telemetry.cold_build("step", "script", lambda: 0)  # a daemon worker's job: the daemon counts it
-            with mock.patch.dict(os.environ, {"DO_NOT_TRACK": "1"}):
-                telemetry.cold_build("step", "script", lambda: 0)
-        self.assertFalse(telemetry.building())
-        self.assertEqual([(build["kind"], build["via"], build["outcome"], build["cached"])
-                          for counts in handed for build in counts["builds"]],
-                         [("step", "script", "ok", False), ("stl", "command", "ok", True), ("dxf", "script", "failed", False),
-                          ("step", "script", "cancelled", False)])
-        self.assertEqual(handed[0]["features"], ["assembly", "declared_mesh"])
-        for counts in handed:
-            telemetry.counted(counts)  # what a running daemon, or the next sender, does with them
+    def test_a_build_an_earlier_cadgen_counted_itself_is_still_counted(self) -> None:
+        # The spool is shared by every cadgen beside the settings: one from before every build
+        # ran on the daemon kept the builds its commands made in their own process.
+        telemetry.counted({"builds": [{"kind": "step", "via": "script", "outcome": "ok", "seconds": 1.0, "cached": False},
+                                      {"kind": "stl", "via": "command", "outcome": "ok", "seconds": 0.5, "cached": True},
+                                      {"kind": "dxf", "via": "script", "outcome": "failed", "seconds": 0.2, "cached": False,
+                                       "reason": "model_error"}],
+                           "features": ["assembly"]})
         builds = [event for event in self.events() if event["name"] == "build"]
-        self.assertEqual([(event["kind"], event["via"], event["count"], event["failed"], event["cancelled"], event["cached"])
-                          for event in builds],
-                         [("dxf", "script", 1, 1, 0, 0), ("step", "script", 2, 0, 1, 0), ("stl", "command", 1, 0, 0, 1)])
+        self.assertEqual([(event["kind"], event["via"], event["count"], event["failed"], event["cached"]) for event in builds],
+                         [("dxf", "script", 1, 1, 0), ("step", "script", 1, 0, 0), ("stl", "command", 1, 0, 1)])
 
-    def test_why_a_build_failed_is_decided_where_it_failed_with_a_daemon_or_without(self) -> None:
+    def test_why_a_build_failed_is_decided_where_it_failed(self) -> None:
         from cadgen._internal.cli_from_function import report_failure
 
         def model() -> None:
@@ -293,28 +261,10 @@ class DaemonTelemetryTest(unittest.TestCase):
             build = telemetry.build(RUN, {"id": f"e:job-{index}", "outputs": ["/w/plate.step"]})
             telemetry.exited({"exit": 1, **frame}, build)
             build.finish(1, None, 1.0)
-        # With none: decided where it ran, and handed over with the build.
-        handed: list[dict] = []
-
-        def escaped() -> int:
-            raise RuntimeError("past every report")
-
-        with mock.patch.object(client, "hand_over", side_effect=handed.append):
-            telemetry.cold_build("step", "script", failing)
-            telemetry.cold_build("stl", "command", lambda: 2)
-            with self.assertRaises(RuntimeError):
-                telemetry.cold_build("stl", "command", escaped)
-            telemetry.cold_build("dxf", "script", lambda: 1)
-            telemetry.cold_build("dxf", "script", lambda: 0)
-        self.assertEqual([build.get("reason") for counts in handed for build in counts["builds"]],
-                         ["model_error", "arguments", "bug", "other", None])
-        for counts in handed:
-            telemetry.counted(counts)
         failures = {(event["kind"], event["via"], event["reason"]): event["count"] for event in self.events()
                     if event["name"] == "build_failure"}
-        self.assertEqual(failures, {("step", "script", "model_error"): 2, ("step", "script", "arguments"): 1,
-                                    ("step", "script", "other"): 1, ("stl", "command", "arguments"): 1,
-                                    ("stl", "command", "bug"): 1, ("dxf", "script", "other"): 1})
+        self.assertEqual(failures, {("step", "script", "model_error"): 1, ("step", "script", "arguments"): 1,
+                                    ("step", "script", "other"): 1})
         self.assertNotIn("secret", json.dumps(self.sent))
 
     def test_why_a_snapshot_failed_is_decided_as_it_failed(self) -> None:

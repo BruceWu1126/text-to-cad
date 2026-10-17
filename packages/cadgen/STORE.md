@@ -726,7 +726,7 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   once every export is finished -- or,
   with `--no-wait`, once every model's result is recorded, the files written
   after: a daemon worker releases its client (the `released` frame, §9) and
-  writes them before its next job, a build with no daemon before it exits, and
+  writes them before its next job, and
   a failure of theirs is the worker's exit, the build feed's and the next run's,
   not the released caller's. An export that fails fails the command; every
   other export still gets its turn, the file on disk stays as it was, and the
@@ -1587,9 +1587,7 @@ are not cancelled merely because a newer editing request exists.
   imports, what it declared the last time this daemon could read it) and
   serves it with `daemon status`; the CAD Viewer matches jobs to the
   documents it shows by output path — a CLI build, a parent's child build and
-  its own compile read alike — and nothing reads any of it to decide freshness. With `CADGEN_DAEMON=0`
-  there is no ledger, and concurrent builds are unbrokered
-  — safe by the two invariants above, wasteful, and a debugging mode.
+  its own compile read alike — and nothing reads any of it to decide freshness.
 
 Before a generated body runs, the build captures its target STEP and sidecar
 digests (absence counts too). It publishes its result's complete immutable
@@ -1768,14 +1766,13 @@ stdin the moment a request arrives or it winds down, and the pass stops at its
 next step. Every step leaves a consistent store, so stopping anywhere is safe
 and the next idle look picks it up; even a pass killed between a rename and
 its recheck leaves the object under a `.swept` name, which the next pass puts
-back if it was claimed and deletes if not. With `CADGEN_DAEMON=0` nothing runs
-automatically; `cadgen store gc --max-size` runs a pass by hand.
+back if it was claimed and deletes if not. `cadgen store gc --max-size` runs a
+pass by hand.
 
 ## 9. The daemon
 
 A build is one job: the request that names the model (`python model.py`,
-`cadgen step build`), warm on a daemon worker or cold in the process that
-asked. A child a parent's body calls is no job: it is decoded from its stored
+`cadgen step build`), warm on a daemon worker. A child a parent's body calls is no job: it is decoded from its stored
 result or built serially inside the parent's own process (§9a). What goes to
 the pool is a document compile (`cadgen.daemon.executors.submit_compile`: a
 door's, the CAD Viewer's, or a body's `read_step` of a file with no tree) and
@@ -1817,7 +1814,7 @@ after the run's exports, or, with `--no-wait`, once every model's result is
 recorded (the `released` frame, which the client returns on); the worker then
 finishes the files, its job open in the ledger until its exit frame, and a
 client that left after its release is no lost client.
-**A job runs in its caller's environment**, as it would cold: every request
+**A job runs in its caller's environment**: every request
 carries the client's whole environment and the worker applies it for that
 job -- a name the caller has is set, a name it lacks is unset, which also
 clears what a previous job's model code exported (`worker._apply_request_env`).
@@ -1963,7 +1960,7 @@ declared, parsed statically from the script it names. The ledger is the CAD
 Viewer's only progress source, and it is process state, never a file.
 
 The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
-are themselves dispatched through the daemon when one is reachable, so they
+are themselves dispatched through the daemon, so they
 run on warm kernels; the subject-less commands (`store`, `doctor`, `daemon
 status`, all snapshot orchestration) run in-process. STEP snapshots delegate
 missing document compilation and part derivation to the build pool -- a daemon
@@ -1984,9 +1981,7 @@ CPU scheduling and reuse remain independent of memory admission:
 
 1. **Job slots — one running build per core.** A counting semaphore of
    `N = os.cpu_count()` slots, the daemon's, shared by its workers
-   (`CADGEN_JOBS` overrides; `daemon/broker.py`); a build in the process that
-   asked (`CADGEN_DAEMON=0`) has no broker, and runs its body with no slot to
-   take. A job takes a slot before its body runs and
+   (`CADGEN_JOBS` overrides; `daemon/broker.py`). A job takes a slot before its body runs and
    holds it through its emit -- a child built inside the body runs in the slot
    its parent holds (§9a) -- and it **yields the slot while it waits for a pool
    job** (its parts' display data, a compile, an export) and reacquires --
@@ -2148,8 +2143,8 @@ each built model's time line and an already-stale notice. Every mode prints,
 once per built model, the warning that its code started a program (§5, every
 read is seen) and the build's own warnings, from the `started` and `warnings`
 lists its `done` event carries as it carries its `timings`. A child's events
-are the parent's process's own, so they reach the root as the parent's do:
-directly in a cold build, in the worker's frames in a warm one. After
+are the parent's process's own, so they reach the root as the parent's do, in
+the worker's frames. After
 publishing, each built model asks its gate once more, and its `done` event
 says `already stale: …; rerun` when a source it was built from, a child's
 among them, changed during the build.

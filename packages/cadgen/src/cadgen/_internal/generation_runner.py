@@ -119,8 +119,8 @@ def _load_generator_module(script_path: Path) -> object:
 
     module = importlib.util.module_from_spec(module_spec)
     # sys.path is exactly what `python script.py` gives: the script's own folder first,
-    # then the caller's PYTHONPATH (already on the path in a transient process; applied
-    # per job by the daemon worker). Seeded for the WHOLE build, so an import inside the
+    # then the caller's PYTHONPATH (applied per job by the daemon worker). Seeded for the
+    # WHOLE build, so an import inside the
     # model function or a helper it calls resolves like one at module top. cadgen adds no
     # root of its own and infers none from directory names (see import_roots.py).
     search_paths = import_roots(resolved_script_path)

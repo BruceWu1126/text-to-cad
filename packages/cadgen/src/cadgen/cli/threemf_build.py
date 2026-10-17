@@ -25,4 +25,9 @@ def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+
+    from cadgen.cli import main as front_door
+
+    # Run as a module, the command is still a door: handed to the daemon as `cadgen` hands it.
+    raise SystemExit(front_door([*DEFAULT_PROG.split()[1:], *sys.argv[1:]]))

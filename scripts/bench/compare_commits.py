@@ -163,10 +163,12 @@ def reported(output: str, stem: str) -> dict:
 
 
 def cold(python: Path, tree: Path, model: str, log: Path, store: Path) -> dict:
-    """One cold build of `model` from `tree`'s sources: fresh store, no daemon, --verbose."""
+    """One cold build of `model` from `tree`'s sources: a fresh store and a fresh daemon of its
+    own, which goes once it has idled a minute, --verbose."""
     script = tree / MODELS.get(model, model)
     env = {**os.environ, "PYTHONPATH": str(tree / "packages/cadgen/src"), "CADGEN_CACHE_DIR": str(store),
-           "CADGEN_DAEMON": "0", "CADGEN_TELEMETRY": "0", "CADGEN_UPDATE_CHECK": "0"}
+           "CADGEN_DAEMON_STATE_DIR": str(store.with_name(f"{store.name}-daemon")),
+           "CADGEN_DAEMON_IDLE_TIMEOUT": "60", "CADGEN_TELEMETRY": "0", "CADGEN_UPDATE_CHECK": "0"}
     load = os.getloadavg()[0]
     start = time.perf_counter()
     proc = subprocess.run([str(python), script.name, "--verbose"], cwd=script.parent, env=env,

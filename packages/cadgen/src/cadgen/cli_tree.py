@@ -3,8 +3,7 @@
 Every model transition — building (with the phase), current, done, failed — is an
 EVENT (``cadgen.daemon.executors.emit_event``), the root's and those of each child
 built inside its body alike. A daemon worker's travel back to the top-level call as
-``{"event": ...}`` frames; a build with no daemon emits them in the process that
-renders them.
+``{"event": ...}`` frames.
 
 Three renderings, chosen once per process:
 

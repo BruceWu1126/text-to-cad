@@ -48,8 +48,8 @@ from cadgen.daemon.server import _TOOL_IMPORTS, _evict_first_party_modules
 
 
 def _apply_request_env(request: dict) -> None:
-    """Apply the requesting CLIENT's environment for this job: the one a cold run
-    of the same command sees.
+    """Apply the requesting CLIENT's environment for this job: the one the process
+    that asked runs in.
 
     A worker inherits the environment of whichever build spawned the DAEMON, so
     without this a model reading ``os.environ`` saw that build's variables, and
@@ -277,7 +277,7 @@ def _run(request: dict) -> int:
 
         with worker_context(request.get("store_root")), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             # Pass the caller's name where the parser takes one, so a command reports the
-            # same usage warm as cold.
+            # usage of the command its caller typed.
             if prog and "prog" in inspect.signature(main).parameters:
                 result = main(argv, prog=prog)
             else:
@@ -299,7 +299,7 @@ def _run(request: dict) -> int:
         sys.path[:] = previous_sys_path
         _park()
         # Deterministic closure capture: the next job must see a clean first-party module
-        # space or it records a different sourceClosureHash than a cold build would.
+        # space or it records a different sourceClosureHash than a fresh worker would.
         _evict_first_party_modules()
 
 

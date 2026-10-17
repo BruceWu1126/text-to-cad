@@ -110,8 +110,8 @@ One cold build of the whole watch per side, each about ten minutes on a
 four-core machine, into `tmp/bench/moonwatch/`: the `moonwatch` row's `wall`
 and `built` are the number. What runs, per side, is `python moonwatch.py
 --verbose` from that side's `models/moonwatch/src` with `CADGEN_CACHE_DIR` on a
-fresh directory, `CADGEN_DAEMON=0` and `PYTHONPATH` on its
-`packages/cadgen/src`. Without a daemon, `main` still builds the children
-through a four-slot pool; a cadgen that builds its children serially inside
+fresh directory, a fresh daemon of its own (`CADGEN_DAEMON_STATE_DIR` beside
+that store) and `PYTHONPATH` on its `packages/cadgen/src`. `main` builds the
+children through a four-slot pool; a cadgen that builds its children serially inside
 the parent's body reports the serial number the migration's brief asks for.
 `--rounds 2` doubles the time and gives medians.

@@ -84,7 +84,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="glb-fixtures-") as folder:
         root = Path(folder)
         (root / "pair.py").write_text(MODEL, encoding="utf-8")
-        env = {**os.environ, "CADGEN_DAEMON": "0", "CADGEN_TELEMETRY": "0", "CADGEN_UPDATE_CHECK": "0",
+        env = {**os.environ, "CADGEN_TELEMETRY": "0", "CADGEN_UPDATE_CHECK": "0",
                "DO_NOT_TRACK": "1", "CADGEN_CACHE_DIR": str(root / "store"), "CADGEN_STATE_DIR": str(root / "state"),
                "PYTHONPATH": str(REPO / "packages/cadgen/src")}
         subprocess.run([sys.executable, "pair.py"], cwd=root, env=env, check=True)

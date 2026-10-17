@@ -43,12 +43,8 @@ class NoTransport(unittest.TestCase):
     def test_a_command_fails_naming_it_and_starts_no_daemon(self):
         err = io.StringIO()
         with no_transport(), redirect_stderr(err), \
-                mock.patch.dict("os.environ", {"CADGEN_DAEMON": "1"}), \
                 mock.patch.object(client, "_connect", side_effect=OSError("no daemon listens there")), \
                 mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("a daemon was started")):
-            import os
-
-            os.environ.pop("CADGEN_DAEMON_CHILD", None)
             code = client.run_via_daemon("step-build", ["in.step", "out.step"], "/work", prog="cadgen step build")
         self.assertEqual(code, 1)
         self.assertIn("no local IPC family", err.getvalue())

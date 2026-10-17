@@ -68,10 +68,10 @@ class RegisteredCommandsAnswerHelpTest(unittest.TestCase):
 
     def test_every_registered_command_answers_help(self) -> None:
         failures: list[str] = []
-        # CADGEN_DAEMON off: dispatch hands some verbs to the warm daemon before
-        # importing their module, and a help request must be answered by the
-        # command itself either way.
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}):
+        # As a daemon worker dispatches (CADGEN_DAEMON_CHILD): dispatch hands the doors
+        # to the daemon before importing their module, and its worker answers a help
+        # request with the command's own parser, as here.
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON_CHILD": "1"}):
             for command in sorted(_COMMANDS):
                 out, err = io.StringIO(), io.StringIO()
                 try:

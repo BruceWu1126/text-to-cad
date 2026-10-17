@@ -298,9 +298,6 @@ class Worker:
         # The broker a worker's jobs take slots from is the daemon itself; name the
         # address explicitly so a worker never guesses it from its identity.
         env["CADGEN_DAEMON_SOCKET"] = daemon_address()
-        # A daemon's worker submits its compiles and pool jobs to the daemon, whatever
-        # the process that started the daemon had in its environment.
-        env.pop("CADGEN_DAEMON", None)
         # Guards against a worker's own top-level call routing back into the daemon
         # as a fresh request; a nested compile ignores this on purpose (client.run_nested).
         env["CADGEN_DAEMON_CHILD"] = "1"

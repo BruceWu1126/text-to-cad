@@ -1,9 +1,9 @@
-"""Warm-process daemon for the CAD build CLIs — ON BY DEFAULT everywhere.
+"""Warm-process daemon for the CAD build CLIs: where every build, compile and artifact job runs.
 
 Holds OCP, build123d and the parser modules resident so repeated builds skip the import
-cost. Every front door — the ``cadgen`` CLI and the skill script shims —
-routes warm unless ``CADGEN_DAEMON=0`` opts out. The daemon sets ``CADGEN_DAEMON_CHILD`` in the process
-it serves from so a tool invoked through it cannot recurse back into the client.
+cost. Every front door — the ``cadgen`` CLI's doors and a model script's top-level call —
+hands its job to it. The daemon sets ``CADGEN_DAEMON_CHILD`` in the process it serves from
+so a tool invoked through it cannot recurse back into the client.
 """
 
 from __future__ import annotations
