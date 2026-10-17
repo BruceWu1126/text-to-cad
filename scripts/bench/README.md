@@ -67,13 +67,16 @@ What the numbers in `table.md` mean, all medians over the rounds:
 
 - `wall`: the `python <model>.py --verbose` command, start to exit.
 - `built`: cadgen's own total for the root model, from its `built ... in`
-  line.
+  line, else from the `generated <script> completed in` line (`main`'s cadgen
+  0.7 prints only that one).
 - `model code`: the seconds inside the model's own Python.
-- `cadgen`: the rest of `built`: kernel, store, export.
+- `cadgen`: the rest of `built`: kernel, store, export. Both come from the
+  `built ... in` line alone, so a side that prints none shows `—` there and a
+  footnote under the table names what it did not report; a dash is no failure.
 - `load`: the one-minute load average when the runs started; a side whose
   load is higher ran on a busier machine.
-- `failures`: runs that exited non-zero or printed no `built` line; read
-  their logs.
+- `failures`: runs that exited non-zero or printed neither line; read their
+  logs.
 - `preview` and `saved`, per edit scenario: seconds after the edit's command
   starts at which the root model's source was ready (its preview is
   published then) and at which its STEP was saved, from the run's event

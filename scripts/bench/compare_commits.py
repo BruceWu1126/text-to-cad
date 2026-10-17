@@ -28,21 +28,25 @@ usage: scripts/bench/compare_commits.py --base REV --head REV [--rounds N] [--mo
   --edit-iterations N  iterations of each edit scenario (default 2)
 
 Output, under the output directory:
-  runs.jsonl                  one line per cold build: round, side, model, status, wall, built,
-                              model_code, cadgen, load
+  runs.jsonl                  one line per cold build: round, side, model, status, wall, load and
+                              the numbers its output gave: built, model_code, cadgen
   <side>-<model>-<round>.log  that build's --verbose output
   edits-<side>.json, .out,    the edit loop's report, output and per-run logs
   edits-<side>-logs/
   table.md                    the comparison, printed at the end as well
 
 What table.md's numbers mean, all medians over the rounds: wall is the command from start to
-exit; built is cadgen's own total for the root model (its "built ... in" line); model code is
-the seconds inside the model's own Python; cadgen is the rest of built (kernel, store, export);
-load is the one-minute load average when each run started; failures counts runs that exited
-non-zero or printed no "built" line (read their logs). With --edits, per scenario: the seconds
-after the command starts at which the root model's source was ready (its preview is published
-then) and at which its STEP was saved, read from the run's event lines; then the edit loop's
-own table, the median wall per scenario (agent_edits.py --compare).
+exit; built is cadgen's own total for the root model: its "built ... in" line, else the
+"generated <script> completed in" line, the one cadgen 0.7 prints; model code is the seconds
+inside the model's own Python and cadgen is the rest of built (kernel, store, export), both from
+the "built ... in" line alone, so a side that prints none shows a dash there and a footnote
+names what it could not report; load is the one-minute load average when each run started;
+failures counts runs that exited non-zero or printed neither line (read their logs).
+
+With --edits, per scenario: the seconds after the command starts at which the root model's
+source was ready (its preview is published then) and at which its STEP was saved, read from the
+run's event lines; then the edit loop's own table, the median wall per scenario
+(agent_edits.py --compare).
 """
 from __future__ import annotations
 
@@ -74,7 +78,11 @@ EDIT_LOOP = [
     "--parent-to", "MOVT_Z_OFFSET + 0.02), (1",
     "--label-from", 'label="moonwatch")', "--label-to", 'label="watch")', "--label-to", 'label="moonwatch_2")',
 ]
-BUILT = re.compile(r"built (\S+) in ([^:]+): model code ([^,]+), cadgen ([^,\n]+)")
+# What a build says about the root model's total. cadgen 0.8.0 prints
+# `built <STEP> in 13.4s: model code 7.2s, cadgen 6.2s` (all three numbers); every cadgen prints
+# `generated <script> completed in 6.70s` (the total alone), and 0.7 prints nothing else.
+BUILT = re.compile(r"built (\S+) in ([^:\n]+): model code ([^,\n]+), cadgen ([^,\n]+)")
+GENERATED = re.compile(r"generated (\S+) completed in (.+)")
 
 
 def git(*args: str) -> str:
@@ -137,6 +145,18 @@ def worktree(python: Path, sha: str, path: Path) -> Path:
     return path
 
 
+def reported(output: str, stem: str) -> dict:
+    """The numbers a build's output gives for the root model `stem`: `built` from the `built ... in`
+    line, with the `model_code` and `cadgen` only that line gives, else `built` from the
+    `generated <script> completed in` line; empty when it prints neither."""
+    lines = [m for m in BUILT.finditer(output) if Path(m.group(1)).stem == stem]
+    if lines:
+        return {"built": round(seconds(lines[-1].group(2)), 2), "model_code": round(seconds(lines[-1].group(3)), 2),
+                "cadgen": round(seconds(lines[-1].group(4)), 2)}
+    lines = [m for m in GENERATED.finditer(output) if Path(m.group(1).split("::")[0]).stem == stem]
+    return {"built": round(seconds(lines[-1].group(2)), 2)} if lines else {}
+
+
 def cold(python: Path, tree: Path, model: str, log: Path, store: Path) -> dict:
     """One cold build of `model` from `tree`'s sources: fresh store, no daemon, --verbose."""
     script = tree / MODELS.get(model, model)
@@ -149,18 +169,42 @@ def cold(python: Path, tree: Path, model: str, log: Path, store: Path) -> dict:
     wall = time.perf_counter() - start
     output = proc.stdout + proc.stderr
     log.write_text(output, encoding="utf-8")
-    root = None
-    for match in BUILT.finditer(output):
-        if Path(match.group(1)).stem == script.stem:
-            root = match
-    row = {"model": script.stem, "status": proc.returncode, "wall": round(wall, 2), "load": round(load, 2)}
-    if root:
-        row.update(built=round(seconds(root.group(2)), 2), model_code=round(seconds(root.group(3)), 2),
-                   cadgen=round(seconds(root.group(4)), 2))
-    if proc.returncode != 0 or root is None:
+    row = {"model": script.stem, "status": proc.returncode, "wall": round(wall, 2), "load": round(load, 2),
+           **reported(output, script.stem)}
+    if proc.returncode != 0 or "built" not in row:
         print(f"  {script.stem} from {tree.name}: status {proc.returncode}, "
-              f"{'no built line' if root is None else 'built'}; see {log}", file=sys.stderr)
+              f"{'no built or generated line' if 'built' not in row else 'built'}; see {log}", file=sys.stderr)
     return row
+
+
+def median(rows: list[dict], key: str) -> str:
+    """The median of `key` over the rows that have it, one decimal; a dash when none does."""
+    values = [r[key] for r in rows if key in r]
+    return f"{statistics.median(values):.1f}" if values else "—"
+
+
+def cold_table(rows: list[dict], models: list[str]) -> list[str]:
+    """The cold builds' table, medians over the rounds. A number a side's build did not print is a
+    dash, not a failure (that is a run that exited non-zero or printed no total), and a footnote
+    names it."""
+    lines = ["| model | side | wall | built | model code | cadgen | load | failures |",
+             "|---|---|---:|---:|---:|---:|---:|---:|"]
+    dashes: dict[str, list[str]] = {"base": [], "head": []}
+    for model in models:
+        name = Path(MODELS.get(model, model)).stem
+        for side in dashes:
+            mine = [r for r in rows if r["model"] == name and r["side"] == side]
+            ok = [r for r in mine if r["status"] == 0 and "built" in r]
+            for key, label in (("model_code", "model code"), ("cadgen", "cadgen")):
+                if ok and not any(key in r for r in ok) and label not in dashes[side]:
+                    dashes[side].append(label)
+            lines.append(f"| {name} | {side} | {median(ok, 'wall')} | {median(ok, 'built')} | {median(ok, 'model_code')} | "
+                         f"{median(ok, 'cadgen')} | {median(mine, 'load')} | {len(mine) - len(ok)} |")
+    named = "; ".join(f"{side}: {', '.join(labels)}" for side, labels in dashes.items() if labels)
+    if named:
+        lines += ["", f"— is a number that side's build does not print ({named}): only cadgen 0.8.0's `built ... in` line "
+                      "gives model code and cadgen, so that side's built is its `generated ... completed in` line."]
+    return lines
 
 
 def edits(python: Path, tree: Path, side: str, out: Path, iterations: int, max_load: float | None) -> Path:
@@ -264,16 +308,7 @@ def main() -> int:
                         print(json.dumps(row), flush=True)
         lines = [f"base {sides['base'][:9]} ({args.base})  head {sides['head'][:9]} ({args.head})  "
                  f"rounds {args.rounds}  {platform.platform()}  {os.cpu_count()} cores", "",
-                 "| model | side | wall | built | model code | cadgen | load | failures |",
-                 "|---|---|---:|---:|---:|---:|---:|---:|"]
-        for model in models:
-            name = Path(MODELS.get(model, model)).stem
-            for side in ("base", "head"):
-                mine = [r for r in rows if r["model"] == name and r["side"] == side]
-                ok = [r for r in mine if r["status"] == 0 and "built" in r]
-                med = lambda key: f"{statistics.median(r[key] for r in ok):.1f}" if ok else "—"  # noqa: E731
-                lines.append(f"| {name} | {side} | {med('wall')} | {med('built')} | {med('model_code')} | {med('cadgen')} | "
-                             f"{statistics.median(r['load'] for r in mine):.1f} | {len(mine) - len(ok)} |")
+                 *cold_table(rows, models)]
         if args.edits:
             reports = {side: edits(python, trees[side], side, out, args.edit_iterations, args.max_load)
                        for side in ("base", "head")}
