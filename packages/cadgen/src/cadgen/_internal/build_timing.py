@@ -27,8 +27,8 @@ and the root must stay light.
 The clock also carries what else a build's ``done`` event tells its root: the
 programs the model's code started (``note_programs``), whose reads no trace sees,
 so the root warns that editing what they read will not rebuild the model
-(``started_warning``), and the build's own warnings (``note_warning``). A child's
-output is dropped when it succeeds, so its done event is how its root hears either.
+(``started_warning``), and the build's own warnings (``note_warning``). Both ride
+the model's done event, which the root's build tree prints once per model (``cadgen.cli_tree``).
 """
 
 from __future__ import annotations

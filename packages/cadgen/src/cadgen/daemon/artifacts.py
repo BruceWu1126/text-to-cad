@@ -265,7 +265,7 @@ def _run_here(request, *, keep_going):
     """The job in this process, with no daemon to run it and no broker to take a slot
     from; asking ``keep_going`` before each derivation, which stops once its one
     subscriber has left. The result is what a worker's would be: plain JSON. What the
-    job reads on its thread -- the document an export wrote, read back by its verify --
+    job reads on its thread -- the file an export wrote, parsed by its verify --
     is cadgen's own, never an input of a build in progress (``filetrace.paused``)."""
     from cadgen._internal.filetrace import paused
 

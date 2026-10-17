@@ -5,7 +5,6 @@ A record says what a model's build depended on and what it produced::
 
     {
       "model": "/abs/src/robot.py",
-      "kind": "step",
       "entryKind": "assembly",
       "tree": "<tree object hash>",
       "key": "<result key>",

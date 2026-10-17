@@ -9,8 +9,9 @@ door call does its work again, and touch nothing else.
   the provenance entry written beside it (``index/provenance``, the build's
   account of its own code) and the results it stored by key (``index/result``),
   so nothing of it stands and ``gc`` may take its geometry. The next run
-  rebuilds it; its children are untouched, and its parents see it rebuilt,
-  under another key, only after that rebuild — exactly as after any edit.
+  rebuilds it; its children are untouched, and its parents read ``child stale``
+  until that rebuild, then stand again where its inputs are unchanged (the same
+  inputs give the same key) — exactly as after any edit.
 - A **document** argument (a ``.step``/``.dxf``/mesh path) drops the
   ``index/document/<sha256(bytes)>-v<schema>`` entry, so the next open or door call
   compiles the file from its bytes again; when a record lists that path as an

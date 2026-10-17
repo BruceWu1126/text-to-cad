@@ -70,8 +70,8 @@ _TIMED_OUT = object()
 # Except the names the daemon, its pool and a job's own machinery set for themselves:
 # a caller never sends them, and applying a job's environment leaves them as they are.
 INTERNAL_ENV_VARS = frozenset({
-    # A daemon worker: it submits its children to its own daemon at its own address,
-    # whose key lives in its own state directory (pool.Worker, worker.serve).
+    # A daemon worker's own: that it serves a daemon, and that daemon's address and
+    # key, which live in its own state directory (pool.Worker, worker.serve).
     "CADGEN_DAEMON",
     "CADGEN_DAEMON_CHILD",
     "CADGEN_DAEMON_SOCKET",

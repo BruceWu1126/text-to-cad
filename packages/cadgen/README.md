@@ -64,7 +64,7 @@ renders.
 - Source scripts are PROGRAMS: run, never passed to CLIs, never parsed by
   renderers.
 
-Three mechanisms live under this law rather than beside it, and each is
+Four mechanisms live under this law rather than beside it, and each is
 specified where it is implemented — change one by reading that section, not
 this one:
 
@@ -73,7 +73,7 @@ this one:
 | Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; the file is exported from that very tree, and its bytes map to it once written, so the saved file's parts are the preview's and nothing is fetched twice | no reader reaches source, closure or a model record; a preview never stands in for a saved file, and no bytes map to a tree before they are written from it | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns -- the child's stored result, decoded, or built there and then -- and how a parent records it | the link/component decision, the child's key | [`STORE.md`](STORE.md) §6, §9a |
 | Display data: canonical trees pin encoded BREP and effective intrinsic face colors; each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — is derived by the build pool, never on the build's thread (a daemon worker, or with no daemon a thread of the build's process): the jobs a build asks for the moment its result exists -- one, or a pool slot's share each of a large batch -- and waits for before it reports done (a parent's children's builds had theirs derived); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
-| Exports: a model's STEP written from its stored result by the build pool, and every exported file verified against the tree it was written from | the file maps to its result only where a parse of it verifies; one that does not is its own content and the build says so | [`STORE.md`](STORE.md) §3 |
+| Exports: a model's STEP written from its stored result by the build pool, its sidecar from its record, and every exported file verified against the tree it was written from | the file's bytes map to its result, pending a parse that verifies them, which a door waits for; a file that does not verify is its own content, and the build says so | [`STORE.md`](STORE.md) §3 |
 
 ### 2. The store contains only derived results
 
@@ -95,7 +95,7 @@ that information is in the wrong place.
 
 The store holds itself to a size cap (`CADGEN_STORE_MAX`, default 20 GB): the
 daemon, when idle, evicts derived entries (part, component, bounds, drawing,
-skin, robot) least recently written first and sweeps what nothing reaches, and retires on
+skin, robot, result) least recently written first and sweeps what nothing reaches, and retires on
 sight the index kinds an older cadgen left (`index/op`, and `index/surface`,
 `index/selector` and `index/mesh`). A record,
 a document entry, an output entry or a provenance entry is never evicted. `cadgen store gc` does
@@ -160,8 +160,8 @@ builds by geometry within a tolerance, never by file hash. One identity is
 deliberately not a byte hash: a **part** -- a component's display data -- is
 keyed by the **construction** that made its component (law 20), so a body the
 kernel writes a little differently from one run to the next is one part with
-one mesh, and a saved document -- the result itself wherever its file holds
-it -- draws with the build's parts.
+one mesh, and a file that holds its result maps to that result and draws with
+the build's parts.
 *Pressure-test*: build one model twice, each from an empty store. If the bytes
 differ, nothing fails, and the second build's outputs are as correct as the
 first's.
@@ -456,10 +456,9 @@ question with another's name.
   the kernel memo's key for it (law 18: the operation, every setting it ran
   with, its parameters by value, the keys of the shapes it was given and the
   output of it the component is, restated stably with cadgen's release) with
-  the producer that derives its display data -- so one
-  body is one mesh however its bytes come out, the saved document's tree is the
-  result wherever its file holds it, and a preview's parts are the saved
-  file's. A
+  the producer that derives its display data -- so one body is one mesh
+  however its bytes come out, a file that holds its result maps to that
+  result, and a preview's parts are the file's. A
   face, edge or vertex is its **lineage** (`_internal/kernel_trace.py`): the
   feature that made it -- `<function>.<operation><count>`, counted among the
   features the part descends from so an edit elsewhere renames nothing, or the
@@ -467,10 +466,10 @@ question with another's name.
   once labelled (a label set after a construction used the shape renames
   nothing it made; on a part placed as it is, a label names the occurrence:
   parts made alike and labelled apart are one part) -- and its number among the elements of its
-  kind that feature made, `f:dial.extrude1.3`, with a piece's number after a
+  kind that feature made, `f:bracket.extrude1.3`, with a piece's number after a
   later split. A ref is the occurrence's **token** (`o:`, from its place in
   the tree: parent token, name, rounded placement) and the element's name:
-  `#o:4b1f9e2a7c03/f:dial.extrude1.3`. So a ref survives a STEP round trip, a
+  `#o:4b1f9e2a7c03/f:bracket.extrude1.3`. So a ref survives a STEP round trip, a
   sibling's insertion, a dimension change and code that moves, and a name
   copied from the viewer resolves in `inspect` to the same face. Nothing on
   the way from a run to its record measures geometry to name anything: the
@@ -508,7 +507,7 @@ token; a fix to what is derived from a name bumps that layer's version.
 *Pressure-test*: build a model and compile the STEP it wrote in an empty
 store: the compile names every occurrence as the result does, every part's
 faces and edges where the result has them within the display tolerance, drawn
-alike -- what the build's verify checks -- so the saved file is the result,
+alike -- what the build's verify checks -- so the file maps to the result,
 its parts the build's; a file the translation changed is its own content,
 named by its geometry, and the build says so, then writes it plain. Then change a
 dimension and rebuild: every face the change left in place keeps its name.

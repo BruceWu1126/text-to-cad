@@ -796,7 +796,7 @@ def _child(defn: ModelDef, frame: BuildFrame) -> Any:
 
     To the parent's capture the child's pipeline is cadgen's own reading
     (``filetrace.paused``): what the child's gate hashes, what its export writes
-    and reads back, what its body read -- its body records in a capture of its
+    and its verify parses, what its body read -- its body records in a capture of its
     own -- is the child's, and the child is the parent's input by its result.
     """
     from cadgen._internal.build_timing import cadgen_work, child_build

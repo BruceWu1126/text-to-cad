@@ -1506,7 +1506,7 @@ def _run_with_spec_generation_status(
         "lastModelSeconds": None if profile else clock.last_model_seconds,
     }
     # The programs its code started and its warnings ride the done event as its timings
-    # do: a child's stderr is dropped when it succeeds, and this is how its root hears them.
+    # do: the root's build tree prints them once per model (cadgen.cli_tree).
     _tree_event(
         spec, "done", elapsed=time.perf_counter() - started, stale=_stale_after_build(spec),
         timings=timings, profile=profile_report, started=list(clock.programs) or None,

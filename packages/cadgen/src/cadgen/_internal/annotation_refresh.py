@@ -4,7 +4,7 @@ This is a narrow source optimization, not an alternate execution engine. Literal
 metadata (including constants used exclusively by annotations) is removed from
 the geometry fingerprint. Computed annotations remain in that fingerprint and
 reuse their recorded value only while their source and dependencies are unchanged.
-Reflection, changed child pins, and unavailable geometry use the ordinary build.
+Reflection, a child under another key, and unavailable geometry use the ordinary build.
 """
 from __future__ import annotations
 
