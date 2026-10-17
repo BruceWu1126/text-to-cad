@@ -54,18 +54,23 @@ those bytes reach the components a model emits. A boolean does not: the layer
 sets every boolean it sees non-destructive (``BOPAlgo_Options``), so the kernel
 copies the sub-shapes it would change and shares the rest, a boolean's inputs
 are left as they were given, and what it left alone keeps its identity in the
-result. A miss serializes each input before and after the operation; a
-change is captured as a sparse delta per sub-shape (tolerance, flags, the
-representations appended), proven exact by undoing and redoing it on the live
-shape, and noted in a ledger by sub-shape. A hit replays the delta, so a hot
-run leaves every input as a cold run would; a hit of a shape's maker undoes,
-through the ledger, every delta applied to any sub-shape of it since it
-returned, so an operation edited out of the model leaves no trace. A change
-the delta cannot express -- a representation rewritten in place -- is not
-replayed: the input's maker forgets its entry, the input is rebuilt by the next
-run, and the operation runs on it again, as it always could. A call that runs
-uncached still captures what it does to a memoized input, and a memoized shape
-embedded in a foreign one that the call changed is forgotten the same way.
+result. What an operation does is captured as each sub-shape's state -- kind,
+tolerance, the seven flags, how many representations it holds, an edge's
+parametric flags -- read after the operation and compared with the state
+before it; the memo keeps the state it last read of every sub-shape of a
+memoized shape, written when a capture reads it and when a ledger row sets it,
+so an input is walked once per operation, after it. A change is a sparse delta
+per sub-shape (the scalars, and the representations appended, by count), noted
+in a ledger by sub-shape. A hit replays the delta, so a hot run leaves every
+input as a cold run would; a hit of a shape's maker undoes, through the ledger,
+every delta applied to any sub-shape of it since it returned, so an operation
+edited out of the model leaves no trace. A change no delta expresses -- a
+sub-shape added or removed, representations taken away -- is not replayed: the
+input's maker forgets its entry, the input is rebuilt by the next run, and the
+operation runs on it again, as it always could; a change outside that state (a
+representation rewritten in place) is not seen. A call that runs uncached still
+captures what it does to a memoized input, and a memoized shape embedded in a
+foreign one that the call changed is forgotten the same way.
 
 **Construction keys.** A key is this process's: its shape inputs are interned
 ids, and an effect is numbered as it happens. ``construction_key`` restates the
@@ -109,6 +114,10 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterator
 
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+from OCP.TopExp import TopExp
+from OCP.TopTools import TopTools_IndexedMapOfShape
+
 from cadgen._internal.kernel_trace import Trace
 
 __all__ = ["CAPACITY", "clear", "construction_key", "enabled", "install", "run", "stats", "uninstall"]
@@ -140,6 +149,7 @@ _EFFECT_IDS = itertools.count(1)
 # after it returned (its ``born`` stamp) by runs before this one.
 _SEQUENCE = itertools.count(1)
 _installed = False
+_EDGE, _VERTEX, _FACE = int(TopAbs_EDGE), int(TopAbs_VERTEX), int(TopAbs_FACE)
 
 
 class _Unkeyable(Exception):
@@ -482,6 +492,7 @@ def clear() -> None:
         _ID_KEYS.clear()
         _STABLE.clear()
         _MAPS.clear()
+        _STATE.clear()
 
 
 # --- the call -----------------------------------------------------------------------------
@@ -1224,6 +1235,8 @@ def _drop(entry: "_Entry") -> None:
         _REGISTRY.pop(made.tshape, None)
         for effect in made.effects:
             effect.forget()
+        if made.parent is None:
+            _forget_states(made.tshape)
         pending.extend(made.subs)
     entry.made = []
 
@@ -1406,24 +1419,49 @@ def _snapshot(value: Any) -> Any:
 
 
 # --- effects on inputs ----------------------------------------------------------------------
+#
+# What an operation does to its inputs is read as each sub-shape's state
+# (``_state``) after the operation and compared with the state before it. The
+# memo keeps the state it last read of every sub-shape of a memoized shape
+# (``_STATE``): written when a capture reads it and when a ledger row sets it,
+# forgotten with the entry whose result holds the sub-shape. So an input is
+# walked once per operation, after it, and the state before is what the memo
+# already holds.
+
+_STATE: dict[Any, tuple] = {}
 
 
 class _Captured:
-    __slots__ = ("index", "handle", "mapped", "rows", "data", "embedded")
+    """One input before the operation: its full map, the TShape of each of its
+    sub-shapes by ordinal and each one's state."""
 
-    def __init__(self, index: int, handle: Any, embedded: list[_Made]) -> None:
+    __slots__ = ("index", "handle", "mapped", "tshapes", "rows", "embedded", "known")
+
+    def __init__(self, index: int, handle: Any, embedded: list[_Made], known: bool) -> None:
         self.index = index
         self.handle = handle
-        self.mapped, self.rows = _lean(handle)
-        self.data = _bytes(handle)
         self.embedded = embedded
+        # A memoized shape's sub-shapes have states the memo keeps. A foreign shape,
+        # captured for the memoized shapes it embeds, is read in full and kept nowhere.
+        self.known = known
+        self.mapped, self.tshapes = _mapped(handle)
+        if known:
+            rows = []
+            for tshape in self.tshapes:
+                state = _STATE.get(tshape)
+                if state is None:
+                    state = _STATE[tshape] = _state(tshape)
+                rows.append(state)
+            self.rows = rows
+        else:
+            self.rows = [_state(tshape) for tshape in self.tshapes]
 
 
 def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
-    """The inputs whose bytes the operation may change: one per TShape, in call
-    order, less any that is a sub-shape of another input (its ancestor's delta
-    covers it). With ``embedded`` (an uncached call), an input no entry made is
-    captured only for the memoized shapes it embeds, which a change taints."""
+    """The inputs the operation may change: one per TShape, in call order, less
+    any that is a sub-shape of another input (its ancestor's delta covers it).
+    With ``embedded`` (an uncached call), an input no entry made is captured
+    only for the memoized shapes it embeds, which a change taints."""
     from cadgen.store.materialize import TREE_TAG
 
     state = getattr(_LOCAL, "run", None)
@@ -1437,23 +1475,22 @@ def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
         if tshape in seen:
             continue
         seen.add(tshape)
+        made = _made_of(tshape, state)
         roots: list[_Made] = []
-        if embedded and _made_of(tshape, state) is None:
+        if embedded and made is None:
             if TREE_TAG in shape.__dict__ or "__cadgen_component_identity__" in shape.__dict__:
                 continue
             roots = _embedded(wrapped, state)
             if not roots:
                 continue
-        distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), roots))
+        distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), roots,
+                                  known=made is not None and made.persistent()))
     return [item for item in distinct
             if not any(other is not item and other.mapped.Contains(item.handle) for other in distinct)]
 
 
 def _embedded(wrapped: Any, state: _Run | None) -> list[_Made]:
     """The memoized shapes a foreign shape holds as sub-shapes."""
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(wrapped, mapped)
     found: list[_Made] = []
@@ -1472,83 +1509,106 @@ def _effects(captured: list[_Captured], state: _Run) -> tuple[list[tuple[int, "_
     sound = True
     rowed: set = set()
     for item in captured:
-        if _bytes(item.handle) == item.data:
+        _mapped_after, tshapes = _mapped(item.handle)
+        rows = [_state(tshape) for tshape in tshapes]
+        if rows == item.rows:
             continue
         if item.embedded:
             for made in item.embedded:
                 _taint(made, state)
             sound = False
             continue
-        mapped, rows = _lean(item.handle)
-        effect = _delta(item, mapped, rows, rowed)
+        effect = _delta(item, tshapes, rows, rowed)
         made = _made_of(item.handle.TShape(), state)
-        if effect is None or not effect.verify(item.handle, item.data, state.id):
+        if effect is None:
             _STATS["unreplayable"] += 1
             sound = False
             _taint(made, state)
             continue
+        effect.note(state.id)
         effects.append((item.index, effect))
         if made is not None:
             made.effects.append(effect)
     return effects, sound
 
 
-def _lean(handle: Any) -> tuple[Any, list[tuple]]:
-    """Every sub-shape's cheap state, by ordinal in the shape's full map: kind,
-    tolerance, the seven flags, how many representations it holds, and an
-    edge's parametric flags."""
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
+def _mapped(handle: Any) -> tuple[Any, list]:
+    """A shape's full ``TopExp`` map, and the TShape of each sub-shape by ordinal."""
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(handle, mapped)
-    rows = []
+    return mapped, [mapped.FindKey(ordinal).TShape() for ordinal in range(1, mapped.Extent() + 1)]
+
+
+def _state(tshape: Any) -> tuple:
+    """One sub-shape's cheap state: kind, tolerance, the seven flags, how many
+    representations it holds, and an edge's parametric flags."""
+    kind = tshape.ShapeType()
+    flags = (tshape.Free(), tshape.Modified(), tshape.Checked(), tshape.Orientable(), tshape.Closed(),
+             tshape.Infinite(), tshape.Convex())
+    if kind == TopAbs_EDGE:
+        return (_EDGE, tshape.Tolerance(), flags, tshape.Curves().Extent(),
+                (tshape.SameParameter(), tshape.SameRange(), tshape.Degenerated()))
+    if kind == TopAbs_VERTEX:
+        return (_VERTEX, tshape.Tolerance(), flags, tshape.Points().Extent(), None)
+    if kind == TopAbs_FACE:
+        return (_FACE, tshape.Tolerance(), flags, None, None)
+    return (int(kind), None, flags, None, None)
+
+
+def _forget_states(tshape: Any) -> None:
+    """Drop the states kept of a TShape's sub-shapes: the memo no longer holds it.
+    A sub-shape another entry's result shares is read again when next captured."""
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(_handle_of(tshape), mapped)
     for ordinal in range(1, mapped.Extent() + 1):
-        shape = mapped.FindKey(ordinal)
-        kind = shape.ShapeType()
-        tshape = shape.TShape()
-        flags = (shape.Free(), shape.Modified(), shape.Checked(), shape.Orientable(), shape.Closed(),
-                 shape.Infinite(), shape.Convex())
-        if kind == TopAbs_EDGE:
-            rows.append((int(kind), tshape.Tolerance(), flags, tshape.Curves().Extent(),
-                         (tshape.SameParameter(), tshape.SameRange(), tshape.Degenerated())))
-        elif kind == TopAbs_VERTEX:
-            rows.append((int(kind), tshape.Tolerance(), flags, tshape.Points().Extent(), None))
-        elif kind == TopAbs_FACE:
-            rows.append((int(kind), tshape.Tolerance(), flags, None, None))
-        else:
-            rows.append((int(kind), None, flags, None, None))
-    return mapped, rows
+        _STATE.pop(mapped.FindKey(ordinal).TShape(), None)
 
 
-def _bytes(handle: Any) -> bytes:
-    from cadgen._internal.component_package import _shape_brep_bytes
-
-    return _shape_brep_bytes(handle)
+def _representations(tshape: Any, kind: int) -> Any:
+    return tshape.ChangeCurves() if kind == _EDGE else tshape.ChangePoints()
 
 
-def _representations(shape: Any) -> Any:
-    from OCP.TopAbs import TopAbs_EDGE
+def _appended(tshape: Any, kind: int, count: int) -> tuple:
+    """The representations an edge or a vertex holds past the first ``count``:
+    the ones the operation appended."""
+    found = []
+    for position, representation in enumerate(_representations(tshape, kind)):
+        if position >= count:
+            found.append(representation)
+    return tuple(found)
 
-    tshape = shape.TShape()
-    return tshape.ChangeCurves() if shape.ShapeType() == TopAbs_EDGE else tshape.ChangePoints()
+
+def _truncate(representations: Any, count: int) -> None:
+    """Drop the representations past the first ``count``, from the tail. The
+    kernel's list removes from its head: it is reversed in place, its head
+    removed as many times, and reversed back -- nothing is rebuilt."""
+    extra = representations.Extent() - count
+    if extra <= 0:
+        return
+    representations.Reverse()
+    for _ in range(extra):
+        representations.RemoveFirst()
+    representations.Reverse()
 
 
-def _delta(item: _Captured, mapped: Any, rows: list[tuple], rowed: set) -> "_Effect | None":
-    """The sparse change between the input's state before and after, or None
-    when it is not an append of representations and a change of scalars. A
-    sub-shape two inputs share is rowed once."""
+def _delta(item: _Captured, tshapes: list, rows: list[tuple], rowed: set) -> "_Effect | None":
+    """The sparse change between the input's state before and after: for each
+    sub-shape whose state differs, its scalars and the representations appended,
+    read past the count before. None when the change is one no delta expresses:
+    a sub-shape added or removed, or standing at another's ordinal, a kind
+    changed, representations taken away. A sub-shape two inputs share is rowed
+    once; an input whose every change another input rowed has an empty effect."""
     if len(rows) != len(item.rows):
         return None
     changed: list[_Row] = []
-    for ordinal, (before, after) in enumerate(zip(item.rows, rows), 1):
+    for ordinal, (before, after) in enumerate(zip(item.rows, rows)):
         if before == after:
             continue
-        if before[0] != after[0]:
+        tshape = tshapes[ordinal]
+        if tshape != item.tshapes[ordinal] or before[0] != after[0]:
             return None
-        shape = mapped.FindKey(ordinal)
-        tshape = shape.TShape()
+        if item.known:
+            _STATE[tshape] = after
         if tshape in rowed:
             continue
         appended: tuple = ()
@@ -1556,10 +1616,10 @@ def _delta(item: _Captured, mapped: Any, rows: list[tuple], rowed: set) -> "_Eff
             if after[3] < before[3]:
                 return None
             if after[3] > before[3]:
-                appended = tuple(list(_representations(shape))[before[3]:])
+                appended = _appended(tshape, before[0], before[3])
         changed.append(_Row(tshape, before, after, appended))
         rowed.add(tshape)
-    return _Effect(changed) if changed else None
+    return _Effect(changed)
 
 
 class _Row:
@@ -1576,34 +1636,34 @@ class _Row:
         self.run = 0
 
     def set(self, state: tuple) -> None:
-        shape = _handle_of(self.tshape)
-        tshape = self.tshape
-        if state[1] is not None:
+        """Set the sub-shape to ``state`` (``before`` or ``after``), touching only
+        what differs between the two: the scalars set, the representations the
+        operation appended put back or dropped from the tail."""
+        tshape, before, after = self.tshape, self.before, self.after
+        if before[1] != after[1]:
             tshape.Tolerance(state[1])
-        free, modified, checked, orientable, closed, infinite, convex = state[2]
-        shape.Free(free)
-        shape.Modified(modified)
-        shape.Checked(checked)
-        shape.Orientable(orientable)
-        shape.Closed(closed)
-        shape.Infinite(infinite)
-        shape.Convex(convex)
-        if state[4] is not None:
+        if before[2] != after[2]:
+            free, modified, checked, orientable, closed, infinite, convex = state[2]
+            tshape.Free(free)
+            tshape.Modified(modified)
+            tshape.Checked(checked)
+            tshape.Orientable(orientable)
+            tshape.Closed(closed)
+            tshape.Infinite(infinite)
+            tshape.Convex(convex)
+        if before[4] != after[4]:
             same_parameter, same_range, degenerated = state[4]
             tshape.SameParameter(same_parameter)
             tshape.SameRange(same_range)
             tshape.Degenerated(degenerated)
-        if state[3] is None or self.before[3] == self.after[3]:
-            return
-        representations = _representations(shape)
-        if state is self.after:
-            for representation in self.appended:
-                representations.Append(representation)
-        else:
-            kept = list(representations)[:self.before[3]]
-            representations.Clear()
-            for representation in kept:
-                representations.Append(representation)
+        if before[3] != after[3]:
+            representations = _representations(tshape, before[0])
+            if state is after:
+                for representation in self.appended:
+                    representations.Append(representation)
+            else:
+                _truncate(representations, before[3])
+        _STATE[tshape] = state
 
 
 class _Effect:
@@ -1625,12 +1685,18 @@ class _Effect:
         return any(row.before[1] != row.after[1] or row.before[3] != row.after[3] or row.appended
                    or row.before[4] != row.after[4] for row in self.rows)
 
-    def apply(self, run_id: int) -> None:
+    def note(self, run_id: int) -> None:
+        """Into the ledger as applied by ``run_id``, the shapes already as the
+        operation left them."""
         for row in self.rows:
-            row.set(row.after)
             row.seq = next(_SEQUENCE)
             row.run = run_id
             _LEDGER.setdefault(row.tshape, []).append(row)
+
+    def apply(self, run_id: int) -> None:
+        for row in self.rows:
+            row.set(row.after)
+        self.note(run_id)
 
     def undo(self) -> None:
         for row in reversed(self.rows):
@@ -1653,17 +1719,3 @@ class _Effect:
                 _LEDGER[row.tshape] = kept
             else:
                 del _LEDGER[row.tshape]
-
-    def verify(self, handle: Any, before: bytes, run_id: int) -> bool:
-        """Prove the delta exact on the live shape: undone, its bytes are the
-        ones captured before the operation; redone, the ones after. Leaves the
-        delta applied and in the ledger."""
-        after = _bytes(handle)
-        try:
-            self.undo()
-            undone = _bytes(handle) == before
-            self.apply(run_id)
-            return undone and _bytes(handle) == after
-        except Exception:  # noqa: BLE001 - a delta that cannot be set is not replayable
-            _STATS["errors"] += 1
-            return False

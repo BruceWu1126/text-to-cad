@@ -16,6 +16,8 @@ elements by the features that made them. Small geometry, in process, no store.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import re
 import tempfile
@@ -24,6 +26,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.python.support.paths import add_repo_path
+from tests.python.support.tmp_root import generated_cad_directory
 
 add_repo_path("packages/cadgen/src")
 
@@ -926,6 +929,96 @@ class BooleanTest(KernelMemoCase):
                         "a face the cut leaves alone keeps its TShape in the result")
         self.assertFalse(any(face.wrapped.IsPartner(bottom.wrapped) for face in body.faces()),
                          "a face the cut modifies is a new one")
+
+
+class BuildAgreementTest(unittest.TestCase):
+    """A model built cold, then hot in one process (``--force`` runs the body again, every
+    construction a hit), stores one tree of one set of component bytes when its body reuses
+    an input an operation changed: a boolean's tool after the boolean, a profile face after
+    an extrusion (README law 18's pressure-test, at the store)."""
+
+    TOOL_REUSED = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+
+@step
+def plate():
+    body = bd.Solid.make_box(20, 20, 8)
+    tool = bd.Solid.make_cylinder(3, 30)
+    bored = body.cut(tool)
+    bored.label = "bored"
+    peg = bd.Pos(30, 0, 0) * tool  # the tool again, after the cut
+    peg.label = "peg"
+    return bd.Compound(children=[bored, peg], label="plate")
+"""
+
+    PROFILE_REUSED = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+
+@step
+def boss():
+    profile = bd.Face(bd.Wire.make_circle(4))
+    body = bd.Solid.extrude(profile, bd.Vector(0, 0, 4))
+    body.label = "body"
+    lid = bd.Solid.extrude(profile, bd.Vector(0, 0, -1))  # the profile again, after the extrusion
+    lid.label = "lid"
+    return bd.Compound(children=[body, bd.Pos(0, 0, -2) * lid], label="boss")
+"""
+
+    def setUp(self) -> None:
+        temporary = generated_cad_directory(prefix="memo-build-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CADGEN_KERNEL_MEMO", None)
+        kernel_memo.install()
+        kernel_memo.clear()
+        self.addCleanup(kernel_memo.clear)
+
+    def build(self, script: Path, *flags: str) -> tuple[dict, dict]:
+        """``(record, memo stats delta)`` of ``python script.py flags``, run in this process."""
+        from cadgen.cli._run_model import run_model_argv
+        from cadgen.store.records import read_record
+
+        before = kernel_memo.stats()
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = run_model_argv([str(script), *flags])
+        self.assertEqual(code, 0, err.getvalue())
+        record = read_record(script)
+        self.assertIsNotNone(record, f"{script.name} has no record")
+        return record, _delta(before, kernel_memo.stats())
+
+    def components(self, record: dict) -> dict[str, bytes]:
+        """Each component of the record's tree, by cid: its encoded BREP."""
+        from cadgen.store.objects import read_object
+        from cadgen.store.trees import get_tree
+
+        return {cid: read_object(entry["brep"]) for cid, entry in get_tree(record["tree"])["components"].items()}
+
+    def assert_cold_and_hot_agree(self, name: str, source: str) -> None:
+        script = self.root / f"{name}.py"
+        script.write_text(source, encoding="utf-8")
+        cold, cold_stats = self.build(script)
+        cold_components = self.components(cold)
+        self.assertEqual(len(cold_components), 2)
+        self.assertEqual((cold_stats["hits"], cold_stats["unreplayable"], cold_stats["errors"]), (0, 0, 0))
+        hot, hot_stats = self.build(script, "--force")
+        self.assertEqual((hot_stats["misses"], hot_stats["unreplayable"], hot_stats["errors"]), (0, 0, 0))
+        self.assertEqual(hot_stats["hits"], cold_stats["misses"], "every construction of the cold run hit")
+        self.assertEqual((hot["tree"], hot["key"]), (cold["tree"], cold["key"]))
+        self.assertEqual(self.components(hot), cold_components)
+
+    def test_a_tool_reused_after_its_boolean_builds_the_same_cold_and_hot(self) -> None:
+        self.assert_cold_and_hot_agree("plate", self.TOOL_REUSED)
+
+    def test_a_profile_reused_after_its_extrusion_builds_the_same_cold_and_hot(self) -> None:
+        self.assert_cold_and_hot_agree("boss", self.PROFILE_REUSED)
 
 
 if __name__ == "__main__":

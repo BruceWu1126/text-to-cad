@@ -387,11 +387,13 @@ why the memo is correct where the operation cache cadgen once kept
 fresh shapes, and model code that held an edge across an operation found
 nothing. Every boolean the layer sees runs non-destructive, so it leaves its
 inputs as it was given them and its result shares every sub-shape it did not
-change; what another operation does to its inputs (a tolerance it raises, a
-representation it adds) is captured as the operation ran, replayed on a hit
-and undone when a later run no longer runs the operation, so a cold run and a
-hot run write the same bytes; an input changed in a way no replay expresses
-makes its maker forget it. The memo never reaches the store and
+change; what another operation does to its inputs (an extrusion clears its
+profile's `Free` flag and appends representations to the profile's edges) is
+captured as each sub-shape's state before and after -- tolerance, flags, how
+many representations it holds -- replayed on a hit and undone when a later
+run no longer runs the operation, so a cold run and a hot run write the same
+bytes; a change that state does not express makes the input's maker forget it.
+The memo never reaches the store and
 never outlives the worker: a cold run computes everything, and
 `CADGEN_KERNEL_MEMO=0` turns hits off and nothing else -- every call runs and is
 keyed and traced as ever. The memo's key for the construction that made a
