@@ -97,10 +97,11 @@ export interface RendererViewProps {
   file: FileMetadata;
   source: FileSource;
   /**
-   * The renderer shows its file fullscreen (the CAD viewer's Preview), or no longer does: the
-   * navbar steps aside while it lasts.
+   * The navbar's box for the renderer's own view controls, last at its right end (the CAD
+   * viewer's Display and Studio, for a 3D view); null where no navbar is drawn (a compact view),
+   * when the renderer draws them over its view instead.
    */
-  onFullscreenChange: (fullscreen: boolean) => void;
+  navbarSlot?: HTMLElement | null;
   onReady: (ready: boolean) => void;
   /**
    * Show another file, by its absolute path, in this view (a robot's mesh). Absent where the view

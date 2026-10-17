@@ -32,7 +32,7 @@ export const TreeRowSurface = forwardRef(function TreeRowSurface({
     'relative flex min-w-0 w-full items-center gap-1 rounded-md pr-2 text-left font-normal transition-colors', dense ? 'text-tiny' : 'text-xs',
     active ? 'bg-accent text-accent-foreground' : 'text-foreground/80 hover:bg-accent/50',
     cursor && !active && 'bg-accent/30', className
-  )} style={{ height: touch ? TREE_ROW_TOUCH_HEIGHT : dense ? TREE_ROW_DENSE_HEIGHT : TREE_ROW_HEIGHT, ...style }} {...props}>{children}</Component>;
+  )} data-tree-row="" style={{ height: touch ? TREE_ROW_TOUCH_HEIGHT : dense ? TREE_ROW_DENSE_HEIGHT : TREE_ROW_HEIGHT, ...style }} {...props}>{children}</Component>;
 });
 
 /** A branch's disclosure: one light chevron, turned down while it is open. A leaf keeps its place. */

@@ -89,9 +89,8 @@ not — a DXF's 2D drawing, which draws its own surface without the shell — ha
 Studio at all, no control and not a disabled one, and nothing that asks for it
 (a link or a host request, should either come to) takes it there: it keeps
 the normal view. The CAD app's Full size, inline, is the host's display mode, not
-the Studio: it shows the normal view, of any file. The Studio is fullscreen
-(`onFullscreenChange`, below): the navbar, with everything in it (the app menu and the
-explorer too), steps aside while it lasts. It never uses the browser Fullscreen API.
+the Studio: it shows the normal view, of any file. The Studio keeps the navbar, so the app
+menu and the explorer still lead to other files; the host is not told it is on.
 The Studio and the tools view are two states: entering leaves the tools view's state as it
 is (the pose, the routine, the selection, hidden and isolated parts, Explode and Clip,
 measurements, the camera, the tool and its panels) and the Studio starts from the model as
@@ -124,9 +123,9 @@ person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
 A renderer's controls for the view are the renderer's own, never the navbar's: the CAD
 viewer's for a 3D view (Display and the Studio) end its tool strip. A renderer that shows its
-file fullscreen (the CAD viewer's Studio) says so through `onFullscreenChange(true)`, and
-`false` when it stops: the navbar steps aside while it lasts, and the renderer draws its own
-controls (the Studio's, in the view's top-right corner: Studio settings and Exit studio). The host's `captureRequest`
+file in a mode of its own (the CAD viewer's Studio) draws that mode's controls itself, inside
+the view (the Studio's, in its top-right corner: Studio settings and Exit studio); the navbar
+stays over it. The host's `captureRequest`
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
 

@@ -56,7 +56,7 @@ File-tab chrome uses normal-weight type. The navbar's file name, the explorer's 
 the model tree's rows, and filter matches use muted/primary text color for emphasis,
 never bold weight. The explorer's rows are compact 24px lines in 12px text, the size of
 the section titles and the filter above them, a folder opening inline under itself; the
-file sidebar's trees (Features, Links) are 24px lines in its smaller 11px text
+file sidebar's trees (Model tree, Links) are 24px lines in its smaller 11px text
 ([the file sidebar](docs/settings-ui.md#the-file-sidebar-and-the-tool-stack)). Both inset
 row backgrounds 4px from their horizontal edges, including selected, hovered and
 filtered rows; nesting adds indentation inside that gutter.
@@ -85,7 +85,7 @@ src/
   library/           a host's home: the models opened before, to open again, and their pictures
   renderers/
     kit/            the frame every viewer file shares: viewport, tools, panels, Display settings, status
-    step/           STEP: Features tree, Position, routines
+    step/           STEP: model tree, Position, routines
     robot/          URDF, SRDF and SDF: Position and Links
     glb/, mesh/     GLB, and STL/3MF triangle meshes
     dxf/            2D drawings
@@ -249,10 +249,10 @@ Annotate, Measure, Explode and Clip; a robot's Select — then, after a thin rul
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
 Annotate's tools, style and history; Explode's and Clip's slider rows.
 What there is to read of the file is the file sidebar at the top-left, whatever the tool
-(`kit/tools/FileSidebar.jsx`): an assembly's Features, a robot's Links, Position, an SDF's
+(`kit/tools/FileSidebar.jsx`): an assembly's Model tree, a robot's Links, Position, an SDF's
 metadata, and Animation for a file with routines, a tile each at the top-left, a tile opening its
 section in a panel under them, one at a time; each section's panel is sized from its
-bottom-right grip, Quick Edit's, and keeps its own size. On a phone the tiles lead the strip. Sidebar sections stay mounted, so a tree keeps its scroll and expansion;
+bottom-right grip, Quick Edit's, and keeps its own size. On a phone it is one tile, opening one panel with the sections as tabs. Sidebar sections stay mounted, so a tree keeps its scroll and expansion;
 only what is on screen does background work. What is picked is Quick Edit's chips. Links is
 the description's link tree, with the Model tree's rows and search box; see
 [robot links](docs/cad-renderer.md#robot-links).

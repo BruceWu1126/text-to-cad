@@ -134,7 +134,7 @@ import { applySourceAppearanceToMeshData, sourceAppearanceGeometry } from "@text
 import { stepPartNameFromFile } from "@text-to-cad/core/lib/step/productName.js";
 // The geometry modes that pick faces or edges, never the part (`selectGeometryMode`).
 const TOPOLOGY_FILTERS = new Set(["faces", "edges", "topology"]);
-// The shape a geometry mode gives the Features tree: one that picks no geometry leaves the
+// The shape a geometry mode gives the model tree: one that picks no geometry leaves the
 // person's own tree, as All does; Faces and Edges together open it as either does.
 const treeShape = mode => (mode === "none" ? "all" : mode === "topology" ? "faces" : mode);
 const EMPTY_MATERIAL_OVERRIDES = Object.freeze({});
@@ -1795,7 +1795,7 @@ function StepSurfaceBody({ view, data }) {
     if (!normalizedNodeId) {
       return;
     }
-    // The picked row is scrolled to in the Features tree, which an assembly shows whenever Select is up.
+    // The picked row is scrolled to in the model tree, which an assembly shows whenever Select is up.
     setActiveTreeNodeScrollKey(source === "viewer" || source === "reference" ? `${source}:${Date.now()}:${normalizedNodeId}` : "");
     if (expandAncestors || expandSelf || source === "reference") {
       expandStepTreeAroundNode(normalizedNodeId, { expandSelf });
@@ -1970,7 +1970,7 @@ function StepSurfaceBody({ view, data }) {
       : [...current, normalizedNodeId]);
   }, []);
 
-  // The geometry Select's filter picks sets the Features tree's shape (`ModelingTree.jsx`), and the expansion here
+  // The geometry Select's filter picks sets the model tree's shape (`ModelingTree.jsx`), and the expansion here
   // with it: expansion is also what the viewport can pick and whose topology is loaded. Leaving
   // All keeps the person's own expansion to put back on the way in. Parts opens every assembly
   // and shuts every part, so no topology is loaded; Faces and Edges open every assembly and keep
@@ -2600,7 +2600,7 @@ function StepSurfaceBody({ view, data }) {
     if (TOPOLOGY_FILTERS.has(selectionFilter)) {
       // A face or edge filter never falls back to the part. A press on an assembly part whose
       // faces and edges are not loaded asks for that part's topology — that part alone, as its
-      // Features row would — and picks again at the same point once they can be picked.
+      // model tree row would — and picks again at the same point once they can be picked.
       if (isAssemblyView && loadableStepTreeTopologyNodeIdSet.has(nextReferenceId) &&
         !pickableTopologyPartIds.has(nextReferenceId) && Number.isFinite(clientX) && Number.isFinite(clientY)) {
         setPendingTopologyPick({ partId: nextReferenceId, clientX, clientY, pointerType, multiSelect });
@@ -2706,7 +2706,7 @@ function StepSurfaceBody({ view, data }) {
 
   // The three menus, as descriptors built from the surface as it stands (`file-view/stepMenus.js`):
   // the model as a whole (a press on empty space, over a loaded model), one node's part menu
-  // (the viewport and a Features row alike), and topology (a pick's faces and edges, or a row's).
+  // (the viewport and a model tree row alike), and topology (a pick's faces and edges, or a row's).
   const openGlobalViewerContextMenu = useCallback(({ clientX = 0, clientY = 0 } = {}) => {
     setViewerContextMenu(selectedMeshData ? {
       x: Number(clientX) || 0,
@@ -3036,7 +3036,7 @@ function StepSurfaceBody({ view, data }) {
 
   /**
    * The actions behind the one part menu, wherever it was opened: the viewport
-   * under Select, and a Features tree row under any tool. A tree row's menu can
+   * under Select, and a model tree row under any tool. A tree row's menu can
    * therefore ask for something the active tool cannot show, so every action
    * lands in Select first — exactly what clicking a tree row already does.
    */
@@ -3363,7 +3363,7 @@ function StepSurfaceBody({ view, data }) {
     copyText: chipCopyText });
 
   // ---- the file sidebar --------------------------------------------------------------------------
-  // Down the left: the Features tree and Position's joints, whatever the tool; the kept effects are
+  // Down the left: the model tree and Position's joints, whatever the tool; the kept effects are
   // the tool stack's.
   // The Studio's Position section moves the Studio's own pose (`studioPose`, above).
   const studioPositionControls = useMemo(() => {
@@ -3389,7 +3389,7 @@ function StepSurfaceBody({ view, data }) {
     selectActive: !previewing,
     selectMode: treeShape(selectionFilter),
     // In an assembly, a part's faces and edges load when a press under Faces or Edges first
-    // reaches it; the Features panel says so until the press can be picked.
+    // reaches it; the model tree says so until the press can be picked.
     loadingGeometry: Boolean(pendingTopologyPick),
     positionRuntime: previewing ? studioPositionControls : motion.positionControls,
     selectedMeshData: selectedDisplayMeshData,

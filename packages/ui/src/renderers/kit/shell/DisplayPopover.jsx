@@ -26,10 +26,12 @@ function ModeChoice({ value, Icon, children, ...props }) {
  * with no room for that tile it opens from the strip's More button instead (`anchor`, its ref, with
  * `open` held by the strip).
  */
-export default function DisplayPopover({ disabled = false, boundary = null, tooltipSide = "top", onOpenChange, mode, projection, anchor = null, open: held, children }) {
+export default function DisplayPopover({ disabled = false, boundary = null, tooltipSide = "top", onOpenChange, mode, projection, anchor = null, open: held, triggerClassName = null, align = "center", children }) {
   const [ownOpen, setOpen] = useState(false);
   const open = held ?? ownOpen;
-  const tileClass = useStripButtonClass();
+  const stripClass = useStripButtonClass();
+  // Its tile is the strip's, or another row's where it stands elsewhere (the navbar's).
+  const tileClass = triggerClassName ?? stripClass;
   const [editing, setEditing] = useState(false);
   const back = useRef(null);
   const settingsButton = useRef(null);
@@ -64,7 +66,7 @@ export default function DisplayPopover({ disabled = false, boundary = null, tool
         {Icon ? <Icon /> : null}
       </ToolbarButton>
     </PopoverTrigger>}
-    <PopoverContent align="center" sideOffset={6} collisionPadding={8} collisionBoundary={boundary || undefined}
+    <PopoverContent align={align} sideOffset={6} collisionPadding={8} collisionBoundary={boundary || undefined}
       aria-label={detail ? `${detail.label} settings` : "Display mode"} data-display-settings={detail?.value}
       onEscapeKeyDown={event => {
         // Committed value inputs cancel their draft on Escape before this surface closes.

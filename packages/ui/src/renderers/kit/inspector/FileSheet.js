@@ -43,10 +43,9 @@ export const FILE_SHEET_VALUE_BADGE_INPUT_CLASSES = [
 ].join(" ");
 export const FILE_SHEET_COMPACT_BUTTON_CLASSES = "h-7 px-2 text-tiny text-muted-foreground hover:text-foreground";
 export const FILE_SHEET_COMPACT_INPUT_CLASSES = "!h-7 px-2 text-tiny !text-foreground";
-// A joint's slider: shadcn's, in its row's 16px band (its thumb that tall), with no fill — a joint's
-// zero is mostly mid-range, so a bar from the left end up to the thumb would mean nothing. Its
-// track is a shade darker than shadcn's muted, so it still shows on a light panel unfilled.
-export const FILE_SHEET_PRECISION_SLIDER_CLASSES = "h-4 [&_[data-slot=slider-range]]:hidden [&_[data-slot=slider-track]]:bg-foreground/15";
+// A joint's slider: in its row's 16px band, with no fill — a joint's zero is mostly mid-range, so a
+// bar from the left end up to the thumb would mean nothing.
+export const FILE_SHEET_PRECISION_SLIDER_CLASSES = "h-4 [&_[data-slot=slider-range]]:hidden";
 
 /** A section heading: 24px, regular 11px, never a disclosure (`docs/settings-ui.md`). */
 export const FILE_SHEET_SECTION_HEADING_CLASSES = "flex h-6 min-w-0 items-center gap-2 px-2 text-tiny font-normal leading-4 text-foreground";

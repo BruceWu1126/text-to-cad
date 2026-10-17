@@ -3,9 +3,9 @@ import { VIEWPORT_INSET_PX } from "../shell/viewportLayout.js";
 
 /**
  * The viewer's chrome around the Studio (preview mode). `children` — the tool strip and its stack,
- * Quick Edit, everything a person edits with — is hidden and inert while `active`. The Studio is
- * fullscreen: the navbar steps aside, and the tool strip with it, and the Studio's own controls
- * stand in the corners, always there: at the top-right `end` (its settings button and the way out),
+ * Quick Edit, everything a person edits with — is hidden and inert while `active`. The navbar stays
+ * (the way to other files); the tool strip steps aside, and the Studio's own controls stand in the
+ * view's corners, always there: at the top-right `end` (its settings button and the way out),
  * tiles with no surface under them, the model showing through; under it `panel`, its settings,
  * docked at the view's right edge while they are open. The top-left is the file sidebar's, the
  * Studio's sections (Position, Animation), drawn by the frame (`RendererShell.jsx`).

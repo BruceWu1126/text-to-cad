@@ -128,10 +128,10 @@ none.
   stops 8px above the cube's line (`VIEWPORT_STACK_BOTTOM`), so it never runs past the
   view.
 - **File sidebar** at the top-left, 8px in: a toolbar of tiles, one per section of what there
-  is to read of the file — a STEP assembly's Features, a robot's Links, Position, an SDF's
+  is to read of the file — a STEP assembly's Model tree, a robot's Links, Position, an SDF's
   metadata, the routines' Animation — whatever tool is in hand; a tile opens its section in a
-  panel under the tiles, one at a time, down to 8px off the view's bottom at most. On a phone the
-  tiles lead the strip (see
+  panel under the tiles, one at a time, down to 8px off the view's bottom at most. On a phone it
+  is one tile, opening one panel with the sections as tabs (see
   [The file sidebar and the tool stack](#the-file-sidebar-and-the-tool-stack)).
 - **Quick Edit** at top-right, 8px in, a STEP's or a robot's: the box of the note a
   person writes to their agent, there only while something is picked, drawn or measured
@@ -245,7 +245,7 @@ is; a hidden one keeps its choice for when it shows again.
 The geometry ticked is picked as one mode (`step/workbench/selectionFilter.js`'s
 `selectGeometryMode`): Parts with Faces or Edges, a press takes the face or edge it lands on
 where the part's topology can be picked, and the part elsewhere; Parts alone, the part;
-Faces or Edges without Parts, that topology alone. The mode sets the Features tree's shape:
+Faces or Edges without Parts, that topology alone. The mode sets the model tree's shape:
 with Parts and Faces or Edges, or no geometry at all, it is the person's own (put back as it
 was when they left it, with the owners of what is still selected kept open); Parts alone
 opens every assembly and shuts every part; Faces or Edges without Parts open every assembly. A
@@ -254,7 +254,7 @@ viewport is revealed at its part's row. Outside the person's own shape the discl
 locked (chevrons shown, not pressable) and Expand/Collapse leave the row menus. Under Faces
 or Edges a part's topology is asked for as its row comes on screen in the tree, never for a
 whole large assembly at once; a viewport press on a part not yet loaded loads that part and
-picks, and the Features heading says "Loading…" meanwhile. In a large assembly (more than 300
+picks, and the model tree's heading says "Loading…" meanwhile. In a large assembly (more than 300
 rows of assemblies and parts, `LARGE_TREE_ROWS`) a part's row coming on screen asks for
 nothing: the pointer resting on the part in the viewport (150ms) or pressing it asks.
 
@@ -322,13 +322,13 @@ the strip is the same for every STEP file.
 
 **The file sidebar** (`kit/tools/FileSidebar.jsx`) holds what there is to read of the file,
 whatever tool is in hand — the strip is for using tools, the sidebar for reading the file: a STEP
-assembly's **Features** (a part file, whose tree would be its one row, has none), then
+assembly's **Model tree** (a part file, whose tree would be its one row, has none), then
 **Position**, where the file has joints to move; a robot's **Links**, an `.sdf`'s **SDF**, then
 **Position**, where a joint can be driven; and, after them, the shell's own **Animation** for a
 file with routines (`kit/tools/playbar/AnimationSection.jsx`). A file with none of them has no
 sidebar. It is a toolbar of its own at the view's top-left, 8px in, on the strip's line and of
 its surface, padding and 24px tiles (`data-file-sidebar-tools`, "File sidebar"): one tile per
-section, a tree's a tree icon named for it (Features, Links), Position's a spline, Animation's a
+section, a tree's a tree icon named for it (Model tree, Links), Position's a spline, Animation's a
 clapperboard, any other section's a page named for it. The Studio offers its Position and
 Animation alone, their tiles bare in its top-left corner; the rest stay mounted, out of sight.
 
@@ -347,10 +347,10 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   past that the whole panel scrolls, as one, the head pinned to its top
   (`data-pinned`). A tree's rows are mounted as that scroll brings them into view
   (`kit/inspector/VirtualRows.jsx`).
-- **Search.** A tree is headed by its search box ("Filter model", "Filter links": "Search…"),
+- **Filter.** A tree is headed by its filter ("Filter model", "Filter links": "Filter…"), in place of a title,
   always there, a tree row's 24px and 11px text, its icon over the rows' glyph column
   (`primitives/tree-filter.jsx`'s `TreeFilterInput`, `dense`), its X clearing it once something
-  is typed, Escape too. Features' search box is followed by "Loading…" while a part's faces load
+  is typed, Escape too. The model tree's filter is followed by "Loading…" while a part's faces load
   and **Show all** while parts are hidden. Every tree's search is one ranked flat search
   (`kit/inspector/modelTreeSearch.js`).
 - **Size, each section's own.** A section's panel opens a tool panel's width
@@ -361,14 +361,18 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   bounds). Its width runs from 120px (`FILE_SIDEBAR_MIN_WIDTH`: room for a heading's name and its
   buttons; a tree's names truncate) to half the viewer, its cap from 64px to its room. One write,
   when the gesture lets go (or per key), never per pointer move; each section keeps its own size
-  (`sidebar:<id>`), so Features may be wide and tall while Position stays narrow.
-- **On a phone** the tiles are the touch strip's first group, ruled off from its tools, there
-  being no room beside the strip for a toolbar of their own (`FileSidebar`'s `onTiles` hands
-  them to the frame, which passes them to `FloatingToolBar` as `sections`); they are the last of
-  the strip to go into More tools. A tile opens its section's panel under the strip and the tool's
-  row, at the left, down to a little past the view's middle at most so the model shows under it,
-  at a phone's own width (256px, within the view's inset: a joint's name beside its slider), with
-  no grip. In the Studio its tiles are its top-left's, as on a desktop.
+  (`sidebar:<id>`), so the model tree may be wide and tall while Position stays narrow.
+- **On a phone** the sidebar is one touch tile, **Sidebar** (a panel icon,
+  `data-file-sidebar-toggle`), at the left of the strip's line, the strip padded clear of it on
+  both sides and keeping to its tools (`FileSidebar`'s `phone`). It opens one panel on the section
+  last open (the first, at first): its top a row of tabs, one per section with its tile's icon
+  (shadcn's `ToggleGroup`, `data-file-sidebar-tab`), and the panel's one X at that row's right end
+  (a section's head then has none; a panel of one section has no tabs and keeps its head's X).
+  The panel runs down to the view's bottom inset, or is as tall as its section if that is less,
+  stopping above Quick Edit's peek (`--cad-quick-edit-peek`), at a phone's own width (288px,
+  within the view's inset), with no grip. Its text is the panel's one size (13px, as the
+  Display menu's), its tree rows 36px with 16px glyphs, its filter, dropdowns and value fields
+  32px (`globals.css`). In the Studio its tiles are its top-left's, as on a desktop.
 - **The layout is the person's.** The section sizes are one of the tab's settings, across its
   files (`CadPreferences.toolStack`: `{ panels: { [id]: { width?, height? } }, collapsed: { [id]: boolean } }`,
   a section's panel under `sidebar:<id>`, kept beside the appearance; any other key a stored
@@ -424,7 +428,7 @@ Its panels follow these rules:
   under every tool. No pick or tool opens or closes the explorer, on desktop or mobile.
 
 Tree rows inset their backgrounds 4px from the panel's edges, and the search box
-shares that inset. A tree in the file sidebar (Features, Links) is dense (`TreeRowSurface`'s
+shares that inset. A tree in the file sidebar (Model tree, Links) is dense (`TreeRowSurface`'s
 `dense`): 24px rows in the panels' 11px text, and ONE light 12px glyph per row in one
 column, as the explorer has: a subassembly's or folded group's disclosure chevron, turned down
 while open, or a part's box (Links draws its chevrons alone), 4px before the name. The glyph
@@ -458,7 +462,7 @@ navbar a 48px row of 36px controls; the strip and the sub-toolbars 36px tiles (t
 **More tools** holding what does not fit; Annotate's controls its chevron's menu, with no row).
 The scale is set once, in `globals.css`, for the whole page while a phone's view is on it, so a
 portalled menu, select or hint is the same size as the chrome it opened from. There is no view
-cube; the file sidebar's tiles lead the strip, its sections opening in a panel under it; and
+cube; the file sidebar is one tile at the strip's left, its sections tabs of one panel; and
 Quick Edit is a bottom sheet (see
 [Quick Edit](#quick-edit)). The explorer is the same popover, never wider than the window less
 1rem. The shortcut hint is hidden.
@@ -593,9 +597,10 @@ slider in the flexible left column, with a compact value field (24px tall, about
 five characters wide, tabular figures; degrees read "90.0°") in the right column
 of the same row; joint rows are 4px apart. Long labels truncate with a full-name
 hint and never take the slider's width. Every slider in the viewer is shadcn's slider
-as shadcn draws it (`primitives/slider.jsx`): a row sizes and places it, never restyles its
-track or thumb — but for a joint's, which has no fill (a joint's zero is mostly mid-range, so a
-bar from the left end means nothing) and a track a shade darker so it shows unfilled. Slider thumbs are named after their
+(`primitives/slider.jsx`), with a 12px thumb (16px on a phone, in a 36px band) and a track a
+shade darker than muted, for these dense, see-through panels: a row sizes and places it, never
+restyles its track or thumb — but for a joint's, which has no fill (a joint's zero is mostly
+mid-range, so a bar from the left end means nothing). Slider thumbs are named after their
 joint, and every slider reports its value at its step's precision (never float
 noise). Writes pose the model at once.
 
@@ -628,7 +633,7 @@ by absolute path; resting on it lights its picks; its X drops them.
 Viewport picks reach individual faces and edges. In an assembly, faces and edges load per part, when first
 needed: under a face or edge filter, a press on a part whose faces are not
 loaded loads that part alone and then picks what is under the pointer — one
-press, with "Loading…" in the Features heading meanwhile. Until
+press, with "Loading…" in the model tree's heading meanwhile. Until
 then, hovering such a part lights the whole part.
 Shift-click adds to a selection in the viewport; Shift, Ctrl or Cmd does in a
 tree (robots select several links this way). Double-click, or a row's Isolate,
@@ -751,21 +756,21 @@ The **Studio** (preview mode, `previewing` in code) is available for every 3D fi
 or not, and for nothing else: a renderer declares it (`useRendererShell`'s `previewable`: STEP,
 GLB, STL/3MF, URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Studio
 button, not a disabled one, and never enters it, whatever asks. It is the shell's own state;
-hosts neither start nor observe it, beyond giving the page over to it. Its button is a play
-triangle ("Studio"), last on the tool strip, after Display. A press covers the view at once
+hosts neither start nor observe it. Its button is a play triangle ("Present"), at the navbar's
+right end after Display (the renderer's `navbarSlot`; a host with no navbar has both end the
+strip). A press covers the view at once
 ("Preparing studio…", in the scene's backdrop colour) and enters the Studio under the cover,
 which lifts once Render is on screen, detail has stopped refining for a moment and the studio
 frame's picture has converged (every sample drawn: the viewport's `pictureProgress`; a view
 that is moving, a routine playing, has nothing to wait for) — at least 700ms, at most five
-seconds — fading from the finished picture. It is fullscreen: the renderer
-says so (`onFullscreenChange`), and the navbar (its menu and the explorer with it) steps aside
-while it lasts; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
+seconds — fading from the finished picture. The navbar stays, so its menu and the explorer
+still lead to other files; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, joint handles, cube and context menu are gone (`PreviewChrome`, hidden and inert).
 
-Its controls stand in the corners, always there, the strip's tiles with no surface under them,
-the model showing through. At the top-right (`PreviewChrome`'s `end`): **Studio settings** (a
-sliders icon, lit while its panel is open) and the way out, an X (**Exit studio**), their hints
-below them. Under them, docked at the view's right edge, the settings panel
+Its controls are always there. At the navbar's right end, in Display's and Present's place:
+**Studio settings** (a sliders icon, pressed while its panel is open) and the way out, an X
+(**Exit studio**), their hints below them (a host with no navbar has them at the view's
+top-right, `PreviewChrome`'s `end`, tiles with no surface under them). Under them, docked at the view's right edge, the settings panel
 (`kit/shell/StudioSettings.jsx`), closed each time the Studio opens and put away by its button
 or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
 time the Studio opens, and its **Speed** is a dropdown of speeds — then Render's own settings

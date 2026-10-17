@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Clapperboard, FileText, ListTree, Spline } from "lucide-react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Clapperboard, FileText, ListTree, PanelLeft, Spline, X } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@text-to-cad/ui/primitives/toggle-group";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { cn } from "@text-to-cad/ui/utils";
 import { FILE_SIDEBAR_SURFACE_CLASS, FLOATING_CHROME_SURFACE_CLASS } from "../../../lib/floatingSurface.js";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
-import { STRIP_BUTTON_CLASS } from "./stripTouch.js";
+import { STRIP_BUTTON_CLASS, TOUCH_STRIP_BUTTON_CLASS } from "./stripTouch.js";
 import { capturePointer, releasePointer } from "../../../lib/pointerCapture.js";
 import ResizeGrip from "./ResizeGrip.jsx";
 import { ToolStackContext } from "./ToolStack.jsx";
@@ -12,14 +13,14 @@ import { FILE_SIDEBAR_MIN_WIDTH, TOOL_PANEL_WIDTH, fileSidebarSizeId, clampToolP
 
 const KEY_NUDGE_PX = 16;
 // A phone's panel: a joint's name and its slider side by side, within the view's inset.
-const PHONE_PANEL_WIDTH = 256;
+const PHONE_PANEL_WIDTH = 288;
 
 /**
  * The file's sidebar: what there is to read of the file, its hierarchy, properties and controls,
  * whatever tool is in hand. The toolbar is for using tools; this is for the file. It is a toolbar
  * of its own at the viewer's top-left, one tile per section (`ToolPanel`s drawn as sections,
- * `ToolStackContext`'s `sidebar`): a tree by its name (**Features**, **Links**: a tree icon, its
- * search box heading the panel), **Position**
+ * `ToolStackContext`'s `sidebar`): a tree by its name (**Model tree**, **Links**: a tree icon, its
+ * filter heading the panel), **Position**
  * for a model's joints, **Animation** for its routines, and any other section by its name. None is open as a file opens; a tile
  * opens its section in a panel under the toolbar, a second press on it closes it, and so does the
  * section's own collapse button; another tile opens its section instead. One section at a time.
@@ -37,10 +38,11 @@ const PHONE_PANEL_WIDTH = 256;
  * bounds), written back once a gesture lets go — each section's own (`layout.panels["sidebar:<id>"]`). It opens a tool panel's
  * width, and may be made narrower than that (`FILE_SIDEBAR_MIN_WIDTH`).
  *
- * On a phone the tiles are the tool strip's first group, there being no room beside it for a
- * toolbar of their own: `onTiles` hands them to the frame, which draws them there (each `{ id,
- * label, Icon, active, onSelect }`), and this draws the panel alone, under the strip, at a phone's
- * own width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
+ * On a phone (`phone`) the toolbar is one touch-sized tile, the sidebar's (a panel icon), which
+ * opens the panel on the section last open (the first, at first) and closes it; the panel's top is
+ * a row of tabs, one per section with its tile's icon, and it runs down the view to its bottom
+ * inset (clear of Quick Edit's peek), or as tall as the section if that is less, at a phone's own
+ * width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
  *
  * `sections` limits the sections on offer to those ids (the Studio's: Position and Animation; the
  * rest stay mounted, out of sight), and `bare` draws its toolbar's tiles with no surface under
@@ -48,12 +50,12 @@ const PHONE_PANEL_WIDTH = 256;
  *
  * @param {{ layout: { panels: object, collapsed: object },
  *   onLayoutChange(patch: object | ((layout: object) => object)): void, hidden?: boolean,
- *   sections?: string[] | null, bare?: boolean, onTiles?: ((tiles: object[]) => void) | null,
+ *   sections?: string[] | null, bare?: boolean, phone?: boolean,
  *   style?: import("react").CSSProperties, children?: import("react").ReactNode }} props
  *   `style` places the room the toolbar and its panel may take; they hang from its top-left corner.
  */
 export default function FileSidebar({ layout: stored, onLayoutChange, hidden = false, sections: allowedSections = null, bare = false,
-  onTiles = null, style, children }) {
+  phone = false, style, children }) {
   const layout = useMemo(() => normalizeToolStack(stored), [stored]);
   const room = useRef(null), bar = useRef(null), scroller = useRef(null), column = useRef(null);
   // The room's height, the most the bar may take, and the viewer's width, which bounds the bar's.
@@ -165,7 +167,6 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   // Each section's panel has a size of its own, the person's, kept under its id.
   const sizeId = fileSidebarSizeId(shown);
   const size = { ...layout.panels[sizeId], ...draft };
-  const phone = Boolean(onTiles);
   const width = phone ? Math.min(PHONE_PANEL_WIDTH, (measured.viewer || window.innerWidth) - 16) : clampWidth(size.width ?? TOOL_PANEL_WIDTH);
   const cap = size.height !== undefined ? clampHeight(size.height) : measured.room || null;
   const closeSection = useCallback(() => setOpenId(null), []);
@@ -178,6 +179,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     meta.current.set(id, next);
     setMetaTick(tick => tick + 1);
   }, []);
+  // A phone's panel with more than one section is headed by their tabs and its one X.
+  const tabbed = phone && ids.length > 1;
   const sections = useMemo(() => ({
     sidebar: true,
     reveal,
@@ -185,6 +188,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     allowed: allowedSections ? id => allowedSections.includes(id) : null,
     openSection: shown,
     closeSection,
+    // Whether a section's head carries its X: not under a phone's tabs, whose row has the panel's.
+    closeInHead: !tabbed,
     register,
     viewerWidth: measured.viewer,
     size: () => null,
@@ -192,7 +197,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
     collapsed: (id, fallback) => layout.collapsed[id] ?? fallback,
     settle,
     room: () => room.current?.clientHeight || 0,
-  }), [reveal, shown, closeSection, register, measured.viewer, layout, settle, allowedSections]);
+  }), [reveal, shown, closeSection, tabbed, register, measured.viewer, layout, settle, allowedSections]);
   const tiles = ids.map(id => {
     const section = meta.current.get(id) || {};
     const tile = section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
@@ -204,12 +209,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   void metaTick;
   // A press of a tile: its section opens, or closes if it was the open one.
   const toggle = useCallback(id => setOpenId(current => (current === id ? null : id)), []);
-  const tileKey = tiles.map(tile => `${tile.id}:${tile.label}`).join(" ");
-  useEffect(() => {
-    onTiles?.(tiles.map(({ id, label, Icon }) => ({ id, label, Icon, active: open === id, onSelect: () => toggle(id) })));
-    // `tileKey` stands for `tiles`, rebuilt each render.
-  }, [onTiles, tileKey, open, toggle]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => onTiles?.([]), [onTiles]);
+  // A phone's one tile: the panel opens on the section last open, or the first, and closes.
+  const togglePanel = () => setOpenId(current => (current && ids.includes(current) ? null : ids.includes(lastOpen.current) ? lastOpen.current : tiles[0]?.id ?? null));
 
   // The corner moves both: the width and the cap, from the size on screen.
   const drag = useRef(null);
@@ -253,6 +254,19 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
       "rounded-md", FILE_SIDEBAR_SURFACE_CLASS,
       open ? "pointer-events-auto" : "pointer-events-none -translate-x-[calc(100%+1rem)] opacity-0")}
     style={{ width, maxHeight: cap ?? undefined }}>
+    {/* A phone's panel is headed by its sections' tabs, each with its tile's icon, and the panel's
+        one X at the row's right end (its sections' heads then have none). */}
+    {tabbed ? <div className="flex shrink-0 items-center gap-1 border-b border-border/60 p-1" data-file-sidebar-tabs="">
+      <ToggleGroup type="single" value={shown ?? ""} onValueChange={id => { if (id) setOpenId(id); }} aria-label="Sidebar sections" className="min-w-0 flex-1">
+        {tiles.map(({ id, label, Icon }) => <ToggleGroupItem key={id} value={id} aria-label={label} className="h-9" data-file-sidebar-tab={id}>
+          <Icon className="size-4.5" aria-hidden="true" />
+        </ToggleGroupItem>)}
+      </ToggleGroup>
+      <button type="button" aria-label="Close sidebar" onClick={closeSection} data-file-sidebar-close=""
+        className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
+        <X className="size-4" aria-hidden="true" />
+      </button>
+    </div> : null}
     <ScrollArea className="min-h-0 flex-1" viewportRef={scroller} viewportProps={{ "data-file-sidebar-scroller": "" }}>
       {/* The section's head needs no rule above it: the panel's edge is there. */}
       <div ref={column} className="flex flex-col [&>section>[data-sidebar-head]]:border-t-0">
@@ -266,7 +280,12 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   return <>
     <div hidden={hidden} className="pointer-events-none absolute z-20 flex flex-col items-start gap-2" style={style} data-file-sidebar-room="">
       {/* The sidebar's toolbar: the tool strip's surface, padding and tiles, on the strip's line. */}
-      {tiles.length && !onTiles ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+      {phone && tiles.length ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
+        className={cn("pointer-events-auto inline-flex shrink-0 items-center rounded-md p-1", FLOATING_CHROME_SURFACE_CLASS)}>
+        <ToolbarButton label="Sidebar" tooltipSide="bottom" className={TOUCH_STRIP_BUTTON_CLASS} active={Boolean(open)} aria-pressed={Boolean(open)}
+          onClick={togglePanel} data-file-sidebar-toggle=""><PanelLeft aria-hidden="true" /></ToolbarButton>
+      </div> : null}
+      {tiles.length && !phone ? <div role="group" aria-label="File sidebar" data-file-sidebar-tools=""
         className={cn("pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-md p-1", bare ? "border border-transparent" : FLOATING_CHROME_SURFACE_CLASS)}>
         {tiles.map(({ id, label, Icon }) => <ToolbarButton key={id} label={label} tooltipSide="bottom" className={STRIP_BUTTON_CLASS}
           active={open === id} aria-pressed={open === id} onClick={() => toggle(id)} data-file-sidebar-tool={id}>

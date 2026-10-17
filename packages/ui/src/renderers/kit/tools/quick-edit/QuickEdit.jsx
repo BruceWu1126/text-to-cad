@@ -198,6 +198,15 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     return () => observer.disconnect();
   }, [docked, open, boxNode]);
   useEffect(() => { if (docked && unfolded) takeKeyboard(); }, [docked, unfolded, takeKeyboard]);
+  // While the sheet peeks, the view knows how tall the peek is (`--cad-quick-edit-peek`), so what
+  // runs down the view (a phone's file sidebar) stops above it.
+  const peek = docked && open && !hidden && folded && stops ? stops[0] : null;
+  useEffect(() => {
+    const element = viewerElement?.current;
+    if (!element) return undefined;
+    if (peek) element.style.setProperty("--cad-quick-edit-peek", peek); else element.style.removeProperty("--cad-quick-edit-peek");
+    return () => element.style.removeProperty("--cad-quick-edit-peek");
+  }, [peek, viewerElement]);
 
   // A pill the selection takes in is highlighted as its text is: it shows no selection of its own.
   useEffect(() => {
@@ -225,7 +234,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
   // Everything happens inside the press: the views are read as they are, and the host binds its
   // destination (and the clipboard its write) before their files are made.
   const run = action => {
-    if (!ready) return;
+    if (!actionReady(action)) return;
     setError("");
     let outcome;
     try {
@@ -253,6 +262,29 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
     canSend ? { id: "send", label: "Send", hint: "Send now", Icon: ArrowUp } : null,
   ].filter(Boolean);
   const primary = actions.at(-1).id;
+  // Copy needs no note (the selection, the annotation and the views go as they are); Queue and Send do.
+  const actionReady = id => (id === "copy" ? !pending && !disabled : ready);
+  // The note's buttons under it: Copy Prompt in words where it is the only one, else an icon each,
+  // the last the primary. On a phone they are as tall as the peek's (40px), a finger's.
+  const ctas = () => actions.length === 1
+    ? <Button type="button" variant="default" size="sm" className={cn("gap-1.5 text-xs", docked ? "h-10 px-3.5" : "h-7 px-2.5")}
+      aria-label={copied ? "Prompt copied" : undefined} aria-busy={pending === "copy" || undefined} disabled={!actionReady("copy")} onClick={() => run("copy")} data-quick-edit-action="copy">
+      {copied ? <Check className={docked ? "size-4" : "size-3.5"} aria-hidden="true" /> : <Copy className={docked ? "size-4" : "size-3.5"} aria-hidden="true" />}
+      {copied ? "Copied" : "Copy Prompt"}
+    </Button>
+    : actions.map(({ id, label, hint, Icon }) => <TooltipHint key={id} content={hint} side="bottom">
+      <Button type="button" variant={id === primary ? "default" : "secondary"} size="icon-sm" className={docked ? "size-10" : "size-7"}
+        aria-label={id === "copy" && copied ? "Prompt copied" : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-action={id}>
+        {id === "copy" && copied ? <Check className={docked ? "size-4" : "size-3.5"} aria-hidden="true" /> : <Icon className={docked ? "size-4" : "size-3.5"} aria-hidden="true" />}
+      </Button>
+    </TooltipHint>);
+  // The same actions on a phone's peeking sheet, beside the field that opens it: plain icon buttons
+  // as tall as the field (the note's own buttons, in colour, are under it once the sheet opens).
+  const peekActions = () => actions.map(({ id, label, Icon }) =>
+    <Button key={id} type="button" variant="outline" size="icon" className="size-10 shrink-0 bg-background/80"
+      aria-label={id === "copy" && copied ? "Prompt copied" : label} disabled={!actionReady(id)} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-peek-action={id}>
+      {id === "copy" && copied ? <Check className="size-4" aria-hidden="true" /> : <Icon className="size-4" aria-hidden="true" />}
+    </Button>);
 
   // What is written, read back from the field: its text, each chip its reference. An emptied field
   // is emptied of what an editor leaves behind (a stray line break), so its placeholder shows.
@@ -383,16 +415,23 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
             </span>
           </TooltipHint> : null}
         </p>
-        <button type="button" aria-label="Close Quick Edit" className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
+        {/* On a phone the sheet's way out is a finger's size, in the foreground. */}
+        {docked ? <Button type="button" variant="ghost" size="icon" className="-mr-1.5 size-8 text-foreground" aria-label="Close Quick Edit" onClick={clearAll}>
+          <X className="size-4" aria-hidden="true" />
+        </Button> : <button type="button" aria-label="Close Quick Edit" className={TOOL_PANEL_BUTTON_CLASS} onClick={clearAll}>
           <X className="size-3" aria-hidden="true" />
-        </button>
+        </button>}
       </div>
       {shownChips.length ? <ReferenceChips chips={shownChips} className="-mt-0.5" /> : null}
       {/* Peeking, the sheet's way in: a field to write in, which opens it with the keyboard in the note. */}
-      {docked && folded ? <button type="button" aria-expanded={false} onClick={unfold} data-quick-edit-fold=""
-        className="flex h-10 w-full items-center gap-2 rounded-md border border-input bg-background/80 px-3 text-left text-ui text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
-        <PenLine className="size-4 shrink-0" aria-hidden="true" />Describe your changes…
-      </button> : null}
+      {/* Its text the note's size: it becomes the note as the sheet opens. */}
+      {docked && folded ? <div className="flex items-center gap-1.5" data-quick-edit-peek="">
+        <button type="button" aria-expanded={false} onClick={unfold} data-quick-edit-fold=""
+          className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-input bg-background/80 px-3 text-left text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
+          <PenLine className="size-4 shrink-0" aria-hidden="true" /><span className="truncate">Describe your changes…</span>
+        </button>
+        {peekActions()}
+      </div> : null}
       {/* Plain text with references inline. It grows with what is written, up to 10rem, until a drag of
           the corner gives it a height, and scrolls in the chrome's own ScrollArea past that; its
           placeholder shows while it is empty. */}
@@ -407,18 +446,7 @@ export default function QuickEdit({ resource, references = EMPTY, chips = null, 
       {error ? <p role="alert" className="text-tiny text-destructive">{error}</p> : null}
       {/* Buttons of the ordinary shape, all solid: the primary in its colour, the others secondary.
           Copy Prompt alone (a host that takes no message) says so in words, its icon first. */}
-      <div className="flex items-center justify-end gap-1.5">
-        {actions.length === 1 ? <Button type="button" variant="default" size="sm" className="h-7 gap-1.5 px-2.5 text-xs"
-          aria-label={copied ? "Prompt copied" : undefined} aria-busy={pending === "copy" || undefined} disabled={!ready} onClick={() => run("copy")} data-quick-edit-action="copy">
-          {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
-          {copied ? "Copied" : "Copy Prompt"}
-        </Button> : actions.map(({ id, label, hint, Icon }) => <TooltipHint key={id} content={hint} side="bottom">
-          <Button type="button" variant={id === primary ? "default" : "secondary"} size="icon-sm" className="size-7"
-            aria-label={id === "copy" && copied ? "Prompt copied" : label} disabled={!ready} aria-busy={pending === id || undefined} onClick={() => run(id)} data-quick-edit-action={id}>
-            {id === "copy" && copied ? <Check className="size-3.5" aria-hidden="true" /> : <Icon className="size-3.5" aria-hidden="true" />}
-          </Button>
-        </TooltipHint>)}
-      </div>
+      <div className="flex items-center justify-end gap-1.5">{ctas()}</div>
       </div>
       {/* The grip every resizable box over the viewport has (`ResizeGrip.jsx`), in this one's bottom-left; docked, it spans the view. */}
       {docked ? null : <ResizeGrip corner="bottom-left" aria-hidden="true" onPointerDown={startResize} data-quick-edit-resize="" className="@max-md/cad-viewport:hidden" />}

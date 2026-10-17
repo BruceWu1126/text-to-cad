@@ -119,7 +119,7 @@ const presentModeFor = (previewing, fileMode) => (previewing ? "render" : fileMo
  * @param {ReturnType<typeof import("../tools/toolModes.js").createToolModes> | null} [options.toolModes]  Omitted
  *   by a renderer with no tools: the shell then has no active tool and a saved tab records none.
  * @param {boolean} [options.previewable]  The renderer's view is 3D and offers the Studio (preview): the model
- *   fullscreen in Render, its tools put away. Each renderer of a 3D view declares it; without it (a 2D view)
+ *   in Render, its tools put away. Each renderer of a 3D view declares it; without it (a 2D view)
  *   there is no Studio at all — no button on the strip, not a disabled one — and anything that asks for it
  *   leaves the normal view on screen (`previewing` stays false, `setPreviewing` does nothing).
  * @param {{ previewing: boolean, set: (previewing: boolean) => void }} [options.preview]  Preview mode

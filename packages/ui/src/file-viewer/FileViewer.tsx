@@ -1,6 +1,6 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { FileText } from "lucide-react";
-import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, useCallback, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { Button } from "../primitives/button.jsx";
 import { Spinner } from "../primitives/spinner.js";
@@ -42,10 +42,8 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
   const [rootRef, mobile] = useViewerMobileMeasure();
   const viewerElement = useRef<HTMLDivElement | null>(null);
   const bindElement = useCallback((element: HTMLDivElement | null) => { viewerElement.current = element; rootRef(element); }, [rootRef]);
-  // A renderer showing its file fullscreen has the page to itself, until it says otherwise or goes.
-  const [fullscreen, setFullscreen] = useState(false);
-  useEffect(() => { setFullscreen(false); }, [key]);
-  const onFullscreenChange = useCallback((full: boolean) => { if (currentKey.current === key) setFullscreen(full); }, [key]);
+  // The navbar's box the renderer draws its view controls into (`navbarSlot`).
+  const [navbarSlot, setNavbarSlot] = useState<HTMLDivElement | null>(null);
   const [readiness, setReadiness] = useState<{ key: string; ready: boolean } | null>(null);
   const [navActions, setNavActions] = useState<{ key: string; actions: readonly FileNavigationAction[] } | null>(null);
   const onNavigationActionsChange = useCallback((actions: readonly FileNavigationAction[]) => { if (currentKey.current === key) setNavActions({ key, actions }); }, [key]);
@@ -70,10 +68,10 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     if (!shown) return null;
     const Renderer = shown.prepared.Component;
     return <RenderBoundary key={key} onError={onError}><Renderer notice={notice} key={key} file={shown.file} source={source}
-      onFullscreenChange={onFullscreenChange} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
+      navbarSlot={navbarSlot} onReady={onReady} onNavigationActionsChange={onNavigationActionsChange}
       onOpenFile={onOpenFile} appearance={appearance}
       state={rendererState} onStateChange={setRendererState} reload={reload} /></RenderBoundary>;
-  }, [shown, key, onError, notice, source, onFullscreenChange, onReady,
+  }, [shown, key, onError, notice, source, navbarSlot, onReady,
     onNavigationActionsChange, onOpenFile, appearance, rendererState, setRendererState, reload]);
 
   let body: ReactNode;
@@ -102,9 +100,9 @@ export function FileViewer({ file, host, renderers, state, onStateChange, colorS
     [host.links, appSettings, colorScheme, appearance.platform]);
   // The navbar is drawn over every file, never over the host's home (which holds its menu itself)
   // or a view drawn small with no chrome (`compact`: an offscreen picture).
-  const navbar = Boolean(path) && !appearance.compact && !fullscreen;
+  const navbar = Boolean(path) && !appearance.compact;
   return <ViewerMobileContext.Provider value={mobile}><ViewerHostContext.Provider value={host}><ViewerElementContext.Provider value={viewerElement}><div className="text-to-cad-file-viewer text-ui font-normal flex h-full min-h-0 min-w-0 flex-col overflow-hidden" ref={bindElement} data-viewer-layout={mobile ? "mobile" : "desktop"} tabIndex={-1}>
-    {navbar ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={path} explorer={explorer} fileMenu={fileMenu} trailing={trailing} update={update} fullSize={fullSize} /> : null}
+    {navbar ? <ViewerNavbar onHome={host.navigation.home} menu={menu} history={history} file={path} explorer={explorer} fileMenu={fileMenu} trailing={trailing} update={update} fullSize={fullSize} controlsRef={setNavbarSlot} /> : null}
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       <div className="min-w-0 flex-1 overflow-hidden">{body}</div>
     </div>

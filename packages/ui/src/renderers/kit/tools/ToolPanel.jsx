@@ -227,8 +227,8 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   // name and the chevron after it are the fold's button and nothing else of the row is (the
   // chevron, a tree row's size, shown while the pointer is on the button or it has the keyboard,
   // turned down while open); its actions, its X and,
-  // on the first, the bar's own toggle at its right end. A header (a tree's find field, while it
-  // is open) takes the row's place, the bar's toggle still after it. The head docks at the bar's bottom while the section is below
+  // on the first, the bar's own toggle at its right end. A header (a tree's filter) takes the
+  // heading's place, the section's X still after it: the filter is the panel's top. The head docks at the bar's bottom while the section is below
   // the view, and pins to its top while the view is in the section (`FileSidebar.jsx`); a press on
   // a docked head opens its section, if it is folded, and brings it to the top.
   const pressHead = event => {
@@ -242,11 +242,11 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   };
   // The section's X ends its head, whether its heading or its search box is up: it closes the
   // panel, its tile no longer pressed.
-  const sidebarToggle = inSidebar && stack.closeSection ? <button type="button" aria-label={`Close ${tileTitle.toLowerCase()}`} data-file-sidebar-close=""
+  const sidebarToggle = inSidebar && stack.closeSection && stack.closeInHead !== false ? <button type="button" aria-label={`Close ${tileTitle.toLowerCase()}`} data-file-sidebar-close=""
     className={TOOL_PANEL_BUTTON_CLASS} onClick={stack.closeSection}><X className="size-3" aria-hidden="true" /></button> : null;
   const sidebarHead = inSidebar ? <div data-sidebar-head=""
     className="sticky z-10 border-t border-border/60 px-1 pb-0.5 pt-1 data-[pinned]:z-20 data-[pinned]:bg-background data-[stuck]:bg-background data-[stuck]:shadow-[0_-1px_3px_rgb(0_0_0/0.12)] data-[pinned]:shadow-[0_1px_3px_rgb(0_0_0/0.12)]">
-    {header ? <div className="flex min-w-0 items-center gap-1 pr-0.5"><div className="min-w-0 flex-1">{header}</div>{sidebarToggle}</div>
+    {header ? <div className="flex min-w-0 items-center gap-1 pr-0.5" data-tool-panel-header=""><div className="min-w-0 flex-1">{header}</div>{sidebarToggle}</div>
       : <div data-tool-panel-heading=""
       // The name is as far in from the bar's left edge as from its top (12px).
       className={cn("relative flex h-6 min-w-0 items-center gap-1 pl-2 pr-0.5 text-foreground", folding && "select-none")}>

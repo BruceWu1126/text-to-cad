@@ -38,7 +38,7 @@ export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useSt
  * @property {string} label
  * @property {import("react").ReactNode} icon
  * @property {boolean} [disabled]
- * @property {boolean} [active]  A control that stays on (a phone's Features): a ticked row in More.
+ * @property {boolean} [active]  A control that stays on (a phone's view control): a ticked row in More.
  * @property {import("react").ReactNode} tile
  * @property {() => void} [onSelect]
  * @property {(props: { anchor: import("react").RefObject<HTMLElement>, open: boolean, onOpenChange(open: boolean): void }) => import("react").ReactNode} [popover]
@@ -47,10 +47,10 @@ export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useSt
 // A plain function, not a component: the strip's own output is the buttons. A tool with a menu is
 // its button as every tool's, then the menu's small chevron, a button of its own with its own
 // hover, as a design tool's toolbar has it (`ToolSettingsMenu`'s "chevron" trigger).
-function toolButton(tool, className = STRIP_BUTTON_CLASS, attributes = null) {
+function toolButton(tool, className = STRIP_BUTTON_CLASS) {
   const active = tool.active === true;
   const button = <ToolbarButton tooltipSide="top" label={tool.label} active={active} disabled={tool.disabled}
-    className={className} aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()} {...attributes}>
+    className={className} aria-pressed={active} aria-description={tool.description} onClick={() => tool.onSelect()}>
     {tool.icon}
   </ToolbarButton>;
   if (!tool.menu) return button;
@@ -66,16 +66,14 @@ const rule = <span role="separator" aria-orientation="vertical" className="mx-0.
  * tools it is handed, left to right, then, after a thin rule, the view's own controls (`views`:
  * a 3D view's Display and the Studio), which are no tools: pressing one leaves the tool in hand as it
  * is. It holds no state and knows no tool by name. On a phone (`touch`) it is one row of
- * touch-sized tiles, and what does not fit goes, from its end, into a More menu (`TouchStrip`);
- * there the file sidebar's tiles (`sections`, each a `ViewportTool` whose press opens or closes
- * its section) lead it, ruled off from the tools, the last to go into More.
+ * touch-sized tiles, and what does not fit goes, from its end, into a More menu (`TouchStrip`).
  *
- * @param {{ tools: ViewportTool[], views?: ViewportViewControl[], sections?: ViewportTool[], touch?: boolean }} props
+ * @param {{ tools: ViewportTool[], views?: ViewportViewControl[], touch?: boolean }} props
  */
-export default function FloatingToolBar({ tools = [], views = [], sections = [], touch = false }) {
+export default function FloatingToolBar({ tools = [], views = [], touch = false }) {
   // Nothing to hold, no strip: an empty bar is never drawn.
-  if (!tools.length && !views.length && !sections.length) return null;
-  if (touch) return <TouchStrip tools={tools} views={views} sections={sections} />;
+  if (!tools.length && !views.length) return null;
+  if (touch) return <TouchStrip tools={tools} views={views} />;
   return (<div className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools">
       <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-wrap")}>
         {tools.map(tool => <Fragment key={tool.id}>{toolButton(tool)}</Fragment>)}
@@ -93,19 +91,17 @@ export default function FloatingToolBar({ tools = [], views = [], sections = [],
 const TILE_PX = 36, CHEVRON_PX = 20, GAP_PX = 4, RULE_PX = 5, FRAME_PX = 10;
 
 /**
- * How many of the strip's entries (the sidebar's tiles, its tools, then its view controls) fit, in
- * order, in `room` pixels: all of them, or as many as leave room for the More button that holds the
- * rest. A rule stands between each two groups shown.
- * @param {{ width: number, view: boolean, section?: boolean }[]} entries
+ * How many of the strip's entries (its tools, then its view controls) fit, in order, in `room`
+ * pixels: all of them, or as many as leave room for the More button that holds the rest.
+ * @param {{ width: number, view: boolean }[]} entries
  */
 export function touchStripFit(entries, room) {
-  const group = entry => (entry.section ? "section" : entry.view ? "view" : "tool");
   const width = (count, more) => {
     const shown = entries.slice(0, count);
     const items = shown.length + (more ? 1 : 0);
-    const rules = Math.max(0, new Set(shown.map(group)).size - 1);
+    const ruled = shown.some(entry => !entry.view) && shown.some(entry => entry.view);
     return FRAME_PX + shown.reduce((sum, entry) => sum + entry.width, 0) + (more ? TILE_PX : 0)
-      + Math.max(0, items - 1) * GAP_PX + rules * (RULE_PX + GAP_PX);
+      + Math.max(0, items - 1) * GAP_PX + (ruled ? RULE_PX + GAP_PX : 0);
   };
   if (width(entries.length, false) <= room) return entries.length;
   let count = entries.length - 1;
@@ -119,7 +115,7 @@ export function touchStripFit(entries, room) {
  * (an ellipsis, last on the strip). A tool there is a checkbox row, ticked while it is in hand; a
  * view control is its press, or its popover, which then opens from More.
  */
-function TouchStrip({ tools, views, sections }) {
+function TouchStrip({ tools, views }) {
   const root = useRef(null);
   const more = useRef(null);
   const [room, setRoom] = useState(Infinity);
@@ -137,23 +133,17 @@ function TouchStrip({ tools, views, sections }) {
     return () => observer.disconnect();
   }, []);
   const entries = [
-    ...sections.map(tool => ({ tool, view: false, section: true, width: TILE_PX })),
     ...tools.map(tool => ({ tool, view: false, width: TILE_PX + (tool.menu ? CHEVRON_PX : 0) })),
     ...views.map(view => ({ control: view, view: true, width: TILE_PX }))
   ];
   const count = touchStripFit(entries, room);
   const shown = entries.slice(0, count), hidden = entries.slice(count);
-  const shownSections = shown.filter(entry => entry.section), shownTools = shown.filter(entry => !entry.view && !entry.section),
-    shownViews = shown.filter(entry => entry.view);
+  const shownTools = shown.filter(entry => !entry.view), shownViews = shown.filter(entry => entry.view);
   const overflowViews = hidden.filter(entry => entry.view).map(entry => entry.control);
   const popoverView = overflowViews.find(view => view.id === openView && view.popover);
   return <StripTouchProvider value={true}>
     <div ref={root} className="relative z-20 flex max-w-full shrink-0 flex-col items-end gap-1" data-cad-toolbar="tools" data-touch-strip="">
       <div role="group" aria-label="Interaction tools" className={cn(GROUP_CLASS, "flex-nowrap")}>
-        {shownSections.length ? <span role="group" aria-label="File sidebar" className="inline-flex items-center gap-1" data-file-sidebar-tools="">
-          {shownSections.map(({ tool }) => <Fragment key={tool.id}>{toolButton({ ...tool, icon: <tool.Icon aria-hidden="true" /> }, TOUCH_STRIP_BUTTON_CLASS, { "data-file-sidebar-tool": tool.id })}</Fragment>)}
-        </span> : null}
-        {shownSections.length && (shownTools.length || shownViews.length) ? rule : null}
         {shownTools.map(({ tool }) => <Fragment key={tool.id}>{toolButton(tool, TOUCH_STRIP_BUTTON_CLASS)}</Fragment>)}
         {shownTools.length && shownViews.length ? rule : null}
         {shownViews.length ? <span className="inline-flex items-center gap-1" data-view-controls="">
@@ -186,7 +176,7 @@ function TouchStrip({ tools, views, sections }) {
               </DropdownMenuItem>
               : <DropdownMenuCheckboxItem key={entry.tool.id} checked={entry.tool.active === true} disabled={entry.tool.disabled}
                 className="min-h-9 gap-2 text-ui" onSelect={() => entry.tool.onSelect()}>
-                <span className="flex size-4.5 items-center justify-center [&>svg]:size-4.5" aria-hidden="true">{entry.section ? <entry.tool.Icon /> : entry.tool.icon}</span>{entry.tool.label}
+                <span className="flex size-4.5 items-center justify-center [&>svg]:size-4.5" aria-hidden="true">{entry.tool.icon}</span>{entry.tool.label}
               </DropdownMenuCheckboxItem>)}
           </DropdownMenuContent>
         </DropdownMenu> : null}

@@ -75,8 +75,8 @@ cleanup, while it still belongs to the same source.
 ## The navbar and the explorer
 
 The navbar is drawn over every file from the moment one is asked for, and never over
-the home, for a `compact` view (a picture: the home's thumbnails) or while a renderer
-shows its file fullscreen. Left to right:
+the home or for a `compact` view (a picture: the home's thumbnails); the CAD viewer's
+Studio keeps it. Left to right:
 
 - the text-to-cad "C" logo (named Menu, with no chevron), which opens the app menu
   (`navigation/AppMenu.jsx`): Back to files where the host has a home

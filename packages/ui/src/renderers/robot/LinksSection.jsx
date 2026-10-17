@@ -163,9 +163,9 @@ export default function LinksSection({ description = null, components = EMPTY, p
   const clearSelection = () => selection.select("");
 
   return <>
-    {/* Headed by its search box, always there: Escape or its X clears it. */}
+    {/* Headed by its filter, always there: Escape or its X clears it. */}
     <ToolPanel id="tree" label="Links" fit="tree" resizable collapsible={false} hidden={!active}
-      header={<TreeFilterInput label="Filter links" placeholder="Search…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense className="px-0 shadow-none"/>}>
+      header={<TreeFilterInput label="Filter links" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense className="px-0 shadow-none"/>}>
       <div className="flex flex-col text-tiny" aria-label="Robot links">
         <div ref={listRef} className="px-1 py-1" aria-label="Robot tree area"
           onClick={event => { if (!event.target.closest("li,button,input")) clearSelection(); }}>

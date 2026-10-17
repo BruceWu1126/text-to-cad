@@ -1,7 +1,11 @@
 import { VIEWPORT_INSET_PX, VIEWPORT_STACK_BOTTOM, VIEWPORT_TOP_BAR_PX } from "./viewportLayout.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LoaderCircle, Play, SlidersHorizontal, X } from "lucide-react";
+import { Button } from "@text-to-cad/ui/primitives/button";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
+import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
+import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import { cn } from "@text-to-cad/ui/utils";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
@@ -31,6 +35,10 @@ const INSET = `${VIEWPORT_INSET_PX}px`;
 // The column spans the view within its inset and centres what it holds: positioned from the centre
 // (`left: 50%`) it would shrink to the half right of it, and the strip would wrap at half the view.
 const TOOLBAR_POSITION = Object.freeze({ top: INSET, left: INSET, right: INSET, bottom: VIEWPORT_STACK_BOTTOM });
+// On a phone with a file sidebar its one tile stands at the left of the strip's line (46px: a 36px
+// tile in its toolbar's padding and border), so the strip keeps clear of it on both sides, centred.
+const PHONE_SIDEBAR_TILE_ROOM = `${VIEWPORT_INSET_PX + 46 + 8}px`;
+const TOOLBAR_POSITION_PHONE_SIDEBAR = Object.freeze({ ...TOOLBAR_POSITION, left: PHONE_SIDEBAR_TILE_ROOM, right: PHONE_SIDEBAR_TILE_ROOM });
 // The file sidebar runs down the left edge, the viewer's full height within its inset: the cube is
 // in the bottom-right corner.
 // It keeps the view's top-left corner, unless it would reach under the strip, when it starts below
@@ -43,13 +51,23 @@ const STUDIO_SECTIONS = Object.freeze(["position", "animation"]);
 // Once quiet, the picture is checked this often until it has converged.
 const PREVIEW_COVER_MIN_MS = 700, PREVIEW_COVER_QUIET_MS = 400, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_CONVERGE_MS = 50;
 const SIDEBAR_POSITION = Object.freeze({ top: `var(--cad-sidebar-top, ${INSET})`, left: INSET, bottom: INSET });
-// On a phone the sidebar's tiles lead the strip (`FileSidebar`'s `onTiles`), and an open section is
-// its panel under the strip and the tool's row (`--cad-tools-bottom`, measured), at the left, down
-// to a little past the view's middle at most, so the model shows under it.
-const SIDEBAR_POSITION_PHONE = Object.freeze({ top: `var(--cad-tools-bottom, ${2 * VIEWPORT_INSET_PX + VIEWPORT_TOP_BAR_PX}px)`, left: INSET, bottom: "40%" });
+// On a phone the sidebar is one tile at the top-left, on the strip's line, and its panel (the open
+// section, under tabs) runs down from under it to the view's bottom inset, clear of Quick Edit's
+// peek (`--cad-quick-edit-peek`, which the sheet publishes while it peeks).
+const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: `calc(var(--cad-quick-edit-peek, 0px) + ${INSET})` });
 const SIDEBAR_POSITION_PHONE_STUDIO = Object.freeze({ top: INSET, left: INSET });
 
 /** One of the view's controls: a tile of the strip, or of the Studio's corner, named on hover. */
+/** One of the view's controls in the navbar: its icon button, named on hover, below it. */
+function NavbarControl({ label, active = undefined, disabled = false, onClick, children, ...props }) {
+  return <TooltipHint content={label} side="bottom" disabled={active === true}>
+    <Button type="button" variant="ghost" size="icon-xs" aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}
+      className={NAVBAR_CONTROL_CLASS} {...props}>{children}</Button>
+  </TooltipHint>;
+}
+// Display's tile in the navbar: the navbar's own icon button.
+const NAVBAR_DISPLAY_TRIGGER_CLASS = `${NAVBAR_CONTROL_CLASS} [&>svg]:size-3.5!`;
+
 function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, children }) {
   return <ToolbarButton label={label} tooltipSide={tooltipSide} disabled={disabled} onClick={onClick} className={useStripButtonClass()}>
     {children}
@@ -139,8 +157,6 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // The one presentation state: every gate — the viewport's, the renderer's — reads it.
   const { previewing, setPreviewing } = shell;
   // A phone's open section is a sheet up from the bottom, where Quick Edit's peek is: it steps aside.
-  // A phone's sidebar tiles, which the strip draws (`FileSidebar`'s `onTiles`).
-  const [phoneTiles, setPhoneTiles] = useState([]);
   // The Studio's settings panel: closed as the Studio opens, until its button brings it out.
   const [studioPanelOpen, setStudioPanelOpen] = useState(false);
   const stripButtonClass = useStripButtonClass();
@@ -268,13 +284,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     setTimeout(enter, 100);
   };
   const leavePreview = () => setPreviewing(false);
-  // Preview is fullscreen: the page around the view steps aside while it lasts.
-  const onFullscreenChange = view.onFullscreenChange;
-  useEffect(() => {
-    if (!previewing) return undefined;
-    onFullscreenChange?.(true);
-    return () => onFullscreenChange?.(false);
-  }, [previewing, onFullscreenChange]);
+  // The view's controls (Display and the Studio, or the Studio's own) are the navbar's where there is one.
+  const inNavbar = Boolean(view.navbarSlot);
   // Annotate's sub-toolbar, one row under the strip while it is the tool: its tools, what the next mark
   // looks like, and its Undo, Redo and Clear (`annotation/toolbar.jsx`). The annotation itself has no
   // panel: it is Quick Edit's chip (its X clears it, a click copies it).
@@ -478,14 +489,28 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                 </div>
               </div>
 
-              {/* The Studio (preview): fullscreen, the navbar and the tools put away, the model in
+              {/* The Studio (preview): the tools put away and the navbar kept (the way to other files), the model in
                   Render — the tools view never is — and still until Orbit is turned on. Its controls
                   stand in the corners, always there, tiles with no surface under them: the top-right
                   pair, its settings and the way out (an X), the settings a panel docked under them
                   (Orbit, Render's own), closed as it opens; the top-left, the sidebar's Position and
                   Animation (below). Nothing sits under the model. */}
+              {/* The view's controls at the navbar's right end (`view.navbarSlot`), the strip keeping to the
+                  tools: Display and the Studio, for a 3D view (`useRendererShell`'s `previewable`), or
+                  in the Studio its settings (a toggle, the panel docked at the view's top-right) and the
+                  way out. A host with no navbar has them over the view instead: Display and the Studio
+                  ending the strip, the Studio's pair in its top-right corner. */}
+              {inNavbar && shell.previewable && (previewing || !toolsHidden) ? createPortal(previewing ? <>
+                <NavbarControl label="Studio settings" active={studioPanelOpen} disabled={shell.idle}
+                  onClick={() => setStudioPanelOpen(open => !open)} data-studio-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label="Exit studio" onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
+              </> : <>
+                <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}
+                  triggerClassName={NAVBAR_DISPLAY_TRIGGER_CLASS} tooltipSide="bottom" align="end">{frame.display}</DisplayPopover>
+                <NavbarControl label="Present" disabled={shell.idle} onClick={enterPreview}><Play className="size-3.5" aria-hidden="true" /></NavbarControl>
+              </>, view.navbarSlot) : null}
               <PreviewChrome active={previewing}
-                end={<>
+                end={inNavbar ? null : <>
                   <ToolbarButton label="Studio settings" tooltipSide="bottom" active={studioPanelOpen} aria-pressed={studioPanelOpen}
                     disabled={shell.idle} className={stripButtonClass} onClick={() => setStudioPanelOpen(open => !open)} data-studio-settings="">
                     <SlidersHorizontal aria-hidden="true" />
@@ -497,18 +522,17 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   onClose={() => setStudioPanelOpen(false)} render={frame.display("render")} /> : null}>
 
               {/* The file explorer floats over the top-left corner, above the sidebar, which stays drawn under it. */}
-              {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={TOOLBAR_POSITION}
+              {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={mobile && !previewing && (sidebar || hasAnimation) ? TOOLBAR_POSITION_PHONE_SIDEBAR : TOOLBAR_POSITION}
                 data-mobile={mobile ? "" : undefined} data-cad-tool-groups=""><StripTouchProvider value={mobile}>
-                {/* The view's controls end the strip: Display, then the Studio, for a 3D view
-                    (`useRendererShell`'s `previewable`); another has neither. */}
+                {/* Where there is no navbar, the view's controls end the strip: Display, then the Studio. */}
                 <div ref={topControls} className="flex max-w-full shrink-0 flex-col items-center gap-2" data-cad-top-controls="">
-                  <FloatingToolBar tools={stripTools} touch={mobile} sections={mobile && !previewing ? phoneTiles : undefined} views={shell.previewable && !previewing ? [
+                  <FloatingToolBar tools={stripTools} touch={mobile} views={shell.previewable && !previewing && !inNavbar ? [
                     { id: "display", label: "Display", icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
                       tile: <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}>{frame.display}</DisplayPopover>,
                       popover: ({ anchor, open, onOpenChange }) => <DisplayPopover anchor={anchor} open={open} onOpenChange={onOpenChange}
                         boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}>{frame.display}</DisplayPopover> },
-                    { id: "preview", label: "Studio", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
-                      tile: <ViewControl label="Studio" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
+                    { id: "preview", label: "Present", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
+                      tile: <ViewControl label="Present" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
                   ] : []} />
                   {/* The tool in hand's own row, then the view catching up, under the strip. */}
                   {previewing ? null : toolRow}
@@ -530,7 +554,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   One sidebar for both views: in the Studio its tiles are bare, the Studio's top-left,
                   and it offers Position and Animation alone (the Studio's own pose and routine). */}
               {toolsHidden || !(sidebar || hasAnimation) ? null : <FileSidebar style={mobile ? previewing ? SIDEBAR_POSITION_PHONE_STUDIO : SIDEBAR_POSITION_PHONE : SIDEBAR_POSITION}
-                sections={previewing ? STUDIO_SECTIONS : null} bare={previewing} onTiles={mobile && !previewing ? setPhoneTiles : null}
+                sections={previewing ? STUDIO_SECTIONS : null} bare={previewing} phone={mobile && !previewing}
                 layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>
                 {sidebar}
                 {hasAnimation ? <AnimationSection key={frame.modelKey} runtime={playbackRuntime} disabled={viewerLoading || !scene}

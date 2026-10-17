@@ -337,10 +337,10 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
       selected={on} joinAbove={on && at > 0 && highlighted.has(matches[at-1].entry.node.id)} joinBelow={on && at < matches.length-1 && highlighted.has(matches[at+1].entry.node.id)}
       choose={choose} disabled={disabled} partControls={rowControls}/>;
   };
-  // Headed by its search box, always there, then what is loading and Show
-  // all while parts are hidden.
-  return <ToolPanel id="tree" label="Features" fit="tree" resizable collapsible={false} hidden={!active}
-    header={<TreeFilterInput label="Filter model" placeholder="Search…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
+  // Headed by its filter, always there (the tile and the section are named "Model tree", CAD's name for an
+  // assembly's parts tree), then what is loading and Show all while parts are hidden.
+  return <ToolPanel id="tree" label="Model tree" fit="tree" resizable collapsible={false} hidden={!active}
+    header={<TreeFilterInput label="Filter model" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
       className="px-0 shadow-none" trailing={<>
         {loading && <span role="status" className="shrink-0 text-micro text-muted-foreground">Loading…</span>}
         {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}

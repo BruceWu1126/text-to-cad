@@ -1,11 +1,23 @@
+import * as React from "react"
 import { Drawer as DrawerPrimitive } from "vaul"
 
 import { cn } from "@text-to-cad/ui/utils"
 
 // shadcn's drawer (vaul), as shadcn ships it.
 
-function Drawer(props) {
-  return <DrawerPrimitive.Root data-slot="drawer" {...props} />
+// vaul never hands `modal={false}` to the Radix dialog under it, so Radix locks the page's pointer
+// events as the drawer opens and vaul lifts the lock only when it opens the drawer itself: a
+// non-modal drawer opened from outside (`open`) would leave every control outside it dead. It is
+// lifted here, after the dialog's own effect has set it, and again on the next frame.
+function Drawer({ modal = true, open, ...props }) {
+  React.useEffect(() => {
+    if (modal || !open) return undefined
+    const lift = () => { if (document.body.style.pointerEvents === "none") document.body.style.pointerEvents = "" }
+    lift()
+    const frame = requestAnimationFrame(lift)
+    return () => cancelAnimationFrame(frame)
+  }, [modal, open])
+  return <DrawerPrimitive.Root data-slot="drawer" modal={modal} open={open} {...props} />
 }
 
 function DrawerTrigger(props) {
