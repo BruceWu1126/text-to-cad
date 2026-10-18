@@ -1,6 +1,6 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
-import MeasurementCard from '../../../../../dist/renderers/step/components/workbench/MeasurementCard.js';
+import MeasurementCard from '../../../../../dist/renderers/kit/tools/measure/MeasurementCard.js';
 
 afterEach(cleanup);
 

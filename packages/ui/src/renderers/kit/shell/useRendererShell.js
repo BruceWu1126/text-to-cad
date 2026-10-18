@@ -178,13 +178,16 @@ const EMPTY = Object.freeze({});
  * @param {{ chips: object[], marks(): object[], clear(): void } | null} [options.measurements]  The
  *   renderer's measurements, as Quick Edit shows them (`chips`) and its prompt files draw them over
  *   each view (`marks`, `measureDimension.js`'s `MeasurementMark`s); `clear` when the note goes.
+ * @param {boolean} [options.sceneEffects]  The viewport applies the view's model effects to the scene,
+ *   through the scene contract (`ShellViewport`'s `sceneEffects`); a renderer whose own layers apply
+ *   them leaves this off.
  */
 export function useRendererShell({
   view, services, resource, modelKey, revisionKey = "", features, toolModes = null, tool = null, previewable = false, preview = null, scene, load,
   viewSettings = null, viewerRef: providedViewerRef = null,
   animation = null, live = EMPTY, promptReferences = null, promptContext = createViewPromptContext,
   escape = EMPTY, rendererState = null, viewState = null, annotationUnits = "mm", deleteSelection = null,
-  measurements = null,
+  measurements = null, sceneEffects = false,
   onCameraSettled = null, preserveInteractionPixelRatio = false, runtimeLifecycle = null,
   onRuntimeAlert = null, presentationReport = null,
   sceneScaleMode = VIEWER_SCENE_SCALE.CAD
@@ -671,6 +674,8 @@ export function useRendererShell({
     syncSceneBounds: () => viewerRef.current?.syncSceneBounds?.(),
     // State the renderer keeps outside React changed: write the record soon (and on unmount).
     scheduleStateSave: scheduleSessionSave,
+    // The view as the person set it, and its store: what a tool that edits it (a model effect) reads and writes.
+    viewSettings: { view: desiredScene.view, store: viewSettingsStore },
     // Frame-facing (RendererShell).
     frame: {
       view, hostRef, hostElement, sceneBackdrop, modelKey, presentationKey, sceneScaleMode, scene,
@@ -686,7 +691,7 @@ export function useRendererShell({
       resource, captureView, escape: escapeView, currentView, quickEditPrompt,
       // Select is the tool in hand (the default one), where a press on ink picks it before a part.
       selecting: !previewing && Boolean(toolModes) && toolMode === toolModes.defaultMode,
-      annotateToolActive, annotation, history, deletePicked, measurements, animation, display, displayMode, projection,
+      annotateToolActive, annotation, history, deletePicked, measurements, animation, display, displayMode, projection, sceneEffects,
       previewDesiredScene
     }
   };

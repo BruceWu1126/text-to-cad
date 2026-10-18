@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { resolveViewSettings } from '@text-to-cad/core/common/viewSettings.js';
 import { createViewSettingsStore } from './viewSettingsStore.js';
-import { CrossSectionControls, ExplodeControls, clipSummary } from '../../../../dist/renderers/step/components/workbench/ModelViewControls.js';
+import { CrossSectionControls, ExplodeControls, clipSummary } from '../../../../dist/renderers/kit/tools/model-effects/ModelViewControls.js';
 import { FileSheetSettingsSection } from '../../../../dist/renderers/kit/inspector/FileSheet.js';
 
 Object.assign(globalThis, { React });

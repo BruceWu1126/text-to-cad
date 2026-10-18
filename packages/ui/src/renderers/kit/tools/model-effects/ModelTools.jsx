@@ -1,6 +1,6 @@
 import { RotateCcw } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
-import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../../../kit/tools/SubToolbar.jsx";
+import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../SubToolbar.jsx";
 import { ClipFlipButton, CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
 
 /** Separated assembly layers, distinct from an expand affordance. */
@@ -24,8 +24,8 @@ function ClipIcon(props) {
  * hand does nothing; on one whose effect is set it takes it up again, as it is, and on one unset
  * it starts neutral. Its Reset removes the effect, idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
  *
- * Every STEP has both, a part file too: Explode on a single part separates nothing (the viewport
- * explodes only two parts or more), and the strip is the same for every STEP file.
+ * Each is offered where the view's features list it (`ViewFeatures`): a renderer decides which of its
+ * files have them, and a file whose view lists Explode has it even where it separates nothing.
  */
 export function useModelTools({ view, features, store, mesh, disabled, selectedTool, onSelect }) {
   const applied = [

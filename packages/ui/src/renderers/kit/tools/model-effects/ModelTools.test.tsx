@@ -2,7 +2,7 @@ import React from 'react';
 import { resolveViewSettings } from '@text-to-cad/core/common/viewSettings.js';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
+import { useModelTools } from '../../../../../dist/renderers/kit/tools/model-effects/ModelTools.js';
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });

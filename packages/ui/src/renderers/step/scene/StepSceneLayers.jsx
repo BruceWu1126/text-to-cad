@@ -7,7 +7,7 @@ import { renderMemoryAccounting } from "../render/renderMemoryAccounting.js";
 import { useStepPartVisualState, useStepLinework } from "./useStepDisplay.js";
 import { useStepExplode } from "./useStepExplode.js";
 import { useStepHighlights } from "./useStepHighlights.js";
-import { useStepMeasureOverlay } from "./useStepMeasureOverlay.js";
+import { useMeasureOverlay } from "../../kit/tools/measure/useMeasureOverlay.js";
 import { useStepPicking } from "./useStepPicking.js";
 import { useStepPose } from "./useStepPose.js";
 import { releaseStepRuntime, useStepSceneSync } from "./useStepSceneSync.js";
@@ -34,7 +34,7 @@ import ViewportError from "../../kit/status/ViewportError.jsx";
  * | exploded view | `useStepExplode.js` |
  * | pick proxies, B-rep linework, part highlight | `useStepDisplay.js` (`useStepLinework`) |
  * | reference highlight | `useStepHighlights.js` |
- * | measure rulers and the snap indicator | `useStepMeasureOverlay.js` |
+ * | measure rulers and the snap indicator | `kit/tools/measure/useMeasureOverlay.js` |
  * | pointer: hover, tap, double-click, measure picks | `useStepPicking.js` |
  * | Pose knobs | the kit's `JointHandleOverlay` |
  *
@@ -243,7 +243,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
     }
   }, [measureState]);
 
-  useStepMeasureOverlay({
+  useMeasureOverlay({
     measureCanvasRef, measureState, activeMeasurementId, selectedMeasurementIds, hoveredMeasurementId, measureHoverRef, measureModeActive,
     runtimeRef, mountRef, preview, viewerReadyTick
   });

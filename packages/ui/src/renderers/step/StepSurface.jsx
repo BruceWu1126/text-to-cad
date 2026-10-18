@@ -14,8 +14,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import { hasAuthoredMaterials } from "@text-to-cad/core/common/inspectEnvironment.js";
 import { displayRecordsBounds, mergeBoundsList } from "@text-to-cad/core/lib/viewer/autoZoom.js";
 import { VIEWER_PICK_MODE } from "@text-to-cad/core/lib/viewer/constants.js";
-import { dimensionLayoutHit, measureLabelText, measureSeriesColor, measurementMark, screenSpaceDimensionLayout } from "@text-to-cad/core/lib/viewer/measureDimension.js";
-import { TOUCH_HIT_PX } from "../kit/viewport/dom.js";
 import { runtimeModelKeyMatches, toNumber } from "@text-to-cad/core/lib/viewer/modelRuntime.js";
 import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualState.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -34,7 +32,7 @@ import { useViewportLod } from "./render/useViewportLod.js";
 import { lodSceneMayMove, sampleLodCamera } from "./render/lodCameraSample.js";
 import { registerLodDisplaySource } from "./render/lodSceneAdoption.js";
 import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
-import { useModelTools } from "./components/workbench/ModelTools.jsx";
+import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useStepPanels, useStepSelectionChips } from "./components/workbench/StepPanels.js";
 import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
 import { useStepPreviewMotion } from "./workbench/useStepPreviewMotion.js";
@@ -44,7 +42,8 @@ import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
 import { useViewportQualityStatus } from "./components/workbench/hooks/useViewportQualityStatus.js";
 import { editingBuildActive } from "./workbench/editingPreview.js";
-import MeasurementCard from "./components/workbench/MeasurementCard.jsx";
+import { useQuickEditMeasurements } from "../kit/tools/measure/measurementChips.jsx";
+import { measureSelectHandlers } from "../kit/tools/measure/measureSelection.js";
 import { useCadWorkspaceSelection } from "./components/workbench/hooks/useCadWorkspaceSelection.js";
 import { useCadWorkspaceSelectors } from "./components/workbench/hooks/useCadWorkspaceSelectors.js";
 import { useAppliedViewSettings } from "../kit/view-settings/useAppliedViewSettings.js";
@@ -85,7 +84,7 @@ import {
   isLargeStepGlbEntry
 } from "@text-to-cad/core/lib/render/meshCost.js";
 import { createAnimationClock, AnimationClockProvider } from "./workbench/animationClockStore.js";
-import { useStepMeasure } from "./workbench/useStepMeasure.js";
+import { useMeasureSession } from "../kit/tools/measure/useMeasureSession.js";
 import { fileKey } from "./workbench/entryPaths.js";
 import {
   stepModuleTopologyOccurrenceIds
@@ -1408,7 +1407,7 @@ function StepSurfaceBody({ view, data }) {
     Boolean(selectedMeshData) &&
     !stepInteractionBlocked &&
     !viewerLoading;
-  const measure = useStepMeasure({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive });
+  const measure = useMeasureSession({ fileKey: selectedKey, revision: selectedEntry?.hash, picking: measureModeActive });
   const measureMeasurements = measure.measurements;
 
   const filteredViewerReferences = useMemo(() => filterSelectionReferences(viewerPickableReferences, selectFilter),
@@ -1534,26 +1533,8 @@ function StepSurfaceBody({ view, data }) {
   // HERE, in the middle of this function, and not at the top: the hook needs a load report,
   // and what this renderer's load IS depends on the resolved view above it. Nothing about
   // hook order says otherwise — there is one function, and no early return in it.
-  // Measure's results, as Quick Edit's chips — each its colour's ruler and its reading, its X
-  // deleting it, resting on it lighting it, its card the full reading — and as the marks a note's
-  // views are drawn with (`measureDimension.js`'s `measurementMark`, as the viewer draws them).
-  const measurementChips = useMemo(() => measureMeasurements.map((item, index) => {
-    const reading = measureLabelText(item.measurement);
-    // A click copies it as snapshot takes it: the path of a file holding it (`--measurements` reads
-    // it), where the host saves prompt files, else the job's `measurements` entry itself.
-    const mark = measurementMark(item);
-    return { key: `measure-${item.id}`, label: `Measurement ${index + 1}: ${reading}`, text: reading,
-      copy: () => (host.promptFiles?.save
-        ? host.promptFiles.save({ name: promptResource.path.split("/").pop(), kind: "measurement", data: mark })
-        : JSON.stringify(mark)),
-      glyph: "ruler", glyphColor: measureSeriesColor(item.colorIndex),
-      card: <MeasurementCard item={item} />,
-      onRemove: () => measure.onDelete(item.id), onHover: on => measure.hover(on ? item.id : "") };
-  }), [measureMeasurements, measure.onDelete, measure.hover, host.promptFiles, promptResource.path]);
-  const quickEditMeasurements = useMemo(() => (measureMeasurements.length ? {
-    chips: measurementChips, clear: measure.clear,
-    marks: () => measureMeasurements.map(measurementMark).filter(Boolean),
-  } : null), [measureMeasurements, measurementChips, measure.clear]);
+  // Measure's results, as Quick Edit's chips and the marks a note's views are drawn with.
+  const quickEditMeasurements = useQuickEditMeasurements(measure, promptResource);
   const shell = useRendererShell({
     previewable: true, preview,
     view, services, resource: promptResource, modelKey: selectedKey, revisionKey: presentationRevisionKey,
@@ -3402,39 +3383,10 @@ function StepSurfaceBody({ view, data }) {
     showAllHiddenParts: handleShowAllHiddenParts
   });
 
-  // Under Select a press on a measurement picks it (Shift adds or takes away) before any part under
-  // it; a press anywhere else lets go of the measurements, unless Shift keeps them. Picking one lets
-  // go of the parts and references, as picking a part lets go of the measurements.
-  // Only while Select picks measurements.
-  // A touch reaches a measurement from further off (`TOUCH_HIT_PX`) than a cursor does.
-  const measureAt = (clientX, clientY, pointerType = "") => {
-    if (!selects(selectFilter, "measurement")) return null;
-    const runtime = runtimeRefRef.current?.current, element = runtime?.renderer?.domElement;
-    if (!runtime?.camera || !element || !measureMeasurements.length) return null;
-    const rect = element.getBoundingClientRect();
-    const local = { left: 0, top: 0, width: rect.width, height: rect.height };
-    const point = { x: clientX - rect.left, y: clientY - rect.top };
-    return measureMeasurements.findLast(item =>
-      dimensionLayoutHit(screenSpaceDimensionLayout(item.pickA, item.pickB, item.measurement, runtime.camera, local), point, pointerType === "touch" ? TOUCH_HIT_PX : undefined))?.id ?? null;
-  };
-  const selectPress = event => {
-    const id = measureAt(event.clientX, event.clientY, event.pointerType);
-    if (!id) {
-      if (!event.shiftKey && measure.selected.length) measure.select([]);
-      return false;
-    }
-    measure.select(event.shiftKey
-      ? (measure.selected.includes(id) ? measure.selected.filter(other => other !== id) : [...measure.selected, id])
-      : [id]);
-    if (!event.shiftKey) clearAssemblySelection();
-    return true;
-  };
-  // The pointer resting on a measurement lights it (null: it left the view); true while it does.
-  const selectHover = event => {
-    const id = event ? measureAt(event.clientX, event.clientY, event.pointerType) ?? "" : "";
-    if (id !== measure.hovered) measure.hover(id);
-    return Boolean(id);
-  };
+  // Under Select a press on a measurement picks it before any part under it, and resting on one
+  // lights it (`measureSelection.js`); only while Select picks measurements.
+  const { press: selectPress, hover: selectHover } = measureSelectHandlers(measure, () => runtimeRefRef.current?.current,
+    clearAssemblySelection, { picks: selects(selectFilter, "measurement") });
   // Everything picked goes: the parts and references, and the measurements.
   const clearSelected = () => { clearAssemblySelection(); measure.select([]); };
 

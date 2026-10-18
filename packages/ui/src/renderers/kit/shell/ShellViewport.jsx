@@ -42,6 +42,7 @@ import { studioEnvironmentCacheFor } from "../look/studioEnvironmentCache.js";
 import { isKitScene } from "../scene.js";
 import LoadingIndicator from "../status/LoadingIndicator.js";
 import AnnotationOverlay from "../tools/annotate/AnnotationOverlay.jsx";
+import { useSceneEffects } from "../tools/model-effects/useSceneEffects.js";
 import { TOUCH_HIT_PX, prefersCoarsePointer } from "../viewport/dom.js";
 import { annotationAt } from "../../../annotation/geometry.js";
 import { annotationsOnScreen, mountAnnotations } from "../tools/annotate/annotation3d.js";
@@ -87,6 +88,10 @@ const ShellViewport = forwardRef(function ShellViewport({
   focalLength = null,
   themeSettings = null,
   displaySettings = null,
+  // The viewport applies the model effects `displaySettings` holds to the scene, through the scene
+  // contract (`tools/model-effects/useSceneEffects.js`); a renderer whose own layers apply them
+  // leaves this off.
+  sceneEffects = false,
   appearance = "light",
   receiveShadows = false,
   renderMode = false,
@@ -517,6 +522,8 @@ const ShellViewport = forwardRef(function ShellViewport({
       return active ? { gridRadius: active.gridRadius ?? null, bounds: active.modelBounds || null,
         floorZ: active.modelFloorZBelowModel ?? null, studioGroundZ: active.photographicGroundZ ?? null,
         studioGround: ground ? { size: ground.scale.x, center: [ground.position.x, ground.position.y] } : null,
+        // How many planes cut the model just now (Clip).
+        cut: (active.activeClipPlanes || []).length,
         // How far Render's picture has converged (`pictureProgress`).
         studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
     };
@@ -674,6 +681,10 @@ const ShellViewport = forwardRef(function ShellViewport({
     (window.__viewerSurfaceLooks ||= { count: 0 }).count += 1;
     runtime.requestRender();
   }, [scene, surfaceLook, receiveShadows, viewerReadyTick]);
+
+  // The model effects on the scene, after its look (`useSceneEffects.js`).
+  useSceneEffects({ runtimeRef, scene, displaySettings, enabled: sceneEffects, look: surfaceLook, loading: isLoading,
+    viewerReadyTick, onBoundsChanged: () => syncSceneBounds() });
 
   // The look: lighting rig or studio, background, floor, grid and axes.
   useEffect(() => {

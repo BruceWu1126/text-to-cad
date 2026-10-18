@@ -73,7 +73,7 @@ const sameSnapTarget = (left, right) => (left?.referenceId || "") === (right?.re
  * Either way the state object is only replaced when what the pointer SNAPS TO
  * changes (or a hover comes or goes) — otherwise every mouse move would re-render
  * the workspace. The point itself moves every frame, and the overlay draws it from
- * the live hover it is handed (`useStepMeasureOverlay`), not from here.
+ * the live hover it is handed (`useMeasureOverlay`), not from here.
  */
 export function applyMeasureRulerHover(state, hover) {
   const nextHover = hover && isFinitePoint(hover?.point) ? hover : null;

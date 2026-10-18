@@ -485,6 +485,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     focalLength={resolvedScene.camera.focalLength}
                     themeSettings={resolvedScene.theme}
                     displaySettings={resolvedScene.display}
+                    sceneEffects={frame.sceneEffects}
                     appearance={resolvedScene.appearance}
                     receiveShadows={resolvedScene.view.lighting.enabled}
                     renderMode={resolvedScene.render.enabled}

@@ -8,7 +8,7 @@ import { Slider } from "@text-to-cad/ui/primitives/slider";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
 import { FLOATING_SURFACE_CLASS } from "../../../../lib/floatingSurface.js";
-import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../../kit/inspector/FileSheet.js";
+import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.js";
 
 const AXES = Object.freeze(["x", "y", "z"]);
 

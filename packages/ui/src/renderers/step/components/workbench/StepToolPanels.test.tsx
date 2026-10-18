@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ModelingTreeView from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
 import { useStepPanels } from '../../../../../dist/renderers/step/components/workbench/StepPanels.js';
-import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
+import { useModelTools } from '../../../../../dist/renderers/kit/tools/model-effects/ModelTools.js';
 import { buildPositionSection } from '../../../../../dist/renderers/step/components/workbench/MotionControlsSection.js';
 import FloatingToolBar from '../../../../../dist/renderers/kit/tools/FloatingToolBar.js';
 import ToolPanel from '../../../../../dist/renderers/kit/tools/ToolPanel.js';

@@ -54,7 +54,7 @@ export function useStepSelectionChips({ stepTreeRoot, selectedMeshData = null, g
  * none, and Select's filter is the chevron after its button on the strip), then **Position**, its
  * joints, where it has any. What is picked is Quick Edit's to show, as chips
  * (`useStepSelectionChips`). Null where there is neither: no sidebar. The kept effects' panels are
- * the tool stack's (`ModelTools.jsx`); the sidebar itself is the shell's
+ * the tool stack's (`kit/tools/model-effects/ModelTools.jsx`); the sidebar itself is the shell's
  * (`kit/shell/RendererShell.jsx`).
  *
  * `selectActive`: Features is on screen, which is when a pick is scrolled to. `selectMode` is the

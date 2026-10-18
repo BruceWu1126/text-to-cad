@@ -19,12 +19,20 @@ import {
 } from "@text-to-cad/core/lib/viewer/measurement.js";
 import { projectWorldPointToClient } from "@text-to-cad/core/lib/viewer/measureRuler.js";
 
-import { measureRulerDraftMeasurement } from "../workbench/measureRulerState.js";
+import { measureRulerDraftMeasurement } from "./measureRulerState.js";
 
 // What Select has picked, as the annotations and the parts are: the one selection blue.
 const MEASURE_SELECTED_COLOR = "#2979ff";
 
-export function useStepMeasureOverlay({
+/**
+ * Measure's drawing over the viewport, on its own 2D canvas (`measureCanvasRef`): every measurement
+ * taken, as a snapshot draws it (`drawMeasurementMark`), the one in hand labelled; the draft's rubber
+ * band to the live hover (`measureHoverRef`); and, while the tool is in hand, the snap marker and
+ * what it snapped to. It draws right after each render of the scene, so a dimension moves in the
+ * frame the model does, and runs no loop at all while there is nothing to draw. Format-blind: a
+ * pick is `{ point, snapKind }` in the scene's coordinates.
+ */
+export function useMeasureOverlay({
   measureCanvasRef,
   measureState,
   activeMeasurementId = "",
@@ -63,13 +71,16 @@ export function useStepMeasureOverlay({
       return undefined;
     }
     if (!hasOverlayContent) {
-      const idleContext = canvas.getContext("2d");
-      if (idleContext) {
-        idleContext.setTransform(1, 0, 0, 1, 0, 0);
-        idleContext.clearRect(0, 0, canvas.width, canvas.height);
+      // Cleared once, after the last drawing: a canvas never drawn on has nothing to clear.
+      if (canvas.dataset.measureDrawn !== undefined) {
+        const idleContext = canvas.getContext("2d");
+        idleContext?.setTransform(1, 0, 0, 1, 0, 0);
+        idleContext?.clearRect(0, 0, canvas.width, canvas.height);
+        delete canvas.dataset.measureDrawn;
       }
       return undefined;
     }
+    canvas.dataset.measureDrawn = "";
 
     let rafId = 0;
 

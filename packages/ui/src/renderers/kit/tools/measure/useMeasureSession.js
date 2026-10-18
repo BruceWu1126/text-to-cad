@@ -10,9 +10,10 @@ import {
 const NO_MEASUREMENTS = Object.freeze([]);
 
 /**
- * The Measure tool's session in a STEP: the measurement being drawn and the ones taken (between
- * points on the model: it snaps to no edge or face), and which is highlighted. The viewport feeds
- * it picks and hovers; Quick Edit's chips read the measurements.
+ * The Measure tool's session, in any 3D file: the measurement being drawn and the ones taken
+ * (between two points, each where the pick snapped: exact vertices, edges and faces where the
+ * renderer has them, else a mesh's triangles), and which is highlighted. The viewport feeds it picks and hovers; Quick
+ * Edit's chips read the measurements (`measurementChips.jsx`).
  *
  * Measurements outlive the tool (they are cleared on purpose, or with the file's geometry);
  * a draft does not — putting the tool down drops it. The highlighted row follows a new measurement, and otherwise stays where the person
@@ -24,7 +25,7 @@ const NO_MEASUREMENTS = Object.freeze([]);
  * @param {{ fileKey: string, revision: string, picking: boolean }} options  `picking`: the tool
  *   is in hand and can pick now.
  */
-export function useStepMeasure({ fileKey, revision, picking }) {
+export function useMeasureSession({ fileKey, revision, picking }) {
   const [state, setState] = useState(null);
   const [activeId, setActiveId] = useState("");
   const onPick = useCallback((pick) => {
