@@ -261,7 +261,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
         from cadgen.store import parts
 
         self.script.write_text(MODEL.replace('@stl(out="../STL/pair.stl")\n', ""), encoding="utf-8")
-        with mock.patch.object(parts, "request_display", side_effect=RuntimeError("no pool")):
+        with mock.patch.object(parts, "display_requests", side_effect=RuntimeError("no pool")):
             self.assertEqual(self.build()[0], "built", "the build stands")
         warnings = [line for line in self.output.splitlines() if "display data not derived" in line]
         self.assertEqual(warnings, ["[cadgen] warning: pair: display data not derived (RuntimeError: no pool); "

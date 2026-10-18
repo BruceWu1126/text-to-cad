@@ -570,18 +570,16 @@ def stored_keys(keys: dict[str, str]) -> dict[str, str]:
 _BATCH_BYTES = 512 * 1024
 
 
-def request_display(tree_hash: str, *, producer: dict | None = None,
-                    cids: list[str] | None = None) -> "DisplayJob | None":
-    """Have the build pool derive the display data of every part of ``tree_hash`` the store
-    lacks -- jobs (``kind: display``, ``daemon/artifacts.py``) that run on daemon workers
-    while the caller goes on: one, or for a large batch one per share of it
-    (``_BATCH_BYTES``), the shares balanced by BREP size -- and return them as one
-    :class:`DisplayJob`; None when the store holds them all. A build submits it the moment
-    its result exists and waits for it before it reports done
-    (``_internal/generation.py``), so a view of what it built only reads.
+def display_requests(tree_hash: str, *, producer: dict | None = None,
+                     cids: list[str] | None = None) -> "tuple[list[dict], dict[str, str], dict] | None":
+    """The build-pool jobs (``kind: display``, ``daemon/artifacts.py``) that derive the display
+    data of every part of ``tree_hash`` the store lacks: their requests -- one, or for a large
+    batch one per share of it (``_BATCH_BYTES``), the shares balanced by BREP size -- the part
+    key of each part they derive, ``{cid: key}``, and where the tree places each component (what
+    a part's failure is named by); None when the store holds them all. Nothing is submitted.
 
     Which parts are missing is asked of the store alone (``probe``): a tree whose display
-    data is all stored starts no job. ``producer`` is the one a view of the tree selects
+    data is all stored asks for no job. ``producer`` is the one a view of the tree selects
     (its document's), this runtime's when None. ``cids`` restricts the work to those
     components (a parent's own: a child's build derives the child's), every component
     when None."""
@@ -595,19 +593,36 @@ def request_display(tree_hash: str, *, producer: dict | None = None,
     missing = {cid: part for cid, part in missing.items() if probe(part) is None}
     if not missing:
         return None
-    from cadgen.daemon.artifacts import submit_artifact
     from cadgen.store.meshes import placements
+
+    requests = [{"kind": "display", "tree": tree_hash, "cids": batch, "producer": producer}
+                for batch in _batches(missing, components)]
+    return requests, missing, placements(descriptor.get("occurrences"))
+
+
+def submit_display(requests: list[dict], keys: dict[str, str], placed: dict) -> "DisplayJob":
+    """Submit ``requests`` (:func:`display_requests`) to the build pool, from threads of their
+    own, and return them as one :class:`DisplayJob`."""
+    from cadgen.daemon.artifacts import submit_artifact
 
     jobs: list[tuple[Any, dict[str, str]]] = []
     try:
-        for batch in _batches(missing, components):
-            future = submit_artifact({"kind": "display", "tree": tree_hash, "cids": batch, "producer": producer})
-            jobs.append((future, {cid: missing[cid] for cid in batch}))
+        for request in requests:
+            jobs.append((submit_artifact(request), {cid: keys[cid] for cid in request["cids"]}))
     except BaseException:
         for future, _keys in jobs:
             future.detach()
         raise
-    return DisplayJob(jobs, missing, placements(descriptor.get("occurrences")))
+    return DisplayJob(jobs, keys, placed)
+
+
+def request_display(tree_hash: str, *, producer: dict | None = None,
+                    cids: list[str] | None = None) -> "DisplayJob | None":
+    """Have the build pool derive the display data of every part of ``tree_hash`` the store
+    lacks (:func:`display_requests`), the jobs running on daemon workers while the caller goes
+    on, and return them as one :class:`DisplayJob`; None when the store holds them all."""
+    asked = display_requests(tree_hash, producer=producer, cids=cids)
+    return submit_display(*asked) if asked is not None else None
 
 
 def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:

@@ -67,8 +67,8 @@ class BuildResult:
     ``cadgen step build IN OUT`` re-emits an existing document in cadgen's own
     dialect (OCCT read -> tree in the store -> the canonical XCAF writer),
     optionally annotating it with kinematics and animation. Unlike ``compile``,
-    its stored result declares a new document. The daemon finishes writing it
-    after the answer; ``saving`` names the files still owed.
+    its stored result declares a new document. The build pool writes it after the
+    answer; ``saving`` names the files still owed.
     """
 
     ok: bool

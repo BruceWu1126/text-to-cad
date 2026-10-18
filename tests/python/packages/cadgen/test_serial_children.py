@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -404,11 +405,12 @@ class DecodedChildrenHit(SerialChildrenCase):
 
 
 class QueuedExports(SerialChildrenCase):
-    """A call's files are queued as its result is recorded and finished by the run that
-    owns the command, children first: a child's STEP is written while its parent's body
-    goes on, the command's result is printed once every file is written, and an export
-    that fails fails the command, keeps the file on disk and is owed to the next run,
-    which exports it without running the body (STORE.md §3, *Exports*; §9a)."""
+    """A call's files are its export job's, started as its result is recorded, so a child's
+    STEP is written while its parent's body goes on; with no worker to hand the jobs to, the
+    run that owns the command awaits them in the order queued, children first, and prints
+    the command's result once every file is written. An export that fails fails the command,
+    keeps the file on disk and is owed to the next run, which exports it without running the
+    body (STORE.md §3, *Exports*; §9a)."""
 
     def test_a_childs_file_lands_after_its_done_and_before_the_result_is_printed(self):
         from cadgen.cli._run_model import run_model_argv
@@ -426,26 +428,28 @@ class QueuedExports(SerialChildrenCase):
         out.events = self.events
         self.events.clear()
         err = io.StringIO()
+        began = time.perf_counter()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             self.assertEqual(run_model_argv([str(self.grand), "--json"]), 0, err.getvalue())
+        ran = time.perf_counter() - began
         events = list(self.events)
         for name in ("child", "parent", "grand"):
             done = next(i for i, e in enumerate(events) if e.get("state") == "done" and Path(e["model"]).stem == name)
             saved = next(i for i, e in enumerate(events) if e.get("saved") and Path(e["model"]).stem == name)
-            self.assertLess(done, saved, f"{name}: its result is recorded before its file is written")
+            self.assertLess(done, saved, f"{name}: its result is recorded before its file's save is said")
             self.assertIn("elapsed", events[saved], f"{name}: its saved event carries the build clock's elapsed")
-            self.assertGreaterEqual(events[saved]["elapsed"], events[done]["elapsed"],
-                                    f"{name}: its saved event reads the clock its done event reads")
+            # The moment the file landed, which its job may reach before the model's done.
+            self.assertTrue(0 < events[saved]["elapsed"] <= ran, f"{name}: its saved event reads the build's clock")
             self.assertTrue((self.root / f"{name}.step").is_file())
         order = [Path(e["model"]).stem for e in events if e.get("saved")]
-        self.assertEqual(order, ["child", "parent", "grand"], "children's files land first, as queued")
+        self.assertEqual(order, ["child", "parent", "grand"], "each file's save is said in the order queued")
         self.assertEqual(saved_first, [3], "the result line follows the last file written")
 
-    def test_verbose_names_the_moment_each_file_landed_in_the_order_they_did(self):
+    def test_verbose_names_the_moment_each_file_landed_in_the_order_queued(self):
         code, err = self.build(self.parent, "--verbose")
         self.assertEqual(code, 0, err)
         landed = [line.split()[3] for line in err.splitlines() if line.startswith("[cadgen] STEP saved ")]
-        self.assertEqual(landed, ["child.step", "parent.step"], "children's files land first, as queued")
+        self.assertEqual(landed, ["child.step", "parent.step"], "children's files first, as queued")
 
     def test_a_failed_export_fails_the_command_and_the_next_run_writes_the_file_without_a_run(self):
         from cadgen.store import exports

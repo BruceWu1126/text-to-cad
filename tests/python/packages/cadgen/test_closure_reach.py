@@ -802,7 +802,11 @@ class ReachClosure(unittest.TestCase):
             replace_atomic(temp_path, target_path)
 
         quiet = {"CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1"}
-        with mock.patch.dict(os.environ, quiet), mock.patch.object(atomic_replace, "replace_atomic", publish):
+        # The export job publishes the file: run here, where the rename is watched.
+        from tests.python.support.inline_artifacts import inline_artifacts
+
+        with mock.patch.dict(os.environ, quiet), mock.patch.object(atomic_replace, "replace_atomic", publish), \
+                inline_artifacts():
             self.assertEqual(0, generate_step_targets([str(script)], force=True, verbose=False))
         self.assertTrue(listings, "the STEP was published from a stage folder")
         gone = set(listings[0]) - set(os.listdir(parts))

@@ -808,6 +808,7 @@ class CadGenerationTests(unittest.TestCase):
             mock.patch.object(cad_generation, "_existing_topology_artifact_matches_spec_without_scene", return_value=True),
             mock.patch.object(cad_generation, "run_script_generator") as run_generator,
             mock.patch.object(cad_generation, "_generate_part_outputs") as package,
+            mock.patch.object(cad_generation, "_ensure_reused_display") as displayed,
             mock.patch.object(cad_generation, "_Export") as queued,
             ):
             result = cad_generation._generate_step_outputs(spec, force=False)
@@ -816,6 +817,7 @@ class CadGenerationTests(unittest.TestCase):
         package.assert_not_called()
         queued.assert_called_once()
         self.assertEqual(queued.call_args.args[:2], (spec, tree))
+        self.assertEqual(queued.call_args.kwargs["displays"], [displayed.return_value])
         self.assertEqual(tree, result.tree)
         self.assertIsNone(result.scene)
 

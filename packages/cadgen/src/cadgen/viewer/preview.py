@@ -7,10 +7,11 @@ far it has got, whether it failed and why; the preview revision it published -- 
 tree's hash, the producer its parts are keyed under, the part key of each component the
 store holds and the hash of its annotations object, artifact-side objects the viewer reads
 as it reads any; the file it saved (``saved``: the tree the bytes were written from and
-their digest), the moment it lands -- a build records its result first and writes the file
-after, so the two are the feed's two events; and, once it has finished, whether the file
-moved past it (``superseded``), when its failure and its preview are no longer the news. A
-daemon restart expires this channel; the catalog keeps serving the bytes on disk.
+their digest), the moment it lands -- a build records its result first and the build pool
+writes the file after, so the two are the feed's two events, and the supervisor names each
+part of the preview as the pool stores it; and, once it has finished, whether the file moved
+past it (``superseded``), when its failure and its preview are no longer the news. A daemon
+restart expires this channel; the catalog keeps serving the bytes on disk.
 """
 
 from __future__ import annotations
@@ -117,10 +118,8 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
             # This output landed before a different file's save failed.
             result.update(state="done", error=None)
         saving = (latest.get("saving") or {}).get(target)
-        saved = (latest.get("savedResults") or {}).get(target)
-        if (isinstance(saving, dict) and not saving.get("superseded")
-                and (not isinstance(saved, dict)
-                     or int(saved.get("sequence") or 0) < int(saving.get("sequence") or 0))):
+        if isinstance(saving, dict) and not saving.get("superseded"):
+            # A job the build handed over is writing the file (``daemon/jobs.py``).
             result["saving"] = {"tree": str(saving["tree"])}
     result["saved"] = _saved_file(latest, target)
     return result
@@ -161,9 +160,14 @@ def _superseded(job: dict, target: str) -> bool:
     """Whether the file changed after ``job`` finished. A build that saved is judged by bytes: the
     file is no longer the one it wrote. One that saved nothing (it failed, or it changed nothing)
     by time: the file was written after the build ended. A file that is not there was not -- a
-    failed first build never wrote one -- and that build's failure is still the news."""
+    failed first build never wrote one -- and that build's failure is still the news. A file the
+    build's job is still writing is the build's next news, never a move past it: the job renames
+    the file into place a moment before the ledger hears it has."""
     if target in (job.get("supersededOutputs") or []):
         return True
+    saving = (job.get("saving") or {}).get(target)
+    if isinstance(saving, dict) and not saving.get("superseded"):
+        return False
     finished = job.get("finishedAt")
     if job.get("state") not in ("done", "failed") or finished is None:
         return False

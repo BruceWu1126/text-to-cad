@@ -40,15 +40,15 @@ def _step_path(record: dict) -> Path | None:
 
 
 def _ready(path: Path, record: dict) -> bool:
-    from cadgen._internal.generation import _document_pair_state, _sha256_or_none
     from cadgen._internal.source_sidecar import appearance_digest, source_sidecar_path
     from cadgen.step_export import STEP_WRITER_SCHEME
+    from cadgen.store.exports import document_pair_state, sha256_or_none
 
     entry = record["outputs"][str(path)]
-    if not entry.get("sha256") or entry["sha256"] != _sha256_or_none(path):
+    if not entry.get("sha256") or entry["sha256"] != sha256_or_none(path):
         return False
     if entry.get("writer"):
-        pair = _document_pair_state(path)
+        pair = document_pair_state(path)
         sidecar = record["outputs"].get(str(source_sidecar_path(path).resolve())) or {}
         # The saved file stands alone. Losing its derived document map or tree
         # does not make its matching receipt owe another export.
@@ -116,10 +116,9 @@ def _spec(model: str, record: dict, target: Path):
 
 
 def _queue(model: str, record: dict, target: Path, logger: CliLogger):
-    from cadgen._internal.generation import (
-        _Export, _document_pair_state, _export_plan, _recorded_sidecar,
-    )
+    from cadgen._internal.generation import _Export, _export_plan
     from cadgen._internal.source_sidecar import source_sidecar_path
+    from cadgen.store.exports import document_pair_state
     from cadgen.store.trees import tree_complete
 
     tree = str(record.get("tree") or "")
@@ -128,23 +127,24 @@ def _queue(model: str, record: dict, target: Path, logger: CliLogger):
     spec = _spec(model, record, target)
     step = None
     if spec.step_output:
-        pair = _document_pair_state(spec.step_path)
+        pair = document_pair_state(spec.step_path)
         plan = _export_plan(record, str(spec.step_path), tree, force=False, on_disk=pair[0])
         sidecar_path = source_sidecar_path(spec.step_path).resolve()
         sidecar_entry = record["outputs"].get(str(sidecar_path))
         expected_sidecar = (sidecar_entry or {}).get("sha256")
         if (plan.kept is None or pair[1] != (expected_sidecar or None)
                 or sidecar_entry is not None and not expected_sidecar):
-            step = {"plan": plan, "record": record, "sidecar_payload": _recorded_sidecar(record),
-                    "expected_document_pair": pair, "live": {}, "previous": lambda: (),
-                    "still_saves": lambda: None}
+            step = {"plan": plan, "expected": pair, "live": {}}
         elif plan.kept is not None:
             plan.map_kept(tree)
     return _Export(spec, tree, key=record.get("key"), logger=logger, step=step, captured_record=record)
 
 
 def export_saved(path: Path | str) -> Path:
-    """Wait for or reproduce ``path`` from the latest recorded result, synchronously."""
+    """Wait for or reproduce ``path`` from the latest recorded result, synchronously: a file
+    its result owes is written by a build-pool job (``generation._Export``), which this command
+    waits for as any door waits for a write (``doors.await_writes``) -- in a process with no
+    daemon worker, the run awaits it here (``BuildRun.finish``)."""
     from cadgen.authoring import build_run
     from cadgen.store.records import export_state
 
@@ -163,9 +163,10 @@ def export_saved(path: Path | str) -> Path:
         from cadgen._internal.source_sidecar import source_sidecar_path
 
         step = _step_path(record)
-        if step is not None and source_sidecar_path(step).resolve() == target:
-            # A STEP and its sidecar publish together under the STEP's saving event.
-            await_writes(step)
+        # A STEP and its sidecar publish together, under the STEP's write.
+        written = step if step is not None and source_sidecar_path(step).resolve() == target else target
+        if written != target:
+            await_writes(written)
             model, record = _recorded(target)
             if record is None:
                 continue
@@ -178,14 +179,15 @@ def export_saved(path: Path | str) -> Path:
             if latest is not None and export_state(latest) == captured:
                 return target
             continue
-        with build_run(logger) as run:
+        with build_run(logger):
             _queue(model, record, target, logger)
-            # This command promises a file, so finish before the worker's answer.
-            run.finish()
-        await_writes(target)
+        # This command promises a file: the job's write is waited for before the answer.
+        await_writes(written)
         _latest_model, latest = _recorded(target)
         if latest is not None and export_state(latest) != captured:
             continue
         if latest is not None and _ready(target, latest):
             return target
-        raise RuntimeError(f"{display_path(target)} was not saved from its stored result")
+        owed = (((latest or {}).get("outputs") or {}).get(str(written)) or {}).get("owed") or {}
+        raise RuntimeError(f"{display_path(target)} was not saved from its stored result"
+                           + (f": {owed['error']}" if owed.get("error") else ""))

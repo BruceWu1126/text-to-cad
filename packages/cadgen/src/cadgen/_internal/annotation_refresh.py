@@ -261,8 +261,8 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
         sidecar['kinematics'] = kinematics
     # Preserve the selected source, record, STEP and sidecar revision until
     # publication. A racing change retries via the ordinary build's safeguards.
-    from cadgen._internal.generation import _document_pair_state
-    pair = _document_pair_state(spec.step_path)
+    from cadgen.store.exports import document_pair_state
+    pair = document_pair_state(spec.step_path)
     # The STEP as the record names it: written (its sha256 empty until its export lands).
     recorded = str(((record.get('outputs') or {}).get(str(spec.step_path.expanduser().resolve())) or {}).get('sha256') or '')
     if not recorded or pair[0] != recorded:
@@ -270,7 +270,7 @@ def refresh_annotations(spec, *, verdict=None) -> str | None:
     if (current_closure_hash(script, closure['files'], sliced, shas=recorded_shas, wholes=wholes, own=own) != full_hash
             or read_record(model) != record):
         return None
-    if _document_pair_state(spec.step_path) != pair:
+    if document_pair_state(spec.step_path) != pair:
         return None
     write_source_sidecar(spec.step_path, sidecar, document_hash=recorded)
     output = source_sidecar_path(spec.step_path).resolve()

@@ -105,7 +105,7 @@ class SavedDocumentReadTest(unittest.TestCase):
     def test_a_sidecar_with_unchanged_bytes_keeps_its_file(self):
         # A viewer versions the sidecar by its file stamp, so rewriting the same bytes (a label
         # edit whose document is kept) would reload the model for nothing.
-        from cadgen._internal.generation import _publish_sidecar
+        from cadgen.store.exports import publish_sidecar
 
         staged, saved = self.root / "stage" / "part.step", self.root / "saved" / "part.step"
         staged_sidecar, saved_sidecar = (path.with_name("part.step.json") for path in (staged, saved))
@@ -113,14 +113,14 @@ class SavedDocumentReadTest(unittest.TestCase):
             sidecar.parent.mkdir()
             sidecar.write_bytes(b'{"documentHash": "same"}')
         before = os.stat(saved_sidecar)
-        _publish_sidecar(staged, saved)
+        publish_sidecar(staged, saved)
         after = os.stat(saved_sidecar)
         self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
         staged_sidecar.write_bytes(b'{"documentHash": "new"}')
-        _publish_sidecar(staged, saved)
+        publish_sidecar(staged, saved)
         self.assertEqual(saved_sidecar.read_bytes(), b'{"documentHash": "new"}')
         self.assertFalse(staged_sidecar.exists(), "a changed sidecar is moved into place")
-        _publish_sidecar(staged, saved)
+        publish_sidecar(staged, saved)
         self.assertFalse(saved_sidecar.exists(), "a build that stages no sidecar removes the saved one")
 
     def test_bytes_no_entry_maps_read_as_their_own_even_beside_a_record(self):
@@ -332,24 +332,20 @@ class SavedDocumentReadTest(unittest.TestCase):
         self.assertTrue(deleted)
         self.assertEqual(expected, self.build())
 
-    def test_readable_compile_geometry_returns_before_its_terminal_exit(self):
+    def test_readable_compile_geometry_returns_at_its_compiles_answer(self):
         from cadgen._internal import step_scene_package
         from cadgen.daemon import executors
 
         document = self.root / "part.step"
         document.write_bytes(b"selected document bytes")
         job, scene = executors.Job(document), object()
-        job._release(0)
-        try:
-            with mock.patch.object(step_scene_package, "lookup_document_scene",
-                                   side_effect=[(None, False), (scene, False)]), \
-                    mock.patch.object(executors, "submit_compile", return_value=job), \
-                    mock.patch.object(job, "wait_terminal", side_effect=AssertionError("native read waited for display")):
-                self.assertIs(step_scene_package.load_step_scene_cached(document), scene)
-        finally:
-            job._finish(0)
+        job._finish(0)
+        with mock.patch.object(step_scene_package, "lookup_document_scene",
+                               side_effect=[(None, False), (scene, False)]), \
+                mock.patch.object(executors, "submit_compile", return_value=job):
+            self.assertIs(step_scene_package.load_step_scene_cached(document), scene)
 
-    def test_unreadable_released_geometry_waits_for_its_owner_before_a_fresh_repair(self):
+    def test_geometry_unreadable_after_its_compile_is_repaired_from_the_bytes_as_they_are(self):
         from cadgen._internal import step_scene_package
         from cadgen.daemon import executors
 
@@ -358,63 +354,39 @@ class SavedDocumentReadTest(unittest.TestCase):
                 document = self.root / "part.step"
                 document.write_bytes(b"selected document bytes")
                 stale, repair = executors.Job(document), executors.Job(document)
-                stale._release(0)
+                stale._finish(0)
                 repair._finish(0)
-                waiting, result, errors = threading.Event(), [], []
                 scene = object()
                 submitted = []
-                original_wait = stale.wait_terminal
-
-                def wait_terminal():
-                    waiting.set()
-                    return original_wait()
 
                 def submit(path, **kwargs):
                     submitted.append((path.read_bytes(), kwargs))
+                    if replace and len(submitted) == 1:
+                        document.write_bytes(b"replacement document bytes")
                     return stale if len(submitted) == 1 else repair
 
                 def lookup(*args, **kwargs):
                     return (scene, False) if len(submitted) == 2 else (None, True)
 
-                def read():
-                    try:
-                        result.append(step_scene_package.load_step_scene_cached(document))
-                    except BaseException as error:
-                        errors.append(error)
-
                 with mock.patch.object(step_scene_package, "lookup_document_scene", side_effect=lookup), \
-                        mock.patch.object(executors, "submit_compile", side_effect=submit), \
-                        mock.patch.object(stale, "wait_terminal", side_effect=wait_terminal):
-                    reader = threading.Thread(target=read)
-                    reader.start()
-                    try:
-                        self.assertTrue(waiting.wait(5), "reader did not await its released compile's owner")
-                        self.assertEqual(len(submitted), 1, "reader resubmitted while the old owner was attachable")
-                        if replace:
-                            document.write_bytes(b"replacement document bytes")
-                    finally:
-                        stale._finish(0)
-                        reader.join(5)
-                    self.assertFalse(reader.is_alive())
-                self.assertEqual(errors, [])
-                self.assertEqual(result, [scene])
+                        mock.patch.object(executors, "submit_compile", side_effect=submit):
+                    self.assertIs(step_scene_package.load_step_scene_cached(document), scene)
                 self.assertEqual(len(submitted), 2)
                 self.assertEqual(submitted[-1], (document.read_bytes(), {"force": True}))
 
-    def test_an_unreadable_released_compile_reports_its_terminal_failure_without_repair(self):
+    def test_an_unreadable_compile_that_failed_reports_its_failure_without_repair(self):
         from cadgen._internal import step_scene_package
         from cadgen.daemon import executors
 
         document = self.root / "part.step"
         document.write_bytes(b"selected document bytes")
         job = executors.Job(document)
-        job._release(0)
-        job._say("RuntimeError: compile owner failed while finishing\n")
+        job._say("RuntimeError: compile owner failed\n")
         job._finish(1)
         with mock.patch.object(step_scene_package, "lookup_document_scene", return_value=(None, True)), \
                 mock.patch.object(executors, "submit_compile", return_value=job) as submitted, \
                 mock.patch.object(sys, "stderr"):
-            with self.assertRaisesRegex(RuntimeError, "compile owner failed while finishing"):
+            with self.assertRaisesRegex(RuntimeError, "compile owner failed"):
                 step_scene_package.load_step_scene_cached(document)
         submitted.assert_called_once_with(document, force=True)
 
@@ -486,9 +458,8 @@ class SavedDocumentReadTest(unittest.TestCase):
                     scene = load_step_scene_cached(step)
                 assert submitted.call_count == 1, (kind, submitted.call_count)
                 assert scene.step_hash == step_hash
-                # Finish this independent repair before damaging its result again.
-                # The controlled released-owner regression covers overlapping damage.
-                assert jobs[-1].wait_terminal() == 0
+                # This independent repair has answered before its result is damaged again.
+                assert jobs[-1].wait() == 0
                 if compiled is None:
                     compiled = tree_for_document_hash(step_hash)
                     assert compiled != tree_hash
@@ -519,7 +490,7 @@ class SavedDocumentReadTest(unittest.TestCase):
                 assert load_step_scene_cached(step).step_hash == step_hash
             assert submitted.call_count == 1
             assert submitted.call_args.kwargs["force"] is True
-            assert jobs[-1].wait_terminal() == 0
+            assert jobs[-1].wait() == 0
             assert tree_for_document_hash(step_hash) == compiled
             assert all(read_verified_object(key) == data for key, data in original.items())
             cases.append("unreadable-brep")

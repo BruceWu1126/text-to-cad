@@ -160,9 +160,10 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
   `mesh_tolerance` below `5e-5` of the bounding diagonal, or
   `mesh_angular_tolerance` below `0.05` or above `1.5708` radians.
 - `CADGEN_MESH_CACHE` is gone: a mesh is an ordinary store entry.
-- A build queues display jobs as its result is recorded. Its worker finishes
-  those jobs after answering, before the files, so later views read the stored
-  parts. Each model's first `python <model>.py` after upgrading, current or not,
+- A build asks for display jobs as its result is recorded. The build service
+  runs them while the build goes on and after it answers, and the files land
+  once they are done, so later views read the stored parts. Each model's first
+  `python <model>.py` after upgrading, current or not,
   derives its parts again, once; a STEP no build has touched since
   is meshed on its first view or snapshot. `cadgen store gc` reclaims what the
   older cadgen stored.
@@ -227,8 +228,8 @@ own process, before the call returns. Children build one at a time, in the order
 the body calls them; nothing runs in parallel, and the time line counts a child's
 build under `children`. A child's STEP is written while its parent's body runs,
 and the command returns once every result is recorded: in the build tree a model's
-`done` says its result is recorded, and its file follows. The daemon worker
-finishes display data and writes the files after the answer; a document reader
+`done` says its result is recorded. The build service derives display data and
+writes the files, during the build and after the answer; a document reader
 waits for its in-flight write before reading it.
 
 A parent records each child by its **key** -- a hash of the child (its script and

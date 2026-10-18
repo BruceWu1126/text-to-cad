@@ -350,8 +350,9 @@ queued work, and `cadgen doctor` says whether one can start here and why not.
 Results go to stdout, errors to stderr. Model runs
 accept `--json` (one result line; a failure is `{"ok": false, "error": "..."}`
 with exit status 1) and `--verbose` (full tracebacks). Every build answers once
-its models' results are recorded. The build service finishes their display data,
-STEP and mesh files after the answer. Text results say `saving <file>` for files
+its models' results are recorded. The build service writes their display data,
+STEP and mesh files after the answer, on jobs of its own, so the next edit of
+the model starts at once. Text results say `saving <file>` for files
 still owed, and JSON results include `files` mapping each path to `saving` or
 `saved`. A command reading one waits for the in-flight write. A failure after the
 answer reaches the ledger, the viewer and the next run; that next run first says
@@ -367,8 +368,8 @@ Every model a run builds, its children included, prints where its time went:
 
 Model code is the decorated function's call, less its waits for child builds;
 cadgen is loading the script and storing the result. Display data, STEP and
-meshes finish after the answer on the daemon worker, so the line does not count
-them. A child's export can run while its parent's body runs. The memo counts are
+meshes are written after the answer by the build service, so the line does not
+count them. A child's export can run while its parent's body runs. The memo counts are
 the model's own kernel calls (booleans, fillets, placements, its calls on the
 children it composes): hits were handed back from an earlier build in the same
 build-service worker, misses ran, and uncached calls run on every build, since an argument or

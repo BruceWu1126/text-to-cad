@@ -1184,8 +1184,10 @@ class ChildrenByKey(StoreCase):
 
         from cadgen.metadata import declared_output_paths
 
-        for output in declared_output_paths(script):
-            await_writes(output)
+        # Each file the run owes has its own door, a child's (another script's) too.
+        for model in sorted(script.parent.glob("*.py")):
+            for output in declared_output_paths(model):
+                await_writes(output)
         return completed.stdout.strip().splitlines()[0].split(" ", 1)[0]
 
     def test_a_parent_follows_its_children_by_key(self) -> None:

@@ -153,13 +153,12 @@ class StepPublicationTests(unittest.TestCase):
         # gate's settled-stamp memo, and a document the build renamed into
         # place is known by the digest its writer took. A label edit keeps a
         # STEP of hundreds of megabytes and used to read it once per check.
-        from cadgen._internal import generation
         from cadgen.cli._run_model import run_model_argv
-        from cadgen.store import gate
+        from cadgen.store import exports, gate
 
         self.assertEqual(self.build(10), 0, self.output)
         reads: list[Path] = []
-        hash_file, sha256_of = gate._hash_file, generation._sha256_of
+        hash_file, sha256_of = gate._hash_file, exports.sha256_of
 
         def counted(original):
             def read(path):
@@ -172,7 +171,7 @@ class StepPublicationTests(unittest.TestCase):
 
         with mock.patch.object(gate, "_stamp_is_settled", return_value=True), \
                 mock.patch.object(gate, "_hash_file", side_effect=counted(hash_file)), \
-                mock.patch.object(generation, "_sha256_of", side_effect=counted(sha256_of)):
+                mock.patch.object(exports, "sha256_of", side_effect=counted(sha256_of)):
             # A new document: the previous one may be read once, the new one never.
             self.assertEqual(self.build(12), 0, self.output)
             self.assertLessEqual(step_reads(), 1, reads)
