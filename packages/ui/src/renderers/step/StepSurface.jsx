@@ -21,7 +21,7 @@ import { normalizePartIdList } from "@text-to-cad/core/lib/viewer/partVisualStat
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
 import StepSceneLayers, { releaseStepRuntime } from "./scene/StepSceneLayers.jsx";
-import StepStudioLayers from "./scene/StepStudioLayers.jsx";
+import StepPreviewLayers from "./scene/StepPreviewLayers.jsx";
 import { displayRecordExplodedViewTranslation } from "./scene/useStepExplode.js";
 import { createStepScene, stepSceneView } from "./scene/stepScene.js";
 import { useStepViewPolicy, viewDrawsHairlines } from "./scene/useStepViewPolicy.js";
@@ -37,7 +37,7 @@ import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { useModelTools } from "./components/workbench/ModelTools.jsx";
 import { useStepPanels, useStepSelectionChips } from "./components/workbench/StepPanels.js";
 import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
-import { useStepStudioMotion } from "./workbench/useStepStudioMotion.js";
+import { useStepPreviewMotion } from "./workbench/useStepPreviewMotion.js";
 import { useSettledValue } from "./workbench/settledValue.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/AnimationTimeControl.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
@@ -49,7 +49,7 @@ import { useCadWorkspaceSelection } from "./components/workbench/hooks/useCadWor
 import { useCadWorkspaceSelectors } from "./components/workbench/hooks/useCadWorkspaceSelectors.js";
 import { useAppliedViewSettings } from "../kit/view-settings/useAppliedViewSettings.js";
 import { useViewSettings } from "../kit/view-settings/useViewSettings.js";
-import { studioSceneQuality } from "../kit/viewport/studioViewScene.js";
+import { previewSceneQuality } from "../kit/viewport/previewViewScene.js";
 import {
   ASSET_STATUS,
   CAD_TOOL_MODES,
@@ -293,7 +293,7 @@ function StepSurfaceBody({ view, data }) {
   const preview = usePreviewState();
   const previewing = preview.previewing;
   // The scene as this mode's render profile draws it: preview raises the LOD's detail with the rest.
-  // What the editor's viewport draws; the Studio is a view of its own and draws itself.
+  // What the editor's viewport draws; Preview is a view of its own and draws itself.
   const resolvedScene = viewUpdate.scene;
   const [stepUpdateInProgress, setStepUpdateInProgress] = useState(false);
   // The viewport's own alert, kept HERE: this renderer folds it into an alert of its own
@@ -456,7 +456,7 @@ function StepSurfaceBody({ view, data }) {
   // rewound), and each one used does too; a frame left by the Animation section stays on the model,
   // as a pose does. Position and the routine are the motion hook's; Explode is the view settings',
   // so the hook says which of its two was used and Explode goes off here, and Explode used puts both
-  // at rest (below). The Studio's pose and routine are its own (`useStepStudioMotion`), on its own scene.
+  // at rest (below). Preview's pose and routine are its own (`useStepPreviewMotion`), on its own scene.
   const explodeAppliedRef = useRef(false);
   const motionHost = useMemo(() => ({
     onUse: () => {
@@ -795,17 +795,17 @@ function StepSurfaceBody({ view, data }) {
   const lodSelectedPartIdsRef = useRef(EMPTY_LIST);
   // Declared here, above the LOD scheduler that is handed it: it reads only refs, so it is
   // safe this early, and a `const` read before its declaration is a TDZ crash, not undefined.
-  // The camera detail is loaded for: the view on screen, the Studio's while it is open (its own
-  // viewport, `studioRuntimeRefRef`), where nothing is selected.
-  const studioRuntimeRefRef = useRef(null);
+  // The camera detail is loaded for: the view on screen, Preview's while it is open (its own
+  // viewport, `previewRuntimeRefRef`), where nothing is selected.
+  const previewRuntimeRefRef = useRef(null);
   const sampleViewportLodCamera = useCallback((options) => {
-    const studio = preview.now();
-    const runtime = (studio ? studioRuntimeRefRef : runtimeRefRef).current?.current;
+    const previewOpen = preview.now();
+    const runtime = (previewOpen ? previewRuntimeRefRef : runtimeRefRef).current?.current;
     if (!runtimeModelKeyMatches(runtime, selectedKey)) return null;
-    return sampleLodCamera(THREE, runtime, { ...options, selectedPartIds: studio ? EMPTY_LIST : lodSelectedPartIdsRef.current });
+    return sampleLodCamera(THREE, runtime, { ...options, selectedPartIds: previewOpen ? EMPTY_LIST : lodSelectedPartIdsRef.current });
   }, [selectedKey, preview.now]);
-  // The detail asked for is the view on screen's: the Studio raises it a tier (`studioViewScene.js`).
-  const lodQuality = previewing ? studioSceneQuality(resolvedScene.quality) : resolvedScene.quality;
+  // The detail asked for is the view on screen's: Preview raises it a tier (`previewViewScene.js`).
+  const lodQuality = previewing ? previewSceneQuality(resolvedScene.quality) : resolvedScene.quality;
   const { onCameraMoved: onLodCameraMoved } = useViewportLod({
     resources: client.resources,
     sampleCamera: sampleViewportLodCamera,
@@ -1053,10 +1053,10 @@ function StepSurfaceBody({ view, data }) {
     selectedStepModuleUrl,
     stepModuleParameterValues
   ]);
-  // The Studio's own pose and routine, on its own scene (`StepStudioLayers`): the model at rest each
-  // time the Studio opens, moved and played by the Studio's Position and Animation sections — the
+  // Preview's own pose and routine, on its own scene (`StepPreviewLayers`): the model at rest each
+  // time Preview opens, moved and played by Preview's Position and Animation sections — the
   // tools view's are never touched.
-  const studioMotion = useStepStudioMotion({ definition: selectedStepModuleDefinition, clips: motion.clips,
+  const previewMotion = useStepPreviewMotion({ definition: selectedStepModuleDefinition, clips: motion.clips,
     meshPartial: selectedMeshPartial, open: previewing });
   const selectedStepPartRootActive = !isAssemblyView && expandedStepTreeNodeIds.includes(STEP_MODEL_ROOT_ID);
   const plainStepReferencePickingEnabled = selectedEntryHasReferences && !isAssemblyView;
@@ -1637,7 +1637,7 @@ function StepSurfaceBody({ view, data }) {
     const reset = motionResets.current;
     if (tabToolMode === TAB_TOOL_MODE.EXPLODE) { reset.position(); reset.animation(); }
   }, [tabToolMode]);
-  // The Studio's Position moves the Studio's own pose: reaching for it there puts nothing of the
+  // Preview's Position moves Preview's own pose: reaching for it there puts nothing of the
   // tools view's down.
   const reachPosition = useCallback(() => {
     if (preview.now()) return;
@@ -3366,7 +3366,7 @@ function StepSurfaceBody({ view, data }) {
     // In an assembly, a part's faces and edges load when a press under Faces or Edges first
     // reaches it; the model tree says so until the press can be picked.
     loadingGeometry: Boolean(pendingTopologyPick),
-    positionRuntime: previewing ? studioMotion.positionControls : motion.positionControls,
+    positionRuntime: previewing ? previewMotion.positionControls : motion.positionControls,
     selectedMeshData: selectedDisplayMeshData,
     client,
     onReachPosition: reachPosition,
@@ -3438,37 +3438,37 @@ function StepSurfaceBody({ view, data }) {
   // Everything picked goes: the parts and references, and the measurements.
   const clearSelected = () => { clearAssemblySelection(); measure.select([]); };
 
-  // ---- the Studio ----------------------------------------------------------------------------
+  // ---- Preview ----------------------------------------------------------------------------
   // Its own scene while it is open, filled by its own layers inside its own viewport from the same
-  // published mesh (`StepStudioLayers`), posed and played by its own motion.
-  const studioStepScene = useMemo(() => (previewing ? createStepScene(THREE) : null), [previewing]);
-  const studioSceneView = useMemo(() => (studioStepScene ? stepSceneView(studioStepScene, keepsAuthoredFinish) : null),
-    [studioStepScene, keepsAuthoredFinish]);
-  const studioAnimation = animationControlsHaveContent(studioMotion.animationControls) ? studioMotion.animationControls : null;
-  // Finer detail reaches the Studio's scene in a few grouped steps (`settledValue.js`): each one
+  // published mesh (`StepPreviewLayers`), posed and played by its own motion.
+  const previewStepScene = useMemo(() => (previewing ? createStepScene(THREE) : null), [previewing]);
+  const previewSceneView = useMemo(() => (previewStepScene ? stepSceneView(previewStepScene, keepsAuthoredFinish) : null),
+    [previewStepScene, keepsAuthoredFinish]);
+  const previewAnimation = animationControlsHaveContent(previewMotion.animationControls) ? previewMotion.animationControls : null;
+  // Finer detail reaches Preview's scene in a few grouped steps (`settledValue.js`): each one
   // starts its converging picture again, and a large model's detail arrives as a burst of batches.
-  const studioMeshData = useSettledValue(selectedDisplayMeshData, { grouped: previewing });
-  // The Studio's runtime going away takes its scene's build with it, and says nothing to the
+  const previewMeshData = useSettledValue(selectedDisplayMeshData, { grouped: previewing });
+  // Preview's runtime going away takes its scene's build with it, and says nothing to the
   // detail loader: the editor's scene is the one that adopted the detail.
-  const studioRuntimeLifecycle = useMemo(() => ({
-    onRelease(runtime) { if (studioStepScene) releaseStepRuntime(runtime, studioStepScene); }
-  }), [studioStepScene]);
-  const studio = {
-    scene: viewportScene ? studioSceneView : null,
+  const previewRuntimeLifecycle = useMemo(() => ({
+    onRelease(runtime) { if (previewStepScene) releaseStepRuntime(runtime, previewStepScene); }
+  }), [previewStepScene]);
+  const previewView = {
+    scene: viewportScene ? previewSceneView : null,
     overlay: (viewport, drawn) => {
-      studioRuntimeRefRef.current = viewport.runtimeRef;
-      return studioStepScene ? <StepStudioLayers viewport={viewport} drawn={drawn} studioStepScene={studioStepScene}
-        meshData={studioMeshData} modelKey={selectedKey} isLoading={viewportIsLoading}
-        selectorRuntime={layerProps.selectorRuntime} stepParameterRuntime={selectedStepParameterRuntime} motion={studioMotion}
+      previewRuntimeRefRef.current = viewport.runtimeRef;
+      return previewStepScene ? <StepPreviewLayers viewport={viewport} drawn={drawn} previewStepScene={previewStepScene}
+        meshData={previewMeshData} modelKey={selectedKey} isLoading={viewportIsLoading}
+        selectorRuntime={layerProps.selectorRuntime} stepParameterRuntime={selectedStepParameterRuntime} motion={previewMotion}
         renderPartsIndividually={Boolean(selectedStepParameterRuntime) || Boolean(Object.keys(selectedDisplayMeshData?.appearance?.materials || {}).length)}
         hoverStore={hoverStore} onLodCameraChange={onLodCameraMoved} /> : null;
     },
-    animation: studioAnimation,
-    runtimeLifecycle: studioRuntimeLifecycle,
+    animation: previewAnimation,
+    runtimeLifecycle: previewRuntimeLifecycle,
     onCameraSettled: onLodCameraMoved
   };
 
-  return <RendererShell shell={shell} tools={tools} subToolbar={modelEffects.subToolbar} sidebar={stepSidebar} studio={studio}
+  return <RendererShell shell={shell} tools={tools} subToolbar={modelEffects.subToolbar} sidebar={stepSidebar} previewView={previewView}
     references={selectionActionVisible ? promptSelection : EMPTY_LIST} referenceChips={referenceChips} nameReference={nameReference}
     onClearReferences={clearSelected} copySelection={copySelection} onSelectPress={selectPress} onSelectHover={selectHover}
     selectsAnnotations={selects(selectFilter, "annotation")}

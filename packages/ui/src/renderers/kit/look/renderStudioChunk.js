@@ -1,7 +1,7 @@
 // The Render studio's lazy boundary.
 //
 // Neutral CAD viewing is what every load pays for. The photographic rig and
-// stage load only for Render, which is the Studio's alone (preview): the shell
+// stage load only for Render, which is Preview's alone: the shell
 // warms them a moment after a model is on screen (`useRendererShell`'s
 // `previewPrepare`, through the viewport's `prepareViewSettings`), and the
 // viewport loads them itself on entering Render if nothing has yet.

@@ -21,13 +21,13 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   assert.deepEqual(createViewSettingsStore(before.display).getSnapshot(), before);
 });
 
-test("Render is the Studio's: a file left in Render is drawn in Solid, its mode its own, and the Studio resolves Render from the same settings", () => {
+test("Render is Preview's: a file left in Render is drawn in Solid, its mode its own, and Preview resolves Render from the same settings", () => {
   const store = createViewSettingsStore({ mode: "render" });
   store.patchMode("render", { lighting: { exposure: 1 } });
   const { display, scene } = store.getSnapshot();
   assert.deepEqual([display.mode, scene.view.mode, scene.render.enabled], ["render", "solid", false]);
-  const studio = store.sceneFor("render");
-  assert.deepEqual([studio.view.mode, studio.view.lighting.exposure, studio.render.enabled], ["render", 1, true]);
+  const drawn = store.sceneFor("render");
+  assert.deepEqual([drawn.view.mode, drawn.view.lighting.exposure, drawn.render.enabled], ["render", 1, true]);
   assert.equal(store.getSnapshot().display, display);
 });
 

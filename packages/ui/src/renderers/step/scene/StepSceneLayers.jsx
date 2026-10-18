@@ -38,8 +38,8 @@ import ViewportError from "../../kit/status/ViewportError.jsx";
  * | pointer: hover, tap, double-click, measure picks | `useStepPicking.js` |
  * | Pose knobs | the kit's `JointHandleOverlay` |
  *
- * The Render Studio mounts its own instance in its own viewport (`studio`, `StepStudioLayers.jsx`):
- * a second scene of the same model, posed and played by the Studio's own motion, with nothing to
+ * Preview mounts its own instance in its own viewport (`preview`, `StepPreviewLayers.jsx`):
+ * a second scene of the same model, posed and played by Preview's own motion, with nothing to
  * pick, measure or hover. The editor's instance alone answers the file's memory accounting, the
  * detail loader's adoption protocol and the debug seams.
  *
@@ -52,7 +52,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const hover = useViewerHover(surfaceProps.hoverStore, surfaceProps.resolveHover);
   const props = { ...surfaceProps, hoveredPartId: hover.hoveredPartId, hoveredReferenceId: hover.hoveredReferenceId };
   const {
-    meshData, modelKey, isLoading, renderMode, studio = false, pickMode, hiddenPartIds, selectedPartIds,
+    meshData, modelKey, isLoading, renderMode, preview = false, pickMode, hiddenPartIds, selectedPartIds,
     hoveredPartId, selectorRuntime, stepParameterRuntime, stepAnimationRuntime, animateMode,
     jointHandles, measureState, activeMeasurementId, selectedMeasurementIds = [], hoveredMeasurementId = "", measureModeActive,
     onLodCameraChange, onMeshSourceAdoption, onViewerAlertChange,
@@ -245,14 +245,14 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
 
   useStepMeasureOverlay({
     measureCanvasRef, measureState, activeMeasurementId, selectedMeasurementIds, hoveredMeasurementId, measureHoverRef, measureModeActive,
-    runtimeRef, mountRef, studio, viewerReadyTick
+    runtimeRef, mountRef, preview, viewerReadyTick
   });
 
   useStepPicking({
     runtimeRef,
     mountRef: hostRef,
     sceneMountRef: mountRef,
-    studio,
+    preview,
     pickMode,
     selectorRuntime: activeSelectorRuntime,
     pickableFaces: filteredPickableFaces,
@@ -276,9 +276,9 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
   const placementRef = useRef(null);
   placementRef.current = { modelKey, renderMode, floor: normalizedThemeSettings.floor || {}, renderConfiguration: props.renderConfiguration };
   useEffect(() => {
-    // The view on screen answers them: the Studio's layers while it is open, and as it closes the
+    // The view on screen answers them: Preview's layers while it is open, and as it closes the
     // layers it covered (the editor's) answer again. The memory probe is the editor's alone: the
-    // Studio's scene shares its geometry, and the file's accounting is the editor's.
+    // Preview's scene shares its geometry, and the file's accounting is the editor's.
     // Byte attribution for the headless memory harness (read, never polled here).
     const memoryProbe = () => renderMemoryAccounting(runtimeRef.current);
     // The LIVE record transforms, so a browser test can assert where a posed occurrence
@@ -311,7 +311,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
           : current.floor.enabled === true && current.floor.followModel !== false
       };
     };
-    const seams = { __cadDisplayRecords: displayRecords, __cadJointHandles: jointHandleLayout, ...(studio ? {} : { __cadRenderMemoryProbe: memoryProbe }) };
+    const seams = { __cadDisplayRecords: displayRecords, __cadJointHandles: jointHandleLayout, ...(preview ? {} : { __cadRenderMemoryProbe: memoryProbe }) };
     const covered = Object.fromEntries(Object.keys(seams).map(name => [name, window[name]]));
     const coveredPlacement = Object.getOwnPropertyDescriptor(window, "__cadModelPlacement");
     Object.assign(window, seams);
@@ -326,7 +326,7 @@ export default function StepSceneLayers({ viewport, stepScene, policy, props: su
         else delete window.__cadModelPlacement;
       }
     };
-  }, [runtimeRef, stepScene, studio]);
+  }, [runtimeRef, stepScene, preview]);
 
   return (
     <>

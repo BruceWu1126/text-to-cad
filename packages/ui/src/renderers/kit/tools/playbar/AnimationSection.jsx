@@ -18,7 +18,7 @@ import { AnimationTimeControl } from "./AnimationTimeControl.js";
  * motions put the routine back at rest, and playing it puts them at rest). Its heading holds Reset,
  * which puts the model back at rest, idle while it is; its body the routine, where there are
  * several, then Play or Pause, the scrubber and the Playback settings (Speed, Loop, Autoplay:
- * `PlaybackMenu.jsx`). The Studio's routine is its own (`useRendererShell`).
+ * `PlaybackMenu.jsx`). Preview's routine is its own (`useRendererShell`).
  *
  * @param {{ runtime: object, autoplay: boolean, onAutoplayChange(value: boolean): void, disabled?: boolean }} props
  */

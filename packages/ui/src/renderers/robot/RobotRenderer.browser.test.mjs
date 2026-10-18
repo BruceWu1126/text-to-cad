@@ -174,10 +174,10 @@ async function open(t, file, { panel = true } = {}) {
       if (await tile.getAttribute('aria-pressed') !== 'true') await tile.click();
       await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
     },
-    // In and out of the Studio, by Present and Exit studio in the navbar, once its cover has lifted.
-    async studio(enter) {
-      await pane.getByRole('button', { name: enter ? 'Present' : 'Exit studio', exact: true }).click();
-      await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Present', exact: true }).waitFor();
+    // In and out of Preview, by Preview and Exit preview in the navbar, once its cover has lifted.
+    async preview(enter) {
+      await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
+      await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
     },
     // A joint set from the sidebar's Position section, whatever Select picks.
@@ -198,7 +198,7 @@ async function open(t, file, { panel = true } = {}) {
     },
     // A selection is React state: it is on screen a render after whatever changed it.
     waitPressed: count => page.waitForFunction(wanted => document.querySelectorAll('[data-testid="one"] [aria-label="Robot tree area"] button[aria-pressed="true"]').length === wanted, count),
-    // Display: its button at the navbar's right end, before Present, the mode in hand; its settings, its per-mode settings page.
+    // Display: its button at the navbar's right end, before Preview, the mode in hand; its settings, its per-mode settings page.
     displayButton: () => pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / }),
     async openDisplay() {
       await robot.displayButton().click();
@@ -274,10 +274,10 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   await robot.openPosition();
   assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
   assert.equal(await robot.tool('Annotate').count(), 0, 'Annotate is a STEP tool; a robot description has none');
-  // Display and Present are the view's controls, at the navbar's right end, for a robot as for any 3D file.
+  // Display and Preview are the view's controls, at the navbar's right end, for a robot as for any 3D file.
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Present']);
-  // Display is the button beside Present, shut as the file opens.
+    ['Display mode: Solid', 'Preview']);
+  // Display is the button beside Preview, shut as the file opens.
   assert.equal(await robot.displayPanel().count(), 0, 'Display is never where a file opens');
   assert.equal(await pane.getByRole('tab').count(), 0, 'no tabs');
   assert.deepEqual([await robot.sidebar(), await robot.stack(), await robot.tiles()], [['Links', 'Position controls'], [], ['Links', 'Position']]);
@@ -408,7 +408,7 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.equal((await robot.stats()).lastPoseWrites, 2, 'the master and its follower, nothing else');
 
   // Posing a joint far past the rest box never resizes the ground, and never moves the camera: the
-  // arm swung straight up stands well above anything the rest pose reached. So too in the Studio,
+  // arm swung straight up stands well above anything the rest pose reached. So too in Preview,
   // on its floor, with its own pose.
   const toolsCamera = await robot.camera();
   await robot.type('shoulder', -90);
@@ -417,17 +417,17 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   assert.ok(restStage.gridRadius > 0);
   assert.equal(swung.gridRadius, restStage.gridRadius, 'the ground keeps the size the rest pose gave it');
   assert.ok(sameCamera(await robot.camera(), toolsCamera), 'a pose never re-frames');
-  await robot.studio(true);
+  await robot.preview(true);
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
   await robot.settled();
   const floored = await page.evaluate(() => window.__cadStage());
   const flooredCamera = await robot.camera();
   await robot.type('shoulder', -90);
   await page.waitForFunction(top => window.__cadStage().bounds.max[2] > top + 0.1, floored.bounds.max[2]);
-  const studioSwung = await page.evaluate(() => window.__cadStage());
-  assert.deepEqual(studioSwung.studioGround, floored.studioGround, 'the studio floor keeps its size');
-  assert.ok(sameCamera(await robot.camera(), flooredCamera), 'a pose never re-frames the Studio');
-  await robot.studio(false);
+  const previewSwung = await page.evaluate(() => window.__cadStage());
+  assert.deepEqual(previewSwung.studioGround, floored.studioGround, 'the studio floor keeps its size');
+  assert.ok(sameCamera(await robot.camera(), flooredCamera), 'a pose never re-frames Preview');
+  await robot.preview(false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
 
   // Anywhere else the press is the camera's, and no joint moves.
@@ -700,14 +700,14 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   assert.deepEqual(robot.errors, []);
 });
 
-test('the Studio draws the robot as it opens, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
+test('Preview draws the robot as it opens, and leaving it finds the tools view as it was: the pose, the hidden visual and the selection', async (t) => {
   const robot = await open(t, 'arm.urdf');
   const { page, pane } = robot;
   const opening = await robot.links();
   const away = async () => { const surface = await robot.surface(); await page.mouse.move(surface.x + surface.width - 90, surface.y + surface.height / 2); };
-  const enterPreview = async () => { await robot.studio(true); await robot.settled(); };
-  const exitPreview = () => robot.studio(false);
-  // The Studio opens still (Orbit off): the robot as the Studio draws a file opened afresh.
+  const enterPreview = async () => { await robot.preview(true); await robot.settled(); };
+  const exitPreview = () => robot.preview(false);
+  // Preview opens still (Orbit off): the robot as Preview draws a file opened afresh.
   await away();
   await enterPreview();
   const authored = (await robot.capture()).data;
@@ -724,11 +724,11 @@ test('the Studio draws the robot as it opens, and leaving it finds the tools vie
   await pane.getByRole('button', { name: 'Select upper_arm', exact: true }).click();
   await robot.pressed(['Select upper_arm']);
 
-  // The Studio draws none of it: the opening pose, every visual, nothing lit.
+  // Preview draws none of it: the opening pose, every visual, nothing lit.
   await away();
   await enterPreview();
-  assert.deepEqual(await robot.links(), opening, 'the Studio poses the robot as it opens');
-  assert.ok((await robot.capture()).data.equals(authored), 'the Studio draws the robot as it opens');
+  assert.deepEqual(await robot.links(), opening, 'Preview poses the robot as it opens');
+  assert.ok((await robot.capture()).data.equals(authored), 'Preview draws the robot as it opens');
 
   // Leaving finds the tools view's work as it was left.
   await exitPreview();

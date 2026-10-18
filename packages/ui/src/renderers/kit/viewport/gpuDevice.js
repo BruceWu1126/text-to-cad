@@ -1,6 +1,6 @@
 // One WebGL context for every view on the page: the GPU device.
 //
-// A view (a viewport: the editor's, the Studio's) is a DOM canvas of its own, with its own
+// A view (a viewport: the editor's, Preview's) is a DOM canvas of its own, with its own
 // scene, camera, look and controls. What it draws is drawn by the device's one WebGLRenderer,
 // on an OffscreenCanvas, and handed to the view's canvas as a bitmap at the end of the frame
 // (`transferToImageBitmap` → the canvas's `bitmaprenderer` context: zero-copy, about 0.06 ms a

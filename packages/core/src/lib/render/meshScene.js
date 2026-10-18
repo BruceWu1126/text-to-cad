@@ -50,7 +50,7 @@ export function createMeshScene(THREE, objects) {
     // surface over the same colours, never a finish "kept".
     setSurfaceLook(next) { if (!disposed) look.apply(next ? { ...next, authored: false } : null); },
     /**
-     * A second scene of the same file (the viewer's Studio beside its editor): its own meshes,
+     * A second scene of the same file (the viewer's Preview beside its editor): its own meshes,
      * materials and look over this scene's geometry (`sharedGeometry.js`). This scene stays the
      * geometry's owner, so the sibling is disposed first.
      */

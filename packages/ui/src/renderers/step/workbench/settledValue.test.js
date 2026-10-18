@@ -22,7 +22,7 @@ function clock() {
   };
 }
 
-test("a burst of detail reaches the Studio's scene as a few grouped steps: after a quiet moment, or at the longest wait", () => {
+test("a burst of detail reaches Preview's scene as a few grouped steps: after a quiet moment, or at the longest wait", () => {
   const time = clock();
   const handed = [];
   const settled = createSettledValue({ quietMs: 300, maxWaitMs: 1000, onValue: value => handed.push(value), ...time });

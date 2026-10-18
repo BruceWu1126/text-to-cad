@@ -223,7 +223,7 @@ export function useStepPicking({
   runtimeRef,
   mountRef,
   sceneMountRef = null,
-  previewMode,
+  preview,
   pickMode,
   selectorRuntime,
   pickableFaces,
@@ -287,18 +287,18 @@ export function useStepPicking({
   // hover tick means the select pointer lingers until the mouse happens to move.
   useEffect(() => {
     const container = mountRef.current;
-    if (!container || previewMode || pickMode !== VIEWER_PICK_MODE.MEASURE) {
+    if (!container || preview || pickMode !== VIEWER_PICK_MODE.MEASURE) {
       return undefined;
     }
     container.style.cursor = "crosshair";
     return () => {
       container.style.cursor = "";
     };
-  }, [mountRef, pickMode, previewMode, viewerReadyTick]);
+  }, [mountRef, pickMode, preview, viewerReadyTick]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
-    if (!runtime || !mountRef.current || previewMode) {
+    if (!runtime || !mountRef.current || preview) {
       onHoverReferenceChangeRef.current?.("");
       return;
     }
@@ -1161,7 +1161,7 @@ export function useStepPicking({
     };
   }, [
     mountRef,
-    previewMode,
+    preview,
     runtimeRef,
     sceneMountRef,
     suppressTopologyPicking,

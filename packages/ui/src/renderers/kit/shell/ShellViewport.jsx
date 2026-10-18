@@ -92,12 +92,12 @@ const ShellViewport = forwardRef(function ShellViewport({
   renderMode = false,
   renderConfiguration = null,
   quality = null,
-  // The Render Studio's viewport (`StudioView.jsx`): opened on the model at rest, framed afresh,
+  // Preview's viewport (`PreviewView.jsx`): opened on the model at rest, framed afresh,
   // keeping no camera, no cube, no Annotate; its Orbit turns the camera at `orbitSpeed`.
-  studio = false,
+  preview = false,
   orbit = false,
   orbitSpeed = 1,
-  // Covered by another view (the editor's, under the Studio): it draws nothing until uncovered,
+  // Covered by another view (the editor's, under Preview): it draws nothing until uncovered,
   // and then, before that paint, whatever it was asked to meanwhile.
   suspended = false,
   isLoading = false,
@@ -195,7 +195,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   const [viewPlaneOrientation] = useState(() => createViewPlaneOrientationStore(DEFAULT_VIEW_PLANE_ORIENTATION));
   const setViewPlaneOrientation = viewPlaneOrientation.set;
   const activeViewPlaneFaceRef = useRef("");
-  const studioRef = useRef(studio);
+  const previewRef = useRef(preview);
   useLayoutEffect(() => { runtimeRef.current?.setSuspended?.(suspended); }, [suspended, viewerReadyTick]);
   const perspectivePropRef = useRef(perspective);
   const modelKeyRef = useRef(modelKey);
@@ -240,7 +240,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   renderShadowMapSizeRef.current = renderShadowMapSize;
 
   // Render's studio is a lazy chunk. The shell warms it once a model is on screen; this is the
-  // backstop for a Studio entered before that warm-up has landed.
+  // backstop for Preview entered before that warm-up has landed.
   const [studioSceneTick, setStudioSceneTick] = useState(() => (studioScene() ? 1 : 0));
   useEffect(() => {
     if (!renderMode || studioScene()) return undefined;
@@ -252,9 +252,9 @@ const ShellViewport = forwardRef(function ShellViewport({
         viewerAlertChangeRef.current?.({
           severity: "error",
           summary: "Render unavailable",
-          title: "Couldn't load the Render studio",
-          message: "The photographic studio is fetched the first time the Studio is opened, and that request did not complete.",
-          recovery: "Check the connection to the viewer and reload the page, then open the Studio again.",
+          title: "Couldn't load Preview's lighting",
+          message: "Preview's photographic lighting is fetched the first time Preview is opened, and that request did not complete.",
+          recovery: "Check the connection to the viewer and reload the page, then open Preview again.",
           details: String(loadError?.message || loadError)
         });
         console.error("Failed to load the Render studio chunk", loadError);
@@ -517,7 +517,7 @@ const ShellViewport = forwardRef(function ShellViewport({
         // How far Render's picture has converged (`pictureProgress`).
         studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
     };
-    // The view on screen answers: the Studio's while it is open, and as it closes the view it
+    // The view on screen answers: Preview's while it is open, and as it closes the view it
     // covered (the editor's) answers again.
     const covered = { __cadCamera: window.__cadCamera, __cadStage: window.__cadStage };
     Object.assign(window, { __cadCamera: read, __cadStage: stage });
@@ -563,7 +563,7 @@ const ShellViewport = forwardRef(function ShellViewport({
   }, []);
 
   useViewerRuntime({
-    mountRef, runtimeRef, studioRef, setError, setViewerReadyTick, viewerTheme, emitPerspectiveChange,
+    mountRef, runtimeRef, previewRef, setError, setViewerReadyTick, viewerTheme, emitPerspectiveChange,
     setActiveViewPlaneFace, activeViewPlaneFaceRef, stepCameraTransition, stepKeyboardOrbit, getActiveViewPlaneFaceId,
     cancelCameraTransition, clearKeyboardOrbitState, isTrackpadLikeWheelEvent, orbitControlsBoostsPinch, WHEEL_PINCH_DELTA_BOOST,
     getKeyboardOrbitCommand, getKeyboardOrbitAxes, applyOrbitDelta, getViewerThemeValue, getPixelRatioCap,
@@ -814,7 +814,7 @@ const ShellViewport = forwardRef(function ShellViewport({
     scene?.keepsAuthoredFinish, renderMode, studioSceneTick, viewerReadyTick, viewerTheme, normalizedThemeSettings.background
   ]);
 
-  // The Studio's orbit.
+  // Preview's orbit.
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
@@ -823,13 +823,13 @@ const ShellViewport = forwardRef(function ShellViewport({
       runtime.interactionState.restoreTimerId = 0;
     }
     clearKeyboardOrbitState(runtime.keyboardOrbitState);
-    // The orbit is the Studio's alone, and runs at its full pixel ratio (`studioViewScene.js`).
-    const orbitActive = studio && orbit && orbitSpeed > 0;
+    // The orbit is Preview's alone, and runs at its full pixel ratio (`previewViewScene.js`).
+    const orbitActive = preview && orbit && orbitSpeed > 0;
     runtime.previewOrbitEnabled = orbitActive;
     runtime.orbitControlsLastTimestamp = 0;
     runtime.controls.autoRotate = orbitActive;
     runtime.controls.autoRotateSpeed = PREVIEW_AUTO_ROTATE_SPEED * orbitSpeed;
-    if (studio) runtime.controls.enabled = true;
+    if (preview) runtime.controls.enabled = true;
     runtime.controls.enableDamping = true;
     runtime.controls.dampingFactor = DEFAULT_DAMPING_FACTOR;
     if (orbitActive) {
@@ -837,7 +837,7 @@ const ShellViewport = forwardRef(function ShellViewport({
       runtime.beginInteraction?.();
     } else runtime.scheduleIdleQuality();
     runtime.requestRender();
-  }, [studio, orbit, orbitSpeed, viewerReadyTick]);
+  }, [preview, orbit, orbitSpeed, viewerReadyTick]);
 
   // Everything that follows where the scene IS, and nothing that frames it: lighting and
   // shadow reach and the floor's height. The ground's SIZE comes from the rest

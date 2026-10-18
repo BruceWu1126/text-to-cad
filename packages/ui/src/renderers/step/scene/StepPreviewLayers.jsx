@@ -10,18 +10,18 @@ const NO_HOVER = Object.freeze({ hoveredPartId: "", hoveredReferenceId: "" });
 const NOTHING_HOVERED = () => NO_HOVER;
 
 /**
- * The Render Studio's STEP scene, driven from inside the Studio's own viewport (`StudioView.jsx`):
- * the same layers the editor mounts (`StepSceneLayers.jsx`), a second instance, over the Studio's
- * own scene (`studioStepScene`), which the same builder fills from the same published mesh, so it
+ * Preview's STEP scene, driven from inside Preview's own viewport (`PreviewView.jsx`):
+ * the same layers the editor mounts (`StepSceneLayers.jsx`), a second instance, over Preview's
+ * own scene (`previewStepScene`), which the same builder fills from the same published mesh, so it
  * shares the editor's component geometry (core's owner counts) and dresses its own materials.
  *
- * It draws the Render scene the Studio draws (`drawn`), at the Studio's quality, its pose and its
- * routine the Studio's own (`motion`, `useStepStudioMotion`) on the Studio's clock, and nothing
+ * It draws the Render scene Preview draws (`drawn`), at Preview's quality, its pose and its
+ * routine Preview's own (`motion`, `useStepPreviewMotion`) on Preview's clock, and nothing
  * else: no selection, hover, measure, knobs, section or explode, nothing to pick. It reports to no
  * one but the detail loader's camera (`onLodCameraChange`): the editor's instance alone answers
  * the loader's adoption protocol, the file's alerts and its memory accounting.
  */
-export default function StepStudioLayers({ viewport, drawn, studioStepScene, meshData, modelKey, isLoading,
+export default function StepPreviewLayers({ viewport, drawn, previewStepScene, meshData, modelKey, isLoading,
   selectorRuntime, stepParameterRuntime, motion, renderPartsIndividually, hoverStore, onLodCameraChange }) {
   const api = useRef(null);
   const policy = useStepViewPolicy({
@@ -34,7 +34,7 @@ export default function StepStudioLayers({ viewport, drawn, studioStepScene, mes
   const parameterRuntime = useMemo(() => (stepParameterRuntime
     ? { ...stepParameterRuntime, parameterValues: motion.parameterValues } : null), [stepParameterRuntime, motion.parameterValues]);
   const props = {
-    studio: true,
+    preview: true,
     stepParameterRuntime: parameterRuntime,
     hiddenPartIds: EMPTY_LIST, focusedPartIds: EMPTY_LIST, selectedPartIds: EMPTY_LIST, selectedReferenceIds: EMPTY_LIST,
     resolveHover: NOTHING_HOVERED, hoverStore, jointHandles: null,
@@ -59,6 +59,6 @@ export default function StepStudioLayers({ viewport, drawn, studioStepScene, mes
     pickAtRef: null
   };
   return <AnimationClockProvider value={motion.clock}>
-    <StepSceneLayers viewport={viewport} stepScene={studioStepScene} policy={policy} props={props} api={api} />
+    <StepSceneLayers viewport={viewport} stepScene={previewStepScene} policy={policy} props={props} api={api} />
   </AnimationClockProvider>;
 }

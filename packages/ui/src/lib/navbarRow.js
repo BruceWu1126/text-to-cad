@@ -3,6 +3,6 @@ export const NAVBAR_ROW_CLASS = "flex h-9 shrink-0 items-center gap-2 border-b p
 // The icon buttons at the row's right end. Each 14px glyph keeps 5px around itself in its 24px
 // button; the gap adds 4px, so two glyphs sit a glyph's width apart.
 export const NAVBAR_CONTROLS_CLASS = "flex shrink-0 items-center gap-1";
-// A view's controls in the navbar (Display and the Studio, or the Studio's settings and its way
+// A view's controls in the navbar (Display and Preview, or Preview's settings and its way
 // out) look as the navbar's own icon buttons do.
 export const NAVBAR_CONTROL_CLASS = "size-6 text-muted-foreground hover:text-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground";

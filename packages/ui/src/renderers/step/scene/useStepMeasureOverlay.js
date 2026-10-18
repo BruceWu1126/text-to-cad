@@ -34,7 +34,7 @@ export function useStepMeasureOverlay({
   measureModeActive = false,
   runtimeRef,
   mountRef,
-  previewMode,
+  preview,
   viewerReadyTick
 }) {
   const measureStateRef = useRef(measureState);
@@ -51,7 +51,7 @@ export function useStepMeasureOverlay({
   // not the tool had ever been opened. While the tool is armed the loop does run
   // continuously, because the snap indicator has to track the cursor.
   const hasOverlayContent = Boolean(
-    !previewMode &&
+    !preview &&
     (measureModeActive ||
       measureState?.measurements?.length ||
       measureState?.draft?.anchor)
@@ -97,7 +97,7 @@ export function useStepMeasureOverlay({
 
       const state = measureStateRef.current;
       const camera = runtime?.camera || null;
-      if (state && camera && !previewMode) {
+      if (state && camera && !preview) {
         const localRect = { left: 0, top: 0, width: cssWidth, height: cssHeight };
         const bounds = { width: cssWidth, height: cssHeight };
         const activeId = activeIdRef.current;
@@ -209,5 +209,5 @@ export function useStepMeasureOverlay({
       window.cancelAnimationFrame(rafId);
       if (hooked?.onAfterRender === afterRender) hooked.onAfterRender = previous;
     };
-  }, [measureCanvasRef, measureHoverRef, measureModeActive, runtimeRef, mountRef, previewMode, viewerReadyTick, hasOverlayContent]);
+  }, [measureCanvasRef, measureHoverRef, measureModeActive, runtimeRef, mountRef, preview, viewerReadyTick, hasOverlayContent]);
 }

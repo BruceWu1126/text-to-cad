@@ -7,7 +7,7 @@ import { shareSettingsValue } from "./shareSettingsValue.js";
 // write here. Resolved defaults are outputs, never written back as new edits.
 // Every mode keeps its own settings: choosing a mode shows them, editing one mode's
 // (the one on screen or another) leaves the rest alone, and Reset takes one mode's away. Render is
-// the Studio's (`sceneFor("render")`, drawn in a view of its own): the scene this store draws is
+// Preview's (`sceneFor("render")`, drawn in a view of its own): the scene this store draws is
 // never Render, and a file left in Render is drawn in Solid, its mode its own.
 export function createViewSettingsStore(initial = {}, defaults = {}) {
   let context = defaults;

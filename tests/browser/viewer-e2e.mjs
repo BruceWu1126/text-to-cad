@@ -34,7 +34,7 @@ const root = path.resolve(args.dir || ".");
 // a robot description.
 const fixtures = [
   // `tools` is the file's own tool strip (a mesh and a drawing have none: a tool that does not
-  // apply is hidden, not disabled); `threeD` has Display and Present at the navbar's right end; `sections`
+  // apply is hidden, not disabled); `threeD` has Display and Preview at the navbar's right end; `sections`
   // are file sidebar tiles it must have (what there is to read of the file, whatever the tool).
   { format: "stl", file: "smoke.stl", parts: false, tools: [], sections: [], threeD: true },
   { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure"], sections: ["Model tree"], threeD: true },
@@ -293,12 +293,12 @@ async function formatGate() {
         buttons.map((button) => button.getAttribute("aria-label")));
       for (const label of fixture.sections) if (!tiles.includes(label)) failures.push(`${fixture.format}: missing the ${label} tile (sidebar: ${tiles.join(", ")})`);
       if (!fixture.sections.length && tiles.length) failures.push(`${fixture.format}: a file sidebar on a file with nothing to read (${tiles.join(", ")})`);
-      // The view's own controls, last in the navbar: Display (its mode) then Present on a 3D view,
+      // The view's own controls, last in the navbar: Display (its mode) then Preview on a 3D view,
       // none on a drawing; the strip keeps to the tools. The navbar's left is the logo (the app
       // menu, the person's settings in it), the file's name and its ⋯, on every file, drawing included.
       const controls = await page.locator("[data-viewer-navbar] [data-view-controls] button").evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("aria-label")));
-      const expected = fixture.threeD ? ["Display mode: Solid", "Present"] : [];
+      const expected = fixture.threeD ? ["Display mode: Solid", "Preview"] : [];
       if (JSON.stringify(controls) !== JSON.stringify(expected)) failures.push(`${fixture.format}: the view's controls are ${JSON.stringify(controls)}`);
       if (await page.locator("[data-cad-toolbar] [data-view-controls]").count()) failures.push(`${fixture.format}: view controls on the strip`);
       const menus = await page.getByRole("button", { name: "Menu", exact: true }).count();
@@ -322,10 +322,10 @@ async function formatGate() {
   }
 }
 
-// Inspect is the tools view, in the file's mode (Solid); Render is the Studio's alone, in by
-// Present and out by Exit studio, both in the navbar, each once the cover over the crossing has lifted.
+// Inspect is the tools view, in the file's mode (Solid); Render is Preview's alone, in by
+// Preview and out by Exit preview, both in the navbar, each once the cover over the crossing has lifted.
 async function selectViewingMode(page, current, next) {
-  const [press, arrive] = next === "Render" ? ["Present", "Exit studio"] : ["Exit studio", "Present"];
+  const [press, arrive] = next === "Render" ? ["Preview", "Exit preview"] : ["Exit preview", "Preview"];
   if (!(await page.getByRole("button", { name: press, exact: true }).count())) fail(`viewing mode: expected ${current} before switching to ${next}`);
   await page.getByRole("button", { name: press, exact: true }).click();
   await page.getByRole("button", { name: arrive, exact: true }).waitFor();
@@ -408,7 +408,7 @@ async function resetView(page) {
 }
 
 // --- the camera across modes ----------------------------------------------
-// Inspect (the tools view, Solid) and Render (the Studio) look at one model: the Studio converts
+// Inspect (the tools view, Solid) and Render (Preview) look at one model: Preview converts
 // the camera to its perspective, keeping what it looks at, and leaving it gives the tools view's
 // camera back exactly. A model opens framed against its own zero pose.
 async function settledCameraFrame(page, { projection = null, stage, requireSettledLod = true, timeout = 60_000 } = {}) {
@@ -512,7 +512,7 @@ async function modeCameraGate() {
       failures.push(`mode camera: Inspect did not open orthographic (${inspectFit?.projection})`);
     }
 
-    // The Studio converts the camera to its projection, keeping what it looks at, and leaving it
+    // Preview converts the camera to its projection, keeping what it looks at, and leaving it
     // is exact.
     await switchMode(page, "Inspect", "Render");
     const renderFit = await cameraState(page);
@@ -524,8 +524,8 @@ async function modeCameraGate() {
     await switchMode(page, "Render", "Inspect");
     await cameraHeld(page, inspectFit, "returning to Inspect");
 
-    // A view taken by hand survives a visit to the Studio, and what is done to the camera in
-    // the Studio is the Studio's: the tools view gets its own back.
+    // A view taken by hand survives a visit to Preview, and what is done to the camera in
+    // Preview is Preview's: the tools view gets its own back.
     await orbitAndZoom(page);
     const handFramed = await cameraMoved(page, inspectFit, "orbit and zoom in Inspect");
     if (handFramed) {
@@ -558,7 +558,7 @@ async function modeCameraGate() {
     if (errors.length) failures.push(`mode camera: ${errors.join(" | ")}`);
     console.log(`  mode camera: Inspect ${describeCamera(inspectFit)}`);
     console.log(`  mode camera: Render  ${describeCamera(renderFit)}`);
-    console.log("  mode camera: the Studio converts the view without re-aiming it, leaving it returns "
+    console.log("  mode camera: Preview converts the view without re-aiming it, leaving it returns "
       + "the tools view's camera, and a new model is framed against its own box");
   } finally {
     await context.close();

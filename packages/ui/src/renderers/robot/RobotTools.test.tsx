@@ -29,14 +29,14 @@ const description = () => `<robot name="arm">
 
 // ---- the WebGL stand-ins ------------------------------------------------------------------------
 const picks = vi.hoisted(() => ({ latest: null as null | { enabled: boolean; scene: any; onPick: (hit: unknown, modifiers: { multiSelect: boolean }) => void } }));
-// The scene the Studio's own viewport draws, while it is open (`StudioView.jsx`).
-const studioView = vi.hoisted(() => ({ scene: null as any }));
+// The scene Preview's own viewport draws, while it is open (`PreviewView.jsx`).
+const previewView = vi.hoisted(() => ({ scene: null as any }));
 vi.mock('../../../dist/renderers/kit/shell/ShellViewport.js', async () => {
   const { createElement, forwardRef: forward, useImperativeHandle: handle, useRef: ref } = await import('react');
   return {
-    default: forward(function ShellViewport({ children, studio, scene }: { children?: (viewport: object) => unknown, studio?: boolean, scene?: any }, viewerRef) {
+    default: forward(function ShellViewport({ children, preview, scene }: { children?: (viewport: object) => unknown, preview?: boolean, scene?: any }, viewerRef) {
       const runtimeRef = ref(null), hostRef = ref(null), mountRef = ref(null);
-      if (studio) studioView.scene = scene ?? null;
+      if (preview) previewView.scene = scene ?? null;
       handle(viewerRef, () => ({
         prepareViewSettings: async () => {}, presentViewSettings() {}, requestRender() {}, syncSceneBounds() {},
         getPerspective: () => null, captureScreenshotBlob: async () => new Blob(['png'], { type: 'image/png' }),
@@ -204,10 +204,10 @@ it('robot Select is the one tool: it opens picking links and dragging the knobs,
   robot.client.dispose();
 });
 
-it('a robot is a 3D view: Display and Present end the navbar, the strip keeping to its tools', async () => {
+it('a robot is a 3D view: Display and Preview end the navbar, the strip keeping to its tools', async () => {
   const robot = await openRobot();
   const actions = robot.pane.querySelector<HTMLElement>('[data-viewer-navbar] [data-view-controls]')!;
-  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Present']);
+  expect([...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Display mode: Solid', 'Preview']);
   expect(within(robot.pane).getByRole('group', { name: 'Interaction tools' }).querySelector('[data-view-controls]')).toBeNull();
   robot.client.dispose();
 });
@@ -300,7 +300,7 @@ it('a new revision of the robot keeps its pose while its controls and named pose
 });
 
 
-it("the Studio draws a robot of its own at the opening pose; the tools view's robot keeps its pose throughout, and its values", async () => {
+it("Preview draws a robot of its own at the opening pose; the tools view's robot keeps its pose throughout, and its values", async () => {
   const robot = await openRobot();
   const frameOf = (scene: any) => Array.from(scene.linkFrames().get('upper_arm'));
   const matrix = () => frameOf(picks.latest!.scene);
@@ -308,13 +308,13 @@ it("the Studio draws a robot of its own at the opening pose; the tools view's ro
   robot.type('shoulder', '30');
   const posed = matrix();
   expect(posed).not.toEqual(opening);
-  studioView.scene = null;
-  await userEvent.setup().click(within(robot.pane).getByRole('button', { name: 'Present' }));
-  await waitFor(() => expect(studioView.scene).not.toBeNull());
-  expect(studioView.scene).not.toBe(picks.latest!.scene);
-  await waitFor(() => expect(frameOf(studioView.scene)).toEqual(opening));
+  previewView.scene = null;
+  await userEvent.setup().click(within(robot.pane).getByRole('button', { name: 'Preview' }));
+  await waitFor(() => expect(previewView.scene).not.toBeNull());
+  expect(previewView.scene).not.toBe(picks.latest!.scene);
+  await waitFor(() => expect(frameOf(previewView.scene)).toEqual(opening));
   expect(matrix()).toEqual(posed);
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Exit studio', exact: true }));
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Exit preview', exact: true }));
   expect(matrix()).toEqual(posed);
   expect(robot.jointField('shoulder').value).toBe('30°');
   robot.client.dispose();

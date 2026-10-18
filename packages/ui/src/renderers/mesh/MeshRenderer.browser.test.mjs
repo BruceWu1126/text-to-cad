@@ -105,11 +105,11 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Present.
+// A mesh has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Preview.
 const noTools = async (pane) => {
   assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a mesh has no tools, and no strip');
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Present'], 'its view\'s controls end the navbar');
+    ['Display mode: Solid', 'Preview'], 'its view\'s controls end the navbar');
   for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
   }
@@ -170,11 +170,11 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-// Render is the Studio's: in by Present and out by Exit studio, both in the navbar, each once the view has
+// Render is Preview's: in by Preview and out by Exit preview, both in the navbar, each once the view has
 // come together under its cover.
-async function studio(page, pane, enter) {
-  await pane.getByRole('button', { name: enter ? 'Present' : 'Exit studio', exact: true }).click();
-  await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Present', exact: true }).waitFor();
+async function togglePreview(page, pane, enter) {
+  await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
+  await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
     && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
 }
@@ -195,8 +195,8 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   // simply orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a mesh has nothing to pick');
-  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Present', exact: true }).count(), 1,
-    'an STL is 3D: Present ends the navbar after Display');
+  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
+    'an STL is 3D: Preview ends the navbar after Display');
 
   // A mesh has no panel of its own: its only settings are Display's, and Display is never
   // where a file opens, so the model has the room.
@@ -217,10 +217,10 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
   await settle(page);
 
-  // The Studio draws the model in Render, on the studio's floor; leaving it takes the studio down.
-  await studio(page, pane, true);
+  // Preview draws the model in Render, on the studio's floor; leaving it takes the studio down.
+  await togglePreview(page, pane, true);
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
-  await studio(page, pane, false);
+  await togglePreview(page, pane, false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
   await display(page, GUIDES_OFF);
 
@@ -352,8 +352,8 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   assert.equal(dominantColors(await capture(page)).length, 1);
   await display(page, { modes: { solid: { flat: false, parts: { colorMode: 'original' } } } });
   assert.equal(differingPixels(shaded, await capture(page)), 0, 'the look is fully reversible');
-  // The Studio's Render keeps the colours and re-lights them.
-  await studio(page, pane, true);
+  // Preview's Render keeps the colours and re-lights them.
+  await togglePreview(page, pane, true);
   const rendered = await capture(page);
   assert.ok(dominantColors(rendered, { minShare: 0.002 }).some(([r, g, b]) => r > g + 60 && r > b + 60), 'the red object is still red under the studio');
   assert.deepEqual(errors, []);
@@ -376,7 +376,7 @@ test('a corrupt mesh raises the viewer\'s load alert and an empty one says there
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.stl/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of [/^Display mode: /, 'Present']) {
+  for (const name of [/^Display mode: /, 'Preview']) {
     assert.equal(await broken.pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   assert.equal(await alert.getByRole('button', { name: 'Retry', exact: true }).count(), 1);

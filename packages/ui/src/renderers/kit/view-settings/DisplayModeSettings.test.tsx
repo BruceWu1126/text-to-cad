@@ -30,8 +30,8 @@ function Harness({ features }: { features?: any }) {
       onPatch={patch => store.patchMode(mode, patch)} onReset={() => store.resetMode(mode)} />}
   </DisplayPopover></>;
 }
-// Render's page alone: the Studio's settings (`StudioSettings.jsx`), never a Display mode.
-function StudioRender() {
+// Render's page alone: Preview's settings (`PreviewSettings.jsx`), never a Display mode.
+function PreviewRender() {
   [store] = React.useState(() => createViewSettingsStore({}));
   const { display } = React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   return <DisplayModeSettings mode="render" display={display} onPatch={patch => store.patchMode('render', patch)} onReset={() => store.resetMode('render')} />;
@@ -136,9 +136,9 @@ it('gives sliders and value drafts their keyboard input', async () => {
   expect(settings('X-ray')).toBe(xray);
 });
 
-it("Render's page, the Studio's settings, has its lighting and a floor that folds while off; editing it leaves the file's mode", async () => {
+it("Render's page, Preview's settings, has its lighting and a floor that folds while off; editing it leaves the file's mode", async () => {
   const user = userEvent.setup({ skipHover: true });
-  render(<StudioRender />);
+  render(<PreviewRender />);
   for (const label of ['Exposure', 'Rotation', 'Softbox size', 'Fill', 'Background opacity', 'Floor opacity']) {
     expect(screen.getByRole('slider', { name: label })).toBeTruthy();
   }

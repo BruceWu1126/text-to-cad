@@ -397,7 +397,7 @@ export function useStepMotion({ entry, fileKey, resources, meshData, meshPartial
 
 /**
  * What the Position and Animation sections read and call, over one motion's state and commands:
- * the tools view's (`useStepMotion`) or the Studio's (`useStepStudioMotion`).
+ * the tools view's (`useStepMotion`) or Preview's (`useStepPreviewMotion`).
  */
 export function motionSectionControls({ status, error, definition, parameterValues, appliedPoseName, animationRuntime,
   animationStatus, animationError, clipList, animationState, commands, clock, onCopyParams = null, onPasteParams = null }) {

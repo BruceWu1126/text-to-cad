@@ -8,17 +8,17 @@ import { motionSectionControls } from "./useStepMotion.js";
 import { useStepMotionControls } from "./useStepMotionControls.js";
 
 /**
- * The Render Studio's own motion: a pose and a routine of its own over the same kinematics module
- * and routines the tools view loaded (`useStepMotion`), played on the Studio's own scene with its
+ * Preview's own motion: a pose and a routine of its own over the same kinematics module
+ * and routines the tools view loaded (`useStepMotion`), played on Preview's own scene with its
  * own clock. Nothing of it reaches the tools view, and nothing of the tools view reaches it: each
- * time the Studio opens (`open` turns true) it starts from the model as authored, at rest, its
+ * time Preview opens (`open` turns true) it starts from the model as authored, at rest, its
  * first routine chosen and not playing.
  *
  * @param {{ definition: object | null, clips: object | null, meshPartial: boolean, open: boolean }} options
  * @returns {{ positionControls: object, animationControls: object, parameterValues: object,
  *   animationRuntime: object | null, clock: object }}
  */
-export function useStepStudioMotion({ definition, clips, meshPartial = false, open = false }) {
+export function useStepPreviewMotion({ definition, clips, meshPartial = false, open = false }) {
   const [clock] = useState(createAnimationClock);
   const resting = () => restoreMotionAnimation(restingAnimationState(clips), clips || {});
   const defaults = () => normalizeParameterValues(definition, definition?.defaultParameterValues || {});

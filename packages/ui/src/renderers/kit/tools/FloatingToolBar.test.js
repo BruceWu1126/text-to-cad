@@ -31,11 +31,11 @@ test('every press reaches onSelect, and a press is all a tool is: no tool opens 
 });
 
 test('a phone\'s strip keeps its 36px tiles in one row and hands what does not fit, from its end, to More', () => {
-  // A STEP's strip: Select with its filter's chevron, five more tools, then Display and Present (a host with no navbar).
+  // A STEP's strip: Select with its filter's chevron, five more tools, then Display and Preview (a host with no navbar).
   const entries = [{ width: 56, view: false }, ...Array(5).fill({ width: 36, view: false }), { width: 36, view: true }, { width: 36, view: true }];
   // A 375px phone (the column 359px): everything fits, no More.
   assert.equal(touchStripFit(entries, 359), 8);
-  // A 320px phone (304px): Select and the next three tools, then More (the last tool, Display, Present).
+  // A 320px phone (304px): Select and the next three tools, then More (the last tool, Display, Preview).
   assert.equal(touchStripFit(entries, 304), 5);
   // Narrower still: fewer tools before More.
   assert.equal(touchStripFit(entries, 200), 3);

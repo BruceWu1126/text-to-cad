@@ -47,26 +47,26 @@ it('draws the navbar over every file, named by its name, and never over the home
 
 it('keeps the right of the navbar for the host\'s update button and Full size, then hands the renderer a box for its own view controls, last; a view shown small has no navbar and no box', async () => {
   // A renderer that draws its view controls into the box it is handed (the CAD viewer's Display
-  // and Present), and over its view where it is handed none.
+  // and Preview), and over its view where it is handed none.
   const handed: (HTMLElement | null)[] = [];
   const slotted = defineFileRenderer({
     id: 'slotted', priority: 2, matches: () => true, prepare: async () => ({ data: null }),
     load: async () => ({ default: (props: any) => {
       handed.push(props.navbarSlot ?? null);
       expect('onFullscreenChange' in props).toBe(false);
-      const control = <button type="button" aria-label="Present" />;
+      const control = <button type="button" aria-label="Preview" />;
       return props.navbarSlot ? createPortal(control, props.navbarSlot) : control;
     } }),
   });
   const view = (extra: object = {}) => render(<FileViewer file={FILE} host={{ ...host, ...extra } as any} renderers={[slotted]} state={{}} onStateChange={() => {}}
     update={<button type="button" aria-label="Update to 0.7.5" />} fullSize={<button type="button" aria-label="Full size" />} />);
   view();
-  await screen.findByRole('button', { name: 'Present' });
-  expect([labels(), screen.getByRole('button', { name: 'Present' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Present'], true]);
+  await screen.findByRole('button', { name: 'Preview' });
+  expect([labels(), screen.getByRole('button', { name: 'Preview' }).parentElement!.hasAttribute('data-view-controls')]).toEqual([['Update to 0.7.5', 'Full size', 'Preview'], true]);
   cleanup();
   handed.length = 0;
   view({ environment: { colorScheme: 'light', compact: true } });
-  await screen.findByRole('button', { name: 'Present' });
+  await screen.findByRole('button', { name: 'Preview' });
   expect([navbar(), handed.at(-1)]).toEqual([null, null]);
 });
 

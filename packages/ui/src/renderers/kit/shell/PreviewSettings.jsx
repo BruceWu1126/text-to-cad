@@ -6,7 +6,7 @@ import { FILE_SHEET_SELECT_TRIGGER_CLASSES, FileSheetSettingRow, FileSheetSettin
 import { ORBIT_SPEEDS } from "../tools/PlaybackMenu.jsx";
 
 /**
- * The Studio's settings, docked at the view's right edge under its corner (closed as the Studio
+ * Preview's settings, docked at the view's right edge under its corner (closed as Preview
  * opens; its settings button and this X put it away): **Orbit** — the camera turning about the
  * model, on or off (preview's own, off each time it opens) and its speed (the file's) — then
  * Render's own settings (`render`, the Display settings' Render page: lighting, background, floor).
@@ -14,13 +14,13 @@ import { ORBIT_SPEEDS } from "../tools/PlaybackMenu.jsx";
  * @param {{ orbit: boolean, onOrbitChange(value: boolean): void, speed: number, onSpeedChange(value: number): void,
  *   onClose(): void, render: import("react").ReactNode }} props
  */
-export default function StudioSettings({ orbit, onOrbitChange, speed, onSpeedChange, onClose, render }) {
+export default function PreviewSettings({ orbit, onOrbitChange, speed, onSpeedChange, onClose, render }) {
   const speeds = ORBIT_SPEEDS.includes(speed) ? ORBIT_SPEEDS : [...ORBIT_SPEEDS, speed].sort((a, b) => a - b);
-  return <div role="region" aria-label="Studio settings" data-studio-settings-panel=""
+  return <div role="region" aria-label="Preview settings" data-preview-settings-panel=""
     className={cn("pointer-events-auto flex max-h-full w-60 min-h-0 flex-col overflow-hidden rounded-md text-tiny", FILE_SIDEBAR_SURFACE_CLASS)}>
     <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 pl-3 pr-1">
       <h3 className="min-w-0 flex-1 truncate text-tiny text-foreground">Settings</h3>
-      <button type="button" aria-label="Close studio settings" onClick={onClose}
+      <button type="button" aria-label="Close preview settings" onClick={onClose}
         className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45">
         <X className="size-3" aria-hidden="true" />
       </button>

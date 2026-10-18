@@ -28,7 +28,7 @@ export { STRIP_BUTTON_CLASS, StripTouchProvider, TOUCH_STRIP_BUTTON_CLASS, useSt
  */
 
 /**
- * One of the view's controls after the strip's rule (Display, the Studio): its tile as drawn on the
+ * One of the view's controls after the strip's rule (Display, Preview): its tile as drawn on the
  * strip (`tile`), and what it is as a row of the touch strip's More menu, when there is no room for
  * it: `onSelect` for a press, or `popover` for a control whose tile opens a popover, which then
  * opens from More itself (`anchor`, the More button's ref).
@@ -64,7 +64,7 @@ const rule = <span role="separator" aria-orientation="vertical" className="mx-0.
 /**
  * The interaction tools: a dumb strip positioned by the viewport shell. It renders the
  * tools it is handed, left to right, then, after a thin rule, the view's own controls (`views`:
- * a 3D view's Display and the Studio), which are no tools: pressing one leaves the tool in hand as it
+ * a 3D view's Display and Preview), which are no tools: pressing one leaves the tool in hand as it
  * is. It holds no state and knows no tool by name. On a phone (`touch`) it is one row of
  * touch-sized tiles, and what does not fit goes, from its end, into a More menu (`TouchStrip`).
  *

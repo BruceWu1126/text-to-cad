@@ -22,7 +22,7 @@ extension):
   the whole viewer at card size: its navbar (the logo, which opens the app menu,
   first; the file name that opens the explorer; the ⋯; then, at the right, the
   update button, and Full size where the host can show a view full size), the tool strip
-  ending in Display and the Studio, the file sidebar, the view cube, and Quick Edit. A
+  ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
   newer card retires the older ones.
 
 A client that renders no MCP Apps never loads this page: its `cad_show` answers

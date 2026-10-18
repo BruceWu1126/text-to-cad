@@ -6,7 +6,7 @@ import { releaseGeometry, shareGeometry } from "@text-to-cad/core/lib/render/sha
 import { createPromptContext, referencePart, textPart } from "@text-to-cad/core/prompt";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { SHELL_TOOL, useRendererShell } from "../kit/shell/useRendererShell.js";
-import { useStudioScene } from "../kit/shell/useStudioScene.js";
+import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
 import { createToolModes } from "../kit/tools/toolModes.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
@@ -77,7 +77,7 @@ const LOAD_STAGES = Object.freeze({
   unready: { load: {}, scene: false }
 });
 
-/** One triangle, as the kit's scene contract (`kit/scene.js`) sees it; a sibling (the Studio's) draws `shared`'s. */
+/** One triangle, as the kit's scene contract (`kit/scene.js`) sees it; a sibling (Preview's) draws `shared`'s. */
 function createTriangleScene(shared = null) {
   const geometry = shared ? shareGeometry(THREE, shared) : new THREE.BufferGeometry();
   if (!shared) {
@@ -108,7 +108,7 @@ function createTriangleScene(shared = null) {
       this.complete = complete;
     },
     setSurfaceLook(next) { look.apply(next ? { ...next, authored: false } : null); },
-    // The Studio's own scene over this one's triangle (`useStudioScene`).
+    // Preview's own scene over this one's triangle (`usePreviewScene`).
     createSibling: () => createTriangleScene(geometry),
     dispose() { root.removeFromParent(); look.dispose(); material.dispose(); releaseGeometry(geometry); }
   };
@@ -214,15 +214,15 @@ function HarnessSurface({ view, data }) {
     </> : null;
   const toolPanels = kept ? <ToolPanel id="kept" title="Kept" label="Kept controls" onClose={() => setKept(false)}><div className="h-16 px-2">Kept</div></ToolPanel> : null;
 
-  // The Studio draws a scene of its own, the triangle's sibling, and plays a routine of its own
-  // (`data.studioAnimation`); its camera's settles reach the renderer as the editor's do.
-  const studioScene = useStudioScene(scene, shell.previewing);
-  const studio = useMemo(() => ({ scene: studioScene, animation: data.studioAnimation ?? null, onCameraSettled }),
-    [studioScene, data.studioAnimation, onCameraSettled]);
+  // Preview draws a scene of its own, the triangle's sibling, and plays a routine of its own
+  // (`data.previewAnimation`); its camera's settles reach the renderer as the editor's do.
+  const previewScene = usePreviewScene(scene, shell.previewing);
+  const previewView = useMemo(() => ({ scene: previewScene, animation: data.previewAnimation ?? null, onCameraSettled }),
+    [previewScene, data.previewAnimation, onCameraSettled]);
 
   // Its test controls sit at the bottom centre, clear of the view cube (bottom-right) and the file sidebar (down the left).
   return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.annotate, keepTool, poseTool] : [shell.tools.annotate]}
-    studio={studio}
+    previewView={previewView}
     toolPanels={toolPanels} sidebar={sidebar} references={references} onClearReferences={() => setPicked("")}
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}
     frameProvider={frame => <HarnessFrameContext.Provider value={`frame:${stage}`}>{frame}</HarnessFrameContext.Provider>}

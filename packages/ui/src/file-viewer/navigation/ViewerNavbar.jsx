@@ -28,7 +28,7 @@ import { FolderExplorer } from "./FolderExplorer.jsx";
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
  * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
  * the view full size (`fullSize`), where it shows it small; last, the renderer's own view controls,
- * drawn into the box it is handed (`controlsRef`: a 3D view's Display and Studio, or in the Studio
+ * drawn into the box it is handed (`controlsRef`: a 3D view's Display and Preview, or in Preview
  * its settings and the way out). The colour scheme is the app menu's.
  *
  * Nothing here is drawn for its own sake: a control appears only where it does something.

@@ -12,8 +12,8 @@ import { poseValuesForPreset } from "../components/workbench/PoseControlsSection
 // going back to rest when one is used (and when Explode's tool is taken up, which the host watches)
 // — nothing is set aside to come back. Position and the routine are both here; Explode is the
 // host's view settings, so `host.onUse(motion)` tells it which of these two was used ("position" or
-// "animation") and it takes Explode off. The tools view and the Studio each have their own motion
-// (`useStepMotion`, `useStepStudioMotion`): their own values, their own routine and its `clock`.
+// "animation") and it takes Explode off. The tools view and Preview each have their own motion
+// (`useStepMotion`, `useStepPreviewMotion`): their own values, their own routine and its `clock`.
 export function useStepMotionControls({
   selectedStepModuleDefinition, selectedAnimationClips, selectedActiveAnimationClip,
   animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,

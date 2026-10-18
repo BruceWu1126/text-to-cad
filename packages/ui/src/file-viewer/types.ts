@@ -98,7 +98,7 @@ export interface RendererViewProps {
   source: FileSource;
   /**
    * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Studio, for a 3D view); null where no navbar is drawn (a compact view),
+   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn (a compact view),
    * when the renderer draws them over its view instead.
    */
   navbarSlot?: HTMLElement | null;

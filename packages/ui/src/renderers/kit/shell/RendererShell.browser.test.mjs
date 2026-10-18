@@ -588,7 +588,7 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.equal(await card.count(), 0, 'and raises nothing');
 
   // THE CUBE IS THE BOTTOM-RIGHT CORNER'S, far enough off the bottom that its axes stay inside the
-  // view, and the tool stack stops above it. The view's controls, Display then Present, end the
+  // view, and the tool stack stops above it. The view's controls, Display then Preview, end the
   // navbar; the strip keeps to its tools. The right of the view is Quick Edit's, and the bottom middle the host's (a
   // composer, on some).
   const frameBox = await canvasElement.boundingBox();
@@ -600,7 +600,7 @@ test('a renderer says more about its load than a download: finding the file, edi
   assert.ok(offRight >= 0 && offRight < 20, `the view cube stays against the right edge: ${offRight}px`);
   assert.ok(stackBox.y + stackBox.height <= cubeBox.y, 'the tool stack stops above the cube');
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Present'], 'Display then Present, at the navbar\'s right end');
+    ['Display mode: Solid', 'Preview'], 'Display then Preview, at the navbar\'s right end');
   assert.equal(await pane.locator('[data-cad-toolbar] [data-view-controls], [data-cad-toolbar] [data-strip-rule]').count(), 0, 'the strip keeps to its tools');
 
   // FINDING: the wait before the file is even located covers the viewport, and says

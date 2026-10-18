@@ -109,7 +109,7 @@ export default function ToolPanel({ id, title = null, name = "", label, summary 
   // button or its tile. Closed, it stays mounted out of sight.
   const inSidebar = Boolean(stack?.sidebar);
   if (inSidebar) collapsible = false;
-  // A section the sidebar does not offer just now (the Studio's are Position and Animation) is as
+  // A section the sidebar does not offer just now (Preview's are Position and Animation) is as
   // a hidden one: mounted, out of sight, and no tile.
   if (inSidebar && stack.allowed && !stack.allowed(id)) hidden = true;
   if (inSidebar && !title) title = name || label;

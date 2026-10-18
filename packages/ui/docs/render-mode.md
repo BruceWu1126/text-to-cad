@@ -63,13 +63,13 @@ edits do not invalidate materials, lighting, geometry or camera. No-op actions p
 Do not merge captured props, persist resolved defaults or keep a second display state.
 
 The view injects offered `modes` and `settings`. Mesh views offer Solid and Render and no
-edges, Clip or Explode. In the viewer Render is the Studio's alone (preview mode): Display
-offers the other modes, and the Studio draws Render whatever the file's mode. Unsupported saved modes resolve to Solid without rewriting storage;
+edges, Clip or Explode. In the viewer Render is Preview's alone: Display
+offers the other modes, and Preview draws Render whatever the file's mode. Unsupported saved modes resolve to Solid without rewriting storage;
 unoffered settings do not affect the scene. The shared UI discovers no host APIs.
 
 ## Rendering costs and camera behavior
 
-The photographic rig stays lazy. The Studio's Render creates its photographic
+The photographic rig stays lazy. Preview's Render creates its photographic
 softbox environment; the other modes use neutral CAD lighting. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
@@ -102,7 +102,7 @@ a near plane at the eye. The grid's bounds also fit the far plane;
 it is independent of the studio floor used by Render. Grid spacing is five cells across the
 default model framing. The grid, the stage and the Render studio's floor are
 SIZED from the model's rest placement for every renderer, STEP included: a pose, a
-playing routine, or a pose set in the Studio never rescales or
+playing routine, or a pose set in Preview never rescales or
 slides the ground; its height, the lighting and the shadow reach follow the model. Enabling photographic effects updates that live scene;
 it never clears or covers the canvas with a loading screen. Only actual context
 recovery replaces the renderer. Quality never changes a mesh: every mode draws
@@ -157,21 +157,21 @@ unchanged after a runtime replacement does not.
 ## Where the controls live
 
 Display settings are a dropdown from the Display button at the navbar's right end
-(the current mode's sphere, before Present: `kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
-modes are every offered mode but Render (`DisplayModeOptions.js`). The Studio, a view of its own
+(the current mode's sphere, before Preview: `kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
+modes are every offered mode but Render (`DisplayModeOptions.js`). Preview, a view of its own
 over the editor's, draws the model in Render whatever the file's mode (the store's
-`sceneFor("render")`, as `kit/viewport/studioViewScene.js` draws it), and the tools
+`sceneFor("render")`, as `kit/viewport/previewViewScene.js` draws it), and the tools
 view never does: a file whose mode is Render is drawn there in Solid. Render's settings page is
-the Studio's settings panel (`kit/shell/StudioSettings.jsx`, under Orbit), its edits the file's
+Preview's settings panel (`kit/shell/PreviewSettings.jsx`, under Orbit), its edits the file's
 Render settings. A file's model tree and Position are
 sections of the file sidebar (see
 [settings-ui.md](./settings-ui.md#the-file-sidebar-and-the-tool-stack)); nothing in them is
 a display setting.
 
-Display and Present, the view's controls at the navbar's right end, are offered by a 3D view
+Display and Preview, the view's controls at the navbar's right end, are offered by a 3D view
 alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`):
 
-| Renderer | Files | Display and the Studio |
+| Renderer | Files | Display and Preview |
 | --- | --- | --- |
 | `step` | STEP, STP | Yes |
 | `glb` | GLB | Yes |
@@ -179,5 +179,5 @@ alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`
 | `robot` | URDF, SRDF, SDF | Yes |
 | `dxf` | DXF | No: a 2D drawing, on a surface of its own, without the shell |
 
-A view without them has no Display or Studio control, not a disabled one, and a
-request for the Studio leaves its normal view as it is.
+A view without them has no Display or Preview control, not a disabled one, and a
+request for Preview leaves its normal view as it is.

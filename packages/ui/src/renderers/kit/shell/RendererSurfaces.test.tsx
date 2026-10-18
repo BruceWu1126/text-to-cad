@@ -9,12 +9,12 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // on, a runtime whose renderer's canvas is the scene's), and records the props the shell wired, so
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
 // The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
-// `props`: the editor's viewport; `studio`: the Studio's, a viewport of its own while it is open.
-const viewport = vi.hoisted(() => ({ props: null as any, studio: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
+// `props`: the editor's viewport; `preview`: Preview's, a viewport of its own while it is open.
+const viewport = vi.hoisted(() => ({ props: null as any, preview: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
-    if (props.studio) viewport.studio = props; else viewport.props = props;
-    useEffect(() => () => { if (props.studio) viewport.studio = null; }, []);
+    if (props.preview) viewport.preview = props; else viewport.props = props;
+    useEffect(() => () => { if (props.preview) viewport.preview = null; }, []);
     useImperativeHandle(ref, () => ({
       captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
       annotationAt: (x: number, y: number) => viewport.annotationAt?.(x, y) ?? null,
@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; viewport.studio = null; });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewport.props = null; viewport.preview = null; });
 
 
 function mount(host = testHost(), state?: unknown, name = 'one.harness', element: { current: HTMLElement | null } | null = null) {
@@ -116,7 +116,7 @@ it('a press the renderer has nothing to say about, a secondary drag, or a press 
   expect(screen.getByRole('menu')).toBeTruthy();
 });
 
-it('Quick Edit is there once something is picked, with what the host can do, is put away in the Studio, and nothing sits at the bottom', async () => {
+it('Quick Edit is there once something is picked, with what the host can do, is put away in Preview, and nothing sits at the bottom', async () => {
   const destination = { kind: 'composer', available: true } as const;
   const send = vi.fn(async () => ({ status: 'sent' as const, partIds: [] }));
   const { container, canvas } = mount(testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } }));
@@ -132,7 +132,7 @@ it('Quick Edit is there once something is picked, with what the host can do, is 
   fireEvent.click(within(box).getByRole('button', { name: 'Close Quick Edit' }));
   expect(screen.queryByRole('region', { name: 'Quick Edit' })).toBeNull();
   pick(canvas);
-  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
   await waitFor(() => expect(container.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(true));
   expect(container.querySelector('[data-preview-chrome]')!.contains(container.querySelector('[data-quick-edit]'))).toBe(true);
 });
@@ -303,12 +303,12 @@ it('the renderer is told the camera settled, through what the viewport reports: 
   // So is the viewport's own settle (a preview camera, a resize), which records nothing.
   act(() => { viewport.props.onCameraSettled(); });
   expect(overlay('camera-settles')).toBe('2');
-  // The Studio's own view keeps no camera (it records no perspective), and the renderer still hears
+  // Preview's own view keeps no camera (it records no perspective), and the renderer still hears
   // its camera settle.
-  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-  await waitFor(() => expect(viewport.studio).not.toBeNull());
-  expect(viewport.studio.onPerspectiveChange ?? null).toBeNull();
-  act(() => { viewport.studio.onCameraSettled(); });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  await waitFor(() => expect(viewport.preview).not.toBeNull());
+  expect(viewport.preview.onPerspectiveChange ?? null).toBeNull();
+  act(() => { viewport.preview.onCameraSettled(); });
   expect(overlay('camera-settles')).toBe('3');
 });
 
@@ -352,36 +352,36 @@ function mountRoutine(data: Record<string, unknown>, state: unknown = undefined)
     <ViewerHostContext.Provider value={testHost()}><HarnessRenderer {...(props(extra) as any)} /></ViewerHostContext.Provider>);
 }
 
-it('opening another file while the Studio is up leaves it; crossing touches neither the tools view\'s routine nor the Studio\'s', async () => {
+it('opening another file while Preview is up leaves it; crossing touches neither the tools view\'s routine nor Preview\'s', async () => {
   const calls: string[] = [];
-  const rerender = mountRoutine({ animation: routineRuntime('tools-a', calls), studioAnimation: routineRuntime('studio-a', calls), modelKey: 'a.glb' });
-  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-  await screen.findByRole('button', { name: 'Exit studio' });
+  const rerender = mountRoutine({ animation: routineRuntime('tools-a', calls), previewAnimation: routineRuntime('preview-a', calls), modelKey: 'a.glb' });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  await screen.findByRole('button', { name: 'Exit preview' });
   // With Autoplay off, entering plays nothing and puts nothing down.
   expect(calls).toEqual([]);
-  rerender({ animation: routineRuntime('tools-b', calls), studioAnimation: routineRuntime('studio-b', calls), modelKey: 'b.glb' });
-  expect(screen.queryAllByRole('button', { name: 'Exit studio' })).toEqual([]);
-  expect([calls, viewport.studio]).toEqual([[], null]);
+  rerender({ animation: routineRuntime('tools-b', calls), previewAnimation: routineRuntime('preview-b', calls), modelKey: 'b.glb' });
+  expect(screen.queryAllByRole('button', { name: 'Exit preview' })).toEqual([]);
+  expect([calls, viewport.preview]).toEqual([[], null]);
 });
 
-it("under Autoplay the Studio plays its own routine as it opens; the tools view's is not touched", async () => {
+it("under Autoplay Preview plays its own routine as it opens; the tools view's is not touched", async () => {
   const calls: string[] = [];
-  mountRoutine({ animation: routineRuntime('tools', calls), studioAnimation: routineRuntime('studio', calls) },
+  mountRoutine({ animation: routineRuntime('tools', calls), previewAnimation: routineRuntime('preview', calls) },
     { version: 2, playback: { orbitSpeed: 1, autoplay: true } });
-  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-  await screen.findByRole('button', { name: 'Exit studio' });
-  await waitFor(() => expect(calls).toEqual(['play studio']));
-  fireEvent.click(screen.getByRole('button', { name: 'Exit studio' }));
-  expect(calls).toEqual(['play studio']);
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  await screen.findByRole('button', { name: 'Exit preview' });
+  await waitFor(() => expect(calls).toEqual(['play preview']));
+  fireEvent.click(screen.getByRole('button', { name: 'Exit preview' }));
+  expect(calls).toEqual(['play preview']);
 });
 
-it('a view that stops offering the Studio while it is up leaves it as every exit does: its view goes, and nothing else', async () => {
+it('a view that stops offering Preview while it is up leaves it as every exit does: its view goes, and nothing else', async () => {
   const calls: string[] = [];
-  const tools = routineRuntime('tools', calls), studio = routineRuntime('studio', calls);
-  const rerender = mountRoutine({ animation: tools, studioAnimation: studio });
-  fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-  await screen.findByRole('button', { name: 'Exit studio' });
-  rerender({ animation: tools, studioAnimation: studio, previewable: false });
-  expect([calls, viewport.studio, viewport.props.suspended]).toEqual([[], null, false]);
-  expect(screen.queryAllByRole('button', { name: 'Exit studio' })).toEqual([]);
+  const tools = routineRuntime('tools', calls), preview = routineRuntime('preview', calls);
+  const rerender = mountRoutine({ animation: tools, previewAnimation: preview });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+  await screen.findByRole('button', { name: 'Exit preview' });
+  rerender({ animation: tools, previewAnimation: preview, previewable: false });
+  expect([calls, viewport.preview, viewport.props.suspended]).toEqual([[], null, false]);
+  expect(screen.queryAllByRole('button', { name: 'Exit preview' })).toEqual([]);
 });

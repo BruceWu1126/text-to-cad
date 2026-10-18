@@ -72,40 +72,40 @@ use the [explicit fake host](../src/host/testing/host.ts).
 
 The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the viewport: its
 tool strip, the tool in hand's sub-toolbar and its file sidebar, its view's controls (Display,
-Present) drawn into the navbar's `navbarSlot` (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
+Preview) drawn into the navbar's `navbarSlot` (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
 DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
 file's name opens that). The layout a person gives the file sidebar — each section's size —
 and the tool stack's panels is one
 of the tab's settings (`settings.toolStack` of the tab record, `@text-to-cad/ui/tab-store`),
 beside the appearance and the home's layout.
 
-## The Studio and renderer navigation actions
+## Preview and renderer navigation actions
 
-The Studio (preview mode) is the shared shell's own state (`previewing`); there is no host
+Preview is the shared shell's own state (`previewing`); there is no host
 prop for it and a host cannot start or observe it. It is a 3D view's alone, and each
 renderer says whether its view is one: it declares `previewable` to the shell
 (`useRendererShell`), as STEP, GLB, STL/3MF and URDF/SRDF/SDF do. A view that does
 not — a DXF's 2D drawing, which draws its own surface without the shell — has no
-Studio at all, no control and not a disabled one, and nothing that asks for it
+Preview at all, no control and not a disabled one, and nothing that asks for it
 (a link or a host request, should either come to) takes it there: it keeps
 the normal view. The CAD app's Full size, inline, is the host's display mode, not
-the Studio: it shows the normal view, of any file. The Studio keeps the navbar, so the app
+Preview: it shows the normal view, of any file. Preview keeps the navbar, so the app
 menu and the explorer still lead to other files; the host is not told it is on.
-The Studio and the tools view are two states: entering leaves the tools view's state as it
+Preview and the tools view are two states: entering leaves the tools view's state as it
 is (the pose, the routine, the selection, hidden and isolated parts, Explode and Clip,
-measurements, the camera, the tool and its panels) and the Studio starts from the model as
+measurements, the camera, the tool and its panels) and Preview starts from the model as
 authored, with its own camera, still, and its routine at rest, drawn in Render whatever the
-file's display mode (the tools view never draws Render); leaving throws the Studio's state
+file's display mode (the tools view never draws Render); leaving throws Preview's state
 away and gives the tools view back exactly as it was, its routine included, in the file's
-mode. The Studio is a view of its own, mounted over the tools view's while it is open
-(`kit/shell/StudioView.jsx`), with its own scene, camera, pose and routine, sharing only the
+mode. Preview is a view of its own, mounted over the tools view's while it is open
+(`kit/shell/PreviewView.jsx`), with its own scene, camera, pose and routine, sharing only the
 page's GPU device; the tools view's viewport stays mounted under it and nothing of it changes.
-Nothing of the Studio is persisted. Routines play from the file sidebar's Animation section in either
-view. The Studio opens still: Orbit is off every time it opens, and its settings panel turns it
+Nothing of Preview is persisted. Routines play from the file sidebar's Animation section in either
+view. Preview opens still: Orbit is off every time it opens, and its settings panel turns it
 on. The file's view's `playback` — Orbit's speed, Autoplay, and the chosen speed and loop —
-is kept between visits to the Studio and across a reload, and a file's routine plays on entry
+is kept between visits to Preview and across a reload, and a file's routine plays on entry
 only when its Autoplay is on. The rules are in
-[settings-ui.md](settings-ui.md#camera-animation-and-the-studio).
+[settings-ui.md](settings-ui.md#camera-animation-and-preview).
 
 A renderer can publish `FileNavigationAction[]` through
 `RendererViewProps.onNavigationActionsChange`. The CAD renderers publish one, and only
@@ -123,7 +123,7 @@ person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
 A renderer's controls for the view are the renderer's own, drawn into the box FileViewer
 hands it at the navbar's right end (`navbarSlot`): the CAD viewer's for a 3D view, Display and
-Present, and in its Studio, Studio settings and Exit studio; the navbar stays over the Studio.
+Preview, and in Preview its Preview settings and Exit preview; the navbar stays over it.
 Where there is no navbar (a view shown small) the renderer draws them over its view. The host's `captureRequest`
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
@@ -311,8 +311,8 @@ schema as snapshots: `mode` selects `solid`, `render`, `xray`, `hidden-line`, or
 clip and exploded are shared. Patches merge supplied fields within each mode's
 groups. A mode patch selects its remembered overrides without clearing anything.
 Reset removes only the named mode's overrides. There is no Custom state or legacy
-shape migration. Render is the Studio's alone, which no live command opens: the tools
-view draws a file whose mode is `render` in Solid, and `modes.render` is the Studio's
+shape migration. Render is Preview's alone, which no live command opens: the tools
+view draws a file whose mode is `render` in Solid, and `modes.render` is Preview's
 Render settings. Camera projection/lens changes preserve viewport pose and zoom.
 `resetCamera` frames the model again without turning the camera — exactly what
 STEP's context-menu "Zoom to fit" does. Cube shortcuts change only orientation.
@@ -369,7 +369,7 @@ Clip and Explode, the playback settings (Orbit's speed, Autoplay, and the chosen
 loop), and the renderer's own slices each behind the
 signature it was written against — a slice that no longer fits the file on screen is
 dropped, the camera, the display and the playback never. Not in it, and started afresh
-on every open: the tool in hand, the selection, measurements, ink, the Studio, a
+on every open: the tool in hand, the selection, measurements, ink, Preview, a
 routine's time and Quick Edit's note. Apps merge
 what a view changed into the store (`files.merge`); a stale view must not overwrite
 another view's entries. Material appearance is source-owned and read-only. Live
@@ -469,7 +469,7 @@ to the agent's chat through the host's `send`, where the host can, and otherwise
 `copy`, its button then Copy prompt; the prompt has a copy icon in its top-right corner either way; the host decides which it supplies. Its
 Manual installation link, the notice's `instructions`, opens through the host's `onLink`. The shell
 handles placement and hides the toolbar in
-the Studio; the host owns callbacks and preferences. None of these imply platform
+Preview; the host owns callbacks and preferences. None of these imply platform
 detection or move application-specific release/network behavior into shared UI.
 
 The explorer is a popover under the file's name (`FolderExplorer.jsx`;
@@ -482,7 +482,7 @@ when it is missing (`isMissingFileError`), and "Could not open that file" and th
 reason otherwise, each with a Go home button where the host has a home.
 
 The viewport's edges and corners are the shell's, never the host's: the tool strip at the
-top centre, ending in the view's own controls (Display and the Studio, a 3D view's), the tool in
+top centre, ending in the view's own controls (Display and Preview, a 3D view's), the tool in
 hand's sub-toolbar under it, the file sidebar down the left edge, Quick Edit at the
 top-right, and the view cube at the bottom-right. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under

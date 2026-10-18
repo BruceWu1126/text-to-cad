@@ -3,7 +3,7 @@ import { Slider } from "@text-to-cad/ui/primitives/slider";
 import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.js";
 
 // The file sidebar's Animation section (`AnimationSection.jsx`) is the one transport, in the tools
-// view and the Studio alike: the routine, Play/Pause, this scrubber and the Playback settings
+// view and Preview alike: the routine, Play/Pause, this scrubber and the Playback settings
 // (`PlaybackMenu.jsx`).
 //
 // Every animation source shares this transport UI. It only edits the clip and clock state of
@@ -12,7 +12,7 @@ import { FILE_SHEET_PRECISION_SLIDER_CLASSES } from "../../inspector/FileSheet.j
 // runtime: { clips: [{ id, label, duration }], activeClipId, playing, elapsedSec,
 //   speed, loopEnabled, clock, onClipSelect, onPlayToggle, onScrub, onSpeedChange,
 //   onLoopToggle, onRelease }. `clock` is the owner's live AnimationClock (`animationClock.js`);
-//   `onRelease` stops, rewinds and puts the model back at rest, as crossing into or out of the Studio does.
+//   `onRelease` stops, rewinds and puts the model back at rest, as crossing into or out of Preview does.
 
 export const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3];
 

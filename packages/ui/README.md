@@ -245,7 +245,7 @@ and demand.
 A CAD file's controls are the shell's chrome over the viewport. The tool strip at the top
 centre holds the file's tools — a STEP's Select (its selection filter the chevron after it),
 Annotate, Measure, Explode and Clip; a robot's Select — then, after a thin rule, a
-3D view's Display (its settings, a popover that opens down) and the Studio. The tool in hand's
+3D view's Display (its settings, a popover that opens down) and Preview. The tool in hand's
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
 Annotate's tools, style and history; Explode's and Clip's slider rows.
 What there is to read of the file is the file sidebar at the top-left, whatever the tool
@@ -258,19 +258,19 @@ the description's link tree, with the Model tree's rows and search box; see
 [robot links](docs/cad-renderer.md#robot-links).
 The binding [viewer design system](docs/settings-ui.md) defines tool lifecycle,
 the file sidebar, mobile layout, section density, keyboard scope, tooltips
-and the Studio. RendererShell owns the strip and its sub-toolbar at the top centre, the file
-sidebar, Quick Edit at the top-right and the cube at the bottom-right. The Studio (preview
+and Preview. RendererShell owns the strip and its sub-toolbar at the top centre, the file
+sidebar, Quick Edit at the top-right and the cube at the bottom-right. Preview (preview
 mode) is the shell's own, the one place Render is drawn — whatever the file's display mode,
 which has no Render — and takes the whole page, the navbar and the strip with it; its own
-controls stand in the view's top-right corner — Studio settings (Orbit, off at every entry,
-and its speed, then Render's settings) and Exit studio — and the file sidebar offers its
+controls stand in the view's top-right corner — Preview settings (Orbit, off at every entry,
+and its speed, then Render's settings) and Exit preview — and the file sidebar offers its
 Position and Animation alone at the top-left; nothing sits under the model. Routines play from
-the sidebar's Animation section, in either view. The Studio and the tools view are two views,
+the sidebar's Animation section, in either view. Preview and the tools view are two views,
 each with its own viewport, scene, camera, pose and routine over the page's one GPU device:
-the Studio starts from the model as authored and leaves the tools view's state untouched, and
-leaving it throws the Studio's away and gives the tools view back exactly as it was
-([the Studio](docs/settings-ui.md#camera-animation-and-the-studio); its mechanism,
-[the Studio and the camera](docs/cad-renderer.md#the-studio-and-the-camera)). Keep app-specific
+Preview starts from the model as authored and leaves the tools view's state untouched, and
+leaving it throws Preview's away and gives the tools view back exactly as it was
+([Preview](docs/settings-ui.md#camera-animation-and-preview); its mechanism,
+[Preview and the camera](docs/cad-renderer.md#preview-and-the-camera)). Keep app-specific
 effects in the [host contract](docs/viewer-host.md), not in renderer components.
 
 One per-file settings store serves controls, live commands and persistence.
@@ -293,7 +293,7 @@ file — the name opens the explorer — and offers its ⋯ menu (Copy path, Rev
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
 and, last, the host's colour scheme control (`colorSchemeControl`, the web viewer's System,
-Light and Dark), where it has one. A 3D view's Display and Studio are its tool strip's.
+Light and Dark), where it has one. A 3D view's Display and Preview are its tool strip's.
 With no file a view shows the host's home, the model library: the models opened before,
 pinned first, with their pictures, and Open where the host has a file chooser, under its
 wordmark and GitHub, Discord and X. A file that

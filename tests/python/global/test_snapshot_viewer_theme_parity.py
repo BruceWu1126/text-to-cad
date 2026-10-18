@@ -54,7 +54,7 @@ def python_accepts(values, validator):
 class SharedDisplayContractParityTests(unittest.TestCase):
     def test_exported_closed_key_sets_and_enums_match(self):
         expected = {
-            # The shared core draws Render as a mode (the Studio's, and a snapshot's `render`);
+            # The shared core draws Render as a mode (Preview's, and a snapshot's `render`);
             # the snapshot's display vocabulary is the working modes, Render its own request.
             "VIEW_MODE_VALUES": DISPLAY_MODES | {"render"},
             "VIEW_SETTINGS_KEYS": DISPLAY_OPTION_KEYS,

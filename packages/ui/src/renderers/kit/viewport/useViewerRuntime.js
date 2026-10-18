@@ -51,7 +51,7 @@ function createViewRenderer(THREE) {
 export function useViewerRuntime({
   mountRef,
   runtimeRef,
-  studioRef,
+  previewRef,
   setError,
   setViewerReadyTick,
   viewerTheme,
@@ -462,7 +462,7 @@ export function useViewerRuntime({
       // Set at teardown. Its context is lost then, so a frame something still asks of this
       // runtime (a timer, a holder of its `requestRender`) draws nothing.
       let released = false;
-      // Suspended (`setSuspended`): the view is covered by another (the Studio over the editor) and
+      // Suspended (`setSuspended`): the view is covered by another (Preview over the editor) and
       // draws nothing; a frame asked of it meanwhile is owed, and drawn the moment it is resumed.
       let suspended = false;
       let owedWhileSuspended = false;
@@ -806,7 +806,7 @@ export function useViewerRuntime({
 
       const handleKeyDown = (event) => {
         if (
-          studioRef.current ||
+          previewRef.current ||
           event.defaultPrevented ||
           !ownsKey(event) ||
           event.ctrlKey ||

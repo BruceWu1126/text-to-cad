@@ -9,7 +9,7 @@ import { VIEWER_SCENE_SCALE } from "@text-to-cad/core/lib/viewer/sceneScale.js";
 import RendererShell from "../kit/shell/RendererShell.jsx";
 import { readFileView } from "../kit/shell/fileView.js";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
-import { useStudioScene } from "../kit/shell/useStudioScene.js";
+import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
@@ -66,7 +66,7 @@ function RobotSurface({ view, data }) {
   const robotRef = useRef(robot);
   robotRef.current = robot;
 
-  // The Studio: a robot of its own (`studioScene`, below), posed by its own Position.
+  // Preview: a robot of its own (`previewScene`, below), posed by its own Position.
   const preview = usePreviewState();
   const previewing = preview.previewing;
 
@@ -137,26 +137,26 @@ function RobotSurface({ view, data }) {
   // ---- a pose step: k matrices, one frame, no component ----------------------------------
   const handlesRef = useRef(NO_HANDLES);
   const handleLayoutRef = useRef(null);
-  // The Studio's own robot and pose: the robot as it opens, each time the Studio opens, moved by the
-  // Studio's Position section and gone as it closes — the tools view's robot and pose are never touched.
-  const studioScene = useStudioScene(scene, previewing);
-  const studioPose = useMemo(() => (previewing && robot ? createPoseStore(robot.description) : null), [previewing, robot]);
+  // Preview's own robot and pose: the robot as it opens, each time Preview opens, moved by the
+  // Preview's Position section and gone as it closes — the tools view's robot and pose are never touched.
+  const previewScene = usePreviewScene(scene, previewing);
+  const previewPose = useMemo(() => (previewing && robot ? createPoseStore(robot.description) : null), [previewing, robot]);
   useLayoutEffect(() => {
-    if (!studioScene || !studioPose) return undefined;
+    if (!previewScene || !previewPose) return undefined;
     let boundsFrame = 0;
     const present = () => {
-      if (!studioScene.setJointValues(studioPose.getSnapshot().values)) return;
-      const studioView = shellRef.current?.frame.studioViewRef.current;
-      studioView?.requestRender?.();
-      boundsFrame ||= window.requestAnimationFrame(() => { boundsFrame = 0; shellRef.current?.frame.studioViewRef.current?.syncSceneBounds?.(); });
+      if (!previewScene.setJointValues(previewPose.getSnapshot().values)) return;
+      const view = shellRef.current?.frame.previewViewRef.current;
+      view?.requestRender?.();
+      boundsFrame ||= window.requestAnimationFrame(() => { boundsFrame = 0; shellRef.current?.frame.previewViewRef.current?.syncSceneBounds?.(); });
     };
     present();
-    const unsubscribe = studioPose.subscribe(present);
+    const unsubscribe = previewPose.subscribe(present);
     return () => { unsubscribe(); window.cancelAnimationFrame(boundsFrame); };
-  }, [studioScene, studioPose]);
-  const studio = useMemo(() => ({ scene: studioScene }), [studioScene]);
-  const studioSceneRef = useRef(studioScene);
-  studioSceneRef.current = studioScene;
+  }, [previewScene, previewPose]);
+  const previewView = useMemo(() => ({ scene: previewScene }), [previewScene]);
+  const previewSceneRef = useRef(previewScene);
+  previewSceneRef.current = previewScene;
   useLayoutEffect(() => {
     if (!scene || !pose || !robot) { handlesRef.current = NO_HANDLES; return undefined; }
     const prepared = prepareRobotJointHandles(THREE, robot.description, scene);
@@ -185,8 +185,8 @@ function RobotSurface({ view, data }) {
   surfaceRenders.current += 1;
   useEffect(() => {
     const handles = () => handleLayoutRef.current?.() || [];
-    // The robot on screen: the Studio's own while it is open.
-    const links = () => [...((studioSceneRef.current || scene)?.linkFrames() || [])].map(([link, matrixWorld]) => ({ link, matrixWorld }));
+    // The robot on screen: Preview's own while it is open.
+    const links = () => [...((previewSceneRef.current || scene)?.linkFrames() || [])].map(([link, matrixWorld]) => ({ link, matrixWorld }));
     // What a pose step cost: the matrices it wrote, and whether this component rendered for it (it must not).
     const stats = () => ({ ...(scene?.stats || {}), surfaceRenders: surfaceRenders.current });
     Object.assign(window, { __cadJointHandles: handles, __robotLinks: links, __robotPoseStats: stats });
@@ -247,8 +247,8 @@ function RobotSurface({ view, data }) {
     </ToolPanel> : null}
     {/* Headed "Position"; its Pose row's Default puts the joints back. */}
     {posable && pose ? <ToolPanel id="position" title="Position" label="Position controls" fit="details">
-      {/* The Studio poses its own robot (`studioPose`). */}
-      <PositionControls key={`${robot.revision}:${studioPose ? "studio" : "tools"}`} pose={studioPose || pose} />
+      {/* Preview poses its own robot (`previewPose`). */}
+      <PositionControls key={`${robot.revision}:${previewPose ? "preview" : "tools"}`} pose={previewPose || pose} />
     </ToolPanel> : null}
   </>;
 
@@ -263,7 +263,7 @@ function RobotSurface({ view, data }) {
   const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
     ? { name: reference.target.selectors.join(", "), kind: "solid" } : ""), [resourcePath]);
 
-  return <RendererShell shell={shell} tools={tools} sidebar={sidebar} studio={studio}
+  return <RendererShell shell={shell} tools={tools} sidebar={sidebar} previewView={previewView}
     references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}
     nameReference={nameLink}
     onClearReferences={clearSelection}

@@ -1,5 +1,5 @@
 // A geometry over another geometry's buffers: what a SECOND scene of the same file (the viewer's
-// Render Studio beside its editor) draws its meshes with. Its attributes ARE the source's
+// Preview beside its editor) draws its meshes with. Its attributes ARE the source's
 // attribute objects, so a renderer that draws both uploads each buffer once; an attribute the
 // second scene rewrites for itself (a look's graded vertex colours) is its own copy.
 //

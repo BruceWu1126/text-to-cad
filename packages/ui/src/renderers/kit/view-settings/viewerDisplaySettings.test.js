@@ -7,7 +7,7 @@ import {
   viewerDisplaySettingsForCamera
 } from './viewerDisplaySettings.js';
 
-test('the viewer offers the working display modes in their intended order: Render is the Studio\'s, no display mode', () => {
+test('the viewer offers the working display modes in their intended order: Render is Preview\'s, no display mode', () => {
   assert.deepEqual(DISPLAY_MODE_OPTIONS.map(({ value, label }) => [value, label]), [
     ['solid', 'Solid'], ['xray', 'X-ray'], ['hidden-line', 'Hidden line'], ['wireframe', 'Wireframe']
   ]);

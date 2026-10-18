@@ -164,7 +164,7 @@ async function measurePoints(page, at, ...points) {
   }
 }
 
-// A page over the fixture, its Features open. The Studio opens with a still camera (Orbit off), so
+// A page over the fixture, its Features open. Preview opens with a still camera (Orbit off), so
 // what moves in a frame is the model.
 async function open(options = {}) {
   const view = await harness.open(options);
@@ -192,16 +192,16 @@ async function open(options = {}) {
     reload: async () => { await page.reload(); Object.assign(opened, await ready()); },
     state: () => page.evaluate(() => window.cadHarness.a.controller.readState()),
     display: patch => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch),
-    // The Studio: in by Present and out by Exit studio, both in the navbar; each
+    // Preview: in by Preview and out by Exit preview, both in the navbar; each
     // once its cover has lifted. It opens still (Orbit off), so what moves in a frame is the model.
-    enterStudio: async () => {
-      await pane.getByRole('button', { name: 'Present', exact: true }).click();
-      await pane.getByRole('button', { name: 'Exit studio', exact: true }).waitFor();
+    enterPreview: async () => {
+      await pane.getByRole('button', { name: 'Preview', exact: true }).click();
+      await pane.getByRole('button', { name: 'Exit preview', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
     },
-    exitStudio: async () => {
-      await pane.getByRole('button', { name: 'Exit studio', exact: true }).click();
-      await pane.getByRole('button', { name: 'Present', exact: true }).waitFor();
+    exitPreview: async () => {
+      await pane.getByRole('button', { name: 'Exit preview', exact: true }).click();
+      await pane.getByRole('button', { name: 'Preview', exact: true }).waitFor();
       await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]'));
     },
     // The file sidebar's tiles, and a section opened by its tile (one at a time), left open if it is.
@@ -211,9 +211,9 @@ async function open(options = {}) {
       if (await tile.getAttribute('aria-pressed') !== 'true') await tile.click();
       await pane.locator(`[data-file-sidebar-tools] button[aria-pressed="true"][aria-label="${name}"]`).waitFor();
     },
-    // The routine's transport, the sidebar's Animation section, in the tools view and the Studio alike.
+    // The routine's transport, the sidebar's Animation section, in the tools view and Preview alike.
     animation: pane.locator('[data-tool-panel][aria-label="Animation"]'),
-    // Display is not a tool: its button, the mode in hand, sits before the Studio at the strip's end,
+    // Display is not a tool: its button, the mode in hand, sits before Preview at the strip's end,
     // after a rule; its settings are its per-mode settings page.
     openDisplay: async (root = pane.locator('[data-viewer-navbar] [data-view-controls]')) => {
       await root.getByRole('button', { name: /^Display mode: / }).click();
@@ -283,7 +283,7 @@ async function open(options = {}) {
 }
 
 
-test('a STEP opens in Select with the tools its sidecar earns, its Model tree, Position and Animation the file sidebar\'s tiles, Select\'s selection filter on the strip, Display and Present ending the navbar, and paints both authored colours', async () => {
+test('a STEP opens in Select with the tools its sidecar earns, its Model tree, Position and Animation the file sidebar\'s tiles, Select\'s selection filter on the strip, Display and Preview ending the navbar, and paints both authored colours', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   // Select's selection filter is a chevron of its own right after its button, never pressed as a
@@ -292,7 +292,7 @@ test('a STEP opens in Select with the tools its sidecar earns, its Model tree, P
     'Explode:false', 'Clip:false'],
     'no Animation tool: routines are the sidebar\'s. Display is a dropdown, not a tool');
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Present'], 'the view\'s controls end the navbar: Display, then Present');
+    ['Display mode: Solid', 'Preview'], 'the view\'s controls end the navbar: Display, then Preview');
   assert.equal(await pane.getByRole('region', { name: 'Model tree', exact: true }).getByRole('button', { name: /^Selection filter: / }).count(), 0,
     'Select\'s filter is the strip\'s, not the Model tree section\'s');
   assert.equal(await view.displayPanel().count(), 0, 'Display is never where a file opens');
@@ -721,7 +721,7 @@ test('every Display preset reaches the drawn frame, on the live canvas', async (
   const view = await open();
   const { page, errors } = view;
   // Display is the mode in hand, chosen from its button's menu at the strip's end. Render is no
-  // mode of it: Render is the Studio's.
+  // mode of it: Render is Preview's.
   await view.tool('Display').click();
   const modes = page.locator('[role=dialog][aria-label="Display mode"]');
   assert.deepEqual(await modes.locator('[data-display-mode-option]').evaluateAll(items => items.map(item => item.getAttribute('data-display-mode-option'))),
@@ -803,7 +803,7 @@ test('Position drives the mate and repaints, a named pose jumps, Select\'s knob 
 
   // The grid runs out past the model and is sized from the REST pose, so
   // swinging the arm cannot rescale it. (The Render studio's floor is held to
-  // the same rule at the end of this test, where the Studio cannot disturb
+  // the same rule at the end of this test, where Preview cannot disturb
   // the frames compared here.)
   const guides = { x0: 0, x1: Math.floor(rest.width * 0.08) };
   assert.ok(painted(rest, guides) > 500, `the compared strip holds grid lines: ${painted(rest, guides)}`);
@@ -867,20 +867,20 @@ test('Position drives the mate and repaints, a named pose jumps, Select\'s knob 
   await page.waitForFunction(() => window.__cadJointHandles().length === 1);
 
   // The Render studio's floor is the same ground as the grid: sized and centred from the REST
-  // placement. Render is the Studio's, which opens on the model at rest; a pose in it (its own
+  // placement. Render is Preview's, which opens on the model at rest; a pose in it (its own
   // Position) is the case that used to size the floor from the swung arm's box. It must be the
   // floor a model at rest gets.
-  const studioStage = () => page.evaluate(() => window.__cadStage());
-  await view.enterStudio();
+  const previewStage = () => page.evaluate(() => window.__cadStage());
+  await view.enterPreview();
   await view.openSection('Position');
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
-  const restStage = await studioStage();
+  const restStage = await previewStage();
   await slider.fill('60');
   await slider.press('Enter');
   await page.waitForFunction(() => Math.abs(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix[13]) > 1);
   await page.waitForFunction(rest => JSON.stringify(window.__cadStage()?.bounds) !== rest, JSON.stringify(restStage.bounds));
-  const posedStage = await studioStage();
-  await view.exitStudio();
+  const posedStage = await previewStage();
+  await view.exitPreview();
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
   const boxShift = Math.max(...[0, 1, 2].flatMap(axis => [
     Math.abs(posedStage.bounds.min[axis] - restStage.bounds.min[axis]), Math.abs(posedStage.bounds.max[axis] - restStage.bounds.max[axis])]));
@@ -889,10 +889,10 @@ test('Position drives the mate and repaints, a named pose jumps, Select\'s knob 
   assert.deepEqual(errors, []);
 });
 
-test("the Studio is a still Render showcase: the navbar holds its settings (Orbit, Render's own) and the way out, the sidebar's Animation plays and pauses the routine without moving the camera or the floor, and leaving restores the pose, the camera and the file's mode", async () => {
+test("Preview is a still Render showcase: the navbar holds its settings (Orbit, Render's own) and the way out, the sidebar's Animation plays and pauses the routine without moving the camera or the floor, and leaving restores the pose, the camera and the file's mode", async () => {
   const view = await open();
   const { page, pane, errors } = view;
-  // A camera of the person's own, which the Studio's must never overwrite.
+  // A camera of the person's own, which Preview's must never overwrite.
   await page.evaluate(() => window.cadHarness.a.controller.setCamera({ ...window.cadHarness.a.controller.readState().camera, zoom: 1.6, target: [4, 5, 2] }));
   await restingCamera(page);
   const saved = (await view.state()).camera;
@@ -903,17 +903,17 @@ test("the Studio is a still Render showcase: the navbar holds its settings (Orbi
   const restArm = (await translations(page))['o1.2'];
   // The routine is no tool: it is the sidebar's Animation section.
   assert.equal(await view.tool('Animation').count(), 0);
-  await view.enterStudio();
-  // The navbar stays (the way to other files), its view controls now the Studio's own: its
+  await view.enterPreview();
+  // The navbar stays (the way to other files), its view controls now Preview's own: its
   // settings, then the way out; nothing of them stands over the view.
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Studio settings', 'Exit studio']);
+    ['Preview settings', 'Exit preview']);
   assert.equal(await pane.locator('[data-preview-corner]').count(), 0);
-  // The file is in Solid; the Studio draws it in Render, on the studio's floor, and still. Its
+  // The file is in Solid; Preview draws it in Render, on the studio's floor, and still. Its
   // settings are put away as it opens.
   await page.waitForFunction(() => window.__cadStage()?.studioGround, null, { timeout: 10000 });
   assert.equal((await view.state()).display.mode, 'solid', 'the file keeps its own mode');
-  assert.equal(await pane.getByRole('region', { name: 'Studio settings' }).count(), 0);
+  assert.equal(await pane.getByRole('region', { name: 'Preview settings' }).count(), 0);
   // The tools are put away; the sidebar offers Position and Animation, its tiles at the top-left.
   assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).isVisible(), false);
   assert.deepEqual(await view.tiles(), ['Position', 'Animation']);
@@ -923,15 +923,15 @@ test("the Studio is a still Render showcase: the navbar holds its settings (Orbi
   await bar.getByRole('button', { name: 'Play animation', exact: true }).waitFor();
   await page.waitForTimeout(300);
   assert.deepEqual((await translations(page))['o1.2'], restArm, 'nothing plays until its play button is pressed');
-  // Render's settings are the Studio's: the file's own, an edit there drawn in the Studio.
+  // Render's settings are Preview's: the file's own, an edit there drawn in Preview.
   await restingCamera(page);
   const floored = await restingFrame(view);
-  await pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
-  const settingsPanel = pane.getByRole('region', { name: 'Studio settings' });
+  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
+  const settingsPanel = pane.getByRole('region', { name: 'Preview settings' });
   await settingsPanel.getByRole('checkbox', { name: 'Floor', exact: true }).click();
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.modes?.render?.floor?.enabled === false);
-  await frameWhen(view, shot => differing(floored, shot) > 100, 'drew the Studio without its floor');
-  await settingsPanel.getByRole('button', { name: 'Close studio settings', exact: true }).click();
+  await frameWhen(view, shot => differing(floored, shot) > 100, 'drew Preview without its floor');
+  await settingsPanel.getByRole('button', { name: 'Close preview settings', exact: true }).click();
   await settingsPanel.waitFor({ state: 'detached' });
   await view.display({ modes: { render: { floor: { enabled: true } } } });
   await page.waitForFunction(() => window.__cadStage()?.studioGround, null, { timeout: 10000 });
@@ -969,16 +969,16 @@ test("the Studio is a still Render showcase: the navbar holds its settings (Orbi
   assert.equal(await bar.getByRole('button', { name: 'Pause animation', exact: true }).isVisible(), true);
   // Orbit, in its settings, starts the camera turning.
   const orbitFrom = await page.evaluate(() => window.__cadCamera().position);
-  await pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
+  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
   const orbit = settingsPanel.getByRole('checkbox', { name: 'Orbit', exact: true });
-  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'the Studio opens still');
+  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'Preview opens still');
   await orbit.click();
   await page.waitForFunction(previous => window.__cadCamera().position.some((value, index) => Math.abs(value - previous[index]) > 1e-3), orbitFrom);
   await orbit.click();
 
-  // Leaving the Studio releases its routine, playing or not: the model goes back to the pose it
+  // Leaving Preview releases its routine, playing or not: the model goes back to the pose it
   // was in, in the tools view's own camera and its own mode, to the pixel.
-  await view.exitStudio();
+  await view.exitPreview();
   await page.waitForFunction(() => !window.__cadStage()?.studioGround, null, { timeout: 10000 });
   await page.waitForFunction(rest => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(rest), restArm)
     .catch(() => {});
@@ -993,7 +993,7 @@ test("the Studio is a still Render showcase: the navbar holds its settings (Orbi
   assert.deepEqual(errors, []);
 });
 
-test('the Studio and the tools view are two states: the Studio draws the model as authored, and leaving it drops what was done there and gives the tools view back as it was', async () => {
+test('Preview and the tools view are two states: Preview draws the model as authored, and leaving it drops what was done there and gives the tools view back as it was', async () => {
   const view = await open();
   const { page, pane, errors } = view;
   const away = () => page.mouse.move(view.box.x + view.box.width - 20, view.box.y + 100);
@@ -1001,12 +1001,12 @@ test('the Studio and the tools view are two states: the Studio draws the model a
   const armAt = expected => page.waitForFunction(at => JSON.stringify(Array.from(window.__cadDisplayRecords().find(record => record.partId === 'o1.2').matrix.slice(12, 15))) === JSON.stringify(at), expected)
     .catch(() => {});
   const restArm = await arm();
-  // The model as the Studio draws a file opened afresh: the picture every later visit draws too,
+  // The model as Preview draws a file opened afresh: the picture every later visit draws too,
   // whatever the tools view holds.
   await away();
-  await view.enterStudio();
+  await view.enterPreview();
   const authored = await restingFrame(view);
-  await view.exitStudio();
+  await view.exitPreview();
 
   // Work in the tools view: the arm swung on Position's slider, the base hidden, the arm picked, the
   // model clipped, and a camera of the person's own.
@@ -1028,15 +1028,15 @@ test('the Studio and the tools view are two states: the Studio draws the model a
   await restingCamera(page);
   const work = await view.state();
 
-  // The Studio draws none of it: the arm at rest, the base there, nothing picked or cut away.
+  // Preview draws none of it: the arm at rest, the base there, nothing picked or cut away.
   await away();
-  await view.enterStudio();
+  await view.enterPreview();
   await armAt(restArm);
-  assert.deepEqual(await arm(), restArm, 'the Studio poses the model at rest');
+  assert.deepEqual(await arm(), restArm, 'Preview poses the model at rest');
   const shown = await frameWhen(view, shot => differing(authored, shot) === 0, 'drew the model as authored');
   assert.ok(partBoxes(shown).base && partBoxes(shown).arm, 'both parts are drawn');
 
-  // What is done in the Studio is the Studio's: its routine played, its camera turned.
+  // What is done in Preview is Preview's: its routine played, its camera turned.
   await view.openSection('Animation');
   const bar = view.animation;
   await bar.getByRole('button', { name: 'Play animation' }).click();
@@ -1050,7 +1050,7 @@ test('the Studio and the tools view are two states: the Studio draws the model a
 
   // Leaving drops it, and gives the tools view back as it was left: the pose, the hidden base, the
   // pick, the clip and its camera.
-  await view.exitStudio();
+  await view.exitPreview();
   await armAt(posedArm);
   assert.deepEqual(await arm(), posedArm, 'the pose comes back');
   const back = await view.state();
@@ -1059,7 +1059,7 @@ test('the Studio and the tools view are two states: the Studio draws the model a
   assert.equal(back.camera.zoom, work.camera.zoom);
   assert.match(await slider.inputValue(), /^60(\.0+)?°$/);
 
-  // An isolated part is the tools view's too: the Studio draws the whole model, and leaving finds the part isolated.
+  // An isolated part is the tools view's too: Preview draws the whole model, and leaving finds the part isolated.
   await view.tool('Select').click();
   await view.openSection('Model tree');
   await pane.getByRole('button', { name: 'Reveal base', exact: true }).click();
@@ -1068,9 +1068,9 @@ test('the Studio and the tools view are two states: the Studio draws the model a
   await page.getByRole('menu').waitFor({ state: 'detached' });
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().isolatedPartIds.join() === 'o1.2');
   await away();
-  await view.enterStudio();
+  await view.enterPreview();
   await frameWhen(view, shot => differing(authored, shot) === 0, 'drew the whole model, as authored');
-  await view.exitStudio();
+  await view.exitPreview();
   assert.deepEqual((await view.state()).isolatedPartIds, ['o1.2']);
   assert.deepEqual(errors, []);
 });
@@ -1131,7 +1131,7 @@ test('one motion at a time: Explode and Position replace each other, taking up E
   assert.deepEqual(errors, []);
 });
 
-test("the routine's Speed and Loop are the file's: chosen in the tools view's Animation section, kept in the Studio; and the Studio opens still every time, Orbit in its settings starting the camera", async () => {
+test("the routine's Speed and Loop are the file's: chosen in the tools view's Animation section, kept in Preview; and Preview opens still every time, Orbit in its settings starting the camera", async () => {
   const view = await open();
   const { page, pane, errors } = view;
   const settingsButton = view.animation.getByRole('button', { name: 'Playback settings' });
@@ -1158,30 +1158,30 @@ test("the routine's Speed and Loop are the file's: chosen in the tools view's An
     await page.keyboard.press('Escape');
     await menu.waitFor({ state: 'detached' });
   };
-  const orbit = pane.getByRole('region', { name: 'Studio settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
-  const studioSettings = () => pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
+  const orbit = pane.getByRole('region', { name: 'Preview settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
+  const previewSettings = () => pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
   await view.openSection('Animation');
   assert.deepEqual(await settings(), ['Animation speed: 1×', 'true'], 'the routine\'s own Speed and Loop');
   await choose(2);
   assert.deepEqual(await settings(), ['Animation speed: 2×', 'false']);
-  await view.enterStudio();
+  await view.enterPreview();
   await view.openSection('Animation');
-  assert.deepEqual(await settings(), ['Animation speed: 2×', 'false'], 'the file\'s Speed and Loop, in the Studio too');
+  assert.deepEqual(await settings(), ['Animation speed: 2×', 'false'], 'the file\'s Speed and Loop, in Preview too');
   // Orbit, in its settings, starts the camera turning.
-  await studioSettings();
-  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'the Studio opens still');
+  await previewSettings();
+  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'Preview opens still');
   const still = await page.evaluate(() => window.__cadCamera().position);
   await orbit.click();
   await page.waitForFunction(start => window.__cadCamera().position.some((value, axis) => Math.abs(value - start[axis]) > 1e-6), still);
-  await view.exitStudio();
+  await view.exitPreview();
 
   // The next visit keeps the Speed and Loop chosen, and opens still again.
-  await view.enterStudio();
-  await studioSettings();
+  await view.enterPreview();
+  await previewSettings();
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'still again');
   await view.openSection('Animation');
   assert.deepEqual(await settings(), ['Animation speed: 2×', 'false'], 'the file\'s Speed and Loop');
-  await view.exitStudio();
+  await view.exitPreview();
   assert.deepEqual(errors, []);
 });
 
@@ -1192,7 +1192,7 @@ test('a pose pass React re-runs while a routine plays draws the clock, never the
   // a frame: on a routine that starts at rest, a flash of the rest pose on every re-run.
   const view = await open();
   const { page, pane, errors } = view;
-  await view.enterStudio();
+  await view.enterPreview();
   await view.openSection('Animation');
   const bar = view.animation;
   await bar.getByRole('button', { name: 'Play animation' }).click();
@@ -1224,7 +1224,7 @@ test('a pose pass React re-runs while a routine plays draws the clock, never the
   assert.ok(ticked[1] > 0.2, 'the routine had turned the arm away from its start');
   ticked.forEach((value, index) => assert.ok(Math.abs(value - rerun[index]) < 1e-9,
     `React's pass drew the routine where the clock is, not where it started: ${ticked} != ${rerun}`));
-  await view.exitStudio();
+  await view.exitPreview();
   assert.deepEqual(errors, []);
 });
 

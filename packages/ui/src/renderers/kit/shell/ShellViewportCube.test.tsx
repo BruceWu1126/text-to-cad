@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 // Which of the viewport's own controls are drawn (`ShellViewport.jsx`), with the WebGL runtime hook
-// replaced by a no-op: the view cube is the editor's, on a phone as on desktop; the Studio's view asks for none.
+// replaced by a no-op: the view cube is the editor's, on a phone as on desktop; Preview's view asks for none.
 vi.mock('../../../../dist/renderers/kit/viewport/useViewerRuntime.js', () => ({ useViewerRuntime: () => {} }));
 import ShellViewport from '../../../../dist/renderers/kit/shell/ShellViewport.js';
 import { ViewerMobileContext } from '../../../../dist/file-viewer/responsive.js';

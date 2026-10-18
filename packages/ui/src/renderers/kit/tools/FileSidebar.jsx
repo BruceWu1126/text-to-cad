@@ -44,9 +44,9 @@ const PHONE_PANEL_WIDTH = 288;
  * inset (clear of Quick Edit's peek), or as tall as the section if that is less, at a phone's own
  * width — wide enough for a joint's name beside its slider, not a desktop's size — with no grip.
  *
- * `sections` limits the sections on offer to those ids (the Studio's: Position and Animation; the
+ * `sections` limits the sections on offer to those ids (Preview's: Position and Animation; the
  * rest stay mounted, out of sight), and `bare` draws its toolbar's tiles with no surface under
- * them, the model showing through, as the Studio's corners are.
+ * them, the model showing through, as Preview's corners are.
  *
  * @param {{ layout: { panels: object, collapsed: object },
  *   onLayoutChange(patch: object | ((layout: object) => object)): void, hidden?: boolean,
@@ -184,7 +184,7 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   const sections = useMemo(() => ({
     sidebar: true,
     reveal,
-    // Which sections are on offer (the Studio's: Position and Animation); null, every one.
+    // Which sections are on offer (Preview's: Position and Animation); null, every one.
     allowed: allowedSections ? id => allowedSections.includes(id) : null,
     openSection: shown,
     closeSection,

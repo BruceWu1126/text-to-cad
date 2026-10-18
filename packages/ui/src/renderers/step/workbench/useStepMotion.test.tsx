@@ -38,7 +38,7 @@ function saved(revision: number, { mates = [swing], poses = OPEN, routine = '' }
     ...(routine ? { animationHash: routine } : {}) };
 }
 
-/** The hook over one entry, as StepSurface mounts it; `offered` is whether Position is offered (its `poseAvailable`), at every render. `host`: the frame's side (whether the Studio is up). */
+/** The hook over one entry, as StepSurface mounts it; `offered` is whether Position is offered (its `poseAvailable`), at every render. `host`: the frame's side (whether Preview is up). */
 function mount(entry: ReturnType<typeof saved>, host: { previewing(): boolean, onUse(motion: string): void } | null = null) {
   const clock = createAnimationClock();
   const offered: boolean[] = [];

@@ -27,7 +27,7 @@ The stages keep ownership narrow:
   (`lib/urdf/robotScene.js`). Each returns the scene contract of
   `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
   second scene of the same file with its own objects, materials and look over the first's
-  geometry (`lib/render/sharedGeometry.js`), which the viewer's Render Studio draws beside
+  geometry (`lib/render/sharedGeometry.js`), which the viewer's Preview draws beside
   its editor. A GLB's sibling is a SkeletonUtils clone wearing copies of the file's authored
   materials, kept before any look, with a sibling `document` for its own routine; a robot's
   has its own links and pose, and its own vertex colours. Ownership is

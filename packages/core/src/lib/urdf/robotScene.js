@@ -361,7 +361,7 @@ export function createRobotScene(THREE, { description, parts }, { shareFrom = nu
     },
     setJointValues(values) { return disposed ? false : setJointValues(values); },
     /**
-     * A second scene of the same robot (the viewer's Studio beside its editor): its own links,
+     * A second scene of the same robot (the viewer's Preview beside its editor): its own links,
      * pose, materials and look over this scene's geometry (`sharedGeometry.js`). This scene stays
      * the geometry's owner, so the sibling is disposed first.
      */

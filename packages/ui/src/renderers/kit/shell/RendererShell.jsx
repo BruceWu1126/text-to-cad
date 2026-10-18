@@ -13,7 +13,7 @@ import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/
 import { modelUpdateStatus, ViewUpdateStatus } from "../status/ViewUpdateStatus.jsx";
 import ViewerLoadingOverlay from "../status/ViewerLoadingOverlay.js";
 import DisplayPopover from "./DisplayPopover.jsx";
-import StudioSettings from "./StudioSettings.jsx";
+import PreviewSettings from "./PreviewSettings.jsx";
 import { withGroups } from "../../../annotation/geometry.js";
 import FloatingToolBar, { StripTouchProvider, useStripButtonClass } from "../tools/FloatingToolBar.js";
 import { AnnotationMenu, AnnotationToolbar } from "../../../annotation/toolbar.jsx";
@@ -24,8 +24,8 @@ import { animationControlsHaveContent } from "../tools/playbar/AnimationTimeCont
 import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
-import StudioView from "./StudioView.jsx";
-import { detailStillComing, studioCoverStep } from "./studioCover.js";
+import PreviewView from "./PreviewView.jsx";
+import { detailStillComing, previewCoverStep } from "./previewCover.js";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
 import AnnotationSelectionBar from "../tools/annotate/AnnotationSelectionBar.jsx";
 
@@ -46,8 +46,8 @@ const TOOLBAR_POSITION_PHONE_SIDEBAR = Object.freeze({ ...TOOLBAR_POSITION, left
 // it (`--cad-sidebar-top`).
 // What stands in the top-right corner: the host's notice and Quick Edit's box (not its column).
 const CORNER_BOXES = "[data-viewport-top-right] :is([data-viewport-notice], [data-quick-edit-box])";
-// The sidebar sections the Studio offers: posing the model and playing its routines.
-const STUDIO_SECTIONS = Object.freeze(["position", "animation"]);
+// The sidebar sections Preview offers: posing the model and playing its routines.
+const PREVIEW_SECTIONS = Object.freeze(["position", "animation"]);
 // Preview's cover: at least this long, then until detail has been quiet this long, and never longer than the last.
 // Once quiet, the picture is checked this often until it has converged.
 // The cover waits at least MIN; at MAX it stops waiting for finer detail, and lets the picture on
@@ -59,9 +59,9 @@ const SIDEBAR_POSITION = Object.freeze({ top: `var(--cad-sidebar-top, ${INSET})`
 // section, under tabs) runs down from under it to the view's bottom inset, clear of Quick Edit's
 // peek (`--cad-quick-edit-peek`, which the sheet publishes while it peeks).
 const SIDEBAR_POSITION_PHONE = Object.freeze({ top: INSET, left: INSET, bottom: `calc(var(--cad-quick-edit-peek, 0px) + ${INSET})` });
-const SIDEBAR_POSITION_PHONE_STUDIO = Object.freeze({ top: INSET, left: INSET });
+const SIDEBAR_POSITION_PHONE_PREVIEW = Object.freeze({ top: INSET, left: INSET });
 
-/** One of the view's controls: a tile of the strip, or of the Studio's corner, named on hover. */
+/** One of the view's controls: a tile of the strip, or of Preview's corner, named on hover. */
 /** One of the view's controls in the navbar: its icon button, named on hover, below it. */
 function NavbarControl({ label, active = undefined, disabled = false, onClick, children, ...props }) {
   return <TooltipHint content={label} side="bottom" disabled={active === true}>
@@ -82,7 +82,7 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  * The frame every file-family renderer draws itself in: the viewport box with the tool strip at
  * its top centre and the tool stack under it, the file sidebar down its left side, Quick Edit at
  * the top-right, the cube in the bottom-right corner, a 3D view's controls at the strip's end
- * (Display and the Studio), the loading, update and alert overlays, and the Studio's own controls.
+ * (Display and Preview), the loading, update and alert overlays, and Preview's own controls.
  * The same structure, classes and data attributes for every renderer: hosts, stylesheets and tests
  * key on them. The toolbar is for using tools, the sidebar for reading the file: a tool's own
  * controls are panels in the tool stack, shown by the tool they belong to; what there is to read of
@@ -151,15 +151,15 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
  *   down): the renderer lights its own overlay under it, and returns true when there is one.
  *   `selectsAnnotations`: whether Select picks the annotation's ink, as the renderer's Select filter says; the
  *   ink is drawn either way.
- *   `studio`: the Render Studio's own, while it is open (`shell.previewing`), for a 3D view: the scene the
+ *   `previewView`: Preview's own, while it is open (`shell.previewing`), for a 3D view: the scene the
  *   renderer built for it (`scene`, its family's builder over the editor's geometry, null until it can be
- *   drawn), what drives that scene from inside the Studio's viewport (`overlay(viewport, drawn)`, given
- *   the Render scene the Studio draws), its routine (`animation`, the Animation section's in the Studio),
- *   and the Studio viewport's `runtimeLifecycle` and `onCameraSettled`. The Studio is a view of its own
- *   (`StudioView.jsx`) over the editor's, which nothing of it reaches.
+ *   drawn), what drives that scene from inside Preview's viewport (`overlay(viewport, drawn)`, given
+ *   the Render scene Preview draws), its routine (`animation`, the Animation section's in Preview),
+ *   and Preview viewport's `runtimeLifecycle` and `onCameraSettled`. Preview is a view of its own
+ *   (`PreviewView.jsx`) over the editor's, which nothing of it reaches.
  */
 export default function RendererShell({ shell, tools, toolPanels = null, subToolbar = null, sidebar = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
-  onContextMenuOpenChange = null, viewportOverlay = null, studio = null,
+  onContextMenuOpenChange = null, viewportOverlay = null, previewView = null,
   frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null, selectsAnnotations = true }) {
   const frame = shell.frame;
   const mobile = useViewerMobile();
@@ -167,21 +167,21 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   // The one presentation state: every gate — the viewport's, the renderer's — reads it.
   const { previewing, setPreviewing } = shell;
   // A phone's open section is a sheet up from the bottom, where Quick Edit's peek is: it steps aside.
-  // The Studio's settings panel: closed as the Studio opens, until its button brings it out.
-  const [studioPanelOpen, setStudioPanelOpen] = useState(false);
+  // Preview's settings panel: closed as Preview opens, until its button brings it out.
+  const [previewPanelOpen, setPreviewPanelOpen] = useState(false);
   const stripButtonClass = useStripButtonClass();
-  // The Studio is a view of its own, mounted over the editor's as it opens (`StudioView.jsx`), and
+  // Preview is a view of its own, mounted over the editor's as it opens (`PreviewView.jsx`), and
   // its first picture takes a moment on a large model — its scene built, finer detail loading for its
-  // camera — so it is covered ("Preparing studio…") from the press until all of that has landed: its
-  // first frame presented (`studioPresented`), no detail refining for a moment (`cad:quality-status`),
+  // camera — so it is covered ("Preparing preview…") from the press until all of that has landed: its
+  // first frame presented (`previewPresented`), no detail refining for a moment (`cad:quality-status`),
   // and its picture converged (every sample of its frame drawn: the view's `pictureProgress`) — unless
   // it starts over, the view moving (a routine playing), when there is nothing to wait for — or at most
   // a few seconds. Then the cover fades away from the finished picture. Leaving needs no cover: the
-  // Studio's view goes, and under it is the editor's, as it was.
-  const studioViewRef = frame.studioViewRef;
-  const [studioPresented, setStudioPresented] = useState(false);
-  const studioPresentedRef = useRef(false);
-  studioPresentedRef.current = previewing && studioPresented;
+  // Preview's view goes, and under it is the editor's, as it was.
+  const previewViewRef = frame.previewViewRef;
+  const [previewPresented, setPreviewPresented] = useState(false);
+  const previewPresentedRef = useRef(false);
+  previewPresentedRef.current = previewing && previewPresented;
   // A press covers the view first, in its own frame, and preview is entered under it: preview's
   // first render can take a moment on a large model, and the cover answers the press at once.
   const [coverRequested, setCoverRequested] = useState(false);
@@ -194,13 +194,13 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
   if (coverFor !== previewing) {
     setCoverFor(previewing);
     setPreviewSettled(false);
-    setStudioPresented(false);
-    if (previewing) { setCoverRequested(false); setStudioPanelOpen(false); }
+    setPreviewPresented(false);
+    if (previewing) { setCoverRequested(false); setPreviewPanelOpen(false); }
   }
   const previewCovered = coverRequested || (previewing && !previewSettled);
-  // What moves the Studio's picture on purpose: its Orbit, or its routine playing (`studioCover.js`).
-  const studioMovingRef = useRef(false);
-  studioMovingRef.current = shell.orbiting || studio?.animation?.playing === true;
+  // What moves Preview's picture on purpose: its Orbit, or its routine playing (`previewCover.js`).
+  const previewMovingRef = useRef(false);
+  previewMovingRef.current = shell.orbiting || previewView?.animation?.playing === true;
   useEffect(() => {
     if (!previewing) return undefined;
     let refining = typeof window !== "undefined" && detailStillComing(window.__cadViewerQuality?.state);
@@ -213,8 +213,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     const settle = (delay = PREVIEW_COVER_QUIET_MS) => {
       clearTimeout(quiet);
       quiet = setTimeout(() => {
-        const step = studioCoverStep({ presented: studioPresentedRef.current, refining: refining && !capped, moving: studioMovingRef.current,
-          progress: studioViewRef.current?.pictureProgress?.() ?? null });
+        const step = previewCoverStep({ presented: previewPresentedRef.current, refining: refining && !capped, moving: previewMovingRef.current,
+          progress: previewViewRef.current?.pictureProgress?.() ?? null });
         if (step === "wait") settle();
         else if (step === "converge") settle(PREVIEW_COVER_CONVERGE_MS);
         else finish();
@@ -228,8 +228,8 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     settle(PREVIEW_COVER_MIN_MS);
     return () => { done = true; clearTimeout(cap); clearTimeout(last); clearTimeout(quiet); window.removeEventListener("cad:quality-status", onQuality); };
   }, [previewing]);
-  // The routine the Animation section plays: the tools view's, or in the Studio the Studio's own.
-  const animation = previewing ? studio?.animation ?? null : frame.animation;
+  // The routine the Animation section plays: the tools view's, or in Preview its own.
+  const animation = previewing ? previewView?.animation ?? null : frame.animation;
   const hasAnimation = animationControlsHaveContent(animation);
   // Speed and Loop, once chosen in the Animation section's Playback settings, are the file's, and what its
   // routines play with, whatever they authored, until they are chosen again. Unset, the routine's own apply.
@@ -242,7 +242,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (chosenSpeed != null && Number(runtime.speed) !== chosenSpeed) runtime.onSpeedChange(chosenSpeed);
     if (chosenLoop != null && (runtime.loopEnabled !== false) !== chosenLoop) runtime.onLoopToggle(chosenLoop);
   }, [previewing, hasAnimation, animation?.speed, animation?.loopEnabled, animation?.activeClipId, chosenSpeed, chosenLoop]);
-  // The Studio opens at rest, its routine started only by Autoplay.
+  // Preview opens at rest, its routine started only by Autoplay.
   const autoplayRef = useRef(shell.autoplay);
   autoplayRef.current = shell.autoplay;
   useEffect(() => {
@@ -295,7 +295,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (over) event.stopPropagation();
   };
   useEffect(() => { setPreviewing(false); }, [frame.modelKey, setPreviewing]);
-  // The Studio is a view of its own (`StudioView.jsx`): it opens on the model as authored, in Render,
+  // Preview is a view of its own (`PreviewView.jsx`): it opens on the model as authored, in Render,
   // still, its routine at rest and started only by Autoplay, and leaving it takes it away.
   const enterPreview = () => {
     setCoverRequested(true);
@@ -306,7 +306,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     setTimeout(enter, 100);
   };
   const leavePreview = () => setPreviewing(false);
-  // The view's controls (Display and the Studio, or the Studio's own) are the navbar's where there is one.
+  // The view's controls (Display and Preview, or Preview's own) are the navbar's where there is one.
   const inNavbar = Boolean(view.navbarSlot);
   // Annotate's sub-toolbar, one row under the strip while it is the tool: its tools, what the next mark
   // looks like, and its Undo, Redo and Clear (`annotation/toolbar.jsx`). The annotation itself has no
@@ -490,7 +490,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     renderMode={resolvedScene.render.enabled}
                     renderConfiguration={resolvedScene.render.configuration}
                     quality={resolvedScene.quality}
-                    // Under the Studio the editor draws nothing; it draws what it owes as the Studio goes.
+                    // Under Preview the editor draws nothing; it draws what it owes as Preview goes.
                     suspended={previewing}
                     isLoading={viewerLoading}
                     viewCube={!compact && !failed && !mobile}
@@ -509,57 +509,57 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   >{overlay}</ShellViewport>
                 </div>
               </div>
-              {/* The Studio: a view of its own over the editor's, mounted while it is open. */}
-              {previewing && studio ? <div className="pointer-events-auto absolute inset-0 z-[1]" data-studio-view="">
-                <StudioView studio={studio} desired={frame.studioDesiredScene} modelKey={frame.modelKey}
-                  sceneScaleMode={frame.sceneScaleMode} viewRef={studioViewRef} onPresented={setStudioPresented}
+              {/* Preview: a view of its own over the editor's, mounted while it is open. */}
+              {previewing && previewView ? <div className="pointer-events-auto absolute inset-0 z-[1]" data-preview-view="">
+                <PreviewView view={previewView} desired={frame.previewDesiredScene} modelKey={frame.modelKey}
+                  sceneScaleMode={frame.sceneScaleMode} viewRef={previewViewRef} onPresented={setPreviewPresented}
                   orbit={orbitPlaying} orbitSpeed={frame.previewOrbitSpeed ?? 1} />
               </div> : null}
 
-              {/* The Studio (preview): the tools put away and the navbar kept (the way to other files), the model in
+              {/* Preview: the tools put away and the navbar kept (the way to other files), the model in
                   Render — the tools view never is — and still until Orbit is turned on. Its controls
                   stand in the corners, always there, tiles with no surface under them: the top-right
                   pair, its settings and the way out (an X), the settings a panel docked under them
                   (Orbit, Render's own), closed as it opens; the top-left, the sidebar's Position and
                   Animation (below). Nothing sits under the model. */}
               {/* The view's controls at the navbar's right end (`view.navbarSlot`), the strip keeping to the
-                  tools: Display and the Studio, for a 3D view (`useRendererShell`'s `previewable`), or
-                  in the Studio its settings (a toggle, the panel docked at the view's top-right) and the
-                  way out. A host with no navbar has them over the view instead: Display and the Studio
-                  ending the strip, the Studio's pair in its top-right corner. */}
+                  tools: Display and Preview, for a 3D view (`useRendererShell`'s `previewable`), or
+                  in Preview its settings (a toggle, the panel docked at the view's top-right) and the
+                  way out. A host with no navbar has them over the view instead: Display and Preview
+                  ending the strip, Preview's pair in its top-right corner. */}
               {inNavbar && shell.previewable && (previewing || !toolsHidden) ? createPortal(previewing ? <>
-                <NavbarControl label="Studio settings" active={studioPanelOpen} disabled={shell.idle}
-                  onClick={() => setStudioPanelOpen(open => !open)} data-studio-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
-                <NavbarControl label="Exit studio" onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label="Preview settings" active={previewPanelOpen} disabled={shell.idle}
+                  onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label="Exit preview" onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
               </> : <>
                 <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}
                   triggerClassName={NAVBAR_DISPLAY_TRIGGER_CLASS} tooltipSide="bottom" align="end">{frame.display}</DisplayPopover>
-                <NavbarControl label="Present" disabled={shell.idle} onClick={enterPreview}><Play className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Play className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}
               <PreviewChrome active={previewing}
                 end={inNavbar ? null : <>
-                  <ToolbarButton label="Studio settings" tooltipSide="bottom" active={studioPanelOpen} aria-pressed={studioPanelOpen}
-                    disabled={shell.idle} className={stripButtonClass} onClick={() => setStudioPanelOpen(open => !open)} data-studio-settings="">
+                  <ToolbarButton label="Preview settings" tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
+                    disabled={shell.idle} className={stripButtonClass} onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings="">
                     <SlidersHorizontal aria-hidden="true" />
                   </ToolbarButton>
-                  <ViewControl label="Exit studio" tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
+                  <ViewControl label="Exit preview" tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
                 </>}
-                panel={studioPanelOpen ? <StudioSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
+                panel={previewPanelOpen ? <PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
                   speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed}
-                  onClose={() => setStudioPanelOpen(false)} render={frame.display("render")} /> : null}>
+                  onClose={() => setPreviewPanelOpen(false)} render={frame.display("render")} /> : null}>
 
               {/* The file explorer floats over the top-left corner, above the sidebar, which stays drawn under it. */}
               {toolsHidden ? null : <div className="group/tool-stack pointer-events-none absolute z-20 flex flex-col items-center gap-2" style={mobile && !previewing && (sidebar || hasAnimation) ? TOOLBAR_POSITION_PHONE_SIDEBAR : TOOLBAR_POSITION}
                 data-mobile={mobile ? "" : undefined} data-cad-tool-groups=""><StripTouchProvider value={mobile}>
-                {/* Where there is no navbar, the view's controls end the strip: Display, then the Studio. */}
+                {/* Where there is no navbar, the view's controls end the strip: Display, then Preview. */}
                 <div ref={topControls} className="flex max-w-full shrink-0 flex-col items-center gap-2" data-cad-top-controls="">
                   <FloatingToolBar tools={stripTools} touch={mobile} views={shell.previewable && !previewing && !inNavbar ? [
                     { id: "display", label: "Display", icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
                       tile: <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}>{frame.display}</DisplayPopover>,
                       popover: ({ anchor, open, onOpenChange }) => <DisplayPopover anchor={anchor} open={open} onOpenChange={onOpenChange}
                         boundary={frame.hostElement} mode={frame.displayMode} projection={frame.projection}>{frame.display}</DisplayPopover> },
-                    { id: "preview", label: "Present", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
-                      tile: <ViewControl label="Present" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
+                    { id: "preview", label: "Preview", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
+                      tile: <ViewControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
                   ] : []} />
                   {/* The tool in hand's own row, then the view catching up, under the strip. */}
                   {previewing ? null : toolRow}
@@ -578,10 +578,10 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
 
               </PreviewChrome>
               {/* The file's sections, and for a file with routines the shell's own Animation section after them.
-                  One sidebar for both views: in the Studio its tiles are bare, the Studio's top-left,
-                  and it offers Position and Animation alone (the Studio's own pose and routine). */}
-              {toolsHidden || !(sidebar || hasAnimation) ? null : <FileSidebar style={mobile ? previewing ? SIDEBAR_POSITION_PHONE_STUDIO : SIDEBAR_POSITION_PHONE : SIDEBAR_POSITION}
-                sections={previewing ? STUDIO_SECTIONS : null} bare={previewing} phone={mobile && !previewing}
+                  One sidebar for both views: in Preview its tiles are bare, Preview's top-left,
+                  and it offers Position and Animation alone (Preview's own pose and routine). */}
+              {toolsHidden || !(sidebar || hasAnimation) ? null : <FileSidebar style={mobile ? previewing ? SIDEBAR_POSITION_PHONE_PREVIEW : SIDEBAR_POSITION_PHONE : SIDEBAR_POSITION}
+                sections={previewing ? PREVIEW_SECTIONS : null} bare={previewing} phone={mobile && !previewing}
                 layout={frame.toolStack} onLayoutChange={frame.changeToolStack}>
                 {sidebar}
                 {hasAnimation ? <AnimationSection key={frame.modelKey} runtime={playbackRuntime} disabled={viewerLoading || !scene}
@@ -595,7 +595,7 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   previewCovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 transition-opacity duration-300 motion-reduce:transition-none")}
                 style={{ backgroundColor: frame.sceneBackdrop }}>
                 {previewCovered ? <span role="status" className="flex items-center gap-2 text-tiny text-muted-foreground">
-                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />Preparing studio…
+                  <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />Preparing preview…
                 </span> : null}
               </div>
 

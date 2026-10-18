@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { useStepStudioMotion } from '../../../../dist/renderers/step/workbench/useStepStudioMotion.js';
+import { useStepPreviewMotion } from '../../../../dist/renderers/step/workbench/useStepPreviewMotion.js';
 
 const parameters = [{ id: 'hinge', type: 'number', defaultValue: 5, min: -90, max: 90 }];
 const definition = { parameters, parameterMap: { hinge: parameters[0] }, defaultParameterValues: { hinge: 5 },
@@ -12,8 +12,8 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-it("the Studio's pose and routine are its own, on its own clock, and every opening starts at rest", () => {
-  const { result, rerender } = renderHook(({ open }) => useStepStudioMotion({ definition, clips, open }), { initialProps: { open: true } });
+it("Preview's pose and routine are its own, on its own clock, and every opening starts at rest", () => {
+  const { result, rerender } = renderHook(({ open }) => useStepPreviewMotion({ definition, clips, open }), { initialProps: { open: true } });
   expect(result.current.parameterValues).toEqual({ hinge: 5 });
   expect(result.current.animationControls.playing).toBe(false);
   act(() => result.current.positionControls.onApplyPose('open'));

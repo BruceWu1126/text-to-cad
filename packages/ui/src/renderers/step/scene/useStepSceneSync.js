@@ -98,7 +98,7 @@ export function useStepSceneSync(layers) {
   const { runtimeRef, viewerReadyTick } = viewport;
   const {
     meshData, modelKey, isLoading, appearance, materialOverrides, receiveShadows, pickMode, pickableParts,
-    selectorRuntime, stepParameterRuntime, studio = false
+    selectorRuntime, stepParameterRuntime, preview = false
   } = props;
   const {
     viewerTheme, normalizedThemeSettings, normalizedDisplayMode, surfaceSettings, explicitViewPolicy,
@@ -336,10 +336,10 @@ export function useStepSceneSync(layers) {
     // Refresh retained scene/GPU estimates before admitting idle BVH work.
     // A denied accelerator keeps stock raycasting and therefore cannot make
     // selection incorrect or blank the current model.
-    // The Studio's scene (`studio`) shares the editor's geometry: the editor's sync alone accounts
+    // Preview's scene (`preview`) shares the editor's geometry: the editor's sync alone accounts
     // for it, and only the editor picks (pick groups, raycast accelerators).
-    const initialRenderMemory = studio ? null : renderMemoryAccounting(runtime);
-    if (!studio && import.meta.env?.DEV && typeof document !== "undefined") {
+    const initialRenderMemory = preview ? null : renderMemoryAccounting(runtime);
+    if (!preview && import.meta.env?.DEV && typeof document !== "undefined") {
       // Main-world diagnostic that browser automation can read even when its
       // JavaScript executes in an isolated extension world.
       document.documentElement.dataset.cadRenderMemory = JSON.stringify({
@@ -370,7 +370,7 @@ export function useStepSceneSync(layers) {
       }
     };
     runtime.raycastBvhOptions = raycastBvhOptions;
-    if (!studio) {
+    if (!preview) {
       syncSelectorPickGroups(runtime, displaySelectorRuntime, modelOffset, { clearSceneGroup });
       scheduleRuntimeRaycastBvh(runtime, raycastBvhOptions);
     }

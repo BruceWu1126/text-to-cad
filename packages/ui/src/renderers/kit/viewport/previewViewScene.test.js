@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveSceneQuality } from '@text-to-cad/core/common/sceneSettings.js';
-import { studioSceneQuality, studioViewScene } from './studioViewScene.js';
+import { previewSceneQuality, previewViewScene } from './previewViewScene.js';
 
 const scene = quality => ({
   quality: resolveSceneQuality(quality),
@@ -9,15 +9,15 @@ const scene = quality => ({
   view: { lighting: { quality: 'preview' } }
 });
 
-test('the Studio draws one quality tier up, capped at High', () => {
-  assert.equal(studioSceneQuality(resolveSceneQuality('interactive')).id, 'standard');
-  assert.equal(studioSceneQuality(resolveSceneQuality('standard')).id, 'high');
-  assert.equal(studioSceneQuality(resolveSceneQuality('high')).id, 'high');
+test('Preview draws one quality tier up, capped at High', () => {
+  assert.equal(previewSceneQuality(resolveSceneQuality('interactive')).id, 'standard');
+  assert.equal(previewSceneQuality(resolveSceneQuality('standard')).id, 'high');
+  assert.equal(previewSceneQuality(resolveSceneQuality('high')).id, 'high');
 });
 
-test('the Studio suspends the tool effects but no Display setting', () => {
+test('Preview suspends the tool effects but no Display setting', () => {
   const resolved = scene('interactive');
-  const drawn = studioViewScene(resolved);
+  const drawn = previewViewScene(resolved);
   assert.equal(drawn.display.mode, 'shaded');
   assert.equal(drawn.view, resolved.view);
   assert.equal(drawn.display.clip.enabled, false);

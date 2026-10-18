@@ -7,7 +7,7 @@ import { VIEW_CUBE_DRAG_RAD_PER_PX, VIEW_PLANE_FACE_BY_ID, applyOrbitDelta, read
 
 /**
  * The camera of a mounted viewport, as React sees it: the perspective a session
- * stores (emitted when it really changed; a viewport that keeps no camera, the Studio's,
+ * stores (emitted when it really changed; a viewport that keeps no camera, Preview's,
  * only says it moved), the initial/stored view, the reset, and the view cube's face presets. The refs and setters are
  * the mounting component's; this hook owns the behaviour between them and the
  * runtime (`runtimeCamera.js`).
@@ -48,7 +48,7 @@ export function useViewportCamera({
       return;
     }
     if (!perspectiveChangeRef.current) {
-      // A view that keeps no camera (the Studio's): only what samples the camera hears it moved.
+      // A view that keeps no camera (Preview's): only what samples the camera hears it moved.
       cameraMovedRef.current?.();
       return;
     }

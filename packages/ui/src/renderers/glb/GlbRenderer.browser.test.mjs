@@ -90,11 +90,11 @@ async function open(t, file, { record = null } = {}) {
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
 
-// A GLB has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Present.
+// A GLB has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Preview.
 const noTools = async (pane) => {
   assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a GLB has no tools, and no strip');
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
-    ['Display mode: Solid', 'Present'], 'its view\'s controls end the navbar');
+    ['Display mode: Solid', 'Preview'], 'its view\'s controls end the navbar');
   for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
   }
@@ -163,11 +163,11 @@ const differingPixels = (left, right) => {
   return count;
 };
 const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-// Render is the Studio's: in by Present and out by Exit studio, both in the navbar, each once the view has
+// Render is Preview's: in by Preview and out by Exit preview, both in the navbar, each once the view has
 // come together under its cover.
-async function studio(page, pane, enter) {
-  await pane.getByRole('button', { name: enter ? 'Present' : 'Exit studio', exact: true }).click();
-  await pane.getByRole('button', { name: enter ? 'Exit studio' : 'Present', exact: true }).waitFor();
+async function togglePreview(page, pane, enter) {
+  await pane.getByRole('button', { name: enter ? 'Preview' : 'Exit preview', exact: true }).click();
+  await pane.getByRole('button', { name: enter ? 'Exit preview' : 'Preview', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-testid="one"] [data-preview-cover]')
     && document.querySelector('[data-testid="one"] [aria-busy="false"]'));
 }
@@ -205,8 +205,8 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   // orbits, pans and zooms, with no tools over it.
   await noTools(pane);
   assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a GLB has nothing to pick');
-  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Present', exact: true }).count(), 1,
-    'a GLB is 3D: Present ends the navbar after Display');
+  assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
+    'a GLB is 3D: Preview ends the navbar after Display');
   assert.equal(await pane.locator('[data-file-sidebar-tools]').count(), 0, 'a static GLB has nothing for the file sidebar');
 
   // A GLB has no panel of its own: its only settings are Display's, and Display is never
@@ -225,10 +225,10 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   await page.waitForFunction(() => document.querySelector('[data-testid="one"] [aria-busy] > div > canvas').width >= 790);
   await settle(page);
 
-  // The Studio draws the model in Render, on the studio's floor; leaving it takes the studio down.
-  await studio(page, pane, true);
+  // Preview draws the model in Render, on the studio's floor; leaving it takes the studio down.
+  await togglePreview(page, pane, true);
   await page.waitForFunction(() => window.__cadStage()?.studioGround);
-  await studio(page, pane, false);
+  await togglePreview(page, pane, false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
 
   // Surfaces, on the native scene. Flat is unlit: each part is one colour, its own.
@@ -326,7 +326,7 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest with no tools, its clips the file sidebar\'s Animation section; in the Studio they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving puts the model back at rest', async (t) => {
+test('an animated GLB opens at rest with no tools, its clips the file sidebar\'s Animation section; in Preview they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving puts the model back at rest', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
   await noTools(pane);
@@ -336,8 +336,8 @@ test('an animated GLB opens at rest with no tools, its clips the file sidebar\'s
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   const toolsRest = await stillCapture(page);
 
-  await studio(page, pane, true);
-  // The Studio's top-left: the sidebar's Animation alone; the model in Render, on its floor.
+  await togglePreview(page, pane, true);
+  // Preview's top-left: the sidebar's Animation alone; the model in Render, on its floor.
   assert.deepEqual(await tileNames(pane), ['Animation']);
   await openSection(pane, 'Animation');
   const section = animationSection(pane);
@@ -362,23 +362,23 @@ test('an animated GLB opens at rest with no tools, its clips the file sidebar\'s
   assert.ok(differingPixels(rest, await capture(page)) > 200, 'the rider moved');
   assert.deepEqual(await page.evaluate(() => window.__cadStage().studioGround), floor);
 
-  // Orbit, in the Studio's settings, turns the camera; turned off again, it stops.
-  await pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
-  const orbit = pane.getByRole('region', { name: 'Studio settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
-  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'the Studio opens still');
+  // Orbit, in Preview's settings, turns the camera; turned off again, it stops.
+  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
+  const orbit = pane.getByRole('region', { name: 'Preview settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
+  assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'Preview opens still');
   const held = await page.evaluate(() => window.__cadCamera().position);
   await orbit.click();
   await page.waitForFunction(start => window.__cadCamera().position.some((value, axis) => Math.abs(value - start[axis]) > 1e-6), held);
   await orbit.click();
 
   // Leaving puts the clip back at rest, in the tools view's own camera and mode.
-  await studio(page, pane, false);
+  await togglePreview(page, pane, false);
   await page.waitForFunction(() => !window.__cadStage()?.studioGround);
   await captureMatching(page, toolsRest, 'the tools view is at rest again');
   assert.deepEqual(errors, []);
 });
 
-test("an animated GLB's Speed and Loop are the file's: chosen in its Animation section, the Studio's routine plays with them, and every visit to the Studio opens still", async (t) => {
+test("an animated GLB's Speed and Loop are the file's: chosen in its Animation section, Preview's routine plays with them, and every visit to Preview opens still", async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
   const settingsButton = animationSection(pane).getByRole('button', { name: 'Playback settings' });
@@ -402,24 +402,24 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
     await page.keyboard.press('Escape');
     await menu.waitFor({ state: 'detached' });
   };
-  const orbit = pane.getByRole('region', { name: 'Studio settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
+  const orbit = pane.getByRole('region', { name: 'Preview settings' }).getByRole('checkbox', { name: 'Orbit', exact: true });
   await openSection(pane, 'Animation');
   assert.deepEqual(await settings(), ['Animation speed: 1×', 'true'], 'the clip\'s own');
   await choose(0.5);
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false']);
-  await studio(page, pane, true);
+  await togglePreview(page, pane, true);
   await openSection(pane, 'Animation');
-  assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, in the Studio too');
-  await pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
+  assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, in Preview too');
+  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
   await orbit.click();
   assert.equal(await orbit.getAttribute('aria-checked'), 'true');
-  await studio(page, pane, false);
-  await studio(page, pane, true);
-  await pane.getByRole('button', { name: 'Studio settings', exact: true }).click();
+  await togglePreview(page, pane, false);
+  await togglePreview(page, pane, true);
+  await pane.getByRole('button', { name: 'Preview settings', exact: true }).click();
   assert.equal(await orbit.getAttribute('aria-checked'), 'false', 'still again');
   await openSection(pane, 'Animation');
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, kept');
-  await studio(page, pane, false);
+  await togglePreview(page, pane, false);
   assert.deepEqual(errors, []);
 });
 
@@ -430,7 +430,7 @@ test('a corrupt GLB raises the viewer\'s load alert, with reload and details', a
   assert.match(await alert.innerText(), /Couldn’t load the model/);
   assert.match(await alert.innerText(), /broken\.glb/);
   // Nothing on screen is the file's to work on: the card alone, with no tools or view actions.
-  for (const name of [/^Display mode: /, 'Present']) {
+  for (const name of [/^Display mode: /, 'Preview']) {
     assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, `no ${name} over a failed load`);
   }
   void page;

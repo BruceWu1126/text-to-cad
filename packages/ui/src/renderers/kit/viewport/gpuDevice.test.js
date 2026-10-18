@@ -44,25 +44,25 @@ const tick = () => new Promise(resolve => queueMicrotask(resolve));
 
 test('two views share one renderer, each drawing with its own state and size', async () => {
   const device = acquireGpuDevice(THREE, fakeRenderer);
-  const editorCanvas = viewCanvas(), studioCanvas = viewCanvas();
-  const editor = device.createView(editorCanvas), studio = device.createView(studioCanvas);
+  const editorCanvas = viewCanvas(), previewCanvas = viewCanvas();
+  const editor = device.createView(editorCanvas), preview = device.createView(previewCanvas);
   assert.equal(editor.domElement, editorCanvas, "a view's canvas is its own");
   editor.setPixelRatio(2); editor.setSize(400, 300, false);
   editor.toneMapping = THREE.ACESFilmicToneMapping; editor.shadowMap.enabled = true;
-  studio.setPixelRatio(1); studio.setSize(1000, 800, false);
-  studio.toneMapping = THREE.NeutralToneMapping; studio.shadowMap.enabled = false;
+  preview.setPixelRatio(1); preview.setSize(1000, 800, false);
+  preview.toneMapping = THREE.NeutralToneMapping; preview.shadowMap.enabled = false;
 
   editor.render({ name: 'editor' });
-  studio.render({ name: 'studio' });
+  preview.render({ name: 'preview' });
   editor.render({ name: 'editor' });
   assert.deepEqual(device.renderer.draws.map(draw => [draw.scene, draw.toneMapping, draw.shadows, draw.size]), [
     ['editor', THREE.ACESFilmicToneMapping, true, [800, 600]],
-    ['studio', THREE.NeutralToneMapping, false, [1000, 800]],
+    ['preview', THREE.NeutralToneMapping, false, [1000, 800]],
     ['editor', THREE.ACESFilmicToneMapping, true, [800, 600]],
   ]);
-  assert.equal(studio.toneMapping, THREE.NeutralToneMapping, "a view's state is kept while another draws");
+  assert.equal(preview.toneMapping, THREE.NeutralToneMapping, "a view's state is kept while another draws");
   assert.deepEqual(editor.getDrawingBufferSize(new THREE.Vector2()).toArray(), [800, 600]);
-  editor.dispose(); studio.dispose();
+  editor.dispose(); preview.dispose();
   await tick();
 });
 

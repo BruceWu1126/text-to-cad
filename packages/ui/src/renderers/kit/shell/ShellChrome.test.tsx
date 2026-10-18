@@ -8,16 +8,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // replaced by an empty box: nothing asserted here is drawn by it. What the viewport is handed is
 // recorded, so a test can read what the shell asked of it, and a view update it is handed is
 // acknowledged at once, as the real one does once it holds the frame.
-// The editor's viewport and, while it is open, the Studio's (`StudioView.jsx`, a viewport of its own).
+// The editor's viewport and, while it is open, Preview's (`PreviewView.jsx`, a viewport of its own).
 const viewportProps: { current: any } = { current: null };
-const studioProps: { current: any } = { current: null };
-// What the viewport's handle answers, where a test gives it one (the Studio's picture, `pictureProgress`).
+const previewProps: { current: any } = { current: null };
+// What the viewport's handle answers, where a test gives it one (Preview's picture, `pictureProgress`).
 const viewportHandle: { current: any } = { current: null };
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function MockViewport(props: any, ref) {
-    const record = props.studio ? studioProps : viewportProps;
+    const record = props.preview ? previewProps : viewportProps;
     record.current = props;
-    useEffect(() => () => { if (props.studio) studioProps.current = null; }, []);
+    useEffect(() => () => { if (props.preview) previewProps.current = null; }, []);
     useImperativeHandle(ref, () => viewportHandle.current, []);
     const update = props.viewUpdate;
     useEffect(() => { if (update?.revision) update.binding.complete(update.revision); }, [update?.revision, update?.binding]);
@@ -63,9 +63,9 @@ beforeEach(() => {
   override(Element.prototype, 'hasPointerCapture', { value: () => true });
   override(Element.prototype, 'scrollIntoView', { value() {} });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; studioProps.current = null; viewportHandle.current = null; });
-// The Studio is up: its own view mounted over the editor's, which draws nothing under it.
-const inStudio = () => studioProps.current !== null && viewportProps.current.suspended === true;
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) restores.pop()!(); viewportProps.current = null; previewProps.current = null; viewportHandle.current = null; });
+// Preview is up: its own view mounted over the editor's, which draws nothing under it.
+const inPreview = () => previewProps.current !== null && viewportProps.current.suspended === true;
 
 /** The tab's settings as a host hands them over, counting every write. */
 function tabSettings(initial: object = {}) {
@@ -258,7 +258,7 @@ async function openDisplay(user: ReturnType<typeof userEvent.setup>, root?: HTML
 const named = (button: Element) => button.getAttribute('aria-label')!.split(':')[0];
 // The view's controls: the strip's last, after its tools and a rule.
 const barButtons = () => [...document.querySelector('[role=group][aria-label="Interaction tools"] [data-view-controls]')?.querySelectorAll('button') ?? []].map(named);
-// The Studio's own, in the view's top-right corner.
+// Preview's own, in the view's top-right corner.
 const cornerButtons = () => [...document.querySelector('[data-preview-corner]')?.querySelectorAll('button') ?? []].map(named);
 // The strip's tools, before the view's controls.
 const strip = () => [...screen.getByRole('group', { name: 'Interaction tools' }).querySelectorAll('button')].filter(button => !button.closest('[data-view-controls]')).map(button => button.getAttribute('aria-label'));
@@ -267,7 +267,7 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   frame();
   const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Present']);
+  expect(barButtons()).toEqual(['Display mode', 'Preview']);
   stage('finding');
   expect(screen.queryByRole('group', { name: 'Interaction tools' })).toBeNull();
   expect(document.querySelector('[data-cad-tool-stack]')).toBeNull();
@@ -275,33 +275,33 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   expect(viewportProps.current.isLoading).toBe(true);
   stage('idle');
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Present']);
-  // With nothing to work on yet, the strip is idle together, and so are Display and the Studio.
+  expect(barButtons()).toEqual(['Display mode', 'Preview']);
+  // With nothing to work on yet, the strip is idle together, and so are Display and Preview.
   stage('unready');
   expect(strip()).toEqual(['Select', 'Annotate', 'Keep', 'Pose']);
-  const idle = (name: string) => (name === 'Display' ? displayButton() : name === 'Present' ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
-  expect(['Select', 'Annotate', 'Display', 'Present'].map(idle)).toEqual([true, true, true, true]);
+  const idle = (name: string) => (name === 'Display' ? displayButton() : name === 'Preview' ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
+  expect(['Select', 'Annotate', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true]);
   stage('idle');
-  expect(['Select', 'Annotate', 'Display', 'Present'].map(idle)).toEqual([false, false, false, false]);
+  expect(['Select', 'Annotate', 'Display', 'Preview'].map(idle)).toEqual([false, false, false, false]);
 });
 
-it("Display and the Studio are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for the Studio leaves it as it is", () => {
-  // The Studio asked for from outside the strip, as a link or a host request would.
+it("Display and Preview are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for Preview leaves it as it is", () => {
+  // Preview asked for from outside the strip, as a link or a host request would.
   const ask = () => act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
-  // A 3D view (the harness's, declared `previewable`): Display and the Studio end the strip, and a request enters it.
+  // A 3D view (the harness's, declared `previewable`): Display and Preview end the strip, and a request enters it.
   frame();
-  expect(barButtons()).toEqual(['Display mode', 'Present']);
+  expect(barButtons()).toEqual(['Display mode', 'Preview']);
   ask();
-  expect(inStudio()).toBe(true);
+  expect(inPreview()).toBe(true);
   cleanup();
   // A view whose renderer does not declare it (`flat.harness`, a 2D view's stand-in): neither on the
   // strip, no rule, and the same request leaves the normal view on screen, its tools up.
   frame({ name: 'flat.harness' });
   expect(barButtons()).toEqual([]);
-  for (const name of [/^Display mode: /, 'Present']) expect(screen.queryByRole('button', { name })).toBeNull();
+  for (const name of [/^Display mode: /, 'Preview']) expect(screen.queryByRole('button', { name })).toBeNull();
   expect(document.querySelector('[data-strip-rule]')).toBeNull();
   ask();
-  expect(inStudio()).toBe(false);
+  expect(inPreview()).toBe(false);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
   expect(strip()).toEqual(['Annotate']);
 });
@@ -318,23 +318,23 @@ it('a load the model did not survive leaves only the card saying so, and a faile
   expect(viewportProps.current.viewCube).toBe(false);
   stage('failed');
   expect(screen.getByRole('group', { name: 'Interaction tools' })).toBeTruthy();
-  expect(barButtons()).toEqual(['Display mode', 'Present']);
+  expect(barButtons()).toEqual(['Display mode', 'Preview']);
   expect(viewportProps.current.viewCube).toBe(true);
 });
 
 it("a dismissed alert's own icon, at the navbar's right, brings its card back; it goes with the card's return, and when the alert clears", async () => {
   // The harness under the real FileViewer, whose navbar's right holds nothing of its own but the
-  // view's controls, last (Display and Present: the strip keeps to the tools), and a dismissed
+  // view's controls, last (Display and Preview: the strip keeps to the tools), and a dismissed
   // alert's icon before them.
   const host = testHost({ links: viewerLinks({ version: '0.7.5' }), environment: { colorScheme: 'light', platform: 'darwin' },
     files: { id: 'one', stat: async (path: string) => ({ path, name: path.split('/').pop()!, kind: 'file', extension: 'harness', size: 1 }) } });
   render(<FileViewer file="/models/one.harness" host={host as any} renderers={[createHarnessRenderer({ preferences: tabSettings() })]}
     state={{}} onStateChange={() => {}} />);
-  await screen.findByRole('button', { name: 'Present' });
+  await screen.findByRole('button', { name: 'Preview' });
   const right = () => [...document.querySelector('[data-viewer-navbar] > div')!.querySelectorAll('a, button')].map(node => node.getAttribute('aria-label'));
   const card = () => screen.queryByRole('alert');
   const stage = (name: string) => act(() => { fireEvent.click(document.querySelector(`[data-harness-stage="${name}"]`)!); });
-  const view = ['Display mode: Solid', 'Present'];
+  const view = ['Display mode: Solid', 'Preview'];
   expect([right(), barButtons()]).toEqual([view, []]);
   expect(document.querySelectorAll('[data-viewer-navbar] [data-view-controls] button')).toHaveLength(2);
   stage('failed');
@@ -387,14 +387,14 @@ it('a host showing the view small gets the model alone: no tools, no view action
   expect(viewportProps.current.viewCube).toBe(false);
 });
 
-it("Display and the Studio end the strip; Render is no mode of Display's, and a mode's settings leave Annotate and kept tools in place", async () => {
+it("Display and Preview end the strip; Render is no mode of Display's, and a mode's settings leave Annotate and kept tools in place", async () => {
   const user = userEvent.setup({ skipHover: true });
   const { remount } = frame();
-  expect([strip(), barButtons()]).toEqual([['Select', 'Annotate', 'Keep', 'Pose'], ['Display mode', 'Present']]);
+  expect([strip(), barButtons()]).toEqual([['Select', 'Annotate', 'Keep', 'Pose'], ['Display mode', 'Preview']]);
   const solid = render(<SolidModeIcon />).container.querySelector('svg')!;
   expect(displayButton().querySelector('svg')!.innerHTML).toEqual(solid.innerHTML);
   await user.click(displayButton());
-  // The modes, then the projection: Render is the Studio's alone.
+  // The modes, then the projection: Render is Preview's alone.
   expect(within(displayMenu()!).getAllByRole('radio').map(item => [item.textContent, item.getAttribute('aria-checked')]))
     .toEqual([['Solid', 'true'], ['Orthographic', 'true'], ['Perspective', 'false']]);
   await user.click(within(displayMenu()!).getByRole('radio', { name: 'Perspective', exact: true }));
@@ -422,14 +422,14 @@ it("Display and the Studio end the strip; Render is no mode of Display's, and a 
   expect([displayPopover(), displayLit()]).toEqual([null, false]);
 });
 
-// The Studio, entered as its tile enters it: the view covered first, then the Studio under the cover.
-async function enterStudio(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Present' }));
-  await screen.findByRole('button', { name: 'Exit studio' });
+// Preview, entered as its tile enters it: the view covered first, then Preview under the cover.
+async function enterPreview(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: 'Preview' }));
+  await screen.findByRole('button', { name: 'Exit preview' });
 }
-const studioSettings = () => screen.queryByRole('region', { name: 'Studio settings' });
+const previewSettings = () => screen.queryByRole('region', { name: 'Preview settings' });
 
-it("three surfaces: the strip, the sidebar's tiles and the stack share the light chrome surface; the sidebar's panel and the Studio's settings, read while they are up, are between; Display's dropdown is the most opaque", async () => {
+it("three surfaces: the strip, the sidebar's tiles and the stack share the light chrome surface; the sidebar's panel and Preview's settings, read while they are up, are between; Display's dropdown is the most opaque", async () => {
   const user = userEvent.setup();
   frame();
   expect(new Set([FLOATING_CHROME_SURFACE_CLASS, FILE_SIDEBAR_SURFACE_CLASS, FLOATING_SURFACE_CLASS]).size).toBe(3);
@@ -446,68 +446,68 @@ it("three surfaces: the strip, the sidebar's tiles and the stack share the light
   await openDisplay(user);
   expect(has(displayPopover()!, FLOATING_SURFACE_CLASS)).toBe(true);
   await user.keyboard('{Escape}');
-  await enterStudio(user);
-  await user.click(screen.getByRole('button', { name: 'Studio settings' }));
-  expect(has(studioSettings()!, FILE_SIDEBAR_SURFACE_CLASS)).toBe(true);
+  await enterPreview(user);
+  await user.click(screen.getByRole('button', { name: 'Preview settings' }));
+  expect(has(previewSettings()!, FILE_SIDEBAR_SURFACE_CLASS)).toBe(true);
 });
 
-it("the Studio is in Render: the strip, the view's controls and the stack step aside, the sidebar offers Position alone, bare, at the top-left; the top-right holds its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
+it("Preview is in Render: the strip, the view's controls and the stack step aside, the sidebar offers Position alone, bare, at the top-left; the top-right holds its settings (Orbit and Render's) and the way out, which brings back the tool in hand and the file's own mode", async () => {
   const user = userEvent.setup();
   frame();
   await user.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
   await openDisplay(user);
   const editor = viewportProps.current;
-  await enterStudio(user);
+  await enterPreview(user);
   const chrome = document.querySelector<HTMLElement>('[data-preview-chrome]')!;
   expect([chrome.hidden, chrome.hasAttribute('inert')]).toEqual([true, true]);
   expect(chrome.contains(document.querySelector('[data-cad-tool-stack]'))).toBe(true);
   expect(displayPopover()).toBeNull();
   // The strip goes with the tools view.
   expect([barButtons(), screen.queryByRole('group', { name: 'Interaction tools' })]).toEqual([[], null]);
-  // The top-left: the sidebar's Studio sections (Position, here) as tiles with no surface under them.
+  // The top-left: the sidebar's Preview sections (Position, here) as tiles with no surface under them.
   expect(tileNames()).toEqual(['Position']);
   expect(screen.getByRole('group', { name: 'File sidebar' }).className).toMatch(/\bborder-transparent\b/);
   expect(chrome.contains(bar())).toBe(false);
   // The top-right: its settings and the way out, an X, 8px in.
-  expect(cornerButtons()).toEqual(['Studio settings', 'Exit studio']);
+  expect(cornerButtons()).toEqual(['Preview settings', 'Exit preview']);
   const corner = document.querySelector<HTMLElement>('[data-preview-corner]')!;
   expect([corner.parentElement!.style.top, corner.parentElement!.style.right]).toEqual(['8px', '8px']);
-  expect(within(corner).getByRole('button', { name: 'Exit studio' }).querySelector('svg.lucide-x')).not.toBeNull();
-  // The Studio draws Render in a view of its own; the editor's viewport is asked for nothing new.
-  expect([inStudio(), studioProps.current.renderMode, studioProps.current.projection, viewportProps.current.renderMode]).toEqual([true, true, 'perspective', false]);
+  expect(within(corner).getByRole('button', { name: 'Exit preview' }).querySelector('svg.lucide-x')).not.toBeNull();
+  // Preview draws Render in a view of its own; the editor's viewport is asked for nothing new.
+  expect([inPreview(), previewProps.current.renderMode, previewProps.current.projection, viewportProps.current.renderMode]).toEqual([true, true, 'perspective', false]);
   const unchanged = () => ['renderMode', 'renderConfiguration', 'displaySettings', 'quality', 'projection', 'themeSettings', 'appearance']
     .filter(key => viewportProps.current[key] !== editor[key]);
   expect(unchanged()).toEqual([]);
   // Its settings are closed as it opens; they are Orbit, then Render's own, the file's.
-  expect(studioSettings()).toBeNull();
-  await user.click(within(corner).getByRole('button', { name: 'Studio settings' }));
-  expect(within(studioSettings()!).getAllByRole('heading').map(heading => heading.textContent)).toEqual(expect.arrayContaining(['Settings', 'Orbit']));
-  const floor = () => within(studioSettings()!).getByRole('checkbox', { name: 'Floor', exact: true });
+  expect(previewSettings()).toBeNull();
+  await user.click(within(corner).getByRole('button', { name: 'Preview settings' }));
+  expect(within(previewSettings()!).getAllByRole('heading').map(heading => heading.textContent)).toEqual(expect.arrayContaining(['Settings', 'Orbit']));
+  const floor = () => within(previewSettings()!).getByRole('checkbox', { name: 'Floor', exact: true });
   expect(floor().getAttribute('aria-checked')).toBe('true');
   fireEvent.click(floor());
-  expect([inStudio(), chrome.hidden]).toEqual([true, true]);
-  await user.click(within(corner).getByRole('button', { name: 'Exit studio' }));
+  expect([inPreview(), chrome.hidden]).toEqual([true, true]);
+  await user.click(within(corner).getByRole('button', { name: 'Exit preview' }));
   expect(chrome.hidden).toBe(false);
-  // The Studio's view is gone, and the editor's is as it was: nothing the Studio did reached it.
-  expect([inStudio(), studioProps.current, viewportProps.current.suspended, unchanged()]).toEqual([false, null, false, []]);
-  expect(barButtons()).toEqual(['Display mode', 'Present']);
+  // Preview's view is gone, and the editor's is as it was: nothing Preview did reached it.
+  expect([inPreview(), previewProps.current, viewportProps.current.suspended, unchanged()]).toEqual([false, null, false, []]);
+  expect(barButtons()).toEqual(['Display mode', 'Preview']);
   // The tools view is in the file's own mode, as it always was.
   expect(displayButton().getAttribute('aria-label')).toBe('Display mode: Solid');
   // The tool in hand is as it was, its section's tile with it; Display, put away, stays shut.
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
   expect(tool('Pose').getAttribute('aria-pressed')).toBe('true');
   expect([displayPopover(), displayLit()]).toEqual([null, false]);
-  // What was set in the Studio is the file's Render settings: the next visit has it.
+  // What was set in Preview is the file's Render settings: the next visit has it.
   act(() => { fireEvent.click(document.querySelector('[data-harness-ask-preview]')!); });
-  expect(inStudio()).toBe(true);
-  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Studio settings' }));
+  expect(inPreview()).toBe(true);
+  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Preview settings' }));
   expect(floor().getAttribute('aria-checked')).toBe('false');
-  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Exit studio' }));
+  await user.click(within(document.querySelector<HTMLElement>('[data-preview-corner]')!).getByRole('button', { name: 'Exit preview' }));
   expect([displayPopover(), displayLit()]).toEqual([null, false]);
 });
 
-it("the Studio is covered from the press until its picture has converged, then shows the finished picture", async () => {
+it("Preview is covered from the press until its picture has converged, then shows the finished picture", async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] });
   try {
     // The studio frame's progress, as the viewport reports it: samples drawn of those it accumulates.
@@ -516,15 +516,15 @@ it("the Studio is covered from the press until its picture has converged, then s
     frame();
     const cover = () => document.querySelector('[data-preview-cover]');
     const wait = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-    fireEvent.click(screen.getByRole('button', { name: 'Present' }));
-    // The press is answered at once, before the Studio itself is entered under it.
-    expect(cover()?.textContent).toBe('Preparing studio…');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+    // The press is answered at once, before Preview itself is entered under it.
+    expect(cover()?.textContent).toBe('Preparing preview…');
     await wait(100);
-    expect([inStudio(), cover() !== null]).toEqual([true, true]);
+    expect([inPreview(), cover() !== null]).toEqual([true, true]);
     // In Render, and still converging well past the shortest cover: it holds.
     picture.sample = 9;
     await wait(2000);
-    expect([studioProps.current.renderMode, cover() !== null]).toEqual([true, true]);
+    expect([previewProps.current.renderMode, cover() !== null]).toEqual([true, true]);
     // Every sample drawn: it lifts.
     picture.sample = 16;
     await wait(100);
@@ -534,28 +534,28 @@ it("the Studio is covered from the press until its picture has converged, then s
   }
 });
 
-it("the Studio opens still: Orbit, in its settings, turns the camera, and Orbit's speed is the file's, kept between visits and in its view, another file at the default", async () => {
+it("Preview opens still: Orbit, in its settings, turns the camera, and Orbit's speed is the file's, kept between visits and in its view, another file at the default", async () => {
   const user = userEvent.setup();
   const states: any[] = [];
-  const enter = async () => { await enterStudio(user); await user.click(screen.getByRole('button', { name: 'Studio settings' })); };
-  const orbit = () => within(studioSettings()!).getByRole('checkbox', { name: 'Orbit' });
-  const speed = () => within(studioSettings()!).getByRole('combobox', { name: 'Orbit speed' }).textContent;
+  const enter = async () => { await enterPreview(user); await user.click(screen.getByRole('button', { name: 'Preview settings' })); };
+  const orbit = () => within(previewSettings()!).getByRole('checkbox', { name: 'Orbit' });
+  const speed = () => within(previewSettings()!).getByRole('combobox', { name: 'Orbit speed' }).textContent;
   // Its speed is a row of Orbit's, there while Orbit is on.
   const speedOnceOn = async () => { if (orbit().getAttribute('aria-checked') !== 'true') await user.click(orbit()); return speed(); };
   const first = frame({ onStateChange: state => states.push(state) });
   await enter();
-  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit, within(studioSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
+  expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, within(previewSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
   await user.click(orbit());
-  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit]).toEqual(['true', true]);
+  expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit]).toEqual(['true', true]);
   // A fresh file orbits at 1×; 2× chosen.
   expect(speed()).toBe('1×');
-  await user.click(within(studioSettings()!).getByRole('combobox', { name: 'Orbit speed' }));
+  await user.click(within(previewSettings()!).getByRole('combobox', { name: 'Orbit speed' }));
   await user.click(screen.getByRole('option', { name: '2×' }));
-  expect(studioProps.current.orbitSpeed).toBe(2);
+  expect(previewProps.current.orbitSpeed).toBe(2);
   // Leaving and coming back: still again, at 2×.
-  await user.click(screen.getByRole('button', { name: 'Exit studio' }));
+  await user.click(screen.getByRole('button', { name: 'Exit preview' }));
   await enter();
-  expect([orbit().getAttribute('aria-checked'), studioProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
+  expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
   // The file's view holds the speed, and no Orbit on or off.
   first.unmount();
   const saved = states.at(-1);

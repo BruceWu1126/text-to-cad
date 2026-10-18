@@ -77,7 +77,7 @@ export function createGlbScene(THREE, document, { sibling = false } = {}) {
     restBounds: bounds,
     setSurfaceLook(next) { if (!disposed) look.apply(next); },
     /**
-     * A second scene of the same document (the viewer's Studio beside its editor): its own copy of
+     * A second scene of the same document (the viewer's Preview beside its editor): its own copy of
      * the hierarchy (skins rebound to its own bones), its own materials as the file authored them,
      * and its own look, over this scene's geometry and textures (`sharedGeometry.js`). Its
      * `document` is the same document around its own copy, so a routine plays on it alone. This

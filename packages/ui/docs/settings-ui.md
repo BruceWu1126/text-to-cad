@@ -19,8 +19,8 @@ belong to apps through the [host contract](viewer-host.md).
 FileViewer owns the navbar — the logo's app menu ([Settings](#settings)) included, built from
 the host's `links` and the `appSettings` `CadViewer` hands it — and the file explorer (a
 popover under the file's name). RendererShell owns the scene's chrome: the tool strip and
-the view's controls at its end (Display, the Studio), the sub-toolbar of the tool in hand under
-it, the file sidebar, Quick Edit, the view cube and the Studio (preview mode). Renderers supply
+the view's controls at its end (Display, Preview), the sub-toolbar of the tool in hand under
+it, the file sidebar, Quick Edit, the view cube and Preview. Renderers supply
 their tools, their tools' rows, their sidebar sections and their document state; the shell never
 inspects a format's parts, joints or topology. No pick or tool opens or closes the explorer.
 
@@ -30,9 +30,9 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 | `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) and `colorSchemeControl` (the home's light/dark button, where it has one) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
-| `onError`, for errors the viewer hands up | The Studio, tooltips, keyboard scope, the tool strip and sidebar, the camera |
+| `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool strip and sidebar, the camera |
 
-Hosts pass no Studio (preview), chrome-visibility or notification props; there are
+Hosts pass no Preview, chrome-visibility or notification props; there are
 none.
 
 - **Navbar.** One row, the same in every app, over every file. Left: the text-to-cad "C"
@@ -64,11 +64,11 @@ none.
 
   *Design note: the strip is for tools; the view's controls are the navbar's.* What a host or
   the file adds (the update, an alert's icon, Full size) is the navbar's right end, and last
-  after them the view's own controls, **Display** and **Present** (`navbarSlot`): they act on
-  the whole view, whatever tool is in hand, so they are no tools. In the Studio the same place
-  holds its own controls, **Studio settings** and **Exit studio**. A host with no navbar has
-  them over the view instead: Display and Present ending the strip after a thin rule, the
-  Studio's pair in the view's top-right corner. A new per-file button that is no tool goes
+  after them the view's own controls, **Display** and **Preview** (`navbarSlot`): they act on
+  the whole view, whatever tool is in hand, so they are no tools. In Preview the same place
+  holds its own controls, **Preview settings** and **Exit preview**. A host with no navbar has
+  them over the view instead: Display and Preview ending the strip after a thin rule, the
+  Preview's pair in the view's top-right corner. A new per-file button that is no tool goes
   with them.
 
   A host's home has no navbar: under its TEXTTOCAD wordmark and byline, its update, when there is
@@ -110,7 +110,7 @@ none.
   closes it, as do Escape and a press anywhere outside it.
 - **Tool strip** at the top centre, 8px down, never wider than the view less 8px at each
   side (it wraps before it would be): the tools, left to right (with no navbar, then a thin
-  rule and the view's controls, **Display** and **Present**: below). 24px tiles with 14px icons,
+  rule and the view's controls, **Display** and **Preview**: below). 24px tiles with 14px icons,
   an even 4px apart, a tool's chevron touching its button, in a 34px row (`FloatingToolBar`,
   `data-cad-toolbar`). A file with no tools has no strip. On a phone
   ([mobile](#the-file-sidebar-and-the-tool-stack)) the tiles are 36px with 18px icons, a chevron
@@ -140,22 +140,22 @@ none.
   drawn in its lower corner never touch the edge (`VIEWPORT_CUBE_BOTTOM`), in a 6rem area:
   enlarged face/edge/corner hit areas and neutral hover and XYZ guides. A host whose own
   control floats over that corner lifts it clear with `--cad-viewport-corner-bottom`, the
-  room that control takes from the bottom edge. The Studio omits it, and so does a phone.
-- **Display and Present** end the navbar, for a 3D file (`data-view-controls`, the box
+  room that control takes from the bottom edge. Preview omits it, and so does a phone.
+- **Display and Preview** end the navbar, for a 3D file (`data-view-controls`, the box
   FileViewer hands the renderer as `navbarSlot`): **Display** (the active mode's sphere: see
-  [Display settings](#display-settings-and-section-primitives)) and **Present** (a play
-  triangle, the way into the Studio), the navbar's icon buttons, hinted below them. They are no
+  [Display settings](#display-settings-and-section-primitives)) and **Preview** (a play
+  triangle, the way into Preview), the navbar's icon buttons, hinted below them. They are no
   tools: pressing one leaves the tool in hand as it is. Display's dropdown opens down from its
   button, aligned to its end, never taller than the viewer below it. A view that is not 3D has
   none of them, and neither does a view drawn as a picture or one that is loading or failed to
-  load; in the Studio the same place holds its own controls (see
-  [the Studio](#camera-animation-and-the-studio)). With no navbar (a host showing the view
-  alone) they end the tool strip after its rule, and the Studio's stand in the view's top-right
+  load; in Preview the same place holds its own controls (see
+  [Preview](#camera-animation-and-preview)). With no navbar (a host showing the view
+  alone) they end the tool strip after its rule, and Preview's stand in the view's top-right
   corner.
-- **Nothing sits at the bottom centre**, in the tools view or the Studio: a file's routines
-  play from the file sidebar's Animation section (see [the Studio](#camera-animation-and-the-studio)).
+- **Nothing sits at the bottom centre**, in the tools view or Preview: a file's routines
+  play from the file sidebar's Animation section (see [Preview](#camera-animation-and-preview)).
 - **Model update status** sits under the strip and its sub-toolbar, centred, and where
-  there is no strip (the Studio, a compact view, a load) at the top centre, in the strip's
+  there is no strip (Preview, a compact view, a load) at the top centre, in the strip's
   34px row, in every host. It is renderer chrome: the navbar carries no status. On mobile
   it is a tappable progress icon whose popover names what is loading.
 
@@ -163,16 +163,16 @@ none.
 
 | File | Tool strip, left to right |
 | --- | --- |
-| STEP | Select, Annotate, Measure, Explode (two or more parts), Clip; then Display and the Studio |
-| URDF / SRDF / SDF | Select; then Display and the Studio |
-| GLB / STL / 3MF | no tools: Display and the Studio alone, a GLB's clips or not |
+| STEP | Select, Annotate, Measure, Explode (two or more parts), Clip; then Display and Preview |
+| URDF / SRDF / SDF | Select; then Display and Preview |
+| GLB / STL / 3MF | no tools: Display and Preview alone, a GLB's clips or not |
 | DXF | none: a 2D canvas, with no strip |
 
 There is no activity dot. A thin rule parts the tools from the view's controls, which
 are no tools (see [Ownership and layout](#ownership-and-layout)). Position is no tool:
 its knobs are Select's, while Select's filter picks Position, and its controls are a
 section of the [file sidebar](#the-file-sidebar-and-the-tool-stack), and so is Animation, where
-the file's routines play (see [the Studio](#camera-animation-and-the-studio)). A file with no tools
+the file's routines play (see [Preview](#camera-animation-and-preview)). A file with no tools
 and no 3D view has no strip at all.
 
 **A tool the file cannot offer is not on the strip**: never shown disabled.
@@ -204,7 +204,7 @@ Explode off, with nothing set aside to come back. While the model is exploded th
 knobs. Put down, Explode keeps its explosion under any other tool until Position is used. A
 routine played from the Animation section is the third motion: playing it puts Explode and the
 pose back at rest, and using either puts the routine back at rest; paused, its frame stays on the
-model as a pose does. The Studio's routine is its own and moves nothing of the tools view's.
+model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
 
 A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
 before it acts.
@@ -224,7 +224,7 @@ included) always reaches its trigger. Choosing a value closes it; ticking an opt
 it open. Menu checks sit on the right. The other dropdowns over the viewport are Display,
 the sub-toolbars' (Clip's axis, Annotate's colour, weight, line style and placement), its
 context menu, and the Animation section's routine and Playback settings (`PlaybackMenu.jsx`, on
-`ToolPopover`). The Studio's settings are a panel, not a dropdown (see [the Studio](#camera-animation-and-the-studio)).
+`ToolPopover`). Preview's settings are a panel, not a dropdown (see [Preview](#camera-animation-and-preview)).
 
 **Select's filter** (`kit/tools/select/SelectFilterMenu.jsx`), as a CAD tool's selection
 filter is: the chevron's dropdown, headed "Selection filter", then **Select all** — ticked
@@ -332,7 +332,7 @@ file with routines (`kit/tools/playbar/AnimationSection.jsx`). A file with none 
 sidebar. It is a toolbar of its own at the view's top-left, 8px in, on the strip's line and of
 its surface, padding and 24px tiles (`data-file-sidebar-tools`, "File sidebar"): one tile per
 section, a tree's a tree icon named for it (Model tree, Links), Position's a spline, Animation's a
-clapperboard, any other section's a page named for it. The Studio offers its Position and
+clapperboard, any other section's a page named for it. Preview offers its Position and
 Animation alone, their tiles bare in its top-left corner; the rest stay mounted, out of sight.
 
 - **One section at a time.** None is open as a file opens. A tile opens its section in a panel
@@ -375,7 +375,7 @@ Animation alone, their tiles bare in its top-left corner; the rest stay mounted,
   stopping above Quick Edit's peek (`--cad-quick-edit-peek`), at a phone's own width (288px,
   within the view's inset), with no grip. Its text is the panel's one size (13px, as the
   Display menu's), its tree rows 36px with 16px glyphs, its filter, dropdowns and value fields
-  32px (`globals.css`). In the Studio its tiles are its top-left's, as on a desktop.
+  32px (`globals.css`). In Preview its tiles are its top-left's, as on a desktop.
 - **The layout is the person's.** The section sizes are one of the tab's settings, across its
   files (`CadPreferences.toolStack`: `{ panels: { [id]: { width?, height? } }, collapsed: { [id]: boolean } }`,
   a section's panel under `sidebar:<id>`, kept beside the appearance; any other key a stored
@@ -476,16 +476,16 @@ pick.
 ## Display settings and section primitives
 
 Display is not a tool. Its button at the navbar's right end shows the current mode's sphere icon and
-opens a compact popover. The order is Display, then Present. Its root has **Display Mode**
+opens a compact popover. The order is Display, then Preview. Its root has **Display Mode**
 and **Projection** section labels, with no title or close-button row. Both sections use
 right-aligned checkmarks for the selected choice. Clicking outside or pressing Escape closes
 the popover. Opening it leaves the active tool and its controls in place. A 2D view has no
-Display or Studio button.
+Display or Preview button.
 
 The modes are Solid, X-ray, Hidden line and Wireframe, filtered by the view's injected
-capabilities (`DisplayModeOptions.js`). Render is no display mode: it is the Studio's, which
-draws the model in Render whatever the file's mode, and Render's settings page is the Studio's
-settings (see [the Studio](#camera-animation-and-the-studio)). Each row has a choice with the mode's sphere and name. A single settings
+capabilities (`DisplayModeOptions.js`). Render is no display mode: it is Preview's, which
+draws the model in Render whatever the file's mode, and Render's settings page is Preview's
+settings (see [Preview](#camera-animation-and-preview)). Each row has a choice with the mode's sphere and name. A single settings
 button (`Settings2`) sits at the top right, inline with the Display Mode label, and edits
 the currently selected mode. It has an accessible name and no tooltip. Clicking a mode
 selects its remembered settings and closes the popover. The settings button is 20px with a
@@ -499,7 +499,7 @@ not a mode.
 | Mode | Settings |
 | --- | --- |
 | Solid | Part colours, Flat shading, Edges and edge colour, Grid, Axes |
-| Render (the Studio's settings) | Part colours, Lighting, Background, Floor |
+| Render (Preview's settings) | Part colours, Lighting, Background, Floor |
 | X-ray | Part colours, Surface opacity, edge colour, Grid, Axes |
 | Hidden line / Wireframe | Edge colour, Grid, Axes |
 
@@ -526,7 +526,7 @@ The last item is **Reset to default**, disabled at that mode's defaults. It remo
 mode's overrides, preserving every other mode, the shared camera and appearance, Clip and
 Explode. Per-file storage remembers each mode independently. Old-shaped stored display
 settings are dropped, never migrated. Projection is shared, orthographic by default; the
-Studio's Render resolves to perspective while preserving the shared choice.
+Preview's Render resolves to perspective while preserving the shared choice.
 
 Display uses shared settings field primitives under its static headings; other inspector
 sections retain their own disclosure rules. Hover, focus and rendering never write
@@ -614,8 +614,8 @@ Default restores the authored
 values (an SRDF's home included), stops motion and hands control back to
 Position. Using Position takes Explode off, and taking up Explode puts the pose back to its
 default ([one motion at a time](#tools-and-lifecycle)); while the model is exploded there are no
-knobs. The Studio leaves the tools view's pose as it is and never shows it: it opens on the model
-at rest, and a pose set there is its own (see [the Studio](#camera-animation-and-the-studio)). Kinematics, named poses and
+knobs. Preview leaves the tools view's pose as it is and never shows it: it opens on the model
+at rest, and a pose set there is its own (see [Preview](#camera-animation-and-preview)). Kinematics, named poses and
 animation are separate capabilities; the absence of one never leaves empty
 controls for another.
 
@@ -651,7 +651,7 @@ one way the viewer hands it over: a box at the viewport's top-right, 8px in, on 
 floating surface. It is there only while it has something to carry or a note to keep:
 nothing stands in for it otherwise, not even a button. Only a view whose picks and
 annotations a note can carry has it (a STEP's, a robot's); a compact host gets none, and
-the Studio puts it away with the tools. While the view loads it is out of sight, its note
+Preview puts it away with the tools. While the view loads it is out of sight, its note
 and its state kept. It is essential, so no setting turns it off.
 
 The sidebar and Quick Edit keep their corners, 8px in, unless one would reach under the tool
@@ -738,7 +738,7 @@ one format, sent, queued or copied: what the person wrote; then `File: <path>`; 
 label and path — `Current view:`, `View 1:`, `Views (cadgen snapshot --job):`,
 `Annotation:` (a picture sent beside the text is not named).
 
-## Camera, animation and the Studio
+## Camera, animation and Preview
 
 Cube face, edge and corner clicks turn the view and keep pan and zoom; dragging
 the cube orbits. Reloading the page restores the camera the file on screen was left
@@ -755,90 +755,90 @@ Zoom to Fit recenters and frames the whole original model at the current angle;
 Zoom to Selection frames the selection and is unavailable without one. Both are
 STEP context-menu items; the live `resetCamera` command takes the same fit path.
 
-The **Studio** (preview mode, `previewing` in code) is available for every 3D file, animated
+**Preview** (`previewing` in code) is available for every 3D file, animated
 or not, and for nothing else: a renderer declares it (`useRendererShell`'s `previewable`: STEP,
-GLB, STL/3MF, URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Studio
+GLB, STL/3MF, URDF/SRDF/SDF), and a view whose renderer does not (a DXF, 2D) has no Preview
 button, not a disabled one, and never enters it, whatever asks. It is the shell's own state;
-hosts neither start nor observe it. Its button is a play triangle ("Present"), at the navbar's
+hosts neither start nor observe it. Its button is a play triangle ("Preview"), at the navbar's
 right end after Display (the renderer's `navbarSlot`; a host with no navbar has both end the
 strip). A press covers the view at once
-("Preparing studio…", in the scene's backdrop colour) and enters the Studio under the cover,
-which lifts once the Studio's view has presented its first frame, no finer detail is on its way
+("Preparing preview…", in the scene's backdrop colour) and enters Preview under the cover,
+which lifts once Preview's view has presented its first frame, no finer detail is on its way
 (the quality is neither preview nor refining) and the studio frame's picture has converged
 (every sample drawn: the viewport's `pictureProgress`) — at least 700ms; at five seconds it stops
 waiting for detail and lifts on the picture converged, a second later at the latest — fading from
-the finished picture (`kit/shell/studioCover.js`). A view the shell set moving, Orbit
+the finished picture (`kit/shell/previewCover.js`). A view the shell set moving, Orbit
 on or a routine playing, has nothing to wait for; detail that lands starts the picture again and
-is waited for, never read as motion. The Studio's scene takes finer detail in grouped steps,
+is waited for, never read as motion. Preview's scene takes finer detail in grouped steps,
 after a quiet moment or every second while it streams (`step/workbench/settledValue.js`), so a
 burst of batches restarts the picture once or twice, not per batch. The navbar stays, so its menu and the explorer
 still lead to other files; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, joint handles, cube and context menu are gone (`PreviewChrome`, hidden and inert).
 
-Its controls are always there. At the navbar's right end, in Display's and Present's place:
-**Studio settings** (a sliders icon, pressed while its panel is open) and the way out, an X
-(**Exit studio**), their hints below them (a host with no navbar has them at the view's
+Its controls are always there. At the navbar's right end, in Display's and Preview's place:
+**Preview settings** (a sliders icon, pressed while its panel is open) and the way out, an X
+(**Exit preview**), their hints below them (a host with no navbar has them at the view's
 top-right, `PreviewChrome`'s `end`, tiles with no surface under them). Under them, docked at the view's right edge, the settings panel
-(`kit/shell/StudioSettings.jsx`), closed each time the Studio opens and put away by its button
+(`kit/shell/PreviewSettings.jsx`), closed each time Preview opens and put away by its button
 or its own X: **Orbit** — its heading's checkbox turns the camera about the model, off every
-time the Studio opens, and its **Speed** is a dropdown of speeds — then Render's own settings
+time Preview opens, and its **Speed** is a dropdown of speeds — then Render's own settings
 page (see [Display settings](#display-settings-and-section-primitives)). At the top-left, the
-file sidebar offers its **Position** and **Animation** alone, their tiles bare: the Studio's own
-pose and routine. Escape leaves the Studio too, once an open dropdown has closed. Explode and
+file sidebar offers its **Position** and **Animation** alone, their tiles bare: Preview's own
+pose and routine. Escape leaves Preview too, once an open dropdown has closed. Explode and
 Clip are the tools view's alone. Nothing sits under the model, nor at the bottom centre.
 
-**The Studio is drawn in Render**, whatever the file's display mode: it is a view of its own
+**Preview is drawn in Render**, whatever the file's display mode: it is a view of its own
 over the tools view, drawing the file's Render settings, and the file's own mode and its
 settings are left as they are. The tools view never draws Render: a file whose stored or sent mode is Render is
-drawn there in Solid. Render settings edited in the Studio are the file's Render settings;
+drawn there in Solid. Render settings edited in Preview are the file's Render settings;
 leaving returns the tools view to the file's mode.
 
 **Routines** play from the file sidebar's **Animation** section, in the tools view and the
-Studio alike (`kit/tools/playbar/AnimationSection.jsx`): its heading holds **Reset animation**,
+Preview alike (`kit/tools/playbar/AnimationSection.jsx`): its heading holds **Reset animation**,
 which stops the routine and puts the model at rest, disabled while it is; its body is the
 routine in hand, a dropdown of the routines where there are two or more, then **Play** or
 **Pause**, the scrubber (`AnimationTimeControl`) and **Playback settings** (a cog: the routine's
 Speed, a submenu, then Loop and Autoplay). In the tools view a routine is a motion as a pose is
 (see [one motion at a time](#tools-and-lifecycle)): paused, its frame stays on the model. A
 routine opens at rest (a STEP's does not own the pose: `restingAnimationState`,
-`step/workbench/motionRestore.js`). Each view's routine is its own: entering the Studio sets the
+`step/workbench/motionRestore.js`). Each view's routine is its own: entering Preview sets the
 tools view's untouched and starts its own at rest, playing only under Autoplay (off by default);
-leaving throws the Studio's away, and the tools view's is as it was left. An update of the model that leaves its routines as they were neither stops nor rewinds
+leaving throws Preview's away, and the tools view's is as it was left. An update of the model that leaves its routines as they were neither stops nor rewinds
 one that is playing; a changed routine starts at rest. Speed and Loop are the file's, one set,
 chosen in Playback settings and kept in its view once chosen — until then the routine's own
 apply. Orbit's speed (1×) and Autoplay are the file's too, remembered between leaving and
-re-entering the Studio and across a reload of the tab; whether it orbits is not kept. Another
+re-entering Preview and across a reload of the tab; whether it orbits is not kept. Another
 file has its own, and a file the tab left starts at the defaults again. Nothing of the
 routine — which one, its time, whether it plays — is saved. Orbit is not an animation
 setting.
 
-**The Studio and the tools view are two states.** Entering the Studio leaves the tools view's
+**Preview and the tools view are two states.** Entering Preview leaves the tools view's
 state exactly as it is — the tool in hand and its sub-toolbar, the Position pose, the routine,
 the selection, hidden and isolated parts, Explode and Clip, Measure's results, the annotations,
-the camera — and the Studio starts clean, from the model as authored: at its opening pose,
+the camera — and Preview starts clean, from the model as authored: at its opening pose,
 every part shown, nothing isolated, picked, hovered, measured, exploded or clipped, its own
 camera fitted at the default angle and still, its routine at rest. Leaving it throws away what
 was done there — its camera, its pose, its routine — and the tools view comes back exactly as
 it was, in the file's display mode, its camera in the projection and lens the Display settings
-now hold. Nothing of the tools view is reset to make room for the Studio and nothing of the
-Studio's is kept: the next one starts clean again. The Studio holds this by being a view of its
-own (`kit/shell/StudioView.jsx`): its own viewport, scene, camera, pose and routine, mounted
+now hold. Nothing of the tools view is reset to make room for Preview and nothing of the
+Preview's is kept: the next one starts clean again. Preview holds this by being a view of its
+own (`kit/shell/PreviewView.jsx`): its own viewport, scene, camera, pose and routine, mounted
 over the tools view's while it is up and unmounted as it closes, sharing only the page's GPU
 device. The tools view's viewport stays mounted throughout and is never told: it draws nothing
 while covered and is uncovered with its own last frame. What is not either state's is the file's settings, shared by
-both and kept: its Display settings (an edit in the Studio's Render settings is the file's
+both and kept: its Display settings (an edit in Preview's Render settings is the file's
 Render settings), Orbit's speed, Autoplay, Speed and Loop.
 
 **Two views, two ways of drawing.** The tools view is drawn for working on the
 model: the scene quality its settings resolve to, and a lower pixel ratio while
-the camera moves so a gesture stays responsive. The Studio's view is drawn for looking at
-it, in Render (`kit/viewport/studioViewScene.js`): one scene-quality tier up (Interactive to
+the camera moves so a gesture stays responsive. Preview's view is drawn for looking at
+it, in Render (`kit/viewport/previewViewScene.js`): one scene-quality tier up (Interactive to
 Standard, Standard to High — a higher idle pixel ratio, and at High larger shadow and
 environment maps, at the same meshes), its full pixel ratio kept while it orbits, and nothing
 of the tools view's (no picking, overlays, cube or tool effects). Neither changes a Display
 setting. Render's studio code and environment are prepared a moment after a model is on screen
-(`useRendererShell`'s `studioPrepare`), into the GPU device's cache the Studio draws from, so
-entering the Studio has less to do.
+(`useRendererShell`'s `previewPrepare`), into the GPU device's cache Preview draws from, so
+entering Preview has less to do.
 
 ## Keyboard
 
@@ -846,7 +846,7 @@ Escape and Copy belong to one viewer: the one with focus, or the one last
 pressed in while focus is on the page. Editable targets keep their own keys.
 
 - **Escape**, innermost first: an open popup in this viewer (a menu, the app menu
-  included, a Select, a color picker, Display, the explorer) closes itself; then the Studio closes;
+  included, a Select, a color picker, Display, the explorer) closes itself; then Preview closes;
   then Annotate's canvas spends its own Escape; then the selected ink; then an unfinished
   measurement; then the tool in hand, any but Select, which goes down and takes Select up, what
   it set kept; then the renderer's own (STEP: the selection, then isolation; robots: the
@@ -864,7 +864,7 @@ pressed in while focus is on the page. Editable targets keep their own keys.
   (it clears the selection). ⌘C or Ctrl+C with none of its text selected is the
   viewer's copy.
 - **Arrow keys and WASD** orbit the viewer that has focus or the pointer over
-  it, never every mounted viewport; they do nothing in the Studio or with a
+  it, never every mounted viewport; they do nothing in Preview or with a
   modifier held.
 
 ## Tooltips and feedback
@@ -872,8 +872,8 @@ pressed in while focus is on the page. Editable targets keep their own keys.
 Every hint is a `TooltipHint`: compact text, one surface and arrow, a 400ms
 delay. No native `title` anywhere in chrome. Prefer one or two words; show a
 full technical name only when it is truncated (`overflowOnly`). Quick Edit's buttons, the
-strip's buttons (Display and the Studio among them), the navbar's right-hand controls (the
-update, an alert's icon, Full size), the Studio's corner (Studio settings, Exit studio) and the
+strip's buttons (Display and Preview among them), the navbar's right-hand controls (the
+update, an alert's icon, Full size), Preview's corner (Preview settings, Exit preview) and the
 Animation section's Reset are hinted by name — the strip's hints above their
 buttons, the others' below; there is no hint on the navbar's left (the logo,
 the file's name and the ⋯ say what they are), on Display's settings button, Playback settings, an X,
@@ -894,7 +894,7 @@ the host's `onError` are the host's to show. A card the
 model survives (a failed update, a warning beside the model) has an X, **Dismiss**: it puts
 the card away for as long as that alert stands, and its icon, first of the navbar's
 right-hand controls after the update button, brings it back. The dismissal goes once the alert changes or clears, or
-another file opens; with the card back, so does the icon. The Studio has no navbar, and so no
+another file opens; with the card back, so does the icon. Preview has no navbar, and so no
 icon.
 
 ## Verification

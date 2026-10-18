@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-// A value that follows another in a few grouped steps rather than every change: the Studio's
-// scene takes finer detail this way (`StepSurface.jsx`). Each change the Studio's scene adopts
+// A value that follows another in a few grouped steps rather than every change: Preview's
+// scene takes finer detail this way (`StepSurface.jsx`). Each change Preview's scene adopts
 // starts its converging picture again, and the detail loader publishes a large model's finer
 // detail as a burst of batches; taken as they come, the picture restarts with each of them and
 // never settles while they stream. Taken once the stream has been quiet for `quietMs`, or every
