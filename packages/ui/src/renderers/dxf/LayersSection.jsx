@@ -8,6 +8,7 @@ import {
 } from "@text-to-cad/ui/primitives/tree-row";
 import { cn } from "@text-to-cad/ui/utils";
 import { LAYER_GLYPH_COLUMN_CLASS, LAYER_ROW_INSET_PX, LayerSwatch } from "../kit/inspector/layerRows.jsx";
+import { openUntilChoice } from "../kit/inspector/treeExpansion.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { drawingReferenceId, layerRows } from "./drawingReferences.js";
 
@@ -44,18 +45,26 @@ function LayerEye({ name, hidden, onToggle }) {
  */
 export default function LayersSection({ drawing, hiddenLayers, onToggleLayer, selection }) {
   const rows = useMemo(() => layerRows(drawing), [drawing]);
-  // A layer with block references on it opens on them; the person folds it from there.
-  const [folded, setFolded] = useState(() => new Set());
+  // The layers are the drawing's, so they open as every tree's nodes do (`kit/inspector/treeExpansion.js`):
+  // a layer with one block reference on it opens on it, one with several stays folded behind its
+  // chevron. From the first layer the person opens or folds, the shape is theirs.
+  const opened = useMemo(() => {
+    const open = openUntilChoice([{ name: "", inserts: rows }], row => row.inserts, row => row.name);
+    open.delete("");
+    return open;
+  }, [rows]);
+  const [touched, setTouched] = useState(null);
+  const shown = touched || opened;
   const chosen = useMemo(() => new Set(selection.selected), [selection.selected]);
-  const toggle = name => setFolded(current => {
-    const next = new Set(current);
+  const toggle = name => setTouched(current => {
+    const next = new Set(current || opened);
     if (!next.delete(name)) next.add(name);
     return next;
   });
   return <ToolPanel id="layers" title="Layers" label="Layers" fit="tree" resizable collapsible={false} icon={Layers}>
     <ul className="px-1 py-1 text-tiny" aria-label="Drawing layers" data-drawing-layers="">
       {rows.map(row => {
-        const hidden = hiddenLayers.has(row.name), open = row.inserts.length > 0 && !folded.has(row.name);
+        const hidden = hiddenLayers.has(row.name), open = row.inserts.length > 0 && shown.has(row.name);
         return <li key={row.name} className="min-w-0">
           <TreeRowSurface dense className="group/row gap-0 pr-0" style={{ paddingLeft: LAYER_ROW_INSET_PX, "--row-actions": ROW_ACTIONS_WIDTH }} data-layer-row={row.name}>
             {row.inserts.length ? <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${row.name}`} aria-expanded={open}

@@ -10,6 +10,7 @@ import { TreeFilterHighlight, TreeFilterInput } from "@text-to-cad/ui/primitives
 import { cn } from "@text-to-cad/ui/utils";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { useTreeSearch } from "../kit/inspector/modelTreeSearch.js";
+import { openUntilChoice } from "../kit/inspector/treeExpansion.js";
 import VirtualRows, { revealRow } from "../kit/inspector/VirtualRows.jsx";
 import { NetKindIcon, PadKindIcon, PartKindIcon } from "./boardIcons.jsx";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree } from "./boardTree.js";
@@ -110,8 +111,10 @@ const MemoBoardSearchRow = memo(BoardSearchRow);
  * nets, each with the pads on it, as a tree is drawn in the sidebar (`settings-ui.md`): headed by its
  * filter, dense rows mounted as they scroll into view (`VirtualRows`). The pointer on a row lights
  * what it names on the board; a press selects it (Shift, Ctrl or Cmd adds or takes away), as a tap
- * on the board does, under any tool; a part's or a net's eye isolates it. A pick on the board opens
- * its row's owners and brings it into view, once.
+ * on the board does, under any tool; a part's or a net's eye isolates it. It opens as every tree
+ * does, until there is a choice (`kit/inspector/treeExpansion.js`): Parts and Nets, a kind with one
+ * part, a net with one pad. A pick on the board opens its row's owners and brings it into view,
+ * once; from the first row the person opens or shuts, the shape is theirs.
  *
  * @param {{ index: object, selection: ReturnType<typeof import("../kit/tools/select/useSceneSelection.js").useSceneSelection>,
  *   isolated: readonly string[], onIsolate(selector: string): void, onSelect(): void }} props
@@ -120,12 +123,17 @@ const MemoBoardSearchRow = memo(BoardSearchRow);
 export default function BoardSection({ index, selection, isolated = EMPTY, onIsolate, onSelect }) {
   const tree = useMemo(() => buildBoardTree(index), [index]);
   const rowHeight = useTreeRowHeight();
-  const [expanded, setExpanded] = useState(() => new Set(["group:parts"]));
-  const toggle = useCallback(node => setExpanded(current => {
-    const next = new Set(current);
+  // Untouched, the tree is the rule's shape for the board it shows; the person's from their first change.
+  const opened = useMemo(() => openUntilChoice(tree.roots, node => node.children), [tree]);
+  const openedRef = useRef(opened);
+  openedRef.current = opened;
+  const [touched, setTouched] = useState(null);
+  const expanded = touched || opened;
+  const reshape = useCallback(change => setTouched(current => change(new Set(current || openedRef.current))), []);
+  const toggle = useCallback(node => reshape(next => {
     if (!next.delete(node.id)) next.add(node.id);
     return next;
-  }), []);
+  }), [reshape]);
   const rows = useMemo(() => visibleRows(tree.roots, expanded), [tree, expanded]);
   const { selected, select, hover, clear } = selection;
   const highlighted = useMemo(() => new Set(selected.flatMap(boardTreeNodeIds)), [selected]);
@@ -150,10 +158,10 @@ export default function BoardSection({ index, selection, isolated = EMPTY, onIso
   useEffect(() => {
     if (!target || searching || revealed.current === target) return;
     const missing = boardTreeAncestors(tree, target).filter(id => !expanded.has(id));
-    if (missing.length) { setExpanded(current => new Set([...current, ...missing])); return; }
+    if (missing.length) { reshape(next => { for (const id of missing) next.add(id); return next; }); return; }
     const row = rowElements.current.get(target);
     if (row) { revealRow(row); revealed.current = target; }
-  }, [target, tree, expanded, searching]);
+  }, [target, tree, expanded, searching, reshape]);
   useEffect(() => { if (!target) revealed.current = null; }, [target]);
   const targetIndex = target ? rows.findIndex(row => row.node.id === target) : -1;
   const treePinned = useMemo(() => (targetIndex < 0 ? EMPTY : [targetIndex]), [targetIndex]);

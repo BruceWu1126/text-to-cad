@@ -7,6 +7,7 @@ import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import RobotVisibilityButton, { ROBOT_ROW_ACTIONS_WIDTH } from "./RobotVisibilityButton.jsx";
 import { robotVisibilityState } from "./visibility.js";
 import { useTreeSearch } from "../kit/inspector/modelTreeSearch.js";
+import { openUntilChoice } from "../kit/inspector/treeExpansion.js";
 import { buildRobotTree, robotComponentNodeId, robotLinkNodeId, robotTreeAncestorIds } from "./robotTree.js";
 import { revealRow } from "../kit/inspector/VirtualRows.jsx";
 
@@ -16,23 +17,15 @@ import { revealRow } from "../kit/inspector/VirtualRows.jsx";
 // while Select is the tool: **Links**. What is selected is Quick Edit's, as chips whose cards say
 // what the description says of each (`robotReferences.jsx`).
 //
-// Expansion starts at the first real choice. The root opens, and so does a chain of
-// single links below it (`base_footprint` > `base_link`), because a tree that opens on
-// one row answers nothing; everything after that is one click, since a robot the size
-// of tom.urdf (78 objects, 51 under one link) is unreadable fully open.
+// Expansion starts at the first real choice, as every tree's does (`kit/inspector/treeExpansion.js`):
+// the root opens, and so does every node with one child (`base_footprint` > `base_link`, a
+// serial chain to its end), because a row with one thing under it answers nothing; a link
+// with several stays shut, since a robot the size of tom.urdf (78 objects, 51 under one link)
+// is unreadable fully open.
 
 const EMPTY = Object.freeze([]);
 
-function initialExpansion(tree) {
-  const expanded = new Set();
-  for (const root of tree.roots) {
-    for (let node = root; node;) {
-      expanded.add(node.id);
-      node = node.children.length === 1 && node.children[0].kind === "link" ? node.children[0] : null;
-    }
-  }
-  return expanded;
-}
+const initialExpansion = tree => openUntilChoice(tree.roots, node => node.children);
 
 // A row with geometry carries the eye (`RobotVisibilityButton`): it takes no width from the row;
 // the name fades out under it, always while it is on, otherwise on hover.

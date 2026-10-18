@@ -37,7 +37,7 @@ the reverse.
 | `look/` | `stageEffects` (lighting rig scaled to the model, floor, glow and shadow catcher, grid and origin axes), the Render studio boundary (`renderStudioChunk`, `studioEnvironmentCache` and its worker). `chromeBackdrop` and `useChromeBackdropColor` (the frame colour around a scene). The surface LOOK is data the viewport resolves and a scene applies to its own materials: `@text-to-cad/core/lib/viewer/surfaceLook.js` (`createSurfaceLook(THREE, root).apply(look)`) does it for any authored material tree. The viewport resolves it with core's `resolveSceneSurfaceLook` (`common/sceneSettings.js`), the resolver the snapshot CLI dresses the same scenes with. |
 | `view-settings/` | The settings model and store (`viewSettingsStore`, `useViewSettings`, `viewerDisplaySettings`, `renderState`), applying a change to a viewport (`useAppliedViewSettings`, `viewUpdateCoordinator`, `viewUpdateGate`, `viewUpdatePlan`), the content of Display's dropdown (`DisplayModeOptions`: the modes and the Grid switch's icons; `DisplayPopover` draws it), and Preview's settings form (`PreviewRenderSettings`). |
 | `tools/` | `FloatingToolBar` (the dumb strip: the tools it is handed, then, only where the host has no navbar, after a thin rule, the view's controls), `SubToolbar` (the tool in hand's one row under the strip, its groups parted by `SubToolbarSeparator`; `SLIDER_SUB_TOOLBAR_CLASS`, the one width of a slider tool's row), `toolModes` (the tool-mode state machine), `ToolModeMenu` (`ToolSettingsMenu`: a tool's settings dropdown, from a chevron right after its button on the strip, or a sliders button in a panel's heading), `ToolPopover` (an ordinary dropdown from its button, on a `side` and `align`ed start or end: the Animation section's Playback settings), `FileSidebar` (the file's sections, whatever the tool: a tile each at the top-left, a tile opening its section in a panel under them, one at a time, sized from its bottom-right grip; on a phone one tile, `phone`, opening one panel with the sections as tabs and its one X; Preview offers its Position and Animation alone, `sections`, its tiles `bare`), `ToolStack` (the bounded column under the strip and sub-toolbar for a renderer's own `toolPanels`, which scrolls only when what cannot give way still does not fit), `ToolPanel` (one panel of the stack, or one section of the sidebar: `fit` says how it gives way when the viewer is short, `resizable` makes a stack panel the person's to size by the grip in its bottom-right corner alone, moving only it, and a panel with a heading can fold to it; its `footer`, a `ToolPanelFooterButton`, is a full-row action under the body that never scrolls), `ResizeGrip` (the one resize grip of a box over the viewport, in a bottom corner: the sidebar's and a resizable panel's at the bottom-right, Quick Edit's at its bottom-left), `toolStackLayout` (every panel's width, each sidebar section's and the resizable panels' sizes, and the folded stack panels: defaults, bounds and their stored record), and the format-blind tools: `annotate/` (`AnnotationOverlay`, the surface Annotate's gestures land on; `annotation3d`, its ink projected into the model; `AnnotationSelectionBar`, the bar of the annotations Select picked), `PreviewChrome` (Preview's chrome: the tools view's controls hidden and inert while it is up, and its own corner, `end`, with its settings panel under it, `panel`), `PlaybackMenu` (the Playback settings — Speed, Loop, Autoplay — and `ORBIT_SPEEDS`, Preview's Orbit speeds), `playbar/` (`AnimationSection`, the file sidebar's Animation section: Reset in its heading, the routine where there are several, Play/Pause, the scrubber, Playback settings; `AnimationTimeControl`, the scrubber, and `animationControlsHaveContent`; `animationClock`, `usePlaybackFrames`, `playbackPreferences`: the file's playback settings — Orbit's speed, Autoplay, and the chosen Speed and Loop), `pose/` (the handle overlay, canvas, drag mathematics), `select/` (`SelectFilterMenu`, Select's selection filter on its chevron; `selectFilter`, its pure toggles; `usePointerPick`: taps and hover through a scene's own `pick`, each with where the pointer was; `useSceneSelection` and `sceneReferences`: the parts a scene's pick names, selected, lit and handed to Quick Edit as references), `measure/` (Measure, for any 3D view: `useMeasureSession`, the session; `useMeasureOverlay`, its drawing; `MeasurementCard`; `measurementChips`, its Quick Edit chips and marks; `measureSelection`, Select's press and hover on a measurement; `SceneMeasure`, picks snapped to a scene's triangles and the model's size row), `model-effects/` (Explode and Clip, for any scene that opts in: `ModelTools`, their strip tools and slider rows; `useSceneEffects`, the viewport applying them to the scene; `motionExclusion`, one motion at a time), `sceneTools` (the tools a scene's renderer composes around the shell: the tool in hand, Annotate, Measure and the model effects), `quick-edit/` (`QuickEdit`, the note to the agent, and `quickEditPrompt`, the context it builds and the text it copies). Screenshot capture is `@text-to-cad/core/lib/viewer/screenshotCapture.js`. |
-| `inspector/` | `FileSheet` and its row and section primitives, `modelTreeSearch` (`useTreeSearch`, the ranked flat search every tree shares), `VirtualRows` (a long tree's rows, windowed), `referenceRows` (`InfoRow`, `MonoValue`, `CoordValue`), `kinematicsControls` (the `Pose` row that heads every Position section: Default, the named poses, Custom). The tree row and filter box are `primitives/tree-row` and `primitives/tree-filter`. |
+| `inspector/` | `FileSheet` and its row and section primitives, `modelTreeSearch` (`useTreeSearch`, the ranked flat search every tree shares), `VirtualRows` (a long tree's rows, windowed), `referenceRows` (`InfoRow`, `MonoValue`, `CoordValue`), `kinematicsControls` (the `Pose` row that heads every Position section: Default, the named poses, Custom), `treeExpansion` (`openUntilChoice`: how every tree opens, until there is a choice), `layerRows` (a Layers section's rows: one glyph each, on the title's line). The tree row and filter box are `primitives/tree-row` and `primitives/tree-filter`. |
 | `status/` | `LoadingIndicator` and `ViewerLoadingOverlay`, `ViewerAlertCard` (the card over the viewport for every alert, and `useAlertDismissal`: a card put away, and its icon in the navbar that brings it back) and `reportIssue` (`alertIssueUrl`: its Report Issue's new issue), `ViewUpdateStatus`, `loadingState` (`viewerLoadingState`), `loadAlerts` (`failureAlert`, `noGeometryAlert`). |
 | `shell/` | The host glue every renderer needs that is not about its scene: see [Shell](#shell). |
 
@@ -329,7 +329,8 @@ it, the file sidebar, Quick Edit at the top-right.
   layer's pen, name, entity count and eye (hidden: not drawn, picked or snapped to), and
   under it the block references placed on it, a click picking one. A row has one glyph, on the
   section title's edge (`kit/inspector/layerRows.jsx`): the pen, or, for a layer with block
-  references under it, the chevron that folds them.
+  references under it, the chevron that folds them. As every tree, it opens until there is a
+  choice: a layer with one block reference opens on it, one with several stays folded.
 - **Quick Edit** carries the picks, the ink and the measurements; its views are the
   window on screen as a plan-view camera (`planCamera`: looking straight down, `up`
   +Y, `orthographicHalfHeight` the window's half height), which `cadgen dxf snapshot
@@ -453,7 +454,8 @@ picture and what a person points at.
   click on a chip copies its reference; the copy key copies the selection's, comma-joined after
   the file (`blinky.kicad_pcb#R1,R1.2`), or, while Annotate is up, the view with its ink.
 - **The sidebar**: **Board** (`board/BoardSection.jsx`), the parts by kind then the nets, each
-  with its pads, headed by its filter, in dense windowed rows (`VirtualRows`); resting on a row
+  with its pads, headed by its filter, in dense windowed rows (`VirtualRows`), opened until there
+  is a choice (Parts and Nets, a kind with one part, a net with one pad); resting on a row
   lights what it names, a click selects it, and a part's or a net's eye isolates it, the rest of
   the board stepping back. **Layers** (`board/LayersSection.jsx`), grouped Front, Inner, Back and
   Other, each layer's colour, name, count and eye.
@@ -1214,13 +1216,13 @@ filter. `StepSurface` keeps the filter (`selectFilter`), the geometry mode it gi
 "none") and the options (`connectedSelection`); while Select is up the press goes to a
 measurement first (`onSelectPress`, while Measurement is ticked), then the annotations
 (`selectsAnnotations`, while Annotations is), then a part, and Position's knobs are drawn while
-Position is (`positionShown`). A change of the geometry ticked sets the tree's expansion
-(`changeSelectFilter`), by the tree's shape (`treeShape`: "all" for Parts with Faces or Edges
-or no geometry, else "parts", "faces" or "edges"): leaving "all" saves the person's
-expansion and coming back restores it (with the owners of selected topology kept open);
-Parts opens every assembly (`collectStepTreeAssemblyNodeIds`) and shuts every part;
-Faces and Edges open every assembly and leave each part to the tree, which asks for a
-part's topology (`onLoadTopology`) and recognition as its row comes on screen (the rows
+Position is (`positionShown`). The geometry ticked never shapes the model tree, which opens by
+the one rule (`kit/inspector/treeExpansion.js`) and is the person's from there. It decides what
+the viewport picks and whose topology loads (`pickExpandedStepTreeNodeIds`, by `treeShape`:
+"all" for Parts with Faces or Edges or no geometry, else "parts", "faces" or "edges"): "all"
+picks what the tree has open; Parts reaches every part (`collectStepTreeAssemblyNodeIds`) and
+loads no topology; Faces and Edges reach every part and leave each part to the tree, which asks
+for a part's topology (`onLoadTopology`) and recognition as its row comes on screen (the rows
 the tree's list reports in view, below). Those requests, and every other
 (`loadInspectionTopology`), cost a lookup for a part already requested; new parts expand
 together at most every 150 ms. The loader behind them (`useCadAssets`'
@@ -1230,14 +1232,13 @@ composed incrementally (only the new parts are built); a part requested while a 
 flight loads beside it rather than after it. While more loads, what is loaded stays
 pickable: a composition serves the request while every part it holds is still requested
 (`topologyCompositionServes`), and Select is "Preparing selection" only with nothing usable yet.
-A new file revision still invalidates everything loaded. Outside the "all" shape the tree's
-disclosure is locked (`data-disclosure-locked`) and the part menus drop Expand/Collapse.
-The one-press load for a part not yet loaded stays in the pick path; the model tree's heading
+A new file revision still invalidates everything loaded. Leaving Faces or Edges
+(`changeSelectFilter`) puts the parts expanded for their topology back as they were, keeping the
+owners of selected topology, so "all" picks a part where it did. The one-press load for a part not yet loaded stays in the pick path; the model tree's heading
 shows `Loading…` while it waits.
 
 **A large tree under Faces and Edges.** Above `LARGE_TREE_ROWS` (300, in `ModelingTree.jsx`) rows
-of assemblies and parts, Faces and Edges keep every assembly open and locked as they do below it,
-but a part row on screen asks for nothing: the viewport asks for the part under a pointer that
+of assemblies and parts, a part row on screen asks for nothing: the viewport asks for the part under a pointer that
 rests on it for `TOPOLOGY_DWELL_MS` (150) or presses it, read from the viewport's hover store
 (`workbench/hoverStore.js`), each part once, and a press on a part not yet loaded loads it and
 picks (above). Below the threshold, and in the "all" and "parts" shapes, nothing of this applies.
@@ -1764,8 +1765,9 @@ row primitive, the filter (`TreeFilterInput`, `primitives/tree-filter`), and the
 flat search of `kit/inspector/modelTreeSearch.js` (`useTreeSearch`). Its X is the section's: it
 closes the panel. The search index also reads a row's `searchAliases`, so a
 link is found by its joint name and the hit shows that joint in place of its
-owners. The root opens, along with a chain of single child links below it;
-everything else starts collapsed. When the tree has exactly one root with
+owners. It opens by the one rule (`kit/inspector/treeExpansion.js`): the root, and every link
+with one child below it, a serial chain to its end; a link with several starts collapsed. When
+the tree has exactly one root with
 children, that root is pinned: no chevron and no indent, so its children start
 at the tree's own left edge. Selecting a hit opens its owners at once and
 scrolls to it when the search ends.

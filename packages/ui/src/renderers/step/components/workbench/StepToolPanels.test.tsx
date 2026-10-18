@@ -60,23 +60,20 @@ function Features({ mode = 'all', mobile = false }) {
   </FileSidebar>;
 }
 
-it("the geometry Select picks shapes the tree: Parts, Faces or Edges alone every assembly open, locked; all of it the person's own tree again", () => {
+it("the tree opens until there is a choice and is the person's own from there: no geometry Select picks shapes it or locks it", () => {
   const view = render(<Features />);
-  // All: the tree is the person's own — open the hinge. A part is a leaf.
+  // The hinge holds two parts, a choice, so it starts shut. A part is a leaf.
   expect(rows()).toEqual(['Expand hinge', 'Select hinge', 'Select pin']);
   fireEvent.click(screen.getByRole('button', { name: 'Expand hinge' }));
-  expect(rows()).toEqual(['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin']);
-  expect(locks()).toEqual([]);
-  // Parts, Faces and Edges: every assembly open, and no disclosure to press.
-  for (const mode of ['parts', 'faces', 'edges']) {
+  const opened = ['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin'];
+  expect(rows()).toEqual(opened);
+  // Parts, Faces, Edges and all of it: the tree the person left, its disclosure theirs to press.
+  for (const mode of ['parts', 'faces', 'edges', 'all']) {
     view.rerender(<Features mode={mode} />);
-    expect(rows()).toEqual(['Select hinge', 'Select base', 'Select arm', 'Select pin']);
-    expect(locks()).toEqual(['open']);
+    expect([rows(), locks()]).toEqual([opened, []]);
   }
-  // All: the tree the person left — the hinge open — and unlocked.
-  view.rerender(<Features mode="all" />);
-  expect(rows()).toEqual(['Collapse hinge', 'Select hinge', 'Select base', 'Select arm', 'Select pin']);
-  expect(locks()).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse hinge' }));
+  expect(rows()).toEqual(['Expand hinge', 'Select hinge', 'Select pin']);
 });
 
 it("Model tree is its filter over its tree — Select's modes are the strip's — opened by its tile, closed by its X or the tile again, never folding, its search kept while closed", async () => {

@@ -203,16 +203,16 @@ createRoot(document.getElementById('root')).render(<App/>);
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await model.getByRole('button', { name: 'Select Part 0-0', exact: true }).waitFor();
 
-  // A large tree (more than LARGE_TREE_ROWS rows of assemblies and parts) under Faces: its
-  // assemblies stay open and locked, its parts are leaves, and nothing asks for topology for being
-  // on screen.
+  // A large tree (more than LARGE_TREE_ROWS rows of assemblies and parts) under Faces: the tree
+  // stays as it is (Select's filter never shapes it, nor locks its disclosure), its parts are
+  // leaves, and nothing asks for topology for being on screen.
   const topology = () => page.evaluate(() => [...window.treeTest.events.topology]);
   await scrollTo(0);
   await page.evaluate(() => { window.treeTest.events.topology.length = 0; window.treeTest.setMode('faces'); });
-  await model.locator('[data-disclosure-locked]').first().waitFor();
   await frames();
-  assert.equal(await model.locator('[aria-label="Model"]').evaluate(list => list.getBoundingClientRect().height), order.length * 24, 'the rows are the assemblies and parts');
-  assert.deepEqual(await model.locator('[data-disclosure-locked]').evaluateAll(marks => [...new Set(marks.map(mark => mark.dataset.disclosureLocked))]), ['open'], 'only the assemblies are locked, open');
+  assert.equal(await model.locator('[aria-label="Model"]').evaluate(list => list.getBoundingClientRect().height), order.length * 24, 'the rows are the assemblies and parts, as they were');
+  assert.equal(await model.locator('[data-disclosure-locked]').count(), 0, 'and the disclosure is the person\'s');
+  assert.equal(await model.getByRole('button', { name: 'Collapse Group 0', exact: true }).count(), 1, 'an assembly keeps its chevron to press');
   assert.equal(await model.getByRole('button', { name: /^(Expand|Collapse) Part / }).count(), 0, 'a part has no disclosure');
   await scrollTo(0.5); await frames(); await scrollTo(0); await frames();
   assert.deepEqual(await topology(), [], 'parts on screen ask for nothing');
@@ -236,11 +236,13 @@ createRoot(document.getElementById('root')).render(<App/>);
   await page.getByTestId('viewport').dispatchEvent('pointerdown');
   assert.equal((await topology()).includes('o13_1'), true, 'a press on a part asks at once');
   await hover('');
-  // All is the person's own tree again, unlocked; Parts locks the assemblies open.
-  await page.evaluate(() => window.treeTest.setMode('all')); await frames();
-  assert.equal(await model.locator('[data-disclosure-locked]').count(), 0);
-  await page.evaluate(() => window.treeTest.setMode('parts')); await frames();
-  assert.deepEqual(await model.locator('[data-disclosure-locked]').evaluateAll(marks => [...new Set(marks.map(mark => mark.dataset.disclosureLocked))]), ['open']);
+  // No mode locks the tree: All and Parts leave it the person's, every assembly's chevron theirs.
+  await scrollTo(0); await frames();
+  for (const mode of ['all', 'parts']) {
+    await page.evaluate(mode => window.treeTest.setMode(mode), mode); await frames();
+    assert.equal(await model.locator('[data-disclosure-locked]').count(), 0, `${mode}: nothing locked`);
+    assert.equal(await model.getByRole('button', { name: 'Collapse Group 0', exact: true }).count(), 1, `${mode}: its chevron to press`);
+  }
 
   // A small tree (5 groups of 50 parts: 255 rows) under Faces: the parts on screen ask for their
   // topology, once each, as a scroll brings them on screen.

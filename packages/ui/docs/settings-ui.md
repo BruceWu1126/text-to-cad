@@ -258,13 +258,13 @@ is; a hidden one keeps its choice for when it shows again.
 The geometry ticked is picked as one mode (`step/workbench/selectionFilter.js`'s
 `selectGeometryMode`): Parts with Faces or Edges, a press takes the face or edge it lands on
 where the part's topology can be picked, and the part elsewhere; Parts alone, the part;
-Faces or Edges without Parts, that topology alone. The mode sets the model tree's shape:
-with Parts and Faces or Edges, or no geometry at all, it is the person's own (put back as it
-was when they left it, with the owners of what is still selected kept open); Parts alone
-opens every assembly and shuts every part; Faces or Edges without Parts open every assembly. A
-part is a leaf in every shape: nothing opens under it, and a face or edge picked in the
-viewport is revealed at its part's row. Outside the person's own shape the disclosure is
-locked (chevrons shown, not pressable) and Expand/Collapse leave the row menus. Under Faces
+Faces or Edges without Parts, that topology alone. The mode never shapes the model tree (it
+opens as every tree does: [the file sidebar](#the-file-sidebar-and-the-tool-stack)): Parts,
+Faces and Edges reach every part in the viewport whatever the tree has open, a press revealing
+its part's row; with Parts and Faces or Edges, or no geometry at all, a press takes what the
+tree has open. A part is a leaf: nothing opens under it, and a face or edge picked in the
+viewport is revealed at its part's row. Leaving Faces or Edges puts the parts whose topology
+loaded for them back as they were (the owners of what is still selected stay loaded). Under Faces
 or Edges a part's topology is asked for as its row comes on screen in the tree, never for a
 whole large assembly at once; a viewport press on a part not yet loaded loads that part and
 picks, and the model tree's heading says "Loading…" meanwhile. In a large assembly (more than 300
@@ -353,6 +353,14 @@ section, a tree's a tree icon named for it (Model tree, Links, Board), Position'
 clapperboard, a Layers section's the layers icon, any other section's a page named for it. Preview offers its Position and
 Animation alone, their tiles bare in its top-left corner; the rest stay mounted, out of sight.
 
+- **How a tree opens, every tree.** Open until there is a choice
+  (`kit/inspector/treeExpansion.js`'s `openUntilChoice`): a tree's roots open, and any node with
+  exactly one child opens too, all the way down, since there is nothing to decide; a node with two
+  or more children stays shut. A board opens on Parts and Nets and each kind's one part; a
+  drawing's layer opens on its one block reference and stays folded on several; a robot opens
+  down its chain of single links; a STEP opens on its one choice. A pick on the model reveals the
+  owners of what was picked, and once the person opens or shuts a row the shape is theirs for the
+  session. Nothing else shapes a tree: not Select's filter, not a tool.
 - **One section at a time.** None is open as a file opens. A tile opens its section in a panel
   under the toolbar, 8px below it, and is pressed while it is open; another tile opens its
   section in the panel instead; a second press of its tile closes it, and so does the X that

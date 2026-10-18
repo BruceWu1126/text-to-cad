@@ -548,10 +548,20 @@ function StepSurfaceBody({ view, data }) {
     () => new Set(loadableStepTreeTopologyNodeIds),
     [loadableStepTreeTopologyNodeIds]
   );
+  // What the viewport picks, and whose faces and edges load, by Select's filter, whatever the tree
+  // has open: Parts and the topology modes reach every part, an assembly the tree keeps shut too (a
+  // pick opens its owners in the tree), Parts loading no topology; with Parts and Faces or Edges, or
+  // no geometry ticked, the tree's own open rows are what a press can take.
+  const stepTreeAssemblyIds = useMemo(() => (stepTreeRoot ? collectStepTreeAssemblyNodeIds(stepTreeRoot) : EMPTY_LIST), [stepTreeRoot]);
+  const pickExpandedStepTreeNodeIds = useMemo(() => {
+    const shape = treeShape(selectionFilter);
+    if (shape === "all") return expandedStepTreeNodeIds;
+    return shape === "parts" ? stepTreeAssemblyIds : uniqueStringList([...expandedStepTreeNodeIds, ...stepTreeAssemblyIds]);
+  }, [selectionFilter, expandedStepTreeNodeIds, stepTreeAssemblyIds]);
   const expandedStepTreeTopologyNodeIds = useMemo(() => expandedVisibleStepTreeTopologyNodeIds(
-    stepTreeRoot, expandedStepTreeNodeIds,
+    stepTreeRoot, pickExpandedStepTreeNodeIds,
     { isolatedNodeIds: focusedAssemblyNodeIds, hiddenPartIds, isAssemblyView }
-  ), [stepTreeRoot, expandedStepTreeNodeIds, focusedAssemblyNodeIds, hiddenPartIds, isAssemblyView]);
+  ), [stepTreeRoot, pickExpandedStepTreeNodeIds, focusedAssemblyNodeIds, hiddenPartIds, isAssemblyView]);
   const requestedStepTreeTopologyNodeIds = useMemo(() => {
     if (!isAssemblyView || !selectedEntryHasReferences) {
       return [];
@@ -573,7 +583,7 @@ function StepSurfaceBody({ view, data }) {
   ]);
   const viewerSelectableAssemblyNodeIds = useMemo(
     () => (isAssemblyView
-      ? selectableViewerNodeIdsForExpandedTree(assemblyRoot, expandedStepTreeNodeIds, {
+      ? selectableViewerNodeIdsForExpandedTree(assemblyRoot, pickExpandedStepTreeNodeIds, {
         rootId: assemblyRootNodeId,
         isolatedNodeIds: focusedAssemblyNodeIds,
         topologyNodeIds: requestedStepTreeTopologyNodeIds
@@ -582,7 +592,7 @@ function StepSurfaceBody({ view, data }) {
     [
       assemblyRoot,
       assemblyRootNodeId,
-      expandedStepTreeNodeIds,
+      pickExpandedStepTreeNodeIds,
       focusedAssemblyNodeIds,
       isAssemblyView,
       requestedStepTreeTopologyNodeIds
@@ -1063,7 +1073,7 @@ function StepSurfaceBody({ view, data }) {
   // tools view's are never touched.
   const previewMotion = useStepPreviewMotion({ definition: selectedStepModuleDefinition, clips: motion.clips,
     meshPartial: selectedMeshPartial, open: previewing });
-  const selectedStepPartRootActive = !isAssemblyView && expandedStepTreeNodeIds.includes(STEP_MODEL_ROOT_ID);
+  const selectedStepPartRootActive = !isAssemblyView && pickExpandedStepTreeNodeIds.includes(STEP_MODEL_ROOT_ID);
   const plainStepReferencePickingEnabled = selectedEntryHasReferences && !isAssemblyView;
   const plainStepReferencePickingRequested =
     plainStepReferencePickingEnabled &&
@@ -1369,12 +1379,12 @@ function StepSurfaceBody({ view, data }) {
     if (isAssemblyView) return referencesForExpandedStepTree(
       assemblyStepTreeTopologyReferences, expandedStepTreeTopologyNodeIds, referencePartId
     );
-    return expandedStepTreeNodeIds.includes(STEP_MODEL_ROOT_ID) ? effectiveVisibleReferences : [];
+    return pickExpandedStepTreeNodeIds.includes(STEP_MODEL_ROOT_ID) ? effectiveVisibleReferences : [];
   }, [
     assemblyStepTreeTopologyReferences,
     effectiveVisibleReferences,
     expandedStepTreeTopologyNodeIds,
-    expandedStepTreeNodeIds,
+    pickExpandedStepTreeNodeIds,
     referencePartId,
     isAssemblyView,
     stepInteractionBlocked,
@@ -1936,52 +1946,36 @@ function StepSurfaceBody({ view, data }) {
       : [...current, normalizedNodeId]);
   }, []);
 
-  // The geometry Select's filter picks sets the model tree's shape (`ModelingTree.jsx`), and the expansion here
-  // with it: expansion is also what the viewport can pick and whose topology is loaded. Leaving
-  // All keeps the person's own expansion to put back on the way in. Parts opens every assembly
-  // and shuts every part, so no topology is loaded; Faces and Edges open every assembly and keep
-  // the parts already open — the tree then asks for each part's topology as its row comes on
-  // screen, never for a whole large assembly at once.
-  const savedTreeExpansionRef = useRef(null);
+  // Select's filter picks; it never shapes the model tree, which opens by the one rule every tree
+  // has (`kit/inspector/treeExpansion.js`) and is the person's from there. What the viewport picks
+  // and whose topology loads follow the filter instead (`pickExpandedStepTreeNodeIds`, above). A
+  // part's faces and edges are no part of the tree's shape (a part is a leaf), only of what loads:
+  // leaving Faces or Edges, the parts loaded for them go back as they were, so a press picks a part
+  // where it did before; the owners of what is still selected stay loaded, and selected.
+  const topologyPartsRef = useRef(null);
   const changeSelectFilter = useCallback((filter) => {
     const previous = treeShape(selectionFilter), next = treeShape(selectGeometryMode(filter));
     setSelectFilter(filter);
-    if (next === previous) return;
-    const root = displayStepTreeRoot || stepTreeRoot;
-    const assemblies = collectStepTreeAssemblyNodeIds(stepTreeRoot);
-    if (previous === "all") savedTreeExpansionRef.current = expandedStepTreeNodeIds;
-    if (next === "all") {
-      // With the owners of what is still selected kept open, so a face picked meanwhile stays
-      // loaded, and selected.
-      const owners = isAssemblyView
-        ? uniqueStringList(selectedReferenceIdsRef.current.map(id => referencePartId(effectiveActiveReferenceMap.get(id))).filter(Boolean))
-        : selectedReferenceIdsRef.current.length ? [STEP_MODEL_ROOT_ID] : [];
-      setExpandedStepTreeNodeIds(uniqueStringList([...(savedTreeExpansionRef.current || []),
-        ...owners.flatMap(id => (root ? collectStepTreeRevealExpansionIds(root, id, { expandSelf: true }) : [id]))]));
-      savedTreeExpansionRef.current = null;
-    } else if (next === "parts") {
-      setExpandedStepTreeNodeIds(assemblies);
-    } else {
-      setExpandedStepTreeNodeIds(current => uniqueStringList([...(previous === "parts" ? [] : current), ...assemblies]));
+    const topology = shape => shape === "faces" || shape === "edges";
+    if (topology(previous) === topology(next)) return;
+    const parts = isAssemblyView ? loadableStepTreeTopologyNodeIdSet : new Set([STEP_MODEL_ROOT_ID]);
+    if (topology(next)) {
+      topologyPartsRef.current = new Set(expandedStepTreeNodeIds.filter(id => parts.has(id)));
+      return;
     }
-  }, [selectionFilter, displayStepTreeRoot, stepTreeRoot, expandedStepTreeNodeIds, isAssemblyView, referencePartId, effectiveActiveReferenceMap]);
-  // The mode outlives an update, and so does the shape it gives the tree: when an update brings
-  // other assemblies under Parts, Faces or Edges, the tree is opened as `changeSelectFilter` opened
-  // the last one, so an assembly the update added is not left shut under a disclosure the mode
-  // locks. It answers to the assemblies changing, not to every new tree object.
-  const treeAssemblyIds = useMemo(() => (stepTreeRoot ? collectStepTreeAssemblyNodeIds(stepTreeRoot) : EMPTY_LIST), [stepTreeRoot]);
-  const treeAssemblyKey = treeAssemblyIds.join("\n");
-  const selectModeRef = useRef({ mode: treeShape(selectionFilter), assembly: isAssemblyView, assemblies: treeAssemblyIds });
-  selectModeRef.current = { mode: treeShape(selectionFilter), assembly: isAssemblyView, assemblies: treeAssemblyIds };
-  useEffect(() => {
-    const { mode, assembly, assemblies } = selectModeRef.current;
-    // Parts on a file that is no longer an assembly is going back to All (above): nothing to shape.
-    if (mode === "all" || (mode === "parts" && !assembly) || !assemblies.length) return;
+    const kept = topologyPartsRef.current || new Set();
+    topologyPartsRef.current = null;
+    const root = displayStepTreeRoot || stepTreeRoot;
+    const owners = isAssemblyView
+      ? uniqueStringList(selectedReferenceIdsRef.current.map(id => referencePartId(effectiveActiveReferenceMap.get(id))).filter(Boolean))
+      : selectedReferenceIdsRef.current.length ? [STEP_MODEL_ROOT_ID] : [];
+    const reveal = owners.flatMap(id => (root ? collectStepTreeRevealExpansionIds(root, id, { expandSelf: true }) : [id]));
     setExpandedStepTreeNodeIds(current => {
-      const next = mode === "parts" ? assemblies : uniqueStringList([...current, ...assemblies]);
-      return orderedStringListEqual(next, current) ? current : next;
+      const nextIds = uniqueStringList([...current.filter(id => !parts.has(id) || kept.has(id)), ...reveal]);
+      return orderedStringListEqual(nextIds, current) ? current : nextIds;
     });
-  }, [treeAssemblyKey]);
+  }, [selectionFilter, isAssemblyView, loadableStepTreeTopologyNodeIdSet, expandedStepTreeNodeIds, displayStepTreeRoot, stepTreeRoot,
+    referencePartId, effectiveActiveReferenceMap]);
 
   const removeSelectedAssemblyNode = useCallback((nodeId) => {
     const normalizedNodeId = String(nodeId || "").trim();
@@ -2681,12 +2675,9 @@ function StepSurfaceBody({ view, data }) {
         root: displayStepTreeRoot, isAssemblyView, expandedIds: expandedStepTreeNodeIds,
         loadableIds: loadableStepTreeTopologyNodeIds, hiddenCount: hiddenPartIds.length,
         zoomSelectionAvailable: zoomSelectionRef.current.available, entry: selectedEntry
-      }),
-      // Picking only parts or only topology, the filter holds the tree's shape: there is nothing to expand or collapse.
-      ...(treeShape(selectionFilter) !== "all" ? { showExpandCollapse: false } : {})
+      })
     } : null);
   }, [
-    selectionFilter,
     displayStepTreeRoot,
     expandedStepTreeNodeIds,
     hiddenPartIds.length,
@@ -2706,10 +2697,8 @@ function StepSurfaceBody({ view, data }) {
       root: displayStepTreeRoot, isAssemblyView, expandedIds: expandedStepTreeNodeIds, loadableIds: loadableStepTreeTopologyNodeIds,
       copyReferenceMap: stepTreeCopyReferenceMap, entry: selectedEntry, zoomSelectionAvailable: zoomSelectionRef.current.available
     });
-    // Picking only parts or only topology, the filter holds the tree's shape: there is nothing to expand or collapse.
-    return descriptor && treeShape(selectionFilter) !== "all" ? { ...descriptor, showExpandCollapse: false } : descriptor;
+    return descriptor;
   }, [
-    selectionFilter,
     assemblyPartMap,
     assemblyRoot,
     displayStepTreeRoot,

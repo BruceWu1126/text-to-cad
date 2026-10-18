@@ -12,6 +12,7 @@ import ToolPanel from '../../../kit/tools/ToolPanel.jsx';
 import { implicitModelingRoots, presentModelingAssembly } from '../../workbench/modelingPresentation.js';
 import { modelTreeSearchChain, useTreeSearch } from '../../../kit/inspector/modelTreeSearch.js';
 import VirtualRows, { revealRow } from '../../../kit/inspector/VirtualRows.jsx';
+import { openUntilChoice } from '../../../kit/inspector/treeExpansion.js';
 
 const EMPTY = [];
 const NO_CONTROLS = {};
@@ -75,10 +76,8 @@ function findNodeLabel(nodes, selectionId) {
   return '';
 }
 
-// The disclosure a row shows: a button, or — while Select's filter decides the tree's shape —
-// the same chevron as a mark nobody can press.
-function Disclosure({ node, open, locked, toggle }) {
-  if (locked) return <span aria-hidden="true" data-disclosure-locked={open ? "open" : "shut"} className="grid h-6 w-3 shrink-0 place-items-center opacity-50"><TreeRowChevron expanded={open}/></span>;
+// The disclosure a row shows: its chevron, a button.
+function Disclosure({ node, open, toggle }) {
   return <button type="button" aria-label={`${open ? 'Collapse' : 'Expand'} ${node.label}`} aria-expanded={open}
     className="grid h-6 w-3 shrink-0 place-items-center rounded focus-visible:ring-2 focus-visible:ring-ring"
     onClick={()=>toggle(node)}><TreeRowChevron expanded={open}/></button>;
@@ -87,7 +86,7 @@ function Disclosure({ node, open, locked, toggle }) {
 // One row of the tree, the rows under it drawn after it by the list (`visibleRows`). Its props
 // are the row's own facts — its selection and joins as booleans, callbacks that never change —
 // so a tree re-rendered for anything else leaves it alone.
-function ModelingRow({ node, depth, open, branch, locked, disabled, selected, joinAbove, joinBelow, hiddenByOwner, unavailable, actionsShown, actionsWidth, partControls, toggle, choose }) {
+function ModelingRow({ node, depth, open, branch, disabled, selected, joinAbove, joinBelow, hiddenByOwner, unavailable, actionsShown, actionsWidth, partControls, toggle, choose }) {
   // An assembly outside the isolate/picking frontier cannot select itself, but
   // its descendants can. Only a hidden owner blocks its entire subtree.
   // The name fades out under its actions (`ROW_NAME_UNDER_ACTIONS`): always while one is on
@@ -100,7 +99,7 @@ function ModelingRow({ node, depth, open, branch, locked, disabled, selected, jo
       {/* Its owners' faint lines, each under its glyph column. */}
       <TreeRowGuides depth={depth} inset={TREE_ROW_INSET_PX}/>
       {/* One glyph per row, in one 12px column: a branch's chevron, or a part's box. */}
-      {branch && <Disclosure node={node} open={open} locked={locked} toggle={toggle}/>}
+      {branch && <Disclosure node={node} open={open} toggle={toggle}/>}
       <TooltipHint content={node.label} overflowOnly><button type="button" aria-label={`Select ${node.label}`} aria-pressed={selected}
         disabled={disabled || unavailable || !(node.selectionId || node.memberSelectionIds?.length)}
         onClick={event=>{if(event.detail < 2)choose(node,event);}} onDoubleClick={event=>choose(node,event)}
@@ -150,25 +149,27 @@ const MemoModelingSearchRow = memo(ModelingSearchRow);
  * mounted otherwise; it has no X, so an assembly always shows it under Select. A part is a leaf:
  * its faces and edges are the viewport's to pick, never rows.
  *
- * The tree's shape follows the Select tool's `mode`. Under All it is the person's own. Under
- * Parts, Faces and Edges every assembly is open, and the disclosure is locked. Under Faces and
- * Edges a part's topology is asked for as its row comes on screen, never for a whole large
- * assembly at once.
+ * The tree opens as every tree does, until there is a choice (`kit/inspector/treeExpansion.js`):
+ * its root, and every assembly with one child, all the way down; one with several stays shut. A
+ * pick on the model opens its owners, and the shape is the person's from there: Select's filter
+ * never shapes it. Under Faces and Edges a part's topology is asked for as its row comes on
+ * screen, never for a whole large assembly at once.
  */
 function ModelingTree({ active, disabled, mode='all', loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
   const [localExpanded,setLocalExpanded]=useState(()=>new Set());
   const rowHeight=useTreeRowHeight();
   const tree=useMemo(()=>presentModelingAssembly(stepRoot),[stepRoot]);
   const implicitRoots=useMemo(()=>implicitModelingRoots(tree),[tree]);
-  const locked=mode !== 'all',topologyMode=mode === 'faces' || mode === 'edges';
-  // Every row that is open while the mode holds the disclosure: every assembly and folded group.
-  const lockedExpansion=useMemo(()=>{
-    if(!locked)return null;
-    const ids=new Set();
-    const visit=nodes=>{for(const node of nodes){if(node.kind === 'part')continue;ids.add(node.id);visit(node.children || EMPTY);}};
-    visit(tree);
+  const topologyMode=mode === 'faces' || mode === 'edges';
+  // What the tree opens on, by the rule: its root is the model itself, which the tree does not draw
+  // (its implicit roots, the chain of single assemblies it opens on, are it), so a top-level row
+  // opens only on one child; a part is a leaf.
+  const opened=useMemo(()=>{
+    const ids=openUntilChoice([{id:'',children:tree}],node=>node.kind === 'part' ? EMPTY : node.children);
+    ids.delete('');
+    for(const node of implicitRoots)ids.add(node.id);
     return ids;
-  },[locked,tree]);
+  },[tree,implicitRoots]);
   const foldedRows=useMemo(()=>{
     const rows=[];
     const visit=nodes=>{for(const node of nodes){
@@ -189,24 +190,27 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
     return count;
   },[visibleRoots]);
   const largeTopology=topologyMode && structuralRows > LARGE_TREE_ROWS;
-  const expanded=useMemo(()=>lockedExpansion
-    ? new Set([...lockedExpansion,...implicitRoots.map(node=>node.id)])
-    : new Set([...localExpanded,...implicitRoots.map(node=>node.id),...(partControls.expandedTreeNodeIds || EMPTY).map(id=>`model:${id}`)]),
-  [lockedExpansion,localExpanded,implicitRoots,partControls.expandedTreeNodeIds]);
-  // An implicit root (an assembly that is the tree's one choice) is open in the host as well, so
-  // viewport picking reaches what the tree shows under it.
-  const openedRoots=useRef(new Set());
+  const expanded=useMemo(()=>new Set([...localExpanded,...implicitRoots.map(node=>node.id),...(partControls.expandedTreeNodeIds || EMPTY).map(id=>`model:${id}`)]),
+  [localExpanded,implicitRoots,partControls.expandedTreeNodeIds]);
+  // What the rule opens is open in the host as well, so viewport picking reaches what the tree shows
+  // under it: each node once, as the tree first holds it, unless an owner hides it. A node the person
+  // shuts stays shut; one a rebuild brings is opened as the rule says.
+  const defaulted=useRef(new Set());
   useEffect(()=>{
     if(!active || disabled || !partControls.onToggleTreeNode)return;
-    let owner={hiddenByOwner:false,outsideFrontier:false};
-    for(const node of implicitRoots){
-      owner=nodeAvailability(node,availability,owner.hiddenByOwner,owner.outsideFrontier);
-      if(openedRoots.current.has(node.id) || owner.hiddenByOwner)continue;
-      if(!partControls.expandedTreeNodeIds?.includes(node.selectionId))partControls.onToggleTreeNode(node.selectionId);
-      openedRoots.current.add(node.id);
-    }
-  },[active,disabled,implicitRoots,partControls.expandedTreeNodeIds,partControls.onToggleTreeNode,availability]);
-  // The tree as the rows the list draws: what is open, under Select's filter's lock or the person's.
+    const visit=(nodes,owner)=>{for(const node of nodes){
+      const own=nodeAvailability(node,availability,owner.hiddenByOwner,owner.outsideFrontier);
+      if(own.hiddenByOwner)continue;
+      if(opened.has(node.id) && !defaulted.current.has(node.id)){
+        defaulted.current.add(node.id);
+        if(node.selectionId && !partControls.expandedTreeNodeIds?.includes(node.selectionId))partControls.onToggleTreeNode(node.selectionId);
+        else if(!node.selectionId)setLocalExpanded(current=>new Set([...current,node.id]));
+      }
+      if(node.kind !== 'part')visit(node.children || EMPTY,own);
+    }};
+    visit(tree,{hiddenByOwner:false,outsideFrontier:false});
+  },[active,disabled,tree,opened,partControls.expandedTreeNodeIds,partControls.onToggleTreeNode,availability]);
+  // The tree as the rows the list draws: what is open, the rule's and the person's.
   const rows=useMemo(()=>visibleRows(visibleRoots,expanded,availability,implicitOwner),[visibleRoots,expanded,availability,implicitOwner]);
   const rowIndex=useMemo(()=>{const index=new Map();rows.forEach((row,at)=>{if(!index.has(row.node.id))index.set(row.node.id,at);});return index;},[rows]);
   // The mounted rows, by key: the reveal scrolls the selection's row, which the list keeps mounted.
@@ -240,8 +244,6 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
     if(!active || reveal.current.complete || !paths.length)return;
     const target=paths.at(-1).at(-1);
     const missing=paths.flatMap(path=>path.slice(0,-1)).filter(node=>!expanded.has(node.id));
-    // A locked tree does not open for a pick: what the mode shows is what there is to scroll to.
-    if(missing.length && locked){reveal.current.complete=true;return;}
     if(missing.length){
       const local=[];
       for(const node of new Map(missing.map(node=>[node.id,node])).values()){
@@ -256,7 +258,7 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
     if(searching)return;
     const row=rowElements.current.get(target.id);
     if(row){revealRow(row);reveal.current.complete=true;}
-  },[active,revealKey,paths,expanded,locked,partControls.onToggleTreeNode,searching]);
+  },[active,revealKey,paths,expanded,partControls.onToggleTreeNode,searching]);
 
   // The rows' callbacks never change; each reads the tree as it is when pressed.
   const choose=useCallback((node,event)=>{
@@ -325,7 +327,7 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
   const actionsOf=node=>node.selectionId ? rowActionsLayout(node,partControls) : null;
   const renderTreeRow=at=>{
     const row=rows[at],on=highlighted.has(row.node.id),actions=actionsOf(row.node);
-    return <MemoModelingRow node={row.node} depth={row.depth} open={row.open} branch={row.branch} disabled={disabled} locked={locked}
+    return <MemoModelingRow node={row.node} depth={row.depth} open={row.open} branch={row.branch} disabled={disabled}
       actionsShown={Boolean(actions?.shown)} actionsWidth={actions?.width}
       selected={on} joinAbove={on && at > 0 && highlighted.has(rows[at-1].node.id)} joinBelow={on && at < rows.length-1 && highlighted.has(rows[at+1].node.id)}
       hiddenByOwner={row.hiddenByOwner} unavailable={row.unavailable} partControls={rowControls} toggle={toggle} choose={choose}/>;

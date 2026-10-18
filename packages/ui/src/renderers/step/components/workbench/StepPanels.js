@@ -58,7 +58,8 @@ export function useStepSelectionChips({ stepTreeRoot, selectedMeshData = null, g
  * (`kit/shell/RendererShell.jsx`).
  *
  * `selectActive`: Features is on screen, which is when a pick is scrolled to. `selectMode` is the
- * Select tool's geometry, which the tree's disclosure follows. Setting a Position control puts any
+ * Select tool's geometry, under which the tree asks for a part's topology as its row shows (it
+ * never shapes the tree). Setting a Position control puts any
  * other motion at rest (the motion hook's `claimPosition`); pressing one sets nothing.
  */
 export function useStepPanels({

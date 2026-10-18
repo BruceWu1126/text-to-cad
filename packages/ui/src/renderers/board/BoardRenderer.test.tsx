@@ -224,7 +224,9 @@ it('the Board section lists parts by kind and nets: a row selects, its eye isola
   const section = await waitFor(() => { const found = pane.querySelector<HTMLElement>('[data-tool-panel-id="board"]'); expect(found).not.toBeNull(); return found!; });
   const inSection = within(section);
   expect(inSection.getByRole('textbox', { name: 'Filter board' })).toBeTruthy();
-  fireEvent.click(inSection.getByRole('button', { name: 'Expand Resistors' }));
+  // It opens until there is a choice: Parts and Nets, each kind on its one part; a part's pads and a net's stay shut.
+  expect([...section.querySelectorAll('[data-board-row]')].map(row => row.getAttribute('data-board-row'))).toEqual([
+    'group:parts', 'kind:Diodes', 'part:D1', 'kind:Resistors', 'part:R1', 'kind:Connectors', 'part:J1', 'group:nets', 'net:GND', 'net:LED', 'net:VBUS']);
   fireEvent.click(inSection.getByRole('button', { name: 'Select R1' }));
   expect(selected(controller)).toEqual(['#R1']);
   // The part's card is what the board says of it, in KiCad's millimetres, y down.

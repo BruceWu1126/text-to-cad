@@ -84,7 +84,7 @@ const chipLabels = () => within(screen.getByRole('region', { name: 'Reference de
 const rows = () => within(screen.getByRole('list', { name: 'Robot links' })).getAllByRole('button', { name: /^Select / }).map(row => row.getAttribute('aria-label'));
 const filter = () => screen.getByRole('textbox', { name: 'Filter links' });
 
-it('draws the kinematic tree collapsed below the first real choice, with each link’s joint beside it', () => {
+it('draws the kinematic tree open until there is a choice, with each link’s joint beside it', () => {
   render(<Harness/>);
   // Its tile is named for the section and opens it; its head is the search box, no heading, and the X that closes it.
   const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Links' });
@@ -95,8 +95,10 @@ it('draws the kinematic tree collapsed below the first real choice, with each li
   fireEvent.click(within(head).getByRole('button', { name: 'Close links' }));
   expect(tile.getAttribute('aria-pressed')).toBe('false');
   // base_footprint is only a frame (no geometry, no mass, base_link fixed to it): it has nothing
-  // to select or read back, so it gets no row and base_link leads the tree.
-  expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
+  // to select or read back, so it gets no row and base_link leads the tree. It opens until there is
+  // a choice: base_link holds two links, the chain under shoulder_link one each down to wrist_link,
+  // whose two objects stay shut.
+  expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select elbow_link', 'Select wrist_link', 'Select camera_link']);
   const shoulder = screen.getByRole('button', { name: 'Select shoulder_link' });
   expect(shoulder.textContent).toBe('shoulder_linkshoulder_pan · revolute');
   expect(shoulder.closest('div')!.style.height).toBe('24px'); // the dense tree's rows
@@ -109,11 +111,11 @@ it('draws the kinematic tree collapsed below the first real choice, with each li
   const indent = (name: string) => (screen.getByRole('button', { name: `Select ${name}` }).closest('div') as HTMLElement).style.paddingLeft;
   expect([indent('base_link'), indent('shoulder_link'), indent('camera_link')]).toEqual(['0px', '0px', '0px']);
   expect(screen.getByRole('list', { name: 'Robot links' }).querySelectorAll('svg.lucide-box, svg.lucide-boxes')).toHaveLength(0);
-  fireEvent.click(screen.getByRole('button', { name: 'Expand shoulder_link' }));
-  expect(rows()).toContain('Select elbow_link');
-  expect(rows()).not.toContain('Select wrist_link');
   fireEvent.click(screen.getByRole('button', { name: 'Collapse shoulder_link' }));
   expect(rows()).not.toContain('Select elbow_link');
+  // The shape is the person's from there: opened again, the chain under it is as it was.
+  fireEvent.click(screen.getByRole('button', { name: 'Expand shoulder_link' }));
+  expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select elbow_link', 'Select wrist_link', 'Select camera_link']);
   expect(screen.queryByRole('region', { name: 'Reference details' })).toBeNull();
 });
 
@@ -222,9 +224,9 @@ it('filters to a flat ranked list by link, joint or object name without expandin
   fireEvent.change(filter(), { target: { value: 'nothing here' } });
   expect(screen.getByText('No link matches “nothing here”')).toBeTruthy();
 
-  // Typing never touched the tree's expansion.
+  // Typing never touched the tree's expansion: it is the shape it opened on.
   fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
-  expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select camera_link']);
+  expect(rows()).toEqual(['Select base_link', 'Select shoulder_link', 'Select elbow_link', 'Select wrist_link', 'Select camera_link']);
 });
 
 it('reveals a selected hit with its ancestors expanded when the filter is cleared', () => {
@@ -291,8 +293,6 @@ it('a row that draws something has the Hide/Reveal eye: a link hides its own vis
   // The eye is its own press: the row is not selected by it.
   expect(screen.getByRole('button', { name: 'Select base_link' }).getAttribute('aria-pressed')).toBe('false');
   // wrist_link's two objects: with one hidden the link is partly hidden, so its eye hides the rest.
-  fireEvent.click(screen.getByRole('button', { name: 'Expand shoulder_link' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Expand elbow_link' }));
   rerender(<Harness onVisibilityChange={onVisibilityChange} hiddenPartIds={['wrist_link:v1/object/0']}/>);
   fireEvent.click(screen.getByRole('button', { name: 'Hide wrist_link' }));
   expect(onVisibilityChange).toHaveBeenLastCalledWith(['wrist_link:v1/object/0', 'wrist_link:v1/object/1'], false);

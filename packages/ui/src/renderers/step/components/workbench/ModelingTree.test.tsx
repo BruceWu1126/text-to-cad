@@ -37,6 +37,9 @@ it('starts the compact tree immediately below its search box and keeps disclosur
  expect(screen.queryByLabelText('Model tree summary')).toBeNull();
  const select=screen.getByRole('button',{name:'Select Arm'});
  expect(select.parentElement?.style.height).toBe('24px'); // the dense tree's rows
+ // It opens until there is a choice, in the host as well: Arm, on its one part.
+ expect(onToggleTreeNode.mock.calls.map(call=>call[0])).toEqual(['arm']);
+ onToggleTreeNode.mockClear();
  fireEvent.click(screen.getByRole('button',{name:'Expand Arm'}));
  expect(onToggleTreeNode).toHaveBeenCalledWith('arm');
  expect(onSelectTreeNode).not.toHaveBeenCalled();
@@ -64,17 +67,18 @@ it('the search box is always there: Escape clears a query and Clear filter does 
  expect([search().value,screen.getByRole('list',{name:'Model'})!==null]).toEqual(['',true]);
 });
 
-it('a part is a leaf in every mode: nothing opens under it, and only its assemblies have a disclosure',()=>{
+it('a part is a leaf in every mode: nothing opens under it, only its assemblies have a disclosure, and no mode shapes the tree',()=>{
  const props={stepRoot:assemblyRoot,active:true,partControls:{expandedTreeNodeIds:['arm','arm.wrist','base']}};
  const {rerender}=render(<ModelingTreeView {...props}/>);
  expect(screen.getByRole('button',{name:'Collapse Arm'})).toBeTruthy();
  expect(screen.queryByRole('button',{name:/^(Expand|Collapse) (Wrist|Base)$/})).toBeNull();
  for(const mode of ['parts','faces','edges']){
   rerender(<ModelingTreeView {...props} mode={mode} partControls={{expandedTreeNodeIds:[]}}/>);
-  // The mode holds every assembly open, locked; a part has no disclosure to hold.
-  expect(screen.getByRole('button',{name:'Select Wrist'})).toBeTruthy();
-  expect([...document.querySelectorAll('[data-disclosure-locked]')].map(mark=>(mark as HTMLElement).dataset.disclosureLocked)).toEqual(['open']);
-  expect(screen.queryByRole('button',{name:/^(Expand|Collapse) /})).toBeNull();
+  // Select's filter opens nothing and locks nothing: the tree is as the host holds it, its disclosure the person's.
+  expect(screen.getByRole('button',{name:'Expand Arm'})).toBeTruthy();
+  expect(screen.queryByRole('button',{name:'Select Wrist'})).toBeNull();
+  expect(document.querySelectorAll('[data-disclosure-locked]')).toHaveLength(0);
+  expect(screen.queryByRole('button',{name:/^(Expand|Collapse) (Wrist|Base)$/})).toBeNull();
  }
 });
 
@@ -135,6 +139,8 @@ it('finds a nested part inside a collapsed subassembly, showing its owner path, 
  const onToggleTreeNode=vi.fn(),onLoadTopology=vi.fn();
  render(inSidebar(<ModelingTreeView stepRoot={assemblyRoot} active onLoadTopology={onLoadTopology} partControls={{expandedTreeNodeIds:[],onToggleTreeNode}}/>));
  expect(screen.queryByRole('button',{name:'Select Wrist'})).toBeNull();
+ // What the tree opened on as it came is the rule's; what follows is the search's alone.
+ onToggleTreeNode.mockClear();
  fireEvent.change(search(),{target:{value:'Wrist'}});
  await screen.findByRole('list',{name:'Model search results'});
  const hit=screen.getByRole('button',{name:'Select Wrist'});
