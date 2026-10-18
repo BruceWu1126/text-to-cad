@@ -14,8 +14,8 @@ Use the installed local skill files as the runtime source of truth.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share one
 installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.22 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.22 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 python`
 
 KiCad builds the board: `@pcb` starts KiCad's headless API server (`kicad-cli api-server`), which only
 the **KiCad 10.99 nightly** (the KiCad 11 API) has; 10.0 is refused at start. It is installed, never bundled:
