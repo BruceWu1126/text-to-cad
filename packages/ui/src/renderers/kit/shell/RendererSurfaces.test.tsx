@@ -10,7 +10,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 // the camera reports reach the renderer through exactly the callbacks the real viewport calls.
 // The viewport's own half of those reports (a resize, a preview camera) is ShellViewport.test.tsx.
 // `props`: the editor's viewport; `preview`: Preview's, a viewport of its own while it is open.
-const viewport = vi.hoisted(() => ({ props: null as any, preview: null as any, annotationAt: null as null | ((x: number, y: number) => string | null) }));
+// `gpu`, where a test sets it: what the viewport says of its WebGL renderer (`softwareRendering`),
+// and the Render scenes it was asked to prepare ahead.
+const viewport = vi.hoisted(() => ({ props: null as any, preview: null as any, annotationAt: null as null | ((x: number, y: number) => string | null),
+  gpu: null as null | { software: boolean; prepared: number } }));
 vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
   default: forwardRef(function StandInViewport(props: any, ref) {
     if (props.preview) viewport.preview = props; else viewport.props = props;
@@ -19,6 +22,10 @@ vi.mock('../../../../dist/renderers/kit/shell/ShellViewport.js', () => ({
       captureScreenshotBlob: async () => new Blob(['pixels'], { type: 'image/png' }),
       annotationAt: (x: number, y: number) => viewport.annotationAt?.(x, y) ?? null,
       promptCamera: () => ({ camera: { position: [0, -100, 0], target: [0, 0, 0], up: [0, 0, 1], orthographicHalfHeight: 40 }, width: 800, height: 600 }),
+      ...(viewport.gpu ? {
+        softwareRendering: () => viewport.gpu!.software,
+        prepareViewSettings: async (scene: any) => { if (scene.render.enabled) viewport.gpu!.prepared += 1; },
+      } : {}),
     }));
     const hostRef = useRef<HTMLDivElement | null>(null);
     const runtimeRef = useRef<any>(null);
@@ -384,4 +391,21 @@ it('a view that stops offering Preview while it is up leaves it as every exit do
   rerender({ animation: tools, previewAnimation: preview, previewable: false });
   expect([calls, viewport.preview, viewport.props.suspended]).toEqual([[], null, false]);
   expect(screen.queryAllByRole('button', { name: 'Exit preview' })).toEqual([]);
+});
+
+it.each([['a GPU', false, 1], ['a software renderer', true, 0]])('on %s, Preview is prepared ahead a moment after the model is on screen, or only as it is entered', (_name, software, prepared) => {
+  // A software renderer (SwiftShader, llvmpipe) compiles for seconds on the page's one thread:
+  // there Preview prepares as it is entered, under its cover, and nothing is asked of it before.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    viewport.gpu = { software: software as boolean, prepared: 0 };
+    mount();
+    act(() => { vi.advanceTimersByTime(599); });
+    expect(viewport.gpu.prepared).toBe(0);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(viewport.gpu.prepared).toBe(prepared);
+  } finally {
+    vi.useRealTimers();
+    viewport.gpu = null;
+  }
 });

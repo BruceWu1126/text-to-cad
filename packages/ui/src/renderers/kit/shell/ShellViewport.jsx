@@ -389,6 +389,9 @@ const ShellViewport = forwardRef(function ShellViewport({
       }
     },
     presentViewSettings() { return runtimeRef.current?.viewUpdateGate?.present(); },
+    // Whether WebGL runs on a software renderer (SwiftShader, llvmpipe): the runtime's own fact,
+    // read once as it was made (`useViewerRuntime.js`).
+    softwareRendering() { return runtimeRef.current?.softwareRendering === true; },
     // How far the picture on screen has converged: Render's studio frame's samples drawn of those
     // it takes (`studioFrame.js`), or null where there is no frame to converge (anything but lit Render).
     pictureProgress() {

@@ -255,9 +255,11 @@ export function useRendererShell({
   // What Preview will need, prepared ahead while the model is on screen: Render's studio code and
   // its environment at Preview's quality, into the GPU device's cache Preview draws from
   // (`studioEnvironmentCacheFor`). Preparing changes nothing the editor draws.
+  // Not on a software renderer (SwiftShader, llvmpipe): compiling there holds the page's one thread
+  // for seconds, unasked; Preview prepares as it is entered instead, under its cover.
   previewPrepare.current = signal => {
     const prepare = viewerRef.current?.prepareViewSettings;
-    if (!prepare) return null;
+    if (!prepare || viewerRef.current.softwareRendering?.()) return null;
     return prepare(previewViewScene(viewSettingsStore.sceneFor("render")), signal);
   };
 

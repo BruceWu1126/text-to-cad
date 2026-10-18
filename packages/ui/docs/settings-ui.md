@@ -838,7 +838,9 @@ environment maps, at the same meshes), its full pixel ratio kept while it orbits
 of the tools view's (no picking, overlays, cube or tool effects). Neither changes a Display
 setting. Render's studio code and environment are prepared a moment after a model is on screen
 (`useRendererShell`'s `previewPrepare`), into the GPU device's cache Preview draws from, so
-entering Preview has less to do.
+entering Preview has less to do — on a GPU. On a software renderer (SwiftShader, llvmpipe:
+the viewport's `softwareRendering`), where that compile would hold the page for seconds unasked,
+nothing is prepared ahead: Preview prepares as it is entered, under its cover.
 
 ## Keyboard
 
