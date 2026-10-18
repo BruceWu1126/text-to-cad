@@ -75,10 +75,14 @@ input, as every file a build reads is. Paths expand `~` and resolve relative to 
 #housing.e3   canonical edge 3 on the occurrence labelled housing
 #f7           face 7, only when the scene has exactly one leaf
 part.step#o1  a file-prefixed ref matching the opened STEP
+part.step#o1.2.f7,o1.2.f8  several refs, as the viewer copies a multi-selection
+#o1.2.f7,f8   a bare entity after an occurrence or label belongs to it
 ```
 
-Pass one reference per `resolve()` call. To enumerate a subassembly's faces,
-use `scene.resolve("#group").entities("face")`; a group has no independent
+`resolve()` takes one reference and returns one selection. `resolve_all()` takes
+a whole copied line, one ref or a comma list, and returns a tuple with one
+selection per ref, in order; any ref that does not resolve raises.
+To enumerate a subassembly's faces, use `scene.resolve("#group").entities("face")`; a group has no independent
 face ordinals. Enumeration preserves canonical occurrence IDs and never
 merges coincident instances. Face and edge IDs agree with the viewer; vertex
 IDs enumerate native STEP vertices (the viewer currently exposes no vertex

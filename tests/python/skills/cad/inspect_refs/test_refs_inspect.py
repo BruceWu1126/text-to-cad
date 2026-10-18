@@ -63,6 +63,27 @@ class StepSceneTests(unittest.TestCase):
             with self.subTest(ref=ref), self.assertRaises(ValueError):
                 scene.resolve(ref)
 
+    def test_a_copied_line_of_several_refs_resolves_to_each(self):
+        # The viewer copies a multi-entity selection as ONE line: `file#o1.f1,o1.f2` (#627).
+        scene = read_scene(self.path)
+        pin = scene.resolve("#pin_1").ref
+        faces = [f"{pin}.f1", f"{pin}.f2", f"{pin}.f3"]
+        copied = self.path.name + "#" + ",".join(face[1:] for face in faces)
+        self.assertEqual([s.ref for s in scene.resolve_all(copied)], faces)
+        # A bare entity belongs to the occurrence or label before it, as in the selector grammar.
+        self.assertEqual([s.ref for s in scene.resolve_all(f"{pin}.f1,f2,f3")], faces)
+        self.assertEqual([s.ref for s in scene.resolve_all("#pin_1.f1,f2,f3")], faces)
+        self.assertEqual(
+            [s.ref for s in scene.resolve_all("#housing,base")],
+            [scene.resolve("#housing").ref, scene.resolve("#base").ref],
+        )
+        self.assertEqual([s.ref for s in scene.resolve_all("#pin_1")], [pin])
+        for ref in ("wrong.step#o1,o1", "#pin_1.f1,", "#pin_1.f1,f9000", "#pin_1.f1,no_such_part", f"{self.path.name}#"):
+            with self.subTest(ref=ref), self.assertRaises(ValueError):
+                scene.resolve_all(ref)
+        with self.assertRaisesRegex(ValueError, "resolve_all"):
+            scene.resolve(copied)
+
     def test_geometry_is_world_placed_including_nested_rotation(self):
         scene = read_scene(self.path)
         pin = scene.resolve("#pin_1")
