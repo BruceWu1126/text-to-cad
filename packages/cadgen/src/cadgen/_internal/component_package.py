@@ -944,6 +944,16 @@ def decode_geometry_component(entry: dict[str, Any], payload: bytes, *, native: 
     return shape
 
 
+def decoded_input(entry: dict[str, Any], payload: bytes) -> NativeShape:
+    """The native input :func:`prepare_geometry_component` returned with a native ``entry``
+    and ``payload`` it prepared (its ``shape``), decoded again from that payload as it was
+    decoded then, as the bare kernel shape and its face colours: for a component prepared,
+    checked and published before, whose bytes are its own."""
+    shape = _decode_brep(entry["codec"], payload, native=True)
+    shape.cad_face_ordinal_colors = dict(entry["faceColors"])
+    return shape
+
+
 def decode_display_shape(entry: dict[str, Any], payload: bytes, *, native: bool = False) -> Any:
     """A shape to mesh for display (``cadgen._internal.tessellate``).
 

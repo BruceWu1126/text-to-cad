@@ -20,6 +20,19 @@ A component the model's run made carries what the run names it by -- its
 construction key and its lineage (``kernel_memo``, ``kernel_trace``) -- and
 nothing on the way measures its geometry for a name.
 
+A worker remembers the components it published (:class:`_Remembered`), in its
+memory and never the store, by the live kernel object each was prepared from: the
+TShape the memo hands back on a hit, its orientation and face colours. A later
+publication of that object takes the remembered component -- its bytes, colours,
+construction key and lineage -- in place of naming, serializing and hashing it
+again, and only while all it stood on is as it was: the construction key the run
+names it by, the rows the memo's ledger holds on each of its sub-shapes
+(``kernel_memo.ledger_snapshot``: every change the memo made to one since its maker
+returned it, flags included), and what naming it reads of the run
+(``kernel_trace.account_basis``: the features it descends from, by their histories,
+and the labels and names they have). Anything else prepares it as a fresh worker
+does, so a remembered component never changes an output.
+
 A model's result is this tree, whether it declares STEP or only meshes: its STEP is
 written from the published tree afterwards, by the build pool (``store/exports.py``),
 and the written bytes map to it. A compile of a STEP's bytes (:func:`build_document_tree`)
@@ -29,6 +42,9 @@ them, every component read from the file.
 
 from __future__ import annotations
 
+import copy
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Protocol
 
@@ -50,7 +66,10 @@ from cadgen.store.trees import COMPONENT_OBJECTS, put_tree
 
 class Namer(Protocol):
     """What a build names the components it prepares by, and tells the calls that made
-    them by: the model's run (``kernel_memo._Run``)."""
+    them by: the model's run (``kernel_memo._Run``), whose trace and registrations say
+    whether a component it remembers publishing is still named as it was."""
+
+    trace: Any
 
     def account(self, shape: Any) -> tuple[str | None, Mapping[str, Any] | None, Mapping[str, int]]:
         """A component's construction key and lineage, either None, and the feature of the
@@ -58,6 +77,9 @@ class Namer(Protocol):
 
     def placed_by(self, shape: Any) -> int | None:
         """The feature whose call made the shape a leaf places, or None."""
+
+    def made_by(self, tshape: Any) -> int | None:
+        """The feature of the run that made ``tshape``, or None."""
 
 
 def _tagged_intact(node: Any) -> str | None:
@@ -112,14 +134,13 @@ def compound_has_children(shape: Any) -> bool:
 class _Walk:
     """A compound walked into tree parts, before anything is published: own
     occurrences (placing ``components`` by cid), links to children's trees, the
-    grouping root, and per cid the shape that owns the geometry plus the
-    location-stripped BREP bytes its cid digests."""
+    grouping root, and per cid the shape that owns the geometry and its prepared
+    component (``prepare_geometry_component``'s, or one this worker remembered)."""
 
     occurrences: list[dict[str, Any]] = field(default_factory=list)
     links: list[dict[str, Any]] = field(default_factory=list)
     components: dict[str, dict[str, Any]] = field(default_factory=dict)
     shapes: dict[str, Any] = field(default_factory=dict)
-    brep_bytes_by_cid: dict[str, bytes] = field(default_factory=dict)
     prepared: dict[str, dict[str, Any]] = field(default_factory=dict)
     native_locations: dict[str, Any] = field(default_factory=dict)
     root: dict[str, Any] = field(default_factory=dict)
@@ -129,6 +150,32 @@ class _Walk:
     # places. The build's provenance (STORE.md §3).
     names: dict[str, dict[str, int]] = field(default_factory=dict)
     placed: dict[str, int | None] = field(default_factory=dict)
+    # The components this worker remembered publishing (``_recall``), and those it
+    # prepared that it remembers once they are published (``_admit``); what checking a
+    # remembered one reads, taken once per walk: the memo's ledger, the run's features
+    # by history, each feature's and each part's naming restated (``account_basis``).
+    recalled: set[str] = field(default_factory=set)
+    pending: list[tuple[tuple, "_Remembered"]] = field(default_factory=list)
+    ledger: dict[int, tuple] | None = None
+    ledger_keys: set[int] | None = None
+    places: dict[int, int] | None = None
+    bases: dict[Any, Any] = field(default_factory=dict)
+    # Per closure this walk restated (by identity): the remembered one found equal to it,
+    # and the identities of its histories.
+    closures: dict[int, tuple] = field(default_factory=dict)
+    held: dict[int, frozenset[int]] = field(default_factory=dict)
+
+    def prototype(self, cid: str) -> Any:
+        """The private native shape component ``cid`` was prepared from: a remembered
+        native component's is decoded from its bytes, once, as its preparation decoded it."""
+        prepared = self.prepared.get(cid)
+        if prepared is None:
+            return None
+        if prepared["shape"] is None and cid in self.recalled and prepared["entry"]["kind"] == "native":
+            from cadgen._internal.component_package import decoded_input
+
+            prepared["shape"] = decoded_input(prepared["entry"], prepared["payload"])
+        return prepared["shape"]
 
     def draft_tree(self, *, root_name: str) -> dict[str, Any]:
         """The tree these parts describe, minus the object hashes publishing adds."""
@@ -237,7 +284,7 @@ def _edge_rendering(descriptor: dict[str, Any], walk: _Walk) -> dict[str, Any]:
     from cadgen.store.bounds import cached_component_topology
 
     def measured(cid: str, entry: dict[str, Any]) -> dict[str, Any]:
-        prototype = (walk.prepared.get(cid) or {}).get("shape")
+        prototype = walk.prototype(cid)
         if prototype is None and cid in walk.shapes:
             prototype = walk.shapes[cid].located(Location())
         if prototype is None:
@@ -361,7 +408,6 @@ def _attach_components(walk: _Walk, scene: Any, *, progress: Any, force: bool = 
                     shape.cad_face_ordinal_colors = face_colors
                 walk.shapes[cid] = shape
                 walk.prepared[cid] = prepared
-                walk.brep_bytes_by_cid[cid] = prepared["payload"]
                 meta: dict[str, Any] = dict(prepared["entry"])
                 color = scene.prototype_colors.get(key)
                 if color is not None:
@@ -437,7 +483,6 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
     components = walk.components
     shapes = walk.shapes
     hash_memo: dict[Any, str] = {}
-    brep_bytes_by_cid = walk.brep_bytes_by_cid
 
     def _add_leaf(
         node: Any,
@@ -464,18 +509,26 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
             except TypeError:
                 memo_key, cid = None, None
             if cid is None:
-                construction, lineage, names = namer.account(node) if namer is not None else (None, None, {})
-                prepared = prepare_geometry_component(
-                    node, face_colors=face_colors,
-                    identity=(construction, lineage) if namer is not None else None)
+                # A component this worker published before, still what it was, stands in.
+                recalled = _recall(walk, node, memo_key, namer) if namer is not None and memo_key is not None else None
+                if recalled is not None:
+                    prepared, names = recalled
+                else:
+                    construction, lineage, names = namer.account(node) if namer is not None else (None, None, {})
+                    prepared = prepare_geometry_component(
+                        node, face_colors=face_colors,
+                        identity=(construction, lineage) if namer is not None else None)
                 entry_meta = dict(prepared["entry"])
                 cid = _component_id(entry_meta["contentHash"])
                 previous = walk.prepared.setdefault(cid, prepared)
                 if previous["entry"]["contentHash"] != entry_meta["contentHash"]:
                     raise ValueError("short component ID collision")
-                if lineage is not None:
+                if recalled is None and namer is not None and memo_key is not None:
+                    _remember(walk, node, memo_key, namer, construction, names, prepared)
+                elif recalled is not None and previous is prepared:
+                    walk.recalled.add(cid)
+                if prepared["lineage"] is not None:
                     walk.names.setdefault(cid, dict(names))
-                brep_bytes_by_cid.setdefault(cid, prepared["payload"])
                 if memo_key is not None:
                     hash_memo[memo_key] = cid
             else:
@@ -672,7 +725,10 @@ def _publish_tree(
     for cid, entry in components.items():
         prepared = walk.prepared.get(cid)
         payload = prepared["payload"] if prepared is not None else read_verified_object(entry["brep"])
-        validate_geometry_component(entry, payload, cid=cid)
+        if cid not in walk.recalled:
+            # A remembered component's bytes and entry were checked by the publication that
+            # remembered them, and neither has changed since (``_admit``).
+            validate_geometry_component(entry, payload, cid=cid)
         ready = not force
         for object_key in COMPONENT_OBJECTS:
             if not entry.get(object_key):
@@ -697,6 +753,7 @@ def _publish_tree(
             built.append(cid)
         write_entry("component", cid, {"schemaVersion": 1, **entry})
         progress.advance()
+    _admit(walk.pending)
 
     progress.phase(PHASE_FINALIZE)
     # Resolved intrinsic appearance has one home in schema-2 trees. Transient
@@ -764,9 +821,10 @@ def _publish_tree(
 def _bbox_from_authored_occurrences(walk: _Walk, *, root_name: str) -> dict[str, list[float]] | None:
     """The result's bounds, measured per leaf under the canonical key
     (``placed_prototype_bounds``): each occurrence's component placed by the transform
-    the tree records -- the prototype the walk holds for its own components; for a
-    linked child's, the box the store remembers for it at that placement
-    (``bounds.composed_bounds``), else the component decoded from the store. So a
+    the tree records -- the prototype the walk holds for the components it prepared; for
+    a linked child's, or one this worker remembered publishing, the box the store
+    remembers for it at that placement (``bounds.composed_bounds``), else the component
+    decoded -- a remembered one from its own bytes, a child's from the store. So a
     child's geometry is never assembled for its parent's bounds, and the box is the same
     function of the tree whichever way it is found. None where a component cannot be
     measured so (an eager-only child's): the whole result is measured instead."""
@@ -789,9 +847,11 @@ def _bbox_from_authored_occurrences(walk: _Walk, *, root_name: str) -> dict[str,
                     boxes.append(composed_bounds([occurrence], components))
                     continue
                 except NotRemembered:
-                    if cid not in decoded:
-                        decoded[cid] = decode_geometry_component(entry, read_verified_object(entry["brep"]))
-                    prototype = decoded[cid]
+                    prototype = walk.prototype(cid)
+                    if prototype is None:
+                        if cid not in decoded:
+                            decoded[cid] = decode_geometry_component(entry, read_verified_object(entry["brep"]))
+                        prototype = decoded[cid]
             box = placed_prototype_bounds(str(entry["codec"]), str(entry["brep"]), prototype,
                                           _location_from_matrix(list(occurrence["transform"])))
             if box is not None:
@@ -842,3 +902,239 @@ def _bbox_from_prepared_occurrences(walk: _Walk) -> dict[str, list[float]] | Non
         }
     except Exception:  # noqa: BLE001 - ordinary native bounds remain the exact fallback
         return None
+
+
+# --- the components a worker remembers publishing ----------------------------------------
+#
+# In the worker's memory, never the store, LRU-bounded by entries and bytes; a worker the
+# daemon reclaims takes them with it (README law 18: nothing here outlives the worker).
+
+_REMEMBERED_ENTRIES = 8192
+_REMEMBERED_BYTES = 512 * 1024 * 1024
+_REMEMBERED: "OrderedDict[tuple, _Remembered]" = OrderedDict()
+_REMEMBERED_LOCK = threading.Lock()
+_STATS = {"recalled": 0, "remembered": 0, "errors": 0, "bytes": 0}
+
+
+@dataclass(eq=False)
+class _Remembered:
+    """A component this worker published, as its publication prepared it -- the entry,
+    its BREP payload, an eager-only component's topology facts and its lineage object's
+    bytes -- with all it stood on: the construction key the run named it by; the ledger
+    as it stood (``ledger``: the publication's snapshot), which the first recall reads the
+    pairs on the body's sub-shapes from -- the hash of each at the identity placement
+    (``subshapes``), and the snapshot's ``(TShape, rows)`` pairs on those (``rows``),
+    kept from then on in place of the snapshot; the run's naming of the body restated
+    (``account_basis``: the part's own, and the closure of features it reads, with the
+    histories its ids are of); and per feature name of its lineage, the history of the
+    feature it stood for."""
+
+    construction: str | None
+    ledger: tuple[dict[int, tuple], set[int]] | None
+    subshapes: Any
+    rows: dict[int, tuple] | None
+    part: tuple
+    closure: tuple
+    histories: tuple
+    prepared: dict[str, Any]
+    names: dict[str, int]
+    size: int
+
+
+def clear_prepared() -> None:
+    """Forget every component this worker remembers publishing: the next publication
+    prepares each one as a fresh worker would."""
+    with _REMEMBERED_LOCK:
+        _REMEMBERED.clear()
+        _STATS["bytes"] = 0
+
+
+def prepared_stats() -> dict[str, int]:
+    """Components recalled, remembered and errors survived (each a fresh preparation), and
+    what is remembered now."""
+    with _REMEMBERED_LOCK:
+        return dict(_STATS, entries=len(_REMEMBERED))
+
+
+def _recall(walk: _Walk, node: Any, key: tuple, namer: Namer) -> tuple[dict[str, Any], dict[str, int]] | None:
+    """The prepared component and the feature each name of its lineage stands for in this
+    run, of a leaf this worker published before -- while the run names it by the same
+    construction key, the memo holds the same rows on its sub-shapes, and the run's naming
+    of it is the same -- else None, and the leaf is prepared again."""
+    with _REMEMBERED_LOCK:
+        remembered = _REMEMBERED.get(key)
+    if remembered is None:
+        return None
+    try:
+        from cadgen._internal import kernel_memo
+
+        if kernel_memo.construction_key_in(namer, node) != remembered.construction:
+            return None
+        subshapes, rows = _pairs_then(remembered, key, node)
+        if _rows_on(walk, subshapes) != rows:
+            return None
+        basis = _basis(walk, node, namer)
+        if basis is None or basis[0] != remembered.part or not _same_closure(walk, basis[1], remembered.closure):
+            return None
+        names = _resolved(walk, namer, remembered.names)
+        if names is None:
+            return None
+    except Exception:  # noqa: BLE001 - checking a remembered component never fails a build: it is prepared again
+        with _REMEMBERED_LOCK:
+            _STATS["errors"] += 1
+        return None
+    with _REMEMBERED_LOCK:
+        if _REMEMBERED.get(key) is remembered:
+            _REMEMBERED.move_to_end(key)
+        _STATS["recalled"] += 1
+    return {**copy.deepcopy(remembered.prepared), "shape": None}, names
+
+
+def _remember(walk: _Walk, node: Any, key: tuple, namer: Namer, construction: str | None,
+              names: Mapping[str, int], prepared: dict[str, Any]) -> None:
+    """Note a leaf this walk prepared, to be remembered once its publication has checked and
+    published it (``_admit``), with what ``_recall`` checks as it stands now. A leaf the
+    memo does not hold (no later hit can hand it back), whose naming cannot be restated, or
+    whose names stand for a feature outside it, is not."""
+    try:
+        from cadgen._internal import kernel_memo
+
+        if not kernel_memo.held((key[0],)):
+            return
+        basis = _basis(walk, node, namer)
+        if basis is None:
+            return
+        part, closure, histories = basis
+        held = walk.held.get(id(histories))
+        if held is None:
+            held = walk.held[id(histories)] = frozenset(map(id, histories))
+        features = namer.trace.features
+        by_history: dict[str, int] = {}
+        for name, index in names.items():
+            history = features[index].history
+            if history is None or id(history) not in held:
+                return
+            by_history[name] = id(history)
+        kept = {"entry": copy.deepcopy(prepared["entry"]), "payload": prepared["payload"],
+                "topology": prepared["topology"], "lineage": prepared["lineage"]}
+        size = len(kept["payload"]) + len(kept["topology"] or b"") + len(kept["lineage"] or b"") + 1024
+        walk.pending.append((key, _Remembered(construction, _ledger(walk), None, None, part, closure,
+                                              histories, kept, by_history, size)))
+    except Exception:  # noqa: BLE001 - remembering is an optimization: this leaf is simply prepared next time
+        with _REMEMBERED_LOCK:
+            _STATS["errors"] += 1
+
+
+def _admit(pending: list[tuple[tuple, _Remembered]]) -> None:
+    """Remember what a publication prepared, now that it has checked and published it; and
+    forget what the memo no longer holds -- no hit can hand it back, and remembering it
+    would keep its geometry alive -- then, past the bounds, the least recently recalled."""
+    if not pending:
+        return
+    from cadgen._internal import kernel_memo
+
+    with _REMEMBERED_LOCK:
+        for key, remembered in pending:
+            replaced = _REMEMBERED.pop(key, None)
+            if replaced is not None:
+                _STATS["bytes"] -= replaced.size
+            _REMEMBERED[key] = remembered
+            _STATS["bytes"] += remembered.size
+            _STATS["remembered"] += 1
+        kept = kernel_memo.held(key[0] for key in _REMEMBERED)
+        for key in [key for key in _REMEMBERED if key[0] not in kept]:
+            _STATS["bytes"] -= _REMEMBERED.pop(key).size
+        while _REMEMBERED and (len(_REMEMBERED) > _REMEMBERED_ENTRIES or _STATS["bytes"] > _REMEMBERED_BYTES):
+            _key, forgotten = _REMEMBERED.popitem(last=False)
+            _STATS["bytes"] -= forgotten.size
+    pending.clear()
+
+
+def _basis(walk: _Walk, node: Any, namer: Namer) -> tuple[tuple, tuple, tuple] | None:
+    """The run's naming of ``node``'s body restated (``kernel_trace.account_basis``), with
+    what the walk has restated already."""
+    from OCP.TopLoc import TopLoc_Location
+
+    from cadgen._internal.kernel_trace import account_basis
+
+    return account_basis(namer.trace, node.wrapped.Located(TopLoc_Location()), namer.made_by, walk.bases)
+
+
+def _same_closure(walk: _Walk, closure: tuple, remembered: tuple) -> bool:
+    """Whether a closure this walk restated is a remembered one: compared once per walk,
+    since every part the walk restates with the same ancestors shares one closure."""
+    if closure is remembered or walk.closures.get(id(closure)) is remembered:
+        return True
+    if closure != remembered:
+        return False
+    walk.closures[id(closure)] = remembered
+    return True
+
+
+def _ledger(walk: _Walk) -> tuple[dict[int, tuple], set[int]]:
+    """The walk's one reading of the memo's ledger (``kernel_memo.ledger_snapshot``), and
+    its hashes: nothing changes the memo's state while a result is published."""
+    if walk.ledger is None:
+        from cadgen._internal import kernel_memo
+
+        walk.ledger = kernel_memo.ledger_snapshot()
+        walk.ledger_keys = set(walk.ledger)
+    return walk.ledger, walk.ledger_keys
+
+
+def _rows_on(walk: _Walk, subshapes: Any) -> dict[int, tuple]:
+    """The walk's ledger's pairs on the sub-shapes with these hashes."""
+    ledger, keys = _ledger(walk)
+    return {key: ledger[key] for key in keys.intersection(subshapes)}
+
+
+def _pairs_then(remembered: _Remembered, key: tuple, node: Any) -> tuple[Any, dict[int, tuple]]:
+    """A remembered component's sub-shape hashes and the ledger's pairs on them when it was
+    published: read off its publication's snapshot the first time they are asked for --
+    hashing a body's sub-shapes costs about what serializing it does, and a component
+    prepared once may never be recalled -- and kept in its place from then on."""
+    with _REMEMBERED_LOCK:
+        subshapes, rows, ledger = remembered.subshapes, remembered.rows, remembered.ledger
+    if subshapes is None:
+        subshapes = _subshape_hashes(node)
+        snapshot, keys = ledger
+        rows = {hashed: snapshot[hashed] for hashed in keys.intersection(subshapes)}
+        with _REMEMBERED_LOCK:
+            if remembered.subshapes is None:
+                remembered.subshapes, remembered.rows, remembered.ledger = subshapes, rows, None
+                grown = subshapes.itemsize * len(subshapes)
+                remembered.size += grown
+                if _REMEMBERED.get(key) is remembered:
+                    _STATS["bytes"] += grown
+    return subshapes, rows
+
+
+def _resolved(walk: _Walk, namer: Namer, names: Mapping[str, int]) -> dict[str, int] | None:
+    """Each name's feature in this run, from the history it stood for; None where a history
+    is no feature's here, or more than one's."""
+    if walk.places is None:
+        places: dict[int, int] = {}
+        shared: set[int] = set()
+        for feature in namer.trace.features:
+            if feature.history is not None:
+                if id(feature.history) in places:
+                    shared.add(id(feature.history))
+                places[id(feature.history)] = feature.index
+        walk.places = {history: index for history, index in places.items() if history not in shared}
+    resolved = {name: walk.places.get(history) for name, history in names.items()}
+    return None if None in resolved.values() else resolved
+
+
+def _subshape_hashes(node: Any) -> Any:
+    """The hash of each of ``node``'s sub-shapes (itself included) at the identity
+    placement: a function of its TShape alone, as the ledger's snapshot hashes them."""
+    from array import array
+
+    from OCP.TopExp import TopExp
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(node.wrapped, mapped)
+    identity = TopLoc_Location()
+    return array("q", (hash(mapped.FindKey(ordinal).Located(identity)) for ordinal in range(1, mapped.Extent() + 1)))
