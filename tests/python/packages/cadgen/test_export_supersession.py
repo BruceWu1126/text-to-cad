@@ -216,6 +216,41 @@ class ExportSupersession(unittest.TestCase):
         self.assertEqual(_digest(document), newer["digest"])
         self.assertEqual(read_record(script), newer["record"], "an old receipt cannot enter the newer record")
 
+    def test_a_changed_mesh_recipe_supersedes_an_export_of_the_same_geometry(self):
+        from cadgen._internal.mesh_export import run_mesh_exporter
+        from cadgen.store.records import read_record, write_record
+
+        script = self.root / "part.py"
+        source = PART.replace("from cadgen import step", "from cadgen import stl").replace(
+            "@step", "@stl(mesh_tolerance=0.05)")
+        script.write_text(source.format(width=10.0), encoding="utf-8")
+        document = self.root / "part.stl"
+        before = {}
+        after = {}
+
+        def newer_recipe(*args, **kwargs):
+            prepared = run_mesh_exporter(*args, **kwargs)
+            before.update(read_record(script))
+            newer = dict(before)
+            newer["outputs"] = {**before["outputs"], str(document): {
+                "sha256": "", "declared": "stl", "chord": "0.025", "angle": "0.1", "name": "part"}}
+            write_record(before["model"], newer)
+            command = self._command(script)
+            command["args"] = [sys.executable, "-m", "cadgen.cli", "export", str(document)]
+            built = subprocess.run(**command, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            after.update(read_record(script))
+            return prepared
+
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said), \
+                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=newer_recipe), self.held(script):
+            pass
+        self.assertEqual((before["key"], before["tree"]), (after["key"], after["tree"]))
+        self.assertEqual(after["outputs"][str(document)]["chord"], "0.025")
+        self.assertEqual(read_record(script), after)
+        self.assertRegex(said.getvalue(), r"part\.stl not written: a newer build")
+
     def test_a_foreign_mesh_edit_during_preparation_is_not_overwritten(self):
         from cadgen._internal.mesh_export import run_mesh_exporter
         from cadgen.store.records import read_record

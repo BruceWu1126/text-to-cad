@@ -95,6 +95,7 @@ assert not any(name.split(".")[0] in {"build123d", "OCP", "cadquery"} for name i
                 "stl build",
                 "3mf build",
                 "glb build",
+                "export",
             },
         )
 
@@ -109,6 +110,15 @@ assert not any(name.split(".")[0] in {"build123d", "OCP", "cadquery"} for name i
             self.assertEqual(daemon.call_args.args[0], "stl-build")
             self.assertEqual(daemon.call_args.args[1], ["part.step"])
             imported.assert_not_called()  # the whole point: no OCP import, and no run here
+
+    def test_export_is_handed_to_the_warm_worker_before_importing_its_parser(self):
+        with mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch("cadgen.daemon.client.run_via_daemon", return_value=0) as daemon, \
+                mock.patch.object(cli.importlib, "import_module") as imported:
+            os.environ.pop("CADGEN_DAEMON_CHILD", None)
+            self.assertEqual(cli.main(["export", "part.step"]), 0)
+        self.assertEqual(daemon.call_args.args[:2], ("export", ["part.step"]))
+        imported.assert_not_called()
 
     def test_the_daemon_child_never_routes_back_to_itself(self):
         with mock.patch.dict("os.environ", {"CADGEN_DAEMON_CHILD": "1"}, clear=False), \

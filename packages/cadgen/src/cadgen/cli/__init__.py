@@ -64,6 +64,7 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "srdf validate": ("cadgen.cli.srdf_validate", "validate an SRDF against its URDF"),
     # Generic / services
     "doctor": ("cadgen.cli.doctor", "print installed cadgen and verify a skill's pin"),
+    "export": ("cadgen.cli.export", "finish a saved file from its recorded result"),
     # The store. `store why <model>` is the debugging surface STORE.md describes;
     # `store where <document> <ref>` is its sibling for provenance (README law 20).
     "store": ("cadgen.cli.store", "the store: info, why <model> (gate verdict), where <document> <ref> (which operation made a face), forget <target>, gc"),
@@ -116,7 +117,7 @@ def read_skill_pin(skill_path) -> str | None:
 # ONE table: a tool's name is its command with the space dashed, and its module is
 # the command's own (`_COMMANDS`). The daemon derives what it may import from here
 # (`daemon_tool_modules`), so a door cannot be warm on one side and unknown on the other.
-_WARM_COMMANDS = ("step build", "step compile", "stl build", "3mf build", "glb build")
+_WARM_COMMANDS = ("step build", "step compile", "stl build", "3mf build", "glb build", "export")
 _DAEMON_TOOLS = {command: command.replace(" ", "-") for command in _WARM_COMMANDS}
 
 

@@ -249,13 +249,13 @@ class _Export:
     and its sidecar into place, the expected pair checked first, §7; the bytes mapped to
     the tree they were written from; the record's output entry; the ``STEP saved`` event,
     its ``elapsed`` read from the clock the model's ``done`` event reads), then cuts the
-    model's declared meshes from that file's bytes. A kept STEP submits nothing and
+    model's declared meshes from the captured result tree. A kept STEP submits nothing and
     publishes only its sidecar; a current model has its display data derived here too,
     after the STEP its file's bytes then map to; a mesh-only model has only its meshes.
     An export that fails fails the worker job; its released caller has already answered.
 
     An export writes only while the model's record still names its result (``key``, the
-    result's key, and its tree): read again before it takes the export job's answer, right
+    result's key, its tree, annotations and output recipes): read again before it takes the export job's answer, right
     before the file replaces the saved one, before the record is written and before the
     meshes are cut. Once a newer build of the model has recorded its result, this one's files
     are that build's to write: an export job that has not begun writes nothing, one already
@@ -273,7 +273,8 @@ class _Export:
     def __init__(self, spec: EntrySpec, tree: str, *, key: str | None, logger: CliLogger,
                  step: dict | None = None, display: bool = False, announce: str | None = None,
                  expected_meshes: dict[str, str | None] | None = None,
-                 previous: Mapping[str, object] | None = None) -> None:
+                 previous: Mapping[str, object] | None = None,
+                 captured_record: dict | None = None) -> None:
         from contextlib import ExitStack
 
         from cadgen._internal import build_timing
@@ -286,6 +287,12 @@ class _Export:
         self.step, self.display, self.announce = step, display, announce
         self.mesh_expected = expected_meshes if expected_meshes is not None else _mesh_file_state(spec)
         self.previous = previous or {}
+        from cadgen.store.records import export_state, read_record
+
+        self.record = (captured_record if captured_record is not None else step["record"] if step is not None
+                       else (read_record(_model_for_spec(spec)) or {}))
+        self.record.setdefault("key", key)
+        self.identity = export_state(self.record)
         # The clock the model's ``done`` event reads, so its ``STEP saved`` event is on it
         # too. A model restored rather than built has no build clock: its export's queueing.
         clock = build_timing.current()
@@ -381,7 +388,9 @@ class _Export:
 
         model = _model_for_spec(self.spec)
         record = read_record(model)
-        if record is None or record.get("key") != self.key or record.get("tree") != self.tree:
+        from cadgen.store.records import export_state
+
+        if record is None or export_state(record) != self.identity:
             return
         outputs = record.get("outputs") or {}
         owed = {"since": time.time(), "error": f"{type(error).__name__}: {error}"}
@@ -413,13 +422,15 @@ class _Export:
             raise RuntimeError(f"{_display_path(path)} was not saved: the mesh file changed during the build")
 
     def _still_current(self, path: Path) -> None:
-        """Raise :class:`_Superseded` for ``path`` when the model's record names another result
-        than this export's (its key or its tree). A record gone with the store is no newer
+        """Raise :class:`_Superseded` for ``path`` when the model's record names another result,
+        annotations or output recipes. A record gone with the store is no newer
         result: the export goes on and fails or lands on its own."""
         from cadgen.store.records import read_record
 
+        from cadgen.store.records import export_state
+
         record = read_record(_model_for_spec(self.spec))
-        if record is not None and (record.get("key") != self.key or record.get("tree") != self.tree):
+        if record is not None and export_state(record) != self.identity:
             raise _Superseded(path)
 
     def _superseded(self, path: Path) -> None:
@@ -495,6 +506,13 @@ class _Export:
         if export is not None:
             # The bytes, mapped to the tree they were written from: the file is the result.
             note_document_tree(digest, tree, producer=export["producer"])
+        # The STEP job may have waited while another export completed a sibling.
+        # Merge only this receipt into the latest matching result and keep theirs.
+        from cadgen.store.records import read_record
+
+        latest = read_record(model_path)
+        self._still_current(step_path)
+        record = copy.deepcopy(latest) if latest is not None else record
         outputs = record["outputs"]
         outputs[str(step_path)] = {**plan.output(), "sha256": digest}
         sidecar_key = str(source_sidecar_path(spec.entry_path).resolve())
@@ -506,6 +524,10 @@ class _Export:
         # A newer result's record is never overwritten with this one's.
         self._still_current(step_path)
         write_record(model_path, record)
+        from cadgen.store.records import export_state
+
+        self.record = record
+        self.identity = export_state(record)
         saved_at = time.perf_counter() - self.started
         executors.emit_event(executors.model_event(
             model_path, "building", phase="STEP saved", elapsed=saved_at,
@@ -954,10 +976,6 @@ def _generate_part_outputs(
         # until its export writes it (record_mesh_export fills the entry), so a
         # declaration the exporter failed to honour reads as STALE at the next
         # gate ("never written") instead of as a current model missing an output.
-        if generated:
-            for declared in spec.mesh_exports or ():
-                key = str(Path(declared.path).expanduser().resolve())
-                outputs.setdefault(key, {"sha256": "", "declared": declared.fmt})
         from cadgen.store.trees import tree_kind
 
         record = {
@@ -973,6 +991,8 @@ def _generate_part_outputs(
             "children": _children_by_key(getattr(scene, "store_children", None)),
             "outputs": outputs,
         }
+        if generated:
+            _record_mesh_recipes(spec, record)
         from cadgen.store.results import producer_versions
         from cadgen.store.trees import get_tree
 
@@ -992,6 +1012,8 @@ def _generate_part_outputs(
                 # Bound to the result's tokens, which the file's are.
                 sidecar_payload["kinematics"] = (
                     resolved["kinematics"] if "kinematics" in resolved else tree_kinematics(tree_hash))
+            if tree.get("appearance") is not None:
+                record["appearance"] = copy.deepcopy(tree["appearance"])
             if writes_step:
                 appearance = tree.get("appearance")
                 if appearance is not None:
@@ -1091,7 +1113,7 @@ def _generate_part_outputs(
             summary = (f"kept STEP: {_display_path(spec.step_path)} (its bytes would not change)" if kept
                        else _generated_python_glb_summary(spec))
             _Export(spec, tree_hash, key=key, logger=logger, announce=None if reemit_source_hash else summary,
-                    expected_meshes=expected_meshes, previous=previous,
+                    expected_meshes=expected_meshes, previous=previous, captured_record=record,
                     step={"plan": export_plan, "record": record, "sidecar_payload": sidecar_payload,
                           "expected_document_pair": expected_document_pair, "live": live,
                           "previous": lambda: _previous_pairs(previous, step_key, sidecar_key),
@@ -1319,16 +1341,15 @@ def _produce_declared_mesh_exports(
     A declaration's own tolerances are the only ones: one that names none is
     written at the display tolerance, from the very meshes the viewer draws.
 
-    A STEP model's meshes are keyed on its STEP's bytes as its record names them -- the
-    build's own knowledge of the file it just wrote, or its current record's -- and cut
-    from the tree those bytes map to (`index/document`): the result they were written
-    from, or, after an annotation refresh re-keyed the record, the tree the entry names,
-    which the bare mesh doors cut from too. No door's lookup of the file (STORE.md §3,
-    *Exports*). A mesh-only model writes no document: its result, ``source_tree``
+    A STEP model's mesh receipts name its STEP's recorded bytes; its geometry and
+    appearance come from the captured result, without a document lookup or mutable
+    disk sidecar (STORE.md §3, *Exports*). A mesh-only model writes no document:
+    its result, ``source_tree``
     (else its record's), IS the geometry the meshes are cut from, so the ledger keys on
     that.
     """
-    owed = _mesh_exports_owed(spec, source_tree=source_tree)
+    owed = _mesh_exports_owed(spec, source_tree=source_tree,
+                              record=owner.record if owner is not None else None)
     if owed is None:
         return ()
     from cadgen._internal.mesh_export import MeshSource, record_mesh_export, run_mesh_exporter
@@ -1369,6 +1390,7 @@ def _produce_declared_mesh_exports(
                 appearance_key=appearance_key,
                 expected_result=(owner.key, owner.tree) if owner is not None else None,
                 expected_hash=digest,
+                expected_state=owner.identity if owner is not None else None,
             )
             if owner is not None:
                 owner._still_current(job.out)
@@ -1381,13 +1403,35 @@ def _produce_declared_mesh_exports(
     return tuple(job.out for job in jobs)
 
 
+def _record_mesh_recipes(spec: EntrySpec, record: dict) -> bool:
+    """Persist each declared mesh recipe before its export starts. A changed recipe
+    owes new bytes even when the geometry key and tree have not changed."""
+    from cadgen._internal.mesh_export import mesh_recipe
+
+    outputs = record.setdefault("outputs", {})
+    changed = False
+    for declared in spec.mesh_exports:
+        path = str(Path(declared.path).expanduser().resolve())
+        recipe = mesh_recipe(declared.fmt, declared.mesh_tolerance, declared.mesh_angular_tolerance,
+                             spec.step_path.stem)
+        old = outputs.get(path) or {}
+        source = ((outputs.get(str(spec.step_path.expanduser().resolve())) or {}).get("sha256")
+                  if spec.step_output else record.get("tree"))
+        if (any(old.get(field) != value for field, value in recipe.items())
+                or (old.get("sha256") and old.get("document") != source)):
+            outputs[path] = {"sha256": "", **recipe}
+            changed = True
+    return changed
+
+
 def _mesh_file_state(spec: EntrySpec) -> dict[str, str | None]:
     """The declared mesh bytes a run found, captured before its body runs."""
     return {str(Path(item.path).expanduser().resolve()): _sha256_or_none(Path(item.path))
             for item in spec.mesh_exports}
 
 
-def _mesh_exports_owed(spec: EntrySpec, *, source_tree: str | None = None) -> tuple | None:
+def _mesh_exports_owed(spec: EntrySpec, *, source_tree: str | None = None,
+                       record: Mapping[str, object] | None = None) -> tuple | None:
     """What the model's declared meshes are cut from and which of them are not current on
     disk (:func:`_produce_declared_mesh_exports`): ``(model, tree, document hash, appearance,
     appearance key, jobs)``, the jobs those to cut; None while nothing names what they are
@@ -1395,22 +1439,20 @@ def _mesh_exports_owed(spec: EntrySpec, *, source_tree: str | None = None) -> tu
     if not spec.mesh_exports or spec.entry_path is None or spec.step_path is None:
         return None
     from cadgen._internal.mesh_export import MeshExportJob, mesh_export_current
-    from cadgen._internal.source_sidecar import appearance_digest, read_source_sidecar
-    from cadgen.store.records import read_record, tree_for_document_hash
+    from cadgen._internal.source_sidecar import appearance_digest
+    from cadgen.store.records import read_record
 
     model = _model_for_spec(spec)
-    record = (read_record(model) if model is not None else None) or {}
+    record = record if record is not None else (read_record(model) if model is not None else None) or {}
+    tree_hash = source_tree or str(record.get("tree") or "") or None
     if spec.step_output:
         output = (record.get("outputs") or {}).get(str(spec.step_path.expanduser().resolve())) or {}
         document_hash = str(output.get("sha256") or "") or None
-        tree_hash = tree_for_document_hash(document_hash) if document_hash else None
     else:
-        tree_hash = source_tree or str(record.get("tree") or "") or None
         document_hash = tree_hash
     if document_hash is None or tree_hash is None or model is None:
         return None
-    sidecar = read_source_sidecar(spec.entry_path, document_hash=document_hash) if spec.step_output else None
-    appearance = (sidecar or {}).get("appearance")
+    appearance = record.get("appearance")
     appearance_key = appearance_digest(appearance)
     jobs = [
         MeshExportJob(fmt=declared.fmt, out=declared.path, mesh_tolerance=declared.mesh_tolerance,
@@ -2009,6 +2051,12 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
     healed.add(model)
     _current_source_result(spec, tree)
     record = read_record(model) or {}
+    if _record_mesh_recipes(spec, record):
+        from cadgen.store.records import note_output, write_record
+
+        write_record(model, record)
+        for declared in spec.mesh_exports:
+            note_output(declared.path, model)
     asked = getattr(verdict, "descendants", None) or {}
     for child in record.get("children") or []:
         child_model = str((child or {}).get("model") or "")
@@ -2041,7 +2089,8 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
         if plan.kept is None or sidecar_owed:
             step = {"plan": plan, "record": copy.deepcopy(record), "sidecar_payload": _recorded_sidecar(record),
                     "expected_document_pair": pair, "live": {}, "previous": lambda: (), "still_saves": lambda: None}
-    _Export(spec, tree, key=record.get("key"), logger=logger, step=step, display=display)
+    _Export(spec, tree, key=record.get("key"), logger=logger, step=step, display=display,
+            captured_record=record)
 
 
 def build_child(defn: object) -> tuple[str, str]:

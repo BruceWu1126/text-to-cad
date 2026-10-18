@@ -208,8 +208,16 @@ passing a script to a CLI, so it stays absent by design.
 `python model.py` is the one source door: it gates, builds, writes every
 output the decorators declare (`.step`, meshes, sidecar — STEP is one output
 kind, not a required one), and rewrites declared exports that drifted. Every
-CLI takes documents, resolves them by their bytes, and compiles a missing
+format CLI takes documents, resolves them by their bytes, and compiles a missing
 tree from those bytes as a job in the build pool — never from a script.
+
+Before a file leaves cadgen, `cadgen export <file>` completes that file and
+answers only when it is ready. This is a code-side handoff: it waits for current
+writes, then uses the output index and the recorded result's exact geometry,
+annotations and export recipe. It never runs source or evaluates today's
+declarations; changed or missing source is reported while the stored result is
+exported. A missing file without recoverable stored geometry fails. An existing
+file with no usable record is already ready. Readers remain artifact-only.
 
 A script is a program, and cadgen runs it wherever it lives. The import path
 inside a build is exactly `python script.py`'s — the script's own folder, then

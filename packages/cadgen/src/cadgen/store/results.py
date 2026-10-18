@@ -118,7 +118,11 @@ def read_result(key: str) -> dict[str, Any] | None:
     if not isinstance(key, str) or not key:
         return None
     entry = read_entry(RESULT_KIND, key)
-    if not entry or entry.get("schemaVersion") != RESULT_SCHEMA_VERSION or not isinstance(entry.get("record"), dict):
+    from cadgen.store.records import RECORD_SCHEMA_VERSION
+
+    if (not entry or entry.get("schemaVersion") != RESULT_SCHEMA_VERSION
+            or not isinstance(entry.get("record"), dict)
+            or entry["record"].get("schemaVersion") != RECORD_SCHEMA_VERSION):
         return None
     return entry
 

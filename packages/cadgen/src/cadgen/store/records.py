@@ -85,7 +85,9 @@ RECORD_KIND = "record"
 # input.
 # Schema 13: the record carries its result's key and the producer that built it, and
 # names each child by the child's key (store/results.py), never by its tree.
-RECORD_SCHEMA_VERSION = 13
+# Schema 14: declared meshes carry complete pending recipes, before any file is
+# written, so a stored result can reproduce them without its source.
+RECORD_SCHEMA_VERSION = 14
 # A format change bumps it and lands on new keys (document_key).
 # Schema 6: an XCAF label entry (`=>[0:1:1:2]`) reads as no name, and an
 # occurrence without one of its own never shows a shared product's name that is
@@ -277,11 +279,43 @@ def forget_output(output_path: Path | str) -> None:
     remove_entry("output", path_key(output_path))
 
 
+def recorded_model_for_output(output_path: Path | str) -> str | None:
+    """The raw output index's model ref, independent of whether its source exists.
+
+    Explicit export uses this code-side route to the recorded result. Ordinary
+    provenance callers keep :func:`model_for_output`'s existing-source rule.
+    """
+    entry = read_entry("output", path_key(output_path)) or {}
+    recorded = str(entry.get("model") or "").strip()
+    return recorded or None
+
+
+def export_state(record: dict[str, Any]) -> dict[str, Any]:
+    """The publication identity: geometry, resolved annotations and output recipes.
+
+    Receipts and owed errors change while one run saves; its recipes do not.
+    Tolerances are not geometry-key inputs, so key/tree alone cannot identify
+    the result an export is allowed to publish for.
+    """
+    import copy
+
+    recipes = {}
+    for path, entry in (record.get("outputs") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("declared"):
+            recipes[path] = {field: entry.get(field) for field in ("declared", "chord", "angle", "name")}
+        elif entry.get("writer"):
+            recipes[path] = {"writer": entry["writer"]}
+    return copy.deepcopy({"key": record.get("key"), "tree": record.get("tree"), "recipes": recipes,
+                          "annotations": {field: record.get(field) for field in
+                                          ("kinematics", "appearance", "animation")}})
+
+
 def model_for_output(output_path: Path | str) -> str | None:
     """The model (``script::fn``) the store remembers writing ``output_path``,
     when that script still exists, else None. MODEL-SIDE: ``store why`` / provenance."""
-    entry = read_entry("output", path_key(output_path)) or {}
-    recorded = str(entry.get("model") or "").strip()
+    recorded = recorded_model_for_output(output_path)
     if recorded:
         script, _function = split_model_ref(recorded)
         if script.is_file():

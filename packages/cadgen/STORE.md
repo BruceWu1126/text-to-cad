@@ -172,6 +172,10 @@ it, and naming the primitive meshes it draws, which a sweep keeps with it); and
 a document's bending tubes as a CAD view plays them
 (`_internal/tube_skin_payload.py`: the document, the digest of the sidecar
 animation that bends them and the parts whose meshes they bind).
+`cadgen export <file>` is a code-side handoff, not an artifact reader: it follows
+`index/output` to the qualified model record even when source no longer exists,
+and completes that record's export without executing or importing the source.
+It never changes the artifact-only lookup used by readers below.
 `index/document` is the document lookup: `sha256(file bytes)`, under this
 cadgen's document schema (above), → the one tree those bytes stand for (§1,
 *document*), plus a mesh ledger keyed by format × tolerances × pose ×
@@ -737,9 +741,9 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   wait on another request's write gives up the job slot meanwhile. The viewer
   draws the build's preview while its catalog read waits. When
   two models write equal bytes, the last export's entry stands. The model's
-  declared meshes (`@stl`/`@glb`/`@threemf`) are then cut from the tree the
-  file's bytes map to, keyed on those bytes as the record names them -- never a
-  door's lookup of the file. Declared meshes are prepared in sibling staging
+  declared meshes (`@stl`/`@glb`/`@threemf`) are then cut from the captured result
+  tree and recorded appearance, keyed on the STEP bytes as the record names
+  them -- never a door's lookup or a mutable disk sidecar. Declared meshes are prepared in sibling staging
   folders too. Before each file replaces its destination, the export rechecks
   its result and the bytes it found before the body ran (or its own previous
   export wrote meanwhile). It verifies the published bytes and binds the receipt
@@ -769,6 +773,21 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   finishes what it queued; an interrupted one abandons it for the next run.
   A current model queues what its files owe in the same way, and so does every
   child under it whose result stands (§4).
+
+  **Explicit handoff.** `cadgen export <file>` waits for current writes and
+  completes the named STEP, its recorded sidecar, or declared mesh synchronously
+  through these same exporters. A STEP-backed mesh finishes its STEP dependency
+  first; a sidecar uses paired STEP publication. The output index identifies the
+  qualified model and its captured tree, resolved annotations and effective mesh
+  recipe, without loading source or evaluating current declarations. Changed or
+  deleted source produces a notice, not a build. A matching saved receipt is
+  ready even if derived objects have been collected; reproducing a missing file
+  requires complete exact stored geometry and never falls back to source or
+  display meshes. An existing file with no usable record is ready; a missing one
+  fails. A newer result or recipe supersedes the retry, which follows the latest
+  record before answering. Publication compares key, tree, annotations and all
+  output recipes; completion receipts are merged into the latest matching record
+  so a sibling export's receipt survives.
 
   **The kept rule.** A rebuild keeps its STEP -- writes nothing -- when its
   record's last build had the same tree, wrote the file with this writer
@@ -835,7 +854,7 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
 ```json
 {
   "kind": "record",
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "model": "/abs/project/src/robot.py::robot",
   "script": "/abs/project/src/robot.py",
   "function": "robot",
@@ -1118,10 +1137,11 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   alone has the same tree and record as any model, every stale declared mesh
   is (re)generated from that tree, and no `.step` (and no sidecar) is written
   — `outputs` simply lists no document.
-- `outputs` may carry per-output facts a door needs (`declared`, the
-  tessellation `chord`/`angle`); those are the door's, the store only keeps
-  them beside the sha. A STEP's entry says which writer wrote it (`writer`);
-  it and its sidecar's are pending -- an empty sha256, which clause 5 reads as
+- `outputs` carries each declared mesh's complete recipe before writing:
+  `declared`, effective tessellation `chord`/`angle` as normalized strings, and
+  its serialization `name`. A changed recipe clears the previous completion
+  receipt. A STEP's entry says which writer writes it (`writer`);
+  it, its sidecar and its declared meshes are pending -- an empty sha256, which clause 5 reads as
   never written -- from the record written at the result until the export lands
   (§3, *Exports*), and the STEP's sha256 lives there and nowhere else in the
   record. A failed export keeps an `owed` object on each unfinished output:
@@ -1191,7 +1211,8 @@ bumps it: nothing here reads another version's, and the next build or compile
 writes this version's, reusing every object that exists (§8 says when the old
 one goes). What each version changed:
 
-- **Record**, schema 13 (`RECORD_SCHEMA_VERSION`, `store/records.py`): the
+- **Record**, schema 14 (`RECORD_SCHEMA_VERSION`, `store/records.py`): complete
+  pending mesh recipes, so exports can be retried without source. 13 added the
   result's `key` and `producer`, and each child by its key. 12 named each child
   by its tree, and was the first written at the result, its STEP output pending
   until the export lands; 11, 10 and 9 named trees of schemas 6, 5 and 4; 8
@@ -1213,7 +1234,7 @@ one goes). What each version changed:
   facts; 6 keeps all three. No older tree is decoded.
 - **Result**, schema 1 (`RESULT_SCHEMA_VERSION`, `store/results.py`): the
   first. Its key hashes its producer, so another cadgen's results are obsolete
-  here (§8).
+  here (§8). Its embedded record must also use the current record schema.
 
 ## 4. The gate
 
@@ -1312,10 +1333,12 @@ the check for a peer that published meanwhile, the annotation refresh and the
 reuse check; it is taken again only after the build waited for a slot, which
 can change it. The already-stale notice after publishing asks anew (§9a).
 
-Mesh tolerances and argv flags are not inputs. A declared mesh's ledger entry
-records the effective pair the file was written at (an omitted tolerance is the
-display tolerance's), so a changed declaration re-cuts that mesh from the current
-tree — the model is never rebuilt for it. Imported STEPs are inputs (a
+Mesh tolerances are export recipes, not separate result-key inputs. A declared
+mesh's entry records the effective pair (an omitted tolerance is the display
+tolerance's). For a current stored result, a changed recipe re-cuts the mesh
+without running the body. Editing the declaration's source still participates
+in the ordinary closure gate and may run the body. Argv flags are not inputs.
+Imported STEPs are inputs (a
 file the body reads is in the closure), not models. `--force` rebuilds the named
 model only; its children go through the gate as usual. `cadgen store forget
 <model.py>` drops the record instead, so the next run — not this one — rebuilds
@@ -2349,8 +2372,10 @@ child's file is written. `record.tree` is never replaced by geometry
 translated from the STEP. The bytes an export writes from the result map to it
 once they exist (§3): no bytes are mapped to a tree before they are written
 from it. The command's success reports the stored result; the ledger reports
-whether each declared file was saved. A successful explicit save requires every
+whether each declared file was saved. A build's finishing work requires every
 declared output, and a failure after the answer remains owed on the record.
+`cadgen export <file>` completes the named file and its dependencies before
+answering (§3, *Explicit handoff*).
 
 An interactive viewer can retain a complete displayed component across a
 replacement when its part and origin agree. Tree-specific placements and

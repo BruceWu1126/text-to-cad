@@ -386,6 +386,12 @@ def _sha256_of(path: Path) -> str | None:
     return digest.hexdigest()
 
 
+def mesh_recipe(fmt: str, chord: float | None, angle: float | None, name: str) -> dict[str, str]:
+    """The complete serialization recipe, including effective default tolerances."""
+    return {"declared": fmt, "chord": _tolerance_token(chord, "chordTolerance"),
+            "angle": _tolerance_token(angle, "angleTolerance"), "name": name}
+
+
 def record_mesh_export(
     output_path: Path,
     *,
@@ -398,23 +404,29 @@ def record_mesh_export(
     appearance_key: str | None = None,
     expected_result: tuple[str | None, str] | None = None,
     expected_hash: str | None = None,
+    expected_state: dict | None = None,
 ) -> None:
     """Record a written mesh as one of the MODEL's outputs (STORE.md: mesh
     exports live in the model record, gated by clause 5). Best-effort. A declared
     export binds its receipt to the result and bytes it published; a replaced
     result or changed file gets no receipt for those bytes."""
     try:
-        from cadgen.store.records import read_record, write_record
+        from cadgen.store.records import export_state, read_record, write_record
 
         record = read_record(model)
         if record is None or (expected_result is not None and
                               (record.get("key"), record.get("tree")) != expected_result):
             return
+        captured = expected_state if expected_state is not None else export_state(record)
+        if export_state(record) != captured:
+            return
         digest = _sha256_of(Path(output_path))
         if digest is None or (expected_hash is not None and digest != expected_hash):
             return
         outputs = dict(record.get("outputs") or {})
+        previous = outputs.get(str(Path(output_path).expanduser().resolve())) or {}
         output_entry = {
+            **({"name": previous["name"]} if "name" in previous else {}),
             "sha256": digest,
             "declared": fmt,
             "document": str(document_hash),
@@ -426,13 +438,17 @@ def record_mesh_export(
         serialization_version = _serialization_version(fmt)
         if serialization_version is not None:
             output_entry["serializer"] = serialization_version
-        outputs[str(Path(output_path).expanduser().resolve())] = output_entry
-        record["outputs"] = outputs
         current = read_record(model)
         if expected_result is not None and (current is None or
                 (current.get("key"), current.get("tree")) != expected_result):
             return
-        write_record(model, record)
+        if current is None or export_state(current) != captured:
+            return
+        # A sibling export may have completed while this mesh was hashed.
+        outputs = dict(current.get("outputs") or {})
+        outputs[str(Path(output_path).expanduser().resolve())] = output_entry
+        current["outputs"] = outputs
+        write_record(model, current)
     except Exception:  # noqa: BLE001 - a failed record only costs a re-export
         pass
     # The artifact-side ledger too, so a bare door on these same bytes is a no-op.

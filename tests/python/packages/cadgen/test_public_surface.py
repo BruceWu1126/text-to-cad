@@ -99,6 +99,7 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "mcp": frozenset(),
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
+    "export": frozenset({"path"}),
 }
 
 # Commands not yet re-homed under the schema. This set only shrinks.

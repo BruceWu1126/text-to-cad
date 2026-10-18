@@ -70,8 +70,9 @@ if __name__ == "__main__":
 python src/bracket.py
 ```
 
-- A run rebuilds what changed and is a no-op otherwise. Export and snapshot
+- A run rebuilds what changed and is a no-op otherwise. Format build and snapshot
   commands read saved files and never run source.
+- Before a file leaves cadgen, run `cadgen export <file>` to finish its saved output without running source.
 - The viewer, snapshots and mesh exports read model units as millimetres, +Z up.
 - A configuration is a plain factory the model calls with its values; a second
   configuration is a second model. cadgen runs a model file's top level to check
