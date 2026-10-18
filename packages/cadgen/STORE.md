@@ -697,12 +697,28 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   holding a component the store cannot decode (an eager-only one, above) is
   exported in the build's own process, from its live shape, by the same
   function. Publishing the file then takes, in order: the expected pair checked
-  (§7) and the publish rule asked again (§5); the staged copy and its sidecar
-  moved into place, each atomically; the bytes mapped to the tree in
-  `index/document` with the producer the export wrote with (never an older
-  entry's hint), at once and finally; the record's output entry filled
+  (§7) and the publish rule asked again (§5); the model's record read again,
+  right before the write, to see that it still names this result; the staged
+  copy and its sidecar moved into place, each atomically; the bytes mapped to
+  the tree in `index/document` with the producer the export wrote with (never
+  an older entry's hint), at once and finally; the record's output entry filled
   (`{sha256, writer}`, empty until then, which the gate reads as never
-  written); and the `STEP saved` event. `--verbose` relays the job's steps.
+  written), the record read again first; and the `STEP saved` event.
+  `--verbose` relays the job's steps.
+
+  **A newer result supersedes an older export.** An export writes only while
+  the model's record names its result -- its key and its tree -- and reads the
+  record again before it takes the export job's answer, before the file
+  replaces the saved one, before it writes the record and before it cuts the
+  meshes. Once a newer build of the model has recorded its result, the older
+  run's files are that build's to write: the older export says so in one line
+  (`<file> not written: a newer build of <model> replaced this result, and
+  writes it`) and writes nothing. An export job that has not begun is told so
+  (`store/exports.py`, `abandon`: a marker in the build's staging folder) and
+  writes nothing; one already writing finishes into its staging folder, since
+  an OCCT write is never cut off, and the folder goes with it. A record gone
+  with the store is no newer result. A child's export under its parent is
+  superseded the same way, by the child's own record.
   Nothing waits on anything after the write: every door given the file -- the
   CAD Viewer, `read_step` and `read_scene`, a snapshot, the mesh doors,
   `step compile`'s current check -- reads that entry and uses its tree. When
@@ -742,7 +758,13 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on disk
   when the build started still has the bytes recorded, and the store maps those
   bytes (their document entry); `--force` always writes
-  (`generation._export_plan`). The run says `kept STEP`. A rebuild that exports
+  (`generation._export_plan`). The run says `kept STEP`. The rule asks only that
+  the store maps the bytes, not that it maps them to this result: a compile of
+  the file (a door opened it after a document-schema change, before the model's
+  next run) or another model's export of equal bytes may stand for it, and refs
+  by lineage would then miss and parts key otherwise. So a kept STEP whose
+  document entry maps its bytes to another tree is mapped to this result: one
+  index write, nothing exported. A rebuild that exports
   the bytes the file already has leaves the file, and its stamp, in place. A
   model whose result stands has its file exported again by its next run, with
   no body run (`generation._hit`, which says why), where another writer wrote
@@ -1557,7 +1579,9 @@ are not cancelled merely because a newer editing request exists.
 - **Same model twice.** Both builds run. Each publishes objects (idempotent)
   and then consults the publish rule: the one whose closure matches the
   sources as they are now wins the record; the other's result is left as
-  unreferenced objects for GC. A rejected explicit save reports failure.
+  unreferenced objects for GC. A rejected explicit save reports failure. The
+  files are written for the result the record names: an export whose result a
+  newer record replaced writes nothing (§3, *Exports*).
 - **Edit a child while its parent builds.** The parent composed the child's
   result when it called it, decoded or built in the parent's own process
   (§9a), and records the child by that result's key; a
@@ -1594,10 +1618,15 @@ digests (absence counts too). It publishes its result's complete immutable
 objects and its record, has the STEP exported to a private staging folder
 (§3, *Exports*), and checks source freshness and the expected output pair
 before it moves the file into place. A concurrently written byte-identical
-pair is idempotent; a different pair makes the save fail. After the final
-renames it checks the written digests before recording the output. A STEP
-re-emission has an explicit immutable input/annotation digest, not a Python
-closure; its output-pair check still applies.
+pair is idempotent, and so is the pair the same model's previous export saved
+while this build's body ran -- the pair the record this build replaced names,
+read again at publication from the result stored under that record's key,
+which that export's publication rewrote: two edits in a row overlap routinely,
+the first one's file landing during the second one's body, and it is the
+model's own. Any other pair (another model's, a person's edit) makes the save
+fail. After the final renames it checks the written digests before recording
+the output. A STEP re-emission has an explicit immutable input/annotation
+digest, not a Python closure; its output-pair check still applies.
 
 Each rename is atomic; the group is not a transaction or compare-and-swap.
 There is a check-to-rename race with independent CLI or external writers, and

@@ -125,10 +125,12 @@ class _ExportPlan:
     """What a build does about its STEP (STORE.md §3, *Exports*): keep the file on disk,
     whose recorded output entry is ``kept``, or export the result. ``why`` says why a file
     the same result was last written to is written again (a current model's re-export,
-    :func:`_hit`); empty otherwise."""
+    :func:`_hit`); empty otherwise. ``mapped`` is the tree the store maps a kept file's
+    bytes to."""
 
     kept: dict | None
     why: str = ""
+    mapped: str | None = None
 
     @property
     def kept_sha256(self) -> str:
@@ -142,6 +144,18 @@ class _ExportPlan:
         if self.kept is not None:
             return dict(self.kept)
         return {"sha256": "", "writer": STEP_WRITER_SCHEME}
+
+    def map_kept(self, tree: str) -> None:
+        """A kept file's bytes mapped to the result ``tree``, where the store maps them to
+        another tree: the kept rule asks only that the store maps the bytes, and a compile of
+        the file (a door opened it after a document-schema change, before this run) or
+        another model's export of equal bytes stands for it then, so refs by lineage would
+        miss and parts key otherwise. One index write; nothing is exported."""
+        if self.kept is None or self.mapped in (None, tree):
+            return
+        from cadgen.store.records import note_document_tree
+
+        note_document_tree(self.kept_sha256, tree, producer=_producer_or_none())
 
 
 def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, force: bool,
@@ -161,7 +175,8 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     entry = document_entry_for_hash(sha) if sha else None
     this_writer = prior.get("writer") == STEP_WRITER_SCHEME
     if not force and same and sha and this_writer and on_disk == sha and entry is not None:
-        return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer")})
+        return _ExportPlan(kept={key: prior[key] for key in ("sha256", "writer")},
+                           mapped=str(entry.get("tree") or "") or None)
     why = ""
     if not force and same and sha and on_disk == sha:
         why = "was written by another writer" if not this_writer else "has no entry in the store"
@@ -188,6 +203,39 @@ def _submit_export(tree: str, staged: Path, *, live: Mapping[str, object]) -> ob
     return submit_artifact({"kind": "export", "tree": tree, "out": str(staged)})
 
 
+def _producer_or_none() -> dict | None:
+    """This runtime's display producer, or None where it cannot name one."""
+    from cadgen.store.parts import producer_identity
+
+    try:
+        return producer_identity()
+    except ValueError:
+        return None
+
+
+def _previous_pairs(previous: Mapping[str, object], step_key: str, sidecar_key: str) -> tuple:
+    """The STEP and sidecar digests the model's previous export wrote, as the record this build
+    replaced (``previous``) named them -- read again now from the result stored under that
+    record's key, which its export's publication rewrote if it landed after this build read the
+    record. Bytes the same model's previous export saved while this build's body ran are the
+    model's own, never a competing edit (STORE.md §7)."""
+    from cadgen.store.results import read_result
+
+    stored = read_result(str(previous.get("key") or ""))
+    pairs = []
+    for record in (previous, (stored or {}).get("record") or {}):
+        outputs = record.get("outputs") or {}
+        step = str((outputs.get(step_key) or {}).get("sha256") or "") or None
+        if step is not None:
+            pairs.append((step, str((outputs.get(sidecar_key) or {}).get("sha256") or "") or None))
+    return tuple(pairs)
+
+
+class _Superseded(Exception):
+    """A newer result of the model is recorded: what this export owes is that result's to write.
+    Its argument is the file it was writing."""
+
+
 class _Export:
     """What a model's build owes beside its record, finished after it (STORE.md §3,
     *Exports*; §9a).
@@ -206,15 +254,24 @@ class _Export:
     after the STEP its file's bytes then map to; a mesh-only model has only its meshes.
     An export that fails fails the command, and the file on disk stays as it was.
 
+    An export writes only while the model's record still names its result (``key``, the
+    result's key, and its tree): read again before it takes the export job's answer, right
+    before the file replaces the saved one, before the record is written and before the
+    meshes are cut. Once a newer build of the model has recorded its result, this one's files
+    are that build's to write: an export job that has not begun writes nothing, one already
+    writing finishes into its staging folder (an OCCT write is never cut off) and is
+    discarded, and the build says so in one line.
+
     ``step`` is what the STEP needs, or None for a model that writes none: the plan
     (:func:`_export_plan`), the record to fill, the sidecar payload, the document pair
-    expected on disk, the build's live shapes (``live``) and the publish rule to ask
-    again (``still_saves``). The document entry a written file gets names the producer
-    the export wrote with.
+    expected on disk, the pairs the model's previous export wrote (``previous``, asked at
+    publication), the build's live shapes (``live``) and the publish rule to ask again
+    (``still_saves``). The document entry a written file gets names the producer the export
+    wrote with.
     """
 
-    def __init__(self, spec: EntrySpec, tree: str, *, logger: CliLogger, step: dict | None = None,
-                 display: bool = False, announce: str | None = None) -> None:
+    def __init__(self, spec: EntrySpec, tree: str, *, key: str | None, logger: CliLogger,
+                 step: dict | None = None, display: bool = False, announce: str | None = None) -> None:
         from contextlib import ExitStack
 
         from cadgen._internal import build_timing
@@ -223,7 +280,7 @@ class _Export:
         run = current_run()
         if run is None:
             raise RuntimeError(f"{spec.cad_ref}: an export was queued outside a build run")
-        self.spec, self.tree, self.logger = spec, tree, logger
+        self.spec, self.tree, self.key, self.logger = spec, tree, key, logger
         self.step, self.display, self.announce = step, display, announce
         # The clock the model's ``done`` event reads, so its ``STEP saved`` event is on it
         # too. A model restored rather than built has no build clock: its export's queueing.
@@ -246,20 +303,54 @@ class _Export:
         from cadgen.daemon.telemetry import job_reused
 
         try:
+            if self.step is not None:
+                self._still_current(self.spec.step_path)
             written = self._publish_step() if self.step is not None else False
             if self.display:
                 _ensure_reused_display(self.spec, self.tree, logger=self.logger)
+            if self.spec.mesh_exports:
+                self._still_current(self.spec.mesh_exports[0].path)
             written = bool(_produce_declared_mesh_exports(self.spec, logger=self.logger, source_tree=self.tree)) or written
             if self.announce:
                 self.command_logger.info(self.announce)
             if written:
                 job_reused(False)  # a file written now: not all of it was the store's
+        except _Superseded as superseded:
+            self._superseded(superseded.args[0])
         finally:
             self.stage.close()
 
     def abandon(self) -> None:
         """Leave the file as it is: the staged copy goes, and the next run exports again."""
         self.stage.close()
+
+    def _still_current(self, path: Path) -> None:
+        """Raise :class:`_Superseded` for ``path`` when the model's record names another result
+        than this export's (its key or its tree). A record gone with the store is no newer
+        result: the export goes on and fails or lands on its own."""
+        from cadgen.store.records import read_record
+
+        record = read_record(_model_for_spec(self.spec))
+        if record is not None and (record.get("key") != self.key or record.get("tree") != self.tree):
+            raise _Superseded(path)
+
+    def _superseded(self, path: Path) -> None:
+        """A newer result of the model is recorded: its build writes the files. An export job
+        that has not begun is told to write nothing; one already writing finishes into the
+        staging folder, never cut off, before that folder goes."""
+        if self.job is not None and not self.job.done():
+            from cadgen.store.exports import abandon
+
+            abandon(self.step["staged"])
+            try:
+                self.job.result()
+            except Exception:  # noqa: BLE001 - the file is the newer build's; this write is discarded
+                pass
+        from cadgen.store.index import display_model
+
+        self.command_logger.info(f"{_display_path(Path(path))} not written: a newer build of "
+                                 f"{_display_path(Path(display_model(_model_for_spec(self.spec))))} replaced this "
+                                 "result, and writes it")
 
     def _publish_step(self) -> bool:
         """The STEP in place from the export's answer, or kept (STORE.md §3, *Exports*; §5,
@@ -294,10 +385,13 @@ class _Export:
         expected_document_pair = step["expected_document_pair"]
         if expected_document_pair is not None:
             current = _document_pair_state(spec.step_path)
-            if current != expected_document_pair and current != (digest, sidecar):
+            # The pair the build found, its own bytes, or the pair the model's previous export
+            # saved meanwhile; anything else is a competing edit (another model, a person).
+            if current not in (expected_document_pair, (digest, sidecar), *step["previous"]()):
                 raise RuntimeError(f"{spec.cad_ref}: result was not saved: the STEP file or its annotations changed "
                                    "during the build")
         step["still_saves"]()
+        self._still_current(step_path)
         if _document_pair_state(spec.step_path)[0] != digest:
             # Separate atomic writes, not a multi-file transaction. Equal bytes stay in place,
             # with their stamp. The written copy's identity survives the rename, so its digest
@@ -320,6 +414,8 @@ class _Export:
         else:
             outputs.pop(sidecar_key, None)
             forget_output(sidecar_key)
+        # A newer result's record is never overwritten with this one's.
+        self._still_current(step_path)
         write_record(model_path, record)
         saved_at = time.perf_counter() - self.started
         executors.emit_event(executors.model_event(
@@ -899,11 +995,14 @@ def _generate_part_outputs(
             # file is published and its meshes cut when the run finishes its exports
             # (_Export) -- after this build's done, while a parent's body goes on.
             kept = writes_step and export_plan.kept is not None
+            if kept:
+                export_plan.map_kept(tree_hash)
             summary = (f"kept STEP: {_display_path(spec.step_path)} (its bytes would not change)" if kept
                        else _generated_python_glb_summary(spec))
-            _Export(spec, tree_hash, logger=logger, announce=None if reemit_source_hash else summary,
+            _Export(spec, tree_hash, key=key, logger=logger, announce=None if reemit_source_hash else summary,
                     step={"plan": export_plan, "record": record, "sidecar_payload": sidecar_payload,
                           "expected_document_pair": expected_document_pair, "live": live,
+                          "previous": lambda: _previous_pairs(previous, step_key, sidecar_key),
                           "still_saves": still_saves} if writes_step else None)
         # Every part of the result is stored before the build reports done (the pool's
         # job for them runs while the record is written), so a view of what it built only
@@ -1808,12 +1907,14 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
         sidecar_owed = pair[1] != (str(recorded.get("sha256") or "") or None)
         if plan.kept is None:
             logger.info(f"{_display_path(spec.step_path)} {plan.why}; writing it again")
-        elif sidecar_owed:
-            logger.info(f"{_display_path(source_sidecar_path(spec.step_path))} is not the record's; writing it again")
+        else:
+            plan.map_kept(tree)
+            if sidecar_owed:
+                logger.info(f"{_display_path(source_sidecar_path(spec.step_path))} is not the record's; writing it again")
         if plan.kept is None or sidecar_owed:
             step = {"plan": plan, "record": copy.deepcopy(record), "sidecar_payload": _recorded_sidecar(record),
-                    "expected_document_pair": pair, "live": {}, "still_saves": lambda: None}
-    _Export(spec, tree, logger=logger, step=step, display=display)
+                    "expected_document_pair": pair, "live": {}, "previous": lambda: (), "still_saves": lambda: None}
+    _Export(spec, tree, key=record.get("key"), logger=logger, step=step, display=display)
 
 
 def build_child(defn: object) -> tuple[str, str]:

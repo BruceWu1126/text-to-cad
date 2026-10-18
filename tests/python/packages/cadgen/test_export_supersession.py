@@ -1,0 +1,245 @@
+"""A newer result's export supersedes an older one's (STORE.md §3, *Exports*; §7).
+
+An export writes only while the model's record still names its result: once a newer build of
+the model has recorded its result, the older run's files are the newer build's to write. A
+build accepts, on the file it saves, the bytes the same model's previous export saved while
+its body ran, and still refuses anyone else's. A kept STEP whose bytes the store maps to
+another tree is mapped back to its result.
+
+The older run is held open in this process -- its exports queued, not yet finished -- while
+the newer build runs through the daemon, as two edits in a row do.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import io
+import os
+import subprocess
+import sys
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from tests.python.support.paths import REPO_ROOT, add_repo_path
+from tests.python.support.tmp_root import generated_cad_directory
+
+add_repo_path("packages/cadgen/src")
+
+PART = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+WIDTH = {width}
+
+
+@step
+def part():
+    return bd.Box(WIDTH, 3.0, 2.0)
+
+
+if __name__ == "__main__":
+    part()
+"""
+
+# The body says it has started, then waits for the test to let it go on.
+WAITING_PART = """\
+import os
+import time
+from pathlib import Path
+
+from cadgen import step
+from cadgen import build123d as bd
+
+WIDTH = {width}
+HERE = Path(__file__).resolve().parent
+
+
+@step
+def part():
+    (HERE / "started").write_text("started")
+    while not os.path.exists(HERE / "go"):
+        time.sleep(0.01)
+    return bd.Box(WIDTH, 3.0, 2.0)
+
+
+if __name__ == "__main__":
+    part()
+"""
+
+CHILD = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+DEPTH = {depth}
+
+
+@step
+def child():
+    return bd.Box(4.0, 3.0, DEPTH)
+"""
+
+PARENT = """\
+from cadgen import step
+from cadgen import build123d as bd
+from child import child
+
+
+@step
+def parent():
+    return bd.Compound(children=[bd.Pos(8, 0, 0) * child(), bd.Box(2, 2, 2)], label="parent")
+
+
+if __name__ == "__main__":
+    parent()
+"""
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+class ExportSupersession(unittest.TestCase):
+    def setUp(self):
+        temporary = generated_cad_directory(prefix="supersession-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        patcher = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _command(self, script: Path) -> dict:
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [
+            str(REPO_ROOT / "packages" / "cadgen" / "src"), os.environ.get("PYTHONPATH", "")]))}
+        env.pop("CADGEN_DAEMON_CHILD", None)
+        return {"args": [sys.executable, script.name], "cwd": str(script.parent), "env": env,
+                "stdout": subprocess.PIPE, "stderr": subprocess.PIPE, "text": True}
+
+    def build(self, script: Path) -> subprocess.CompletedProcess:
+        """``python <script>``, through the daemon, as a person runs it."""
+        return subprocess.run(**self._command(script), timeout=600)
+
+    @contextlib.contextmanager
+    def held(self, script: Path):
+        """A run of ``script`` built in this process, its exports queued and finished only as
+        the block ends."""
+        from cadgen._internal.generation import _selected_specs_for_targets, build_model
+        from cadgen.authoring import build_run
+        from cadgen.cli_logging import CliLogger
+
+        logger = CliLogger("cadgen", verbose=False)
+        with build_run(logger):
+            _specs, (spec,) = _selected_specs_for_targets([str(script)])
+            build_model(spec, generator=None, force=False, profile=False, logger=logger)
+            yield
+
+    def await_started(self, process: subprocess.Popen) -> None:
+        deadline = time.monotonic() + 300
+        while not (self.root / "started").exists():
+            if process.poll() is not None:
+                self.fail(f"the build ended before its body started: {process.communicate()[1][-3000:]}")
+            self.assertLess(time.monotonic(), deadline, "the build's body never started")
+            time.sleep(0.02)
+
+    def assert_holds_its_result(self, script: Path) -> str:
+        """The model's file holds the result its record names: its bytes map to that tree."""
+        from cadgen.store.records import read_record, tree_for_document_hash
+
+        tree = read_record(script)["tree"]
+        self.assertEqual(tree_for_document_hash(_digest(script.with_suffix(".step"))), tree)
+        return tree
+
+    def test_an_older_runs_export_is_skipped_once_a_newer_result_is_recorded(self):
+        from cadgen.store.records import read_record
+
+        script = self.root / "part.py"
+        script.write_text(PART.format(width=10.0), encoding="utf-8")
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said), self.held(script):
+            older = read_record(script)["tree"]
+            script.write_text(PART.format(width=11.0), encoding="utf-8")
+            newer = self.build(script)
+            self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
+        self.assertRegex(said.getvalue(), r"part\.step not written: a newer build of \S*part\.py replaced this result")
+        self.assertNotEqual(self.assert_holds_its_result(script), older, "the file holds the newer result")
+
+    def test_a_childs_export_under_its_parent_is_skipped_likewise(self):
+        from cadgen.store.records import read_record
+
+        (self.root / "child.py").write_text(CHILD.format(depth=2.0), encoding="utf-8")
+        parent = self.root / "parent.py"
+        parent.write_text(PARENT, encoding="utf-8")
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said), self.held(parent):
+            older = {name: read_record(self.root / f"{name}.py")["tree"] for name in ("child", "parent")}
+            (self.root / "child.py").write_text(CHILD.format(depth=3.0), encoding="utf-8")
+            newer = self.build(parent)
+            self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
+        for name in ("child", "parent"):
+            self.assertRegex(said.getvalue(), rf"{name}\.step not written: a newer build of \S*{name}\.py replaced this result")
+            self.assertNotEqual(self.assert_holds_its_result(self.root / f"{name}.py"), older[name], name)
+
+    def test_an_export_its_build_abandoned_writes_nothing(self):
+        from cadgen.store.exports import abandon, export_step
+
+        stage = self.root / ".stage"
+        stage.mkdir()
+        abandon(stage / "part.step")
+        self.assertEqual(export_step("0" * 64, stage / "part.step"), {"skipped": True})
+        self.assertFalse((stage / "part.step").exists())
+
+    def test_the_models_previous_export_landing_during_a_build_is_its_own(self):
+        script = self.root / "part.py"
+        script.write_text(PART.format(width=10.0), encoding="utf-8")
+        with self.held(script):
+            script.write_text(WAITING_PART.format(width=11.0), encoding="utf-8")
+            newer = subprocess.Popen(**self._command(script))
+            self.addCleanup(newer.kill)
+            self.await_started(newer)
+        # The older run's export landed while the newer build's body runs.
+        older = self.assert_holds_its_result(script)
+        (self.root / "go").write_text("go", encoding="utf-8")
+        _out, err = newer.communicate(timeout=600)
+        self.assertEqual(newer.returncode, 0, err[-3000:])
+        self.assertNotEqual(self.assert_holds_its_result(script), older, "the newer build saved its own file")
+
+    def test_a_person_editing_the_file_during_a_build_still_stops_its_save(self):
+        script = self.root / "part.py"
+        script.write_text(PART.format(width=10.0), encoding="utf-8")
+        self.assertEqual(self.build(script).returncode, 0)
+        script.write_text(WAITING_PART.format(width=11.0), encoding="utf-8")
+        newer = subprocess.Popen(**self._command(script))
+        self.addCleanup(newer.kill)
+        self.await_started(newer)
+        edited = b"ISO-10303-21;\nEND-ISO-10303-21;\n"
+        (self.root / "part.step").write_bytes(edited)
+        (self.root / "go").write_text("go", encoding="utf-8")
+        _out, err = newer.communicate(timeout=600)
+        self.assertNotEqual(newer.returncode, 0)
+        self.assertIn("the STEP file or its annotations changed during the build", err)
+        self.assertEqual((self.root / "part.step").read_bytes(), edited, "the person's file stays")
+
+    def test_a_kept_step_the_store_maps_to_a_compile_is_mapped_back_to_its_result(self):
+        from cadgen._internal.doors import document_snapshot
+        from cadgen.store.index import remove_entry
+        from cadgen.store.records import document_key, tree_for_document_hash
+
+        script = self.root / "part.py"
+        script.write_text(PART.format(width=10.0), encoding="utf-8")
+        self.assertEqual(self.build(script).returncode, 0)
+        result = self.assert_holds_its_result(script)
+        document = script.with_suffix(".step")
+        # A document-schema change left the bytes unmapped, and a door opened the file before
+        # the model's next run: the compile of its bytes stands for it.
+        remove_entry("document", document_key(_digest(document)))
+        self.assertNotEqual(document_snapshot(document)[1], result)
+        rerun = self.build(script)
+        self.assertEqual(rerun.returncode, 0, rerun.stderr[-3000:])
+        self.assertIn("current", rerun.stdout)
+        self.assertEqual(tree_for_document_hash(_digest(document)), result, "the entry names the result again")
+
+
+if __name__ == "__main__":
+    unittest.main()
