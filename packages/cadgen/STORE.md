@@ -376,6 +376,11 @@ A later consuming construction can pin an author label to that particular
 copied output. Distinct outputs of one assembly copy keep independent labels,
 even if their source bodies shared native geometry; earlier geometry keeps its
 original naming cutoff, and provenance can name both outputs at that copy call.
+Simple Copy origins are stored as immutable feature-input indices and global
+ordinal vectors. Reads reconstruct their exact history tuples, independently
+of whether the whole-copy certificate is later withdrawn. Every native query
+and placement lookup finishes during composition; ambiguous or chained reports
+expand into the ordinary origin representation before composition returns.
 An element passed on unchanged from a shape no feature made -- a child's, a
 file's -- has no name and names nothing (it is no source, parent or lower
 element of a name); an element made out of one alone falls to the passes, and

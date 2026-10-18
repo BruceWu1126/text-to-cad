@@ -45,10 +45,12 @@ points, a text) has nothing to report and is not patched.
 
 from __future__ import annotations
 
+import bisect
 import contextlib
 import functools
 import itertools
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
@@ -92,7 +94,7 @@ class History:
     ``result_rules`` separately holds complete first-input identity tables for
     individual results, computed by the trace and reused on hits (``kernel_trace``)."""
 
-    origins: dict[tuple[int, int, int], tuple[tuple[int, int, int, str, tuple[int, ...]], ...]] = field(
+    origins: Mapping[tuple[int, int, int], tuple[tuple[int, int, int, str, tuple[int, ...]], ...]] = field(
         default_factory=dict)
     structures: dict[Any, Any] = field(default_factory=dict, repr=False)
     # Complete first-input identity tables, separately from full structures:
@@ -115,6 +117,133 @@ class Copy:
 
     source: Any
     ordinals: tuple[tuple[int, ...], ...]
+
+
+class _Origins(Mapping):
+    """Exact Copy origins, synthesized from frozen global-input ordinal vectors.
+
+    Independent of certificates, with no native handles or expanding read cache.
+    Sparse rows retain ordinary composition's values verbatim.
+    """
+
+    def __init__(self, vectors: dict[int, tuple], sparse: dict) -> None:
+        self.vectors = vectors
+        self.sparse = sparse
+        self.size = len(sparse) + sum(sum(ordinal != 0 for ordinal in ordinals)
+                                      for kinds in vectors.values() for _owners, ordinals in kinds)
+
+    def __getitem__(self, key: tuple) -> tuple:
+        if key in self.sparse:
+            return self.sparse[key]
+        if not isinstance(key, tuple) or len(key) != 3:
+            raise KeyError(key)
+        position, kind, ordinal = key
+        kinds = self.vectors.get(position)
+        if kinds is None or not isinstance(kind, int) or not 0 <= kind < len(KINDS) or not isinstance(ordinal, int):
+            raise KeyError(key)
+        owners, ordinals = kinds[kind]
+        if not 0 < ordinal <= len(ordinals) or not ordinals[ordinal - 1]:
+            raise KeyError(key)
+        j = owners if isinstance(owners, int) else owners[ordinal - 1]
+        return ((j, kind, ordinals[ordinal - 1], SAME, (1,)),)
+
+    def __iter__(self) -> Iterator[tuple[int, int, int]]:
+        yield from self.sparse
+        for position, kinds in self.vectors.items():
+            for kind, (_owners, ordinals) in enumerate(kinds):
+                for ordinal, source in enumerate(ordinals, 1):
+                    key = position, kind, ordinal
+                    if source and key not in self.sparse:
+                        yield key
+
+    def __len__(self) -> int:
+        return self.size
+
+
+class _CopyRows:
+    """Temporary direct-source evidence for one Copy; released after compose."""
+
+    def __init__(self, result: Any, maps: list, local: list[list[int]], start: int) -> None:
+        self.result = result
+        self.maps = maps
+        self.local = local
+        self.start = start
+        self.stop = start + sum(len(kind) for kind in local)
+        self.owners = [[0] * len(kind) for kind in local]
+        self.ordinals = [[0] * len(kind) for kind in local]
+        self.local_frozen: tuple | None = None
+        self.frozen: tuple | None = None
+
+    def origin(self, kind: int, ordinal: int) -> tuple:
+        return ((self.owners[kind][ordinal - 1], kind, self.ordinals[kind][ordinal - 1], SAME, (1,)),)
+
+    def freeze(self) -> tuple:
+        if self.frozen is None:
+            kinds = []
+            for kind, (owners, ordinals) in enumerate(zip(self.owners, self.ordinals)):
+                owner = owners[0] if owners and all(j == owners[0] for j in owners) else tuple(owners)
+                # Usually the feature input is the copied body itself. Keep
+                # the same immutable vector without depending on Copy's lifetime.
+                held = (self.local_frozen[kind] if self.local_frozen is not None and ordinals == self.local[kind]
+                        else tuple(ordinals))
+                kinds.append((owner, held))
+            self.frozen = tuple(kinds)
+        return self.frozen
+
+
+def _compact_origins(rows: list[_CopyRows], results: list[Any], reported: Any) -> _Origins | None:
+    """Bind direct/located results and prove all other output memberships now.
+
+    Any conflicting actual/partner membership requests the ordinary placement
+    merge. Only immutable integer vectors and sparse values escape this helper.
+    """
+    tops: dict[Any, list[_CopyRows]] = {}
+    for row in rows:
+        tops.setdefault(row.result.TShape(), []).append(row)
+    ends = [row.stop for row in rows]
+
+    def origin(at: int) -> tuple:
+        row = rows[bisect.bisect_left(ends, at)]
+        offset = row.start
+        for kind, ordinals in enumerate(row.local):
+            if at <= offset + len(ordinals):
+                ordinal = row.maps[kind].FindIndex(reported.FindKey(at))
+                return row.origin(kind, ordinal)
+            offset += len(ordinals)
+        raise AssertionError("reported Copy element outside its record")
+
+    vectors: dict[int, tuple] = {}
+    sparse: dict = {}
+    for position, result in enumerate(results):
+        if result is None:
+            continue
+        candidates = tops.get(result.TShape(), ())
+        if len(candidates) > 1:
+            return None
+        row = candidates[0] if candidates else None
+        if row is not None and row.result.IsSame(result):
+            vectors[position] = row.freeze()
+            continue
+        # Legacy placement checks the actual result AND each located partner
+        # map. A sole partner supplies its ordinal vector, but actual matches
+        # must agree; otherwise let _places/_merged retain their exact order.
+        for kind, topabs in enumerate(KINDS):
+            elements = _map(result, topabs)
+            if row is not None and elements.Extent() != len(row.local[kind]):
+                return None
+            for ordinal in range(1, elements.Extent() + 1):
+                at = reported.FindIndex(elements.FindKey(ordinal))
+                if not at:
+                    continue
+                found = origin(at)
+                if row is not None:
+                    if found != row.origin(kind, ordinal):
+                        return None
+                else:
+                    sparse[(position, kind, ordinal)] = found
+        if row is not None:
+            vectors[position] = row.freeze()
+    return _Origins(vectors, sparse)
 
 
 # --- recording ------------------------------------------------------------------------------
@@ -504,6 +633,11 @@ def _feeding(taken: list[_Record], results: list[Any]) -> list[_Record]:
     return feeding
 
 
+def _simple_copy_rows(taken: list[_Record]) -> list[_CopyRows] | None:
+    """A compact attempt only where every feeding maker can give a direct Copy."""
+    return [] if all(record.adapter is _COPY and len(record.inputs) == 1 for record in taken) else None
+
+
 def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> History:
     """The feature's :class:`History`: ``inputs`` the shapes it was given as it was given
     them (None where empty), ``results`` the shapes it returned (None where empty) and
@@ -522,10 +656,12 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
     shapes: list[Any] = []
     kinds: list[int] = []
     origins: list[dict[tuple[int, int, int], tuple[str, tuple[int, ...]]]] = []
+    compact = _simple_copy_rows(taken)
 
     def source(sub: Any, kind: int) -> tuple | None:
         index = reported.FindIndex(sub)
         if index:
+            promote()  # prior reported history takes precedence over feature inputs
             return tuple((j, k, o, how, place) for (j, k, o), (how, place) in origins[index - 1].items())
         for j, shape in enumerate(inputs):
             if shape is None:
@@ -552,6 +688,35 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         for j, k, o, how, place in found:
             _merge(merged, (j, k, o), how, place)
 
+    def promote() -> None:
+        """Expand only the already reported numeric prefix, without a query.
+
+        Copy vectors are in target order; the eager reporter first saw them in
+        source ordinal order. Include the current record's partial prefix too.
+        """
+        nonlocal compact
+        if compact is None:
+            return
+        prefix, compact = compact, None
+        for row in prefix:
+            for kind, ordinals in enumerate(row.local):
+                targets = [0] * len(ordinals)
+                for target, ordinal in enumerate(ordinals, 1):
+                    if ordinal and row.ordinals[kind][target - 1]:
+                        targets[ordinal - 1] = target
+                for target in targets:
+                    if target:
+                        report(row.maps[kind].FindKey(target), row.origin(kind, target))
+
+    def answers_from(sub: Any, found: tuple, answers: list) -> None:
+        for at, (made, how) in enumerate(answers, 1):
+            made_kind = _KIND.get(made.ShapeType())
+            if made_kind is None or made.IsSame(sub):
+                continue
+            merged = reporting(made, made_kind)
+            for j, k, o, was, place in found:
+                _merge(merged, (j, k, o), _then(was, how), (*place, at))
+
     copied: list[tuple[_Record, Copy]] = []
     for record in taken:
         if record.adapter is _WIRE:
@@ -559,6 +724,7 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
             continue
         query = _prepared(record)
         if query is None:
+            promote()  # its result may still be a legacy located-partner alternative
             continue
         held = None if record.adapter.generator else [_map(record.result, kind) for kind in KINDS]
         # Reuse the answers needed for element history. Whole-copy identity needs
@@ -566,38 +732,68 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         # covering every result element once, from an actual Copy maker.
         copying = record.adapter is _COPY and len(record.inputs) == 1
         copy_ordinals = [[0] * elements.Extent() for elements in held] if copying else None
+        row = None
+        if compact is not None:
+            row = _CopyRows(record.result, held, copy_ordinals, reported.Extent())
+            compact.append(row)
         for shape in record.inputs:
             for kind, topabs in enumerate(KINDS):
                 subs = _map(shape, topabs)
                 if copying and subs.Extent() != len(copy_ordinals[kind]):
                     copying = False
+                    promote()
                 for ordinal in range(1, subs.Extent() + 1):
                     sub = subs.FindKey(ordinal)
                     if held is not None and held[kind].Contains(sub):
                         copying = False
+                        promote()
                         continue
                     found = source(sub, kind)
                     if found is None:
                         copying = False
+                        promote()
                         continue
                     answers = _asked(query, sub)
                     if copying:
                         target = held[kind].FindIndex(answers[0][0]) if len(answers) == 1 else 0
                         if not target or answers[0][1] != SAME or copy_ordinals[kind][target - 1]:
                             copying = False
+                            promote()
                         else:
                             copy_ordinals[kind][target - 1] = ordinal
-                    for at, (made, how) in enumerate(answers, 1):
-                        made_kind = _KIND.get(made.ShapeType())
-                        if made_kind is None or made.IsSame(sub):
+                    if compact is not None:
+                        # The source was directly resolved, never an earlier
+                        # report. A shared target would need _merge, so promote
+                        # before processing this already-read answer ordinarily.
+                        made = answers[0][0]
+                        if (len(found) == 1 and found[0][3:] == (SAME, ())
+                                and not reported.Contains(made)):
+                            j, _kind, global_ordinal, _how, _place = found[0]
+                            row.owners[kind][target - 1] = j
+                            # Share the local permutation's int object where
+                            # global ordinals coincide, rather than retain two.
+                            row.ordinals[kind][target - 1] = ordinal if global_ordinal == ordinal else global_ordinal
+                            reported.Add(made)
                             continue
-                        merged = reporting(made, made_kind)
-                        for j, k, o, was, place in found:
-                            _merge(merged, (j, k, o), _then(was, how), (*place, at))
+                        promote()
+                    answers_from(sub, found, answers)
         if copying and all(all(ordinals) for ordinals in copy_ordinals):
-            copied.append((record, Copy(record.inputs[0], tuple(tuple(kind) for kind in copy_ordinals))))
+            local = tuple(tuple(kind) for kind in copy_ordinals)
+            copied.append((record, Copy(record.inputs[0], local)))
+            if row is not None:
+                row.local_frozen = local
+        elif compact is not None:
+            promote()
     history = History()
     history.copies = _copies(inputs, results, copied, all_taken)
+    if compact is not None:
+        if not reported.Extent():
+            return history
+        packed = _compact_origins(compact, results, reported)
+        if packed is not None:
+            history.origins = packed
+            return history
+        promote()
     if not origins:
         return history
     # Where each reported shape is among the results: in a result, at its ordinal there --
@@ -607,6 +803,7 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
             for position, result in enumerate(results) if result is not None
             for shape in [result] + [record.result for record in taken
                                      if record.result.IsPartner(result) and not record.result.IsSame(result)]]
+    eager: dict = {}
     for index, places in enumerate(_places(shapes, kinds, held)):
         if not places:
             continue
@@ -614,8 +811,9 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         kind = kinds[index]
         for position, ordinal in places:
             key = (position, kind, ordinal)
-            known = history.origins.get(key)
-            history.origins[key] = found if known is None else _merged(known, found)
+            known = eager.get(key)
+            eager[key] = found if known is None else _merged(known, found)
+    history.origins = eager
     return history
 
 

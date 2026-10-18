@@ -1721,6 +1721,196 @@ class HistoryCaptureTest(KernelMemoCase):
     """What the kernel's makers report while a feature runs (``kernel_history``): recorded
     for the feature that ran them, composed through their chain, kept with the memo's entry."""
 
+    @staticmethod
+    def _copy_record(source):
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+
+        with kernel_history.recording() as records:
+            result = BRepBuilderAPI_Copy(source).Shape()
+        return result, records
+
+    @staticmethod
+    def _compose_origins(inputs, results, records, eager=False):
+        before = kernel_history.stats()["queries"]
+        with (mock.patch.object(kernel_history, "_simple_copy_rows", return_value=None)
+              if eager else contextlib.nullcontext()):
+            history = kernel_history.compose(inputs, results, records)
+        return history, kernel_history.stats()["queries"] - before
+
+    def test_compact_copy_origins_keep_global_ordinals_placements_wrappers_and_rejection(self) -> None:
+        import copy
+        from types import SimpleNamespace
+        from build123d import Location, Solid
+        from OCP.BRep import BRep_Builder
+        from OCP.TopoDS import TopoDS_Compound
+
+        def compound(*shapes):
+            result = TopoDS_Compound()
+            builder = BRep_Builder()
+            builder.MakeCompound(result)
+            for shape in shapes:
+                builder.Add(result, shape)
+            return result
+
+        first = Solid.make_box(2, 3, 4).wrapped
+        second = Solid.make_box(3, 4, 5).wrapped.Moved(Location((10, 0, 0)).wrapped)
+        source = compound(first, second)
+        copied, records = self._copy_record(second)
+        outputs = [copied, copied.Moved(Location((0, 20, 0)).wrapped), copied.Reversed(), compound(copied), source]
+        inputs = [source, second]  # the earlier containing input owns every source element
+        history, queries = self._compose_origins(inputs, outputs, records)
+        eager, eager_queries = self._compose_origins(inputs, outputs, records, eager=True)
+        self.assertEqual((queries, eager_queries), (26, 26))
+        expected = dict(eager.origins)
+        self.assertIsInstance(history.origins, kernel_history._Origins)
+        storage = copy.deepcopy(history.origins.__dict__)
+        self.assertEqual(dict(history.origins), expected)
+        self.assertEqual(history.copies, eager.copies)
+        self.assertEqual(set(history.copies), {0, 1, 2})
+        self.assertIs(history.origins.vectors[0], history.origins.vectors[1])
+        self.assertIs(history.origins.vectors[0], history.origins.vectors[2])
+        self.assertTrue(any(key[0] == 3 for key in history.origins), "an uncertified wrapper still has exact origins")
+        self.assertFalse(any(key[0] == 4 for key in history.origins), "the untouched wrapper was proved empty")
+        differs = False
+        for kind, topabs in enumerate(kernel_history.KINDS):
+            local = kernel_history._map(second, topabs)
+            global_map = kernel_history._map(source, topabs)
+            for ordinal, at in enumerate(history.copies[0].ordinals[kind], 1):
+                global_ordinal = global_map.FindIndex(local.FindKey(at))
+                self.assertEqual(history.origins[(0, kind, ordinal)], ((0, kind, global_ordinal, "I", (1,)),))
+                differs |= global_ordinal != at
+        self.assertTrue(differs, "nested-body local ordinals are not the feature input's global ordinals")
+        keys = list(history.origins)
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual((len(history.origins), set(keys)), (len(expected), set(expected)))
+        self.assertEqual(sorted(history.origins.values()), sorted(expected.values()))
+        sentinel = object()
+        for key in ((99, 0, 1), (0, -1, 1), (0, 3, 1), (0, 0, 0), (0, 0, 999)):
+            self.assertIs(history.origins.get(key, sentinel), sentinel)
+            with self.assertRaises(KeyError):
+                history.origins[key]
+
+        def portable(value):
+            return isinstance(value, (int, str)) or isinstance(value, tuple) and all(portable(x) for x in value) or (
+                isinstance(value, dict) and all(portable(k) and portable(v) for k, v in value.items()))
+
+        self.assertTrue(portable(history.origins.__dict__), "the facade contains no native objects or callbacks")
+
+        def fallback(account_history):
+            trace = kernel_trace.Trace(None)
+            trace.record("primitive", ("fixture.py", 1, "fixture"), [], [SimpleNamespace(_wrapped=source)])
+            feature = trace.record("copy", ("fixture.py", 2, "fixture"),
+                                   [(SimpleNamespace(_wrapped=shape), 0, shape) for shape in inputs],
+                                   [SimpleNamespace(_wrapped=result) for result in outputs])
+            feature.history = account_history
+            trace.reject_copies(feature)
+            return trace.account(copied, lambda shape: 1 if shape == copied.TShape() else None)
+
+        account = fallback(history)
+        self.assertEqual(account, fallback(eager))
+        self.assertTrue(all(name is not None for name in account[0]["faces"]))
+        self.assertFalse(history.copies)
+        self.assertEqual(dict(history.origins), expected)
+        source_vertex = kernel_history._map(second, kernel_history.KINDS[0]).FindKey(1)
+        result_vertex = kernel_history._map(copied, kernel_history.KINDS[0]).FindKey(1)
+        source_vertex.TShape().Tolerance(0.02)
+        result_vertex.TShape().Tolerance(0.03)
+        with mock.patch.object(kernel_history, "_map", side_effect=AssertionError("origin read mapped live geometry")), \
+                mock.patch.object(kernel_history, "_asked", side_effect=AssertionError("origin read queried a maker")):
+            self.assertEqual(dict(history.origins), expected)
+        self.assertEqual(history.origins.__dict__, storage, "reads cannot retain an expanding origin cache")
+
+        combined, combined_records = self._copy_record(source)
+        mixed, mixed_queries = self._compose_origins([first, second], [combined], combined_records)
+        reference, reference_queries = self._compose_origins([first, second], [combined], combined_records, eager=True)
+        self.assertEqual((mixed_queries, reference_queries), (52, 52))
+        self.assertIsInstance(mixed.origins, kernel_history._Origins)
+        self.assertEqual(dict(mixed.origins), dict(reference.origins))
+        self.assertTrue(all(isinstance(owners, tuple) for owners, _ordinals in mixed.origins.vectors[0]))
+        self.assertFalse(mixed.copies, "element origins cannot replace whole-source anchoring")
+
+        empty = compound()
+        copied_empty, empty_records = self._copy_record(empty)
+        empty_history, empty_queries = self._compose_origins([empty], [copied_empty], empty_records)
+        self.assertEqual(empty_queries, 0)
+        self.assertFalse(empty_history.origins)
+        self.assertEqual(set(empty_history.copies), {0})
+
+    def test_late_copy_answer_promotes_the_complete_prefix_without_requerying(self) -> None:
+        from build123d import Solid
+
+        source = Solid.make_box(2, 3, 4).wrapped
+        copied, records = self._copy_record(source)
+        copied_again, later = self._copy_record(Solid.make_box(5, 6, 7).wrapped)
+        inputs = [source, later[0].inputs[0]]
+        results = [copied, copied_again]
+        all_records = [*records, *later]
+        original = kernel_history._asked
+        faces = kernel_history._map(copied_again, kernel_history.KINDS[2])
+        vertices = kernel_history._map(copied_again, kernel_history.KINDS[0])
+
+        def compose(eager):
+            calls = 0
+
+            def answer(query, sub):
+                nonlocal calls
+                calls += 1
+                found = original(query, sub)
+                if calls in (27, 28):
+                    return [(vertices.FindKey(29 - calls), "I")]
+                if calls == 51:  # a complete record plus the current record's 24-row prefix
+                    made = found[0][0]
+                    return [(made, "M"), (made, "G"), (faces.FindKey(1), "I")]
+                return found
+
+            with mock.patch.object(kernel_history, "_asked", answer):
+                history, queries = self._compose_origins(inputs, results, all_records, eager=eager)
+            self.assertEqual((calls, queries), (52, 52))
+            return history
+
+        history, eager = compose(False), compose(True)
+        self.assertIsInstance(history.origins, dict)
+        self.assertEqual(dict(history.origins), dict(eager.origins))
+        self.assertEqual(history.copies, eager.copies)
+        self.assertEqual(history.origins[(1, 0, 1)], ((1, 0, 2, "I", (1,)),))
+        self.assertEqual(history.origins[(1, 0, 2)], ((1, 0, 1, "I", (1,)),))
+        self.assertEqual(history.origins[(1, 2, 5)], ((1, 2, 5, "G", (1,)),),
+                         "strongest report keeps the earliest place")
+        self.assertEqual(history.origins[(1, 2, 1)], ((1, 2, 1, "I", (1,)), (1, 2, 5, "I", (3,))))
+
+    def test_copy_chains_shared_targets_and_failed_prepare_keep_eager_history(self) -> None:
+        from build123d import Solid
+
+        source = Solid.make_box(2, 3, 4).wrapped
+        copied, records = self._copy_record(source)
+        chained, next_records = self._copy_record(copied)
+        history, queries = self._compose_origins([source], [chained], [*records, *next_records])
+        eager, eager_queries = self._compose_origins([source], [chained], [*records, *next_records], eager=True)
+        self.assertEqual((queries, eager_queries), (52, 52))
+        self.assertIsInstance(history.origins, dict)
+        self.assertEqual(dict(history.origins), dict(eager.origins))
+        self.assertTrue(all(origin[-1] == (1, 1) for found in history.origins.values() for origin in found))
+
+        duplicate = kernel_history._Record(records[0].maker, records[0].adapter)
+        duplicate.inputs, duplicate.result, duplicate.order = records[0].inputs, copied, records[0].order + 1
+        repeated, count = self._compose_origins([source], [copied], [*records, duplicate])
+        reference, expected_count = self._compose_origins([source], [copied], [*records, duplicate], eager=True)
+        self.assertEqual((count, expected_count), (52, 52))
+        self.assertIsInstance(repeated.origins, dict)
+        self.assertEqual(dict(repeated.origins), dict(reference.origins))
+        self.assertFalse(repeated.copies, "two claims to the same whole result remain ambiguous")
+        prepared = kernel_history._prepared
+
+        def prepare(record):
+            return None if record is duplicate else prepared(record)
+
+        with mock.patch.object(kernel_history, "_prepared", prepare):
+            failed, count = self._compose_origins([source], [copied], [*records, duplicate])
+            reference, expected_count = self._compose_origins([source], [copied], [*records, duplicate], eager=True)
+        self.assertEqual((count, expected_count), (26, 26))
+        self.assertIsInstance(failed.origins, dict)
+        self.assertEqual(dict(failed.origins), dict(reference.origins))
+
     def test_a_maker_a_nested_call_runs_belongs_to_the_enclosing_feature(self) -> None:
         """``split`` runs build123d's own boolean (a patched call, nested) and its makers: one
         feature, whose history is the splitter's and the clean's, from the torus's face."""
