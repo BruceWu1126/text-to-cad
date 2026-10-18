@@ -439,7 +439,7 @@ class SavedDocumentReadTest(unittest.TestCase):
             print(json.dumps({"repaired": cases, "forced": True, "codeIndexReadsForbidden": True}))
             """)
         # A daemon of the guarded process's own, started by it with the guard on its path: the
-        # test file's daemon was started without it. Short: a Unix socket path caps near 104 bytes.
+        # test run's daemon was started without it. Short: a Unix socket path caps near 104 bytes.
         state = tempfile.mkdtemp(prefix="cgg-")
         socket = rf"\\.\pipe\cadgen-guard-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(state, "d.sock")
         self.addCleanup(shutil.rmtree, state, True)

@@ -1,6 +1,6 @@
 """A document's compile is a daemon job, and the events it emits.
 
-Tested with a real daemon (the test file's own) on a real (temporary) store. The one job
+Tested with a real daemon (the test run's) on a real (temporary) store. The one job
 a build hands to the pool is a document compile (``submit_compile``): what it must do is
 compile into the store the job names, report the document's transitions through the event
 sink, capture a failed job's output for the error, and never block the caller until

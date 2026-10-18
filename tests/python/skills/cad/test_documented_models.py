@@ -4,7 +4,7 @@ A skill is consumed by an agent that copies what it reads, so a code block that
 has drifted from the model contract is a generator of broken models, and the
 drift is invisible to every other test. The complete model scripts in
 the main skill and its generation, export, positioning and kinematics references
-are therefore extracted and BUILT here, on the test file's own daemon, in a
+are therefore extracted and BUILT here, on the test run's daemon, in a
 throwaway project with a private store, and every output their decorators
 declare must exist afterwards.
 

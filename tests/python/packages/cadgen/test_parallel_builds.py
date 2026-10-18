@@ -1,6 +1,6 @@
 """Builds through one daemon agree byte for byte, however many run at once.
 
-Every build runs on the daemon (STORE.md §9), the test file's own here: a build of a
+Every build runs on the daemon (STORE.md §9), the test run's here: a build of a
 model whose worker is busy runs on an extra worker beside it. Four builds of one part at
 once must write exactly what one build alone writes -- every file the build writes and
 its store package, by sha256 -- and ``--profile``, parsed where the user typed it, is

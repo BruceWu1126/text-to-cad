@@ -274,7 +274,8 @@ when touching shared surfaces or before handoff:
 - Docs site: `npm --prefix apps/docs run check`
 - API (`api.texttocad.dev`): `npm --prefix apps/api test`
 - Targeted Python tests: `scripts/test/test-python.sh <changed test paths>` (each file
-  on a store and build daemon of its own; `test-global.sh` for `tests/python/global`)
+  on a store of its own, on a build daemon of the run's own; `test-global.sh` for
+  `tests/python/global`)
 
 When a task changes what the bundlers consume, run `scripts/bundle/bundle.sh`
 and confirm the change lands in the built runtime. There is nothing to commit:

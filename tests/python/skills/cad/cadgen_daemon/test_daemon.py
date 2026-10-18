@@ -90,7 +90,7 @@ class CadgenDaemonTests(unittest.TestCase):
         cls.model_dir = Path(cls.model_tmp.name)
         (cls.model_dir / "box.py").write_text(BOX_SOURCE, encoding="utf-8")
 
-        # Build first, on the test file's own daemon (the environment's), so the request to
+        # Build first, on the test run's daemon (the environment's), so the request to
         # the daemon under test, which starts below, is a current-skip.
         build = subprocess.run(
             [sys.executable, "box.py"],

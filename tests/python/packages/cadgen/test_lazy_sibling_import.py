@@ -6,7 +6,7 @@ closure (every first-party file is hashed when it executes).
 The tom-cad migration hit the old behaviour (the folder was seeded for the module
 body only and removed before the model ran): a ``lib/`` helper that imported a
 sibling model inside a function failed or passed depending on what some other
-module had already imported. Real CLI runs on the test file's daemon, a temp store.
+module had already imported. Real CLI runs on the test run's daemon, a temp store.
 """
 
 from __future__ import annotations

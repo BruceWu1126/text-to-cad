@@ -102,7 +102,8 @@ run_python_unittest() {
   # path relative to the repo root and names an import failure by that path + file.
   #
   # Each test FILE runs in its own interpreter with its own fresh store, CADGEN_TEST_JOBS
-  # at a time (default: the machine's cores). Modules cannot see one another's builds,
+  # at a time (default: the machine's cores), on one build daemon the runner starts for
+  # the run. Modules cannot see one another's builds,
   # and a module that spawns workers or a daemon does not hold the rest of the suite.
   # PYTHON_TEST_PRINT_WEIGHTS is how --print-weights reaches the runner without every
   # caller growing a flag.

@@ -7,7 +7,7 @@ own); ``store where`` answers a ref from it: through the model's own entry, and 
 child's for a part placed from a child model. It knows the file's bytes
 only while they are the ones it describes, says so otherwise, goes with ``store
 forget``, is never evicted, and a rerun in a hot worker writes the same entry the
-first run did. Real CLIs on the test file's own daemon, a temp store.
+first run did. Real CLIs on the test run's daemon, a temp store.
 """
 
 from __future__ import annotations

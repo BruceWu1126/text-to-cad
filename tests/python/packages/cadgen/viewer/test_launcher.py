@@ -168,7 +168,7 @@ class LauncherFixture(unittest.TestCase):
                 "TEMP": self.home,
                 "TMP": self.home,
                 "CADGEN_STATE_DIR": self.state,
-                # A launch warms the build daemon: the test file's own, at the endpoint the
+                # A launch warms the build daemon: the test run's, at the endpoint the
                 # runner gave this process, one for every launch here.
             }
         )

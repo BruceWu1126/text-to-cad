@@ -153,7 +153,7 @@ class OneSlotDaemon(unittest.TestCase):
             "CADGEN_DAEMON_STATE_DIR": cls.env["CADGEN_DAEMON_STATE_DIR"], "CADGEN_DAEMON_SOCKET": cls.address,
         })
         endpoint.start()
-        cls.addClassCleanup(endpoint.stop)  # the file's own daemon serves whatever runs after
+        cls.addClassCleanup(endpoint.stop)  # the run's daemon serves whatever runs after
         with open(cls.log_path, "ab") as log_file:
             cls.server = subprocess.Popen(
                 [sys.executable, str(DAEMON_DIR / "__main__.py")],

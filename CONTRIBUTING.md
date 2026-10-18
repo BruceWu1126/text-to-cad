@@ -82,7 +82,7 @@ $gitBash = 'C:\Program Files\Git\bin\bash.exe'
 ```
 
 Use the Windows virtual-environment path for direct CLI calls, and the runner for a
-focused test, so the file gets a store and a build daemon of its own:
+focused test, so the file gets a store of its own and builds on a daemon of the run's own:
 
 ```powershell
 .\.venv\Scripts\python.exe -m cadgen.cli step snapshot --help
@@ -226,10 +226,14 @@ at once saturate the runner). `CAD_TEST_SWIFTSHADER=1` makes a macOS run use tha
 software renderer, to reproduce a CI-only browser failure locally.
 
 A test's COST is part of its design. Model runs in tests go through the daemon,
-as every build does: the runner gives each test file a daemon of its own -- its
-own store, state directory and endpoint -- and retires it when the file
-finishes. A file's first build pays ~2.6 s importing the CAD kernel in a worker,
-and every subprocess a test starts pays an interpreter's start: build a fixture
+as every build does: the runner starts one daemon for the run -- its own state
+directory and endpoint -- gives each test file its own store, and retires the
+daemon after the last file. Its workers are warm for every file after the first,
+so they carry what one file's builds left (the kernel memo, imported extensions): a
+test that needs a daemon to itself -- its slots, its memory budget, a cold start --
+starts its own at an address of its own. A worker's first build pays ~2.6 s
+importing the CAD kernel, and every subprocess a test starts pays an
+interpreter's start: build a fixture
 the tests only READ once for the class and copy it in, keep each test's store,
 roots and freshness state private, and add a subprocess only where the subject
 IS the process. A test of what a pool job does, rather than how it is
@@ -1062,8 +1066,8 @@ working in a particular package, skill, docs site, or production-output
 path.
 
 For targeted Python tests, run the relevant test files through the runner, which
-gives each file a store and a build daemon of its own (a bare `python -m unittest`
-would build on your own daemon), for example:
+gives each file a store of its own and builds on a daemon of the run's own (a bare
+`python -m unittest` would build on your own daemon), for example:
 
 ```bash
 scripts/test/test-python.sh tests/python/skills/urdf/test_cli.py
