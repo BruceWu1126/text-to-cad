@@ -557,7 +557,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   memo made to one since its maker returned it, flags included, which BinTools
   writes -- the representations an extrusion appends to a profile's edges the part
   shares, the flag a compound clears), with none met since of the changes the memo
-  counts as unreplayable or failed to capture (`unreplayable`, `errors`: it notes no
+  counts as unreplayable, failed to capture, or made to memoized geometry under an
+  uncached call on a wrapper of it (`unreplayable`, `errors`, `tainted`: it notes no
   row for one, on whatever shapes share the sub-shape); and the run's naming of it
   (`kernel_trace.account_basis`): the features it descends from and those their
   inputs are registered to, each by its history (its memo entry's, which a hit

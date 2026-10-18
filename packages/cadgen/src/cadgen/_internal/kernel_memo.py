@@ -196,7 +196,7 @@ _CHILD = "<child>"
 # The effects by id, while anything holds them: a key names an input's effects by id.
 _EFFECTS: "weakref.WeakValueDictionary[int, _Effect]" = weakref.WeakValueDictionary()
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
-_STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0}
+_STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0}
 _RUN_IDS = itertools.count(1)
 _EFFECT_IDS = itertools.count(1)
 # Every row applied takes the next stamp: a maker's reset undoes the rows applied
@@ -1529,11 +1529,15 @@ def _drop(entry: "_Entry") -> None:
 
 def _taint(made: _Made | None, state: _Run) -> None:
     """An input changed in a way no hit can replay: its maker forgets it, so
-    the next run rebuilds it and runs this operation on the fresh shape."""
+    the next run rebuilds it and runs this operation on the fresh shape. Counted
+    (``tainted``): a publication that remembers a component by its live object
+    (``store.build``) reads the count, since the change left a state the ledger holds
+    no row for, on whatever shapes share the sub-shape it was on."""
     if made is None:
         return
     root = made.root()
     with _LOCK:
+        _STATS["tainted"] += 1
         pending = [root]
         while pending:
             item = pending.pop()

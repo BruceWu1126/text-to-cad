@@ -1091,14 +1091,15 @@ def _ledger(walk: _Walk) -> tuple[dict[int, tuple], set[int]]:
 
 def _unreplayed(walk: _Walk) -> int:
     """How many changes the memo could not replay, or could not capture, this worker has met
-    (``kernel_memo.stats``): each leaves a state its ledger holds no row for, on whatever
-    shapes share the sub-shape it was on, so a component published before one may not be
-    what it was."""
+    (``kernel_memo.stats``: the unreplayable, the errors and every input it tainted, an
+    embedded root changed by an uncached call among them): each leaves a state its ledger
+    holds no row for, on whatever shapes share the sub-shape it was on, so a component
+    published before one may not be what it was."""
     if walk.unreplayed is None:
         from cadgen._internal import kernel_memo
 
         counts = kernel_memo.stats()
-        walk.unreplayed = counts["unreplayable"] + counts["errors"]
+        walk.unreplayed = counts["unreplayable"] + counts["errors"] + counts["tainted"]
     return walk.unreplayed
 
 

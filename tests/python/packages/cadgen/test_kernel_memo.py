@@ -34,7 +34,7 @@ from cadgen._internal import kernel_history, kernel_memo, kernel_trace  # noqa: 
 from cadgen._internal.component_package import _shape_brep_bytes as _bytes  # noqa: E402
 from cadgen.cad_ref_syntax import Step, expanded_derivation  # noqa: E402
 
-COUNTS = ("hits", "misses", "unkeyable", "unreplayable", "errors")
+COUNTS = ("hits", "misses", "unkeyable", "unreplayable", "errors", "tainted")
 
 
 def _delta(before: dict, after: dict) -> dict:
@@ -1161,7 +1161,9 @@ class EffectTest(KernelMemoCase):
                         return uncached_mutation(wrapper)
 
                     _, stats, _ = _run(model)
-                    self.assertEqual(stats["errors"], 0)
+                    self.assertEqual((stats["errors"], stats["unreplayable"], stats["tainted"]), (0, 0, 1),
+                                     "a change under an uncached call counts as a taint, where the ledger "
+                                     "holds no row for it")
                     fresh, rebuilt, _ = _run(primitive)
                     self.assertEqual((rebuilt["hits"], rebuilt["misses"]), (0, 1))
                     self.assertIsNot(fresh, body, "the uncached mutation retired the embedded body's maker")
