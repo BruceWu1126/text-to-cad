@@ -69,7 +69,6 @@ class ImportedStepCacheTests(unittest.TestCase):
             os.environ,
             {
                 "CADGEN_CACHE_DIR": str(self.store),
-                "CADGEN_DAEMON": "0",
                 "CADGEN_COMPONENT_WORKERS": "1",
             },
         )
@@ -79,7 +78,6 @@ class ImportedStepCacheTests(unittest.TestCase):
         self.environment.update(
             {
                 "CADGEN_CACHE_DIR": str(self.store),
-                "CADGEN_DAEMON": "0",
                 "CADGEN_COMPONENT_WORKERS": "1",
                 "PYTHONPATH": str(CADGEN_SRC),
             }

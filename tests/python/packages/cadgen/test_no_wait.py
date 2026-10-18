@@ -1,9 +1,9 @@
 """``python model.py --no-wait``: the command answers once every model's result is recorded
 and the files are written after (STORE.md §3, *Exports*; §9).
 
-With no daemon the result lines come before the exports and the process still writes every
-file before it exits; through the daemon the client returns on the worker's release and the
-worker finishes the files before its next job.
+Run as a worker runs it, the result lines come before the exports and the run still writes
+every file before it returns; through the daemon the client returns on the worker's release
+and the worker finishes the files before its next job.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, warm_entries
 
 add_repo_path("packages/cadgen/src")
 
@@ -70,7 +69,7 @@ class NoWait(unittest.TestCase):
         self.assertEqual(check_user_flags(["--json", "--no-wait"], prog="python parent.py", called="parent"),
                          ["--json", "--no-wait"])
 
-    def test_with_no_daemon_the_result_comes_before_the_files_and_the_files_still_come(self):
+    def test_as_a_worker_runs_it_the_result_comes_before_the_files_and_the_files_still_come(self):
         from cadgen.cli._run_model import run_model_argv
 
         events: list[dict] = []
@@ -88,7 +87,7 @@ class NoWait(unittest.TestCase):
 
         saved_first: list[int] = []
         out, err = Stdout(), io.StringIO()
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON": "0"}), \
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = run_model_argv([str(self.parent), "--json", "--no-wait"])
         self.assertEqual(code, 0, err.getvalue())
@@ -101,7 +100,7 @@ class NoWait(unittest.TestCase):
     def test_through_the_daemon_the_client_returns_on_its_release_and_the_worker_writes_the_files(self):
         from cadgen.store.records import read_record
 
-        env = {**os.environ, **warm_entries(), "CADGEN_CACHE_DIR": str(self.store),
+        env = {**os.environ, "CADGEN_CACHE_DIR": str(self.store),
                "PYTHONPATH": os.pathsep.join(filter(None, [str(REPO_ROOT / "packages" / "cadgen" / "src"),
                                                            os.environ.get("PYTHONPATH", "")]))}
         env.pop("CADGEN_DAEMON_CHILD", None)
@@ -110,17 +109,18 @@ class NoWait(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
         (line,) = [line for line in completed.stdout.splitlines() if line.startswith('{"ok":')]
         self.assertEqual(json.loads(line)["outcome"], "built")
-        # The worker finishes the files after the client has gone: await its job's end.
+        # The worker finishes the files after the client has gone: await them, each written and
+        # its record naming the bytes on disk.
+        def written(name: str) -> bool:
+            step = self.root / f"{name}.step"
+            output = ((read_record(self.root / f"{name}.py") or {}).get("outputs") or {}).get(str(step)) or {}
+            return step.is_file() and output.get("sha256") == hashlib.sha256(step.read_bytes()).hexdigest()
+
         deadline = time.monotonic() + 300
-        while not served(self.root.name):
-            self.assertLess(time.monotonic(), deadline, "the worker never finished the job it released its client from")
-            time.sleep(0.2)
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
-            for name in ("child", "parent"):
-                step = self.root / f"{name}.step"
-                self.assertTrue(step.is_file(), name)
-                record = read_record(self.root / f"{name}.py")
-                self.assertEqual(record["outputs"][str(step)]["sha256"], hashlib.sha256(step.read_bytes()).hexdigest(), name)
+            while not all(written(name) for name in ("child", "parent")):
+                self.assertLess(time.monotonic(), deadline, "the worker never finished the job it released its client from")
+                time.sleep(0.2)
 
 
 if __name__ == "__main__":

@@ -90,19 +90,18 @@ class CadgenDaemonTests(unittest.TestCase):
         cls.model_dir = Path(cls.model_tmp.name)
         (cls.model_dir / "box.py").write_text(BOX_SOURCE, encoding="utf-8")
 
-        # Build inline (cold) first so the daemon request is a warm current-skip.
-        build_env = {k: v for k, v in os.environ.items() if k != "CADGEN_DAEMON"}
-        build_env["CADGEN_DAEMON"] = "0"  # inline: the daemon under test starts below
+        # Build first, on the test file's own daemon (the environment's), so the request to
+        # the daemon under test, which starts below, is a current-skip.
         build = subprocess.run(
             [sys.executable, "box.py"],
             cwd=cls.model_dir,
-            env=build_env,
+            env=dict(os.environ),
             capture_output=True,
             text=True,
             timeout=300,
         )
         if build.returncode != 0:
-            raise RuntimeError(f"inline warm-up build failed:\n{build.stdout}\n{build.stderr}")
+            raise RuntimeError(f"the first build failed:\n{build.stdout}\n{build.stderr}")
 
         cls.log_path = Path(cls.socket_dir.name) / "daemon.log"
         cls._start_server()
@@ -139,7 +138,7 @@ class CadgenDaemonTests(unittest.TestCase):
         """Block until the supervisor counts no request in flight. A job's thread sends its exit frame
         and only then leaves the count, so on a loaded runner the next test's request can still find
         the last test's job in flight -- and a restart then drains it rather than taking the no-work path."""
-        env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(cls.address)}
+        env = {"CADGEN_DAEMON_SOCKET": str(cls.address)}
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with mock.patch.dict(os.environ, env):
@@ -153,7 +152,7 @@ class CadgenDaemonTests(unittest.TestCase):
     @classmethod
     def _live_worker_pids(cls) -> set[int]:
         """The pool's worker pids, asked while the supervisor still answers."""
-        env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(cls.address)}
+        env = {"CADGEN_DAEMON_SOCKET": str(cls.address)}
         with mock.patch.dict(os.environ, env):
             os.environ.pop("CADGEN_DAEMON_CHILD", None)
             status = daemon_client.status() or {}
@@ -170,7 +169,7 @@ class CadgenDaemonTests(unittest.TestCase):
         request (the assertion then describes a job that never began) or pads every
         green run to the length of the worst red one.
         """
-        env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(cls.address)}
+        env = {"CADGEN_DAEMON_SOCKET": str(cls.address)}
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with mock.patch.dict(os.environ, env):
@@ -252,7 +251,7 @@ class CadgenDaemonTests(unittest.TestCase):
         that matters, not the CLI's re-run hint that happens to be printed last."""
         bad = self.model_dir / "bad.step"
         bad.write_bytes(b"this is not a STEP file\n")
-        env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(self.address)}
+        env = {"CADGEN_DAEMON_SOCKET": str(self.address)}
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, env):
             os.environ.pop("CADGEN_DAEMON_CHILD", None)
@@ -346,10 +345,9 @@ class CadgenDaemonTests(unittest.TestCase):
         )
 
         # And it still serves: the pool replaces the killed worker on the next acquire.
-        # run_via_daemon gates on CADGEN_DAEMON, which this test process does not set.
         with mock.patch.dict(
             os.environ,
-            {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(self.address)},
+            {"CADGEN_DAEMON_SOCKET": str(self.address)},
         ):
             exit_code = daemon_client.run_via_daemon(
                 "run", ["box_orphan.py"], str(self.model_dir)
@@ -380,7 +378,7 @@ class CadgenDaemonTests(unittest.TestCase):
         def run() -> None:
             # The decorator's real handoff shape: the script path leads argv and
             # prog is how the user spelled it (cadgen.authoring._build).
-            env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(self.address)}
+            env = {"CADGEN_DAEMON_SOCKET": str(self.address)}
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env):
                 os.environ.pop("CADGEN_DAEMON_CHILD", None)
@@ -393,7 +391,7 @@ class CadgenDaemonTests(unittest.TestCase):
 
         thread = threading.Thread(target=run)
         thread.start()
-        env = {"CADGEN_DAEMON": "1", "CADGEN_DAEMON_SOCKET": str(self.address)}
+        env = {"CADGEN_DAEMON_SOCKET": str(self.address)}
         busy_pid = None
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline and busy_pid is None:

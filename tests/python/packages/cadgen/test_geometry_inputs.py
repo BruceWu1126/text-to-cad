@@ -63,8 +63,7 @@ class GeometryInputs(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.env = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1", "CADGEN_DAEMON": "0",
-        })
+            "CADGEN_COMPONENT_WORKERS": "1",         })
         self.env.start(); self.addCleanup(self.env.stop)
         from cadgen.store.materialize import reset_memo
         reset_memo(); self.addCleanup(reset_memo)

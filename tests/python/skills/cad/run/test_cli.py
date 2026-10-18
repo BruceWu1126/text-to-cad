@@ -141,15 +141,14 @@ TWO_MODELS = (
 
 class TheUsersFlagsEndInTheirOwnProcess(unittest.TestCase):
     """`--help` and a usage error are answered by the process the user started,
-    BEFORE any handoff -- so they behave the same warm and cold. Handed to the
-    daemon, `--help` came back as a job that exited 0 having built nothing, and the
+    BEFORE any handoff. Handed to the daemon, `--help` came back as a job that exited 0 having built nothing, and the
     wait for its source result raised a traceback (exit 1)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory(prefix="cadrun-")
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name).resolve()
-        # A private WARM endpoint nobody is listening on: reaching the client
+        # A private endpoint nobody is listening on: reaching the client
         # would start a daemon here, and the key file it writes is the evidence.
         self._state = tempfile.TemporaryDirectory(prefix="cgr-", dir=None if os.name == "nt" else "/tmp")
         self.addCleanup(self._state.cleanup)
@@ -160,7 +159,6 @@ class TheUsersFlagsEndInTheirOwnProcess(unittest.TestCase):
         env = dict(os.environ)
         env.pop("CADGEN_DAEMON_CHILD", None)
         env.update({
-            "CADGEN_DAEMON": "1",
             "CADGEN_DAEMON_STATE_DIR": str(self.state),
             "CADGEN_DAEMON_SOCKET": (
                 rf"\\.\pipe\cadgen-run-{os.getpid()}" if os.name == "nt" else str(self.state / "d.sock")
@@ -176,7 +174,7 @@ class TheUsersFlagsEndInTheirOwnProcess(unittest.TestCase):
     def _no_daemon_was_started(self) -> bool:
         return not any(name.endswith(".key") for name in os.listdir(self.state))
 
-    def test_help_exits_zero_on_the_warm_path_without_a_handoff(self) -> None:
+    def test_help_exits_zero_without_a_handoff(self) -> None:
         script = self.root / "pair.py"
         script.write_text(TWO_MODELS, encoding="utf-8")
         proc = self._run(script, "--help")

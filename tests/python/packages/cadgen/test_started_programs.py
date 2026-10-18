@@ -1,4 +1,4 @@
-"""A model that starts a program is warned about, root or child, warm or cold.
+"""A model that starts a program is warned about, root or child.
 
 The file trace sees what the build's own process opens; a program the model
 starts reads files no trace sees, so editing them would never rebuild the model.
@@ -18,7 +18,6 @@ from pathlib import Path
 
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, warm_entries
 
 CADGEN_SRC = add_repo_path("packages/cadgen/src")
 
@@ -65,30 +64,19 @@ class StartedPrograms(unittest.TestCase):
             subprocess.run([sys.executable, "-c", "pass"], check=True)  # once, however often
         self.assertEqual(trace.programs, [os.path.basename(sys.executable), "exit"])
 
-    def _warnings(self, *, warm: bool) -> list[str]:
+    def test_the_root_and_its_child_are_each_warned_about_once(self) -> None:
         scratch = generated_cad_directory(prefix="started-programs-")
         self.addCleanup(scratch.cleanup)
         project = Path(scratch.name).resolve()
         (project / "bolt.py").write_text(BOLT, encoding="utf-8")
         (project / "frame.py").write_text(FRAME, encoding="utf-8")
-        environment = {**os.environ, "CADGEN_CACHE_DIR": str(project / "store"), "PYTHONPATH": str(CADGEN_SRC),
-                       **(warm_entries() if warm else {"CADGEN_DAEMON": "0"})}
+        environment = {**os.environ, "CADGEN_CACHE_DIR": str(project / "store"), "PYTHONPATH": str(CADGEN_SRC)}
         completed = subprocess.run([sys.executable, "frame.py"], cwd=str(project), env=environment,
                                    capture_output=True, text=True, timeout=600)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-        if warm:
-            self.assertTrue(served(project.name), "the warm run fell back to cold")
-        return sorted(line for line in completed.stderr.splitlines() if " started " in line)
-
-    def _expected(self) -> list[str]:
-        return sorted([WARNING.format(model="frame", program="exit"),
-                       WARNING.format(model="bolt", program=os.path.basename(sys.executable))])
-
-    def test_the_root_and_a_transient_child_are_each_warned_about_once(self) -> None:
-        self.assertEqual(self._warnings(warm=False), self._expected())
-
-    def test_the_root_and_a_daemon_child_are_each_warned_about_once(self) -> None:
-        self.assertEqual(self._warnings(warm=True), self._expected())
+        self.assertEqual(sorted(line for line in completed.stderr.splitlines() if " started " in line),
+                         sorted([WARNING.format(model="frame", program="exit"),
+                                 WARNING.format(model="bolt", program=os.path.basename(sys.executable))]))
 
 
 if __name__ == "__main__":

@@ -1167,7 +1167,7 @@ def boss():
         temporary = generated_cad_directory(prefix="memo-build-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         env.start()
         self.addCleanup(env.stop)
         os.environ.pop("CADGEN_KERNEL_MEMO", None)

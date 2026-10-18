@@ -112,7 +112,6 @@ class DirectRunEngagesThePoolTest(unittest.TestCase):
         )
         # In process, so the eviction and the pool share one interpreter — the
         # daemon path has its own __main__ and never reproduced this.
-        env["CADGEN_DAEMON"] = "0"
         env.pop("CADGEN_COMPONENT_WORKERS", None)
 
         with tempfile.TemporaryDirectory(prefix="cadgen-pool-probe-") as tmp:

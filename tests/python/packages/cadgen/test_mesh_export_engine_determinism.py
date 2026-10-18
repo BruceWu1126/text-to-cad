@@ -90,7 +90,6 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
         self.root = Path(self._tmp.name).resolve()
         self.base_env = dict(os.environ)
         self.base_env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })

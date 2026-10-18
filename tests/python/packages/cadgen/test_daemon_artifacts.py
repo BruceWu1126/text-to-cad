@@ -498,7 +498,7 @@ class ArtifactStartup(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
         self.enterContext(mock.patch.dict(os.environ, {
-            "CADGEN_DAEMON": "1", "CADGEN_DAEMON_SPARES": "0",
+            "CADGEN_DAEMON_SPARES": "0",
             "CADGEN_DAEMON_STATE_DIR": str(self.root / "state"),
             "CADGEN_CACHE_DIR": str(self.root / "store"),
         }))
@@ -575,7 +575,7 @@ class ArtifactLeases(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.root = str(Path(temp.name).resolve())
         self.enterContext(self.private.served())
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": self.root, "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": self.root})
         env.start()
         self.addCleanup(env.stop)
         self.fake = types.ModuleType("cadgen.store.parts")
@@ -737,7 +737,7 @@ class SupervisedDerivation(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         root = str(Path(temp.name).resolve())
         self.enterContext(private.served())
-        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": root, "CADGEN_DAEMON": "0"}))
+        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": root}))
         from build123d import Box, Compound, Pos
         from cadgen.store import parts
         from cadgen.store.build import build_tree_from_compound

@@ -6,7 +6,7 @@ closure (every first-party file is hashed when it executes).
 The tom-cad migration hit the old behaviour (the folder was seeded for the module
 body only and removed before the model ran): a ``lib/`` helper that imported a
 sibling model inside a function failed or passed depending on what some other
-module had already imported. Real CLI runs, a temp store, ``CADGEN_DAEMON=0``.
+module had already imported. Real CLI runs on the test file's daemon, a temp store.
 """
 
 from __future__ import annotations
@@ -87,7 +87,6 @@ def _run(*argv: str, cwd: Path, cache: Path) -> subprocess.CompletedProcess:
         p for p in [str(REPO_ROOT / "packages" / "cadgen" / "src"), env.get("PYTHONPATH", "")] if p
     )
     env["CADGEN_CACHE_DIR"] = str(cache)
-    env["CADGEN_DAEMON"] = "0"
     env.pop("CADGEN_DAEMON_CHILD", None)
     return subprocess.run(
         [sys.executable, *argv], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=600

@@ -102,8 +102,7 @@ class PreviewRevision(unittest.TestCase):
         self.model = self.root / "part.py"
         self.step = self.root / "part.step"
         self.store = self.root / "store"
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON": "0",
-                                           "CADGEN_JOBS": "1"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_JOBS": "1"})
         env.start()
         self.addCleanup(env.stop)
 

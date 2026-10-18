@@ -25,7 +25,7 @@ class StepPublicationTests(unittest.TestCase):
         self.sidecar = self.root / "part.step.json"
         env = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_DAEMON": "0", "CADGEN_JOBS": "1",
+            "CADGEN_JOBS": "1",
         })
         env.start()
         self.addCleanup(env.stop)
@@ -554,7 +554,7 @@ class AssemblyJobReads(unittest.TestCase):
         self.arm = self.root / "src/arm.py"
         self.pin.write_text(PIN_SOURCE, encoding="utf-8")
         self.arm.write_text(ARM_SOURCE, encoding="utf-8")
-        self.env = {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0", "CADGEN_JOBS": "1"}
+        self.env = {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1"}
         patch = mock.patch.dict(os.environ, self.env)
         patch.start()
         self.addCleanup(patch.stop)

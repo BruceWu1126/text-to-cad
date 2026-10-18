@@ -6,8 +6,8 @@ feature every name of its lineage stands for (a part names its features among it
 own); ``store where`` answers a ref from it: through the model's own entry, and through a
 child's for a part placed from a child model. It knows the file's bytes
 only while they are the ones it describes, says so otherwise, goes with ``store
-forget``, is never evicted, and a warm rerun writes the same entry a cold run
-did. Real CLIs, transient builds and one private warm daemon, a temp store.
+forget``, is never evicted, and a rerun in a hot worker writes the same entry the
+first run did. Real CLIs on the test file's own daemon, a temp store.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
-from tests.python.support.warm_daemon import served, warm_entries
 
 add_repo_path("packages/cadgen/src")
 
@@ -102,17 +101,13 @@ REFS = """
 FEATURE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$")
 
 
-def _run(*argv: str, cwd: Path, cache: Path, warm: bool = False) -> subprocess.CompletedProcess:
+def _run(*argv: str, cwd: Path, cache: Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         p for p in [str(REPO_ROOT / "packages" / "cadgen" / "src"), env.get("PYTHONPATH", "")] if p
     )
     env["CADGEN_CACHE_DIR"] = str(cache)
     env.pop("CADGEN_DAEMON_CHILD", None)
-    if warm:
-        env.update(warm_entries())
-    else:
-        env["CADGEN_DAEMON"] = "0"
     return subprocess.run(
         [sys.executable, *argv], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=600
     )
@@ -426,7 +421,7 @@ class EachOccurrence(unittest.TestCase):
 
 
 class TheEntryAndTheStore(unittest.TestCase):
-    """Edits, forget, gc and the warm path, each on its own pin."""
+    """Edits, forget, gc and a hot rerun, each on its own pin."""
 
     def setUp(self) -> None:
         tmp = generated_cad_directory(prefix="provenance-store-")
@@ -437,9 +432,8 @@ class TheEntryAndTheStore(unittest.TestCase):
         (self.root / "src" / "pin.py").write_text(textwrap.dedent(PIN).lstrip(), encoding="utf-8")
         (self.root / "src" / "refs.py").write_text(textwrap.dedent(REFS).lstrip(), encoding="utf-8")
 
-    def _build(self, *argv: str, warm: bool = False) -> subprocess.CompletedProcess:
-        # The absolute script: the daemon's completed-job line names it (served()).
-        result = _run(str(self.root / "src" / "pin.py"), *argv, cwd=self.root, cache=self.cache, warm=warm)
+    def _build(self, *argv: str) -> subprocess.CompletedProcess:
+        result = _run(str(self.root / "src" / "pin.py"), *argv, cwd=self.root, cache=self.cache)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         return result
 
@@ -532,15 +526,13 @@ class TheEntryAndTheStore(unittest.TestCase):
         self.assertFalse(stale.is_file(), "an entry at another cadgen's key, a week old, is retired")
         self.assertEqual(0, self._store("where", "STEP/pin.step", self._face()).returncode)
 
-    def test_a_warm_rerun_writes_the_entry_a_cold_run_wrote(self) -> None:
+    def test_a_hot_rerun_writes_the_entry_the_first_run_wrote(self) -> None:
         self._build()
-        cold = self._entry()
-        self.assertIsNotNone(cold)
-        self._build("--force", warm=True)
-        self.assertTrue(served(self.root.name), "the warm daemon did not build the pin")
-        self.assertEqual(cold, self._entry())
-        self._build("--force", warm=True)
-        self.assertEqual(cold, self._entry(), "a hot run in the same worker writes the same entry")
+        first = self._entry()
+        self.assertIsNotNone(first)
+        for _ in range(2):
+            self._build("--force")
+            self.assertEqual(first, self._entry(), "a hot run in the same worker writes the same entry")
 
 
 

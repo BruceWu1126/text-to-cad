@@ -70,7 +70,6 @@ class LayeringCase(unittest.TestCase):
         env = dict(os.environ)
         env.update(
             {
-                "CADGEN_DAEMON": "0",
                 "CADGEN_CACHE_DIR": cls._store.name,
                 "PYTHONPATH": str(REPO_ROOT / "packages" / "cadgen" / "src"),
             }

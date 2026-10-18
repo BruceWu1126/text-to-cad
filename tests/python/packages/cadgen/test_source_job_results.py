@@ -25,7 +25,7 @@ class SourceJobResults(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         environment = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_DAEMON": "0", "CADGEN_JOBS": "2", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_JOBS": "2", "CADGEN_COMPONENT_WORKERS": "1",
         })
         environment.start()
         self.addCleanup(environment.stop)

@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import temporary_directory
@@ -52,10 +53,7 @@ def _write_project(root: Path, width: float) -> Path:
 
 def _base_env(work: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env.update({
-        "CADGEN_CACHE_DIR": str(work / "store"),
-        "CADGEN_DAEMON_STATE_DIR": str(work / "state"),
-    })
+    env["CADGEN_CACHE_DIR"] = str(work / "store")
     env.pop("CADGEN_DAEMON_CHILD", None)
     return env
 
@@ -100,13 +98,12 @@ class ImportRootsHelper(unittest.TestCase):
             self.assertEqual(entries, [str(extra.resolve())], "missing and empty PYTHONPATH entries are dropped")
 
 
-class TransientExecutor(unittest.TestCase):
+class SharedRoot(unittest.TestCase):
     def test_pythonpath_is_the_only_way_to_a_shared_root(self) -> None:
-        with temporary_directory(prefix="cadgen-roots-transient-") as tmp:
+        with temporary_directory(prefix="cadgen-roots-shared-") as tmp:
             work = Path(tmp)
             script = _write_project(work / "proj", 10.0)
             env = _base_env(work)
-            env["CADGEN_DAEMON"] = "0"
             env["PYTHONPATH"] = _cadgen_src()
             failed = _run(script, env)
             self.assertNotEqual(failed.returncode, 0, failed.stdout)
@@ -131,11 +128,15 @@ class DaemonExecutor(unittest.TestCase):
         # Windows has no filesystem sockets: the daemon listens on a named pipe there.
         cls.address = rf"\\.\pipe\cadgen-roots-{os.getpid()}" if os.name == "nt" else os.path.join(cls.socket_dir.name, "d.sock")
         cls.env = _base_env(cls.work)
+        cls.env["CADGEN_DAEMON_STATE_DIR"] = str(cls.work / "state")
         cls.env["CADGEN_DAEMON_SOCKET"] = cls.address
         cls.env["PYTHONPATH"] = _cadgen_src()
         cls.env["CADGEN_JOBS"] = "2"
-        os.environ["CADGEN_DAEMON_SOCKET"] = cls.address
-        os.environ["CADGEN_DAEMON_STATE_DIR"] = cls.env["CADGEN_DAEMON_STATE_DIR"]
+        endpoint = mock.patch.dict(os.environ, {
+            "CADGEN_DAEMON_STATE_DIR": cls.env["CADGEN_DAEMON_STATE_DIR"], "CADGEN_DAEMON_SOCKET": cls.address,
+        })
+        endpoint.start()
+        cls.addClassCleanup(endpoint.stop)  # the file's own daemon serves whatever runs after
         cls.log_path = Path(cls.socket_dir.name) / "daemon.log"
         with open(cls.log_path, "ab") as log_file:
             cls.server = subprocess.Popen(
@@ -171,8 +172,6 @@ class DaemonExecutor(unittest.TestCase):
                 os.kill(int(worker["pid"]), 9)
             except (OSError, ValueError, TypeError):
                 pass
-        os.environ.pop("CADGEN_DAEMON_SOCKET", None)
-        os.environ.pop("CADGEN_DAEMON_STATE_DIR", None)
         # Windows refuses to delete a file another process still has open, and a
         # killed worker releases its handle on the daemon log a beat after the kill.
         deadline = time.monotonic() + 15

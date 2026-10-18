@@ -81,11 +81,12 @@ $gitBash = 'C:\Program Files\Git\bin\bash.exe'
 & $gitBash scripts/test/test-python.sh --select cadgen
 ```
 
-Use the Windows virtual-environment path for direct CLI or focused test calls:
+Use the Windows virtual-environment path for direct CLI calls, and the runner for a
+focused test, so the file gets a store and a build daemon of its own:
 
 ```powershell
 .\.venv\Scripts\python.exe -m cadgen.cli step snapshot --help
-.\.venv\Scripts\python.exe -m unittest tests/python/skills/urdf/test_cli.py
+& $gitBash scripts/test/test-python.sh tests/python/skills/urdf/test_cli.py
 ```
 
 ### Development dependencies
@@ -1060,11 +1061,12 @@ Use `AGENTS.md` or `scripts/README.md` for path-specific validation when you are
 working in a particular package, skill, docs site, or production-output
 path.
 
-For targeted Python skill-script tests, run the relevant unittest files with the
-repo-local Python runtime, for example:
+For targeted Python tests, run the relevant test files through the runner, which
+gives each file a store and a build daemon of its own (a bare `python -m unittest`
+would build on your own daemon), for example:
 
 ```bash
-./.venv/bin/python -m unittest tests/python/skills/urdf/test_cli.py
+scripts/test/test-python.sh tests/python/skills/urdf/test_cli.py
 ```
 
 Repo-owned Python tests live under `tests/python/`, grouped by tested surface:

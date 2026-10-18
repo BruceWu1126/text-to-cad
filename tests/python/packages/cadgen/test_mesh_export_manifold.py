@@ -108,7 +108,6 @@ class MeshExportManifoldTest(unittest.TestCase):
         cls.project = Path(cls._tmp.name).resolve()
         env = dict(os.environ)
         env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             # Its own store, so a stale tessellation cannot stand in for the run.
             "CADGEN_CACHE_DIR": str(cls.project / "store"),

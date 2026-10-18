@@ -176,9 +176,6 @@ class StandaloneDxfSourceTests(unittest.TestCase):
         # A drawing is a model in the graph: calling `bracket()` in its body records
         # bracket's key in the drawing's record (gate clause 3), so the flat
         # pattern goes stale when bracket is rebuilt — no `--force`.
-        import os
-        from unittest import mock
-
         from cadgen.store.gate import stale
         from cadgen.store.records import read_record
 
@@ -216,7 +213,7 @@ class StandaloneDxfSourceTests(unittest.TestCase):
                 pattern()
             '''
         ).strip()
-        with temporary_directory(prefix="dxf-skill") as root, mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}):
+        with temporary_directory(prefix="dxf-skill") as root:
             bracket_path = Path(root) / "bracket.py"
             bracket_path.write_text(bracket.format(width=40) + "\n", encoding="utf-8")
             pattern_path = Path(root) / "pattern.py"

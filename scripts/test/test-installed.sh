@@ -58,9 +58,6 @@ if ! "$PYTHON_BIN" -c "import OCP, build123d" >/dev/null 2>&1; then
 fi
 
 WORK="$(mktemp -d)"
-cleanup() { rm -rf "$WORK"; }
-trap cleanup EXIT
-
 VENV="$WORK/venv"
 EMPTY="$WORK/empty"
 DIST="$WORK/dist"
@@ -68,8 +65,20 @@ CACHE="$WORK/cache"
 DAEMON_STATE="$WORK/daemon"
 mkdir -p "$EMPTY" "$DIST" "$CACHE" "$DAEMON_STATE"
 export CADGEN_CACHE_DIR="$CACHE"
-export CADGEN_DAEMON=0
+# The builds below run on a build daemon, as every build does: this run's own, at a private
+# address, retired on the way out -- and gone by itself after a minute idle if it is not.
 export CADGEN_DAEMON_STATE_DIR="$DAEMON_STATE"
+export CADGEN_DAEMON_SOCKET="$DAEMON_STATE/d.sock"
+export CADGEN_DAEMON_IDLE_TIMEOUT=60
+cleanup() {
+  # The installed cadgen's own client retires the daemon its builds started.
+  if [ -x "$VENV/bin/python" ]; then
+    "$VENV/bin/python" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
+      || echo "warning: this run's build daemon did not retire; it goes once idle" >&2
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 # What the CAD app remembers (its library, release checks) stays in the throwaway directory too.
 export CADGEN_STATE_DIR="$WORK/state"
 unset CADGEN_DAEMON_CHILD

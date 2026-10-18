@@ -87,11 +87,7 @@ class PublishRuleTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.env = dict(os.environ)
-        self.env.update({
-            "CADGEN_DAEMON": "0",
-            "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_DAEMON_STATE_DIR": str(self.root / "state"),
-        })
+        self.env["CADGEN_CACHE_DIR"] = str(self.root / "store")
         self.env.pop("CADGEN_DAEMON_CHILD", None)
         # The model scripts run from a temp dir: a relative PYTHONPATH entry would resolve
         # there and the scripts would import whatever cadgen is installed, not this one.
@@ -100,7 +96,7 @@ class PublishRuleTest(unittest.TestCase):
             + [os.path.abspath(p) for p in self.env.get("PYTHONPATH", "").split(os.pathsep) if p]
         )
         # The gate and the records this test reads in-process must look at the same store.
-        patcher = mock.patch.dict(os.environ, {k: self.env[k] for k in ("CADGEN_CACHE_DIR", "CADGEN_DAEMON_STATE_DIR")})
+        patcher = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": self.env["CADGEN_CACHE_DIR"]})
         patcher.start()
         self.addCleanup(patcher.stop)
 

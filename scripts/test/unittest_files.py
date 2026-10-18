@@ -17,15 +17,16 @@ which `-m unittest` would run silently.
 ``--print-weights`` prints this run's measured per-file costs, the first thing to read
 when a run is slow.
 
-With ``--jobs N`` greater than one, each FILE runs in its own interpreter, N at a time,
-with its own fresh store and private daemon endpoint/auth state. Its daemon is retired
-before the temporary directories are removed, so modules cannot see one another's
-builds or stop one another's artifact workers. The per-module output is printed as each finishes and
-the final ``Ran N tests`` / ``OK`` / ``FAILED`` summary aggregates every module, so a
-log reads the same as a single-process run. The loaded test set is identical to
-`python -m unittest <files>` run from --top either way. A file still running
-``FILE_HANG_SECONDS`` after it started is hung: its interpreter prints every thread's
-stack and exits, and the run fails naming the file.
+Each FILE runs in its own interpreter, ``--jobs`` at a time (default one), with its own
+fresh store and a build daemon of its own: a private state directory and endpoint, so
+every build, compile and artifact job the file's tests ask for runs on that daemon, as
+every build runs on one. Its daemon is retired before the temporary directories are
+removed, so modules cannot see one another's builds or stop one another's workers, and
+nothing a test does reaches a developer's own daemon. The per-module output is printed
+as each finishes and the final ``Ran N tests`` / ``OK`` / ``FAILED`` summary aggregates
+every module. The loaded test set is identical to `python -m unittest <files>` run from
+--top. A file still running ``FILE_HANG_SECONDS`` after it started is hung: its
+interpreter prints every thread's stack and exits, and the run fails naming the file.
 """
 
 from __future__ import annotations
@@ -49,6 +50,9 @@ import uuid
 # Hung, not slow: the slowest file CI has run took about four minutes. Without this a
 # hang runs out the CI job's timeout and says nothing about where it is.
 FILE_HANG_SECONDS = 15 * 60
+# A file's daemon outlives none of it -- it is retired as the file ends -- but one a killed
+# run leaves behind goes away on its own after this long idle.
+DAEMON_IDLE_SECONDS = 300
 
 
 def dotted_name(path: str, top: str) -> str:
@@ -153,17 +157,18 @@ def _counts(output: str) -> dict[str, int]:
 def _run_one_file(path: str, top: str, verbose: bool) -> tuple[str, int, str, float]:
     started = time.perf_counter()
     store = tempfile.mkdtemp(prefix="cadgen-test-store.")
-    # Stores alone do not isolate lazy artifact jobs: a sibling test can stop
-    # the shared daemon while this module is reading its package. Keep auth,
-    # logs and the actual endpoint private too. The short filename avoids the
-    # Unix socket length ceiling; Windows pipe names need explicit uniqueness.
+    # Stores alone do not isolate a file's builds and artifact jobs: a sibling file could
+    # stop a shared daemon while this one reads its package. Keep auth, logs and the
+    # actual endpoint private too. The short filename avoids the Unix socket length
+    # ceiling; Windows pipe names need explicit uniqueness.
     state = tempfile.mkdtemp(prefix="cgt-")
     env = dict(os.environ)
     env["CADGEN_CACHE_DIR"] = store
     env["CADGEN_DAEMON_STATE_DIR"] = state
     env["CADGEN_DAEMON_SOCKET"] = (rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt"
                                   else os.path.join(state, "d.sock"))
-    argv = [sys.executable, os.path.abspath(__file__), "--top", top, "--jobs", "1",
+    env["CADGEN_DAEMON_IDLE_TIMEOUT"] = str(DAEMON_IDLE_SECONDS)
+    argv = [sys.executable, os.path.abspath(__file__), "--top", top, "--file",
             "--hang-seconds", str(FILE_HANG_SECONDS)]
     if verbose:
         argv.append("--verbose")
@@ -202,7 +207,7 @@ def _read_all(stream) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def run_in_parallel(files: list[str], top: str, jobs: int, verbose: bool, print_weights: bool = False) -> int:
+def run_files(files: list[str], top: str, jobs: int, verbose: bool, print_weights: bool = False) -> int:
     top = os.path.realpath(top)
     started = time.perf_counter()
     totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0, "expected failures": 0, "unexpected successes": 0}
@@ -261,13 +266,15 @@ def main(argv: list[str] | None = None) -> int:
         "--jobs",
         type=int,
         default=1,
-        help="run each test file in its own interpreter, this many at a time (default 1: one process)",
+        help="how many test files run at once, each in its own interpreter with its own daemon (default 1)",
     )
     parser.add_argument(
         "--print-weights",
         action="store_true",
         help="print one `WEIGHT<TAB>path<TAB>seconds` line per slow file on stdout",
     )
+    # The runner's own: the interpreter it starts for one file, which runs it here.
+    parser.add_argument("--file", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--hang-seconds",
         type=float,
@@ -276,11 +283,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("files", nargs="+", metavar="TEST_FILE")
     args = parser.parse_args(argv)
 
-    files = args.files
-
-    if args.jobs > 1 and len(files) > 1:
-        return run_in_parallel(files, args.top, args.jobs, args.verbose, args.print_weights)
-    return run_in_process(files, args.top, args.verbose, args.hang_seconds)
+    if args.file:
+        return run_in_process(args.files, args.top, args.verbose, args.hang_seconds)
+    return run_files(args.files, args.top, max(1, args.jobs), args.verbose, args.print_weights)
 
 
 if __name__ == "__main__":

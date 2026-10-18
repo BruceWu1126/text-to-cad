@@ -54,7 +54,7 @@ class TessellationPolicyTests(unittest.TestCase):
         for key, value in display.items():
             self.assertIsNone(policy.tolerance_refusal(key, value, name=key))
         with generated_cad_directory(prefix="display-tolerance-") as root, \
-                mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(root) / "store"), "CADGEN_DAEMON": "0"}):
+                mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(root) / "store")}):
             tree, _, _ = build_tree_from_compound(Solid.make_box(1, 2, 3), root_name="box")
             with mock.patch.object(tessellate, "mesh_component", wraps=tessellate.mesh_component) as meshed:
                 parts.derive(tree)

@@ -17,7 +17,6 @@ re-emitting.
 from __future__ import annotations
 
 import json
-import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -75,25 +74,21 @@ class StepReemitTests(unittest.TestCase):
         # IsolatedCadRoots registers its cwd and CADGEN_CACHE_DIR restores as cleanups on a
         # TestCase; this seed build is not one, so it borrows a bare case and runs them itself.
         seed = unittest.TestCase()
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}):
-            roots = IsolatedCadRoots(seed, prefix="cadreemit-seed-")
-            tempdir = roots.temporary_cad_directory(prefix="tmp-cadreemit-seed-")
-            try:
-                script = Path(tempdir.name) / "hinge.py"
-                script.write_text(MODEL, encoding="utf-8")
-                if generate_step_targets(
-                    [str(script)], force=True, verbose=False
-                ):
-                    raise RuntimeError("the seed document could not be built")
-                cls._vendor_bytes = (Path(tempdir.name) / "hinge.step").read_bytes()
-            finally:
-                tempdir.cleanup()
-                seed.doCleanups()
+        roots = IsolatedCadRoots(seed, prefix="cadreemit-seed-")
+        tempdir = roots.temporary_cad_directory(prefix="tmp-cadreemit-seed-")
+        try:
+            script = Path(tempdir.name) / "hinge.py"
+            script.write_text(MODEL, encoding="utf-8")
+            if generate_step_targets(
+                [str(script)], force=True, verbose=False
+            ):
+                raise RuntimeError("the seed document could not be built")
+            cls._vendor_bytes = (Path(tempdir.name) / "hinge.step").read_bytes()
+        finally:
+            tempdir.cleanup()
+            seed.doCleanups()
 
     def setUp(self) -> None:
-        offline = mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"})
-        offline.start()
-        self.addCleanup(offline.stop)
         self._roots = IsolatedCadRoots(self, prefix="cadreemit-")
         self._tempdir = self._roots.temporary_cad_directory(prefix="tmp-cadreemit-")
         self.root = Path(self._tempdir.name)

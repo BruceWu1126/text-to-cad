@@ -7,14 +7,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import unittest
+import uuid
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.daemon_cleanup import retire_owned_daemon
 from tests.python.support.documents import assert_same_document, save_step
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -24,8 +28,7 @@ class SavedDocumentReadTest(unittest.TestCase):
         scratch = generated_cad_directory(prefix="saved-document-reads-")
         self.addCleanup(scratch.cleanup)
         self.root = Path(scratch.name)
-        environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"),
-                                                   "CADGEN_DAEMON": "0"})
+        environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         environment.start()
         self.addCleanup(environment.stop)
         workers = mock.patch("cadgen._internal.component_package._component_build_worker_count", return_value=1)
@@ -335,8 +338,8 @@ class SavedDocumentReadTest(unittest.TestCase):
         expected = self.build()
         guard_root = self.root / "reader-guard"
         guard_root.mkdir()
-        # The real transient compile process inherits this guard. Historical
-        # compile bookkeeping may be written, but no reader can consult it.
+        # The compile runs on a daemon this process starts, whose workers inherit this
+        # guard. Historical compile bookkeeping may be written, but no reader can consult it.
         (guard_root / "sitecustomize.py").write_text(textwrap.dedent("""\
             import os
             import sys
@@ -435,10 +438,21 @@ class SavedDocumentReadTest(unittest.TestCase):
             assert hashlib.sha256(step.read_bytes()).hexdigest() == step_hash
             print(json.dumps({"repaired": cases, "forced": True, "codeIndexReadsForbidden": True}))
             """)
+        # A daemon of the guarded process's own, started by it with the guard on its path: the
+        # test file's daemon was started without it. Short: a Unix socket path caps near 104 bytes.
+        state = tempfile.mkdtemp(prefix="cgg-")
+        socket = rf"\\.\pipe\cadgen-guard-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(state, "d.sock")
+        self.addCleanup(shutil.rmtree, state, True)
+
+        def retire() -> None:
+            with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": socket, "CADGEN_DAEMON_STATE_DIR": state}):
+                retire_owned_daemon(socket)
+
+        self.addCleanup(retire)  # before its folder goes
         environment = {key: value for key, value in os.environ.items() if not key.startswith("CADGEN_")}
         environment.update({
-            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0",
-            "CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_DAEMON_STATE_DIR": state, "CADGEN_DAEMON_SOCKET": socket, "CADGEN_DAEMON_IDLE_TIMEOUT": "60",
             "PYTHONPATH": os.pathsep.join([str(guard_root), str(Path(cadgen.__file__).resolve().parent.parent)]),
         })
         completed = subprocess.run(
@@ -460,8 +474,7 @@ class SavedFileTest(unittest.TestCase):
         scratch = generated_cad_directory(prefix="saved-file-")
         self.addCleanup(scratch.cleanup)
         self.root = Path(scratch.name)
-        environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"),
-                                                   "CADGEN_DAEMON": "0"})
+        environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         environment.start()
         self.addCleanup(environment.stop)
 

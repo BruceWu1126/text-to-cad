@@ -16,6 +16,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
@@ -136,7 +137,6 @@ class OneSlotDaemon(unittest.TestCase):
             "CADGEN_CACHE_DIR": str(cls.work / "store"),
             "CADGEN_DAEMON_STATE_DIR": str(cls.work / "state"),
             "CADGEN_DAEMON_SOCKET": cls.address,
-            "CADGEN_DAEMON": "1",  # the runner may export 0; these clients go warm
             "CADGEN_DAEMON_SPARES": "1",
             "CADGEN_DAEMON_IDLE_TIMEOUT": "600",
             "CADGEN_JOBS": str(cls.LIMIT),
@@ -149,8 +149,11 @@ class OneSlotDaemon(unittest.TestCase):
             ),
         })
         cls.env.pop("CADGEN_DAEMON_CHILD", None)
-        os.environ["CADGEN_DAEMON_STATE_DIR"] = cls.env["CADGEN_DAEMON_STATE_DIR"]
-        os.environ["CADGEN_DAEMON_SOCKET"] = cls.address
+        endpoint = mock.patch.dict(os.environ, {
+            "CADGEN_DAEMON_STATE_DIR": cls.env["CADGEN_DAEMON_STATE_DIR"], "CADGEN_DAEMON_SOCKET": cls.address,
+        })
+        endpoint.start()
+        cls.addClassCleanup(endpoint.stop)  # the file's own daemon serves whatever runs after
         with open(cls.log_path, "ab") as log_file:
             cls.server = subprocess.Popen(
                 [sys.executable, str(DAEMON_DIR / "__main__.py")],
@@ -182,8 +185,6 @@ class OneSlotDaemon(unittest.TestCase):
                 os.kill(int(worker["pid"]), 9)
             except (OSError, ValueError, TypeError):
                 pass
-        os.environ.pop("CADGEN_DAEMON_SOCKET", None)
-        os.environ.pop("CADGEN_DAEMON_STATE_DIR", None)
         # Windows refuses to delete a file another process still has open, and a
         # killed worker releases its handle on the daemon log a beat after the kill.
         deadline = time.monotonic() + 15

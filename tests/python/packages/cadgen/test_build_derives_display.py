@@ -89,7 +89,7 @@ class BuildDerivesDisplayData(unittest.TestCase):
         self.script.write_text(MODEL, encoding="utf-8")
         self.document = self.root / "STEP/pair.step"
         self.store = self.root / "store"
-        patch = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store), "CADGEN_DAEMON": "0"})
+        patch = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)})
         patch.start()
         self.addCleanup(patch.stop)
 

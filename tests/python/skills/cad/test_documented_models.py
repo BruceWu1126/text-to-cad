@@ -4,9 +4,9 @@ A skill is consumed by an agent that copies what it reads, so a code block that
 has drifted from the model contract is a generator of broken models, and the
 drift is invisible to every other test. The complete model scripts in
 the main skill and its generation, export, positioning and kinematics references
-are therefore extracted and BUILT here, cold
-(`CADGEN_DAEMON=0`, transient workers), in a throwaway project with a private
-store, and every output their decorators declare must exist afterwards.
+are therefore extracted and BUILT here, on the test file's own daemon, in a
+throwaway project with a private store, and every output their decorators
+declare must exist afterwards.
 
 Blocks fall into two kinds:
 
@@ -98,7 +98,6 @@ def _environment(store: Path) -> dict[str, str]:
     return {
         **os.environ,
         # A warm worker would serve another checkout's code.
-        "CADGEN_DAEMON": "0",
         "CADGEN_COMPONENT_WORKERS": "1",
         "CADGEN_CACHE_DIR": str(store),
         "PYTHONPATH": str(CADGEN_SRC),
@@ -218,9 +217,9 @@ class DocumentedModelsBuild(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(source, encoding="utf-8")
         # The documented models are independent of one another (the one child they
-        # compose, link_pin, is written above), so their cold builds run side by side;
-        # each is its own process with its own kernel import, and the store settles
-        # concurrent builds by the publish rule.
+        # compose, link_pin, is written above), so their first builds run side by side
+        # on the daemon's workers, and the store settles concurrent builds by the
+        # publish rule.
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             first_runs = dict(zip((relative for _, relative, _ in blocks.models),
                                   pool.map(self.run_script, (relative for _, relative, _ in blocks.models))))

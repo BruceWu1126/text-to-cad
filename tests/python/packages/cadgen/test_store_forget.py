@@ -4,7 +4,7 @@ Forgetting a model drops its record and nothing else, so ``store why`` says
 ``no record`` and the next run rebuilds it. Forgetting a document drops the
 tree entry for its bytes (and the record that wrote it), so the next door call
 compiles it again -- and answers, in one call. A target the store never heard
-of is nothing to forget, exit 0. Real CLIs, transient builds, a temp store.
+of is nothing to forget, exit 0. Real CLIs, real builds, a temp store.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ def _run(*argv: str, cwd: Path, cache: Path) -> subprocess.CompletedProcess:
         p for p in [str(REPO_ROOT / "packages" / "cadgen" / "src"), env.get("PYTHONPATH", "")] if p
     )
     env["CADGEN_CACHE_DIR"] = str(cache)
-    env["CADGEN_DAEMON"] = "0"
     env.pop("CADGEN_DAEMON_CHILD", None)
     return subprocess.run(
         [sys.executable, *argv], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=600

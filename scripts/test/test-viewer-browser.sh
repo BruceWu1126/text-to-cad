@@ -56,8 +56,11 @@ fi
 log="$(mktemp)"
 viewer_pidfile="$project/viewer.pid"
 export CADGEN_CACHE_DIR="$project/cache"
-export CADGEN_DAEMON=0
+# The fixture builds below and the Viewer's compiles run on a build daemon: this test's own,
+# at a private address, retired on the way out -- and gone by itself after a minute idle if not.
 export CADGEN_DAEMON_STATE_DIR="$project/daemon-state"
+CADGEN_DAEMON_SOCKET="$("$PYTHON" -c 'import os, sys, uuid; print(rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(sys.argv[1], "d.sock"))' "$CADGEN_DAEMON_STATE_DIR")"
+export CADGEN_DAEMON_SOCKET CADGEN_DAEMON_IDLE_TIMEOUT=60
 # The model library every Viewer writes: the test's own, never the user's.
 export CADGEN_STATE_DIR="$project/state"
 export CADGEN_VIEWER_DIST="$RUNTIME"
@@ -102,6 +105,8 @@ if pid_path.is_file():
 PY
     wait "$server_pid" 2>/dev/null || true
   fi
+  "$PYTHON" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
+    || echo "warning: the test's build daemon did not retire; it goes once idle" >&2
   rm -rf "$project" "$log"
 }
 trap cleanup EXIT

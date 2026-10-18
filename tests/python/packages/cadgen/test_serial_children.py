@@ -113,7 +113,7 @@ class SerialChildrenCase(unittest.TestCase):
         self.addCleanup(executors.set_event_sink, None)
 
     def use_store(self, store: Path) -> None:
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(store), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(store)})
         env.start()
         self.addCleanup(env.stop)
 

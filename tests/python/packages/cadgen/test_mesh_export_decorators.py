@@ -180,7 +180,6 @@ class MeshExportProductionTest(unittest.TestCase):
         (self.project / "src" / "widget.py").write_text(MODEL, encoding="utf-8")
         self.env = dict(os.environ)
         self.env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.project / "store"),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),

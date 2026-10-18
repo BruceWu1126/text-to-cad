@@ -273,7 +273,8 @@ when touching shared surfaces or before handoff:
   `scripts/test/test-python.sh`. Touching `cadgen/viewer/` means running that.
 - Docs site: `npm --prefix apps/docs run check`
 - API (`api.texttocad.dev`): `npm --prefix apps/api test`
-- Targeted Python tests: `./.venv/bin/python -m unittest <changed test paths>`
+- Targeted Python tests: `scripts/test/test-python.sh <changed test paths>` (each file
+  on a store and build daemon of its own; `test-global.sh` for `tests/python/global`)
 
 When a task changes what the bundlers consume, run `scripts/bundle/bundle.sh`
 and confirm the change lands in the built runtime. There is nothing to commit:

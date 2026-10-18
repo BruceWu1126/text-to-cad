@@ -44,7 +44,6 @@ class KernelImportHintTest(unittest.TestCase):
     def _run(self, name: str) -> str:
         env = dict(os.environ)
         env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_CACHE_DIR": str(self.project / "cache"),
             "PYTHONPATH": str(CADGEN_SRC) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""),
         })

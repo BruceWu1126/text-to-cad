@@ -237,7 +237,6 @@ class AssemblyHelperBuildWarningTests(unittest.TestCase):
             environment = {
                 **os.environ,
                 "PYTHONPATH": str(repo_path("packages/cadgen/src")),
-                "CADGEN_DAEMON": "0",
                 "CADGEN_CACHE_DIR": str(root / "store"),
             }
 

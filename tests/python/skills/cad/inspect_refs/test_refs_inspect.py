@@ -24,8 +24,7 @@ class StepSceneTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="python-inspection-")
         cls.root = Path(cls.temp.name)
         cls.env = mock.patch.dict(os.environ, {
-            "CADGEN_CACHE_DIR": str(cls.root / "store"), "CADGEN_DAEMON": "0",
-            "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(cls.root / "store"), "CADGEN_COMPONENT_WORKERS": "1",
         })
         cls.env.start()
         cls.path = cls.root / "assembly.step"

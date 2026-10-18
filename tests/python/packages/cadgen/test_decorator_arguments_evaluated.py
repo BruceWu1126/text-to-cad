@@ -15,7 +15,6 @@ from pathlib import Path
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import temporary_directory
-from tests.python.support.warm_daemon import warm_entries
 
 add_repo_path("packages/cadgen/src")
 
@@ -58,7 +57,6 @@ class DecoratorArgumentsAreEvaluated(unittest.TestCase):
         self.env = dict(os.environ)
         self.env.update(
             {
-                **warm_entries(),
                 "CADGEN_CACHE_DIR": str(self.root / "store"),
                 "PYTHONPATH": str(REPO_ROOT / "packages/cadgen/src"),
             }
@@ -95,7 +93,7 @@ class DecoratorArgumentsAreEvaluated(unittest.TestCase):
         # The registry entry is reused while the SCRIPT's bytes are unchanged, but its
         # declarations came from lib/dims.py: a warm worker that checked the script
         # alone kept rebuilding the model under its old output name after the helper
-        # was edited. In process, no daemon: the mechanism, not the pipeline.
+        # was edited. In process: the mechanism, not the pipeline.
         from cadgen.metadata import parse_generator_metadata
 
         metadata = parse_generator_metadata(self.src / "plate.py")

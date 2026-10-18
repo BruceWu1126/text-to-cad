@@ -43,9 +43,8 @@ class NoStaleBytecodeTest(unittest.TestCase):
             '''),
             encoding="utf-8",
         )
-        self._env = {k: os.environ.get(k) for k in ("CADGEN_CACHE_DIR", "CADGEN_DAEMON")}
+        self._env = {k: os.environ.get(k) for k in ("CADGEN_CACHE_DIR",)}
         os.environ["CADGEN_CACHE_DIR"] = str(self.root / "cache")
-        os.environ["CADGEN_DAEMON"] = "0"
         self._cwd = os.getcwd()
         os.chdir(self.root)
 

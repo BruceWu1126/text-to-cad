@@ -87,7 +87,6 @@ class FollowUps(unittest.TestCase):
         self.env = dict(os.environ)
         self.env.update(
             {
-                "CADGEN_DAEMON": "0",
                 "CADGEN_CACHE_DIR": str(self.store),
                 "PYTHONPATH": str(REPO_ROOT / "packages/cadgen/src"),
             }

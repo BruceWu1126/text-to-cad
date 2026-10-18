@@ -3,8 +3,8 @@
 The defect this pins: a 2,700-occurrence validate ran 35 minutes on a warm worker,
 the worker was killed (out of memory, most likely), and the caller saw one line --
 ``cadgen-daemon: worker closed the connection`` -- and exit 1. Nothing said the
-worker had died, nothing named the job, nothing said how to run it where the failure
-could be seen. The fix is the MESSAGE, deliberately not a silent cold retry: a
+worker had died, nothing named the job, nothing said where to read what the worker
+printed as it died. The fix is the MESSAGE, deliberately not a silent retry: a
 half-hour job re-running unannounced is worse than the failure it hides.
 
 Driven through ``_run_request`` with a scripted channel, so the wording is pinned at
@@ -258,9 +258,9 @@ class ResidentProcessLifecycle(unittest.TestCase):
 
     def test_a_job_runs_in_its_callers_environment_and_the_daemon_keeps_its_own_names(self):
         # A model reading os.environ, and a client's own choice such as CADGEN_STORE_MAX
-        # (STORE.md §8), see the caller's environment warm as cold: what the caller has is
-        # set, what it lacks is unset -- in a daemon started with it -- and the names the
-        # daemon's machinery sets for itself are neither sent nor replaced.
+        # (STORE.md §8), see the caller's environment: what the caller has is set, what it
+        # lacks is unset -- even in a daemon started with it -- and the names the daemon's
+        # machinery sets for itself are neither sent nor replaced.
         import os
 
         from cadgen.daemon import worker

@@ -15,7 +15,6 @@ the refusal reaches it, and every door after it only reads.
 
 from __future__ import annotations
 
-import os
 import unittest
 from unittest import mock
 
@@ -74,12 +73,10 @@ class UnmeshedFaceTests(unittest.TestCase):
         import cadgen.stl as stl_door
         from cadgen._internal import tessellate
 
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), inline_artifacts(), \
-                mock.patch.object(tessellate, "_mesh", refusing_the_pins_side(tessellate._mesh)):
+        with inline_artifacts(), mock.patch.object(tessellate, "_mesh", refusing_the_pins_side(tessellate._mesh)):
             step_door.compile(document)
         # Each door only reads what the compile stored: none starts a derivation job.
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}), \
-                mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("a door derived")):
+        with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("a door derived")):
             cls.listing = step_door.snapshot(document, mode="list")
             cls.view = step_door.snapshot(document, cls.workspace / "asm.png", width=SIZE[0], height=SIZE[1])
             cls.export = stl_door.build(document, cls.workspace / "asm.stl")

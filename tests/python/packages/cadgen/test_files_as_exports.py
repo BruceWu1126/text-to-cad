@@ -41,10 +41,7 @@ if __name__ == "__main__":
 
 class FilesAsExportsTest(unittest.TestCase):
     def setUp(self) -> None:
-        import os
-
         roots = IsolatedCadRoots(self, prefix="files-as-exports-")
-        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_DAEMON": "0"}))
         # The export and the verify run where they are submitted: what they write and
         # answer is the subject, and the build hears the verify before it returns.
         self.enterContext(inline_artifacts())

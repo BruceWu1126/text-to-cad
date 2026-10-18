@@ -801,7 +801,7 @@ class ReachClosure(unittest.TestCase):
                 listings.append(os.listdir(target.parent))
             replace_atomic(temp_path, target_path)
 
-        quiet = {"CADGEN_DAEMON": "0", "CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1"}
+        quiet = {"CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1"}
         with mock.patch.dict(os.environ, quiet), mock.patch.object(atomic_replace, "replace_atomic", publish):
             self.assertEqual(0, generate_step_targets([str(script)], force=True, verbose=False))
         self.assertTrue(listings, "the STEP was published from a stage folder")
@@ -1047,7 +1047,7 @@ class ReachEndToEnd(unittest.TestCase):
         import subprocess
 
         env = dict(os.environ)
-        env.update({"CADGEN_DAEMON": "0", "PYTHONPATH": str(self.repo / "packages/cadgen/src")})
+        env.update({"PYTHONPATH": str(self.repo / "packages/cadgen/src")})
         completed = subprocess.run(
             [self.python, self.model.name], cwd=str(self.model.parent), env=env,
             capture_output=True, text=True, timeout=600,

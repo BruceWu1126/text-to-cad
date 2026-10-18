@@ -301,7 +301,7 @@ class SnapshotBrowserTessCacheIntegrationTest(unittest.TestCase):
 
         with generated_cad_directory(prefix="snapshot-browser-cache-") as temporary:
             root = Path(temporary).resolve()
-            with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "cache"), "CADGEN_DAEMON": "0"}):
+            with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(root / "cache")}):
                 asyncio.run(exercise(root))
 
 

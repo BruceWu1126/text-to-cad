@@ -118,13 +118,12 @@ def run(*args: str) -> subprocess.CompletedProcess:
 
 def run_script(script: str, *args: str) -> subprocess.CompletedProcess:
     # Library-first: the model script IS the entrypoint; same stream contract
-    # as every CLI. Cold keeps the child self-contained.
+    # as every CLI.
     env = dict(os.environ)
     own_cadgen = str(REPO / "packages" / "cadgen" / "src")
     env["PYTHONPATH"] = os.pathsep.join(
         [own_cadgen, *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
     )
-    env["CADGEN_DAEMON"] = "0"
     return subprocess.run(
         [sys.executable, script, *args],
         cwd=REPO, capture_output=True, text=True, check=False, env=env,

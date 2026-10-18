@@ -71,7 +71,6 @@ class DiscoveredFileInputTests(unittest.TestCase):
         self.environment.update(
             {
                 # A warm worker would serve another checkout's code.
-                "CADGEN_DAEMON": "0",
                 "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_CACHE_DIR": str(self.project / "store"),
                 "PYTHONPATH": str(CADGEN_SRC),
@@ -252,7 +251,6 @@ class OwnOutputAsInputTests(unittest.TestCase):
         self.project = Path(self._tmp.name).resolve()
         self.environment = dict(os.environ)
         self.environment.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_CACHE_DIR": str(self.project / "store"),
             "PYTHONPATH": str(CADGEN_SRC),
         })
@@ -373,7 +371,6 @@ class ReadSceneTests(unittest.TestCase):
             build123d.export_step(build123d.Box(4, 3, 2), path)
             with mock.patch.dict(os.environ, {
                 "CADGEN_CACHE_DIR": str(Path(tmp) / "store"),
-                "CADGEN_DAEMON": "0",
             }):
                 with filetrace.capture() as trace:
                     step_scene.read_scene(path)

@@ -60,7 +60,7 @@ class MissingModuleInput(unittest.TestCase):
         self.addCleanup(scratch.cleanup)
         self.project = Path(scratch.name).resolve()
         (self.project / "assembly.py").write_text(ASSEMBLY, encoding="utf-8")
-        self.environment = {**os.environ, "CADGEN_DAEMON": "0", "CADGEN_CACHE_DIR": str(self.project / "store"),
+        self.environment = {**os.environ, "CADGEN_CACHE_DIR": str(self.project / "store"),
                             "PYTHONPATH": str(CADGEN_SRC)}
 
     def _run(self, *argv: str) -> subprocess.CompletedProcess:

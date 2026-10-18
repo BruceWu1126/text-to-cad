@@ -105,8 +105,6 @@ if ! pick_interpreter; then
   exit 1
 fi
 echo "    interpreter: $PYTHON"
-# Cold: a smoke test spawns no build daemon.
-export CADGEN_DAEMON=0
 # Isolated store: content keying would otherwise resolve the fixture against
 # the developer's real cache and skip the import this smoke test exists to run.
 export CADGEN_CACHE_DIR="$(mktemp -d)"
@@ -115,13 +113,19 @@ export CADGEN_CACHE_DIR="$(mktemp -d)"
 private_tmp="$("$PYTHON" -c 'import tempfile; print(tempfile.mkdtemp(prefix="cv-"))')"
 export TMPDIR="$private_tmp" TEMP="$private_tmp" TMP="$private_tmp"
 export CADGEN_STATE_DIR="$private_tmp/state"
+# The build daemon the launch starts, whose job the compile below is: this test's own, at a
+# private address, retired on the way out -- and gone by itself after a minute idle if not.
 export CADGEN_DAEMON_STATE_DIR="$private_tmp/daemon"
+CADGEN_DAEMON_SOCKET="$("$PYTHON" -c 'import os, sys, uuid; print(rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(sys.argv[1], "d.sock"))' "$CADGEN_DAEMON_STATE_DIR")"
+export CADGEN_DAEMON_SOCKET CADGEN_DAEMON_IDLE_TIMEOUT=60
 PORT="$("$PYTHON" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 STARTED=""
 cleanup() {
   if [ -n "$STARTED" ]; then
     "$PYTHON" -m cadgen.viewer stop --port "$PORT" >/dev/null 2>&1 || true
   fi
+  "$PYTHON" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
+    || echo "warning: the test's build daemon did not retire; it goes once idle" >&2
   rm -rf "$serve_root" "$CADGEN_CACHE_DIR" "$private_tmp"
   rm -f "$log"
 }
@@ -227,8 +231,8 @@ if ! printf '%s' "$status_json" | grep -q '"compile":true'; then
   exit 1
 fi
 # The POST starts the compile and answers at once; the status route says when it
-# has landed. The compile pays one cold interpreter + OCP start, so the wait for
-# that is bounded generously.
+# has landed. The compile is a job of the daemon the launch started, whose worker may
+# still be importing OCP, so the wait for it is bounded generously.
 build_json="$(curl -s -m 30 -X POST -H 'x-cadgen-viewer: 1' "$step_url")"
 if ! printf '%s' "$build_json" | grep -q '"ok":true'; then
   echo "FAIL: the compile did not start: $build_json" >&2

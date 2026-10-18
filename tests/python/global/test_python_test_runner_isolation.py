@@ -49,6 +49,15 @@ class PythonTestRunnerIsolation(unittest.TestCase):
             self.assertFalse(Path(env["CADGEN_CACHE_DIR"]).exists())
             self.assertFalse(Path(env["CADGEN_DAEMON_STATE_DIR"]).exists())
 
+    def test_even_one_file_at_one_job_runs_on_a_daemon_of_its_own(self):
+        # A direct run of one file used to run in the runner's own interpreter, on the
+        # developer's daemon: every file now gets an interpreter, a store and a daemon.
+        ran = ("only.py", 0, "Ran 0 tests in 0.000s\n\nOK\n", 0.0)
+        with mock.patch.object(runner, "_run_one_file", return_value=ran) as one, \
+                mock.patch.object(runner.sys, "stderr", io.StringIO()):
+            self.assertEqual(runner.main(["--top", str(REPO_ROOT), "only.py"]), 0)
+        one.assert_called_once_with("only.py", os.path.realpath(REPO_ROOT), False)
+
     def test_failed_child_still_retires_only_its_own_endpoint(self):
         calls = []
 
@@ -67,18 +76,27 @@ class PythonTestRunnerIsolation(unittest.TestCase):
         self.assertFalse(Path(calls[0][1]["CADGEN_DAEMON_STATE_DIR"]).exists())
 
     def test_cleanup_uses_authenticated_retirement_without_spawning_or_retrying(self):
-        from cadgen.daemon import client
+        from cadgen.daemon import client, transport
 
         channel = mock.Mock()
+        lock = mock.Mock()
+        lock.acquire.side_effect = [False, False, True]  # still draining twice, then gone
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": "owned"}), \
                 mock.patch.object(client, "_connect", return_value=channel) as connect, \
                 mock.patch.object(client, "_send_json", return_value=True) as send, \
                 mock.patch.object(client, "_recv_json", return_value={"restart": True}), \
+                mock.patch.object(transport, "daemon_lock", return_value=lock) as daemon_lock, \
                 mock.patch.object(client, "_connect_or_spawn", side_effect=AssertionError("must never spawn")):
             retire_owned_daemon("owned")
             connect.assert_called_once_with("owned")
             send.assert_called_once_with(channel, {"token": "test-owned-daemon-retirement"})
             channel.close.assert_called_once()
+            # Done when the daemon lets go of its address, not at its reply: one still
+            # draining wakes its own accept through the socket file the caller removes next,
+            # and with that file gone it served nothing, forever.
+            daemon_lock.assert_called_once_with("owned")
+            self.assertEqual(lock.acquire.call_count, 3)
+            lock.release.assert_called_once()
             with self.assertRaisesRegex(ValueError, "explicit test-owned address"):
                 retire_owned_daemon("developer")
             self.assertEqual(connect.call_count, 1)
@@ -100,7 +118,7 @@ class HangGuard(unittest.TestCase):
             report = io.StringIO()
             with contextlib.chdir(top), mock.patch.object(runner, "FILE_HANG_SECONDS", 1), \
                     mock.patch.object(runner.sys, "stderr", report):
-                code = runner.run_in_parallel([str(hung)], top, 2, False)
+                code = runner.run_files([str(hung)], top, 1, False)
         self.assertEqual(code, 1)
         self.assertIn("in test_waits_forever", report.getvalue())
         self.assertIn(f"failing modules:\n  {hung}", report.getvalue())

@@ -101,7 +101,6 @@ class SavedDocumentIdentityTest(unittest.TestCase):
             {
                 "CADGEN_CACHE_DIR": str(self.store),
                 "CADGEN_COMPONENT_WORKERS": "1",
-                "CADGEN_DAEMON": "0",
                 "CADGEN_JOBS": "1",
             },
         )

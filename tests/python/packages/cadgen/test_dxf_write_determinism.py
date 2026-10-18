@@ -344,12 +344,13 @@ class DxfRunPathDeterminismTest(unittest.TestCase):
 
     Everything above tests the emitter directly. This runs the whole ``@dxf``
     path — decorator, freshness gate, runner, drawing validation, atomic write —
-    in separate COLD processes under different hash seeds, and compares the file
-    on disk. That is the surface the deleted ``PYTHONHASHSEED`` re-exec used to
+    in separate fresh processes under different hash seeds, each running the build
+    as a daemon worker runs it (``CADGEN_DAEMON_CHILD``), and compares the file on
+    disk. That is the surface the deleted ``PYTHONHASHSEED`` re-exec used to
     protect, so it is the surface that has to hold without it.
     """
 
-    # One fixed seed and one unset seed, built cold ONCE for the class: the tests
+    # One fixed seed and one unset seed, built ONCE for the class: the tests
     # only read the bytes. (Three seeds were three tickets in the lottery that
     # test_class_registry_is_sorted settles directly.)
     @classmethod
@@ -368,7 +369,9 @@ class DxfRunPathDeterminismTest(unittest.TestCase):
             environment.pop("PYTHONHASHSEED", None)
             if seed is not None:
                 environment["PYTHONHASHSEED"] = seed
-            environment["CADGEN_DAEMON"] = "0"  # a fresh interpreter IS the subject
+            # A worker's hash seed is its own from its start, so a fresh interpreter that
+            # runs the build itself, as a worker does, is the subject.
+            environment["CADGEN_DAEMON_CHILD"] = "1"
             environment["CADGEN_CACHE_DIR"] = str(project / "store")
             environment["PYTHONPATH"] = str(CADGEN_SRC)
             completed = subprocess.run(
@@ -381,13 +384,13 @@ class DxfRunPathDeterminismTest(unittest.TestCase):
                 check=False,
             )
             if completed.returncode != 0:
-                raise RuntimeError(f"the cold drawing build failed:\n{completed.stdout}{completed.stderr}")
+                raise RuntimeError(f"the drawing build failed:\n{completed.stdout}{completed.stderr}")
             written = project / "bracket_plate.dxf"
             if not written.is_file():
                 raise RuntimeError(f"no drawing written:\n{completed.stdout}{completed.stderr}")
             return written.read_bytes()
 
-    def test_cold_runs_under_different_seeds_write_identical_files(self) -> None:
+    def test_fresh_processes_under_different_seeds_write_identical_files(self) -> None:
         self.assertEqual(
             hashlib.sha256(self._unseeded).hexdigest(),
             hashlib.sha256(self._seeded).hexdigest(),

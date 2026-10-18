@@ -1175,7 +1175,7 @@ class ChildrenByKey(StoreCase):
 
     def run_model(self, script: Path) -> str:
         env = dict(os.environ)
-        env.update({"CADGEN_DAEMON": "0", "PYTHONPATH": str(REPO / "packages/cadgen/src")})
+        env.update({"PYTHONPATH": str(REPO / "packages/cadgen/src")})
         completed = subprocess.run(
             [PYTHON, script.name], cwd=str(script.parent), env=env, capture_output=True, text=True, timeout=600
         )

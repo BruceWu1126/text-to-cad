@@ -128,7 +128,6 @@ class DaemonRouting(unittest.TestCase):
             if key != "CADGEN_DAEMON_CHILD"
         }
         env.update({
-            "CADGEN_DAEMON": "1",
             "CADGEN_DAEMON_SOCKET": cls.address,
             "CADGEN_CACHE_DIR": str(cls.stores["a"]),
             "CADGEN_DAEMON_STATE_DIR": str(cls.work / "state"),

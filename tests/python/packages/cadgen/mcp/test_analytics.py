@@ -630,7 +630,7 @@ class InstallChannelTest(_Tmp):
 
     def test_the_cad_server_writes_its_channel_down_as_it_starts(self) -> None:
         environment = {**os.environ, "CADGEN_INSTALL_CHANNEL": "claude-github", "CADGEN_STATE_DIR": str(self.tmp),
-                       "DO_NOT_TRACK": "1", "CADGEN_UPDATE_CHECK": "0", "CADGEN_DAEMON": "0"}
+                       "DO_NOT_TRACK": "1", "CADGEN_UPDATE_CHECK": "0"}
         # A host that starts a server only to list its tools, and closes it at once.
         subprocess.run([sys.executable, "-m", "cadgen.cli", "mcp"], stdin=subprocess.DEVNULL, capture_output=True,
                        env=environment, timeout=120, check=True)

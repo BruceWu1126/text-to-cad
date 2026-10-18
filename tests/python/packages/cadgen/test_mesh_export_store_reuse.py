@@ -53,7 +53,7 @@ def _write_model(root: Path, size: float) -> Path:
 
 
 class MeshExportStoreReuseTest(unittest.TestCase):
-    # block.py is built cold ONCE for the class; each test gets a copy of the
+    # block.py is built ONCE for the class; each test gets a copy of the
     # project (script, document, store) and drives the doors against that copy.
     @classmethod
     def setUpClass(cls) -> None:
@@ -63,7 +63,6 @@ class MeshExportStoreReuseTest(unittest.TestCase):
         entry = _write_model(cls._seed_root, size=6.0)
         env = dict(os.environ)
         env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(cls._seed_root / "store"),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
@@ -88,7 +87,6 @@ class MeshExportStoreReuseTest(unittest.TestCase):
         self.store = self.root / "store"
         self.env = dict(os.environ)
         self.env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.store),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),

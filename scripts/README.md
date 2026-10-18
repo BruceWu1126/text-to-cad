@@ -63,8 +63,11 @@ where those files ship, so these scripts are what produces them.
     read when a run is slow.
 - `unittest_files.py` — the runner underneath, invoked by `common.sh`. Loads each
   test file under its full dotted path so an import failure names the file, and
-  runs the files `--jobs` at a time in their own interpreters. A file still
-  running after 15 minutes is hung: it prints every thread's stack and fails.
+  runs the files `--jobs` at a time, each in its own interpreter with its own
+  store and build daemon, retired when the file ends; run one test file through
+  it too, rather than `python -m unittest`, which would build on your own daemon.
+  A file still running after 15 minutes is hung: it prints every thread's stack
+  and fails.
 - `test-global.sh [PATH...]` — `tests/python/global`, the repo-wide policy
   suite, narrowed to PATHs as `test-python.sh` is. Like `test-python.sh`, it
   builds the `--browser` runtime stage and this machine's file tracer first when

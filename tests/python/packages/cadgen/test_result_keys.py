@@ -63,7 +63,7 @@ class ResultKeys(unittest.TestCase):
         self.plate = self.root / "plate.py"
         self.document = self.root / "plate.step"
         self.size(10.0)
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         env.start()
         self.addCleanup(env.stop)
         self.events: list[dict] = []

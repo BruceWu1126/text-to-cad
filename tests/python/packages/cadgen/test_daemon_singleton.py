@@ -167,7 +167,7 @@ class RestartHandoverTest(unittest.TestCase):
     The client respawns at once. The stale daemon used to clear its address, reply,
     and hold the lock through its pool shutdown (about half a second per warm worker),
     so the respawned daemon stood down and the address was left with no daemon: the
-    CAD Viewer's geometry request, which has no cold path, failed.
+    CAD Viewer's geometry request failed.
     """
 
     def test_the_lock_is_free_when_a_client_is_told_to_restart(self):
@@ -262,8 +262,8 @@ class OneTokenForOneCodeTest(unittest.TestCase):
 @unittest.skipIf(os.name == "nt", "a pipe name has no path to outgrow")
 class DeepStateDirTest(unittest.TestCase):
     """A state directory too deep for a Unix socket (``CADGEN_DAEMON_STATE_DIR``, a deep
-    ``TMPDIR``) left the daemon unable to bind, and every request with no cold path -- a
-    mesh export -- failed with "could not accept the request". Its socket now goes in a
+    ``TMPDIR``) left the daemon unable to bind, and every request -- a mesh export among
+    them -- failed with "could not accept the request". Its socket now goes in a
     short folder of this user's own; the key, the locks and the log stay where they were."""
 
     def setUp(self):

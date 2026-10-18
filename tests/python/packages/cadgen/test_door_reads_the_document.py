@@ -6,8 +6,8 @@ one question (does the store have a tree for these bytes?) and a source that has
 moved on since the document was written is the model's business, not the door's
 (STORE.md §9); ``cadgen store why`` answers that question, never a door.
 
-Real fixture, real script run: the document is built cold in a subprocess, then
-the door is called in-process with stderr captured.
+Real fixture, real script run: the document is built by a script run in a subprocess,
+then the door is called in-process with stderr captured.
 """
 
 from __future__ import annotations
@@ -60,7 +60,6 @@ class DoorReadsTheDocumentTests(unittest.TestCase):
 
     def _build(self) -> None:
         env = dict(os.environ)
-        env["CADGEN_DAEMON"] = "0"
         env["PYTHONPATH"] = os.pathsep.join(
             [str(add_repo_path("packages/cadgen/src")), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
         )

@@ -30,7 +30,7 @@ class PartStoreTest(unittest.TestCase):
         self.tmp = generated_cad_directory(prefix="part-store-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         env.start()
         self.addCleanup(env.stop)
         from build123d import Solid

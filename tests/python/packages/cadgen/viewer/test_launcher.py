@@ -168,9 +168,8 @@ class LauncherFixture(unittest.TestCase):
                 "TEMP": self.home,
                 "TMP": self.home,
                 "CADGEN_STATE_DIR": self.state,
-                # A launch warms the build daemon, which would be one per test, its workers left
-                # running after it. PrewarmsTheDaemon opts in.
-                "CADGEN_DAEMON": "0",
+                # A launch warms the build daemon: the test file's own, at the endpoint the
+                # runner gave this process, one for every launch here.
             }
         )
         env.update(overrides)
@@ -693,7 +692,6 @@ class PrewarmsTheDaemon(LauncherFixture):
 
         state = tempfile.mkdtemp(prefix="cgv-")  # short: a Unix socket path caps near 104 bytes
         daemon_env = {
-            "CADGEN_DAEMON": "1",
             "CADGEN_DAEMON_STATE_DIR": state,
             "CADGEN_DAEMON_SOCKET": (rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt"
                                      else os.path.join(state, "d.sock")),

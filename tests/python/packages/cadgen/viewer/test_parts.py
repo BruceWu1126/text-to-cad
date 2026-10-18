@@ -49,8 +49,7 @@ class PartRequests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         env = mock.patch.dict(os.environ, {
-            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0",
-            "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_COMPONENT_WORKERS": "1",
         })
         env.start()
         self.addCleanup(env.stop)
@@ -463,7 +462,7 @@ class FaceMeasureRequests(unittest.TestCase):
     def setUp(self):
         self.tmp = generated_cad_directory(prefix="face-measure-")
         self.addCleanup(self.tmp.cleanup)
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.tmp.name) / "store"), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.tmp.name) / "store")})
         env.start()
         self.addCleanup(env.stop)
         self.enterContext(inline_artifacts())

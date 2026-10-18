@@ -40,7 +40,6 @@ class _ModelRunCase(unittest.TestCase):
         self.project = Path(self._tmp.name).resolve()
         self.env = dict(os.environ)
         self.env.update({
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.project / "store"),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
@@ -67,7 +66,7 @@ class ModelRunResultLineTest(_ModelRunCase):
 
         The contract is a single sentence -- the result line names a path the caller can
         open, never the tree hash -- and it was being asked three times, each from its own
-        empty store, each paying a cold kernel import and a full mesh write. The three
+        empty store, each paying a full build and a full mesh write. The three
         shapes it has to hold for are just three fixtures.
         """
         self._write("spacer.py", """\

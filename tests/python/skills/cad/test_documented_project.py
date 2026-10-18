@@ -41,7 +41,6 @@ class TheTemplateBuilds(unittest.TestCase):
             target.write_text(source, encoding="utf-8")
         self.environment = {
             **os.environ,
-            "CADGEN_DAEMON": "0",
             "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.project / "store"),
             "PYTHONPATH": str(CADGEN_SRC),

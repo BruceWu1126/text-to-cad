@@ -153,7 +153,7 @@ class BuiltTreeTokensTest(unittest.TestCase):
         self.tmp = generated_cad_directory(prefix="tree-tokens-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_DAEMON": "0"})
+        env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         env.start()
         self.addCleanup(env.stop)
 

@@ -21,8 +21,7 @@ class ColdCompileCleanupTest(unittest.TestCase):
         self.root = Path(scratch.name)
         env = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1", "CADGEN_DAEMON": "0",
-        })
+            "CADGEN_COMPONENT_WORKERS": "1",         })
         env.start()
         self.addCleanup(env.stop)
 
