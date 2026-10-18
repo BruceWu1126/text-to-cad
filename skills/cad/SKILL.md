@@ -34,8 +34,8 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
 one installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.22 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.22 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.23 python`
 
 The first run downloads that installation and the first snapshot its headless
 browser; later runs reuse both.
@@ -125,16 +125,20 @@ for decorator examples, mesh tolerances and animated GLB.
 A reference such as `/work/robot/STEP/assembly.step#o1.2.f7` identifies geometry
 in a particular saved document. Its file part is the document's absolute path as
 the CAD viewer copied it, with the file's real name and extension (in quotes when it
-holds a space or `#`). Open that path with `read_scene`, and pass the whole reference
-to `resolve()`:
+holds a space or `#`). A selection of several entities is copied as one line, its
+refs comma-separated (`/work/robot/STEP/assembly.step#o1.2.f7,o1.2.f8`). Open that
+path with `read_scene`, and pass the whole line to `resolve()`, which returns a tuple
+of one selection per ref, in order:
 
 ```python
 from cadgen import read_scene
 
 scene = read_scene("/work/robot/STEP/assembly.step")
-selection = scene.resolve("/work/robot/STEP/assembly.step#o1.2.f7")
-face = selection.shape()  # owned native geometry, in document world coordinates
-print(selection.ref, face.area)
+for selection in scene.resolve("/work/robot/STEP/assembly.step#o1.2.f7,o1.2.f8"):
+    face = selection.shape()  # owned native geometry, in document world coordinates
+    print(selection.ref, face.area)
+
+(selection,) = scene.resolve("/work/robot/STEP/assembly.step#o1.2.f7")  # one ref
 ```
 
 A Quick Edit prompt names its document under `File:`, selected entities under
