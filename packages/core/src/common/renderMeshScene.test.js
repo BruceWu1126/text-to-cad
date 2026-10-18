@@ -3,10 +3,8 @@ import test from "node:test";
 
 import * as THREE from "three";
 
-import {
-  buildModel,
-  buildStepClipPlane
-} from "./cadScene.js";
+import { buildModel } from "./cadScene.js";
+import { buildStepClipPlane } from "../lib/viewer/clipPlane.js";
 import {
   captureModel,
   disposeSnapshotSceneResources,
@@ -514,18 +512,19 @@ test("render display accepts common camera, selection, clipping, and quality con
   assert.equal(options.materialSettings.defaultColor, "#123456");
 });
 
-test("only a STEP job has edges, a section or an exploded view; every other kind renders Solid without them", () => {
+test("only a STEP job has edges; Clip cuts every 3D file and Explode a STEP or a GLB of several parts", () => {
   const display = { mode: "wireframe", clip: { enabled: true, axis: "x" }, exploded: { enabled: true, amount: 0.5 } };
   const step = renderJobContext(twoPartMeshData(), { kind: "step", display });
   assert.equal(step.sceneSettings.view.mode, "wireframe");
   assert.equal(step.sharedRenderOptions.clip.enabled, true);
-  for (const kind of ["stl", "3mf", "glb", "dxf", "urdf", "srdf", "sdf"]) {
-    const context = renderJobContext(twoPartMeshData(), { kind, display });
-    assert.equal(context.sceneSettings.view.mode, "solid", kind);
-    assert.equal(context.sceneSettings.view.edges.enabled, false, kind);
-    assert.equal(context.sharedRenderOptions.clip.enabled, false, kind);
-    assert.equal(context.displaySettings.exploded.enabled, false, kind);
-  }
+  const view = (kind, parts = 0) => {
+    const context = renderJobContext({ ...twoPartMeshData(), explodeParts: parts }, { kind, display });
+    return [context.sceneSettings.view.mode, context.sceneSettings.view.edges.enabled, context.sharedRenderOptions.clip.enabled,
+      context.displaySettings.exploded.enabled];
+  };
+  for (const kind of ["stl", "3mf", "glb", "urdf", "srdf", "sdf"]) assert.deepEqual(view(kind), ["solid", false, true, false], kind);
+  assert.deepEqual(view("glb", 2), ["solid", false, true, true], "a GLB of several parts explodes");
+  assert.deepEqual(view("dxf"), ["solid", false, false, false], "a drawing is no scene to cut");
 });
 
 // A stub renderer: captureModel does everything except produce pixels, and the

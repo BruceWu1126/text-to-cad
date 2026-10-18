@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
-import { buildModel, buildStepClipPlane } from "./cadScene.js";
+import { buildModel } from "./cadScene.js";
+import { buildStepClipPlane } from "../lib/viewer/clipPlane.js";
 import { resolveCadEdgeSettings } from "./cadInk.js";
 import { applyMaterialSettingsToRecord as applyViewerMaterialSettings } from "../lib/viewer/surfaceMaterials.js";
 import { resolveViewSceneSettings } from "./sceneSettings.js";

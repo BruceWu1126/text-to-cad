@@ -7,7 +7,8 @@ import {
   headlessResources,
   headlessSceneDress,
   headlessSceneFamily,
-  headlessSceneModel
+  headlessSceneModel,
+  refuseUnexplodable
 } from "./headlessScene.js";
 import {
   captureModel,
@@ -84,7 +85,8 @@ async function captureFamilyScene(family, job) {
   let context;
   let model;
   try {
-    context = renderJobContext({ bounds: scene.bounds }, job);
+    refuseUnexplodable(scene, job);
+    context = renderJobContext({ bounds: scene.bounds, explodeParts: scene.explodeParts || 0 }, job);
     model = headlessSceneModel(THREE, scene, headlessSceneDress(context.sceneSettings));
   } catch (error) { scene.dispose(); throw error; }
   stageTimings.buildModelMs = Math.round(performance.now() - buildStarted);

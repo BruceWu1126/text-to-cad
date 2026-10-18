@@ -48,7 +48,7 @@ import {
   applyDisplayRecordTransform,
   composeDisplayRecordEffectMatrix
 } from "./displayRecordTransform.js";
-import { axisIndex, clipAxisBounds, clipAxisPosition, normalizeStepClipSettings } from "../lib/viewer/clipPlane.js";
+import { normalizeStepClipSettings, buildStepClipPlane, syncMaterialClipPlanes } from "../lib/viewer/clipPlane.js";
 import {
   PART_HOVER_EDGE_EMPHASIS,
   PART_HOVER_EMISSIVE_INTENSITY,
@@ -1308,72 +1308,7 @@ function applyParameters(THREE, runtime, parameters, meshData, callbacks = {}) {
   return effectiveBoundsFromRecords(THREE, runtime.displayRecords, runtime.baseBounds);
 }
 
-export function buildStepClipPlane(THREE, clip, bounds, modelOffset = null) {
-  const normalized = normalizeStepClipSettings(clip);
-  if (!normalized.enabled || (normalized.at === undefined && !bounds)) {
-    return null;
-  }
-  const index = axisIndex(normalized.axis);
-  // `at` in millimetres in the model's frame; without it, the middle of the model at rest.
-  const position = clipAxisPosition(bounds, normalized);
-  // A plane that cuts nothing (at or past the face on the kept side) activates no clipping
-  // shaders or stencil caps, so an idle tool costs nothing.
-  if (bounds) {
-    const { min, max } = clipAxisBounds(bounds, normalized.axis);
-    if (normalized.invert ? position <= min : position >= max) return null;
-  }
-  const normal = new THREE.Vector3(
-    index === 0 ? 1 : 0,
-    index === 1 ? 1 : 0,
-    index === 2 ? 1 : 0
-  );
-  // Keep the lower-coordinate half by default, exposing the cut toward the
-  // default camera. Flip reverses that side without moving the section plane.
-  if (!normalized.invert) {
-    normal.multiplyScalar(-1);
-  }
-  const point = modelOffset?.clone ? modelOffset.clone() : new THREE.Vector3(0, 0, 0);
-  point.setComponent(index, point.getComponent(index) + position);
-  return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);
-}
 
-export function syncMaterialClipPlanes(material, clipPlanes) {
-  if (!material) {
-    return;
-  }
-  const materials = Array.isArray(material) ? material : [material];
-  const clippingEnabled = Array.isArray(clipPlanes) && clipPlanes.length > 0;
-  for (const item of materials) {
-    if (!item) {
-      continue;
-    }
-    const previousEnabled = item.userData?.cadClipPlaneEnabled === true;
-    const previousCount = Number(item.userData?.cadClipPlaneCount) || 0;
-    const previousShaderClipping = item.clipping === true;
-    item.clippingPlanes = clippingEnabled ? clipPlanes : null;
-    item.clipIntersection = false;
-    item.clipShadows = clippingEnabled;
-    if ("clipping" in item) {
-      item.clipping = clippingEnabled;
-    }
-    const clipPlaneCount = clippingEnabled ? clipPlanes.length : 0;
-    if (item.userData?.cadClipPlaneEnabled !== clippingEnabled
-      || item.userData?.cadClipPlaneCount !== clipPlaneCount) {
-      item.userData = {
-        ...(item.userData || {}),
-        cadClipPlaneEnabled: clippingEnabled,
-        cadClipPlaneCount: clipPlaneCount
-      };
-    }
-    if (
-      previousEnabled !== clippingEnabled ||
-      previousCount !== (clippingEnabled ? clipPlanes.length : 0) ||
-      previousShaderClipping !== (item.clipping === true)
-    ) {
-      item.needsUpdate = true;
-    }
-  }
-}
 
 function syncClip(runtime, clip, bounds, modelOffset = null) {
   const clipPlane = buildStepClipPlane(runtime.THREE, clip, bounds, modelOffset);

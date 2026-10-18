@@ -242,6 +242,35 @@ export const EDGELESS_VIEW_FEATURES = Object.freeze({
   settings: Object.freeze(VIEW_SETTING_IDS.filter(id => !["edges", "clip", "exploded"].includes(id)))
 });
 
+// A triangle mesh, a robot and a GLB have no edges either, but Clip cuts whatever a scene drew
+// (`lib/viewer/sceneClip.js`), and a GLB of several parts moves them apart (`sceneExplode.js`).
+/** STL, 3MF, URDF, SRDF, SDF and a GLB of one part: Solid, cut by Clip. @type {ViewFeatures} */
+export const MESH_VIEW_FEATURES = Object.freeze({
+  modes: EDGELESS_VIEW_FEATURES.modes,
+  settings: Object.freeze([...EDGELESS_VIEW_FEATURES.settings, "clip"])
+});
+/** A GLB of several parts: a mesh's, and Explode. @type {ViewFeatures} */
+export const PARTED_MESH_VIEW_FEATURES = Object.freeze({
+  modes: EDGELESS_VIEW_FEATURES.modes,
+  settings: Object.freeze([...MESH_VIEW_FEATURES.settings, "exploded"])
+});
+
+/**
+ * What a file of `kind` offers, for the viewer and a snapshot alike: a STEP everything; a GLB a
+ * mesh's, and Explode when it has several parts (`parts`); every other 3D file a mesh's; a
+ * drawing (DXF) no more than an edgeless view.
+ * @param {string} kind  The file's extension, without the dot.
+ * @param {{ parts?: number }} [scene]
+ * @returns {ViewFeatures}
+ */
+export function viewFeaturesForKind(kind, { parts = 0 } = {}) {
+  const normalized = String(kind || "").trim().toLowerCase();
+  if (normalized === "step" || normalized === "stp") return ALL_VIEW_FEATURES;
+  // A drawing is no scene: nothing in it to cut.
+  if (normalized === "dxf") return EDGELESS_VIEW_FEATURES;
+  return normalized === "glb" && parts > 1 ? PARTED_MESH_VIEW_FEATURES : MESH_VIEW_FEATURES;
+}
+
 /** A caller's lists, with the full set standing in for any it left out. @returns {ViewFeatures} */
 export function normalizeViewFeatures(features = null) {
   return {

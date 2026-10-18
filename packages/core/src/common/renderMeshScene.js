@@ -33,6 +33,7 @@ import {
   syncTopologyDisplayEdgeLine
 } from "../lib/viewer/topologyDisplayEdgeLine.js";
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
+import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
 import {
   applyExplodedViewProgress,
@@ -66,7 +67,7 @@ import {
   resolveDisplayMaterialSettings,
   resolveViewSceneSettings
 } from "./sceneSettings.js";
-import { ALL_VIEW_FEATURES, EDGELESS_VIEW_FEATURES } from "./viewSettings.js";
+import { viewFeaturesForKind } from "./viewSettings.js";
 import {
   createEnvironmentResource,
   disposeEnvironmentResource
@@ -445,8 +446,9 @@ export function renderJobContext(meshData, job = {}) {
     display: job.display ?? {},
     // Render is the job's own request (`render: true`), over the same display settings.
     render: job.render === true,
-    // The viewer's rule: only a CAD model has edges to draw, parts to explode or solids to section.
-    features: stepDisplayEnabled ? ALL_VIEW_FEATURES : EDGELESS_VIEW_FEATURES
+    // The viewer's rule for this file: only a CAD model has edges to draw; a GLB of several parts
+    // explodes; every 3D file is cut by Clip (`viewFeaturesForKind`).
+    features: viewFeaturesForKind(sourceKind, { parts: meshData.explodeParts || 0 })
   });
   // Neutral CAD lights remain available when only the background/floor is on.
   const theme = sceneSettings.theme;
@@ -707,6 +709,7 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       viewport.annotationLayer?.layer.dispose();
       viewport.annotationLayer = null;
       if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
+      viewport.sceneClip?.dispose();
       model.dispose?.();
       scene.remove?.(model.root);
       if (studioRuntime) disposePhotographicStudio(studioRuntime);
@@ -874,7 +877,7 @@ function syncViewportAnnotation(viewport, job, { height }) {
     viewport.annotationLayer = { layer, lineScale };
   }
   if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
-  viewport.annotationLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || []);
+  viewport.annotationLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || viewport.sceneClip?.planes || []);
 }
 
 export async function captureModel(viewport, captureOptions = {}) {
@@ -937,9 +940,19 @@ export async function captureModel(viewport, captureOptions = {}) {
     const restBounds = viewport.model.restBounds || null;
     let outputBounds = baseOutputBounds;
     // The exploded view, topology edges and their screen-space line widths are a CAD
-    // model's (`buildModel`'s runtime). A family's scene has none of them: the viewer's
-    // rule for it (`EDGELESS_VIEW_FEATURES`), which the job was resolved under too.
-    if (viewport.model.runtime) {
+    // model's (`buildModel`'s runtime). A family's scene has no edges; it explodes and is cut
+    // through the scene contract, as the viewer's viewport explodes and cuts it
+    // (`sceneExplode.js`, `sceneClip.js`), under the features the job was resolved with.
+    if (!viewport.model.runtime) {
+      const familyScene = viewport.model.scene;
+      const exploded = context.displaySettings.exploded;
+      if (familyScene.setExplode) {
+        familyScene.setExplode(exploded?.enabled === true ? Number(exploded.amount) || 0 : 0);
+        outputBounds = captureOptions.frameBounds || familyScene.bounds;
+      }
+      viewport.sceneClip ??= createSceneClip(THREE, { stage: viewport.scene });
+      viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
+    } else {
       outputBounds = applyViewportExplodedView(viewport, baseOutputBounds, restBounds || baseOutputBounds);
       syncViewportTopologyDisplayEdges(viewport);
       // The Clip tool cuts and caps the model as the viewer's does, on every material, edge set and
