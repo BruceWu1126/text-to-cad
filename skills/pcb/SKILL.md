@@ -156,16 +156,22 @@ both sides (costs more); any package or part change from what was asked; each po
 
 ## The viewer and references
 
-The viewer draws a `.kicad_pcb` read-only from the file, no KiCad. Board tools: Select (hover, net highlight),
-the tree, the Reference, copy reference, Quick Edit; Display with a checkbox per layer (front, inner, back,
-other; vias, drills, ratsnest) under the Mode presets (Board, Copper, Assembly, Placement). No measure, no
-draw on a board. Drag to pan, wheel or pinch to zoom, double-click to fit. What the person points at reaches
-you as a board reference `<file>#<selector>`: `#R1` a part, `#R1.2` its pad as the footprint numbers it,
+The viewer draws a `.kicad_pcb` read-only from the file, no KiCad. Its strip is Select, Annotate and Measure,
+then Display. Select picks a pad, then copper, then a part (Shift adds; its filter ticks Parts, Pads and Nets, and
+Nets alone takes a whole net); Annotate draws on the board; Measure snaps to pad, via and hole centres, track ends
+and outline corners, in millimetres. The sidebar's Board lists the parts by kind and the nets, each with its pads
+(a row selects, an eye isolates); its Layers has an eye per layer. Display is Board, Copper, Assembly or Placement,
+with Copper pours and View from below. Drag to pan, wheel or pinch to zoom, double-click to fit. What the person
+points at reaches you through Quick Edit as a board reference `<file>#<selector>`: `#R1` a part, `#R1.2` its pad as the footprint numbers it,
 `#net:VBUS` a net, `#net:VBUS@x40.1y21.6` that net's copper at a point, `#@x40.1y21.6` a point; several share
 one `#`, comma-joined. Points are millimetres in KiCad's frame, y down, the one `Vector2.from_xy_mm` takes; the
 file is the board's absolute path, quoted when it holds a space or `#`. `read_board(path).resolve(selector)` answers
 it from the saved file ([checks](references/checks.md#scripts) has the API); a failing check prints the same
 selectors (`#U1.3`), so the person can click what it names; after a rebuild, resolve against the new board.
+A Quick Edit prompt's views come as a snapshot job (inline JSON or a `.snapshot.json` path; save inline JSON
+to a file first): each view's window as a plan-view camera with the board's Display, the person's ink and
+measurements on the board in millimetres. `cadgen pcb snapshot --job <file>` renders what they saw again;
+look at their annotations before editing.
 
 ## Handoff
 

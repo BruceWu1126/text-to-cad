@@ -6,7 +6,7 @@ on every copper layer they are on, tracks, the via and the holes, the pour's sav
 in the permissive stroke font, mask and paste derived from the pads, the outline, and the
 ratsnest from cadgen's own connectivity. The payload is a function of the file's bytes, and
 the store caches it by them. The JavaScript renderer's fixture
-(`packages/ui/src/renderers/plot/__fixtures__/board.plot.json`) is this same board's payload.
+(`packages/ui/src/renderers/board/__fixtures__/board.plot.json`) is this same board's payload.
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ class PlotPayloadTest(unittest.TestCase):
             build_plot(self.folder / "missing.kicad_pcb")
 
     def test_the_javascript_fixture_is_this_boards_payload(self) -> None:
-        fixture = repo_path("packages", "ui", "src", "renderers", "plot", "__fixtures__", "board.plot.json")
+        fixture = repo_path("packages", "ui", "src", "renderers", "board", "__fixtures__", "board.plot.json")
         self.assertEqual(json.loads(fixture.read_text(encoding="utf-8")), self.payload, "regenerate the fixture: see its README")
 
 

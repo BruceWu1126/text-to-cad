@@ -6,6 +6,7 @@ import type { FileViewerState } from '../file-viewer/types.js';
 import { createLiveRegistry, type LiveRegistry } from '../host/liveRegistry.js';
 import type { ViewerHost } from '../host/types.js';
 import { THUMBNAIL_SIZE } from '../library/thumbnails.js';
+import { createBoardRenderer } from '../renderers/board/index.js';
 import { createDxfRenderer } from '../renderers/dxf/index.js';
 import { createGlbRenderer } from '../renderers/glb/index.js';
 import { createMeshRenderer } from '../renderers/mesh/index.js';
@@ -14,11 +15,12 @@ import { createStepRenderer } from '../renderers/step/index.js';
 import type { CadPreferenceSource } from '../renderers/workspace/index.js';
 import { createCadFileSource } from './catalog.js';
 
-/** The five CAD renderers over one client, reading the tab's preferences, bound to one live registry. */
+/** The six CAD renderers over one client, reading the tab's preferences, bound to one live registry. */
 export function cadRenderers(client: CadWorkspaceService, preferences: CadPreferenceSource, live: LiveRegistry['binding']) {
   return [
     createStepRenderer({ client, preferences, live }),
     createDxfRenderer({ client, preferences, live }),
+    createBoardRenderer({ client, preferences, live }),
     createGlbRenderer({ client, preferences, live }),
     createMeshRenderer({ client, preferences, live }),
     createRobotRenderer({ client, preferences, live }),

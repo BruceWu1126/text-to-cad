@@ -79,16 +79,18 @@ these peers are not bundled into UI.
 src/
   host/              explicit host ports, prompt actions and React binding
   annotation/        Annotate's session, toolbar and ink geometry (its 3D ink is renderers/kit/tools/annotate)
-  cad-viewer/        CadViewer (FileViewer + the five CAD renderers + the home), and a CAD client as a FileSource
+  cad-viewer/        CadViewer (FileViewer + the six CAD renderers + the home), and a CAD client as a FileSource
   file-viewer/       FileViewer, typed source/renderer contracts, the document lifecycle hook
     navigation/     the navbar, the app menu and its links, the folder explorer, the file menu
   library/           a host's home: the models opened before, to open again, and their pictures
   renderers/
     kit/            the frame every viewer file shares: viewport, tools, panels, Display settings, status
+                    (shell/FlatViewFrame.jsx: a flat view's, the drawing's and the board's)
     step/           STEP: model tree, Position, routines
     robot/          URDF, SRDF and SDF: Position and Links
     glb/, mesh/     GLB, and STL/3MF triangle meshes
     dxf/            2D drawings
+    board/          KiCad boards: Board, Layers and the board's Display
     workspace/      a viewer file's catalog entry and document load
     harness/, shell-harness/  surfaces the browser suites drive
   primitives/       shared controls: buttons, menus, selects, sheets, tooltips, tree rows
@@ -117,6 +119,7 @@ fallback renderer (`fallback: true`) for the types nothing else matches.
 import { FileViewer } from '@text-to-cad/ui/file-viewer';
 import { createStepRenderer } from '@text-to-cad/ui/renderers/step';
 import { createDxfRenderer } from '@text-to-cad/ui/renderers/dxf';
+import { createBoardRenderer } from '@text-to-cad/ui/renderers/board';
 import { createGlbRenderer } from '@text-to-cad/ui/renderers/glb';
 import { createMeshRenderer } from '@text-to-cad/ui/renderers/mesh';
 import { createRobotRenderer } from '@text-to-cad/ui/renderers/robot';
@@ -125,7 +128,7 @@ import '@text-to-cad/ui/styles.css';
 
 // One viewer renderer per file family, sharing one client and one preference source.
 const renderers = [createStepRenderer({ client, preferences }), createDxfRenderer({ client, preferences }),
-  createGlbRenderer({ client, preferences }), createMeshRenderer({ client, preferences }),
+  createBoardRenderer({ client, preferences }), createGlbRenderer({ client, preferences }), createMeshRenderer({ client, preferences }),
   createRobotRenderer({ client, preferences })];
 // The host supplies storage, actions, navigation and environmental ports.
 <FileViewer file={selectedFile} host={host} renderers={renderers}
@@ -133,7 +136,7 @@ const renderers = [createStepRenderer({ client, preferences }), createDxfRendere
 ```
 
 Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`, `/renderers/step`,
-`/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
+`/renderers/dxf`, `/renderers/board`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
 `/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Share anonymous usage data row and its state), `/loading-icon`, `/utils`, `/primitives/*`,
 `/tokens.css`, and `/styles.css`. `/catalog` (a CAD client as a `FileSource`, the file menu's
 Copy path and Reveal, and the one spelling of an absolute path: `normalizePath`, `baseName`,

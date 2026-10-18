@@ -8,8 +8,8 @@ export function readBoardIsolation(raw) {
 }
 
 /**
- * The parts and nets a person isolated with a tree row's eye (`kit/inspector/TreeRowEye.jsx`):
- * everything else on the canvas steps back, as it does for a net or a check in focus. It is the
+ * The parts and nets a person isolated with a Board row's eye (`BoardSection.jsx`): everything
+ * else on the canvas steps back, as it does for a net in focus. It is the
  * file's (a renderer slice, `isolated`), named in board references, so it survives a rebuild: what
  * no longer names anything on the new revision is dropped, and the rest stays. Until the document's
  * index is in, the stored set is kept as it was.

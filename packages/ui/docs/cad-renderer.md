@@ -20,7 +20,8 @@ modules around it (see the end of [Shell](#shell)). Applications use the registr
 `src/renderers/kit` is the format-blind half of the viewer: small modules a
 renderer composes, none of which asks what it is showing. There is one renderer
 per file family, each a vertical slice over the kit: `src/renderers/dxf`
-([DXF renderer](#dxf-renderer)), `src/renderers/glb` ([GLB renderer](#glb-renderer)),
+([DXF renderer](#dxf-renderer)), `src/renderers/board` (KiCad boards, [Board renderer](#board-renderer)),
+`src/renderers/glb` ([GLB renderer](#glb-renderer)),
 `src/renderers/mesh` (STL and 3MF, [Mesh renderer](#mesh-renderer)),
 `src/renderers/robot` (URDF, SRDF and SDF, [Robot renderer](#robot-renderer)) and
 `src/renderers/step` (STEP and STP, [STEP renderer](#step-and-source-separation)). The kit imports itself, shared UI
@@ -238,10 +239,10 @@ returns the live catalog entry of the prepared file, the prompt `resource`, the
 `useDeclinedSelectReference` consumes a host's request to select a reference in
 a file that has none without changing the view. A renderer is then its
 scene hook, its tool list, its tools' rows and its sidebar sections, if it has any
-(`glb/GlbRenderer.jsx`, `mesh/MeshRenderer.jsx`, `robot/RobotRenderer.jsx`). A flat view — a
-drawing — uses the workspace module without the shell: it has no scene, so it reaches the same
-catalog entry and commands directly, through the kit's flat frame (`FlatViewFrame.jsx`: the
-strip, its row, the sidebar, Quick Edit, the loading cover and the alert card, laid out as the
+(`glb/GlbRenderer.jsx`, `mesh/MeshRenderer.jsx`, `robot/RobotRenderer.jsx`). The flat views — a
+drawing, a board — use the workspace module without the shell: they have no scene, so they reach
+the same catalog entry and commands directly, through the kit's flat frame (`FlatViewFrame.jsx`:
+the strip, its row, the sidebar, Quick Edit, the loading cover and the alert card, laid out as the
 shell lays out a 3D view's; `useFlatView.js`: the tools and the handover — the host's commands,
 Quick Edit's context and its views, the copy key, the live binding; `viewport/useFlatCanvasView.js`:
 the canvas, fit, pan, zoom about the pointer, taps and hover).
@@ -298,7 +299,7 @@ viewport, no scene, no Display settings, no Preview. The questions the old
 Material/Bends tabs answered were about a sheet-metal part the viewer was inventing
 from the file; a drawing is not that. What it has is what a person needs to talk about
 a drawing — the kit's chrome, composed around the canvas rather than around
-`ShellViewport`, in the kit's flat frame (`DxfRenderer.jsx` over
+`ShellViewport`, in the flat frame a board shares (`DxfRenderer.jsx` over
 `kit/shell/FlatViewFrame.jsx`): the strip at the top centre, the tool's row under
 it, the file sidebar, Quick Edit at the top-right.
 
@@ -406,6 +407,68 @@ it, the file sidebar, Quick Edit at the top-right.
   flip, the red circle, the unfilled island, the hairline at 800%, zoom about the
   pointer, pan, re-fit and the resize rule; `DxfRenderer.test.tsx` asserts that the
   pane has no tab, tool strip or Preview.
+
+## Board renderer
+
+`createBoardRenderer` (`@text-to-cad/ui/renderers/board`, id `board`) shows a `.kicad_pcb`.
+It is a flat view composed as a drawing's is, from the same frame (`kit/shell/FlatViewFrame.jsx`,
+`useFlatView.js`, `kit/viewport/useFlatCanvasView.js`): the strip at the top centre, the tool's
+row under it, the file sidebar at the top-left, Quick Edit at the top-right. What differs is the
+picture and what a person points at.
+
+- **The picture comes from the BACKEND.** `client.plotPayload(file)` is `GET /__cad/plot`
+  (`apps/web/docs/backend.md`): geometry per layer and the board's index, read from the file by
+  cadgen, never by this renderer ([the plot payload](../../core/docs/plot-payload.md)). Drawing is
+  core's (`@text-to-cad/core/lib/plot2d`: `layoutPlot`, `fitPlotTransform`, `drawPlot`), and the
+  snapshot bundle draws the same payload with it (`common/headlessPlotRender.js`), so
+  `cadgen pcb snapshot` cannot show what this view cannot. The board keeps KiCad's colours
+  (`plot2d/theme.js`) on KiCad's background in either theme; the surround is the theme's. The view
+  keeps rasters of what it drew (`board/boardRasters.js`): a pan moves pixels, a zoom shows what it
+  has and draws again once the view rests.
+- **Three frames** (`plot2d/boardView.js`): the SHEET (the payload's millimetres, y down), where
+  ink and measurements are kept; the PLAN, drawing2d's model space for the view (the sheet with y
+  negated, mirrored about its middle from below); the screen. A Quick Edit's view is a plan-view
+  camera (`drawing2d/planView.js`) with the board's Display.
+- **Tools** (`board/tools.js`): **Select** (in hand; the view's hand too: a drag pans, the wheel
+  or a pinch zooms about the pointer, a double-click fits), **Annotate** and **Measure**; then,
+  after the rule, **Display**. Select picks, front to back, a measurement, ink, then the most
+  specific thing under the pointer (`board2d/boardIndex.js`'s `pick`, the side faced first): a
+  pad, then copper (a track or a via: its net's copper there), then a part; Shift adds. Its
+  filter (`SelectFilterMenu`) is Select all, then Parts, Pads and Nets; Nets alone takes the
+  whole net of whatever copper is under the pointer, lit whole, the rest dimmed. Annotate's ink
+  lies on the board in sheet millimetres, on no part, mirrored with it from below
+  (`board/boardAnnotation.js`). Measure is the kit's session over the view's projection
+  (`boardPlanProjection`), snapped (`index.snap`) to pad, via and hole centres, track ends and
+  outline corners, in millimetres. A payload without its index is its picture and its Display
+  alone: no tools, no Board section, no Quick Edit.
+- **References** are the board's (`@text-to-cad/core`'s `lib/boardRefs.js`), in KiCad's own
+  frame: `blinky.kicad_pcb#R1` (a part), `#R1.2` (its pad 2), `#net:VBUS`,
+  `#net:VBUS@x40.1y21.6` (its copper where it was picked), `#@x3.5y3.5` (a point). Quick Edit's
+  chips name them as the board does (`R1`, `R1.2`, `net VBUS`, `VBUS · track`) with the kinds'
+  glyphs of Select's filter, and their cards say what the board says (`board/boardFacts.js`). A
+  click on a chip copies its reference; the copy key copies the selection's, comma-joined after
+  the file (`blinky.kicad_pcb#R1,R1.2`), or, while Annotate is up, the view with its ink.
+- **The sidebar**: **Board** (`board/BoardSection.jsx`), the parts by kind then the nets, each
+  with its pads, headed by its filter, in dense windowed rows (`VirtualRows`); resting on a row
+  lights what it names, a click selects it, and a part's or a net's eye isolates it, the rest of
+  the board stepping back. **Layers** (`board/LayersSection.jsx`), grouped Front, Inner, Back and
+  Other, each layer's colour, name, count and eye.
+- **Display** (`board/BoardDisplay.jsx`; its rows in
+  [settings-ui.md](settings-ui.md#display-settings-and-section-primitives)): one object,
+  `{ mode, side, poured, layers }` (core's `plot2d/boardDisplay.js`), which Layers' eyes edit
+  too, kept with the file's view, carried by a Quick Edit's views and drawn as it is by
+  `cadgen pcb snapshot --display`.
+- **Host commands**: `select` takes board references and refuses, by name, any the board lacks;
+  `clearSelection` lets go; `resetCamera` fits; `capture` hands over the PNG; `readState` reports
+  `camera: null` and the board's Display (`boardDisplay`). `setCamera` and `setDisplaySettings`
+  are each declined with a sentence that says why.
+- **State** under `[path, "board"]` (`kit/shell/fileView.js`): the transform once the person has
+  moved the view, the board's Display and what is isolated (its slices `board` and `isolated`).
+- **Fixture and tests**: `board/__fixtures__/board.plot.json`, the Python suite's test board as
+  the route answers it (its README says what is on it). `BoardRenderer.test.tsx` holds the strip,
+  picks and the filter, the sections, Display, Measure and the host commands in jsdom;
+  `BoardRenderer.browser.test.mjs` opens it in a real browser and reads the pixels: the fit, the
+  board's background, its track's red, a press on a pad lighting it.
 
 ## GLB renderer
 

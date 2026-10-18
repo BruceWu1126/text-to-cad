@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createBoardIndex } from "@text-to-cad/core/lib/board2d/boardIndex.js";
 import { boardTreeAncestors, boardTreeNodeIds, buildBoardTree, partKind } from "./boardTree.js";
-import { boardReferenceFacts } from "./boardFacts.js";
+import { boardReferenceId, describeBoardReference } from "./boardFacts.js";
 
 const square = (cx, cy, w, h) => [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]];
 const BOARD = {
@@ -26,7 +26,7 @@ const BOARD = {
 };
 const index = createBoardIndex(BOARD);
 
-test("the tree is parts by kind, then nets: what KiCad reported is the alert card's", () => {
+test("the tree is parts by kind, then nets", () => {
   const tree = buildBoardTree(index);
   assert.deepEqual(tree.roots.map((node) => `${node.label} ${node.detail}`), ["Parts 3", "Nets 2"]);
   const parts = tree.roots[0].children;
@@ -53,22 +53,22 @@ test("a reference finds its rows, and a row its owners", () => {
   assert.deepEqual(boardTreeAncestors(tree, "pad:U1.2"), ["group:parts", "kind:ICs", "part:U1"]);
 });
 
-test("the Reference reads a part, a pad, a net, copper and a point in KiCad's millimetres", () => {
-  const row = (facts, label) => facts.rows.find(([name]) => name === label)?.[1];
-  const part = boardReferenceFacts(index.resolve("#C10"), index);
-  assert.equal(part.heading, "C10 · 1u");
-  assert.equal(row(part, "Position"), "x 5, y 25");
-  assert.equal(row(part, "Rotation"), "90°");
-  assert.equal(row(part, "LCSC"), "C15849");
-  assert.equal(row(boardReferenceFacts(index.resolve("#C2"), index), "DNP"), "Not assembled");
-  const pad = boardReferenceFacts(index.resolve("#U1.2"), index);
-  assert.equal(pad.heading, "U1 · pad 2 VO");
-  assert.equal(row(pad, "Net"), "VIN");
-  const net = boardReferenceFacts(index.resolve("#net:VIN"), index);
-  assert.equal(row(net, "Parts"), "C10, C2, U1");
-  assert.equal(row(net, "Tracks"), "1 · 17.8 mm");
-  const copper = boardReferenceFacts(index.resolve("#net:VIN@x10y25.8"), index);
-  assert.equal(copper.heading, "VIN · track");
-  assert.equal(row(copper, "Width"), "1 mm");
-  assert.equal(boardReferenceFacts(index.resolve("#@x1y2"), index).rows[0][1], "x 1, y 2");
+test("a chip names a part, a pad, a net, copper and a point, its card in KiCad's millimetres", () => {
+  const fact = (described, label) => described.facts.find((row) => row.label === label)?.value;
+  const part = describeBoardReference(index.resolve("#C10"), index);
+  assert.deepEqual([part.name, part.glyph], ["C10", "solid"]);
+  assert.equal(fact(part, "Value"), "1u");
+  assert.equal(fact(part, "Position"), "x 5, y 25");
+  assert.equal(fact(part, "Rotation"), "90°");
+  assert.equal(fact(part, "LCSC"), "C15849");
+  assert.equal(fact(part, "Script"), "hat.py:40");
+  assert.equal(fact(describeBoardReference(index.resolve("#C2"), index), "DNP"), "Not assembled");
+  const pad = describeBoardReference(index.resolve("#U1.2"), index);
+  assert.deepEqual([pad.name, pad.glyph, fact(pad, "Net"), fact(pad, "Pin"), fact(pad, "Type")], ["U1.2", "face", "VIN", "VO", "power out"]);
+  const net = describeBoardReference(index.resolve("#net:VIN"), index);
+  assert.deepEqual([net.name, fact(net, "Class"), fact(net, "Pads")], ["net VIN", "Power", "3"]);
+  const copper = describeBoardReference(index.resolve("#net:VIN@x10y25.8"), index);
+  assert.deepEqual([copper.name, fact(copper, "Width"), fact(copper, "Length")], ["VIN · track", "1 mm", "17.8 mm"]);
+  assert.equal(fact(describeBoardReference(index.resolve("#@x1y2"), index), "Position"), "x 1, y 2");
+  assert.equal(boardReferenceId("#net:VIN@x10y25.8"), "net:VIN@x10y25.8");
 });

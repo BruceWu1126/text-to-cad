@@ -1,4 +1,4 @@
-# Plot renderer fixtures
+# Board renderer fixtures
 
 `board.plot.json` is a `GET /__cad/plot` payload (schema version 3, `@text-to-cad/core`'s
 `docs/plot-payload.md`): the test board of the Python suite
@@ -18,7 +18,7 @@
 - the LED net unrouted: one `ratsnest` line from D1.2 to R1.2 (`unrouted: 1`);
 - the text `blinky` on the top silkscreen at (20, 5), and each part's reference and value.
 
-`PlotRenderer.browser.test.mjs` and `PlotRenderer.test.tsx` serve it as the route would.
+`BoardRenderer.browser.test.mjs` and `BoardRenderer.test.tsx` serve it as the route would.
 Regenerate it when the payload's shape or the board changes (the Python suite asserts they
 agree):
 
@@ -30,6 +30,6 @@ from tests.python.support.kicad_board import write_board
 from cadgen.kicad.plot import build_plot
 with tempfile.TemporaryDirectory() as folder:
     plot = build_plot(write_board(pathlib.Path(folder)))
-pathlib.Path('packages/ui/src/renderers/plot/__fixtures__/board.plot.json').write_text(json.dumps(plot, indent=1) + '\n')
+pathlib.Path('packages/ui/src/renderers/board/__fixtures__/board.plot.json').write_text(json.dumps(plot, indent=1) + '\n')
 "
 ```

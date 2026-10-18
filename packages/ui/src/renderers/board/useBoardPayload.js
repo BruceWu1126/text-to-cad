@@ -1,5 +1,5 @@
 /**
- * The plot on screen: one `GET /__cad/plot` for the file, laid out.
+ * The board on screen: one `GET /__cad/plot` for the file, laid out.
  *
  * The client never parses the board's file. The server reads it and answers geometry per layer,
  * which `layoutPlot` validates and lays out; the board's index rides beside it. That is the whole
@@ -10,32 +10,32 @@ import { PLOT_SCHEMA_VERSION, layoutPlot } from "@text-to-cad/core/lib/plot2d/in
 import { failureAlert } from "../kit/status/loadAlerts.js";
 
 /** A payload from a cadgen that does not agree with this build about the shape. */
-class PlotSchemaError extends Error {
+class BoardSchemaError extends Error {
   constructor(received) {
     super(
-      `The viewer received a plot payload at schemaVersion ${JSON.stringify(received)}, but this `
+      `The viewer received a board payload at schemaVersion ${JSON.stringify(received)}, but this `
       + `build of the app reads version ${PLOT_SCHEMA_VERSION}.`
     );
-    this.name = "PlotSchemaError";
+    this.name = "BoardSchemaError";
     this.received = received;
   }
 }
 
 /**
- * Load and lay out one plot. A newer revision of the same file is read behind the plot on
- * screen: `loading` is a plot with nothing to show yet, and `updating` the next revision of the
+ * Load and lay out one board. A newer revision of the same file is read behind the board on
+ * screen: `loading` is a board with nothing to show yet, and `updating` the next revision of the
  * one shown, which stays until it arrives — or, if that revision will not read, stays with the
  * error beside it.
  *
  * @param {{ client: import("@text-to-cad/core/client").CadWorkspaceService, file: string, revision?: string }} options
  * @returns {{ plot: { layout: object, board: object|null }|null, error: unknown, loading: boolean, updating: boolean }}
  */
-export function usePlotPayload({ client, file, revision = "" }) {
+export function useBoardPayload({ client, file, revision = "" }) {
   const [state, setState] = useState(() => ({ key: "", file: "", plot: null, error: null, loading: true }));
   const key = useMemo(() => JSON.stringify([file, revision]), [file, revision]);
   useEffect(() => {
     if (!file) {
-      setState({ key, file, plot: null, error: new Error("This plot has no file to read."), loading: false });
+      setState({ key, file, plot: null, error: new Error("This board has no file to read."), loading: false });
       return undefined;
     }
     const controller = new AbortController();
@@ -45,7 +45,7 @@ export function usePlotPayload({ client, file, revision = "" }) {
     client.plotPayload(file, { signal: controller.signal })
       .then((payload) => {
         if (payload?.schemaVersion !== PLOT_SCHEMA_VERSION) {
-          throw new PlotSchemaError(payload?.schemaVersion);
+          throw new BoardSchemaError(payload?.schemaVersion);
         }
         // The board's index rides beside its picture: what its parts, pads and nets are, and where.
         return { layout: layoutPlot(payload), board: payload.board ?? null };
@@ -64,20 +64,20 @@ export function usePlotPayload({ client, file, revision = "" }) {
 }
 
 /**
- * The alert for a plot that would not load, in the viewer's actionable shape: one heading, an
+ * The alert for a board that would not load, in the viewer's actionable shape: one heading, an
  * explanation with the server's own sentence — an unreadable board says why — and the next step.
  *
  * @param {string} modelKey
  * @param {any} error
  */
-export function plotLoadAlert(modelKey, error) {
+export function boardLoadAlert(modelKey, error) {
   if (!error) {
     return null;
   }
-  if (error instanceof PlotSchemaError || error?.name === "PlotSchemaError") {
+  if (error instanceof BoardSchemaError || error?.name === "BoardSchemaError") {
     return {
       severity: "error", kind: "version", summary: "Version mismatch",
-      title: "This app and cadgen disagree about plots",
+      title: "This app and cadgen disagree about boards",
       message: error.message,
       recovery: "Update cadgen and the app together, then reload. They ship from one release for exactly this reason.",
       details: `File: ${modelKey}\nOperation: plotting\n${error.message}`,

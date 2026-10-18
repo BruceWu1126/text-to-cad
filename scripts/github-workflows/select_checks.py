@@ -273,6 +273,8 @@ RULES: tuple[Rule, ...] = (
     # The DXF suite renders ui's DXF fixture, and holds every JS file in packages/ to having
     # no second layer-intent table; cadgen's suite globs packages/ for vendored node runtimes.
     Rule(("packages/ui/src/renderers/dxf/__fixtures__/**",), select(skills=[f"{SKILL_SUITES}/dxf/test_snapshot_render.py"])),
+    # cadgen's plot suite holds ui's board fixture to being the test board's payload.
+    Rule(("packages/ui/src/renderers/board/__fixtures__/**",), select(cadgen=[f"{CADGEN_SUITE}/test_pcb_plot.py"])),
     Rule(("packages/ui/**/*.js",), select(skills=[f"{SKILL_SUITES}/dxf/test_drawing_checks.py"])),
     Rule(("packages/ui/**/node_runtime.py",), select(cadgen=[f"{CADGEN_SUITE}/test_node_resolve_bootstrap.py"])),
     Rule(("tests/browser/**", "tests/fixtures/cad/**"), select(flags=["web_viewer"])),

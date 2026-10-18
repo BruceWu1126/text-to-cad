@@ -60,8 +60,8 @@ export const ENTRY_ICON_KIND = Object.freeze({
 //
 // This is the place a format DECLINES a tool, and the shell reads it through
 // `supportsTool`. The flat formats are the rows that decline: a DXF drawing and a KiCad board's
-// plot are painted on a canvas with no toolbar over it at all, so they claim none of these
-// rather than advertising four buttons that exist nowhere.
+// plot are painted on a canvas, not in a viewport, and their tools (Select, Annotate, Measure) are
+// their renderers' own, so they claim none of these.
 const VIEWPORT_TOOLS = Object.freeze({
   select: true,
   draw: true,
@@ -146,7 +146,7 @@ export const RENDER_CAPABILITIES = Object.freeze({
     iconKind: ENTRY_ICON_KIND.DXF,
     tools: NO_VIEWPORT_TOOLS,
   }),
-  // A KiCad board is not on the 3D shell either (packages/ui/src/renderers/plot): its pane is
+  // A KiCad board is not on the 3D shell either (packages/ui/src/renderers/board): its pane is
   // a canvas painted from `GET /__cad/plot`, the board's layers drawn from its file. Its 3D
   // comes from the STEP or GLB a board model exports, which are files of their own.
   [RENDER_FORMAT.KICAD_PCB]: Object.freeze({

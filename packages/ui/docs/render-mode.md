@@ -189,7 +189,8 @@ sections of the file sidebar (see
 a display setting.
 
 Display and Preview, the view's controls at the strip's end, are offered by a 3D view
-alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`):
+alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`) — but for a
+board's Display, which is its own (a choice of layers, not of shading):
 
 | Renderer | Files | Display and Preview |
 | --- | --- | --- |
@@ -198,6 +199,7 @@ alone, as its renderer declares to the shell (`useRendererShell`'s `previewable`
 | `mesh` | STL, 3MF | Yes |
 | `robot` | URDF, SRDF, SDF | Yes |
 | `dxf` | DXF | No: a 2D drawing, on a surface of its own, without the shell |
+| `board` | KiCad board (`.kicad_pcb`) | Its own Display (Board, Copper, Assembly, Placement; the pours, the side); no Preview |
 
 A view without them has no Display or Preview control, not a disabled one, and a
 request for Preview leaves its normal view as it is.

@@ -16,11 +16,11 @@ an endpoint the server does not implement.
 
 ## Scope
 
-This is the rule inside the STEP renderer (`src/renderers/step`). A DXF,
+This is the rule inside the STEP renderer (`src/renderers/step`). A DXF, a KiCad board,
 a GLB, a triangle mesh (STL, 3MF) and a robot description (URDF, SRDF, SDF) have renderers
-of their own (`src/renderers/dxf`, `src/renderers/glb`, `src/renderers/mesh`,
+of their own (`src/renderers/dxf`, `src/renderers/board`, `src/renderers/glb`, `src/renderers/mesh`,
 `src/renderers/robot`; see [CAD renderer](cad-renderer.md#kit)): a vertical slice owns its
-tools, tabs and scene outright and consults no capability table. The `dxf`, `glb`, `stl`,
+tools, tabs and scene outright and consults no capability table. The `dxf`, `kicad-pcb`, `glb`, `stl`,
 `3mf`, `urdf`, `srdf` and `sdf` rows below remain for what is not a renderer: the file
 list's icon and label. The headless snapshot renderer consults no table either: it draws
 each of those families with the scene builder its renderer uses
@@ -30,7 +30,9 @@ The DXF slice does not even have a scene: it is a canvas painted from
 `GET /__cad/drawing`, so none of the viewport capabilities below describes it — and its
 row says so, with `assetKind: drawing` and no viewport tools (its own are its renderer's). `cadgen dxf snapshot` paints the same
 payload with the same code (`@text-to-cad/core/lib/drawing2d`), so the CLI cannot produce a
-picture the pane could not.
+picture the pane could not. A KiCad board is the same again: a canvas painted from
+`GET /__cad/plot` (its row `assetKind: plot`, no viewport tools), and `cadgen pcb snapshot`
+draws that payload with `@text-to-cad/core/lib/plot2d`.
 
 ## The capability registry
 
@@ -39,9 +41,9 @@ format. Pure data: no behaviour, no imports beyond the format enum.
 
 | Capability | Meaning |
 |---|---|
-| `assetKind` | Which asset a format LOADS: `mesh`, `drawing`, `robot`. |
+| `assetKind` | Which asset a format LOADS: `mesh`, `drawing`, `plot`, `robot`. |
 | `iconKind` | The file-list glyph. |
-| `tools` | `select`, `pan`, `draw`, `orbit`, `screenshot`. Orbit and screenshot are true for every format WITH a viewport — they act on the viewport, not the geometry. `dxf` claims none of them: it has no viewport, and its tools (Select, Annotate, Measure) are its renderer's own, over a 2D canvas. |
+| `tools` | `select`, `pan`, `draw`, `orbit`, `screenshot`. Orbit and screenshot are true for every format WITH a viewport — they act on the viewport, not the geometry. `dxf` and `kicad-pcb` claim none of them: they have no viewport, and their tools (Select, Annotate, Measure) are their renderers' own, over a 2D canvas. |
 | `parts` | Per-part selection, hiding, isolate, assembly tree. |
 | `topology` | Face/edge/vertex references. Implies `parts`. |
 | `params` | `sidecar` (the model's `@step(pose=...)` block), or `null`. |
