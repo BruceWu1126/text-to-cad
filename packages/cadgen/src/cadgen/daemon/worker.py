@@ -16,7 +16,9 @@ A fourth, ``{"heartbeat": {"phase": ..., "cpu": ...}}``, is the worker's livenes
 while a job runs (``_heartbeat``); the supervisor consumes it and never relays it.
 A fifth, ``{"artifactNext": true}``, is an artifact job asking before each derivation
 whether anyone still wants it (``_wanted``); the supervisor answers ``{"goOn": ...}``
-on stdin and never relays it.
+on stdin and never relays it. A sixth, ``{"released": code}``, says a build command has
+answered -- every model's result recorded -- while its display data and files are still
+owed: the client returns on it, and the worker finishes them before its exit frame.
 
 One request kind, ``run`` — a CLI tool, output streamed as frames. The store root
 arrives on every request (``store_root``) and is applied per job, so one daemon serves
@@ -272,16 +274,43 @@ def _run(request: dict) -> int:
             telemetry.job_failed("missing_file")  # the folder it was asked from is gone
             return 1
         sys.argv = [prog or f"cadgen {tool}", *argv]
-        main = _tool_main(tool)
+        from cadgen.authoring import finished_after_answer
         from cadgen.daemon.artifacts import worker_context
 
-        with worker_context(request.get("store_root")), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            # Pass the caller's name where the parser takes one, so a command reports the
-            # usage of the command its caller typed.
-            if prog and "prog" in inspect.signature(main).parameters:
-                result = main(argv, prog=prog)
-            else:
-                result = main(argv)
+        with worker_context(request.get("store_root")), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), finished_after_answer() as held:
+            code = _command(tool, argv, prog, err)
+            if held:
+                # The command has answered: every model's result is recorded. Its client
+                # returns now, and the display data and files its runs owe are finished
+                # here, the job open in the ledger until they are (STORE.md §3, *Exports*).
+                _emit({"released": code})
+                code = _finish_held(held, code, prog or f"cadgen {tool}")
+        return code
+    except BaseException as error:  # noqa: BLE001 - a failed job must not kill the worker
+        err.write(traceback.format_exc())
+        _report(error, bugs_only=False)
+        telemetry.job_ended(1, "bug" if isinstance(error, Exception) else None)
+        return 1
+    finally:
+        sys.argv = previous_argv
+        sys.path[:] = previous_sys_path
+        _park()
+        # Deterministic closure capture: the next job must see a clean first-party module
+        # space or it records a different sourceClosureHash than a fresh worker would.
+        _evict_first_party_modules()
+
+
+def _command(tool: str, argv: list[str], prog: str | None, err: _FrameWriter) -> int:
+    """Run the tool's command and return its exit code."""
+    try:
+        main = _tool_main(tool)
+        # Pass the caller's name where the parser takes one, so a command reports the
+        # usage of the command its caller typed.
+        if prog and "prog" in inspect.signature(main).parameters:
+            result = main(argv, prog=prog)
+        else:
+            result = main(argv)
         return 0 if result is None else int(result)
     except SystemExit as exc:
         code = exc.code
@@ -294,13 +323,22 @@ def _run(request: dict) -> int:
         _report(error, bugs_only=False)  # past the command's own reporting of what failed: never meant to
         telemetry.job_ended(1, "bug" if isinstance(error, Exception) else None)
         return 1
-    finally:
-        sys.argv = previous_argv
-        sys.path[:] = previous_sys_path
-        _park()
-        # Deterministic closure capture: the next job must see a clean first-party module
-        # space or it records a different sourceClosureHash than a fresh worker would.
-        _evict_first_party_modules()
+
+
+def _finish_held(held: list, code: int, prog: str) -> int:
+    """Finish the runs a command left owing, after its answer: each run's display data, then
+    its files. A failure there is the job's, not the released caller's: its line on stderr,
+    in the command's failure voice, which the job ledger keeps as the reason the build feed
+    shows, and the job's exit code."""
+    from cadgen._internal.cli_from_function import report_failure
+
+    for run in held:
+        try:
+            run.finish()
+        except Exception as error:  # noqa: BLE001 - the next run still gets its turn
+            report_failure(error, prog=prog, as_json=False, verbose_hint=False)
+            code = code or 1
+    return code
 
 
 def _wanted() -> bool:
@@ -387,9 +425,6 @@ def serve() -> int:
     from cadgen.daemon import executors
 
     executors.set_event_sink(lambda event: _emit({"event": event}))
-    # A command that answers before its files are written (--no-wait) releases its
-    # client with this frame; the exit frame follows once the files are written.
-    executors.set_release_sink(lambda code: _emit({"released": code}))
     # What killed workers left in the temp folder (views, trace logs) goes, on a
     # thread of its own: no job waits for it, and no live process's is touched.
     from cadgen._internal import temp_leftovers
