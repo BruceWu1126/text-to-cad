@@ -362,13 +362,18 @@ selects one.
 Every model a run builds, its children included, prints where its time went:
 
 ```text
-[cadgen] built STEP/arm.step in 9m42s: model code 8m20s, cadgen 1m22s
+[cadgen] built STEP/arm.step in 9m42s: model code 8m20s, cadgen 1m22s, memo 4,210 hits, 51 misses, 0 uncached
 ```
 
 Model code is the decorated function's call, less its waits for child builds;
 cadgen is loading the script and storing the result. Display data, STEP and
 meshes finish after the answer on the daemon worker, so the line does not count
-them. A child's export can run while its parent's body runs. A `--json`
+them. A child's export can run while its parent's body runs. The memo counts are
+the model's own kernel calls (booleans, fillets, placements, its calls on the
+children it composes): hits were handed back from an earlier build in the same
+build-service worker, misses ran, and uncached calls run on every build, since an argument or
+input could not be keyed (a generator, a shape built outside build123d's
+operations). A `--json`
 result carries the same numbers in `timings` (`null` for a current model). A
 model whose code took more than twice its last build's, and 30 s more, gets a
 warning. `python part.py --profile` rebuilds that model with its own code under

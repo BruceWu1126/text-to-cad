@@ -26,6 +26,7 @@ from cadgen._internal.build_timing import (  # noqa: E402
     format_duration,
     measuring,
     model_body,
+    note_memo,
     record_fields,
     slowdown_warning,
     time_line,
@@ -61,6 +62,16 @@ class Formatting(unittest.TestCase):
         self.assertTrue(time_line("a.step", timings).endswith(
             "cadgen 1m22s, children 40.0s, queued for a build slot 3.0s"))
 
+    def test_the_time_line_ends_with_how_the_model_s_kernel_calls_went_in_the_memo(self):
+        timings = {"seconds": 41.0, "modelSeconds": 2.5, "cadgenSeconds": 38.5, "childrenSeconds": 0.0,
+                   "queuedSeconds": 0.0, "memoHits": 4210, "memoMisses": 51, "memoUncached": 0}
+        # On one line, after the split, which readers of the line take off its head as ever.
+        self.assertEqual(time_line("STEP/watch.step", timings),
+                         "built STEP/watch.step in 41.0s: model code 2.5s, cadgen 38.5s, "
+                         "memo 4,210 hits, 51 misses, 0 uncached")
+        timings.update(memoHits=None, memoMisses=None, memoUncached=None)
+        self.assertNotIn("memo", time_line("a.step", timings), "a build no run reported on says nothing of the memo")
+
 
 class SlowdownRule(unittest.TestCase):
     def test_it_takes_both_twice_the_time_and_thirty_seconds_more(self):
@@ -82,7 +93,9 @@ class Measuring(unittest.TestCase):
                 clock.now = 1.0
                 with model_body(None):
                     clock.now = 2.0
-                    with child_build():  # a child's build: 3 s
+                    with child_build():  # a child's build: 3 s, its model run ending in its own build
+                        with measuring(model_ref="/m/b.py::b", last_model_seconds=None) as child:
+                            note_memo({"hits": 40, "misses": 0, "uncached": 0})
                         clock.now = 5.0
                     clock.now = 6.0
                     with cadgen_work():  # loading a child: 1 s, of which 0.5 s waiting
@@ -95,6 +108,7 @@ class Measuring(unittest.TestCase):
                 clock.now = 11.0
                 with child_build():  # a child built after the body: 1 s
                     clock.now = 12.0
+                note_memo({"hits": 7, "misses": 2, "uncached": 1})  # the model's run ends
                 measured.queued = 0.25
                 clock.now = 14.0
                 timings = measured.timings()
@@ -104,7 +118,10 @@ class Measuring(unittest.TestCase):
         self.assertEqual(timings.payload(), {
             "seconds": 14.0, "modelSeconds": 5.0, "cadgenSeconds": 4.25,
             "childrenSeconds": 4.5, "queuedSeconds": 0.25,
+            "memoHits": 7, "memoMisses": 2, "memoUncached": 1,
         })
+        self.assertEqual(child.timings().payload()["memoHits"], 40, "a child's run is its own build's")
+        note_memo({"hits": 1})  # outside a build: nothing to tell
 
     def test_a_profiled_build_keeps_the_last_unprofiled_time(self):
         with measuring(model_ref=None, last_model_seconds=42.0, profile=True):
@@ -162,7 +179,8 @@ class Measuring(unittest.TestCase):
                         timings = measured.timings().payload()
                 self.assertEqual(timings, {"seconds": 11.0, "modelSeconds": model_seconds,
                                            "cadgenSeconds": 11.0 - model_seconds,
-                                           "childrenSeconds": 0.0, "queuedSeconds": 0.0})
+                                           "childrenSeconds": 0.0, "queuedSeconds": 0.0,
+                                           "memoHits": None, "memoMisses": None, "memoUncached": None})
                 loader.assert_called_once_with(source)
                 if failed_at == "load":
                     decoder.assert_not_called()

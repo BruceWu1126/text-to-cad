@@ -242,13 +242,17 @@ class BuildTimeTest(_ModelRunCase):
         first = self._run("cart.py", "--json")
         result = json.loads(first.stdout.strip())
         timings = result["timings"]
-        self.assertEqual(set(timings), {"seconds", "modelSeconds", "cadgenSeconds", "childrenSeconds", "queuedSeconds"})
+        self.assertEqual(set(timings), {"seconds", "modelSeconds", "cadgenSeconds", "childrenSeconds", "queuedSeconds",
+                                        "memoHits", "memoMisses", "memoUncached"})
         self.assertGreater(timings["modelSeconds"], 0.0)
-        # The parent AND the child it built each get their own line.
+        # How the parent's own kernel calls went in the memo.
+        self.assertGreater(timings["memoHits"] + timings["memoMisses"], 0, timings)
+        # The parent AND the child it built each get their own line, ending with its memo counts.
         built = [line for line in first.stderr.splitlines() if line.startswith("[cadgen] built ")]
         self.assertEqual(len(built), 2, first.stderr)
-        self.assertRegex(built[0], r"^\[cadgen\] built wheel\.step in \S+: model code \S+, cadgen \S+$")
-        self.assertRegex(built[1], r"^\[cadgen\] built cart\.step in \S+: model code \S+, cadgen \S+")
+        memo = r"memo [\d,]+ hits, [\d,]+ misses, [\d,]+ uncached"
+        self.assertRegex(built[0], rf"^\[cadgen\] built wheel\.step in \S+: model code \S+, cadgen \S+, {memo}$")
+        self.assertRegex(built[1], rf"^\[cadgen\] built cart\.step in \S+: model code \S+, cadgen \S+.*, {memo}$")
 
         # A current model was not built: no line, and no timings in its result.
         again = self._run("cart.py", "--json")

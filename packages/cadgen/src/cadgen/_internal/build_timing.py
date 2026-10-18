@@ -21,6 +21,12 @@ How the split is measured, on the thread that runs the build:
 * ``queued`` is the wait for a build slot before the body could start.
 * ``cadgen`` is the rest of the build's wall time.
 
+The line ends with how the model's kernel calls went in the kernel memo (README
+law 18): how many were hits, handed back from an earlier run; how many were
+misses, computed and kept; and how many ran uncached, for an argument or an input
+the memo cannot key (``note_memo``, from the model's run; a child built inside the
+body counts in its own line). A warm edit that misses everything says so here.
+
 ``--profile`` runs cProfile over exactly the model-code windows and reports the
 functions the time went to. Stdlib only: the root process imports this to print,
 and the root must stay light.
@@ -67,31 +73,38 @@ def format_duration(seconds: float) -> str:
 
 @dataclass(frozen=True)
 class BuildTimings:
-    """What one build's wall time was spent on, in seconds."""
+    """What one build's wall time was spent on, in seconds, and how its model's
+    kernel calls went in the memo: hits, misses and uncached, or None unmeasured."""
 
     seconds: float
     model: float
     children: float
     queued: float
+    memo: dict[str, int] | None = None
 
     @property
     def cadgen(self) -> float:
         return max(0.0, self.seconds - self.model - self.children - self.queued)
 
-    def payload(self) -> dict[str, float]:
+    def payload(self) -> dict[str, float | int | None]:
         """The ``timings`` object a ``--json`` result and the build tree's ``done``
         line carry."""
+        memo = self.memo or {}
         return {
             "seconds": round(self.seconds, 3),
             "modelSeconds": round(self.model, 3),
             "cadgenSeconds": round(self.cadgen, 3),
             "childrenSeconds": round(self.children, 3),
             "queuedSeconds": round(self.queued, 3),
+            "memoHits": memo.get("hits"),
+            "memoMisses": memo.get("misses"),
+            "memoUncached": memo.get("uncached"),
         }
 
 
 def time_line(document: str, timings: dict[str, Any]) -> str:
-    """``built STEP/robot.step in 9m42s: model code 8m20s, cadgen 1m22s``."""
+    """``built STEP/robot.step in 9m42s: model code 8m20s, cadgen 1m22s, memo 4,210
+    hits, 51 misses, 0 uncached``."""
     parts = [
         f"model code {format_duration(timings.get('modelSeconds') or 0.0)}",
         f"cadgen {format_duration(timings.get('cadgenSeconds') or 0.0)}",
@@ -102,6 +115,10 @@ def time_line(document: str, timings: dict[str, Any]) -> str:
     queued = float(timings.get("queuedSeconds") or 0.0)
     if queued >= 0.05:
         parts.append(f"queued for a build slot {format_duration(queued)}")
+    counts = [timings.get(name) for name in ("memoHits", "memoMisses", "memoUncached")]
+    if all(isinstance(count, int) for count in counts):
+        hits, misses, uncached = counts
+        parts.append(f"memo {hits:,} hits, {misses:,} misses, {uncached:,} uncached")
     return f"built {document} in {format_duration(timings.get('seconds') or 0.0)}: {', '.join(parts)}"
 
 
@@ -151,6 +168,7 @@ class BuildClock:
         self.profile_report: str | None = None
         self.programs: list[str] = []  # what the model's code started (note_programs)
         self.warnings: list[str] = []  # what the build warns of (note_warning)
+        self.memo: dict[str, int] | None = None  # how its kernel calls went (note_memo)
         self._in_body = 0
         self._paused = 0
 
@@ -164,6 +182,7 @@ class BuildClock:
             model=self.model_seconds,
             children=self.children,
             queued=self.queued,
+            memo=None if self.memo is None else dict(self.memo),
         )
 
 
@@ -181,6 +200,17 @@ def note_programs(programs: list[str]) -> None:
     for program in programs:
         if program not in clock.programs:
             clock.programs.append(program)
+
+
+def note_memo(tally: dict[str, int]) -> None:
+    """How the kernel calls of the model run that ends went in the memo (its hits,
+    misses and uncached calls), for the build measured on this thread: the model's
+    run ends inside its own build, a child's inside the child's. Nothing outside a
+    build."""
+    clock = current()
+    if clock is None:
+        return
+    clock.memo = {name: int(tally.get(name, 0)) for name in ("hits", "misses", "uncached")}
 
 
 def note_warning(text: str) -> bool:

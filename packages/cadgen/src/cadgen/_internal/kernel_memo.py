@@ -418,12 +418,15 @@ def _helper(slot: str, function: Any) -> Any:
 
 class _Run:
     """One model run: its trace, call counts, native registrations and maker
-    bindings, transient results and nesting depth."""
+    bindings, transient results and nesting depth, and how its
+    features went: hits, misses and calls that ran uncached (``tally``, what the
+    build's time line reports)."""
 
     def __init__(self, script_path: Path | None) -> None:
         self.id = next(_RUN_IDS)
         self.trace = Trace(Path(script_path).resolve().parent if script_path is not None else None)
         self.counts: dict[int, int] = {}
+        self.tally = {"hits": 0, "misses": 0, "uncached": 0}
         self.depth = 0
         self.transient: dict[Any, _Made] = {}
         # Entry reuse and eviction belong to the shared memo. The registrations
@@ -496,6 +499,8 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
     """A model run on this thread: inside it every patched call from the
     model's code is a feature, and a hit when the memo has one. ``script_path``
     is the model's script, whose folder feature paths are relative to."""
+    from cadgen._internal import build_timing
+
     install()
     state = _Run(script_path)
     previous = getattr(_LOCAL, "run", None)
@@ -504,6 +509,9 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
         yield state
     finally:
         _LOCAL.run = previous
+        # The build measured on this thread is this run's: its time line says how
+        # its features went.
+        build_timing.note_memo(state.tally)
 
 
 def stats() -> dict[str, int]:
@@ -568,6 +576,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             copied = _copy_origins(feature, state)
             entry.refresh(feature.index, state, copied)
             _STATS["hits"] += 1
+            state.tally["hits"] += 1
             return None if kind == "constructor" else result
         try:
             captured = _capture(shapes)
@@ -581,6 +590,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             function_result = function(*args, **kwargs)
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
+        state.tally["misses"] += 1
         feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
         feature.history = _history(feature, makers)
         copied = _copy_origins(feature, state)
@@ -634,6 +644,7 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     """Run the call as plain build123d. It is still a feature, its results are
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
+    state.tally["uncached"] += 1
     inputs = state.trace.given(shapes, state.feature_of)
     verified = capture
     try:
