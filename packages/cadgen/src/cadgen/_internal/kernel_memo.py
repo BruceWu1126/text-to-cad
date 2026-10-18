@@ -72,10 +72,11 @@ representation rewritten in place) is not seen. A call that runs uncached still
 captures what it does to a memoized input, and a memoized shape embedded in a
 foreign or transient one that the call changed is forgotten the same way.
 Results registered only for a run's lineage have no entry to replay or forget:
-uncached calls on them read scalar sub-shape state only when they embed a
-persistent memoized root. Otherwise their topology map alone detects structural
-changes, which forget their old registration so the result has this call's
-lineage. A wrapper's artifact tags do not decide whether it embeds a memoized root.
+uncached calls on them keep a topology map to detect structural changes, which
+forget their old registration so the result has this call's lineage. Each
+persistent root embedded in such an input has its own state captured: changing
+only the wrapper forgets no embedded maker. A wrapper's artifact tags do not
+decide whether it embeds a memoized root.
 
 **History.** While a call from the model's code runs, the OCCT makers it runs
 record what they were given and what they made (``kernel_history``, installed
@@ -1481,8 +1482,8 @@ class _Captured:
         self.index = index
         self.handle = handle
         self.embedded = embedded
-        # A memoized shape's sub-shapes have states the memo keeps. A foreign shape,
-        # captured for the memoized shapes it embeds, is read in full and kept nowhere.
+        # A directly memoized shape's sub-shapes have states the memo keeps.
+        # Roots reached through uncontrolled wrappers are read fresh and kept nowhere.
         self.known = known
         self.mapped, self.tshapes = _mapped(handle) if topology is None else topology
         if structural_only:
@@ -1502,12 +1503,13 @@ class _Captured:
 def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
     """The inputs the operation may change: one per TShape, in call order, less
     any that is a sub-shape of another input (its ancestor's delta covers it).
-    With ``embedded`` (an uncached call), an input with no persistent entry needs
-    scalar states only for the persistent memoized roots it embeds, which a
-    change taints. A transient-only input keeps its topology map so a structural
-    change forgets the old registration and names the result by this call."""
+    With ``embedded`` (an uncached call), each persistent root a foreign or
+    transient input embeds is captured separately, with fresh scalar state. A
+    transient input keeps only its topology map so a structural change forgets
+    its old registration without blaming the unchanged roots it contains."""
     state = getattr(_LOCAL, "run", None)
     distinct: list[_Captured] = []
+    protected: dict[Any, _Captured] = {}
     seen: set = set()
     for index, shape in enumerate(shapes):
         wrapped = _wrapped(shape)
@@ -1518,21 +1520,26 @@ def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
             continue
         seen.add(tshape)
         made = _made_of(tshape, state)
-        roots: list[_Made] = []
         topology = None
         structural_only = False
         if embedded and (made is None or not made.persistent()):
             topology = _mapped(wrapped)
-            roots = _embedded(wrapped, state, tshapes=topology[1])
-            if not roots:
-                if made is None:
-                    continue
-                structural_only = True
-        distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), roots,
+            for root in _embedded(wrapped, state, tshapes=topology[1]):
+                if root.tshape not in protected:
+                    protected[root.tshape] = _Captured(index, root.handle(), [root], known=False)
+            if made is None:
+                continue
+            structural_only = True
+        distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), [],
                                   known=made is not None and made.persistent(),
                                   topology=topology, structural_only=structural_only))
+    # A protected root is captured once even if it is also a direct input. Keep
+    # each root's protection independent of the wrappers' topology guards and
+    # of other roots that share or contain some of its native sub-shapes.
+    distinct = [item for item in distinct if item.rows is None or item.handle.TShape() not in protected]
     return [item for item in distinct
-            if not any(other is not item and other.mapped.Contains(item.handle) for other in distinct)]
+            if item.rows is None or not any(other is not item and other.rows is not None
+                                            and other.mapped.Contains(item.handle) for other in distinct)] + list(protected.values())
 
 
 def _embedded(wrapped: Any, state: _Run | None, *, tshapes: list | None = None) -> list[_Made]:
@@ -1563,12 +1570,13 @@ def _effects(captured: list[_Captured], state: _Run) -> tuple[list[tuple[int, "_
                 _taint(_made_of(item.handle.TShape(), state), state)
             continue
         rows = [_state(tshape) for tshape in tshapes]
-        if rows == item.rows:
-            continue
         if item.embedded:
-            for made in item.embedded:
-                _taint(made, state)
-            sound = False
+            if tshapes != item.tshapes or rows != item.rows:
+                for made in item.embedded:
+                    _taint(made, state)
+                sound = False
+            continue
+        if rows == item.rows:
             continue
         effect = _delta(item, tshapes, rows, rowed)
         made = _made_of(item.handle.TShape(), state)

@@ -400,10 +400,12 @@ captured as each sub-shape's state before and after -- tolerance, flags, how
 many representations it holds -- replayed on a hit and undone when a later
 run no longer runs the operation, so a cold run and a hot run write the same
 bytes; a change that state does not express makes the input's maker forget it.
-An uncached call captures scalar state only for persistent memoized inputs or
-wrappers that embed them. A result registered only for the run's lineage keeps
-a topology map to detect structural changes; its artifact tags do not exempt
-embedded memoized geometry.
+An uncached call captures scalar state only for persistent memoized inputs and
+each persistent root embedded in a foreign or transient wrapper. Each root's
+own topology and state decide whether its maker is forgotten; a change to the
+wrapper alone leaves an unchanged root's construction and lineage intact.
+A result registered only for the run's lineage keeps a topology map to detect
+structural changes; its artifact tags do not exempt embedded memoized geometry.
 The memo never reaches the store and
 never outlives the worker: a cold run computes everything, and
 `CADGEN_KERNEL_MEMO=0` turns hits off and nothing else -- every call runs and is

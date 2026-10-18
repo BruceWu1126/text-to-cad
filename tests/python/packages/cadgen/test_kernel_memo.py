@@ -427,6 +427,133 @@ class EffectTest(KernelMemoCase):
                     self.assertEqual((rebuilt["hits"], rebuilt["misses"]), (0, 1))
                     self.assertIsNot(fresh, body, "the uncached mutation retired the embedded body's maker")
 
+    def test_nesting_a_transient_wrapper_preserves_its_embedded_roots_construction_and_lineage(self) -> None:
+        from build123d import Compound, Solid
+
+        foreign = Solid.make_box(1, 1, 1)
+
+        def inner():
+            body = Solid.make_box(2, 3, 4)
+            return body, Compound(children=[body, foreign])
+
+        plain_body, plain_inner = inner()
+        plain = _bytes(Compound(children=[plain_inner]).wrapped)
+        plain_body_bytes = _bytes(plain_body.wrapped)
+
+        def model(deferred):
+            body, wrapper = inner()
+            state = kernel_memo._LOCAL.run
+            identity = None if deferred else state.identify(body)
+            members = set(kernel_memo._mapped(body.wrapped)[1])
+            self.assertTrue(wrapper.wrapped.Free())
+            with mock.patch.object(kernel_memo, "_state", wraps=kernel_memo._state) as reads:
+                outer = Compound(children=[wrapper])
+            self.assertFalse(wrapper.wrapped.Free(), "the containing compound changes only its wrapper")
+            self.assertEqual({call.args[0] for call in reads.call_args_list}, members,
+                             "capture the embedded root, without scalar reads of the wrapper or foreign geometry")
+            return body, outer, identity, state.identify(body)
+
+        expected, traces = None, []
+        for deferred in (False, True):
+            kernel_memo.clear()
+            first = None
+            for enabled in ("1", "1", "0"):
+                with self.subTest(deferred=deferred, enabled=enabled):
+                    os.environ["CADGEN_KERNEL_MEMO"] = enabled
+                    (body, outer, before, after), stats, run = _run(model, deferred)
+                    self.assertEqual(stats["errors"], 0)
+                    if before is not None:
+                        expected = before if expected is None else expected
+                        self.assertEqual(before, expected)
+                    # Publication first asks for lineage after nesting, with no
+                    # earlier account to warm this run's trace caches.
+                    self.assertRegex(after[0], r"^[0-9a-f]{64}$")
+                    self.assertIsNotNone(after[1])
+                    self.assertEqual(after, expected)
+                    self.assertEqual(_bytes(body.wrapped), plain_body_bytes)
+                    self.assertEqual(_bytes(outer.wrapped), plain)
+                    if first is None:
+                        first = body
+                    elif enabled == "1":
+                        self.assertIs(body, first, "the embedded maker remains a memo hit")
+                        self.assertEqual(stats["misses"], 0)
+                    traces.append(run.trace.feature_rows())
+        self.assertEqual(traces, [traces[0]] * 6)
+
+    def test_an_uncached_change_taints_only_the_affected_embedded_root(self) -> None:
+        from build123d import Compound, Solid
+
+        foreign = Solid.make_box(1, 1, 1)
+
+        def primitives():
+            return Solid.make_box(2, 3, 4), Solid.make_box(5, 6, 7)
+
+        def mutate(wrapper, overlapping, direct):
+            direct.wrapped.Free(not direct.wrapped.Free())
+            return wrapper
+
+        uncached_mutation = kernel_memo._wrap("mutate", mutate, "function")
+
+        def model():
+            affected, untouched = primitives()
+            wrapper = Compound(children=[affected, untouched, foreign])
+            overlapping = Compound(children=[affected, foreign])
+            state = kernel_memo._LOCAL.run
+            before = state.identify(untouched)
+            uncached_mutation(wrapper, overlapping, affected)
+            self.assertIsNone(kernel_memo.construction_key(affected))
+            self.assertEqual(state.identify(untouched), before)
+            return affected, untouched
+
+        (affected, untouched), stats, _ = _run(model)
+        self.assertEqual(stats["errors"], 0)
+        (fresh, same), rebuilt, _ = _run(primitives)
+        self.assertEqual((rebuilt["hits"], rebuilt["misses"]), (1, 1))
+        self.assertIsNot(fresh, affected)
+        self.assertIs(same, untouched, "overlapping wrappers do not retire the unchanged maker")
+
+    def test_embedded_root_topology_replacement_taints_its_maker_with_equal_scalar_rows(self) -> None:
+        from build123d import Compound, Solid
+        from OCP.BRep import BRep_Builder
+
+        foreign = Solid.make_box(1, 1, 1)
+        replacement = Solid.make_box(2, 3, 4)
+        builder = BRep_Builder()
+
+        def mutate(wrapper, root, body):
+            before = [kernel_memo._state(shape) for shape in kernel_memo._mapped(root.wrapped)[1]]
+            free = root.wrapped.Free()
+            root.wrapped.Free(True)  # OCCT permits structural edits only to a free shape.
+            try:
+                builder.Remove(root.wrapped, body.wrapped)
+                builder.Add(root.wrapped, replacement.wrapped)
+            finally:
+                root.wrapped.Free(free)
+            after = [kernel_memo._state(shape) for shape in kernel_memo._mapped(root.wrapped)[1]]
+            self.assertEqual(after, before, "only native topology identity changes")
+            return Compound(wrapper.wrapped)
+
+        uncached_mutation = kernel_memo._wrap("mutate", mutate, "function")
+
+        def model():
+            body = Solid.make_box(2, 3, 4)
+            root = Compound(children=[body])
+            wrapper = Compound(children=[root, foreign])
+            state = kernel_memo._LOCAL.run
+            before = state.identify(body)
+            self.assertIsNotNone(kernel_memo.construction_key(root))
+            changed = uncached_mutation(wrapper, root, body)
+            self.assertIsNone(kernel_memo.construction_key(root))
+            self.assertEqual(state.identify(body), before, "the removed body's own topology and state did not change")
+            return changed, Compound(changed.wrapped)
+
+        (changed, alias), stats, run = _run(model)
+        self.assertEqual(stats["errors"], 0)
+        self.assertTrue(changed.wrapped.IsSame(alias.wrapped))
+        self.assertIsNone(run.trace.feature_of(alias))
+        self.assertEqual(run.feature_of(alias), len(run.trace.features) - 1,
+                         "the transient wrapper's changed topology is registered to the mutation")
+
     def test_uncached_topology_change_registers_transient_aliases_to_the_mutating_feature(self) -> None:
         from build123d import Compound, Location, Solid
         from OCP.BRep import BRep_Builder
