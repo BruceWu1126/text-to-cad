@@ -83,6 +83,12 @@ on whether the elements of the feature's inputs have names, so it is kept per ac
 that (``_skey``). The names themselves are rendered per part, as a feature's name is the
 part's: strings, from those structures, with no maker run and no map built on a warm run.
 
+A complete whole-body Copy certificate also preserves the source component's naming
+context and ordinal links at that boundary. The copy's elements render in that context,
+including when a later feature follows them, so placing an assembly never counts a
+sibling's makers in a leaf's names. Histories retain only copy ordinals; each run binds
+them to its own feature nodes, and no copy invents lineage for foreign elements.
+
 ``Trace.account`` is a component's whole account: its lineage, the object its tree
 entry names (``component_package``) -- the feature that made the body, per element
 ordinal its name, and the table -- and the feature each feature name it holds stands
@@ -199,6 +205,10 @@ class Feature:
     # What the makers the call ran report of its results (``kernel_history.History``),
     # with the structures of its naming kept in it; None where it could not be composed.
     history: Any = field(default=None, repr=False)
+    # Per result, the source's naming context at a certified whole-body copy.
+    # This is rebound for every run, including hits: histories contain ordinals,
+    # never the feature indices of the run that first computed them.
+    copies: dict[int, "_CopyContext"] = field(default_factory=dict, repr=False)
     # Functions of the feature alone, computed once: the operation as its name spells
     # it, the name without its count (``<function>.<operation>``, as written) -- every
     # part's naming reads them for each feature it descends from -- and, on first use,
@@ -235,9 +245,30 @@ class _Structure:
     a shape no feature made, no name; ``("s", input, ordinal)`` that input's element;
     ``("h", sources)`` named by history, each source ``(input, kind, ordinal, how)``;
     ``("u", candidates)`` from a parent, each ``(kind, ordinal, number)``; ``("l",
-    lowers)`` from its lower elements, each ``(kind, ordinal)``; ``("m", number)`` made."""
+    lowers)`` from its lower elements, each ``(kind, ordinal)``; ``("m", number)`` made;
+    ``("c", position, kind, ordinal)`` in that result's frozen source context."""
 
     rules: list[list[list[tuple]] | None]
+
+
+@dataclass
+class _CopyContext:
+    """A source's derivation nodes and naming boundary, without rendered lineage.
+
+    Nodes are in source ordinal order. A copy chain remaps these tuples rather
+    than retaining another chain of contexts. Structures are captured while the
+    source still has the topology the copy saw; strings are rendered on demand.
+    """
+
+    names: "_Names | None"
+    made: int | None
+    nodes: tuple[tuple[tuple | None, ...], ...]
+    renderer: "_Renderer | None" = field(default=None, repr=False)
+    owner: tuple[int, int] = (-1, -1)
+    identity: int = -1
+    label: str | None = None
+    pinned_at: int | None = None
+    labelled: dict[tuple[str, int], "_Renderer"] = field(default_factory=dict, repr=False)
 
 
 class Trace:
@@ -259,6 +290,9 @@ class Trace:
         # transitively, every feature that made what it was given) as bits by index; per
         # stem, the features of that stem; per label, the features that claim it, in order.
         self._ancestors: list[int] = []
+        self._copy_ancestors: list[int] = []
+        self._copy_contexts: list[_CopyContext] = []
+        self._copy_labels: dict[str, int] = {}
         self._stems: dict[str, int] = {}
         self._labelled: dict[str, list[int]] = {}
         # Per run: where each input came from (``_source``), the structure each feature is
@@ -343,14 +377,34 @@ class Trace:
         )
         self.features.append(feature)
         ancestors = 1 << feature.index
-        for given in feature.inputs:
+        copied_inputs = 0
+        for _shape, given, handle in inputs:
             if given is not None:
-                ancestors |= self._ancestors[given]
+                context = None if handle is None else self._copy_of(handle, self._made_by)
+                if context is not None:
+                    ancestors |= (1 << given) | (1 << context.owner[0])
+                    if context.names is not None:
+                        ancestors |= context.names.ancestors
+                        copied_inputs |= context.names.copies
+                    copied_inputs |= 1 << context.identity
+                else:
+                    ancestors |= self._ancestors[given]
+                    copied_inputs |= self._copy_ancestors[given]
         self._ancestors.append(ancestors)
+        self._copy_ancestors.append(copied_inputs)
         self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
-        for shape, index, _handle in inputs:
+        for shape, index, handle in inputs:
             if index is not None:
-                self._pin(index, getattr(shape, "__dict__", {}).get("label"), at=feature.index)
+                label = getattr(shape, "__dict__", {}).get("label")
+                context = None if handle is None else self._copy_of(handle, self._made_by)
+                if context is None:
+                    self._pin(index, label, at=feature.index)
+                elif context.label is None:
+                    from cadgen._internal.tree_tokens import is_occurrence_token
+
+                    if isinstance(label, str) and label and not is_occurrence_token(label):
+                        context.label, context.pinned_at = identifier(label), feature.index
+                        self._copy_labels[context.label] = self._copy_labels.get(context.label, 0) | (1 << context.identity)
         for shape in results:
             try:
                 self._by_object[id(shape)] = (weakref.ref(shape), feature.index)
@@ -409,6 +463,102 @@ class Trace:
                 return index
             index = inner
 
+    def preserve_copies(self, feature: Feature, copies: dict, made_by: Callable[[Any], int | None]) -> None:
+        """Bind whole-copy certificates to this run's original component context.
+
+        The enclosing assembly's other makers must not count in a copied leaf's
+        feature names, and a copied foreign leaf must remain unnamed.
+        """
+        self._made_by = made_by
+        sources: dict[Any, _CopyContext] = {}
+        for position, copy in copies.items():
+            top = copy.source.TShape()
+            context = sources.get(top)
+            if context is None:
+                context = sources[top] = self._copy_context(copy.source, copy.ordinals, made_by)
+            preserved = _CopyContext(
+                context.names, context.made,
+                tuple(tuple(context.nodes[kind][ordinal - 1] for ordinal in ordinals)
+                      for kind, ordinals in enumerate(copy.ordinals)),
+                owner=(feature.index, position), identity=len(self._copy_contexts))
+            feature.copies[position] = preserved
+            self._copy_contexts.append(preserved)
+
+    def _copy_of(self, body: Any, made_by: Callable[[Any], int | None]) -> _CopyContext | None:
+        index = made_by(body.TShape())
+        if index is None:
+            return None
+        position = self.features[index].position_of(body.TShape())
+        return self.features[index].copies.get(position)
+
+    def reject_copies(self, feature: Feature) -> None:
+        """Withdraw a current call's inheritance before any later feature sees it."""
+        feature.copies.clear()
+        self._structures.pop(feature.index, None)
+        self._skeys.pop(feature.index, None)
+        self._origins = {node: origin for node, origin in self._origins.items() if node[0] != feature.index}
+        if feature.history is not None:
+            feature.history.copies.clear()
+            feature.history.structures.clear()
+
+    def _copy_context(self, body: Any, ordinals: tuple, made_by: Callable[[Any], int | None]) -> _CopyContext:
+        previous = self._copy_of(body, made_by)
+        if previous is not None:
+            return previous
+        maker = self._maker(made_by, body)
+        owners = self._owners(made_by, body)
+        made = None if maker is None else self.unwrapped(maker)
+        roots = [index for _shape, index in owners] + ([made] if made is not None else [])
+        if not roots:
+            return _CopyContext(None, None, tuple(tuple(None for _ordinal in kind) for kind in ordinals))
+        names = self._names(roots, made, made_at=max(roots))
+        for _shape, index in owners:
+            self._structure(index)
+        # The usual case is a whole result: its ordinals are already the source
+        # nodes. No new element map, payload or rendered string is needed.
+        if len(owners) == 1 and owners[0][0] is body:
+            index = owners[0][1]
+            located = self._located(index, body)
+            if located is not None and located[1] is None:
+                position = located[0]
+                return self._frozen_copy_context(names, made, tuple(tuple(self._copy_node((index, position, kind, ordinal))
+                    for ordinal in range(1, len(held) + 1)) for kind, held in enumerate(ordinals)))
+        nodes = []
+        for kind in range(3):
+            elements = _map(body, _TOPABS[kind])
+            nodes.append(tuple(self._copy_node(self._component_node(body, owners, elements.FindKey(ordinal), kind, ordinal))
+                               for ordinal in range(1, elements.Extent() + 1)))
+        return self._frozen_copy_context(names, made, tuple(nodes))
+
+    def _copy_node(self, node: tuple | None) -> tuple | None:
+        return node if node is not None and self._origin(node) is not None else None
+
+    def _frozen_copy_context(self, names: "_Names", made: int | None, nodes: tuple) -> _CopyContext:
+        """Resolve derivation links now, before native source maps can change.
+
+        Structures alone do not resolve a history source extracted from a
+        located parent. Freeze those ordinal links too, without rendering names.
+        """
+        pending = [node for kind in nodes for node in kind if node is not None]
+        seen = set()
+        while pending:
+            node = self._origin(pending.pop())
+            if node is None or node in seen:
+                continue
+            seen.add(node)
+            rule = self._rule(node)
+            index, position, _kind, _ordinal = node
+            if rule[0] == "h":
+                more = [self._input_node(index, j, kind, ordinal) for j, kind, ordinal, _how in rule[1]]
+            elif rule[0] == "u":
+                more = [(index, position, kind, ordinal) for kind, ordinal, _number in rule[1]]
+            elif rule[0] == "l":
+                more = [(index, position, kind, ordinal) for kind, ordinal in rule[1]]
+            else:
+                continue
+            pending.extend(source for source in more if source is not None)
+        return _CopyContext(names, made, nodes)
+
     # --- the payload ---------------------------------------------------------------------
 
     def feature_rows(self) -> list[dict[str, Any]]:
@@ -426,16 +576,23 @@ class Trace:
         lineage holds stands for, with the features those were given: what ``store
         where`` answers a name of this part with."""
         self._made_by = made_by
+        copied = self._copy_of(body, made_by)
+        if copied is not None and copied.names is None and copied.made is None:
+            # The complete source context proved that no feature named any of
+            # this body. Do not open an enclosing assembly just to render x's.
+            return None, {}
         maker = self._maker(made_by, body)
         owners = self._owners(made_by, body)
         if maker is None and not owners:
             return None, {}
         # A body build123d only wrapped or placed was made by what it wraps.
-        made_feature = None if maker is None else self.unwrapped(maker)
+        made_feature = copied.made if copied is not None else None if maker is None else self.unwrapped(maker)
         roots = [index for _shape, index in owners] + ([made_feature] if made_feature is not None else [])
         names = self._names(roots, made_feature, made_at=max(roots))
         renderer = _Renderer(self, names)
-        payload: dict[str, Any] = {"made": None if made_feature is None else names[made_feature]}
+        made_name = (None if made_feature is None else copied.names[made_feature]
+                     if copied is not None else names[made_feature])
+        payload: dict[str, Any] = {"made": made_name}
         named = False
         # The features the names hold, spelled out or folded into the table, as bits.
         held = 0
@@ -461,22 +618,33 @@ class Trace:
             held ^= low
         for index in list(stands):
             stands.update(given for given in self.features[index].inputs if given is not None)
-        return payload, {names[index]: index for index in sorted(stands) if index in names}
+        rendered_indices = set(renderer.namings.values())
+        named_features = {names[index]: index for index in sorted(stands)
+                          if index in names and index not in rendered_indices}
+        named_features.update(renderer.namings)
+        if made_name is not None:
+            named_features[made_name] = made_feature
+        return payload, named_features
 
     def _names(self, roots: list[int], body: int | None, *, made_at: int) -> "_Names":
         """The names of the features a part descends from -- ``roots`` and, transitively,
         every feature that made what one of them was given (:class:`_Names`)."""
         ancestors = 0
+        copies = 0
         for index in roots:
             if index is not None:
                 ancestors |= self._ancestors[index]
-        return _Names(self, ancestors, body, made_at)
+                copies |= self._copy_ancestors[index]
+        return _Names(self, ancestors, body, made_at, copies)
 
     def _maker(self, made_by: Callable[[Any], int | None], body: Any) -> int | None:
         """The feature that made ``body``, or None: the one its TShape is
         registered to, unless that feature was handed the TShape it returned
         (a placement of a shape no feature made)."""
         index = made_by(body.TShape())
+        copied = self._copy_of(body, made_by)
+        if copied is not None and copied.made is None:
+            return None
         if index is not None and self._passed_through(index, body.TShape()):
             return None
         return index
@@ -725,6 +893,12 @@ class Trace:
             if result is None:
                 rules.append(None)
                 continue
+            copied = feature.copies.get(position)
+            if copied is not None:
+                rules.append([[("x",) if node is None else ("c", position, kind, ordinal)
+                               for ordinal, node in enumerate(held, 1)]
+                              for kind, held in enumerate(copied.nodes)])
+                continue
             maps = [_map(result, topabs) for topabs in _TOPABS]
             partners = [j for j, handle in enumerate(feature.handles)
                         if handle is not None and handle.TShape() == result.TShape() and not handle.IsSame(result)]
@@ -829,12 +1003,16 @@ class _Names:
     labelled apart are one part, named alike. A label pinned later -- set on a shape after
     it was given to the construction that made this part -- renames nothing here."""
 
-    def __init__(self, trace: Trace, ancestors: int, body: int | None, made_at: int) -> None:
+    def __init__(self, trace: Trace, ancestors: int, body: int | None, made_at: int,
+                 copies: int = 0) -> None:
         self.trace = trace
         self.ancestors = ancestors
         self.body = body
         self.made_at = made_at
         self.found: dict[int, str] = {}
+        self.copies = copies
+        self.overrides: dict[int, tuple[str, int]] = {}
+        self._claims: dict[str, tuple[int, int] | None] = {}
 
     def __contains__(self, index: object) -> bool:
         return isinstance(index, int) and index >= 0 and (self.ancestors >> index) & 1 == 1
@@ -848,18 +1026,50 @@ class _Names:
     def get(self, index: int, default: str | None = None) -> str | None:
         if index not in self:
             return default
+        if index in self.overrides:
+            return self.overrides[index][0]
         name = self.found.get(index)
         if name is None:
             name = self.found[index] = self._name(index)
         return name
+
+    def binding(self, index: int) -> int:
+        return self.overrides[index][1] if index in self.overrides else index
+
+    def labelled(self, index: int, label: str, binding: int) -> "_Names":
+        names = _Names(self.trace, self.ancestors, self.body, self.made_at, self.copies)
+        names.overrides = {**self.overrides, index: (label, binding)}
+        return names
+
+    def _claimer(self, label: str) -> tuple[int, int] | None:
+        if label in self._claims:
+            return self._claims[label]
+        claims = [(index, -1) for index in self.trace._labelled.get(label, ())
+                  if index in self and self._pins(index)]
+        copied = self.copies & self.trace._copy_labels.get(label, 0)
+        while copied:
+            low = copied & -copied
+            context = self.trace._copy_contexts[low.bit_length() - 1]
+            if context.owner[0] in self and context.pinned_at is not None and context.pinned_at <= self.made_at:
+                claims.append(context.owner)
+            copied ^= low
+        claim = self._claims[label] = min(claims) if claims else None
+        return claim
+
+    def copy_label(self, context: _CopyContext) -> tuple[str, int] | None:
+        if context.label is None or context.made is None or context.pinned_at is None or context.pinned_at > self.made_at:
+            return None
+        claim = self._claimer(context.label)
+        if claim == context.owner or claim == (context.made, -1):
+            return context.label, claim[0]
+        return None
 
     def _name(self, index: int) -> str:
         trace = self.trace
         feature = trace.features[index]
         label = feature.label
         if label is not None and self._pins(index):
-            claimer = next((other for other in trace._labelled[label] if other in self and self._pins(other)), None)
-            if claimer == index:
+            if self._claimer(label) == (index, -1):
                 return label
         stem = feature.stem
         return f"{stem}{(self.ancestors & trace._stems[stem] & ((2 << index) - 1)).bit_count()}"
@@ -881,6 +1091,8 @@ class _Renderer:
         # text names -- spelled out or in what it folds -- as bits by index), or None
         self.texts: dict[tuple, tuple[str, str, int] | None] = {}
         self.table: dict[str, str] = {}
+        self.namings: dict[str, int] = {}
+        self._copied: dict[_Renderer, None] = {}
 
     def rendered(self, node: tuple) -> tuple[str, str, int] | None:
         """The element's name -- its text, its last feature and the features it holds -- or
@@ -933,11 +1145,31 @@ class _Renderer:
         :meth:`_depends`) rendered."""
         texts = self.texts
         index = node[0]
+        if rule[0] == "c":
+            _tag, position, kind, ordinal = rule
+            context = self.trace.features[index].copies[position]
+            source = context.nodes[kind][ordinal - 1]
+            if source is None or context.names is None:
+                return None
+            if context.renderer is None:
+                context.renderer = _Renderer(self.trace, context.names)
+            renderer = context.renderer
+            labelled = self.names.copy_label(context)
+            if labelled is not None:
+                renderer = context.labelled.get(labelled)
+                if renderer is None:
+                    renderer = context.labelled[labelled] = _Renderer(
+                        self.trace, context.names.labelled(context.made, *labelled))
+            rendered = renderer.rendered(source)
+            self._copied[renderer] = None
+            return rendered
         feature = self.names.get(index)
         if feature is None or rule[0] in ("x", "s"):
             return None
+        binding = self.names.binding(index)
+        self.namings[feature] = binding
         if rule[0] == "m":
-            return f"{feature}.{rule[1]}", feature, 1 << index
+            return f"{feature}.{rule[1]}", feature, 1 << binding
         if rule[0] == "h":
             sources = []
             for (j, source_kind, _ordinal, how), origin in zip(rule[1], origins):
@@ -953,7 +1185,7 @@ class _Renderer:
             if rule[2] > 1:
                 op += str(rule[2])
             extras = _distinct([(source_kind, rendered) for source_kind, _j, rendered, _how in sources])
-            return self._step(sources[0][2], op, feature, index, extras[1:1 + _EXTRAS])
+            return self._step(sources[0][2], op, feature, binding, extras[1:1 + _EXTRAS])
         if rule[0] == "u":
             candidates = []
             for (_parent_kind, _parent, number), origin in zip(rule[1], origins):
@@ -963,7 +1195,7 @@ class _Renderer:
             if not candidates:
                 return None
             _text, number, rendered = min(candidates)
-            return self._step(rendered, f"U{number}" if number > 1 else "U", feature, index, [])
+            return self._step(rendered, f"U{number}" if number > 1 else "U", feature, binding, [])
         if rule[0] == "l":
             lowers = []
             for (lower_kind, _lower), origin in zip(rule[1], origins):
@@ -973,7 +1205,7 @@ class _Renderer:
                 lowers.append((rendered[0], lower_kind, rendered))
             lowers.sort(key=lambda lower: lower[0])
             extras = _distinct([(lower_kind, rendered) for _text, lower_kind, rendered in lowers])
-            return self._step(lowers[0][2], "L", feature, index, extras[1:1 + _EXTRAS])
+            return self._step(lowers[0][2], "L", feature, binding, extras[1:1 + _EXTRAS])
         return None
 
     def _step(self, base: tuple[str, str, int], op: str, feature: str, index: int,
@@ -1020,6 +1252,22 @@ class _Renderer:
     def closed(self, names: list[str]) -> dict[str, str]:
         """The table entries element ``names`` reach: every folded atom they or the entries
         name."""
+        # Borrow each source table once per account, not once per copied element
+        # (which would repeatedly copy a growing table for a large part).
+        stack = [(self, False)]
+        merged: set[_Renderer] = set()
+        while stack:
+            renderer, ready = stack.pop()
+            if renderer in merged:
+                continue
+            if not ready:
+                stack.append((renderer, True))
+                stack.extend((source, False) for source in renderer._copied if source not in merged)
+                continue
+            for source in renderer._copied:
+                renderer.table.update(source.table)
+                renderer.namings.update(source.namings)
+            merged.add(renderer)
         closed: dict[str, str] = {}
         pending = folded_atoms("\n".join(names))
         while pending:

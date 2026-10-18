@@ -334,6 +334,228 @@ class MissTest(KernelMemoCase):
         self.assertEqual(traces, [traces[0]] * 3)
 
 
+class CopyIdentityTest(KernelMemoCase):
+    """Body identity follows a proven copy, independently of the copy call's memo key."""
+
+    def test_nested_assembly_copies_preserve_each_leafs_deferred_identity(self) -> None:
+        import copy
+        from build123d import Compound, Location, Solid
+
+        foreign = Solid.make_box(1, 2, 3)
+
+        def primitive():
+            return Solid.make_box(4, 5, 6)
+
+        def model(operation, with_foreign, noise):
+            if noise:
+                Solid.make_sphere(0.5)
+            first, second = primitive(), primitive().moved(Location((10, 0, 0)))
+            first.label, second.label = "first", "second"
+            nested = Compound(children=[second, foreign] if with_foreign else [second])
+            assembly = Compound(children=[first, nested])
+            if operation == "moved":
+                placed = assembly.moved(Location((0.01, 0, 0)))
+            elif operation == "rigid":
+                placed = assembly.moved(Location((3, 4, 5), (10, 20, 30)))
+            elif operation == "located":
+                placed = assembly.located(Location((3, 4, 5), (10, 20, 30)))
+            else:
+                placed = (copy.copy if operation == "copy" else copy.deepcopy)(assembly)
+            return assembly, placed, (first, second), (placed.children[0], placed.children[1].children[0])
+
+        for with_foreign in (False, True):
+            for operation in ("moved", "rigid", "located", "copy", "deepcopy"):
+                kernel_memo.clear()
+                plain = _bytes(model(operation, with_foreign, False)[1].wrapped)
+                expected = None
+                first_copy = None
+                for memo, noise in (("1", False), ("1", True), ("0", False)):
+                    with self.subTest(foreign=with_foreign, operation=operation, memo=memo, noise=noise):
+                        os.environ["CADGEN_KERNEL_MEMO"] = memo
+                        (assembly, placed, sources, copies), stats, run = _run(model, operation, with_foreign, noise)
+                        self.assertEqual(stats["errors"], 0)
+                        self.assertEqual(_bytes(placed.wrapped), plain, "identity bookkeeping preserves ordinary geometry")
+                        self.assertEqual([body.label for body in copies], ["first", "second"])
+                        # Nothing asked for names before the whole assembly was copied.
+                        identities = [run.identify(body) for body in copies]
+                        original = [run.identify(body) for body in sources]
+                        self.assertEqual(identities, original)
+                        self.assertEqual(identities[0], identities[1], "independent identical parts stay one part")
+                        self.assertIsNotNone(identities[0][0])
+                        expected = identities if expected is None else expected
+                        self.assertEqual(identities, expected)
+                        for source, body in zip(sources, copies):
+                            self.assertIsNot(source, body)
+                            self.assertFalse(source.is_same(body), "ordinary build123d descendants are native copies")
+                            self.assertEqual(source.volume, body.volume)
+                            _key, _lineage, names = run.account(body)
+                            self.assertEqual(run.trace.features[names["primitive.make_box1"]].op, "Solid.make_box")
+                        if operation in ("moved", "rigid", "copy"):
+                            self.assertTrue(assembly.is_same(placed) if operation == "copy"
+                                            else assembly.wrapped.IsPartner(placed.wrapped))
+                        if with_foreign:
+                            foreign_copy = placed.children[1].children[1]
+                            self.assertEqual(run.identify(foreign_copy), (None, None))
+                            made = kernel_memo._made_of(copies[0].wrapped.TShape(), run)
+                            self.assertFalse(made.persistent(), "identity inheritance must not promote an uncached result")
+                        if first_copy is not None and memo == "1" and not with_foreign:
+                            self.assertIs(copies[0], first_copy, "a hit still returns its original Python object")
+                        if first_copy is None:
+                            first_copy = copies[0]
+
+    def test_copy_identity_is_frozen_before_later_source_and_copy_effects(self) -> None:
+        import copy
+        from build123d import Compound, Face, Location, Solid, Vector, Wire
+
+        foreign = Solid.make_box(1, 1, 1)
+
+        def model(with_foreign):
+            source = Face(Wire.make_circle(4))
+            assembly = Compound(children=[source, foreign] if with_foreign else [source])
+            first = assembly.moved(Location((5, 0, 0))).children[0]
+            second = copy.deepcopy(first)
+            state = kernel_memo._LOCAL.run
+            pristine = state.identify(second)
+            Solid.extrude(source, Vector(0, 0, 2))
+            after_source = state.identify(first), state.identify(second)
+            Solid.extrude(first, Vector(0, 0, 3))
+            return pristine, after_source, state.identify(first), state.identify(second)
+
+        for with_foreign in (False, True):
+            kernel_memo.clear()
+            expected = None
+            for memo in ("1", "1", "0"):
+                with self.subTest(foreign=with_foreign, memo=memo):
+                    os.environ["CADGEN_KERNEL_MEMO"] = memo
+                    (pristine, after_source, changed, independent), stats, _run_state = _run(model, with_foreign)
+                    self.assertEqual(stats["errors"], 0)
+                    self.assertIsNotNone(pristine[0])
+                    self.assertEqual(after_source, (pristine, pristine))
+                    self.assertEqual(independent, pristine, "mutating a copy cannot rename an earlier independent copy")
+                    self.assertNotEqual(changed[0], pristine[0], "a changed body has no pristine copy identity")
+                    expected = pristine if expected is None else expected
+                    self.assertEqual(pristine, expected)
+
+    def test_labels_on_distinct_copied_outputs_pin_only_the_geometry_that_consumes_them(self) -> None:
+        from build123d import Compound, Face, Location, Solid, Vector, Wire
+
+        def profile():
+            return Face(Wire.make_rect(4, 5))
+
+        def model(copied, shared):
+            first = profile()
+            second = (first if shared else profile()).moved(Location((10, 0, 0)))
+            leaves = (first, second)
+            if copied:
+                leaves = Compound(children=leaves).moved(Location((1, 0, 0))).children
+            state = kernel_memo._LOCAL.run
+            before = [state.identify(body)[1] for body in leaves]
+            leaves[0].label, leaves[1].label = "left_profile", "right_profile"
+            solids = [Solid.extrude(body, Vector(0, 0, 3)) for body in leaves]
+            named = [state.account(body) for body in solids]
+            joined = solids[0].fuse(solids[1])
+            return before, [state.identify(body)[1] for body in leaves], named, state.account(joined)
+
+        (before, after, direct, _joined), _, _ = _run(model, False, False)
+        self.assertEqual(before, after)
+        for shared in (False, True):
+            kernel_memo.clear()
+            for memo in ("1", "1", "0"):
+                with self.subTest(shared=shared, memo=memo):
+                    os.environ["CADGEN_KERNEL_MEMO"] = memo
+                    (before, after, named, joined), stats, run = _run(model, True, shared)
+                    self.assertEqual(stats["errors"], 0)
+                    self.assertEqual(before, after, "consuming labels cannot rename an existing copied leaf")
+                    self.assertEqual([account[1] for account in named], [account[1] for account in direct])
+                    for label, account in zip(("left_profile", "right_profile"), named):
+                        self.assertEqual(run.trace.features[account[2][label]].op, "moved")
+                    self.assertIn("left_profile", joined[2])
+                    self.assertIn("right_profile", joined[2])
+                    self.assertEqual(joined[2]["left_profile"], joined[2]["right_profile"],
+                                     "both labels truthfully name distinct outputs of one assembly-copy call")
+
+    def test_real_edits_name_their_changes_and_keep_unchanged_copy_names(self) -> None:
+        from build123d import Compound, Location, Solid
+
+        def primitive():
+            return Solid.make_box(4, 4, 4)
+
+        def model():
+            first, second = primitive(), primitive().moved(Location((10, 0, 0)))
+            assembly = Compound(children=[first, Compound(children=[second])])
+            copied = assembly.moved(Location((1, 0, 0))).children[1].children[0]
+            tool = Solid.make_cylinder(1, 6).moved(Location((12, 2, -1)))
+            return second, copied, copied.cut(tool), copied.scale(2)
+
+        for memo in ("1", "1", "0"):
+            os.environ["CADGEN_KERNEL_MEMO"] = memo
+            (source, copied, cut, scaled), stats, run = _run(model)
+            self.assertEqual(stats["errors"], 0)
+            original = run.identify(source)
+            self.assertEqual(run.identify(copied), original)
+            self.assertNotEqual(run.identify(cut)[0], original[0])
+            self.assertNotEqual(run.identify(scaled)[0], original[0])
+            before, name_before = _named(run, copied)
+            after, name_after = _named(run, cut)
+            unchanged = [face for face in cut.faces() if any(face.is_same(old) for old in copied.faces())]
+            self.assertTrue(unchanged)
+            self.assertTrue(all(name_after(face) == name_before(face) for face in unchanged))
+            self.assertTrue(any(";M:" in face for face in after["faces"]))
+            self.assertNotEqual(after["made"], before["made"])
+            self.assertFalse(run.trace.features[-1].history.copies, "scaling is not a whole-body Copy certificate")
+
+    def test_nested_copies_preserve_the_sources_earlier_label_claimants(self) -> None:
+        import copy
+        from build123d import Compound, Face, Location, Solid, Vector, Wire
+
+        def model():
+            profile = Face(Wire.make_rect(4, 5))
+            inner = Compound(children=[profile]).moved(Location((1, 0, 0))).children[0]
+            inner.label = "A"
+            source = Solid.extrude(inner, Vector(0, 0, 3))
+            outer = copy.deepcopy(source)
+            state = kernel_memo._LOCAL.run
+            before = state.identify(outer)
+            other = Solid.make_box(2, 3, 4).moved(Location((10, 0, 0)))
+            other.label = "A"
+            combined = outer.fuse(other)
+            return before, state.identify(outer), state.account(combined)
+
+        for memo in ("1", "1", "0"):
+            os.environ["CADGEN_KERNEL_MEMO"] = memo
+            (before, after, combined), stats, run = _run(model)
+            self.assertEqual(stats["errors"], 0)
+            self.assertEqual(before, after)
+            self.assertEqual(run.trace.features[combined[2]["A"]].op, "moved",
+                             "the nested copied profile claimed A before the later box")
+            self.assertIn("model.make_box1", combined[2])
+
+    def test_source_changes_within_the_copy_call_withdraw_both_inherited_identities(self) -> None:
+        import copy
+        from build123d import Solid
+
+        def changing_copy(source):
+            result = copy.deepcopy(source)
+            # A real scalar change with no history maker reporting it.
+            source.vertices()[0].wrapped.TShape().Tolerance(0.02)
+            return result
+
+        operation = kernel_memo._wrap("changing_copy", changing_copy, "function")
+
+        def model():
+            return operation(Solid.make_box(2, 3, 4))
+
+        for memo in ("1", "1", "0"):
+            os.environ["CADGEN_KERNEL_MEMO"] = memo
+            body, stats, run = _run(model)
+            self.assertEqual(stats["errors"], 0)
+            key, lineage = run.identify(body)
+            self.assertIsNone(key)
+            self.assertEqual(lineage["made"], "model.changing_copy1")
+            self.assertFalse(run.trace.features[-1].copies)
+            self.assertFalse(run.trace.features[-1].history.copies)
+
+
 class EffectTest(KernelMemoCase):
     """The kernel's changes to its inputs: an extrusion clears its profile's ``Free``
     flag and appends representations to the profile's edges (a boolean, run

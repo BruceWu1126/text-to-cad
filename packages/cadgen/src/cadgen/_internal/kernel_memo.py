@@ -105,6 +105,13 @@ models, or other versions of this one, gives the key a cold run gives. A shape
 whose making passes through a call the memo could not key (an effect it cannot
 name, a key it no longer holds) has none, and is named by its bytes.
 
+A whole body certified by ``kernel_history`` as an actual complete Copy keeps
+the source's stable construction material, frozen before later calls can change
+it. This is separate from its runtime key: a copied descendant of an uncached
+assembly move remains transient. Its own geometric effects change that inherited
+identity; an unknown source or an effect that cannot be named gives it none.
+The trace's source naming context is likewise rebound on each hit.
+
 The memo lives in this process's memory for the life of the process,
 LRU-bounded by entries; it never reaches the store and a cold run computes
 everything. ``CADGEN_KERNEL_MEMO=0`` turns hits off and nothing else: every
@@ -458,7 +465,7 @@ class _Run:
         wrapped = _wrapped(shape)
         if wrapped is None:
             return None, None, {}
-        key = construction_key(shape)
+        key = _construction_key(shape, self)
         lineage, names = self.trace.account(wrapped.Located(TopLoc_Location()), self.made_by)
         return key, lineage, names
 
@@ -554,7 +561,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
             # The very shapes the miss made, so the history it captured is theirs: no maker runs.
             feature.history = entry.history
-            entry.refresh(feature.index, state.id)
+            copied = _copy_origins(feature, state)
+            entry.refresh(feature.index, state.id, copied)
             _STATS["hits"] += 1
             return None if kind == "constructor" else result
         try:
@@ -571,10 +579,15 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         _STATS["misses"] += 1
         feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
         feature.history = _history(feature, makers)
+        copied = _copy_origins(feature, state)
         del makers
         snapshot = None
         try:
             effects, sound = _effects(captured, state)
+            if not sound or any(effect.geometric() for _index, effect in effects):
+                # A source changed within this outer call. Its pre-call material
+                # cannot certify whether a nested copy preceded that change.
+                copied = _reject_copies(feature, copied, state)
             if sound:
                 if kind == "constructor":
                     snapshot = _Adopt(_wrapped(result), dict(_CONSTRUCTOR_TARGETS)[label])
@@ -582,13 +595,15 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                     snapshot = _snapshot(result)
         except _Unkeyable:
             snapshot = None
+            copied = _reject_copies(feature, copied, state)
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             snapshot = None
+            copied = _reject_copies(feature, copied, state)
             for item in captured:
                 _taint(_made_of(item.handle.TShape(), state), state)
         if snapshot is None:
-            _register(result, None, feature.index, state, None)
+            _register(result, None, feature.index, state, None, copied)
             return function_result
         for index, effect in effects:
             effect.origin = (key_id, n, index)
@@ -598,7 +613,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             replaced = _MEMO.pop(entry.key, None)
             if replaced is not None:
                 _drop(replaced)  # the key's earlier entry, made from inputs this run no longer has
-        entry.made = _register(result, entry.key, feature.index, state, entry)
+        entry.made = _register(result, entry.key, feature.index, state, entry, copied)
         with _LOCK:
             _MEMO[entry.key] = entry
             _MEMO.move_to_end(entry.key)
@@ -616,23 +631,31 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
     inputs = state.trace.given(shapes, state.feature_of)
+    verified = capture
     try:
         captured = _capture(shapes, embedded=True) if capture else []
     except Exception:  # noqa: BLE001
         _STATS["errors"] += 1
         captured = []
+        verified = False
     with kernel_history.recording() as makers:
         function_result = function(*args, **kwargs)
     result = args[0] if kind == "constructor" else function_result
     feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
     feature.history = _history(feature, makers)
+    copied = _copy_origins(feature, state)
+    if not verified:
+        copied = _reject_copies(feature, copied, state)
     del makers
     if captured:
         try:
-            _effects(captured, state)
+            effects, sound = _effects(captured, state)
+            if not sound or any(effect.geometric() for _index, effect in effects):
+                copied = _reject_copies(feature, copied, state)
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
-    _register(result, None, feature.index, state, None)
+            copied = _reject_copies(feature, copied, state)
+    _register(result, None, feature.index, state, None, copied)
     return function_result
 
 
@@ -644,6 +667,41 @@ def _history(feature: Any, makers: list) -> "kernel_history.History | None":
     except Exception:  # noqa: BLE001
         kernel_history._STATS["errors"] += 1
         return None
+
+
+def _copy_origins(feature: Any, state: _Run) -> dict[int, tuple | None]:
+    """Freeze certified sources before another operation can change their state.
+
+    This is artifact identity only. A copied descendant of an uncached assembly
+    placement stays transient and can never make that operation a memo hit.
+    """
+    copies = feature.history.copies if feature.history is not None else {}
+    if not copies:
+        return {}
+    try:
+        state.trace.preserve_copies(feature, copies, state.made_by)
+    except Exception:  # noqa: BLE001 - identity capture cannot make geometry fail
+        _STATS["errors"] += 1
+        return _reject_copies(feature, {position: None for position in copies}, state)
+    materials: dict[int, tuple | None] = {}
+    for position, copy in copies.items():
+        made = _made_of(copy.source.TShape(), state)
+        try:
+            materials[position] = None if made is None else _made_material(made)
+        except _Unstable:
+            materials[position] = None
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            materials[position] = None
+    return materials
+
+
+def _reject_copies(feature: Any, copied: dict[int, tuple | None], state: _Run) -> dict[int, None]:
+    """Withdraw both kinds of inheritance, including what a later hit could use."""
+    if not copied:
+        return {}
+    state.trace.reject_copies(feature)
+    return {position: None for position in copied}
 
 
 def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kwargs: dict, shapes: list) -> Any:
@@ -997,14 +1055,19 @@ def construction_key(shape: Any) -> str | None:
     with every shape input and every effect restated as a construction key of
     its own, the effects applied to the shape and its sub-shapes since, its
     orientation, and the cadgen release that built it (the kernel's versions
-    are the part's producer). None when no memoized call of this process made it."""
+    are the part's producer). A certified whole copy inherits its source's stable
+    construction material. None when neither has a known construction."""
+    return _construction_key(shape, getattr(_LOCAL, "run", None))
+
+
+def _construction_key(shape: Any, state: _Run | None) -> str | None:
     import cadgen
 
     wrapped = _wrapped(shape)
     if wrapped is None:
         return None
     with _LOCK:
-        made = _REGISTRY.get(wrapped.TShape())
+        made = _made_of(wrapped.TShape(), state)
         if made is None:
             return None
         try:
@@ -1016,6 +1079,11 @@ def construction_key(shape: Any) -> str | None:
 
 
 def _made_material(made: "_Made") -> tuple:
+    if made.origin is not _NO_COPY:
+        if made.origin is None:
+            raise _Unstable("a copy whose source has no construction key")
+        effects = _effects_material(made)
+        return made.origin if effects == _NO_EFFECTS else ("changed-copy", made.origin, effects)
     if made.parent is None:
         if made.key is None:
             raise _Unstable("a shape no memoized operation made")
@@ -1027,6 +1095,7 @@ def _made_material(made: "_Made") -> tuple:
 
 
 _NO_EFFECTS: tuple = ((), ())
+_NO_COPY = object()
 
 
 def _effects_material(made: "_Made") -> tuple:
@@ -1156,11 +1225,11 @@ class _Made:
     of their own."""
 
     __slots__ = ("tshape", "key", "position", "feature", "run", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born")
+                 "subs", "born", "origin")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
-                 index: int | None = None, position: int = 0) -> None:
+                 index: int | None = None, position: int = 0, origin: Any = _NO_COPY) -> None:
         self.tshape = tshape
         self.key = key
         self.position = position
@@ -1173,6 +1242,9 @@ class _Made:
         self.effects: list[_Effect] = []
         self.subs: list[_Made] = []
         self.born = next(_SEQUENCE)
+        # Immutable source material, never a source _Made whose effects can grow.
+        # None is a certified copy of unknown construction; _NO_COPY is no copy.
+        self.origin = origin
 
     def root(self) -> "_Made":
         made = self
@@ -1238,7 +1310,8 @@ def _handle_of(tshape: Any) -> Any:
     return shape
 
 
-def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Run, entry: "_Entry | None") -> list[_Made]:
+def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Run, entry: "_Entry | None",
+              copied: dict[int, tuple | None] | None = None) -> list[_Made]:
     """Register every shape of a result under the entry that made it, each at its
     position among the result's shapes. A TShape already registered (a move
     shares its input's) keeps its first maker."""
@@ -1250,7 +1323,8 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Ru
         tshape = wrapped.TShape()
         if _made_of(tshape, state) is not None:
             continue
-        made = _Made(tshape, key=key, feature=feature, run=state.id, entry=entry, position=position)
+        origin = copied.get(position, _NO_COPY) if copied else _NO_COPY
+        made = _Made(tshape, key=key, feature=feature, run=state.id, entry=entry, position=position, origin=origin)
         with _LOCK:
             if key is None:
                 state.transient[tshape] = made
@@ -1359,10 +1433,12 @@ class _Entry:
                 return False
         return True
 
-    def refresh(self, feature: int, run_id: int) -> None:
+    def refresh(self, feature: int, run_id: int, copied: dict[int, tuple | None]) -> None:
         for made in self.made:
             made.feature = feature
             made.run = run_id
+            if made.position in copied:
+                made.origin = copied[made.position]
 
 
 class _ShapeState:
@@ -1529,7 +1605,7 @@ def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
                     protected[root.tshape] = _Captured(index, root.handle(), [root], known=False)
             if made is None:
                 continue
-            structural_only = True
+            structural_only = made.origin is _NO_COPY or made.origin is None
         distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), [],
                                   known=made is not None and made.persistent(),
                                   topology=topology, structural_only=structural_only))

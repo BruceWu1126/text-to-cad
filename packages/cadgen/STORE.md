@@ -298,6 +298,15 @@ part is keyed by its content hash, its bytes. Nothing measures geometry to
 name a part, and nothing but display data stands on a part's key: the gate,
 the publish rule, the sweeper and every object address stay with bytes.
 
+A whole-body `BRepBuilderAPI_Copy` keeps that source construction when its
+reported same-element mapping is complete and bijective. The copy freezes
+the source's stable construction material, independently of the runtime memo
+key of the enclosing call. An uncached assembly placement's copied descendants
+stay uncached; copied foreign geometry gains no construction key. Later effects
+on the source do not rename its independent copy, and geometric effects on the copy do
+not retain its pristine identity. Partial or ambiguous histories and a source
+changed within the same call establish no whole-copy identity.
+
 **An element is its lineage.** The run's trace (`_internal/kernel_trace.py`)
 records each kernel call from the model's own code as a **feature**, named
 within each part among the features the part descends from (those that made
@@ -353,6 +362,16 @@ whatever its length, and a folded atom takes further steps like any other, so
 every name stays short; the component's lineage object keeps what each folded
 atom stands for (its `table`, §3), every one its names or that table reach.
 Nothing is measured: no surface, curve or extent is compared to name anything.
+A certified whole-body copy also keeps the source component's naming context:
+its own ancestor closure, body and label cutoff, with the copied ordinals
+remapped by the maker. Moving a whole assembly therefore cannot count a
+sibling's primitive makers in a leaf's names or invent names for foreign
+leaves. Derivation structures are captured at the copy boundary and names are
+rendered on demand; a memo hit binds the context to the current run's features.
+A later consuming construction can pin an author label to that particular
+copied output. Distinct outputs of one assembly copy keep independent labels,
+even if their source bodies shared native geometry; earlier geometry keeps its
+original naming cutoff, and provenance can name both outputs at that copy call.
 An element passed on unchanged from a shape no feature made -- a child's, a
 file's -- has no name and names nothing (it is no source, parent or lower
 element of a name); an element made out of one alone falls to the passes, and
@@ -1573,7 +1592,8 @@ Decided mechanically from the returned geometry and occurrence metadata.
   (the same shape, re-placed). build123d's `child.located(loc)` deep-copies
   the geometry (`BRepBuilderAPI_Copy`), which serializes to different bytes —
   a new component id, so a component rather than a link: place a child with
-  `moved()`.
+  `moved()`. A new byte identity does not change a proven copy's construction
+  identity or its element names (§2).
 - **The materialize contract.** A parent may rely on: the child's exact
   geometry, its labels, colors, owned intrinsic PBR values and placements, as a compound whose children
   mirror the child's grouping. It receives nothing else — a child's sidecar

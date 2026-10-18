@@ -413,7 +413,11 @@ keyed and traced as ever. The memo's key for the construction that made a
 component -- every setting the call ran with, the output of it the component
 is, the effects later calls had on it -- restated stably (`construction_key`),
 is that component's identity (law 20), the same in a cold worker, a warm one
-and with hits off. The same layer records each call from the
+and with hits off. A complete whole-body copy certified by the kernel's Copy
+maker keeps its source's construction identity, frozen when it was copied;
+later geometric changes to either body cannot rename the other. This does not change
+the copy call's runtime key, eligibility for hits or returned objects.
+The same layer records each call from the
 model's own code as a **feature** (`_internal/kernel_trace.py`), whose lineage
 names the faces, edges and vertices of what the run made from what the OCCT
 makers the call ran report of them (`_internal/kernel_history.py`) -- kept with

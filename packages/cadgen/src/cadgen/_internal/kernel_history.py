@@ -94,6 +94,22 @@ class History:
     origins: dict[tuple[int, int, int], tuple[tuple[int, int, int, str, tuple[int, ...]], ...]] = field(
         default_factory=dict)
     structures: dict[Any, Any] = field(default_factory=dict, repr=False)
+    # A whole body copied by an actual Copy maker, not inferred from element
+    # history: result position -> source body and result-to-source ordinals.
+    copies: dict[int, "Copy"] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True)
+class Copy:
+    """A complete bijection a ``BRepBuilderAPI_Copy`` reported for one body.
+
+    ``ordinals[kind][result ordinal - 1]`` is the source ordinal. The source is
+    an owned handle at the copy boundary; its placement does not name the body.
+    This says nothing about whether that body's construction is memoizable.
+    """
+
+    source: Any
+    ordinals: tuple[tuple[int, ...], ...]
 
 
 # --- recording ------------------------------------------------------------------------------
@@ -261,6 +277,7 @@ def _tapered(maker: Any) -> Callable[[Any], list[tuple[Any, str]]]:
 
 _MAKER = _Adapter(_made)
 _GENERATOR = _Adapter(_made, generator=True)
+_COPY = _Adapter(_copied)
 _WIRE = _Adapter(lambda maker: None)  # composed by its own rule (_wire_copies)
 
 # (module, class, adapter): the makers build123d 0.11.1's topology modules construct that
@@ -279,7 +296,7 @@ _ADAPTERS = (
     ("OCP.ShapeFix", "ShapeFix_Wire", _Adapter(_fixed)),
     ("OCP.ShapeFix", "ShapeFix_Solid", _Adapter(_fixed)),
     ("OCP.ShapeFix", "ShapeFix_Wireframe", _Adapter(_fixed)),
-    ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Copy", _Adapter(_copied)),
+    ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Copy", _COPY),
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Transform", _Adapter(_transformed)),
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_GTransform", _Adapter(_transformed)),
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Sewing", _Adapter(_sewn)),
@@ -489,6 +506,7 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
     taken = sorted((record for record in records if record.result is not None), key=lambda record: record.order)
     if not taken or not any(shape is not None for shape in results):
         return History()
+    all_taken = taken
     taken = _feeding(taken, results)
     if not taken:
         return History()
@@ -529,6 +547,7 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         for j, k, o, how, place in found:
             _merge(merged, (j, k, o), how, place)
 
+    copied: list[tuple[_Record, Copy]] = []
     for record in taken:
         if record.adapter is _WIRE:
             _wire_copies(record, source, report)
@@ -537,24 +556,43 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
         if query is None:
             continue
         held = None if record.adapter.generator else [_map(record.result, kind) for kind in KINDS]
+        # Reuse the answers needed for element history. Whole-copy identity needs
+        # more than I origins: exactly one same-kind answer per source element,
+        # covering every result element once, from an actual Copy maker.
+        copying = record.adapter is _COPY and len(record.inputs) == 1
+        copy_ordinals = [[0] * elements.Extent() for elements in held] if copying else None
         for shape in record.inputs:
             for kind, topabs in enumerate(KINDS):
                 subs = _map(shape, topabs)
+                if copying and subs.Extent() != len(copy_ordinals[kind]):
+                    copying = False
                 for ordinal in range(1, subs.Extent() + 1):
                     sub = subs.FindKey(ordinal)
                     if held is not None and held[kind].Contains(sub):
+                        copying = False
                         continue
                     found = source(sub, kind)
                     if found is None:
+                        copying = False
                         continue
-                    for at, (made, how) in enumerate(_asked(query, sub), 1):
+                    answers = _asked(query, sub)
+                    if copying:
+                        target = held[kind].FindIndex(answers[0][0]) if len(answers) == 1 else 0
+                        if not target or answers[0][1] != SAME or copy_ordinals[kind][target - 1]:
+                            copying = False
+                        else:
+                            copy_ordinals[kind][target - 1] = ordinal
+                    for at, (made, how) in enumerate(answers, 1):
                         made_kind = _KIND.get(made.ShapeType())
                         if made_kind is None or made.IsSame(sub):
                             continue
                         merged = reporting(made, made_kind)
                         for j, k, o, was, place in found:
                             _merge(merged, (j, k, o), _then(was, how), (*place, at))
+        if copying and all(all(ordinals) for ordinals in copy_ordinals):
+            copied.append((record, Copy(record.inputs[0], tuple(tuple(kind) for kind in copy_ordinals))))
     history = History()
+    history.copies = _copies(inputs, results, copied, all_taken)
     if not origins:
         return history
     # Where each reported shape is among the results: in a result, at its ordinal there --
@@ -574,6 +612,51 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
             known = history.origins.get(key)
             history.origins[key] = found if known is None else _merged(known, found)
     return history
+
+
+def _copies(inputs: list[Any], results: list[Any], copied: list[tuple[_Record, Copy]],
+            records: list[_Record]) -> dict[int, Copy]:
+    """Certify only whole Copy results, anchored in a whole input body.
+
+    Element I history also describes partial copies and unchanged pieces of a
+    boolean. Neither establishes body identity. The actual copy maker and its
+    bijection do; a later maker touching its source or result withdraws that
+    certificate. Chains compose their ordinal permutations back to the input.
+    """
+    if not copied:
+        return {}
+    tops: dict[Any, Copy | None] = {}
+    given = None
+    changed = None
+
+    def tshapes(shape: Any) -> set:
+        mapped = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, mapped)
+        return {mapped.FindKey(at).TShape() for at in range(1, mapped.Extent() + 1)}
+
+    for record, copy in copied:
+        if record.result.ShapeType() != copy.source.ShapeType():
+            continue
+        source = copy.source
+        previous = tops.get(source.TShape())
+        if previous is not None:
+            copy = Copy(previous.source, tuple(tuple(previous.ordinals[kind][at - 1] for at in ordinals)
+                                              for kind, ordinals in enumerate(copy.ordinals)))
+        else:
+            if given is None:
+                given = set().union(*(tshapes(shape) for shape in inputs if shape is not None))
+            if source.TShape() not in given:
+                continue
+        if changed is None:
+            changed = set().union(*(tshapes(shape) for other in records if other.adapter is not _COPY
+                                    for shape in (*other.inputs, other.result) if shape is not None))
+        if changed and not changed.isdisjoint(tshapes(source) | tshapes(record.result)):
+            continue
+        top = record.result.TShape()
+        # Two claims to the same native result are ambiguous, even if alike.
+        tops[top] = copy if top not in tops else None
+    return {position: tops[result.TShape()] for position, result in enumerate(results)
+            if result is not None and tops.get(result.TShape()) is not None}
 
 
 def _places(shapes: list[Any], kinds: list[int], held: list[tuple[int, list[Any]]]) -> list[list[tuple[int, int]]]:
