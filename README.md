@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://github.com/earthtojake/text-to-cad/raw/284827cc5817f7d3e4ebdca993a0dcb77b972aad/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
+<img src="https://github.com/earthtojake/text-to-cad/raw/b316da8ff264e774c7499c8fde521be198092d60/apps/docs/public/brand/logo-texttocad-animated.svg" alt="text-to-cad" width="800">
 
 Give your agent CAD superpowers.
 
@@ -15,7 +15,7 @@ Give your agent CAD superpowers.
 [![cadgen](https://img.shields.io/pypi/v/cadgen?style=for-the-badge&logo=pypi&logoColor=white&label=cadgen)](https://pypi.org/project/cadgen/)
 [![build123d](https://img.shields.io/badge/build123d-0.11-2F6FB0?style=for-the-badge)](https://github.com/gumyr/build123d)
 [![Open CASCADE](https://img.shields.io/badge/Open%20CASCADE-7.9-E2001A?style=for-the-badge)](https://dev.opencascade.org)
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/earthtojake/text-to-cad/blob/284827cc5817f7d3e4ebdca993a0dcb77b972aad/packages/cadgen/pyproject.toml)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://github.com/earthtojake/text-to-cad/blob/b316da8ff264e774c7499c8fde521be198092d60/packages/cadgen/pyproject.toml)
 [![Node.js](https://img.shields.io/badge/Node.js-20+-5FA04E?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 
 </div>
@@ -110,7 +110,7 @@ app. If Claude Desktop cannot find `uvx`, give its full path (`which uvx`).
   "mcpServers": {
     "cad": {
       "command": "uvx",
-      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.7.23", "cadgen", "mcp"],
+      "args": ["--no-config", "--managed-python", "--python", "3.13", "--from", "cadgen==0.7.24", "cadgen", "mcp"],
       "env": {"CADGEN_INSTALL_CHANNEL": "claude-desktop"}
     }
   }
@@ -348,4 +348,4 @@ robot description files, simulation, and local review.
 ## 🛠️ Contributing
 
 Branch from `main` and open PRs against `main`. For the local workflow, testing in
-agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/284827cc5817f7d3e4ebdca993a0dcb77b972aad/CONTRIBUTING.md).
+agent apps and validation, see [CONTRIBUTING.md](https://github.com/earthtojake/text-to-cad/blob/b316da8ff264e774c7499c8fde521be198092d60/CONTRIBUTING.md).
