@@ -924,6 +924,9 @@ test("Preview is a still Render showcase: the navbar holds its settings (Orbit, 
   const settingsPanel = pane.getByRole('region', { name: 'Preview settings' });
   const floor = settingsPanel.getByRole('checkbox', { name: 'Floor', exact: true });
   await floor.click();
+  // The panel reads back what it set: the STEP renderer's own settings store hands Preview's
+  // settings to the shell with the display (it once left them out, and every edit read as the default).
+  assert.equal(await floor.getAttribute('aria-checked'), 'false', 'the Floor checkbox shows the floor off');
   await frameWhen(view, shot => differing(floored, shot) > 100, 'drew Preview without its floor');
   // The display is untouched: Preview's settings are its own.
   assert.equal(JSON.stringify((await view.state()).display).includes('floor'), false);

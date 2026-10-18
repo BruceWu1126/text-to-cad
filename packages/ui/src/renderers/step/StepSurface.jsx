@@ -279,7 +279,7 @@ function StepSurfaceBody({ view, data }) {
     viewerContextMenuRef.current = next;
     setViewerContextMenuState(next);
   }, []);
-  const { display: displaySettings, scene: desiredScene, store: viewSettingsStore } = useViewSettings(resolvedColorSchemeMode);
+  const { display: displaySettings, preview: previewSettings, scene: desiredScene, store: viewSettingsStore } = useViewSettings(resolvedColorSchemeMode);
   // The viewport's handle, and the ONE coordinator that drives it. Both are this
   // renderer's: what it loads, and how much detail it asks for, is decided from the
   // RESOLVED view — long before it can describe its own load to the shell.
@@ -1546,7 +1546,7 @@ function StepSurfaceBody({ view, data }) {
     view, services, resource: promptResource, modelKey: selectedKey, revisionKey: presentationRevisionKey,
     features: viewFeatures, toolModes: CAD_TOOL_MODES, tool: { mode: tabToolMode, set: setTabToolMode },
     scene: viewportScene,
-    viewSettings: { display: displaySettings, scene: desiredScene, store: viewSettingsStore, applied: viewUpdate },
+    viewSettings: { display: displaySettings, preview: previewSettings, scene: desiredScene, store: viewSettingsStore, applied: viewUpdate },
     viewerRef,
     load: {
       // `busy` is the shell's "nothing to show yet", and the viewport DETACHES the scene while
