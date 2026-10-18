@@ -23,6 +23,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.fixture_requests import cleanup_after_requests
 from tests.python.support.paths import REPO_ROOT, add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -104,13 +105,15 @@ def _digest(path: Path) -> str:
 class ExportSupersession(unittest.TestCase):
     def setUp(self):
         temporary = generated_cad_directory(prefix="supersession-")
-        self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
+        self.stores: set[str] = set()
         patcher = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(cleanup_after_requests, temporary, self.stores, environment=dict(os.environ))
 
     def _command(self, script: Path) -> dict:
+        self.stores.add(os.path.realpath(self.root / "store"))
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [
             str(REPO_ROOT / "packages" / "cadgen" / "src"), os.environ.get("PYTHONPATH", "")]))}
         env.pop("CADGEN_DAEMON_CHILD", None)
@@ -129,11 +132,22 @@ class ExportSupersession(unittest.TestCase):
         from cadgen.authoring import build_run
         from cadgen.cli_logging import CliLogger
 
+        self.stores.add(os.path.realpath(self.root / "store"))
         logger = CliLogger("cadgen", verbose=False)
         with build_run(logger) as run:
             _specs, (spec,) = _selected_specs_for_targets([str(script)])
             build_model(spec, generator=None, force=False, profile=False, logger=logger)
             yield run
+
+    def finish_waiting(self, process: subprocess.Popen) -> None:
+        # Killing an early-answer client would leave its daemon body waiting for go.
+        (self.root / "go").touch()
+        try:
+            process.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=10)
+            raise
 
     def await_started(self, process: subprocess.Popen) -> None:
         deadline = time.monotonic() + 300
@@ -302,7 +316,7 @@ class ExportSupersession(unittest.TestCase):
         with self.held(script):
             script.write_text(WAITING_PART.format(width=11.0), encoding="utf-8")
             newer = subprocess.Popen(**self._command(script))
-            self.addCleanup(newer.kill)
+            self.addCleanup(self.finish_waiting, newer)
             self.await_started(newer)
         # The older run's export landed while the newer build's body runs.
         older = self.assert_holds_its_result(script)
@@ -318,7 +332,7 @@ class ExportSupersession(unittest.TestCase):
         self.assert_holds_its_result(script)
         script.write_text(WAITING_PART.format(width=11.0), encoding="utf-8")
         newer = subprocess.Popen(**self._command(script))
-        self.addCleanup(newer.kill)
+        self.addCleanup(self.finish_waiting, newer)
         self.await_started(newer)
         edited = b"ISO-10303-21;\nEND-ISO-10303-21;\n"
         (self.root / "part.step").write_bytes(edited)

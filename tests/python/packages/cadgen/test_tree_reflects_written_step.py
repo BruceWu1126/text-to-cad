@@ -13,11 +13,11 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+from tests.python.support.fixture_requests import cleanup_after_requests
 from tests.python.support.paths import add_repo_path
 from tests.python.support.tmp_root import generated_cad_directory
 
@@ -74,7 +74,6 @@ def _volumes(shape) -> list[float]:
 class TreeReflectsWrittenStep(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = generated_cad_directory(prefix="tree-through-step-")
-        self.addCleanup(self._tmp.cleanup)
         self.project = Path(self._tmp.name).resolve()
         self.store = self.project / "store"
         self.environment = dict(os.environ)
@@ -85,6 +84,7 @@ class TreeReflectsWrittenStep(unittest.TestCase):
                 "PYTHONPATH": str(CADGEN_SRC),
             }
         )
+        self.addCleanup(cleanup_after_requests, self._tmp, [self.store], environment=self.environment)
 
     def _run(self, model: str) -> str:
         """Build ``model``; what it said."""
@@ -117,10 +117,11 @@ class TreeReflectsWrittenStep(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
             self.assertIsNotNone(result_tree_for(step_path), "the build published no tree for its STEP")
             warm = read_step(step_path)
-        with tempfile.TemporaryDirectory(prefix="empty-store-") as empty:
-            with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": empty}):
-                self.assertIsNone(result_tree_for(step_path))
-                cold = read_step(step_path)
+        empty = generated_cad_directory(prefix="empty-store-")
+        self.addCleanup(cleanup_after_requests, empty, [empty.name], environment=self.environment)
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": empty.name}):
+            self.assertIsNone(result_tree_for(step_path))
+            cold = read_step(step_path)
         return warm, cold, bd.import_step(str(step_path))
 
     def test_compound_members_links_and_face_colours_round_trip(self) -> None:
