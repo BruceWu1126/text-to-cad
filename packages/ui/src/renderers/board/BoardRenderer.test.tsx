@@ -262,6 +262,7 @@ it('Display is a stock menu: a mode closes it; View from below and the pours lea
   await opened(pane);
   await user.click(within(strip(pane)).getByRole('button', { name: 'Display mode: Board' }));
   const menu = await openMenu('Display');
+  expect([...menu.querySelectorAll('[data-slot=dropdown-menu-label]')].map(label => label.textContent)).toEqual(['Display modes', 'Settings']);
   expect(within(menu).getAllByRole('menuitemradio').map(item => item.textContent)).toEqual(['Board', 'Copper', 'Assembly', 'Placement']);
   expect(within(menu).getAllByRole('menuitemcheckbox').map(item => item.textContent)).toEqual(['Copper pours', 'View from below']);
   await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'View from below' }));

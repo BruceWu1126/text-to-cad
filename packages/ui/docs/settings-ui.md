@@ -508,13 +508,15 @@ pressing Escape closes it. Opening it leaves the active tool and its controls in
 drawing has no Display, and no 2D view has Preview.
 
 A board's Display is its own, because its picture is a choice of layers
-(`renderers/board/BoardDisplay.jsx`): the same stock dropdown and tile, a muted **Display**
-label, the modes as a radio group with their icons — **Board** (the board as it is made),
-**Copper**, **Assembly** and **Placement** (the board before it is wired: its pads and every
-connection as an airwire) — and **Custom** while the Layers section's eyes have left the mode's
-set (choosing a mode goes back to it), a separator, then **Copper pours** (while copper is
-drawn) and **View from below** (the board mirrored, its back on top), two switches of their own,
-kept through a change of mode as Grid is. On a phone it is More's Display row, the same rows.
+(`renderers/board/BoardDisplay.jsx`): the same stock dropdown and tile, in two groups each
+under a muted label. **Display modes**: the modes as a radio group with their icons —
+**Board** (the board as it is made), **Copper**, **Assembly** and **Placement** (the board
+before it is wired: its pads and every connection as an airwire) — and **Custom** while the
+Layers section's eyes have left the mode's set (choosing a mode goes back to it). A separator,
+then **Settings**: **Copper pours** (while copper is drawn) and **View from below** (the board
+mirrored, its back on top), two switches of their own, kept through a change of mode as Grid is.
+The modes' icons are drawn as the 3D modes' are, outlines in their one line, each what the mode
+shows (`board/boardIcons.jsx`). On a phone it is More's Display row, the same two groups.
 What it shows is one object, `{ mode, side, poured, layers }` (core's `plot2d/boardDisplay.js`),
 kept with the file's view, carried by a Quick Edit's views and drawn as it is by
 `cadgen pcb snapshot --display`.

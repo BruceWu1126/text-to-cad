@@ -15,12 +15,13 @@ import { AssemblyModeIcon, BoardModeIcon, CopperModeIcon, PlacementModeIcon } fr
 /**
  * A board's Display (`settings-ui.md`): the one view control a board has, because its picture is a
  * choice — which layers, the pours, the side. A stock dropdown, as a 3D view's Display is
- * (`kit/shell/DisplayPopover.jsx`): a muted **Display** label, the modes as a radio group — each a
- * layer set (`plot2d/boardDisplay.js`) — and **Custom** while the Layers section's eyes have left
- * the mode's set (choosing the mode goes back to it), a rule, then two switches of their own, kept
- * through a change of mode as a 3D view's Grid is: **Copper pours** (while copper is drawn) and
- * **View from below** (the board mirrored, its back layers on top). Choosing a mode closes the
- * menu; ticking leaves it open.
+ * (`kit/shell/DisplayPopover.jsx`), in two groups each under a muted label: **Display modes**, the
+ * modes as a radio group — each a layer set (`plot2d/boardDisplay.js`) — and **Custom** while the
+ * Layers section's eyes have left the mode's set (choosing the mode goes back to it); a rule, then
+ * **Settings**, two switches of their own, kept through a change of mode as a 3D view's Grid is:
+ * **Copper pours** (while copper is drawn) and **View from below** (the board mirrored, its back
+ * layers on top). Choosing a mode closes the menu; ticking leaves it open. A phone's More submenu
+ * is the same two groups.
  *
  * The contract — `{ mode, side, poured, layers }` — is core's, shared with `cadgen pcb snapshot
  * --display`, so what is drawn here is drawn there, and kept with the file's view.
@@ -49,6 +50,7 @@ export function boardDisplayChoice(display, sheet) {
 export function BoardDisplayItems({ display, sheet, onChange }) {
   const choice = boardDisplayChoice(display, sheet);
   return <>
+    <DropdownMenuLabel className="text-muted-foreground">Display modes</DropdownMenuLabel>
     <DropdownMenuRadioGroup aria-label="Board display mode" value={choice.value}
       onValueChange={value => { if (value !== CUSTOM) onChange(selectBoardMode(display, value)); }}>
       {BOARD_MODE_OPTIONS.map(({ value, label, Icon }) => <DropdownMenuRadioItem key={value} value={value} data-board-mode-option={value}>
@@ -59,6 +61,7 @@ export function BoardDisplayItems({ display, sheet, onChange }) {
       </DropdownMenuRadioItem> : null}
     </DropdownMenuRadioGroup>
     <DropdownMenuSeparator />
+    <DropdownMenuLabel className="text-muted-foreground">Settings</DropdownMenuLabel>
     {/* Ticking leaves the menu open, as every checkbox row in a menu does: the board is seen changing. */}
     {boardDisplayDrawsCopper(display, sheet) ? <DropdownMenuCheckboxItem checked={display.poured} onSelect={keepOpen}
       onCheckedChange={value => onChange({ ...display, poured: value === true })} data-board-pours="">
@@ -86,7 +89,6 @@ export function BoardDisplayPopover({ display, sheet, onChange, disabled = false
     {/* Closes with no exit animation, so a quick second press always reaches the tile. */}
     <DropdownMenuContent align="center" sideOffset={6} collisionPadding={8} aria-label="Display"
       className={cn(FLOATING_SURFACE_CLASS, "w-44 data-[state=closed]:animate-none!")}>
-      <DropdownMenuLabel className="text-muted-foreground">Display</DropdownMenuLabel>
       <BoardDisplayItems display={display} sheet={sheet} onChange={onChange} />
     </DropdownMenuContent>
   </DropdownMenu>;
