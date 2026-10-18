@@ -299,7 +299,10 @@ name a part, and nothing but display data stands on a part's key: the gate,
 the publish rule, the sweeper and every object address stay with bytes.
 
 A whole-body `BRepBuilderAPI_Copy` keeps that source construction when its
-reported same-element mapping is complete and bijective. The copy freezes
+reported same-element mapping is complete and bijective. This proof uses the
+Copy's own source and result frames, even when an ancestor placement leaves its
+elements without ordinary origins in the enclosing call's frame. Those ordinary
+origins remain unknown. The copy freezes
 the source's stable construction material, independently of the runtime memo
 key of the enclosing call. An uncached assembly placement's copied descendants
 stay uncached; copied foreign geometry gains no construction key. Later effects

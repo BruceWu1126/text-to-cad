@@ -511,12 +511,14 @@ class CopyIdentityTest(KernelMemoCase):
         def primitive():
             return Solid.make_box(4, 5, 6)
 
-        def model(operation, with_foreign, noise):
+        def model(operation, with_foreign, noise, located_group):
             if noise:
                 Solid.make_sphere(0.5)
             first, second = primitive(), primitive().moved(Location((10, 0, 0)))
             first.label, second.label = "first", "second"
             nested = Compound(children=[second, foreign] if with_foreign else [second])
+            if located_group:
+                nested.move(Location((3, -4, 5), (10, 20, 30)))
             assembly = Compound(children=[first, nested])
             if operation == "moved":
                 placed = assembly.moved(Location((0.01, 0, 0)))
@@ -528,16 +530,18 @@ class CopyIdentityTest(KernelMemoCase):
                 placed = (copy.copy if operation == "copy" else copy.deepcopy)(assembly)
             return assembly, placed, (first, second), (placed.children[0], placed.children[1].children[0])
 
-        for with_foreign in (False, True):
+        for with_foreign, located_group in ((False, False), (True, False), (False, True), (True, True)):
             for operation in ("moved", "rigid", "located", "copy", "deepcopy"):
                 kernel_memo.clear()
-                plain = _bytes(model(operation, with_foreign, False)[1].wrapped)
+                plain = _bytes(model(operation, with_foreign, False, located_group)[1].wrapped)
                 expected = None
                 first_copy = None
                 for memo, noise in (("1", False), ("1", True), ("0", False)):
-                    with self.subTest(foreign=with_foreign, operation=operation, memo=memo, noise=noise):
+                    with self.subTest(foreign=with_foreign, group=located_group,
+                                      operation=operation, memo=memo, noise=noise):
                         os.environ["CADGEN_KERNEL_MEMO"] = memo
-                        (assembly, placed, sources, copies), stats, run = _run(model, operation, with_foreign, noise)
+                        (assembly, placed, sources, copies), stats, run = _run(
+                            model, operation, with_foreign, noise, located_group)
                         self.assertEqual(stats["errors"], 0)
                         self.assertEqual(_bytes(placed.wrapped), plain, "identity bookkeeping preserves ordinary geometry")
                         self.assertEqual([body.label for body in copies], ["first", "second"])
@@ -1795,6 +1799,17 @@ class HistoryCaptureTest(KernelMemoCase):
                 isinstance(value, dict) and all(portable(k) and portable(v) for k, v in value.items()))
 
         self.assertTrue(portable(history.origins.__dict__), "the facade contains no native objects or callbacks")
+
+        # The Copy's local source is held beneath a placed ancestor. Its native
+        # bijection is still provable; ordinary enclosing-frame origins are not.
+        enclosing = source.Moved(Location((30, 40, 50), (15, 25, 35)).wrapped)
+        local, local_queries = self._compose_origins([enclosing], [copied], records)
+        local_eager, local_eager_queries = self._compose_origins([enclosing], [copied], records, eager=True)
+        self.assertEqual((local_queries, local_eager_queries), (26, 26))
+        self.assertEqual(dict(local.origins), {})
+        self.assertEqual(dict(local.origins), dict(local_eager.origins))
+        self.assertEqual(set(local.copies), {0})
+        self.assertEqual(local.copies, local_eager.copies)
 
         def fallback(account_history):
             trace = kernel_trace.Trace(None)

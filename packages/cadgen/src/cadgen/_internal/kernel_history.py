@@ -750,9 +750,12 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
                         continue
                     found = source(sub, kind)
                     if found is None:
-                        copying = False
                         promote()
-                        continue
+                        # A nested body's local frame can differ from the
+                        # enclosing input's. Its actual Copy can still prove a
+                        # whole-body bijection without an enclosing origin.
+                        if not copying:
+                            continue
                     answers = _asked(query, sub)
                     if copying:
                         target = held[kind].FindIndex(answers[0][0]) if len(answers) == 1 else 0
@@ -761,6 +764,8 @@ def compose(inputs: list[Any], results: list[Any], records: list[_Record]) -> Hi
                             promote()
                         else:
                             copy_ordinals[kind][target - 1] = ordinal
+                    if found is None:
+                        continue
                     if compact is not None:
                         # The source was directly resolved, never an earlier
                         # report. A shared target would need _merge, so promote
