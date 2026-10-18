@@ -130,8 +130,11 @@ A mesh carries no CAD topology. Its snapshot door accepts `--display solid`
 (the default), and `--render` for the photographic view. Inline JSON and
 JSON files use per-mode settings under `modes`, with shared `appearance` and
 `camera`. Omitted settings inherit the active mode's defaults.
-`edges`, `clip`, `exploded`, the `xray`, `hidden-line` and `wireframe` presets
-are STEP-only and are refused by name.
+`display.clip` cuts it (`at` in the file's own unit: a GLB's metres, a 3MF's
+declared unit, an STL's own numbers) and `display.exploded` moves a GLB's nodes apart
+(a GLB of one is refused as it renders). `edges` and the `xray`, `hidden-line` and
+`wireframe` presets are STEP-only and are refused by name, as `exploded` is for an STL
+or a 3MF.
 Mesh doors do not have
 `--focus`/`--hide`, `--kinematics`, or `--animation`/`--time`; meshes have no
 canonical CAD occurrences, kinematics,

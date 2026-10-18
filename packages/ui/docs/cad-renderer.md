@@ -35,7 +35,7 @@ the reverse.
 | `camera/` | `runtimeCamera` (zoom percent against the authored framing, projection and lens sync, perspective snapshots, eased transitions, fit-to-bounds, recentre), `useViewportCamera` (that behaviour bound to a mounted viewport: the perspective kept by a mounted view, the reset that Zoom to fit and the live `resetCamera` share, view-cube presets, which turn the camera and keep its zoom and target), `viewportCameraKit` and `viewportCameraFit`, `orbitControls`, `zoomPivotReanchor` (a wheel step first moves the pivot's depth onto the surface under the cursor, and a perspective pan is scaled by that surface's depth, so Render pans and zooms what the cursor is on at Solid's rate), `zoomSpeeds`, `cameraLens`, `ViewPlaneControl` (view cube). |
 | `look/` | `stageEffects` (lighting rig scaled to the model, floor, glow and shadow catcher, grid and origin axes), the Render studio boundary (`renderStudioChunk`, `studioEnvironmentCache` and its worker). `chromeBackdrop` and `useChromeBackdropColor` (the frame colour around a scene). The surface LOOK is data the viewport resolves and a scene applies to its own materials: `@text-to-cad/core/lib/viewer/surfaceLook.js` (`createSurfaceLook(THREE, root).apply(look)`) does it for any authored material tree. The viewport resolves it with core's `resolveSceneSurfaceLook` (`common/sceneSettings.js`), the resolver the snapshot CLI dresses the same scenes with. |
 | `view-settings/` | The settings model and store (`viewSettingsStore`, `useViewSettings`, `viewerDisplaySettings`, `renderState`), applying a change to a viewport (`useAppliedViewSettings`, `viewUpdateCoordinator`, `viewUpdateGate`, `viewUpdatePlan`), and the content of Display's dropdown (`DisplayModeSettings`, `DisplayModeOptions`; `DisplayPopover` draws it). |
-| `tools/` | `FloatingToolBar` (the dumb strip: the tools it is handed, then, only where the host has no navbar, after a thin rule, the view's controls), `SubToolbar` (the tool in hand's one row under the strip, its groups parted by `SubToolbarSeparator`; `SLIDER_SUB_TOOLBAR_CLASS`, the one width of a slider tool's row), `toolModes` (the tool-mode state machine), `ToolModeMenu` (`ToolSettingsMenu`: a tool's settings dropdown, from a chevron right after its button on the strip, or a sliders button in a panel's heading), `ToolPopover` (an ordinary dropdown from its button, on a `side` and `align`ed start or end: the Animation section's Playback settings), `FileSidebar` (the file's sections, whatever the tool: a tile each at the top-left, a tile opening its section in a panel under them, one at a time, sized from its bottom-right grip; on a phone one tile, `phone`, opening one panel with the sections as tabs and its one X; Preview offers its Position and Animation alone, `sections`, its tiles `bare`), `ToolStack` (the bounded column under the strip and sub-toolbar for a renderer's own `toolPanels`, which scrolls only when what cannot give way still does not fit), `ToolPanel` (one panel of the stack, or one section of the sidebar: `fit` says how it gives way when the viewer is short, `resizable` makes a stack panel the person's to size by the grip in its bottom-right corner alone, moving only it, and a panel with a heading can fold to it; its `footer`, a `ToolPanelFooterButton`, is a full-row action under the body that never scrolls), `ResizeGrip` (the one resize grip of a box over the viewport, in a bottom corner: the sidebar's and a resizable panel's at the bottom-right, Quick Edit's at its bottom-left), `toolStackLayout` (every panel's width, each sidebar section's and the resizable panels' sizes, and the folded stack panels: defaults, bounds and their stored record), and the format-blind tools: `annotate/` (`AnnotationOverlay`, the surface Annotate's gestures land on; `annotation3d`, its ink projected into the model; `AnnotationSelectionBar`, the bar of the annotations Select picked), `PreviewChrome` (Preview's chrome: the tools view's controls hidden and inert while it is up, and its own corner, `end`, with its settings panel under it, `panel`), `PlaybackMenu` (the Playback settings — Speed, Loop, Autoplay — and `ORBIT_SPEEDS`, Preview's Orbit speeds), `playbar/` (`AnimationSection`, the file sidebar's Animation section: Reset in its heading, the routine where there are several, Play/Pause, the scrubber, Playback settings; `AnimationTimeControl`, the scrubber, and `animationControlsHaveContent`; `animationClock`, `usePlaybackFrames`, `playbackPreferences`: the file's playback settings — Orbit's speed, Autoplay, and the chosen Speed and Loop), `pose/` (the handle overlay, canvas, drag mathematics), `select/` (`SelectFilterMenu`, Select's selection filter on its chevron; `selectFilter`, its pure toggles; `usePointerPick`: taps and hover through a scene's own `pick`), `quick-edit/` (`QuickEdit`, the note to the agent, and `quickEditPrompt`, the context it builds and the text it copies). Screenshot capture is `@text-to-cad/core/lib/viewer/screenshotCapture.js`. |
+| `tools/` | `FloatingToolBar` (the dumb strip: the tools it is handed, then, only where the host has no navbar, after a thin rule, the view's controls), `SubToolbar` (the tool in hand's one row under the strip, its groups parted by `SubToolbarSeparator`; `SLIDER_SUB_TOOLBAR_CLASS`, the one width of a slider tool's row), `toolModes` (the tool-mode state machine), `ToolModeMenu` (`ToolSettingsMenu`: a tool's settings dropdown, from a chevron right after its button on the strip, or a sliders button in a panel's heading), `ToolPopover` (an ordinary dropdown from its button, on a `side` and `align`ed start or end: the Animation section's Playback settings), `FileSidebar` (the file's sections, whatever the tool: a tile each at the top-left, a tile opening its section in a panel under them, one at a time, sized from its bottom-right grip; on a phone one tile, `phone`, opening one panel with the sections as tabs and its one X; Preview offers its Position and Animation alone, `sections`, its tiles `bare`), `ToolStack` (the bounded column under the strip and sub-toolbar for a renderer's own `toolPanels`, which scrolls only when what cannot give way still does not fit), `ToolPanel` (one panel of the stack, or one section of the sidebar: `fit` says how it gives way when the viewer is short, `resizable` makes a stack panel the person's to size by the grip in its bottom-right corner alone, moving only it, and a panel with a heading can fold to it; its `footer`, a `ToolPanelFooterButton`, is a full-row action under the body that never scrolls), `ResizeGrip` (the one resize grip of a box over the viewport, in a bottom corner: the sidebar's and a resizable panel's at the bottom-right, Quick Edit's at its bottom-left), `toolStackLayout` (every panel's width, each sidebar section's and the resizable panels' sizes, and the folded stack panels: defaults, bounds and their stored record), and the format-blind tools: `annotate/` (`AnnotationOverlay`, the surface Annotate's gestures land on; `annotation3d`, its ink projected into the model; `AnnotationSelectionBar`, the bar of the annotations Select picked), `PreviewChrome` (Preview's chrome: the tools view's controls hidden and inert while it is up, and its own corner, `end`, with its settings panel under it, `panel`), `PlaybackMenu` (the Playback settings — Speed, Loop, Autoplay — and `ORBIT_SPEEDS`, Preview's Orbit speeds), `playbar/` (`AnimationSection`, the file sidebar's Animation section: Reset in its heading, the routine where there are several, Play/Pause, the scrubber, Playback settings; `AnimationTimeControl`, the scrubber, and `animationControlsHaveContent`; `animationClock`, `usePlaybackFrames`, `playbackPreferences`: the file's playback settings — Orbit's speed, Autoplay, and the chosen Speed and Loop), `pose/` (the handle overlay, canvas, drag mathematics), `select/` (`SelectFilterMenu`, Select's selection filter on its chevron; `selectFilter`, its pure toggles; `usePointerPick`: taps and hover through a scene's own `pick`, each with where the pointer was; `useSceneSelection` and `sceneReferences`: the parts a scene's pick names, selected, lit and handed to Quick Edit as references), `measure/` (Measure, for any 3D view: `useMeasureSession`, the session; `useMeasureOverlay`, its drawing; `MeasurementCard`; `measurementChips`, its Quick Edit chips and marks; `measureSelection`, Select's press and hover on a measurement; `SceneMeasure`, picks snapped to a scene's triangles and the model's size row), `model-effects/` (Explode and Clip, for any scene that opts in: `ModelTools`, their strip tools and slider rows; `useSceneEffects`, the viewport applying them to the scene; `motionExclusion`, one motion at a time), `sceneTools` (the tools a scene's renderer composes around the shell: the tool in hand, Annotate, Measure and the model effects), `quick-edit/` (`QuickEdit`, the note to the agent, and `quickEditPrompt`, the context it builds and the text it copies). Screenshot capture is `@text-to-cad/core/lib/viewer/screenshotCapture.js`. |
 | `inspector/` | `FileSheet` and its row and section primitives, `modelTreeSearch` (`useTreeSearch`, the ranked flat search every tree shares), `VirtualRows` (a long tree's rows, windowed), `referenceRows` (`InfoRow`, `MonoValue`, `CoordValue`), `kinematicsControls` (the `Pose` row that heads every Position section: Default, the named poses, Custom). The tree row and filter box are `primitives/tree-row` and `primitives/tree-filter`. |
 | `status/` | `LoadingIndicator` and `ViewerLoadingOverlay`, `ViewerAlertCard` (the card over the viewport for every alert, and `useAlertDismissal`: a card put away, and its icon in the navbar that brings it back) and `reportIssue` (`alertIssueUrl`: its Report Issue's new issue), `ViewUpdateStatus`, `loadingState` (`viewerLoadingState`), `loadAlerts` (`failureAlert`, `noGeometryAlert`). |
 | `shell/` | The host glue every renderer needs that is not about its scene: see [Shell](#shell). |
@@ -44,13 +44,15 @@ the reverse.
 lists, `features: { modes, settings }` (`ViewFeatures` in
 `@text-to-cad/core/common/viewSettings.js`): the modes it lists and the settings
 its menus offer (`VIEW_SETTING_IDS`). A setting left out does not affect the
-scene, and saved settings are never rewritten. Core names two lists,
-`ALL_VIEW_FEATURES` and `EDGELESS_VIEW_FEATURES` (no Edges, Clip or Explode;
-Solid alone, Render being no mode). Every renderer hands its list to
-the shell, which configures the view-settings store (`configure({ features })`) and
-Display's settings from it: STEP passes the first (and the same list to its Explode and Clip
-tools), the GLB, mesh and robot renderers the second. The headless renderer
-(`renderMeshScene.js`) resolves a job of each family under the same list.
+scene, and saved settings are never rewritten. `viewFeaturesForKind(kind, { parts })`
+is the one rule of which list a file gets: `ALL_VIEW_FEATURES` for a STEP;
+`PARTED_MESH_VIEW_FEATURES` (Solid, Clip and Explode) for a GLB of several rigid nodes
+that draw; `MESH_VIEW_FEATURES` (Solid and Clip) for any other 3D file; and
+`EDGELESS_VIEW_FEATURES` (no Edges, Clip or Explode) for a drawing. Render is no mode. Every
+renderer hands its list to the shell, which configures the view-settings store
+(`configure({ features })`) and Display's settings from it, and to its Explode and Clip
+tools. The headless renderer (`renderMeshScene.js`) resolves a job of each family under the
+same rule.
 
 **Tools.** The strip draws the list it is handed: `{ id, label, icon, active,
 disabled, onSelect, description?, menu? }` — a press is a tool's only action; a tool with
@@ -72,14 +74,19 @@ owner that poses its model outside React) as a ref whose list it replaces per po
 **The scene contract** (core's `lib/viewer/sceneContract.js`, a JSDoc typedef that `kit/scene.js`
 re-exports, because the snapshot CLI holds the same scenes): `{ object3D, bounds,
 restBounds?, dispose(), setSurfaceLook?(look), setShadowReception?(receives),
-keepsAuthoredFinish?, complete?, pick?(ray), placedObjects?() }`.
+keepsAuthoredFinish?, complete?, pick?(ray), placedObjects?() }`, and for a family's scene
+the tools' half: `units` (the file's unit against the scene's coordinates, core's
+`sceneUnits.js`), `setClipPlanes(planes)`, `explodeParts` and `setExplode(amount)` (a GLB),
+and, for a scene whose parts are picked by an id of the file's own, `hasPart(id)`,
+`describePart(id)` and `setHighlight({ hovered, selected })`.
 The viewport adopts `object3D`, frames `restBounds`, lights and floors `bounds`,
 and hands over the surface look the Display settings resolved
 (`{ materialSettings, authored, surface: { style, opacity } }`); it only ever
 detaches a scene, whose owner disposes it. `buildModel`
 (`@text-to-cad/core/common/cadScene.js`) exposes `object3D`, `bounds`, `restBounds`
 and `dispose()`; the GLB and mesh renderers' scenes implement all of it but `pick`,
-and the robot renderer's all of it. `pick(ray)` is what `usePointerPick` calls: the
+and the robot renderer's all of it. A family's `pick(ray)` answers the first surface Clip has
+not cut away, with the triangle it hit (`triangle`, for Measure). `pick(ray)` is what `usePointerPick` calls: the
 hook owns the pointer (which press is a tap, one hover pick per frame, the
 cursor), the scene says what is under the ray, and its renderer says what a hit
 means. A tap acts at once: nothing waits to tell it from a double-click.
@@ -96,7 +103,8 @@ and a material with no source colour says so with `userData.cadSourceColor = fal
 **The rule and its check.** Kit code names no file format, no file-kind switch
 and no STEP-assembly concept (topology, selectors, display records, explode,
 section clipping), in code or in comments; only `view-settings/` may name the
-Clip and Explode sections a view opts into. `npm run check:boundaries` runs
+Clip and Explode sections a view opts into, and `tools/model-effects/` the two effects
+it applies to whatever scene opts in. `npm run check:boundaries` runs
 `scripts/test/check-kit-boundaries.mjs`, which scans every kit source for imports
 of a renderer or of a file-family core module and for those words, against a
 short allowlist that carries a reason per line and fails when an entry goes
@@ -133,7 +141,11 @@ not: the camera fit, the studio set up per output, and PNG encoding.
 
 Both hosts dress a scene the same way: the look from `resolveSceneSurfaceLook`, shadows
 while the lighting is on, `keepsAuthoredFinish` for Inspect's reflection environment, and
-the ground sized from `restBounds`. A robot opens at `robotOpeningPose`
+the ground sized from `restBounds`. Both cut and explode it the same way: Clip through
+core's `lib/viewer/sceneClip.js` (the plane in the box the camera frames, `at` in the
+file's unit, the cut capped as a STEP's is), Explode through the scene's `setExplode`
+(`lib/viewer/sceneExplode.js`, a STEP's layout over the file's tree). A robot's parts a
+Quick Edit's view hid come back in its job's `selection.hide`. A robot opens at `robotOpeningPose`
 (`lib/urdf/motion.js`: every joint's default, then an SRDF's `home` state) and a
 snapshot's `--joint-values` go on top through the same joint matrices. What a snapshot
 cannot express, it refuses rather than approximates: a GLB's clips play in the viewer's
@@ -243,7 +255,7 @@ read and written by `workbench/useStepView.js`: the tree's expansion, hidden par
 isolated assemblies, the pose, the large-file setting, each behind the signature that says
 whether it still fits the file), its prompt context, and the resource its live state reports while a rebuild is held
 behind the previous mesh (`live.resource`). The surface composes modules of its own around
-the shell: Measure's session (`workbench/useStepMeasure.js`), the pose and routines
+the shell: Measure's session (`kit/tools/measure/useMeasureSession.js`, the kit's), the pose and routines
 (`workbench/useStepMotion.js`), the context menus as pure descriptors
 (`file-view/stepMenus.js`) and what a selection or a node copies (`file-view/stepCopy.js`).
 The shell was widened for it rather than forked: it accepts display settings a renderer
@@ -375,11 +387,23 @@ STEP renderer does not match `.glb`.
   (`userData.cadSourceColor === false`: no materials in the file, a writer's
   flag, or the grey a STEP export stamps on uncoloured parts) takes the viewer's
   surface colour in Inspect.
-- **Display**: `EDGELESS_VIEW_FEATURES` (Solid, Preview drawing Render; no Edges, Clip or Explode).
-- **Tools**: none, clips or not (`glb/tools.js` exports only the declined live commands).
-  The renderer hands the shell no tools for a strip (`tools={[]}`), so its strip is the
-  view's controls alone, Display and Preview, and a GLB picks nothing, so there is no Select,
-  no filter menu, no copy-references action and no viewport context menu.
+- **Display**: `viewFeaturesForKind("glb", { parts })`: Solid and Clip, and Explode where the
+  file has two or more rigid nodes that draw (`explodeParts`); Preview draws Render.
+- **Tools** (`glb/tools.js`): **Select** (in hand as the file opens), **Annotate**,
+  **Measure**, **Explode** (several parts only) and **Clip**. Select picks a NODE: the glTF
+  node a mesh belongs to, marked on load (`userData.gltfNode`, `glbMeshData.js`), named
+  `n<index>` after the file's `nodes[index]`; a selection is any number of nodes, each a chip
+  in Quick Edit (its name, told apart by its id where several share it) whose card says
+  `nodes[i]`, its triangles and, for a GLB cadgen exported, the STEP occurrence it came from;
+  the scene lights it with a STEP part's highlight ink (`sceneHighlight.js`). Measure snaps to
+  the triangles under the pointer and reads glTF's metres, approximately (see
+  [Measure on a mesh](#measure-on-a-mesh)). Explode moves the rigid nodes that draw along the
+  file's tree (`sceneExplode.js`); Clip cuts every surface and caps the cut. There is no filter
+  menu, no copy-references key and no viewport context menu.
+- **One motion at a time** (`kit/tools/model-effects/motionExclusion.js`): Explode set, the
+  routine playing (or owning the pose) and Clip set each put the other two back, decided by
+  value. A routine lets go of Explode before it plays, so it starts from where the nodes were
+  authored; a routine let go puts them back under Explode's (`syncExplode`).
 - **Animation** (`glb/useGlbAnimation.js`): clips play from the file sidebar's Animation
   section, the shell's (`AnimationSection.jsx`) — Reset in its heading, the clip where there
   are several, Play/Pause, the scrubber and Playback settings — in the tools view and the
@@ -392,9 +416,12 @@ STEP renderer does not match `.glb`.
   scene's sibling (`createSibling()` in core's `glbScene.js`: a SkeletonUtils clone wearing
   copies of the file's authored materials, kept before any look, over the editor's geometry
   and textures, with a sibling `document` for its routine; `kit/shell/usePreviewScene.js`).
-- **Host commands**: the base live commands; `select` and `clearSelection` are
-  declined with a sentence, and a `selectReference` host request is consumed and
-  acknowledged without changing the view.
+- **Quick Edit**: as a STEP's — the picked nodes as references (`model.glb#n12`), the
+  annotation, the measurements and the views (Clip and Explode in their `display`), Copy,
+  Queue and Send.
+- **Host commands**: the base live commands, and `clearSelection`; `select` is declined with
+  a sentence (a node is picked by a person), a `selectReference` host request is consumed and
+  acknowledged without changing the view, and live state reports `selectedNodes`.
 - **State**: the shell record under `[path, "glb"]`. Records written under
   `[path, "cad"]` are not migrated.
 
@@ -406,7 +433,10 @@ renderer does not match either.
 
 - **Scene** (core's `lib/render/meshScene.js`, `buildMeshScene`, which the snapshot CLI draws an STL or a 3MF with too): one `Mesh` per object of the file (an STL is
   one; a 3MF has one per object and material) and nothing else: no part table,
-  display records, edges, clip planes, explode matrices or selectors. Geometries
+  display records, edges or selectors. A 3MF's object knows its place in the build (`o2.1`:
+  the second build item, its first component; `threeMfMeshData.js` reads it from three's
+  loader and from the package reader alike) and its unit the one the model declares
+  (`<model unit>`, read from the head of the root model part alone). Geometries
   come from `@text-to-cad/core/lib/render/meshObjects.js` (`buildMeshObjects`): views
   over the arrays core decoded, never copies, with the display normals of
   `meshNormals.js` (creased at 30° up to `CREASED_NORMAL_MAX_TRIANGLES`, plain
@@ -423,19 +453,25 @@ renderer does not match either.
   coloured the rest keep the colour their material carried. Flat is unlit,
   Single colour and Color by part override source colours (the palette is dealt
   in the order it always was, `paletteIndex`), opacity applies to every object.
-- **Display**: `EDGELESS_VIEW_FEATURES` (Solid, Preview drawing Render; no Edges, Clip or Explode).
-- **Tools**: none. A triangle mesh has nothing to pick, measure, pose or
-  play, so the renderer hands the shell no tools (`tools={[]}`): its strip is the view's
-  controls alone, Display and Preview, and there is no viewport context menu.
+- **Display**: `MESH_VIEW_FEATURES` (Solid and Clip; Preview drawing Render).
+- **Tools** (`mesh/tools.js`): a 3MF has **Select** (its objects, by their place in the
+  build: `model.3mf#o2.1`; an unnamed one is "Object o2.1"), **Annotate**, **Measure** (in the
+  unit the file declares, approximately) and **Clip**, Select in hand as it opens. An STL is
+  one mesh in no unit: **Annotate** and **Clip**, nothing in hand as it opens (a press on ink
+  still picks it), and its Quick Edit names the whole file. Neither has parts to move apart,
+  nor a viewport context menu.
 - **Panels**: none, and no file sidebar sections of its own. Preview is the shell's, as for every 3D file;
   it draws the scene's sibling (`createSibling()`: its own meshes, materials and look over the
   editor's geometry; `kit/shell/usePreviewScene.js`).
 - **Alerts**: a file that fails to parse raises the load alert ("Couldn’t load
   the model", with the loader's error in Details); one that parses to no
   triangles raises "No geometry to display".
-- **Host commands**: the base live commands; `select` and `clearSelection` are
-  declined with a sentence, and a `selectReference` host request is consumed and
-  acknowledged without changing the view.
+- **Quick Edit**: as a STEP's — a 3MF's picked objects as references, the annotation, the
+  measurements and the views (Clip in their `display`); an STL's carries the file, its ink
+  and its views.
+- **Host commands**: the base live commands, and `clearSelection`; `select` is declined with
+  a sentence, a `selectReference` host request is consumed and acknowledged without changing
+  the view, and live state reports `selectedObjects`.
 - **State**: the shell record under `[path, "mesh"]`. Records written under
   `[path, "cad"]` are not migrated.
 
@@ -485,11 +521,15 @@ loader asks which it is. The STEP renderer matches none of them.
   it too, because it draws the robot with this same scene.
   Materials are double-sided, so a mirrored `<mesh scale>` cannot turn a link
   inside out. "Color by part" deals the palette in the order parts always took it.
-- **Display**: `EDGELESS_VIEW_FEATURES` (Solid, Preview drawing Render; no Edges, Clip or Explode).
-- **Tools**: **Select** alone (`robot/tools.js`), its selection filter the chevron after it
+- **Display**: `MESH_VIEW_FEATURES` (Solid and Clip; Preview drawing Render). A robot is
+  posed, never exploded.
+- **Tools** (`robot/tools.js`): **Select**, its selection filter the chevron after it
   (`kit/tools/select/SelectFilterMenu.jsx`): **Links** and **Position** (the joints' knobs;
   offered where a control can be driven, and until the robot has loaded), each on its own,
-  both ticked when a file opens; then, after the strip's rule, Display and Preview.
+  both ticked when a file opens; then **Annotate**, **Measure** (the description's metres, REP
+  103, each mesh as its `<mesh scale>` draws it; approximate) and **Clip**. Clip turned on puts
+  the joints back at the opening pose, and a joint moved takes Clip off: the second is heard
+  on the pose store itself, outside React, so a pose step still renders no component.
 - **Pose** (`robot/poseStore.js`): joint values live in a store outside React
   (degrees; metres for a prismatic joint), with one write path. A write is clamped,
   ignored under `URDF_JOINT_VALUE_EPSILON`, releases the tracked named pose and is
@@ -534,6 +574,53 @@ loader asks which it is. The STEP renderer matches none of them.
 - **Test seams** (read-only): `window.__cadJointHandles()` (knobs in CSS pixels,
   with values and drawn travel), `window.__robotLinks()` (every link group's frame)
   and `window.__robotPoseStats()` (matrices written per pose, renders of the surface).
+
+## Tools on a scene of triangles
+
+A GLB, a 3MF, an STL and a robot have the kit's tools as their matrix allows them
+(`kit/tools/sceneTools.jsx` composes them; each renderer adds its own Select):
+
+| | Select | Annotate | Measure | Clip | Explode |
+| --- | --- | --- | --- | --- | --- |
+| URDF, SRDF, SDF | links (and named mesh objects) | yes | metres, approximate | yes | no: a robot is posed |
+| GLB | nodes, `n<index>` | yes | metres, approximate | yes | where it has several rigid nodes that draw |
+| 3MF | objects, `o<item>[.<component>]` | yes | its declared unit, approximate | yes | no |
+| STL | no: one mesh, the whole file | yes | no: the format names no unit | yes | no |
+
+### Measure on a mesh
+
+Measure takes two points, each snapped to the triangle under the pointer
+(`@text-to-cad/core/lib/viewer/meshMeasure.js`): one of its corners within 10 px, else the
+nearest point of one of its sides within 7 px, else the point on its face ("Surface"). The
+scene's `pick` hands the triangle in the scene's coordinates, through a skin or morph targets
+as drawn (`hitTriangle`). The length is read in the FILE's unit (`scene.units`: a GLB's and a
+robot's metres, a 3MF's declared unit) and is approximate — a width across two facets of a
+tessellated curve is no diameter — so every reading says so: "≈ 0.0425 m" on the dimension, in
+the chip ("Measurement 1: ≈ 0.0425 m (approximate)"), in its card (Accuracy: Approximate) and in
+the mark a Quick Edit's job carries. There is no face-to-face or centre-to-centre reading. While
+Measure is in hand its row under the strip says the model's size as drawn now (its box, in the
+file's unit) and offers **Measure the size**: the box's three edges, X, Y and Z, as
+measurements. Under Select a measurement is picked, lit and deleted as a STEP's is
+(`measureSelection.js`). Picks ignore what Clip has cut away.
+
+### Clip and Explode on any scene
+
+`ShellViewport` applies both to a scene whose renderer passes `sceneEffects`
+(`kit/tools/model-effects/useSceneEffects.js`), after its look: Explode through the scene's
+`setExplode(amount)` (the stage follows the box the parts make), Clip through core's
+`sceneClip.js`, which sets the plane on the scene's materials through its `setClipPlanes` (a
+look's later stand-ins and a selection's ghost are cut too) and caps the cut with the stencil
+fill a STEP's section wears — over meshes drawn where their geometry says, not a skinned or
+morphed one. The planes in force are the runtime's `activeClipPlanes`, which the ink is cut by.
+Clip's slider maps in the box the camera frames, in the file's unit, which is what `clip.at`
+holds; a STEP's layers apply both themselves. Explode on a GLB moves the rigid nodes that draw,
+in the file's tree order, each in its parent's frame from where it was authored (its layout,
+a STEP's, is measured the first time Explode is used).
+
+Explode, a routine, Position and Clip are one motion at a time
+(`kit/tools/model-effects/motionExclusion.js`): the one SET off its default — by value, never
+by a tool taken up — puts the others back. A GLB has Explode, its routine and Clip; a robot
+Position and Clip; an STL or a 3MF only Clip.
 
 ## Host integration
 
@@ -647,12 +734,15 @@ The port and app adapters own delivery and return an acknowledged outcome.
 
 Quick Edit (`kit/tools/quick-edit/QuickEdit.jsx`) is the shared note to the agent:
 a box at the top-right, there only while it has something to carry, which
-`RendererShell` mounts for a renderer that hands it `references` — STEP and the robot
-renderer, the formats with picks and annotations (a picture, `compact`, gets none). Its box, header and buttons are the design system's
+`RendererShell` mounts for a renderer that hands it `references` — every 3D file's renderer
+(a picture, `compact`, gets none; a drawing has no Quick Edit). Its box, header and buttons are the design system's
 ([Quick Edit](settings-ui.md#quick-edit)); what it can do follows the host
 ([prompt handoff](viewer-host.md#prompt-handoff)), never an app. The renderer hands
 the shell what is selected as `references`, in the prompt grammar (STEP's, under
-Select while its references can be read; the file itself always goes), and the
+Select while its references can be read; a robot's links, `robot.urdf#upper_arm`; a GLB's nodes,
+`model.glb#n12`, the file's `nodes[12]`; a 3MF's objects, `model.3mf#o2.1`, its build's second
+item's first component; none for an STL, whose note names the file; the file itself always
+goes), and the
 shell hands Quick Edit the file, its prompt (`quickEditPrompt`: the views it
 carries — the view on screen, from `ShellViewport.promptCamera` and the renderer's
 `viewState`, its pose and hidden and isolated parts — and the files `host.promptFiles`

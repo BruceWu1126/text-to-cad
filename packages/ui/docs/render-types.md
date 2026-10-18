@@ -44,10 +44,14 @@ format. Pure data: no behaviour, no imports beyond the format enum.
 | `tools` | `select`, `pan`, `draw`, `orbit`, `screenshot`. Orbit and screenshot are true for every format WITH a viewport — they act on the viewport, not the geometry. `dxf` claims none of them: its pane is a canvas with no toolbar over it. |
 | `parts` | Per-part selection, hiding, isolate, assembly tree. |
 | `topology` | Face/edge/vertex references. Implies `parts`. |
-| `exploded`, `displayModes`, `clip` | STEP-tier display transforms. |
 | `params` | `sidecar` (the model's `@step(pose=...)` block), or `null`. |
 | `animations` | Has animation clips, so transport controls apply. |
 | `artifactManaged` | Builds a package before it can render. A format listed here that the backend cannot produce a package for blocks forever, so a format the viewer renders from its own file belongs out. |
+
+What a 3D file's tools and view offer — Measure, Clip, Explode, the display modes — is not
+in this table: each renderer offers its own tools ([CAD renderer](cad-renderer.md#tools-on-a-scene-of-triangles)),
+and `viewFeaturesForKind` (`@text-to-cad/core/common/viewSettings.js`) is the one rule of
+what a file's view offers, for the viewer and a snapshot alike.
 
 ### Rules
 

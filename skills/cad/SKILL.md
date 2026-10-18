@@ -149,6 +149,21 @@ annotation itself).
 included; after an edit, render it to check the change where the person looked
 ([annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)).
 
+A reference into a file that is not a STEP names what the viewer picked in it, in that
+file's own terms (none is a STEP selector `read_scene` resolves):
+
+| File | Reference | Means |
+| --- | --- | --- |
+| URDF, SRDF, SDF | `/work/arm/arm.urdf#upper_arm` | the link `upper_arm` |
+| GLB | `/work/out/model.glb#n12` | the glTF node `nodes[12]` (0-based, the file's own index) |
+| 3MF | `/work/out/plate.3mf#o2.1` | the 2nd `<build><item>`'s 1st `<component>` (1-based); `#o3` is the 3rd build item |
+| STL | the file alone, on `File:` | one mesh: nothing in it is picked |
+
+A measurement taken on a mesh (a GLB, a 3MF or a robot's links) is between two points of
+its triangles, in the file's unit, and APPROXIMATE: its label starts with `≈` ("≈ 0.0425 m").
+Never read a width across two facets of a tessellated curve as an exact diameter; measure
+the source model for that.
+
 For a bare `#o1.2.f7`, use the identified target file. Do not guess between
 ambiguous files or labels. Numeric refs belong to that saved revision;
 reopen and reselect after rebuilding. The [inspection reference](references/inspection-and-validation.md)

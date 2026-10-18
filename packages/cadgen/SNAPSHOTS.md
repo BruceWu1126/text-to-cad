@@ -26,11 +26,13 @@ axes start off. Enable them explicitly in a mode, for example
 `{"modes":{"solid":{"grid":{"enabled":true}}}}`. The retired `grid` mode,
 top-level style groups and unknown keys are refused.
 
-A clip keeps the part of a STEP model on the lower side of a plane across
+A clip keeps the part of a model on the lower side of a plane across
 `axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
-faces. The plane stands at `at`, its coordinate on the axis in millimetres in the
-model's own frame (the numbers `--mode list` prints as bounds), or, without
-`at`, through the middle of the model at rest. A camera facing
+faces. The plane stands at `at`, its coordinate on the axis in the FILE's unit in
+the model's own frame — a STEP's millimetres (the numbers `--mode list` prints as
+bounds), a GLB's, a URDF's and an SDF's metres, a 3MF's declared unit, an STL's
+own numbers — or, without `at`, through the middle of the model at rest. Every 3D
+input takes one, as the viewer's Clip cuts every 3D file. A camera facing
 the cut (`right`, `back` or `top`; `left`, `front` or `bottom` inverted) draws a
 section view. `--camera` or a job/output `camera` specifies pose and framing;
 `display.camera` specifies projection and focal length (20–200 mm). Render
@@ -38,11 +40,14 @@ uses perspective; the other modes use the shared projection, orthographic by
 default. Opacity is 0 for transparent and 1 for opaque, including partially
 transparent PNG backgrounds.
 
-`edges`, `clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes
-describe a CAD model: its topology edges, its parts and its solids. They apply
-to STEP/STP inputs only. A mesh or a robot description (STL, 3MF, GLB, URDF,
-SRDF, SDF) takes `solid` with its other settings, or `--render`, and refuses
-unsupported settings by name before anything is rendered.
+`edges` and the `xray`, `hidden-line` and `wireframe` modes describe a CAD
+model's topology edges, and apply to STEP/STP inputs only. `exploded` moves parts
+apart: a STEP assembly's, or a GLB's rigid nodes (a GLB of one is refused as it
+renders, saying so); an STL, a 3MF or a robot description refuses it by name. A
+mesh or a robot description (STL, 3MF, GLB, URDF, SRDF, SDF) takes `solid` with its
+other settings and `clip`, or `--render`, and refuses unsupported settings by name
+before anything is rendered. A robot job's `selection.hide` takes its part ids (a
+Quick Edit's view names the parts the Links panel hid); `focus` is a STEP's.
 
 ## Meshes and robot descriptions
 
@@ -71,8 +76,10 @@ snapshot's own.
   the floor's height follows a posed robot down.
 - `--mode list` lists what the scene drew, one row per mesh: a `ref` naming it,
   its `name`, its triangle and vertex counts, and its bounds as drawn. A robot's
-  rows run down its tree from the root link. For these inputs a ref is a name, not
-  a selector: `--focus` and `--hide` are STEP-only.
+  rows run down its tree from the root link. A GLB's ref is its node, `#n12` (the
+  file's `nodes[12]`), as a Quick Edit names it; a 3MF's is its object's place in the
+  build, `#o2.1`; a robot's is its part id. `--focus` and `--hide` are STEP-only (a
+  robot job's `selection.hide` takes its part ids).
 
 ## Drawings
 

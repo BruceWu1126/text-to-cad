@@ -164,8 +164,10 @@ none.
 | File | Tool strip, left to right |
 | --- | --- |
 | STEP | Select, Annotate, Measure, Explode (two or more parts), Clip; then Display and Preview |
-| URDF / SRDF / SDF | Select; then Display and Preview |
-| GLB / STL / 3MF | no tools: Display and Preview alone, a GLB's clips or not |
+| URDF / SRDF / SDF | Select, Annotate, Measure, Clip; then Display and Preview |
+| GLB | Select, Annotate, Measure, Explode (several rigid nodes that draw), Clip; then Display and Preview |
+| 3MF | Select, Annotate, Measure, Clip; then Display and Preview |
+| STL | Annotate, Clip, nothing in hand as it opens; then Display and Preview |
 | DXF | none: a 2D canvas, with no strip |
 
 There is no activity dot. A thin rule parts the tools from the view's controls, which
@@ -191,9 +193,9 @@ Explode or Clip with its effect set takes it up again, as it is; unset, it start
 
 | Tool | Pressing it | Its sub-toolbar | Leaving it |
 | --- | --- | --- | --- |
-| Select | The default tool of STEP and robots; picks what its filter ticks (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
+| Select | The default tool of every 3D file but an STL; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
 | Annotate | Draws on the view | Its tools, what is drawn next, Undo, Redo and Clear annotations (on a phone, the menu of a chevron after its tile instead) | The annotations stay in the model, their chip in Quick Edit; the tool in hand stays, the strip's Annotate showing its icon |
-| Measure | Arms picking between points on the model; each result a chip in Quick Edit, in its colour | None | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
+| Measure | Arms picking between points on the model (a STEP's exact vertices, edges and faces; a mesh's triangles, approximately, in its file's unit); each result a chip in Quick Edit, in its colour | None on a STEP; on a mesh, the model's size and Measure the size | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
 | Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, and Flip clip before Reset) | The effect stays on the model |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
@@ -205,6 +207,9 @@ knobs. Put down, Explode keeps its explosion under any other tool until Position
 routine played from the Animation section is the third motion: playing it puts Explode and the
 pose back at rest, and using either puts the routine back at rest; paused, its frame stays on the
 model as a pose does. Preview's routine is its own and moves nothing of the tools view's.
+Another file has the motions its tools have, under the same rule, decided by value
+(`kit/tools/model-effects/motionExclusion.js`): a GLB's Explode, routine and Clip; a robot's
+Position and Clip.
 
 A tree is the file sidebar's, on screen under every tool; a pick in it takes Select up
 before it acts.

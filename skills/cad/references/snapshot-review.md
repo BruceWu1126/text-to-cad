@@ -3,7 +3,8 @@
 Read this file when choosing visual checks for saved STEP/STP or mesh outputs.
 Use `cadgen step snapshot` for STEP, or the corresponding `stl`, `3mf` or `glb`
 snapshot command for meshes (see [mesh exports](supported-exports.md)). The
-CAD topology, selection, clipping and motion controls below apply to STEP.
+CAD topology, selection and motion controls below apply to STEP; clipping applies
+to every 3D input, and exploding to a STEP or a GLB of several parts.
 
 ## Policy
 
@@ -117,8 +118,9 @@ Render's floor sits at the model's lowest point; `placement: "origin"` moves it
 to Z=0. `--camera` (or a job's top-level or per-output `camera`) sets pose and
 framing (`preset`, `position`, `target`, `up`, `direction`, `zoom`,
 `orthographicHalfHeight`); projection and focal length belong in
-`display.camera`. `clip` and `exploded` are shared `display` tools. `edges`,
-`clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes are
+`display.camera`. `clip` and `exploded` are shared `display` tools: every 3D input
+takes `clip` (`at` in the file's own unit), and `exploded` takes a STEP or a GLB of
+several parts. `edges` and the `xray`, `hidden-line` and `wireframe` modes are
 STEP-only; meshes and robot descriptions take `solid`, or `--render`. DXF uses
 `--appearance` and has no scene display modes. Retired top-level style groups
 and the old `grid` mode are refused.
@@ -205,7 +207,10 @@ the PNGs it rendered, and their `.annotation.json` file when they drew. Every
 path in the prompt and job is absolute, so the saved job can be replayed from
 another working folder without copying the annotation into the model directory. The job's `measurements` are
 the distances they measured, each `{start, end, label, color}`, drawn over every
-view as the viewer drew them. `cadgen snapshot --job <job
+view as the viewer drew them; a label starting `≈` was measured on a mesh's triangles and
+is approximate. A Quick Edit from any 3D file replays: a robot's job carries its
+`jointValues` and the parts hidden in its Links panel (`selection.hide`), a GLB's or a
+3MF's its `display.clip` and `display.exploded`. `cadgen snapshot --job <job
 file>` renders those views again: after an edit, run it to see the change from
 where the person looked, with their annotation still on it. Add a TARGET to aim the
 same views at another document.
@@ -213,8 +218,9 @@ same views at another document.
 ## Clipped views
 
 Use the viewer's Clip setting to reveal internal geometry in a normal view snapshot.
-`display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at` in model
-millimetres, and `invert`. The cut stays capped and uses the same scene as the viewer.
+`display.clip` takes `enabled`, `axis` (`x`, `y` or `z`), `at` in the file's own unit
+(a STEP's millimetres; a GLB's, URDF's and SDF's metres; a 3MF's declared unit), and
+`invert`. The cut stays capped and uses the same scene as the viewer.
 
 ```bash
 cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip":{"enabled":true,"axis":"y","at":12.5}}'

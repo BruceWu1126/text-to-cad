@@ -146,9 +146,12 @@ Render offers `parts`, `lighting`, `background` and `floor`; Solid offers `parts
 `flat`, `grid` and `axes`. `appearance` is `light` (default) or `dark`.
 Projection and focal length belong in `display.camera`; Render uses perspective.
 Top-level `--camera` and `--joint-values` remain active in every display mode.
-The display mode is `solid`, and `--render` draws Render: `edges`, `clip`, `exploded`, and
-`xray`, `hidden-line` and `wireframe` describe a STEP model's CAD edges, parts
-and solids, and are refused by name here.
+The display mode is `solid`, and `--render` draws Render. `display.clip` cuts the robot as the
+viewer's Clip does (`{"clip":{"axis":"x","at":0.05}}`, `at` in metres); `edges`, `exploded`,
+and `xray`, `hidden-line` and `wireframe` describe a STEP model's CAD edges and parts, and are
+refused by name here. A Quick Edit job from the viewer replays as it is: its `jointValues`, its
+`selection.hide` (the parts hidden in the Links panel, by their ids), its clip, annotation and
+measurements (`cadgen snapshot --job <file>`).
 
 Link meshes are resolved relative to the description, so they must be present: an
 unhydrated Git LFS pointer fails as "No link mesh loaded for robot". Run

@@ -244,7 +244,9 @@ and demand.
 
 A CAD file's controls are the shell's chrome over the viewport. The tool strip at the top
 centre holds the file's tools — a STEP's Select (its selection filter the chevron after it),
-Annotate, Measure, Explode and Clip; a robot's Select — then, after a thin rule, a
+Annotate, Measure, Explode and Clip; a robot's Select, Annotate, Measure and Clip; a GLB's
+Select (its nodes), Annotate, Measure, Explode (several parts) and Clip; a 3MF's Select (its
+objects), Annotate, Measure and Clip; an STL's Annotate and Clip — then, after a thin rule, a
 3D view's Display (its settings, a popover that opens down) and Preview. The tool in hand's
 controls are one row under the strip, its sub-toolbar (`kit/tools/SubToolbar.jsx`):
 Annotate's tools, style and history; Explode's and Clip's slider rows.

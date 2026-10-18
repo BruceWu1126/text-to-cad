@@ -97,7 +97,12 @@ protocol relationship never imports Python or discovers an interpreter.
   both call; the look they wear is resolved in one place (`resolveSceneSurfaceLook`,
   `common/sceneSettings.js`) and a robot opens at one pose (`robotOpeningPose`). A
   snapshot therefore cannot draw one of them differently from the viewer, and none is
-  flattened into mesh data for a render. `npm run check:boundaries` holds both callers
+  flattened into mesh data for a render. They are cut, exploded and measured the same
+  way in both, too: Clip through `lib/viewer/sceneClip.js`, Explode through the scene's
+  `setExplode` (`lib/viewer/sceneExplode.js`, a GLB's), Measure's snapping through
+  `lib/viewer/meshMeasure.js`, every number in the FILE's unit (`lib/viewer/sceneUnits.js`)
+  and a mesh's measurement marked approximate. What a file's view offers is one rule,
+  `viewFeaturesForKind` (`common/viewSettings.js`). `npm run check:boundaries` holds both callers
   to the shared modules. A STEP document's scene is `buildModel`, shared the same way.
 - **Direct GLB stays native**: a direct GLB is its glTF scene graph (nodes, skins,
   morph targets, authored materials) with its translation, rotation, scale, skin and
