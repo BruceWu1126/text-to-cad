@@ -342,7 +342,8 @@ class SnapshotFamilySceneTests(unittest.TestCase):
                 self.assertGreater(count(annotated), 20, f"{name} must draw its own coloured pixels")
 
     def test_list_mode_lists_what_the_scene_drew(self) -> None:
-        self.assertEqual([("#o1.1", "box", 12)], [(part["ref"], part["name"], part["triangleCount"]) for part in self.listing.parts])
+        # A GLB's row is its node, as a Quick Edit reference names it (`model.glb#n0`, glTF `nodes[0]`).
+        self.assertEqual([("#n0", "box", 12)], [(part["ref"], part["name"], part["triangleCount"]) for part in self.listing.parts])
 
 
 if __name__ == "__main__":
