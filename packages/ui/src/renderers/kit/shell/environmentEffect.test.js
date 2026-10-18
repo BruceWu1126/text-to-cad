@@ -47,8 +47,6 @@ for (const group of ['floor', 'background']) {
       photographicLighting: false, scene: { keepsAuthoredFinish: true }, INSPECT_ENVIRONMENT_ID: 'neutral',
       createInspectEnvironmentResource: () => ({ texture }),
       applyActivePhotographicStudio: () => { events.push(group); applyPhotographicStudio(THREE, runtime, scope.renderConfiguration); },
-      // The rig's bake follows the environment it includes; it needs a GPU this stub does not have.
-      applyActiveRigGlobalIllumination: () => {},
       applySceneBackground: () => { throw new Error('the studio owns the configured backdrop'); },
       viewerAlertChangeRef: { current: () => {} }, viewerTheme: {}, normalizedThemeSettings: { background: {} }
     };

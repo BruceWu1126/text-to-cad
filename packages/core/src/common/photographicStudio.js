@@ -6,16 +6,23 @@ import {
 import {
   PHOTOGRAPHIC_STUDIO_GROUND_DIFFUSE_WEIGHT,
   PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_INTENSITY,
+  PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_BELOW,
   PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX,
+  PHOTOGRAPHIC_STUDIO_BACKDROP,
   PHOTOGRAPHIC_STUDIO_CONTACT_SHADOW,
+  PHOTOGRAPHIC_STUDIO_FLOOR_FADE,
   PHOTOGRAPHIC_STUDIO_FLOOR_FINISHES,
+  PHOTOGRAPHIC_STUDIO_CARD_DISTANCE,
+  PHOTOGRAPHIC_STUDIO_FRAME,
+  PHOTOGRAPHIC_STUDIO_KEY_CARD,
   PHOTOGRAPHIC_STUDIO_KEY_DIRECTION,
-  PHOTOGRAPHIC_STUDIO_KEY_ILLUMINANCE,
-  PHOTOGRAPHIC_STUDIO_STAGE_RADIUS_MULTIPLIER
+  PHOTOGRAPHIC_STUDIO_SOFT_SHADOW,
+  PHOTOGRAPHIC_STUDIO_KEY_ILLUMINANCE
 } from "./photographicStudioRig.js";
+import { createStudioBackdrop } from "./studioBackdrop.js";
 import { createStudioContactShadow, syncDitherScale } from "./studioContactShadow.js";
 import { createStudioFloorReflection } from "./studioFloorReflection.js";
-import { collectLitMeshes, RadiosityStage } from "../lib/viewer/radiosityStage.js";
+import { createStudioFrame } from "./studioFrame.js";
 
 function component(value, axis, fallback) {
   if (Array.isArray(value)) return finiteOr(value[axis], fallback);
@@ -54,8 +61,7 @@ function resolvedConfiguration(configuration = {}) {
       enabled: lighting.enabled !== false,
       rotation: clamp(finiteOr(lighting.rotation, DEFAULT_RENDER_LIGHTING.rotation), -180, 180),
       size: clamp(finiteOr(lighting.size, DEFAULT_RENDER_LIGHTING.size), 0.25, 3),
-      fill: clamp(finiteOr(lighting.fill, DEFAULT_RENDER_LIGHTING.fill), 0, 1),
-      globalIllumination: lighting.globalIllumination !== false
+      fill: clamp(finiteOr(lighting.fill, DEFAULT_RENDER_LIGHTING.fill), 0, 1)
     },
     backdrop: {
       ...(Object.hasOwn(backdrop, "opacity") ? { opacity: clamp(finiteOr(backdrop.opacity, 1), 0, 1) } : {}),
@@ -97,14 +103,15 @@ function disposeGround(state) {
 function updatePhysicalGroundColor(material, color) {
   material.color.set(color).multiplyScalar(PHOTOGRAPHIC_STUDIO_GROUND_DIFFUSE_WEIGHT);
   material.emissive.set(color);
-  // A tiny neutral component gives near-black backdrop colors enough linear
-  // energy to remain visible without perceptibly cooling ordinary colors.
-  material.emissive.r += (1 - material.emissive.r)
-    * PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX;
-  material.emissive.g += (1 - material.emissive.g)
-    * PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX;
-  material.emissive.b += (1 - material.emissive.b)
-    * PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX;
+  // A tiny neutral component gives a near-black floor enough linear energy for its shadow
+  // to show; it fades out as the colour lightens, so any other floor keeps its own tone.
+  const { r, g, b } = material.emissive;
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const mix = PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_MIX
+    * Math.max(0, 1 - luminance / PHOTOGRAPHIC_STUDIO_GROUND_EMISSIVE_NEUTRAL_BELOW);
+  material.emissive.r += (1 - r) * mix;
+  material.emissive.g += (1 - g) * mix;
+  material.emissive.b += (1 - b) * mix;
 }
 
 // The floor's shading is a few shallow gradients (the sweep's reflection, the key's
@@ -116,6 +123,7 @@ function updatePhysicalGroundColor(material, color) {
 // every average colour as it was. A snapshot that averages STUDIO_DITHER_SCALE squared
 // samples into each pixel it keeps draws the noise that much wider (`syncDitherScale`).
 const FLOOR_DITHER_FRAGMENT = /* glsl */ `
+gl_FragColor.a *= studioFloorFade();
 #ifdef STUDIO_DITHER_SCALE
 gl_FragColor.rgb += (rand(gl_FragCoord.xy) + rand(gl_FragCoord.yx + 17.0) - 1.0) * STUDIO_DITHER_SCALE
   / (255.0 * max(gl_FragColor.a, 0.05));
@@ -125,10 +133,32 @@ gl_FragColor.rgb += (rand(gl_FragCoord.xy) + rand(gl_FragCoord.yx + 17.0) - 1.0)
 #endif
 `;
 
-function patchFloor(material, reflection) {
+// The floor has no edge (`PHOTOGRAPHIC_STUDIO_FLOOR_FADE`): from `uStudioFloorFade` of the
+// plane's half-width out to its inscribed circle it fades to nothing, and the backdrop shows
+// through, with its shadow and its reflection, which are drawn on it. Squared, the fade's tail
+// is long: no ring where it ends, even seen low across the floor, where it is foreshortened.
+const FLOOR_FADE_VERTEX_PARS = /* glsl */ `
+varying vec2 vStudioFloorPlane;
+`;
+const FLOOR_FADE_FRAGMENT_PARS = /* glsl */ `
+uniform float uStudioFloorFade;
+varying vec2 vStudioFloorPlane;
+float studioFloorFade() {
+  float fade = 1.0 - smoothstep(uStudioFloorFade, 1.0, length(vStudioFloorPlane) * 2.0);
+  return fade * fade;
+}
+`;
+
+function patchFloor(material, reflection, fade) {
   material.onBeforeCompile = (shader) => {
     reflection?.patch(shader);
-    shader.fragmentShader = shader.fragmentShader.replace("#include <dithering_fragment>", FLOOR_DITHER_FRAGMENT);
+    shader.uniforms.uStudioFloorFade = fade;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>\n${FLOOR_FADE_VERTEX_PARS}`)
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvStudioFloorPlane = position.xy;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>\n${FLOOR_FADE_FRAGMENT_PARS}`)
+      .replace("#include <dithering_fragment>", FLOOR_DITHER_FRAGMENT);
   };
   material.customProgramCacheKey = () => (reflection ? "studio-floor-reflection" : "studio-floor-dither");
 }
@@ -156,17 +186,21 @@ function createState(THREE, runtime) {
     target,
     shadowMapSize: null,
     ground: null,
+    floorFade: { value: 0 },
+    backdrop: null,
     contactShadow: null,
-    radiosity: null,
-    radiosityRoot: null,
-    radiosityStep: null,
-    keyDirection: new THREE.Vector3(...PHOTOGRAPHIC_STUDIO_KEY_DIRECTION).normalize(),
     reflection: null,
     reflectionHidden: null,
     restoreSceneHook: null,
     reflecting: false,
     scene: runtime.scene,
     groundKind: null,
+    frame: null,
+    // Where the key rests, and the softbox face its samples move it across (`sampleKey`).
+    keyRest: new THREE.Vector3(),
+    keyAcross: new THREE.Vector3(),
+    keyUp: new THREE.Vector3(),
+    keySample: 0,
     original: {
       toneMapping: runtime.renderer.toneMapping,
       toneMappingExposure: runtime.renderer.toneMappingExposure,
@@ -240,16 +274,16 @@ function updateFloorFinish(THREE, state, configuration, { contactShadow, softwar
       requestFrame: contactShadow.requestFrame || null
     });
     // Nothing of the floor itself, nor a guide lying on it, is reflected.
-    state.reflectionHidden = () => [state.ground, state.contactShadow?.layer, ...guides()].filter(Boolean);
+    state.reflectionHidden = () => [state.ground, state.contactShadow?.layer, state.backdrop?.object, ...guides()].filter(Boolean);
     hookScene(state);
   } else {
     releaseReflection(state);
   }
-  patchFloor(material, state.reflection);
+  patchFloor(material, state.reflection, state.floorFade);
   material.needsUpdate = true;
 }
 
-function updateGround(THREE, state, configuration, bounds, sceneScale, extentBounds = bounds, {
+function updateGround(THREE, state, configuration, bounds, extentBounds = bounds, {
   contactShadow = {},
   softwareRendering = false,
   guides = () => [],
@@ -286,7 +320,7 @@ function updateGround(THREE, state, configuration, bounds, sceneScale, extentBou
     material.polygonOffset = true;
     material.polygonOffsetFactor = 1;
     material.polygonOffsetUnits = 1;
-    if (kind === "physical") patchFloor(material, null);
+    if (kind === "physical") patchFloor(material, null, state.floorFade);
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     ground.name = "studio-ground";
     // The physical floor takes its shadow from the contact layer, which softens it;
@@ -311,18 +345,16 @@ function updateGround(THREE, state, configuration, bounds, sceneScale, extentBou
     state.contactShadow?.setDitherScale(ditherScale);
   }
   state.ground.material.opacity = configuration.backdrop.groundOpacity;
-  const minimumSize = sceneScale === "urdf" ? 0.5 : 100;
   // The plane's SIZE and where it is centred come from `extentBounds`: a caller whose
   // model moves hands over its rest placement, so posing or playing never rescales
   // or slides the floor under it. Only the plane's height follows the model.
   const spanX = extentBounds.max[0] - extentBounds.min[0];
   const spanY = extentBounds.max[1] - extentBounds.min[1];
-  const stageSize = Math.max(
-    spanX,
-    spanY,
-    extentBounds.radius * PHOTOGRAPHIC_STUDIO_STAGE_RADIUS_MULTIPLIER,
-    minimumSize
-  );
+  // It fades out from `inner` of the model's reach to its rim at `outer` of it, so it has no
+  // edge, however far the camera pulls back or however low it looks across the floor.
+  const reach = Math.max(extentBounds.radius, Math.hypot(spanX, spanY) / 2);
+  const stageSize = 2 * reach * PHOTOGRAPHIC_STUDIO_FLOOR_FADE.outer;
+  state.floorFade.value = PHOTOGRAPHIC_STUDIO_FLOOR_FADE.inner / PHOTOGRAPHIC_STUDIO_FLOOR_FADE.outer;
   // Geometry keeps its authored coordinates: the PLANE moves, never the model.
   // The default pins the floor to the document's Z=0; "lowest" follows the
   // current bounds. Neither placement clips the model.
@@ -352,7 +384,6 @@ function updateKeyLight(THREE, state, configuration, bounds, shadowMapSize, soft
   const rotation = THREE.MathUtils.degToRad(configuration.lighting.rotation);
   const direction = new THREE.Vector3(...PHOTOGRAPHIC_STUDIO_KEY_DIRECTION).normalize();
   direction.applyAxisAngle(new THREE.Vector3(0, 0, 1), rotation);
-  state.keyDirection = direction;
 
   const distance = Math.max(bounds.radius * 5, 1e-4);
   const center = new THREE.Vector3(...bounds.center);
@@ -390,94 +421,48 @@ function updateKeyLight(THREE, state, configuration, bounds, shadowMapSize, soft
   state.keyLight.shadow.needsUpdate = true;
   state.keyLight.updateMatrixWorld(true);
   state.target.updateMatrixWorld(true);
-}
-
-// Irradiance the key spotlight gives an unoccluded up-facing surface at the model:
-// its illuminance is set along its own direction (`updateKeyLight`), and rotating the
-// rig about Z leaves the direction's elevation alone.
-// The key softbox's apparent radius (radians) at Size 1, and how it grows with Size: the
-// bake jitters the key's shadow direction inside this cone, so the shadow softens with
-// distance from the caster and with the softbox.
-const KEY_SHADOW_CONE = Object.freeze({ base: 0.06, perSize: 0.05 });
-
-function disposeGlobalIllumination(runtime, state) {
-  if (!state.radiosity) return;
-  state.radiosity.group.removeFromParent();
-  if (runtime?.refineFrame === state.radiosityStep) runtime.refineFrame = null;
-  state.radiosity.dispose();
-  state.radiosity = null;
-  state.radiosityRoot = null;
-  state.radiosityStep = null;
+  // The softbox's face, square to the key: across it level with the floor, and up it. A
+  // still frame's samples move the key over it (`sampleKey`), so its shadows are a softbox's,
+  // crisp where a part meets what it shades and soft away from it. Size scales the face.
+  state.keyRest.copy(state.keyLight.position);
+  state.keyAcross.crossVectors(direction, new THREE.Vector3(0, 0, 1));
+  if (state.keyAcross.lengthSq() < 1e-8) state.keyAcross.set(1, 0, 0);
+  state.keyAcross.normalize();
+  state.keyUp.crossVectors(state.keyAcross, direction).normalize();
+  const reach = distance * configuration.lighting.size * PHOTOGRAPHIC_STUDIO_SOFT_SHADOW.spread
+    / PHOTOGRAPHIC_STUDIO_CARD_DISTANCE;
+  state.keyAcross.multiplyScalar(reach * PHOTOGRAPHIC_STUDIO_KEY_CARD.width / 2);
+  state.keyUp.multiplyScalar(reach * PHOTOGRAPHIC_STUDIO_KEY_CARD.height / 2);
+  state.keySample = 0;
 }
 
 /**
- * Global illumination (`lighting.globalIllumination`): a progressive radiosity bake
- * (`lib/viewer/radiosityStage.js`) that refines over a few seconds lights the model from
- * the studio environment — the key card, fill cards, softbox, strips and sweep of the
- * PMREM — with soft shadows and contact occlusion baked into a lightmap, and shadows the
- * key spotlight the same way: the spotlight stays, with its highlights and its pool on the
- * floor, but each surface receives it by the fraction of the softbox it can see, so its
- * shadow softens with distance and it never lights the inside of a part it cannot reach.
- * The spotlight's shadow map and the floor's contact-shadow layer are not drawn; the bake's
- * floor catches both the environment's occlusion and the key's shadow.
- *
- * It needs a host that steps the bake every frame — `host.root` names the meshes to bake
- * and the host calls `runtime.refineFrame()` before each draw — and a renderer with float
- * render targets. A snapshot passes no host, and a software renderer bakes nothing: both
- * keep the spotlight's shadow map.
+ * Put the key where sample `index` of a still frame has it: at rest for the first (0), and for
+ * every other at a point of its softbox's face (a low-discrepancy R2 sequence, so any number of
+ * samples covers the face evenly). Answers whether the key moved, so its shadows are due.
  */
-function updateGlobalIllumination(THREE, runtime, state, configuration, extentBounds, host) {
-  const wanted = configuration.lighting.enabled && configuration.lighting.globalIllumination
-    && host?.root?.isObject3D === true && runtime.softwareRendering !== true
-    && RadiosityStage.supported(runtime.renderer);
-  if (!wanted) {
-    if (state.radiosity) {
-      disposeGlobalIllumination(runtime, state);
-      runtime.requestRender?.();
-    }
-    return;
+export function sampleKey(state, index) {
+  const sample = index > 0 ? index : 0;
+  if (sample === state.keySample) return false;
+  state.keySample = sample;
+  state.keyLight.position.copy(state.keyRest);
+  if (sample > 0) {
+    const [u, v] = softboxPoint(sample);
+    state.keyLight.position.addScaledVector(state.keyAcross, u).addScaledVector(state.keyUp, v);
   }
-  let stage = state.radiosity;
-  if (!stage) {
-    stage = new RadiosityStage(runtime.renderer);
-    state.radiosity = stage;
-    state.group.add(stage.group);
-    state.radiosityStep = () => state.radiosity?.step() === true;
-  }
-  runtime.refineFrame = state.radiosityStep;
-  if (state.radiosityRoot !== host.root) {
-    const root = host.root;
-    stage.setMeshesProvider(() => collectLitMeshes(root));
-    state.radiosityRoot = root;
-  }
-  if (configuration.backdrop.ground && state.ground) {
-    stage.setFloor({
-      center: new THREE.Vector3(...extentBounds.center),
-      level: state.ground.position.z,
-      extent: Math.max(
-        extentBounds.max[0] - extentBounds.min[0],
-        extentBounds.max[1] - extentBounds.min[1],
-        extentBounds.max[2] - extentBounds.min[2],
-        1e-6
-      ),
-      albedo: new THREE.Color(configuration.backdrop.groundColor)
-    });
-  } else {
-    stage.setFloor(null);
-  }
-  stage.setEnvironment(runtime.scene.environment || null, runtime.scene.environmentRotation || null, 1);
-  // The spotlight's shadow is the bake's: its shadow map and the floor's contact layer
-  // are not drawn, and the light itself is scaled by the baked visibility of its softbox.
-  state.keyLight.castShadow = false;
-  state.contactShadow?.setEnabled(false);
-  stage.setDirectLights([{
-    direction: state.keyDirection,
-    angle: KEY_SHADOW_CONE.base + KEY_SHADOW_CONE.perSize * configuration.lighting.size,
-    irradiance: PHOTOGRAPHIC_STUDIO_KEY_ILLUMINANCE
-  }]);
+  state.keyLight.updateMatrixWorld(true);
+  return true;
 }
 
-function updateRendererAndScene(THREE, runtime, state, configuration) {
+/** Sample `index` (from 1) of the R2 sequence (Roberts 2018), as a point of [-1, 1]². */
+export function softboxPoint(index) {
+  return [
+    2 * ((0.5 + index * 0.7548776662466927) % 1) - 1,
+    2 * ((0.5 + index * 0.5698402909980532) % 1) - 1
+  ];
+}
+
+function updateRendererAndScene(THREE, runtime, state, configuration, ditherScale) {
   const { renderer, scene } = runtime;
   // Product rendering needs authored paint colors and bright whites to remain
   // distinct. Filmic compression made ordinary CAD albedos look pastel/gray.
@@ -504,7 +489,54 @@ function updateRendererAndScene(THREE, runtime, state, configuration) {
   // canvas alpha so the viewer checkerboard and PNG export agree exactly.
   scene.background = alpha < 1 ? null : color;
   renderer.setClearColor?.(color, alpha);
+  // Over the clear, the studio's sweep in that colour (studioBackdrop.js): never a flat fill.
+  if (!state.backdrop) {
+    state.backdrop = createStudioBackdrop(THREE, PHOTOGRAPHIC_STUDIO_BACKDROP);
+    state.group.add(state.backdrop.object);
+  }
+  state.backdrop.update({ color, opacity: alpha });
+  syncDitherScale(state.backdrop.object.material, ditherScale);
   state.keyLight.visible = configuration.lighting.enabled;
+}
+
+/**
+ * The studio's frame (`studioFrame.js`): what the studio's lighting is drawn through, so a
+ * still view converges to its occlusion and soft light. Only while that lighting is on, and
+ * never in software, which keeps three's single draw. `options` is `applyPhotographicStudio`'s
+ * `frame`: false for none, or the frame's `samples` and `multisample` (by default the canvas's
+ * own MSAA). Lighting quality Final converges over more samples than Preview.
+ */
+function updateFrame(THREE, runtime, state, configuration, bounds, options, quality) {
+  const wanted = options !== false && configuration.lighting.enabled && runtime.softwareRendering !== true;
+  if (!wanted) {
+    state.frame?.dispose();
+    state.frame = null;
+    return;
+  }
+  if (!state.frame) {
+    // MSAA as the canvas has it, but two samples on a high-density canvas: there a moving
+    // frame's edges are fine already, a still one's are the accumulation's, and the scene
+    // target's multisampled buffers are most of the frame's memory.
+    const antialias = runtime.renderer.getContext?.()?.getContextAttributes?.()?.antialias !== false;
+    const dense = (runtime.renderer.getPixelRatio?.() ?? 1) >= 2;
+    state.frame = createStudioFrame(THREE, {
+      multisample: options?.multisample ?? (antialias ? (dense ? 2 : 4) : 0),
+      occlusion: PHOTOGRAPHIC_STUDIO_FRAME.occlusion,
+      onSample(index, renderer, { castersChanged }) {
+        // A key that casts no shadow (software) has none to soften: it stays at rest.
+        if (!state.keyLight.castShadow || !state.keyLight.visible) return;
+        if (sampleKey(state, index) && renderer.shadowMap) renderer.shadowMap.needsUpdate = true;
+        // A shadow pass that only moved the key leaves the floor shadow's heights as they were.
+        state.contactShadow?.holdHeights(!castersChanged);
+      },
+      afterSample() {
+        state.contactShadow?.holdHeights(false);
+      }
+    });
+  }
+  const samples = options?.samples ?? PHOTOGRAPHIC_STUDIO_FRAME.samples[quality === "final" ? "final" : "preview"];
+  if (state.frame.samples !== samples) state.frame.configure({ samples });
+  state.frame.place({ radius: bounds.radius, center: bounds.center });
 }
 
 /**
@@ -527,20 +559,16 @@ function updateRendererAndScene(THREE, runtime, state, configuration) {
  * render scale, so the floor's dither survives its downsampling (`syncDitherScale`); a viewer,
  * which shows its pixels as drawn, keeps 1.
  *
- * `globalIllumination` is the host of the recipe's global illumination, when it can be one
- * (`updateGlobalIllumination`): `{ root }` names the object whose meshes the bake lights, and
- * the host steps the bake through `runtime.refineFrame()` before every frame it draws. Without
- * it the recipe's `lighting.globalIllumination` is ignored and the key spotlight keeps its
- * shadow map.
+ * `frame` is the studio's frame (`state.frame`, `studioFrame.js`), which its caller draws the
+ * scene through: false for none, or its `samples` and `multisample`.
  */
 export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
   bounds = runtime?.modelBounds,
   groundBounds = null,
-  sceneScale = "cad",
   shadowMapSize = 2048,
   contactShadow = {},
   ditherScale = 1,
-  globalIllumination = null
+  frame = {}
 } = {}) {
   if (!THREE || !runtime?.scene || !runtime?.renderer) {
     throw new Error("applyPhotographicStudio requires THREE and a runtime with scene and renderer");
@@ -553,7 +581,7 @@ export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
   runtime.photographicStudio = state;
   const resolvedBounds = resolveBounds(bounds, runtime.modelRadius);
 
-  updateRendererAndScene(THREE, runtime, state, resolved);
+  updateRendererAndScene(THREE, runtime, state, resolved, ditherScale);
   if (resolved.lighting.enabled) updateKeyLight(
     THREE,
     state,
@@ -562,11 +590,12 @@ export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
     shadowMapSize,
     runtime.softwareRendering === true
   );
-  const resolvedGroundBounds = groundBounds ? resolveBounds(groundBounds, runtime.modelRadius) : resolvedBounds;
-  updateGround(THREE, state, resolved, resolvedBounds, sceneScale, resolvedGroundBounds,
+  const restBounds = groundBounds ? resolveBounds(groundBounds, runtime.modelRadius) : resolvedBounds;
+  updateGround(THREE, state, resolved, resolvedBounds, restBounds,
     { contactShadow, softwareRendering: runtime.softwareRendering === true,
       guides: () => [runtime.gridHelper, runtime.originAxis], ditherScale });
-  updateGlobalIllumination(THREE, runtime, state, resolved, resolvedGroundBounds, globalIllumination);
+  // Its occlusion is sized from the model at rest, so a pose never changes its reach.
+  updateFrame(THREE, runtime, state, resolved, restBounds, frame, configuration.quality);
 
   runtime.invalidateShadows?.();
   runtime.requestRender?.();
@@ -576,8 +605,11 @@ export function applyPhotographicStudio(THREE, runtime, configuration = {}, {
 export function disposePhotographicStudio(runtime) {
   const state = runtime?.photographicStudio;
   if (!state) return;
-  disposeGlobalIllumination(runtime, state);
   disposeGround(state);
+  state.backdrop?.dispose();
+  state.backdrop = null;
+  state.frame?.dispose();
+  state.frame = null;
   state.keyLight.shadow?.map?.dispose?.();
   state.keyLight.shadow.map = null;
   runtime.scene?.remove?.(state.group);

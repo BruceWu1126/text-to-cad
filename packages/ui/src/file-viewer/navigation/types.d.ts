@@ -56,14 +56,13 @@ export function fuzzyMatch(
 /**
  * The one navbar, over a file (a host's home has none). Left: the logo, which opens the app's menu
  * (`AppMenu`), Back and Forward where the host keeps the view's history (`history`), the open file's
- * name (the explorer's door, where the host's files can be browsed) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, then the box the
- * renderer draws its view controls into (`controlsRef`).
+ * name (the explorer's door, where the host's files can be browsed) and its ⋯. Right: `update`, `trailing` (the file's actions), `fullSize`, then the renderer's view controls (`controlsRef`).
  */
 export const ViewerNavbar: ComponentType<{
   /** The host's home, where it has one: the app menu's Back to files. */
   onHome?: () => void;
   /** The rest of the app's menu: the host's links and the person's settings. */
-  menu?: { links?: import("../../host/types.js").ViewerLinks; appSettings?: readonly import("../types.js").AppSetting[]; platform?: string } | null;
+  menu?: { links?: import("../../host/types.js").ViewerLinks; appSettings?: readonly import("../types.js").AppSetting[]; colorScheme?: import("../types.js").ColorSchemeSetting; platform?: string } | null;
   /** The view's own history, where the host keeps one: Back and Forward, each disabled where there is nowhere to go. */
   history?: import("../types.js").ViewerHistory | null;
   /** The open file, by its absolute path. */
@@ -77,6 +76,8 @@ export const ViewerNavbar: ComponentType<{
   fullSize?: ReactNode;
   /** The box, last in the row, the renderer draws its view controls into (a 3D view's Display and Preview). */
   controlsRef?: (element: HTMLDivElement | null) => void;
+  /** The host's light/dark control, last: the page's top-right corner. */
+  colorSchemeControl?: ReactNode;
   className?: string;
 }>;
 
@@ -90,6 +91,7 @@ export const AppMenu: ComponentType<{
   onHome?: () => void;
   links?: import("../../host/types.js").ViewerLinks;
   appSettings?: readonly import("../types.js").AppSetting[];
+  colorScheme?: import("../types.js").ColorSchemeSetting;
   platform?: string;
 }>;
 

@@ -1,3 +1,4 @@
+import { syncMaterialClipPlanes } from "./clipPlane.js";
 import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMaterials.js";
 
 // The viewer's surface LOOK over a scene somebody else authored: the Display
@@ -61,11 +62,13 @@ function inspectStandIn(THREE, authored) {
  * Take over the lit materials under `root`. Materials shared between meshes are
  * un-shared first (a per-part palette needs one colour per mesh); those clones
  * and the stand-ins Inspect and "Flat" wear are this object's to dispose.
- * Textures stay with whoever authored them.
+ * Textures stay with whoever authored them. Clip's planes (`setClipPlanes`) cut every material under
+ * `root`, the stand-ins a later look puts on included.
  *
- * @returns {{ apply(look: object | null): void, dispose(): void, meshCount: number }}
+ * @returns {{ apply(look: object | null): void, setClipPlanes(planes: object[]): void, dispose(): void, meshCount: number }}
  */
 export function createSurfaceLook(THREE, root) {
+  let clipPlanes = [];
   const slots = [];
   const seen = new Set();
   const owned = new Set();
@@ -138,12 +141,18 @@ export function createSurfaceLook(THREE, root) {
       Object.assign(target, next);
       target.color.copy(color);
       if (programChanged) target.needsUpdate = true;
+      syncMaterialClipPlanes(target, clipPlanes);
       assign(entry, target);
     }
   }
 
   return {
     apply,
+    setClipPlanes(planes) {
+      clipPlanes = Array.isArray(planes) ? planes : [];
+      // The caps' own stencils are cut by the planes they cap (`sectionCaps.js`).
+      root?.traverse?.((object) => { if (object?.isMesh && object.name !== "Section stencil") syncMaterialClipPlanes(object.material, clipPlanes); });
+    },
     meshCount: meshIndex,
     dispose() {
       apply(null);
