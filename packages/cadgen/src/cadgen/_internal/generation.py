@@ -906,9 +906,14 @@ def _generate_part_outputs(
                 publish_preview(tree_hash, tree)
         stats["tree"] = tree_hash
         if producer is not None and not generated:
-            # A document compiled from its bytes: every part of it, before its tree is
-            # mapped to them, so a view only reads.
-            _await_display(_request_display(tree_hash, producer=producer), progress=progress, logger=logger)
+            # A document's native result is ready independently of its display data.
+            # Its compile run finishes this same pool job after the answer, as a
+            # source build does; native readers need only the complete tree below.
+            from cadgen.authoring import current_run
+
+            display = _request_display(tree_hash, producer=producer)
+            if display is not None:
+                current_run().displays.append((display, spec.display_name))
         # The build's account of its code (STORE.md §3): the features its run called,
         # where each ran, the components it made, each with the feature every name of
         # its lineage stands for, and each occurrence of one with the feature whose call

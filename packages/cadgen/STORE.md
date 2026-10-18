@@ -520,16 +520,19 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   and queues them on its run. The command answers once its result is recorded;
   its worker awaits these jobs before finishing the files. A linked child's parts
   are its own build's, so a parent asks
-  only for its own. A compile of a document asks for every part of its tree
-  before it reports done; a model whose result stands asks for those of the
+  only for its own. A document compile queues every part of its tree on the same
+  run and answers once its complete geometry is published and mapped to the
+  captured document bytes. Native readers can use that geometry while display
+  jobs finish; eager-only components still refuse exact native reconstruction.
+  A direct call without a worker drains its display jobs before returning.
+  A model whose result stands asks for those of the
   tree its file maps to (a mesh-only model's own), links expanded, when the run
   finishes its exports (below), after the STEP it may owe and before its
   declared meshes, and the children healed under it ask for none (§4).
   Which parts lack display data is asked of the store alone (one probe per
   part, no kernel import), so a model whose display data is stored starts no
   job. Display jobs finish after the result's `done` event, so their time is
-  outside the model's time line; a compile still reports `Meshing parts` while it
-  waits. A part that fails to derive is a
+  outside the model's time line. A part that fails to derive is a
   warning on the build, never its failure: the geometry is published, and a
   view goes on without that part, saying so (below). A run that fails after
   publishing a result still finishes the display jobs and exports it queued;
@@ -889,7 +892,8 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   linked, inlined, modified or discarded; a model called twice is listed once.
   It is never derived from links.
 - `modelSeconds` is how long the build's model code ran: the body's call less
-  its children's builds and the loading of their geometry
+  its children's builds, the loading of their geometry, and `read_step`'s
+  artifact loading (including a missing tree's compile and its wait)
   (`cadgen._internal.build_timing`). It is no input and no gate reads it; the
   next build compares its own model code against it and warns when that took
   more than twice as long and at least 30 s more. A record without it (a model
@@ -2104,6 +2108,10 @@ CPU scheduling and reuse remain independent of memory admission:
    of starting another. In flight only, never a lookup into the past, and never
    a model build: a second `python a.py` still runs, on an extra, and two
    parents needing one stale child build it once per run (§9a), not per pool.
+   Coalesced compile callers receive the owner's `released` frame when its
+   native answer is ready, including callers attaching while its display jobs
+   finish. Owner and follower ledger rows stay open until the owner exits and
+   receive its final completion status and error.
 3. **Idle unbind — 10 minutes** (`CADGEN_DAEMON_IDLE_UNBIND`). A bound worker
    idle that long returns to the spare set (spares beyond K exit); its model's
    next build rebinds a spare — no import repaid.

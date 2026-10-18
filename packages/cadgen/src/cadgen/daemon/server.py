@@ -215,19 +215,25 @@ def _wait_for_inflight_consumer(conn: transport.Channel, entry: dict) -> int | N
 
     A request client sends no more messages, so a nonblocking receive is purely
     an EOF probe. It emits no heartbeat frames and cannot disturb other users of
-    the same in-flight entry. An artifact job's result is relayed as it lands.
+    the same in-flight entry. An artifact result or command release is relayed as it
+    lands. A released caller may leave; this waiter stays for the owner's actual
+    exit so its ledger row receives the final outcome, including a finishing failure.
     """
     result_seen = False
+    released = False
     while True:
         result, done, code = _BROKER.wait_update(entry, result_seen=result_seen)
         try:
             if result is not None:
                 _send(conn, result)
                 result_seen = True
+                released = "released" in result
         except OSError:
             return None
         if done:
             return code
+        if released:
+            continue
         try:
             if conn.recv(0.0) == b"":
                 return None
@@ -393,7 +399,8 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
         else:
             owns_work, inflight = _BROKER.claim_entry(subject, closure, store_root=str(request.get("store_root") or ""))
         if not owns_work:
-            # Identical source is already building: attach, relay its exit, run nothing.
+            # Identical work is already running: relay its answer, then keep this
+            # ledger row open for its actual exit. No second worker is started.
             _log(f"{tool} {model}: coalesced onto the job in flight")
             try:
                 code = _wait_for_inflight_consumer(conn, inflight)
@@ -514,6 +521,8 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                 if is_artifact:
                     raise _WorkerBrokeProtocol("artifact worker released its client")
                 released.set()
+                if inflight is not None:
+                    _BROKER.publish_release(inflight, int(frame["released"]))
             if not is_artifact:
                 _JOBS.observe(frame)
             if is_artifact:

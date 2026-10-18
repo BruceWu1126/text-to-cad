@@ -73,6 +73,26 @@ class CompileWorker:
         yield {"exit": self.exit_code}
 
 
+class ReleasingCompileWorker(CompileWorker):
+    """Native result, then deferred work: separate barriers for its answer and exit."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.allow_release = threading.Event()
+
+    def frames(self, **_kwargs):
+        yield {"stream": "stderr", "data": "[cadgen] compiling\n"}
+        self.started.set()
+        if not self.allow_release.wait(5):
+            raise AssertionError("Test did not release the answer barrier")
+        yield {"released": 0}
+        if not self.allow_exit.wait(5):
+            raise AssertionError("Test did not release the completion barrier")
+        if self.exit_code:
+            yield {"stream": "stderr", "data": "[cadgen] FAILED: RuntimeError: finishing failed on purpose\n"}
+        yield {"exit": self.exit_code}
+
+
 class CoalescedCompiles(unittest.TestCase):
     def setUp(self):
         temporary = generated_cad_directory(prefix="coalesced-compile-")
@@ -142,6 +162,66 @@ class CoalescedCompiles(unittest.TestCase):
 
     def test_a_follower_of_a_failed_owner_fails_with_its_reason(self):
         self.exercise_follower(exit_code=1)
+
+    def exercise_released_followers(self, *, exit_code):
+        worker = ReleasingCompileWorker(exit_code=exit_code)
+        worker_pool = mock.Mock()
+        worker_pool.acquire.return_value = worker
+
+        class LeavesAtAnswer(DisconnectableConnection):
+            def __init__(self):
+                super().__init__()
+                self.released = threading.Event()
+
+            def send(self, raw):
+                super().send(raw)
+                if self.frames[-1] == {"released": 0}:
+                    self.disconnected.set()
+                    self.released.set()
+
+        connections = [LeavesAtAnswer() for _ in range(3)]
+        with self.serving(worker_pool), concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            owner = executor.submit(server._handle_request, connections[0], self.request())
+            try:
+                self.assertTrue(worker.started.wait(3))
+                follower = executor.submit(server._handle_request, connections[1], self.request())
+                self.wait_until(lambda: self.broker.snapshot()["coalesced"] == 1, "follower never attached")
+                worker.allow_release.set()
+                for connection in connections[:2]:
+                    self.assertTrue(connection.released.wait(3), "the native answer was not relayed")
+                late = executor.submit(server._handle_request, connections[2], self.request())
+                self.assertTrue(connections[2].released.wait(3), "a late follower missed the retained answer")
+                self.assertEqual(self.broker.snapshot()["inflight"], 1)
+                self.assertFalse(worker.killed)
+                for row in self.ledger.snapshot():
+                    self.assertIsNone(row.get("finishedAt"), "release prematurely finished a ledger row")
+                self.assertFalse(any(request.done() for request in (owner, follower, late)))
+                worker.allow_exit.set()
+                for request in (owner, follower, late):
+                    request.result(timeout=3)
+            finally:
+                worker.allow_release.set()
+                worker.allow_exit.set()
+        worker_pool.acquire.assert_called_once_with("", dependency=True, on_start=mock.ANY)
+        worker_pool.release.assert_called_once_with(worker, healthy=True, cancelled=False)
+        expected = "finishing failed on purpose" if exit_code else None
+        rows = self.ledger.snapshot()
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertEqual((row["state"], row["exit"], row["error"]),
+                             ("failed" if exit_code else "done", exit_code, expected))
+            self.assertIsNotNone(row["finishedAt"])
+        for connection in connections:
+            self.assertEqual([frame for frame in connection.frames if "released" in frame], [{"released": 0}])
+            self.assertFalse(any("exit" in frame for frame in connection.frames), "the client left at its answer")
+        self.assertFalse(worker.killed)
+        self.assertEqual(self.broker.snapshot()["inflight"], 0)
+
+    def test_present_and_late_followers_are_released_while_their_ledger_rows_finish_with_the_owner(self):
+        self.exercise_released_followers(exit_code=0)
+
+    def test_released_followers_keep_a_later_finishing_failure_in_their_ledger_rows(self):
+        self.exercise_released_followers(exit_code=1)
 
     def test_an_owner_refused_admission_fails_its_request_and_frees_the_entry(self):
         worker_pool = mock.Mock()

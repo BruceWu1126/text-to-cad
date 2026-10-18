@@ -12,7 +12,8 @@ How the split is measured, on the thread that runs the build:
 * ``model code`` is the wall time of the decorated function's call, minus the
   windows inside it where cadgen worked for it: a child model's build, run inside
   the body when the body calls it (``child_build``), and loading a child's
-  geometry from the store (``cadgen_work``). Module import is not in it: loading
+  geometry from the store, or loading a STEP's artifact geometry and waiting for
+  its compile (``cadgen_work``). Module import is not in it: loading
   the script is cadgen's, and on a cold run it is mostly the CAD kernel's own
   import.
 * ``children`` is the time the body spent in its children's builds, decoded or

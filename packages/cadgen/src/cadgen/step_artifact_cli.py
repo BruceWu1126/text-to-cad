@@ -170,7 +170,9 @@ def build_step_artifact(
     tree for these bytes already existed). Raises on error.
 
     ``step`` must be an existing STEP/STP file. The document itself is never
-    written, and nothing appears beside it: the tree is keyed by its bytes."""
+    written, and nothing appears beside it: the tree is keyed by its bytes.
+    A worker answers with that native result and finishes its display jobs after;
+    a direct call without a worker finishes them before returning."""
     repo_root = Path(repo_root).expanduser().resolve()
     step_path = Path(step).expanduser().resolve()
     if not step_path.is_file():
@@ -212,11 +214,12 @@ def build_step_artifact(
                 payload = _existing_result_payload(spec, artifact)
                 if payload is not None:
                     return payload
+        from cadgen.authoring import build_run
         from cadgen.daemon import broker
 
         # A document's compile is a JOB (STORE.md §9): its kernel work -- the read
         # and the component emit -- holds a job slot the way a model body does.
-        with broker.held(spec.source_ref):
+        with build_run(logger), broker.held(spec.source_ref):
             # _generate_part_outputs reports this phase itself when it does the loading;
             # here the scene is preloaded, so the parse would otherwise go unreported.
             # OCCT's reader reports no fraction of its own, so the read names the file

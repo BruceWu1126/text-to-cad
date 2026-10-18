@@ -168,12 +168,17 @@ def import_step(step_path: Path, *, label: str | None = None) -> Any:
     Cache misses compile and return through the same canonical representation as
     hits.
     """
-    resolved = Path(step_path).expanduser().resolve()
-    scene = load_step_scene_cached(resolved)
-    # No filename fallback for the label: build123d keeps the STEP's own root
-    # name, and deriving it from the path would make identical STEP content
-    # produce different trees depending on where the file happens to live.
-    return scene_to_build123d_compound(scene, label=label)
+    from cadgen._internal.build_timing import cadgen_work
+
+    # Loading/compiling the artifact and reconstructing its geometry are cadgen's
+    # work for the caller, just as materializing a decorated child's result is.
+    with cadgen_work():
+        resolved = Path(step_path).expanduser().resolve()
+        scene = load_step_scene_cached(resolved)
+        # No filename fallback for the label: build123d keeps the STEP's own root
+        # name, and deriving it from the path would make identical STEP content
+        # produce different trees depending on where the file happens to live.
+        return scene_to_build123d_compound(scene, label=label)
 
 
 def prototype_topology(shape: Any) -> dict[str, Any]:

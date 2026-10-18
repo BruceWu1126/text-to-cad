@@ -174,9 +174,22 @@ class Broker:
                 entry["result"] = {"artifactResult": copy.deepcopy(result)}
                 self._cv.notify_all()
 
+    def publish_release(self, entry: dict[str, Any], code: int) -> None:
+        """Retain a command's answer for attached callers while its worker finishes.
+
+        This is not the owner's exit: the entry and every follower's ledger row
+        remain open until :meth:`finish_entry` records the actual outcome.
+        """
+        if entry.get("artifact"):
+            return
+        with self._cv:
+            if entry["result"] is None and not entry["done"].is_set():
+                entry["result"] = {"released": int(code)}
+                self._cv.notify_all()
+
     def wait_update(self, entry: dict[str, Any], *, result_seen: bool, timeout: float = .1) -> tuple[dict | None, bool, int]:
-        """Wait for the entry's result (an artifact job's, once, unless ``result_seen``)
-        or its end: ``(result frame or None, done, exit)``."""
+        """Wait for the owner's answer (artifact result or command release, once unless
+        ``result_seen``) or its exit: ``(answer frame or None, done, exit)``."""
         with self._cv:
             self._cv.wait_for(lambda: entry["done"].is_set() or (entry["result"] is not None and not result_seen), timeout)
             result = copy.deepcopy(entry["result"]) if not result_seen else None

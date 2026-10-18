@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
 from unittest import mock
 
@@ -114,6 +115,59 @@ class Measuring(unittest.TestCase):
             with model_body(None):
                 pass
             self.assertEqual(record_fields(), {})
+
+    def test_step_import_load_compile_and_reconstruction_are_cadgen_work(self):
+        from cadgen._internal import step_scene_mesh
+
+        # Exercise the actual import boundary, without parsing a document or building
+        # geometry: the load includes any foreign-STEP compile wait, then reconstruction.
+        for failed_at, nested, model_seconds in ((None, False, 4.0), ("load", False, 6.0),
+                                                  ("decode", False, 4.0), (None, True, 3.0)):
+            with self.subTest(failed_at=failed_at, nested=nested):
+                clock = _Clock()
+                scene, shape = object(), object()
+                refusal = ValueError("could not read vendor STEP")
+                source = Path("vendor.step").resolve()
+
+                def load(path):
+                    clock.now = 5.0
+                    if failed_at == "load":
+                        raise refusal
+                    return scene
+
+                def decode(value, *, label):
+                    clock.now = 7.0
+                    if failed_at == "decode":
+                        raise refusal
+                    return shape
+
+                with mock.patch.object(build_timing.time, "perf_counter", clock), \
+                        mock.patch.object(step_scene_mesh, "load_step_scene_cached", side_effect=load) as loader, \
+                        mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=decode) as decoder:
+                    with measuring(model_ref=None, last_model_seconds=None) as measured:
+                        clock.now = 1.0
+                        with model_body(None):
+                            clock.now = 2.0
+                            with cadgen_work() if nested else nullcontext():
+                                if failed_at:
+                                    with self.assertRaises(ValueError) as raised:
+                                        step_scene_mesh.import_step(source, label="vendor part")
+                                    self.assertIs(raised.exception, refusal)
+                                else:
+                                    self.assertIs(step_scene_mesh.import_step(source, label="vendor part"), shape)
+                                if nested:
+                                    clock.now = 8.0
+                            clock.now = 10.0
+                        clock.now = 11.0
+                        timings = measured.timings().payload()
+                self.assertEqual(timings, {"seconds": 11.0, "modelSeconds": model_seconds,
+                                           "cadgenSeconds": 11.0 - model_seconds,
+                                           "childrenSeconds": 0.0, "queuedSeconds": 0.0})
+                loader.assert_called_once_with(source)
+                if failed_at == "load":
+                    decoder.assert_not_called()
+                else:
+                    decoder.assert_called_once_with(scene, label="vendor part")
 
     def test_nothing_is_measured_outside_a_build(self):
         with model_body(None), child_build(), cadgen_work():
