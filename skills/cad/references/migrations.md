@@ -205,6 +205,19 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
   every bending tube as a glTF skin, so there is no rate or mode to choose:
   delete the keys. `clip`, `seconds`, `start` and `drop` keep their meaning.
 
+## Every build runs on the daemon in 0.8
+
+`CADGEN_DAEMON=0` is gone, and nothing reads it: `python <model>.py`, `cadgen
+step build|compile` and `cadgen stl|3mf|glb build` hand their job to the warm
+daemon, which the first command that needs one starts, and no command builds in
+its own process. Where no daemon can start -- no local IPC family, a socket
+folder another user owns, a state directory this user cannot write -- the
+command fails naming why and what to set; `cadgen doctor` says whether one can
+start here, and the CAD Viewer does not start without one. A script that set
+`CADGEN_DAEMON=0` drops it; one that wants a daemon to itself sets
+`CADGEN_DAEMON_STATE_DIR`, and `CADGEN_DAEMON_IDLE_TIMEOUT` for how long it stays
+once idle.
+
 ## Children build serially, and a parent follows its children by key, in 0.8
 
 A child a parent's body calls is decoded from its stored result when the store
