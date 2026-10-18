@@ -120,6 +120,10 @@ Omitting OUT writes one sibling file with the requested extension. It does
 not discover declared model variants. See [mesh exports](references/supported-exports.md)
 for decorator examples, mesh tolerances and animated GLB.
 
+STL, 3MF and GLB exports, declared or one-off, run in Node.js 20 or newer;
+STEP does not. Check `node --version` (or `CADGEN_NODE`) before adding a mesh
+decorator, and if there is no Node, tell the user before declaring one.
+
 ## Prompt references and inspection
 
 A reference such as `/work/robot/STEP/assembly.step#o1.2.f7` identifies geometry

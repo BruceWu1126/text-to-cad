@@ -10,6 +10,15 @@ and review its mesh. A mesh image does not establish exact dimensions or topolog
 
 Native GLB exports are ordinary glTF 2.0 binary files for external tools: Y-up, with one material per distinct part/face color. Do not confuse them with what the CAD Viewer renders from — the model's result tree in the store (`~/.cache/cadgen`: content-addressed exact-geometry components plus links to child trees), which every build writes and a mesh door never does.
 
+## Node.js
+
+STL, 3MF and GLB exports run in Node.js 20 or newer, found on `PATH` or named
+by `CADGEN_NODE`; STEP builds never need it. On a machine without Node, a
+model that declares a mesh still saves its STEP, then the run fails naming the
+mesh it could not write, and fails the same way on every later run until Node
+is installed or the decorator is removed. Check `node --version` before adding
+`@stl`, `@threemf` or `@glb`, and ask the user when it is missing.
+
 ## Declare the exports the model always has
 
 Stack `@stl`, `@glb` or `@threemf` on the model for maintained mesh outputs.
