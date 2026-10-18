@@ -64,6 +64,19 @@ def grand():
     return bd.Compound(children=[parent(), bd.Pos(0, 20, 0) * child()], label="grand")
 """
 
+# A parent that makes something of its child (a part of its own) beside a placement of it (a link).
+CUTTER = """\
+from cadgen import step
+from cadgen import build123d as bd
+from child import child
+
+
+@step
+def cutter():
+    holed = child().cut(bd.Pos(1, 1, 0) * bd.Cylinder(0.5, 10))
+    return bd.Compound(children=[holed, bd.Pos(9, 0, 0) * child()], label="cutter")
+"""
+
 
 DYN_CHILD = """\
 import importlib
@@ -322,6 +335,72 @@ class HitsHealTheTree(SerialChildrenCase):
         hit = self.record(parent)["closure"]
         self.assertIn("plug.py", miss["files"])
         self.assertEqual((sorted(miss["files"]), miss["hash"]), (sorted(hit["files"]), hit["hash"]))
+
+
+class DecodedChildrenHit(SerialChildrenCase):
+    """A child reaches its parent decoded and keyed by its tree hash (``kernel_memo.decoded``):
+    the parent's next run in this process is handed the objects its last run was, and its
+    calls on them are hits. Nothing a reader sees changes: the parent's tree is the same
+    whether its child was built or decoded, cold, hot, with hits off, and after the process
+    built another parent of the same child (STORE.md §2, §9a)."""
+
+    def setUp(self):
+        super().setUp()
+        from cadgen._internal import kernel_memo
+
+        self.cutter = self.root / "cutter.py"
+        self.cutter.write_text(CUTTER, encoding="utf-8")
+        kernel_memo.clear()  # a cold worker
+        self.addCleanup(kernel_memo.clear)
+
+    def memo(self, name: str) -> tuple[int, int, int]:
+        """How the run of ``name`` the last build made went in the memo: hits, misses, uncached."""
+        timings = next(e["timings"] for e in self.events if e.get("state") == "done" and Path(e["model"]).stem == name)
+        return timings["memoHits"], timings["memoMisses"], timings["memoUncached"]
+
+    def build_cutter(self, *flags: str) -> tuple[str, bytes]:
+        code, err = self.build(self.cutter, *flags)
+        self.assertEqual(code, 0, err)
+        return self.record(self.cutter)["tree"], (self.root / "cutter.step").read_bytes()
+
+    def test_a_parents_calls_on_its_decoded_child_hit_and_make_what_a_cold_run_makes(self):
+        from cadgen._internal import kernel_memo
+        from cadgen.store.trees import get_tree
+
+        built = self.build_cutter()  # the child built inside its parent, then decoded
+        self.assertEqual(sorted(self.done()), ["child", "cutter"])
+        hits, misses, uncached = self.memo("cutter")
+        self.assertEqual((hits, uncached), (0, 0), "a decoded child keys every call made of it")
+        self.assertGreater(misses, 0)
+        decoded = self.build_cutter("--force")  # the child current, decoded: the same objects
+        self.assertEqual((self.done(), self.current()), (["cutter"], ["child"]))
+        self.assertEqual(self.memo("cutter"), (misses, 0, 0), "every call the last run missed hits")
+        self.assertEqual(decoded, built)
+        with mock.patch.dict(os.environ, {"CADGEN_KERNEL_MEMO": "0"}):
+            off = self.build_cutter("--force")
+        self.assertEqual(self.memo("cutter"), (0, misses, 0))
+        self.assertEqual(off, built)
+        kernel_memo.clear()
+        self.assertEqual(self.build_cutter("--force"), built, "a cold worker, the child decoded")
+
+        tree = get_tree(built[0])
+        self.assertEqual([link["tree"] for link in tree["links"]], [self.record(self.child)["tree"]],
+                         "the placed child is a link")
+        (own,) = tree["components"].values()
+        self.assertNotIn("construction", own, "what the parent made of its child goes by its content")
+        self.assertIn("lineage", own, "and its features name what they made")
+
+    def test_a_worker_that_built_another_parent_between_makes_what_a_cold_run_makes(self):
+        """Decision 2: a warm worker building A, then B, then A gives A what a cold build
+        gives -- here B composes the same child, so it is handed the objects A was, and
+        A's next run is handed them back as the decode left them."""
+        cold = self.build_cutter()
+        code, err = self.build(self.parent)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.done(), ["parent"])
+        again = self.build_cutter("--force")
+        self.assertEqual(self.memo("cutter")[1:], (0, 0))
+        self.assertEqual(again, cold)
 
 
 class QueuedExports(SerialChildrenCase):

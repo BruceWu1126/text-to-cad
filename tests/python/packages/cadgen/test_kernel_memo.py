@@ -334,6 +334,173 @@ class MissTest(KernelMemoCase):
         self.assertEqual(traces, [traces[0]] * 3)
 
 
+
+class DecodedChildTest(KernelMemoCase):
+    """A child's stored result as its parent receives it (``kernel_memo.decoded``, through
+    ``store.materialize``): keyed by its tree hash, so a second run of the parent is handed
+    the same objects, restored and reset, and its calls on them hit -- while nothing a
+    reader sees changes: a decode is no feature and names no construction, and the parent
+    ends with the same bytes cold, hot, with hits off and in plain Python."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from build123d import Compound, Pos, Solid
+
+        from cadgen.store.build import build_tree_from_compound
+
+        temporary = generated_cad_directory(prefix="memo-decoded-")
+        self.addCleanup(temporary.cleanup)
+        patch = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(temporary.name) / "store")})
+        patch.start()
+        self.addCleanup(patch.stop)
+        box = Solid.make_box(4, 3, 2)
+        box.cad_face_ordinal_colors = {1: (0.2, 0.3, 0.4, 1.0)}
+        child = Compound(children=[box, Pos(6, 0, 0) * Solid.make_cylinder(1, 2)], label="child")
+        self.tree = build_tree_from_compound(child, root_name="child")[0]
+
+    def _child(self):
+        from cadgen.store.materialize import materialize
+
+        return materialize(self.tree, label="child")
+
+    def _parent(self):
+        from build123d import Compound, Pos, Solid
+
+        piece, again = self._child(), self._child()
+        bored = piece.children[0].cut(Pos(1, 1, 0) * Solid.make_cylinder(0.5, 10))
+        return Compound(children=[Pos(10, 0, 0) * piece, Pos(-10, 0, 0) * again, bored], label="parent"), piece, again, bored
+
+    def test_a_second_run_is_handed_the_same_child_and_its_calls_on_it_hit(self) -> None:
+        (assembly, piece, again, bored), cold, cold_run = _run(self._parent)
+        self.assertIsNot(piece, again, "two decodes of one tree in one run are two objects")
+        self.assertFalse(piece.children[0].wrapped.IsPartner(again.children[0].wrapped))
+        self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
+        self.assertEqual(cold_run.tally, {"hits": 0, "misses": cold["misses"], "uncached": 0})
+        (assembly2, piece2, again2, bored2), hot, hot_run = _run(self._parent)
+        self.assertEqual((hot["misses"], hot["unkeyable"], hot["errors"]), (0, 0, 0))
+        self.assertEqual(hot["hits"], cold["misses"])
+        self.assertEqual(hot_run.tally, {"hits": hot["hits"], "misses": 0, "uncached": 0})
+        self.assertIs(piece2, piece)
+        self.assertIs(again2, again)
+        self.assertEqual([child is first for child, first in zip(piece2.children, piece.children)], [True, True])
+        self.assertIs(bored2, bored)
+        self.assertTrue(assembly2.wrapped.IsSame(assembly.wrapped), "the compound wraps the first run's container")
+        self.assertEqual(_bytes(assembly2.wrapped), _bytes(assembly.wrapped))
+
+    def test_nothing_a_reader_sees_changes_cold_hot_off_or_plain(self) -> None:
+        plain = self._parent()  # no run: plain build123d around a fresh decode
+        seen = []
+        for enabled in ("1", "1", "0"):
+            os.environ["CADGEN_KERNEL_MEMO"] = enabled
+            (assembly, piece, _again, bored), _stats, run = _run(self._parent)
+            seen.append((_bytes(assembly.wrapped), run.identify(bored), run.identify(piece.children[1]),
+                         [(feature.op, feature.inputs) for feature in run.trace.features]))
+        self.assertEqual(seen[0][0], _bytes(plain[0].wrapped))
+        self.assertEqual(seen, [seen[0]] * 3)
+        construction, lineage = seen[0][1]
+        self.assertIsNone(construction, "what a parent makes of its child goes by its content")
+        self.assertIsNotNone(lineage, "and the parent's feature names what it made")
+        self.assertEqual(seen[0][2], (None, None), "a child's leaf is no feature's and no construction's")
+        self.assertNotIn(kernel_memo._CHILD, [op for op, _inputs in seen[0][3]], "a decode is no feature")
+        cut = next(inputs for op, inputs in seen[0][3] if op == "cut")
+        self.assertEqual(cut, [None, None, 1], "the cut's decoded base was made by no feature of the run")
+
+    def test_a_decode_hit_undoes_what_an_earlier_run_did_to_the_child(self) -> None:
+        """An extrusion changes the face it is given; a later run that no longer extrudes
+        is handed its child as a fresh decode leaves it, intact for its parent's link."""
+        from build123d import Solid, Vector
+
+        from cadgen.store.materialize import PARTNER_TAG
+
+        fresh = _bytes(self._child().wrapped)
+
+        def extruding():
+            piece = self._child()
+            Solid.extrude(piece.children[0].faces()[0], Vector(0, 0, -1))
+            return piece
+
+        def composing():
+            return self._child()
+
+        piece, cold, _ = _run(extruding)
+        self.assertEqual(cold["unkeyable"], 0)
+        self.assertNotEqual(_bytes(piece.wrapped), fresh, "the extrusion changed the child it was given")
+        piece2, hot, _ = _run(extruding)
+        self.assertIs(piece2, piece)
+        self.assertEqual(hot["misses"], 0)
+        piece3, _, _ = _run(composing)
+        self.assertIs(piece3, piece)
+        self.assertEqual(_bytes(piece3.wrapped), fresh, "with the extrusion edited out, the child is as decoded")
+        self.assertTrue(getattr(piece3, PARTNER_TAG).intact(piece3), "and its parent links it")
+
+    def test_what_a_parent_sets_on_its_child_is_in_the_keys_of_its_calls(self) -> None:
+        from build123d import Color, Compound
+
+        def placing(label, color):
+            def model():
+                piece = self._child()
+                piece.label = label
+                piece.color = color
+                return Compound(children=[piece])
+
+            return model
+
+        _, cold, _ = _run(placing("placed", Color(1, 0, 0)))
+        _, hot, _ = _run(placing("placed", Color(1, 0, 0)))
+        _, recolored, _ = _run(placing("placed", Color(0, 0, 1)))
+        _, relabelled, _ = _run(placing("moved", Color(0, 0, 1)))
+        self.assertEqual((cold["misses"], hot["hits"], hot["misses"]), (1, 1, 0))
+        self.assertEqual((recolored["misses"], relabelled["misses"]), (1, 1),
+                         "the colour and the label a parent sets on its child are in the key of what it is given to")
+
+    def test_a_child_built_inside_its_parent_is_never_handed_its_ancestors_decode(self) -> None:
+        """A body that holds a decoded child and then calls a model built inside it (which
+        composes the same child) keeps its own: decodes are counted across the runs one
+        build nests, so the nested run's decode is another entry, and each is a hit on the
+        next build."""
+        def build():
+            with kernel_memo.run(None) as outer:
+                held = self._child()
+                held.label = "held"
+                with kernel_memo.run(None):
+                    nested = self._child()
+                    nested.label = "nested"
+                self.assertEqual(held.label, "held", "the nested run's decode left the ancestor's alone")
+                again = self._child()
+            return held, nested, again, outer
+
+        held, nested, again, _ = build()
+        self.assertEqual(len({id(held), id(nested), id(again)}), 3)
+        held2, nested2, again2, outer2 = build()
+        self.assertEqual([held2 is held, nested2 is nested, again2 is again], [True, True, True])
+        self.assertEqual(held2.label, "held")
+
+    def test_what_a_parent_sets_on_its_child_is_that_run_s_alone(self) -> None:
+        from build123d import Color, Location
+
+        def tinting():
+            piece = self._child()
+            piece.locate(Location((0, 0, 5)))  # in place, as an assembly places a decoded child
+            leaf = piece.children[0]
+            leaf.label = "renamed"
+            leaf.color = Color(1, 0, 0)
+            leaf.cad_face_ordinal_colors[1] = (1.0, 0.0, 0.0, 1.0)  # in place
+            return piece
+
+        def held(piece):
+            return [tuple(round(v, 9) for v in piece.location.position)] + [
+                (child.label, child.__dict__.get("_color"), child.__dict__.get("cad_face_ordinal_colors"))
+                for child in piece.children]
+
+        expected = held(self._child())  # no run: a fresh decode
+        self.assertEqual(expected[1][2], {1: (0.2, 0.3, 0.4, 1.0)})
+        piece, _, _ = _run(tinting)
+        self.assertNotEqual(held(piece), expected)
+        piece2, _, _ = _run(self._child)
+        self.assertIs(piece2, piece)
+        self.assertEqual(held(piece2), expected)
+
+
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""
 

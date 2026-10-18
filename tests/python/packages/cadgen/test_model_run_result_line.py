@@ -245,8 +245,9 @@ class BuildTimeTest(_ModelRunCase):
         self.assertEqual(set(timings), {"seconds", "modelSeconds", "cadgenSeconds", "childrenSeconds", "queuedSeconds",
                                         "memoHits", "memoMisses", "memoUncached"})
         self.assertGreater(timings["modelSeconds"], 0.0)
-        # How the parent's own kernel calls went in the memo.
+        # How the parent's own kernel calls went in the memo: the box and the compound.
         self.assertGreater(timings["memoHits"] + timings["memoMisses"], 0, timings)
+        self.assertEqual(timings["memoUncached"], 0, timings)
         # The parent AND the child it built each get their own line, ending with its memo counts.
         built = [line for line in first.stderr.splitlines() if line.startswith("[cadgen] built ")]
         self.assertEqual(len(built), 2, first.stderr)

@@ -293,7 +293,12 @@ model's file maps to the result it was written from (§3, *Exports*), so a view
 of the file draws the build's parts, the ones its preview named (§9b). A
 construction the memo cannot key (an argument it
 cannot hash) has no construction key, and neither has a shape no construction
-of the run made (a child's decoded result, a file read): such a component's
+of the run made (a child's decoded result, a file read), nor anything made of a
+child's decoded result: the memo keys a decode by the child's tree hash for the
+hits of the process that decoded it (§9a), and no construction key names a
+decode, so what a parent makes of its child -- a cut, a fuse, a copy -- has
+none, cold, hot or with hits off, whether the child was built inside the parent
+or decoded. Such a component's
 part is keyed by its content hash, its bytes. Nothing measures geometry to
 name a part, and nothing but display data stands on a part's key: the gate,
 the publish rule, the sweeper and every object address stay with bytes.
@@ -1578,7 +1583,9 @@ Decided mechanically from the returned geometry and occurrence metadata.
   geometry and descendant metadata. The tag is internal; model authors need
   no additional imports or ownership helpers.
 - Its process cache retains at most 64 MiB of immutable canonical BREP bytes.
-  Each independent materialization reconstructs fresh kernel shapes; repeated
+  Each independent materialization reconstructs fresh kernel shapes (inside a
+  model run, a tree's n-th decode does so once per process, and a later run's
+  n-th decode is handed the same shapes, restored: §9a), and repeated
   occurrences of one component within that materialization share their
   prototype. Different face-color components sharing BREP bytes receive
   private topology, preventing XCAF from overwriting another variant's styles.
@@ -2249,6 +2256,24 @@ caller's own process, there and then:
   features see the child the same way: a stored result, decoded. A child is
   never a job of the pool and never another process's; `--force` and
   `--profile` are the root's flags and never reach a child.
+- **Keyed by its tree.** Inside the parent's run the decode is a kernel-memo
+  entry keyed by the child's tree hash and the label it is handed back under
+  (`kernel_memo.decoded`, README law 18), as an operation with no shape inputs
+  is: the n-th decode of a tree in a build -- counted across the runs it nests,
+  so a child built inside the body is never handed what an ancestor holds -- is
+  handed the objects the n-th decode of an earlier build in this process made,
+  restored to the state the decode returned them in, every change the memo saw
+  a run make to them undone. So the
+  parent's calls on its child -- placements, booleans, compounds -- are hits on
+  its next run down to the call an edit changed, as a link to another document
+  keeps its identity in FreeCAD; a child rebuilt is another tree and misses. The
+  decodes are the memo's entries, bounded with them (LRU by entries) and gone
+  with the worker the daemon reclaims (§9). A
+  hit reads nothing from the store: the tree's hash is its content, and the gate
+  verified its objects before the child stood (§4, clause 4). A decode is no
+  feature and no construction key names it (§2): the child's elements keep no
+  name in the parent, and the parent's tree is the same built cold, hot or with
+  hits off, its child built inside it or decoded.
 - **Serial.** Children build one at a time, in the order the body calls them,
   in the slot the parent holds (§9). A body waits for each call as it would for
   any function.

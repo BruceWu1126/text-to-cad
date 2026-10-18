@@ -3,7 +3,11 @@ composes against.
 
 Rebuilds a build123d ``Compound`` from a tree: canonical component bytes are
 cached within a fixed budget, each independent consumer reconstructs fresh
-TShapes, and each object is decoded once per descriptor. Components are placed
+TShapes, and each object is decoded once per descriptor. Inside a model run a
+decode is keyed by its tree hash in the kernel memo (``kernel_memo.decoded``,
+README law 18): the n-th decode of a tree in a run hands back the objects the
+n-th decode of an earlier run made, restored and reset, so the parent's own
+calls on its child hit; elsewhere every call decodes. Components are placed
 per the flattened structure, nested
 grouping preserved. The result is TAGGED with the tree hash
 (``__cadgen_tree__``) so the packager can recognize it intact in a parent's
@@ -387,10 +391,13 @@ def materialized_children(
     return result
 
 # A process-local cache of immutable canonical BREP bytes. Live OCCT prototypes
-# cannot cross materialize() calls: build123d's moved() deliberately shares a
-# TShape, whose meshing and bookkeeping are mutable. The old live-shape memo
-# let one independent consumer alter another. Keeping bytes saves object reads
-# while every consumer receives a fresh reconstruction; on the nine-component
+# cross materialize() calls only through the kernel memo's decode, which hands a
+# later run the objects an earlier one was given restored, every change the
+# memo saw that run make to them undone (``kernel_memo.decoded``): build123d's
+# moved() deliberately shares a TShape, whose meshing and bookkeeping are
+# mutable, and the old live-shape memo, which restored nothing, let one
+# independent consumer alter another. Keeping bytes saves object reads while
+# every other consumer receives a fresh reconstruction; on the nine-component
 # warm-build fixture that boundary costs about 4 ms per materialization.
 #
 # 64 MiB is a conservative fraction of the daemon worker's default 2 GiB
@@ -558,11 +565,21 @@ def _material_from_entry(entry: dict[str, Any]) -> dict[str, Any] | None:
 
 def materialize(tree_hash: str, *, label: str | None = None) -> Any:
     """A ``Compound`` for the tree. Raises FileNotFoundError when the tree or a
-    component object is missing (the gate should have said stale)."""
-    from cadgen.store.trees import capture_tree
+    component object is missing (the gate should have said stale).
 
-    descriptor, payloads = capture_tree(tree_hash)
-    return materialize_descriptor(descriptor, captured_objects=payloads, label=label, tree_hash=tree_hash)
+    Inside a model run it is the kernel memo's decode of the tree
+    (``kernel_memo.decoded``): a hit reads nothing, since the tree's content is
+    its hash and the gate verified the objects before the child was taken as
+    current (STORE.md §4, clause 4)."""
+    from cadgen._internal.kernel_memo import decoded
+
+    def decode() -> Any:
+        from cadgen.store.trees import capture_tree
+
+        descriptor, payloads = capture_tree(tree_hash)
+        return materialize_descriptor(descriptor, captured_objects=payloads, label=label, tree_hash=tree_hash)
+
+    return decoded(tree_hash, label, decode)
 
 
 def materialize_descriptor(

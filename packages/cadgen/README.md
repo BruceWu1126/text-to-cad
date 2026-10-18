@@ -379,7 +379,9 @@ cleaning, validity, file imports -- and remembers, in the worker's memory for
 the life of the process, the live result of each under a key made of the
 operation, its parameters by value and the keys of the shapes it was given (a
 result by the operation that made it, a face or an edge by the shape it was
-taken from and its index there, a file by its bytes), so a second run of the
+taken from and its index there, a file by its bytes, a child model's result --
+decoded from the store, its decode keyed like an operation with no shape inputs
+-- by its tree hash), so a second run of the
 same code hands back **the same live objects** the first run made, restored
 to the state the operation returned them in, down to the point where an input
 changed, and executes everything from there. A hit is the previous run's
@@ -414,7 +416,9 @@ keyed and traced as ever. The memo's key for the construction that made a
 component -- every setting the call ran with, the output of it the component
 is, the effects later calls had on it -- restated stably (`construction_key`),
 is that component's identity (law 20), the same in a cold worker, a warm one
-and with hits off. A complete whole-body copy certified by the kernel's Copy
+and with hits off. A child's decode is keyed for hits alone: no construction
+key names it, so what a parent makes of its child goes by its bytes (`STORE.md`
+§2). A complete whole-body copy certified by the kernel's Copy
 maker keeps its source's construction identity, frozen when it was copied;
 later geometric changes to either body cannot rename the other. This does not change
 the copy call's runtime key, eligibility for hits or returned objects.
@@ -427,14 +431,16 @@ trace is what provenance keeps (law 20, `STORE.md` §3). The hooks that
 remain change no result: `determinism.py` fixes the iteration order of
 build123d's de-duplications (an order-keeping set, and a `Vertex` hash by
 point that leaves equality alone), a child call hands back the child's
-stored result decoded (`STORE.md` §9a), and the file trace only watches what
+stored result decoded -- on a later run, the same objects the parent's earlier
+run was handed, restored (`STORE.md` §9a) -- and the file trace only watches what
 the run opens (`STORE.md` §5). An expensive part may still be its own model; it
 no longer has to be.
 *Pressure-test*: call a model's function under plain Python, then inside a
 cadgen build with the memo cold, then again with it hot; the geometry each
 returns, the bytes of every component it writes, and the answer to every `==`
 and `is_same` along the way, are the same all three times, and the hot run
-counts a hit for every miss of the cold one.
+counts a hit for every miss of the cold one -- its calls on the children it
+composes included.
 
 ### 19. Nothing waits on the network
 

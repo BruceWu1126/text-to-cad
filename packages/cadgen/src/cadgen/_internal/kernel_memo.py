@@ -30,11 +30,25 @@ colours, ``for_construction``) and the keys of its children; and with the
 effects (below) every operation so far has had on it. The n-th call with one
 key in a run is its own entry, so two identical constructions in one run are
 two objects, as in plain Python. A shape no operation of this process made --
-a child model's materialized result, an imported file, a shape built outside
-the patched surface -- has no key, and a call given one runs uncached: a hit
-would hand back a result sharing the FIRST run's copy of that shape, not the
-one the model holds, and ``is_same`` across that boundary would answer
-differently from a run that computed it.
+one built outside the patched surface, or before the run -- has no key, and a
+call given one runs uncached: a hit would hand back a result sharing the FIRST
+run's copy of that shape, not the one the model holds, and ``is_same`` across
+that boundary would answer differently from a run that computed it.
+
+**Children.** A child model's result reaches its parent decoded from the store
+(``store.materialize``), and the decode is keyed by its content as an operation
+with no shape inputs is (``decoded``): the child's tree hash and the label it is
+handed back under. The n-th decode of one tree in a build is its own entry,
+counted across the runs the build nests, so a child built inside its parent's
+body is never handed objects an ancestor still holds; its root and every group
+and occurrence it holds are registered at their positions as any result's
+shapes are (a sub-shape taken out of one by its kind and index, as ever), and a
+later build's decode of that tree hands back the same objects, restored and
+reset as any hit's, so the parent's calls on them are hits down to the call an
+edit changed -- as a link to another document keeps its identity in FreeCAD. A
+decode is no feature, and no construction key names one (``_stable_id``): a
+child's elements keep no name in the parent, and what the parent makes of them
+goes by its content.
 
 **Hits.** A hit requires the key and, for every shape input, the very
 ``TShape`` the entry was computed with, and returns the SAME Python objects
@@ -103,7 +117,9 @@ identical calls apart (identical constructions are one part, however many
 identical calls any part made before them) -- so a warm worker that built other
 models, or other versions of this one, gives the key a cold run gives. A shape
 whose making passes through a call the memo could not key (an effect it cannot
-name, a key it no longer holds) has none, and is named by its bytes.
+name, a key it no longer holds) or through a child's decode has none, and is
+named by its bytes; which keys have none is remembered with the ids
+(``_UNSTABLE``), so a part asks it once.
 
 A whole body certified by ``kernel_history`` as an actual complete Copy keeps
 the source's stable construction material, frozen before later calls can change
@@ -134,7 +150,7 @@ import threading
 import weakref
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
 from OCP.TopExp import TopExp
@@ -143,7 +159,7 @@ from OCP.TopTools import TopTools_IndexedMapOfShape
 from cadgen._internal import kernel_history
 from cadgen._internal.kernel_trace import Trace
 
-__all__ =["CAPACITY", "clear", "construction_key", "enabled", "install", "run", "stats", "uninstall"]
+__all__ = ["CAPACITY", "clear", "construction_key", "decoded", "enabled", "install", "run", "stats", "uninstall"]
 
 # Entries of live results: a model's intermediate geometry for a few models at
 # once, so an edit loop over a large model keeps every unchanged step.
@@ -159,9 +175,13 @@ _LEDGER: dict[Any, list["_Row"]] = {}
 _KEY_IDS: "OrderedDict[tuple, int]" = OrderedDict()
 _KEY_IDS_NEXT = itertools.count(1)
 # The key each interned id stands for, and the construction key it restates as
-# (``construction_key``), computed when first asked and forgotten with the id.
+# (``construction_key``), computed when first asked and forgotten with the id;
+# or that it has none, as a key that reaches a child's decode has none.
 _ID_KEYS: dict[int, tuple] = {}
 _STABLE: dict[int, bytes] = {}
+_UNSTABLE: set[int] = set()
+# The operation a child's decode is keyed as (``decoded``): no method is named so.
+_CHILD = "<child>"
 # The effects by id, while anything holds them: a key names an input's effects by id.
 _EFFECTS: "weakref.WeakValueDictionary[int, _Effect]" = weakref.WeakValueDictionary()
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
@@ -528,6 +548,7 @@ def clear() -> None:
         _KEY_IDS.clear()
         _ID_KEYS.clear()
         _STABLE.clear()
+        _UNSTABLE.clear()
         _MAPS.clear()
         _STATE.clear()
 
@@ -623,20 +644,31 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             effect.origin = (key_id, n, index)
         entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
                        history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
-        with _LOCK:
-            replaced = _MEMO.pop(entry.key, None)
-            if replaced is not None:
-                _drop(replaced)  # the key's earlier entry, made from inputs this run no longer has
+        _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
-        with _LOCK:
-            _MEMO[entry.key] = entry
-            _MEMO.move_to_end(entry.key)
-            while len(_MEMO) > CAPACITY:
-                _old_key, old = _MEMO.popitem(last=False)
-                _drop(old)
+        _keep(entry)
         return function_result
     finally:
         state.depth -= 1
+
+
+def _replace(key: tuple[int, int]) -> None:
+    """Drop the key's earlier entry: it was made from inputs this run no longer has
+    (or with hits off, by an earlier run)."""
+    with _LOCK:
+        replaced = _MEMO.pop(key, None)
+        if replaced is not None:
+            _drop(replaced)
+
+
+def _keep(entry: "_Entry") -> None:
+    """Into the memo as its newest entry, the oldest past ``CAPACITY`` dropped."""
+    with _LOCK:
+        _MEMO[entry.key] = entry
+        _MEMO.move_to_end(entry.key)
+        while len(_MEMO) > CAPACITY:
+            _old_key, old = _MEMO.popitem(last=False)
+            _drop(old)
 
 
 def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function: Any, args: tuple,
@@ -739,8 +771,7 @@ def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kw
         result.__dict__["_wrapped"] = downcast(wrapped.Located(wrapped.Location()))
     else:
         result = entry.snapshot.restore()
-    for made in entry.made:
-        made.reset(state.id)
+    _reset(entry.made, state.id)
     for index, effect in entry.effects:
         effect.apply(state.id)
         made = _made_of(_wrapped(shapes[index]).TShape(), state)
@@ -748,6 +779,59 @@ def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kw
             made.effects.append(effect)
     for made in entry.made:
         made.born = next(_SEQUENCE)
+    return result
+
+
+def decoded(tree: str, label: str | None, decode: Callable[[], Any]) -> Any:
+    """A child model's result as a parent's run receives it: ``decode()`` -- the
+    child's stored result decoded (``store.materialize``) -- keyed by its content,
+    the tree hash and the label it is handed back under, as an operation with no
+    shape inputs is keyed. The n-th decode of one tree in a build is its own
+    entry, counted on the build's outermost run: a child built inside the body
+    that decodes the same tree takes the next entry, never objects an ancestor
+    run still holds. A miss decodes, keeps a snapshot of the result and
+    registers its shapes at their positions under no feature: a decode is
+    cadgen's, not the model's. A hit hands back the objects an earlier build's
+    decode made, restored to the state the decode returned them in and reset as
+    any hit's makers are, so the parent's calls on them hit as well. Outside a
+    run, or inside a patched call, it only decodes; with hits off it decodes
+    every time and registers alike, so every key it gives is the same either
+    way."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth:
+        return decode()
+    key_id = _intern((_CHILD, (tree,), (("label", label),), ()))
+    outermost = state
+    while outermost.previous is not None:
+        outermost = outermost.previous
+    n = outermost.count(key_id)
+    entry = None
+    if enabled():
+        with _LOCK:
+            entry = _MEMO.get((key_id, n))
+            if entry is not None:
+                _MEMO.move_to_end((key_id, n))
+    if entry is not None:
+        result = entry.snapshot.restore()
+        _reset(entry.made, state.id)
+        for made in entry.made:
+            made.born = next(_SEQUENCE)
+        entry.refresh(None, state, {})
+        return result
+    # The decode's own kernel calls are cadgen's: none is a feature or an entry.
+    state.depth += 1
+    try:
+        result = decode()
+    finally:
+        state.depth -= 1
+    try:
+        snapshot = _snapshot(result)
+    except _Unkeyable:
+        return result  # nothing to hand back next time: a shape no operation made
+    entry = _Entry(key=(key_id, n), inputs=[], snapshot=snapshot, effects=[])
+    _replace(entry.key)
+    entry.made = _register(result, entry.key, None, state, entry)
+    _keep(entry)
     return result
 
 
@@ -803,6 +887,7 @@ def _intern(key: tuple) -> int:
                 _old, old_id = _KEY_IDS.popitem(last=False)
                 _ID_KEYS.pop(old_id, None)
                 _STABLE.pop(old_id, None)
+                _UNSTABLE.discard(old_id)
         else:
             _KEY_IDS.move_to_end(key)
         return found
@@ -1169,17 +1254,32 @@ def _stable_id(root: int) -> bytes:
     operation's (its label, parameters and keyword parameters, a shape among them
     by its own) or a shape's (where it came from, its attributes, its children).
     Every id a key holds was interned before it, so the walk is a DAG; it runs
-    on a stack, as a model's chain of operations can be long."""
+    on a stack, as a model's chain of operations can be long. A key with no such
+    digest -- a child's decode, which its content keys only for this process's
+    hits (``decoded``), an effect no memoized call had, or a key holding one --
+    is remembered as having none (``_UNSTABLE``), as a digest is remembered."""
     stack = [root]
     while stack:
         key_id = stack[-1]
-        if key_id in _STABLE:
+        if key_id in _STABLE or key_id in _UNSTABLE:
             stack.pop()
             continue
         key = _ID_KEYS.get(key_id)
         if key is None:
             raise _Unstable("a key the memo no longer holds")
-        missing = [dependency for dependency in _dependencies(key) if dependency not in _STABLE]
+        try:
+            if key[0] == _CHILD:
+                raise _Unstable("a child's decode")
+            dependencies = _dependencies(key)
+        except _Unstable:
+            _UNSTABLE.add(key_id)
+            stack.pop()
+            continue
+        if any(dependency in _UNSTABLE for dependency in dependencies):
+            _UNSTABLE.add(key_id)
+            stack.pop()
+            continue
+        missing = [dependency for dependency in dependencies if dependency not in _STABLE]
         if missing:
             stack.extend(missing)
             continue
@@ -1191,6 +1291,8 @@ def _stable_id(root: int) -> bytes:
             material = ("shape", _stable_placed(placed), attrs, tuple(_STABLE[child] for child in children))
         _STABLE[key_id] = hashlib.sha256(repr(material).encode()).digest()
         stack.pop()
+    if root in _UNSTABLE:
+        raise _Unstable("made through what no construction key names")
     return _STABLE[root]
 
 
@@ -1308,30 +1410,32 @@ class _Made:
     def handle(self) -> Any:
         return _handle_of(self.tshape)
 
-    def reset(self, run_id: int) -> None:
-        """Back to the state the operation returned: every row noted in the
-        ledger on any sub-shape of this TShape by an earlier run, after this
-        TShape was made, undone, latest first. Rows this run applied are its
-        own operations' and stay."""
-        from OCP.TopExp import TopExp
-        from OCP.TopTools import TopTools_IndexedMapOfShape
 
-        mapped = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(self.handle(), mapped)
-        for ordinal in range(1, mapped.Extent() + 1):
-            tshape = mapped.FindKey(ordinal).TShape()
-            rows = _LEDGER.get(tshape)
-            if not rows:
-                continue
-            kept = [row for row in rows if row.run == run_id or row.seq <= self.born]
-            for row in reversed(rows):
-                if row.run != run_id and row.seq > self.born:
-                    row.set(row.before)
-            if kept:
-                _LEDGER[tshape] = kept
-            else:
-                del _LEDGER[tshape]
-        pending: list[_Made] = [self]
+def _reset(makers: list[_Made], run_id: int) -> None:
+    """Each of an entry's makers back to the state its operation returned: every
+    row noted in the ledger on any sub-shape of its TShape by an earlier run, after
+    it was made, undone, latest first. Rows this run applied are its own
+    operations' and stay. The makers were made, and are re-made, in order, so one
+    held inside an earlier one (an occurrence of a decoded tree, a child of a
+    compound) had every row its own walk would undo undone by that walk, and is
+    not walked again; with no row in the ledger there is nothing to walk."""
+    covered: set = set()
+    for maker in makers:
+        if _LEDGER and maker.tshape not in covered:
+            for tshape in _mapped(maker.handle())[1]:
+                covered.add(tshape)
+                rows = _LEDGER.get(tshape)
+                if not rows:
+                    continue
+                kept = [row for row in rows if row.run == run_id or row.seq <= maker.born]
+                for row in reversed(rows):
+                    if row.run != run_id and row.seq > maker.born:
+                        row.set(row.before)
+                if kept:
+                    _LEDGER[tshape] = kept
+                else:
+                    del _LEDGER[tshape]
+        pending: list[_Made] = [maker]
         while pending:
             made = pending.pop()
             made.effects.clear()
@@ -1347,11 +1451,12 @@ def _handle_of(tshape: Any) -> Any:
     return shape
 
 
-def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Run, entry: "_Entry | None",
-              copied: dict[int, tuple | None] | None = None) -> list[_Made]:
+def _register(result: Any, key: tuple[int, int] | None, feature: int | None, state: _Run,
+              entry: "_Entry | None", copied: dict[int, tuple | None] | None = None) -> list[_Made]:
     """Register every shape of a result under the entry that made it, each at its
-    position among the result's shapes. A TShape already registered (a move
-    shares its input's) keeps its first maker."""
+    position among the result's shapes, and bound to the run's ``feature`` that made
+    it -- none for a child's decode (``decoded``). A TShape already registered (a
+    move shares its input's) keeps its first maker."""
     created: list[_Made] = []
     for position, shape in enumerate(_result_shapes(result)):
         wrapped = _wrapped(shape)
@@ -1369,7 +1474,8 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Ru
                 _REGISTRY[tshape] = made
                 state.registered[tshape] = made
                 created.append(made)
-            state.owners[made] = feature
+            if feature is not None:
+                state.owners[made] = feature
     return created
 
 
@@ -1481,11 +1587,14 @@ class _Entry:
                 return False
         return True
 
-    def refresh(self, feature: int, state: _Run, copied: dict[int, tuple | None]) -> None:
+    def refresh(self, feature: int | None, state: _Run, copied: dict[int, tuple | None]) -> None:
+        """Bind the entry's shapes to this run, and to the feature of it that hit
+        (none for a child's decode)."""
         for made in self.made:
             made.feature = feature
             made.run = state.id
-            state.owners[made] = feature
+            if feature is not None:
+                state.owners[made] = feature
             pending = [made]
             while pending:
                 item = pending.pop()
@@ -1493,6 +1602,14 @@ class _Entry:
                 pending.extend(item.subs)
             if made.position in copied:
                 made.origin = copied[made.position]
+
+
+def _owned(attrs: dict) -> dict:
+    """``attrs`` with every dict and list it holds copied: what the object holds of
+    its own -- its joints, a decoded child's face colours and finish -- is the
+    object's, and the model may change it in place without changing the snapshot."""
+    return {name: dict(value) if type(value) is dict else list(value) if type(value) is list else value
+            for name, value in attrs.items()}
 
 
 class _ShapeState:
@@ -1516,16 +1633,12 @@ class _ShapeState:
                 raise _Unkeyable("a child that is not a shape")
             self.children = [_ShapeState(child) for child in children]
             attrs["_NodeMixin__children"] = None
-        if isinstance(attrs.get("joints"), dict):
-            attrs["joints"] = dict(attrs["joints"])
-        self.attrs = attrs
+        self.attrs = _owned(attrs)
 
     def restore(self) -> Any:
         from build123d.topology.shape_core import downcast
 
-        attrs = dict(self.attrs)
-        if isinstance(attrs.get("joints"), dict):
-            attrs["joints"] = dict(attrs["joints"])
+        attrs = _owned(self.attrs)
         if self.children is not None:
             attrs["_NodeMixin__children"] = [state.obj for state in self.children]
         obj = self.obj
