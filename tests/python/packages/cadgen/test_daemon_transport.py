@@ -673,20 +673,20 @@ class DaemonStopsTest(unittest.TestCase):
 
     STOP_SECONDS = 30.0
 
-    def test_a_retired_daemon_stops_when_its_last_job_ends_though_its_socket_file_is_gone(self):
+    def test_a_retired_daemon_can_stop_even_if_its_socket_file_is_gone(self):
         _, address, daemon, status = self._start_daemon()
         # A job in flight: a worker's slot, held for as long as its connection is open.
         lease = client._connect(address)
         self.addCleanup(lease.close)
         lease.send(json.dumps({"kind": "slot", "label": "held", "token": status["token"]}).encode("utf-8"))
         self.assertEqual(json.loads(lease.recv(30.0)), {"slot": "granted"})
-        # Retired while it runs: it keeps serving its address until the job ends.
+        # Retirement drains the held job while the daemon still owns its address.
         with client._connect(address) as retire:
             retire.send(json.dumps({"token": "retired"}).encode("utf-8"))
             self.assertEqual(json.loads(retire.recv(30.0)), {"restart": True})
         if os.name != "nt":
             os.unlink(address)  # a named pipe has no file to lose
-        lease.close()  # the last job ends, so the daemon stops
+        lease.close()  # retirement can finish; on POSIX, address loss may have ended it already
         self.assertEqual(self._await_exit(daemon, address), 0, self._log(address))
 
     @unittest.skipIf(os.name == "nt", "a named pipe has no file another daemon could take over")

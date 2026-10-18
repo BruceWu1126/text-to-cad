@@ -7,7 +7,8 @@ job's DECLARED OUTPUT PATHS and its state as the build tree narrates it:
 submitted → queued → building [phase, done/total] → done | failed. The viewer
 asks the daemon (``cadgen.daemon.client.status``), matches jobs to the document
 it displays by output path, and shows ``compiling · <phase> n/total`` for any
-of them alike; ``failed`` when the latest job for the document failed.
+of them alike. Failure is per output: a failed save names the affected file,
+while a saved STEP stays successful if a sibling mesh failed.
 
 Artifact-side only: no record, no script, no closure is read here, and nothing
 on disk is scraped — there is no advisory progress record any more. With no
