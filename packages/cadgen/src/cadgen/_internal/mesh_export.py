@@ -88,7 +88,15 @@ def run_mesh_exporter(
     import tempfile
     from contextlib import ExitStack
 
-    from cadgen._internal.node_runtime import cad_node_executable, node_builder_script
+    from cadgen._internal.node_runtime import NodeUnavailable, cad_node_executable, node_builder_script
+
+    # Resolved first, so a missing Node names the files it cost rather than a
+    # builder the person never asked for (issue #629).
+    try:
+        node = cad_node_executable()
+    except NodeUnavailable as exc:
+        names = ", ".join(job.out.name for job in jobs)
+        raise NodeUnavailable(f"Cannot write {names}: STL, 3MF and GLB exports run in Node. {exc}") from None
 
     if appearance is not None:
         from cadgen._internal.source_sidecar import apply_appearance
@@ -100,7 +108,7 @@ def run_mesh_exporter(
         descriptor_path.write_text(json.dumps(apply_appearance(descriptor, appearance), sort_keys=True), encoding="utf-8")
 
     argv = [
-        str(cad_node_executable()),
+        str(node),
         str(node_builder_script(MESH_EXPORT_BUILDER)),
         "--package-dir", str(package_dir),
         "--name", name,

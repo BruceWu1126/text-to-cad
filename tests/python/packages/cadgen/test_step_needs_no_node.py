@@ -1,10 +1,9 @@
 """Building a STEP document's tree must never require Node.
 
 STEP is the core build path: it is what the CAD skill runs for every generated model, and
-it is pure OCP/build123d. The DXF package is the one that bakes its
-preview in a JS builder, and cadgen resolves Node lazily -- ``cad_node_executable()`` is
-called at build time, not import time -- precisely so a STEP-only environment never needs
-it.
+it is pure OCP/build123d. The STL/3MF/GLB exporter is the one builder that runs in Node,
+and cadgen resolves Node lazily -- ``cad_node_executable()`` is called at build time, not
+import time -- precisely so a STEP-only environment never needs it.
 
 That property is easy to lose by accident. ``cadgen.step_artifact`` already IMPORTS the
 Node bridge transitively (step_artifact -> component_package -> generation ->
@@ -53,6 +52,10 @@ if __name__ == "__main__":
     model()
 """
 
+_MODEL_WITH_STL = _MODEL.replace(
+    "from cadgen import step\n@step\n", "from cadgen import step, stl\n@stl\n@step\n"
+)
+
 _PROBE = """
 import json, sys
 sys.path.insert(0, {src!r})
@@ -64,25 +67,28 @@ print(json.dumps({{"ok": exit_code == 0, "exit_code": exit_code}}))
 """
 
 
+def _build_without_node(root: Path, source: str) -> "tuple[subprocess.CompletedProcess, dict]":
+    model = root / "block.py"
+    model.write_text(source, encoding="utf-8")
+    env = {**os.environ, "CADGEN_DAEMON": "0", "CADGEN_CACHE_DIR": str(root / "store")}
+    # Not an executable, so cad_node_executable() raises NodeUnavailable rather than
+    # falling back to PATH. Any attempt to reach Node fails loudly.
+    env["CADGEN_NODE"] = str(root / "definitely-not-node")
+    proc = subprocess.run(
+        [sys.executable, "-c", _PROBE.format(src=_CADGEN_SRC, model=str(model), root=str(root))],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+        env=env,
+    )
+    return proc, env
+
+
 class StepBuildsWithoutNodeTests(unittest.TestCase):
     def test_a_step_package_builds_with_node_unresolvable(self):
         with generated_cad_directory(prefix="step-no-node-") as tmp:
             root = Path(tmp)
-            model = root / "block.py"
-            model.write_text(_MODEL, encoding="utf-8")
-
-            env = {**os.environ, "CADGEN_DAEMON": "0", "CADGEN_CACHE_DIR": str(root / "store")}
-            # Not an executable, so cad_node_executable() raises NodeUnavailable rather than
-            # falling back to PATH. Any attempt to reach Node fails loudly.
-            env["CADGEN_NODE"] = str(root / "definitely-not-node")
-
-            proc = subprocess.run(
-                [sys.executable, "-c", _PROBE.format(src=_CADGEN_SRC, model=str(model), root=str(root))],
-                capture_output=True,
-                text=True,
-                cwd=str(root),
-                env=env,
-            )
+            proc, env = _build_without_node(root, _MODEL)
 
             self.assertEqual(
                 0,
@@ -100,6 +106,22 @@ class StepBuildsWithoutNodeTests(unittest.TestCase):
                 tree = result_tree_for(root / "block.step")
                 self.assertTrue(tree and tree_complete(tree), f"No complete geometry tree under {root}")
             self.assertFalse((root / "store/index/surface").exists())
+
+    def test_a_declared_stl_without_node_names_the_file_and_keeps_the_step(self):
+        # Issue #629: the run fails (a declared output is missing), but its reason
+        # names the mesh it could not write and says the document is current --
+        # the STEP is saved, and the CAD Viewer shows it.
+        with generated_cad_directory(prefix="stl-no-node-") as tmp:
+            root = Path(tmp)
+            proc, _env = _build_without_node(root, _MODEL_WITH_STL)
+            self.assertNotEqual(0, proc.returncode, proc.stdout)
+            reason = next(
+                (line for line in reversed(proc.stderr.splitlines()) if "NodeUnavailable" in line), ""
+            )
+            self.assertIn("block.step is up to date. Cannot write block.stl:", reason, proc.stderr)
+            self.assertIn("CADGEN_NODE", reason)
+            self.assertTrue((root / "block.step").is_file())
+            self.assertFalse((root / "block.stl").exists())
 
 
 if __name__ == "__main__":  # pragma: no cover

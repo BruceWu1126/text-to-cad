@@ -958,6 +958,8 @@ def _produce_declared_mesh_exports(
 
     # The Node exporter reads a view directory (assembly.json + components/): a temporary VIEW of the
     # tree, removed when the export is done (the store holds no result dirs).
+    from cadgen._internal.node_runtime import NodeUnavailable
+
     view_dir = export_view(tree_hash)
     try:
         jobs = list(pending)
@@ -969,6 +971,12 @@ def _produce_declared_mesh_exports(
             logger=logger if logger is not None else CliLogger("cadgen", verbose=False),
             appearance=appearance,
         )
+    except NodeUnavailable as exc:
+        # The document is saved and current by now; only the meshes are missing.
+        # Say so, or the failed run reads as a model that did not update (#629).
+        if not spec.step_output:
+            raise
+        raise NodeUnavailable(f"{spec.step_path.name} is up to date. {exc}") from None
     finally:
         shutil.rmtree(view_dir, ignore_errors=True)
     for job in jobs:

@@ -1,8 +1,7 @@
 """Run a Node builder as a child of the Python process that owns the build.
 
-The DXF (3D preview) and mesh-export builders are JavaScript: the DXF preview mesher is
-~3,400 LOC of already-shipped JS, and the mesh exporters share the viewport's own
-tessellations. The split is:
+The mesh-export builder (STL/3MF/GLB) is JavaScript: it shares the viewport's own
+tessellations. It is the only builder; nothing else cadgen runs needs Node. The split is:
 
 * **Python owns** the run id, the status record, the freshness re-check and the child's
   lifetime.
@@ -115,8 +114,8 @@ def cad_node_executable(repo_root: Path | str | None = None) -> str:
         return str(Path(found).resolve())
 
     raise NodeUnavailable(
-        "node was not found on PATH. The DXF and mesh-export builders run in Node. "
-        "Install Node.js (>=20), or point CADGEN_NODE at an existing node binary."
+        "node was not found on PATH. Install Node.js (>=20), or point CADGEN_NODE at an "
+        "existing node binary."
     )
 
 
