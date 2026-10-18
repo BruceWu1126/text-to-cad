@@ -170,8 +170,8 @@ def run_daemon(top: str) -> Iterator[dict[str, str]]:
     build would otherwise start it with its own settings (one job slot, a memory budget)
     for every file after. Retired after the last file -- the retirement waits out the jobs
     it still has in flight, such as a build's verify, which answers into that build's
-    store -- and only then is its folder removed: a daemon wakes its own accept through
-    the socket file in it to stop.
+    store -- and only then is its folder removed: those jobs reach the daemon through the
+    address and key in it.
     """
     # Short: a Unix socket path caps near 104 bytes. Windows pipe names need explicit
     # uniqueness.

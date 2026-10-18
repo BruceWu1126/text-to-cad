@@ -32,8 +32,9 @@ def retire_owned_daemon(address: str) -> None:
     finally:
         channel.close()
     # Retired is gone from its address: its lock is free. A daemon draining its jobs still
-    # serves the address -- their workers reach it there -- and wakes its own accept through
-    # that socket file to stop, so the caller removes the folder holding it only after.
+    # serves the address -- their workers reach it there, with the key beside it -- and
+    # those jobs answer into stores, so the caller removes the stores and the folder
+    # holding the address only after.
     lock = transport.daemon_lock(address)
     deadline = time.monotonic() + DRAIN_SECONDS
     while not lock.acquire():

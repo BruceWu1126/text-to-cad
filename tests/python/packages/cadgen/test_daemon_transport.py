@@ -1,12 +1,16 @@
-"""Daemon channels have one close owner even when cancellation races cleanup, and no one
-peer's handshake holds up a listener's other peers."""
+"""Daemon channels have one close owner even when cancellation races cleanup, no one
+peer's handshake holds up a listener's other peers, and a daemon stops whatever became of
+its socket file."""
 
 from __future__ import annotations
 
+import json
 import os
 import multiprocessing.connection as mpc
+import shutil
 import socket
 import struct
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -225,18 +229,21 @@ class ChannelCloseOwnershipTest(unittest.TestCase):
 
 
 class _PendingListener:
-    """Windows-like listener: closing queued handles does not wake pending accept.
+    """A native listener whose pending accept returns only when woken, as a pipe's pending
+    connect does: closing the listener under it cancels nothing.
 
-    ``accepted`` peers are returned at once, before the accept that waits.
+    ``accepted`` peers are returned at once, before the accept that waits; the woken
+    accept returns ``connection``, a peer that connected as the listener closed, or None.
     """
 
     def __init__(self, connection=None, *, accepted=()):
         self.entered = threading.Event()
-        self.release = threading.Event()
+        self.woken = threading.Event()
         self.connection = connection
         self.accepted = list(accepted)
         self.close_calls = 0
         self.accept_calls = 0
+        self.wake_calls = 0
         self.close_thread = None
 
     def accept(self):
@@ -244,11 +251,14 @@ class _PendingListener:
         if self.accepted:
             return self.accepted.pop(0)
         self.entered.set()
-        if not self.release.wait(2):
+        if not self.woken.wait(2):
             raise TimeoutError("pending accept was not woken")
-        if self.connection is not None:
-            return self.connection
-        raise EOFError("wakeup disconnected before authentication")
+        self.woken.clear()
+        return self.connection
+
+    def wake(self):
+        self.wake_calls += 1
+        self.woken.set()
 
     def close(self):
         self.close_calls += 1
@@ -280,42 +290,32 @@ class ServerShutdownTest(unittest.TestCase):
         thread.start()
         return thread, results, errors
 
-    def test_pending_pipe_accept_is_woken_then_closed_by_its_owner(self):
+    def test_pending_accept_is_woken_then_closed_by_its_owner(self):
         pending = _PendingListener()
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending) as factory, \
-                mock.patch.object(transport, "_family", return_value="AF_PIPE"), \
-                mock.patch.object(transport, "_wake_listener") as wake:
-            listener = transport.Server("private-pipe", b"secret", backlog=4)
-
-            def wake_pending(address, family):
-                self.assertEqual((address, family), ("private-pipe", "AF_PIPE"))
-                self.assertEqual(pending.close_calls, 0, "close must not race native pipe creation")
-                pending.release.set()
-
-            wake.side_effect = wake_pending
+        with mock.patch.object(transport, "_listen", return_value=pending) as listen:
+            listener = transport.Server("private", b"secret", backlog=4)
             thread, results, errors = self.accept_in_thread(listener)
             try:
                 self.assertTrue(pending.entered.wait(1))
                 listener.close()
                 listener.close()
             finally:
-                pending.release.set()
+                pending.woken.set()
                 thread.join(2)
-            self.assertFalse(thread.is_alive())
-            self.assertEqual(errors, [])
-            self.assertEqual(results, [None])
-            self.assertTrue(listener.closed)
-            self.assertEqual(pending.close_calls, 1)
-            self.assertEqual(pending.close_thread, thread.ident)
-            wake.assert_called_once()
-            # No key for the stdlib Listener: its accept() would authenticate inline.
-            factory.assert_called_once_with("private-pipe", family="AF_PIPE", backlog=4)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [None])
+        self.assertTrue(listener.closed)
+        self.assertEqual(pending.wake_calls, 1)
+        # Closed once, by the accept thread once its wait returned: never under the wait.
+        self.assertEqual(pending.close_calls, 1)
+        self.assertEqual(pending.close_thread, thread.ident)
+        listen.assert_called_once_with("private", 4)
 
     def test_connection_returning_across_close_is_discarded_unauthenticated(self):
         connection = mock.Mock()
         pending = _PendingListener(connection)
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending), \
-                mock.patch.object(transport, "_wake_listener", side_effect=lambda *_: pending.release.set()), \
+        with mock.patch.object(transport, "_listen", return_value=pending), \
                 mock.patch.object(transport, "_authenticate") as authenticate:
             listener = transport.Server("private", b"secret")
             thread, results, errors = self.accept_in_thread(listener)
@@ -323,7 +323,7 @@ class ServerShutdownTest(unittest.TestCase):
                 self.assertTrue(pending.entered.wait(1))
                 listener.close()
             finally:
-                pending.release.set()
+                pending.woken.set()
                 thread.join(2)
             self.assertFalse(thread.is_alive())
             self.assertEqual(errors, [])
@@ -342,7 +342,7 @@ class ServerShutdownTest(unittest.TestCase):
             if peer is stranger:
                 raise transport.mpc.AuthenticationError("stale")
 
-        with mock.patch.object(transport.mpc, "Listener", return_value=native), \
+        with mock.patch.object(transport, "_listen", return_value=native), \
                 mock.patch.object(transport, "_authenticate", side_effect=authenticate):
             listener = transport.Server(
                 "private",
@@ -357,16 +357,15 @@ class ServerShutdownTest(unittest.TestCase):
 
     def test_close_without_accept_is_immediate_and_repeated_accept_stays_closed(self):
         pending = _PendingListener()
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending), \
-                mock.patch.object(transport, "_wake_listener") as wake:
+        with mock.patch.object(transport, "_listen", return_value=pending):
             listener = transport.Server("private", b"secret")
             listener.close()
             listener.close()
             self.assertIsNone(listener.accept())
             self.assertIsNone(listener.accept())
-            self.assertEqual(pending.accept_calls, 0)
-            self.assertEqual(pending.close_calls, 1)
-            wake.assert_not_called()
+        self.assertEqual(pending.accept_calls, 0)
+        self.assertEqual(pending.close_calls, 1)
+        self.assertEqual(pending.wake_calls, 0)
 
     def test_close_does_not_wait_for_a_stalled_handshake(self):
         peer = mock.Mock()
@@ -380,8 +379,7 @@ class ServerShutdownTest(unittest.TestCase):
             if not answer.wait(2):
                 raise TimeoutError("the stalled peer was never released")
 
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending), \
-                mock.patch.object(transport, "_wake_listener", side_effect=lambda *_: pending.release.set()), \
+        with mock.patch.object(transport, "_listen", return_value=pending), \
                 mock.patch.object(transport, "_authenticate", side_effect=authenticate):
             listener = transport.Server("private", b"secret")
             thread, results, errors = self.accept_in_thread(listener)
@@ -405,107 +403,14 @@ class ServerShutdownTest(unittest.TestCase):
         pending = mock.Mock()
         interruption = KeyboardInterrupt("accept interrupted")
         pending.accept.side_effect = interruption
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending), \
-                mock.patch.object(transport, "_wake_listener") as wake:
+        with mock.patch.object(transport, "_listen", return_value=pending):
             listener = transport.Server("private", b"secret")
             with self.assertRaises(KeyboardInterrupt) as caught:
                 listener.accept()
             self.assertIs(caught.exception, interruption)
             listener.close()
-            pending.close.assert_called_once_with()
-            wake.assert_not_called()
-
-    def test_pipe_wakeup_holds_both_instances_and_never_waits_or_authenticates(self):
-        import ctypes
-
-        kernel = mock.Mock()
-        order = []
-        handles = iter((11, 12))
-
-        def create(*args):
-            handle = next(handles)
-            order.append(("open", handle))
-            return handle
-
-        kernel.CreateFileW.side_effect = create
-        kernel.CloseHandle.side_effect = lambda handle: order.append(("close", handle))
-        with mock.patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
-                mock.patch.object(transport.mpc, "Client", side_effect=AssertionError("unbounded Client wake")):
-            transport._wake_pipe_listener("private-pipe")
-        self.assertEqual(order, [("open", 11), ("open", 12), ("close", 11), ("close", 12)])
-        kernel.WaitNamedPipeW.assert_not_called()
-
-    def test_pipe_wakeup_busy_instance_does_not_retry_or_leak_first_handle(self):
-        import ctypes
-
-        kernel = mock.Mock()
-        kernel.CreateFileW.side_effect = (11, ctypes.c_void_p(-1).value)
-        with mock.patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
-                mock.patch.object(ctypes, "get_last_error", return_value=231, create=True) as last_error, \
-                mock.patch.object(ctypes, "WinError", create=True) as win_error:
-            transport._wake_pipe_listener("private-pipe")
-        last_error.assert_called_once_with()
-        win_error.assert_not_called()
-        self.assertEqual(kernel.CreateFileW.call_count, 2)
-        kernel.CloseHandle.assert_called_once_with(11)
-        kernel.WaitNamedPipeW.assert_not_called()
-
-    def test_pipe_wakeup_open_failure_closes_previously_opened_handle(self):
-        import ctypes
-
-        # File/path-not-found cannot be a normal close race while the Server
-        # guard retains its listener. Access/resource errors must also stay loud.
-        for error in (2, 3, 5, 8):
-            with self.subTest(winerror=error):
-                kernel = mock.Mock()
-                kernel.CreateFileW.side_effect = (11, ctypes.c_void_p(-1).value)
-                failure = OSError(error, "second open failed")
-                with mock.patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
-                        mock.patch.object(ctypes, "get_last_error", return_value=error, create=True) as last_error, \
-                        mock.patch.object(ctypes, "WinError", return_value=failure, create=True) as win_error:
-                    with self.assertRaises(OSError) as caught:
-                        transport._wake_pipe_listener("private-pipe")
-                self.assertIs(caught.exception, failure)
-                last_error.assert_called_once_with()
-                win_error.assert_called_once_with(error)
-                kernel.CloseHandle.assert_called_once_with(11)
-
-    def test_failed_wakeup_keeps_admission_closed_and_later_close_can_retry(self):
-        import ctypes
-
-        pending = _PendingListener()
-        kernel = mock.Mock()
-        kernel.CreateFileW.side_effect = (ctypes.c_void_p(-1).value, 11, 12)
-        kernel.CloseHandle.side_effect = lambda _: pending.release.set()
-        failure = OSError(5, "wakeup unavailable")
-        with mock.patch.object(transport.mpc, "Listener", return_value=pending), \
-                mock.patch.object(transport, "_family", return_value="AF_PIPE"), \
-                mock.patch.object(ctypes, "WinDLL", return_value=kernel, create=True), \
-                mock.patch.object(ctypes, "get_last_error", return_value=5, create=True) as last_error, \
-                mock.patch.object(ctypes, "WinError", return_value=failure, create=True) as win_error:
-            listener = transport.Server("private", b"secret")
-            thread, results, errors = self.accept_in_thread(listener)
-            try:
-                self.assertTrue(pending.entered.wait(1))
-                with self.assertRaises(OSError) as caught:
-                    listener.close()
-                self.assertIs(caught.exception, failure)
-                self.assertTrue(listener.closed)
-                self.assertEqual(pending.close_calls, 0)
-                kernel.CloseHandle.assert_not_called()
-                listener.close()
-                listener.close()
-            finally:
-                pending.release.set()
-                thread.join(2)
-            self.assertFalse(thread.is_alive())
-            self.assertEqual(errors, [])
-            self.assertEqual(results, [None])
-            self.assertEqual(kernel.CreateFileW.call_count, 3)
-            self.assertEqual(kernel.CloseHandle.call_args_list, [mock.call(11), mock.call(12)])
-            last_error.assert_called_once_with()
-            win_error.assert_called_once_with(5)
-            self.assertEqual(pending.close_calls, 1)
+        pending.close.assert_called_once_with()
+        pending.wake.assert_not_called()
 
     def real_listener(self, **options):
         address = transport.private_address(transport.identity_digest(uuid.uuid4().hex))
@@ -624,6 +529,9 @@ class ServerShutdownTest(unittest.TestCase):
             # The accept that took it, then the next: accept() stopped waiting for it.
             self.assertTrue(native_waits.acquire(timeout=10))
             self.assertTrue(native_waits.acquire(timeout=10))
+            if os.name != "nt":
+                # Its handshake wakes that accept without the address: no file to connect to.
+                os.unlink(listener.address)
             transport.mpc.answer_challenge(late, b"test-key")
             transport.mpc.deliver_challenge(late, b"test-key")
             thread.join(10)
@@ -750,6 +658,71 @@ class ServerShutdownTest(unittest.TestCase):
         finally:
             listener.close()
             thread.join(2)
+
+
+class DaemonStopsTest(unittest.TestCase):
+    """A daemon stops when it decides to, whatever became of its socket file.
+
+    It woke its own blocked accept by connecting to its address. With the socket file
+    gone -- its state directory deleted, a tmp cleaner, a test tearing down -- that connect
+    failed silently and the daemon waited in accept forever, with its workers: nothing
+    could reach it to stop it, and its idle timeout could not either. Test runs left three
+    to five behind. No build and no kernel here: a worker's slot is a job in flight that
+    needs neither."""
+
+    STOP_SECONDS = 30.0
+
+    def test_a_retired_daemon_stops_when_its_last_job_ends_though_its_socket_file_is_gone(self):
+        state = Path(tempfile.mkdtemp(prefix="cgs-", dir=None if os.name == "nt" else "/tmp"))
+        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
+        address = rf"\\.\pipe\cadgen-stops-{uuid.uuid4().hex}" if os.name == "nt" else str(state / "d.sock")
+        self.enterContext(mock.patch.dict(os.environ, {
+            "CADGEN_DAEMON_STATE_DIR": str(state),
+            "CADGEN_DAEMON_SOCKET": address,
+            "CADGEN_DAEMON_SPARES": "0",  # no worker, so no kernel import
+            "CADGEN_DAEMON_IDLE_TIMEOUT": "4",  # its watchdog looks every second
+        }))
+        daemon = client._spawn_daemon(address)
+        self.addCleanup(self._kill, daemon)
+        status = self._await_status(daemon)
+        # A job in flight: a worker's slot, held for as long as its connection is open.
+        lease = client._connect(address)
+        self.addCleanup(lease.close)
+        lease.send(json.dumps({"kind": "slot", "label": "held", "token": status["token"]}).encode("utf-8"))
+        self.assertEqual(json.loads(lease.recv(30.0)), {"slot": "granted"})
+        # Retired while it runs: it keeps serving its address until the job ends.
+        with client._connect(address) as retire:
+            retire.send(json.dumps({"token": "retired"}).encode("utf-8"))
+            self.assertEqual(json.loads(retire.recv(30.0)), {"restart": True})
+        if os.name != "nt":
+            os.unlink(address)  # a named pipe has no file to lose
+        lease.close()  # the last job ends, so the daemon stops
+        try:
+            code = daemon.wait(self.STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            self.fail(f"the daemon still runs {self.STOP_SECONDS:.0f} s after its last job ended:\n{self._log(address)}")
+        self.assertEqual(code, 0, self._log(address))
+
+    def _await_status(self, daemon: subprocess.Popen) -> dict:
+        deadline = time.monotonic() + self.STOP_SECONDS
+        while (status := client.status()) is None:
+            if daemon.poll() is not None or time.monotonic() >= deadline:
+                self.fail(f"the daemon never answered (exit {daemon.poll()}):\n{self._log(client.daemon_address())}")
+            time.sleep(0.05)
+        return status
+
+    @staticmethod
+    def _log(address: str) -> str:
+        try:
+            return client.log_path(address).read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            return f"(no log: {error})"
+
+    @staticmethod
+    def _kill(daemon: subprocess.Popen) -> None:
+        if daemon.poll() is None:
+            daemon.kill()
+            daemon.wait(DaemonStopsTest.STOP_SECONDS)
 
 
 if __name__ == "__main__":

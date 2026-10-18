@@ -107,8 +107,8 @@ class PythonTestRunnerIsolation(unittest.TestCase):
             send.assert_called_once_with(channel, {"token": "test-owned-daemon-retirement"})
             channel.close.assert_called_once()
             # Done when the daemon lets go of its address, not at its reply: one still
-            # draining wakes its own accept through the socket file the caller removes next,
-            # and with that file gone it served nothing, forever.
+            # draining serves its jobs there, and they answer into the stores the caller
+            # removes next.
             daemon_lock.assert_called_once_with("owned")
             self.assertEqual(lock.acquire.call_count, 3)
             lock.release.assert_called_once()

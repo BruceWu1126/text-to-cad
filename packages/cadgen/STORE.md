@@ -1946,6 +1946,13 @@ still proving the key, and waits for their threads before it exits. Prevents:
 one connection whose challenge never reached its reader (another viewer thread
 read it off a reused file descriptor) holding every later request.
 
+**A daemon stops whatever became of its socket file.** Idle past its timeout,
+or retired once its last job ends, it closes its listener, which wakes the
+accept waiting on it through a pipe of the listener's own, never by connecting
+to the address. Prevents: a daemon whose socket file was deleted under it (its
+state directory removed, a tmp cleaner) waiting in accept forever with its
+workers, where nothing could reach it to stop it.
+
 The **store root is a field on every request** (`store_root`), applied per
 job in the worker, never inherited from whichever build spawned the daemon:
 one daemon serves any number of isolated stores. The daemon holds no store

@@ -20,6 +20,12 @@ VERSIONING. The wire format differs from the newline-JSON one that came before, 
 address carries PROTOCOL. A new client cannot reach an old daemon and misparse it; it
 simply finds nothing at the new address and starts its own. The old one idles out and
 exits on its own timer.
+
+STOPPING. A listener that closes wakes its pending accept through a pipe of its own that
+the accept's wait watches beside the listener, never by connecting to its address: a
+daemon whose socket file was deleted (its state directory removed, a tmp cleaner) found
+nothing to connect to and waited in accept forever. The stdlib's listeners wait with no
+way in but a connection, so the two here are this module's own, one per family.
 """
 
 from __future__ import annotations
@@ -36,8 +42,12 @@ import stat
 import tempfile
 import threading
 import time
+import weakref
 from collections.abc import Callable, Iterator
 from pathlib import Path
+
+if os.name == "nt":
+    import _winapi
 
 # Bump when the wire format changes. It is part of the address, so mismatched peers never
 # meet rather than meeting and misreading each other.
@@ -502,54 +512,144 @@ def connect(address: str, authkey: bytes) -> Channel:
         raise OSError(str(exc)) from exc
 
 
-def _wake_pipe_listener(address: str) -> None:
-    """Connect and disconnect without waiting for a free pipe or authentication."""
-    import ctypes
-    from ctypes import wintypes
+class _Wakeup:
+    """A pipe a listener's accept watches beside the listener: ``wake()``, from any thread,
+    makes that wait return with no peer. ``multiprocessing.connection.wait`` takes it with
+    a socket or a wait handle alike, as ``concurrent.futures`` wakes its manager thread."""
 
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    create = kernel.CreateFileW
-    create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                       wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
-    create.restype = wintypes.HANDLE
-    close = kernel.CloseHandle
-    close.argtypes = (wintypes.HANDLE,)
-    close.restype = wintypes.BOOL
-    GENERIC_READ = 0x80000000
-    GENERIC_WRITE = 0x40000000
-    OPEN_EXISTING = 3
-    FILE_FLAG_OVERLAPPED = 0x40000000
-    ERROR_PIPE_BUSY = 231
-    handles = []
-    try:
-        # CPython PipeListener owns one pending instance and one queued instance.
-        # Keep both clients open until connected so a queued instance cannot consume
-        # the only wakeup. CreateFile returns PIPE_BUSY immediately; do not use
-        # WaitNamedPipe or multiprocessing.Client's retry/authentication loops.
-        for _ in range(2):
-            handle = create(address, GENERIC_READ | GENERIC_WRITE, 0, None,
-                            OPEN_EXISTING, FILE_FLAG_OVERLAPPED, None)
-            if handle == ctypes.c_void_p(-1).value:
-                error = ctypes.get_last_error()
-                if error == ERROR_PIPE_BUSY:
-                    break
-                # The Server guard retains the listener through this wakeup, so
-                # even a missing pipe is unexpected rather than a close race.
-                raise ctypes.WinError(error)
-            handles.append(handle)
-    finally:
+    def __init__(self) -> None:
+        self.reader, self._writer = mpc.Pipe(duplex=False)
+
+    def wake(self) -> None:
+        with contextlib.suppress(OSError):  # closed with its listener: nothing left to wake
+            self._writer.send_bytes(b"\0")
+
+    def clear(self) -> None:
+        """Read every wake sent so far, so the next wait waits."""
+        while self.reader.poll():
+            self.reader.recv_bytes()
+
+    def close(self) -> None:
+        for end in (self.reader, self._writer):
+            with contextlib.suppress(OSError):
+                end.close()
+
+
+def _remove_socket_file(path: str) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
+
+
+class _SocketListener:
+    """A listening AF_UNIX socket whose accept also returns, with no peer, on ``wake()``.
+
+    Its file goes as the stdlib listener's does: when it closes, or, never closed, when it
+    is collected or the process exits."""
+
+    def __init__(self, address: str, backlog: int) -> None:
+        self._wakeup = _Wakeup()
+        self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self._socket.bind(address)
+            self._socket.listen(backlog)
+            # The wait says when a peer is there, so accepting never blocks: a peer gone
+            # before it is taken is no peer, rather than a wait for the next one.
+            self._socket.setblocking(False)
+        except OSError:
+            self._socket.close()
+            self._wakeup.close()
+            raise
+        self._remove_file = weakref.finalize(self, _remove_socket_file, address)
+
+    def accept(self) -> mpc.Connection | None:
+        ready = mpc.wait([self._socket, self._wakeup.reader])
+        if self._wakeup.reader in ready:
+            self._wakeup.clear()
+        if self._socket not in ready:
+            return None
+        try:
+            peer, _ = self._socket.accept()
+        except (BlockingIOError, ConnectionAbortedError):
+            return None
+        peer.setblocking(True)  # on BSD and macOS it inherits the listener's O_NONBLOCK
+        return mpc.Connection(peer.detach())
+
+    def wake(self) -> None:
+        self._wakeup.wake()
+
+    def close(self) -> None:
+        try:
+            self._socket.close()
+        finally:
+            self._remove_file()
+            self._wakeup.close()
+
+
+class _PipeListener:
+    """A named pipe's instances, kept as the stdlib's ``PipeListener`` keeps them -- the
+    oldest awaiting a client, a newer one queued behind it so the name never lapses --
+    whose accept waits on the pending connect and ``wake()`` together. Woken, it cancels
+    the connect; a client that connected meanwhile is still a peer."""
+
+    def __init__(self, address: str) -> None:
+        self._address = address
+        self._wakeup = _Wakeup()
+        try:
+            self._handles = [self._new_handle(first=True)]
+        except OSError:
+            self._wakeup.close()
+            raise
+
+    def _new_handle(self, first: bool = False) -> int:
+        flags = _winapi.PIPE_ACCESS_DUPLEX | _winapi.FILE_FLAG_OVERLAPPED
+        if first:
+            flags |= _winapi.FILE_FLAG_FIRST_PIPE_INSTANCE
+        return _winapi.CreateNamedPipe(
+            self._address, flags,
+            _winapi.PIPE_TYPE_MESSAGE | _winapi.PIPE_READMODE_MESSAGE | _winapi.PIPE_WAIT,
+            _winapi.PIPE_UNLIMITED_INSTANCES, mpc.BUFSIZE, mpc.BUFSIZE,
+            _winapi.NMPWAIT_WAIT_FOREVER, _winapi.NULL,
+        )
+
+    def accept(self) -> mpc.PipeConnection | None:
+        self._handles.append(self._new_handle())
+        handle = self._handles.pop(0)
+        try:
+            pending = _winapi.ConnectNamedPipe(handle, overlapped=True)
+        except OSError as error:
+            if error.winerror == _winapi.ERROR_NO_DATA:
+                return mpc.PipeConnection(handle)  # it connected, wrote and left (bpo-14725)
+            _winapi.CloseHandle(handle)
+            raise
+        connected = False
+        try:
+            try:
+                ready = mpc.wait([pending.event, self._wakeup.reader])
+                if self._wakeup.reader in ready:
+                    self._wakeup.clear()
+            finally:
+                pending.cancel()  # nothing to cancel once a client has connected
+                _, status = pending.GetOverlappedResult(True)
+            connected = status == 0
+        finally:
+            if not connected:
+                _winapi.CloseHandle(handle)
+        return mpc.PipeConnection(handle) if connected else None
+
+    def wake(self) -> None:
+        self._wakeup.wake()
+
+    def close(self) -> None:
+        handles, self._handles = self._handles, []
         for handle in handles:
-            close(handle)
+            with contextlib.suppress(OSError):
+                _winapi.CloseHandle(handle)
+        self._wakeup.close()
 
 
-def _wake_listener(address: str, family: str) -> None:
-    if family == "AF_PIPE":
-        _wake_pipe_listener(address)
-        return
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as wakeup:
-        wakeup.settimeout(0.1)
-        with contextlib.suppress(OSError):
-            wakeup.connect(address)
+def _listen(address: str, backlog: int) -> _SocketListener | _PipeListener:
+    """This platform's listener at ``address``."""
+    return _PipeListener(address) if _family() == "AF_PIPE" else _SocketListener(address, backlog)
 
 
 class _Deadline:
@@ -611,12 +711,13 @@ class _Handshake:
 
 
 class Server:
-    """A listener that authenticates each peer off its accept loop, with a bounded,
-    unauthenticated shutdown wakeup.
+    """A listener that authenticates each peer off its accept loop, and stops whatever
+    became of its address.
 
-    The accept owner closes the listener after its native wait returns: closing it
-    concurrently does not cancel Windows' pending pipe and can race pipe creation.
-    The wakeup immediately disconnects and can never become an application channel.
+    close() wakes a pending accept through the listener's own wakeup, never by connecting
+    to the address, so a daemon whose socket file was deleted still stops when it decides
+    to. The accept owner closes the listener once its wait returns: closing it under that
+    wait does not cancel Windows' pending connect and can race pipe creation.
 
     The stdlib Listener authenticates inside accept(), on the accept thread, with no
     deadline: one peer that never answered stopped the daemon serving anyone. Here a
@@ -639,9 +740,7 @@ class Server:
     ) -> None:
         if not isinstance(authkey, bytes):
             raise TypeError("authkey must be bytes")
-        self._family = _family()
-        # No authkey for the stdlib Listener: its accept() would authenticate inline.
-        self._listener = mpc.Listener(address, family=self._family, backlog=backlog)
+        self._listener = _listen(address, backlog)
         self.address = address
         self._authkey = authkey
         self._handshake_timeout = handshake_timeout
@@ -658,7 +757,6 @@ class Server:
         self._accepting = False
         self._woken = False
         self._closed = False
-        self._wake_failed = False
 
     def accept(self) -> Channel | None:
         """The next authenticated client, or None once the listener has been closed.
@@ -671,6 +769,7 @@ class Server:
         with self._accept_guard:
             while True:
                 connection = None
+                failed = False
                 try:
                     with self._guard:
                         if self._closed:
@@ -680,7 +779,7 @@ class Server:
                         self._accepting = True
                     connection = self._listener.accept()
                 except (OSError, EOFError):
-                    pass
+                    failed = True
                 finally:
                     with self._guard:
                         was_accepting = self._accepting
@@ -688,13 +787,13 @@ class Server:
                         if was_accepting and self._closed:
                             with contextlib.suppress(OSError):
                                 self._listener.close()
-                            self._wake_failed = False
                 if connection is None:
-                    with self._guard:
-                        if self._closed:
-                            return None
-                    time.sleep(0.01)  # never a busy loop on a broken listener
-                    continue
+                    if failed:
+                        with self._guard:
+                            if self._closed:
+                                return None
+                        time.sleep(0.01)  # never a busy loop on a broken listener
+                    continue  # woken: closed, or a late peer is ready -- the top says which
                 handshake = _Handshake(connection)
                 thread = threading.Thread(target=self._run_handshake, args=(handshake,),
                                           name="cadgen-handshake", daemon=True)
@@ -762,35 +861,29 @@ class Server:
                 self._changed.notify_all()
                 if queued and self._accepting and not self._woken:
                     # accept() moved on and waits natively for the next peer: wake it to
-                    # hand this one out. Under the guard, as close() wakes it. If the
-                    # wakeup fails, the next peer to connect hands this one out.
+                    # hand this one out. Under the guard, as close() wakes it: once its
+                    # wait returns, the owner looks again under the guard, so no wake
+                    # is lost and one pending is never repeated.
                     self._woken = True
-                    try:
-                        _wake_listener(self.address, self._family)
-                    except OSError:
-                        self._woken = False
+                    self._listener.wake()
 
     def close(self) -> None:
         unused = ()
         try:
             with self._guard:
-                if self._closed and not self._wake_failed:
+                if self._closed:
                     return
                 self._closed = True
                 unused, self._ready = self._ready, collections.deque()
                 self._changed.notify_all()
                 if self._accepting:
-                    # Hold the guard through the bounded wakeup so accept cannot close
-                    # and release this address for another listener before we connect.
-                    # An unexpected failure remains loud and admission stays closed;
-                    # a later close may retry without abandoning the listener owner.
-                    self._wake_failed = True
-                    _wake_listener(self.address, self._family)
-                    self._wake_failed = False
+                    # The owner closes the listener once its wait returns.
+                    if not self._woken:
+                        self._woken = True
+                        self._listener.wake()
                 else:
                     with contextlib.suppress(OSError):
                         self._listener.close()
-                    self._wake_failed = False
         finally:
             for connection in unused:
                 with contextlib.suppress(OSError):
