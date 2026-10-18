@@ -1,6 +1,7 @@
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { previewSettingsChanged, resolvePreviewSettings } from "@text-to-cad/core/common/viewSettings.js";
 import { Button } from "@text-to-cad/ui/primitives/button";
+import { Checkbox } from "@text-to-cad/ui/primitives/checkbox";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@text-to-cad/ui/primitives/select";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
@@ -45,6 +46,12 @@ function Range({ label, name = label, value, onChange, min = 0, max = 1, step = 
       thumbProps={{ "aria-label": name }} onValueChange={([next]) => onChange(next)} />
     <FileSheetValueInput ariaLabel={`${name} value`} value={format(value)} onValueCommit={commit} disabled={disabled}
       className="h-6 w-13 px-1.5" />
+  </FileSheetSettingRow>;
+}
+// An on/off setting within a section: its checkbox at the row's right end, where every control ends.
+function Toggle({ label, name = label, checked, onChange, disabled = false }) {
+  return <FileSheetSettingRow label={label} disabled={disabled}>
+    <Checkbox aria-label={name} className="ml-auto" checked={checked} disabled={disabled} onCheckedChange={next => onChange(next === true)} />
   </FileSheetSettingRow>;
 }
 function Color({ label, name = label, value, onChange, disabled = false }) {
@@ -97,6 +104,10 @@ export function PreviewRenderSettings({ settings = {}, display = {}, appearance 
           <Range label="Rotation" value={look.lighting.rotation} min={-180} max={180} step={1} scale={1} format={v => `${v}°`} onChange={rotation => patch("lighting", { rotation })} />
           <Range label="Softbox" name="Softbox size" value={look.lighting.size} min={0.25} max={3} step={0.05} scale={1} format={v => `${v.toFixed(2)}×`} onChange={size => patch("lighting", { size })} />
           <Range label="Fill" value={look.lighting.fill} onChange={fill => patch("lighting", { fill })} />
+          {/* Global illumination: a progressive radiosity bake that lights the model from the studio
+              and shadows the key softly, refining over a few seconds (`photographicStudio.js`). */}
+          <Toggle label="Radiosity" name="Global illumination" checked={look.lighting.globalIllumination}
+            onChange={globalIllumination => patch("lighting", { globalIllumination })} />
         </FileSheetSettingsSection>
         <FileSheetSettingsSection title="Background">
           {color("background", "Background colour")}{opacity("background", "Background opacity")}

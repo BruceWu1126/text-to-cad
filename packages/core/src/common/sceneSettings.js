@@ -126,9 +126,9 @@ export const DEFAULT_RENDER_LIGHTING = Object.freeze({
   fill: 0.25
 });
 
-// Render's floor stands at the authored Z=0 plane, as the Display preset's does
-// (`RENDER_FLOOR_PLACEMENT`), its opacity letting geometry below that plane remain visible;
-// "lowest" follows the current model bounds instead.
+// Render's floor stands under the model's lowest point, as Preview's does
+// (`RENDER_FLOOR_PLACEMENT`); "origin" pins it to the authored Z=0 plane instead, its opacity
+// letting geometry below that plane remain visible.
 export const DEFAULT_RENDER_BACKDROP = Object.freeze({
   transparent: false,
   ground: true,

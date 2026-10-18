@@ -285,13 +285,25 @@ test("the floor is matte until Glossy is chosen, and a snapshot's Preview is the
   assert.deepEqual(snapshot, viewer);
 });
 
-test("Preview's floor stands at Z=0 until Lowest point is chosen, and a snapshot's stands where the viewer's does", () => {
-  assert.equal(RENDER_FLOOR_PLACEMENT, "origin");
-  for (const appearance of ["light", "dark"]) assert.equal(resolveViewSettings({}, { appearance, ...PREVIEW }).floor.placement, "origin");
-  const lowest = { floor: { placement: "lowest" } };
-  assert.equal(previewSettingsChanged(lowest), true);
-  assert.equal(resolveViewSceneSettings({ display: {}, ...PREVIEW, previewSettings: lowest }).render.configuration.backdrop.groundPlacement, "lowest");
+test("Preview's floor stands at the model's lowest point until Model origin is chosen, and a snapshot's stands where the viewer's does", () => {
+  assert.equal(RENDER_FLOOR_PLACEMENT, "lowest");
+  for (const appearance of ["light", "dark"]) assert.equal(resolveViewSettings({}, { appearance, ...PREVIEW }).floor.placement, "lowest");
+  const origin = { floor: { placement: "origin" } };
+  assert.equal(previewSettingsChanged(origin), true);
+  assert.equal(resolveViewSceneSettings({ display: {}, ...PREVIEW, previewSettings: origin }).render.configuration.backdrop.groundPlacement, "origin");
   const viewer = resolveViewSceneSettings({ display: {}, ...PREVIEW }).render.configuration.backdrop;
   const snapshot = renderJobContext(mesh(), { kind: "step", display: {}, ...PREVIEW }).sceneSettings.render.configuration.backdrop;
-  assert.deepEqual([viewer.groundPlacement, snapshot.groundPlacement], ["origin", "origin"]);
+  assert.deepEqual([viewer.groundPlacement, snapshot.groundPlacement], ["lowest", "lowest"]);
+});
+
+test("Preview's global illumination is a lighting boolean, on by default, that rides into the Render recipe", () => {
+  assert.equal(resolveViewSettings({}, PREVIEW).lighting.globalIllumination, true);
+  const off = { lighting: { globalIllumination: false } };
+  assert.equal(resolveViewSettings({}, { ...PREVIEW, previewSettings: off }).lighting.globalIllumination, false);
+  assert.deepEqual(normalizePreviewSettings(off), off);
+  assert.throws(() => normalizePreviewSettings({ lighting: { globalIllumination: "yes" } }), /preview\.lighting\.globalIllumination must be a boolean/);
+  assert.equal(previewSettingsChanged({ lighting: { globalIllumination: true } }), false);
+  assert.equal(previewSettingsChanged(off), true);
+  assert.equal(resolveViewSceneSettings({ display: {}, ...PREVIEW }).render.configuration.lighting.globalIllumination, true);
+  assert.equal(resolveViewSceneSettings({ display: {}, ...PREVIEW, previewSettings: off }).render.configuration.lighting.globalIllumination, false);
 });

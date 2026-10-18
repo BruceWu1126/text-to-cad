@@ -110,10 +110,10 @@ share of a dark color than of a light one). It writes the clear's alpha, premult
 as three's clear is, so a half-transparent background keeps its gradient; at alpha 0 it
 is not drawn, and a caller that renders with `scene.background` taken away and a clear
 alpha of 0 (a thumbnail) gets nothing of it. The floor's mirrored draw leaves it out.
-The floor is independent of background alpha. Render's stands at authored
-Z=0 (`placement: "origin"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's backdrop
-default too); `placement: "lowest"` follows the current model minimum without moving
-geometry or lighting. Its double-sided plane uses one transparency pass,
+The floor is independent of background alpha. Render's follows the current model
+minimum (`placement: "lowest"`, `RENDER_FLOOR_PLACEMENT`, the Render recipe's backdrop
+default too) without moving geometry or lighting; `placement: "origin"` stands it at
+authored Z=0. Its double-sided plane uses one transparency pass,
 keeping geometry below the origin visible. Depth fitting includes the actual floor elevation;
 orthographic views can use a signed near plane when the floor crosses the eye.
 
@@ -199,6 +199,20 @@ the canvas is: four samples, two on a canvas of pixel ratio 2 or more), its reso
 half-float accumulation and two half-resolution occlusion targets: about 200 MB at that
 size, released with the studio. Software rendering has no frame: three's single draw, as
 before, whose key casts no shadow to soften.
+
+`lighting.globalIllumination` (Preview's, on by default) adds a progressive radiosity
+bake (`lib/viewer/radiosityStage.js`): the studio environment reaches the model with soft
+shadows and contact occlusion accumulated into a lightmap over a few seconds, the floor
+catches the baked shadow, and the key spotlight is shadowed by the fraction of its softbox
+each surface sees. Until the bake has faded in (and again whenever a pose, a routine's frame
+or a setting starts it over) the key keeps its shadow map and the floor its contact layer;
+once it has, neither is drawn. The studio's frame starts its picture again while the bake
+fades in and once more as it converges, and converges over it in between. It needs a host
+that steps it (`applyPhotographicStudio`'s `globalIllumination: { root }`; the viewport calls
+`runtime.refineFrame()` before each draw) and WebGL2 float render targets: a snapshot passes
+no host and a software renderer bakes nothing. A scene over `RADIOSITY_MAX_TRIANGLES`
+(500 000; charting runs on the main thread at about 2 M triangles a second) is not baked.
+Instanced repeats (`cadSurfaceInstances.js`) are not lit by the bake.
 
 `applyPhotographicStudio(THREE, runtime, configuration, options)` owns the
 synchronous light, ground and renderer state and updates those objects in place.

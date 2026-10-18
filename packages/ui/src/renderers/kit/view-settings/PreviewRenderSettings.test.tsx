@@ -25,7 +25,7 @@ function Harness() {
     <PreviewRenderSettings settings={preview} display={display} onPatch={store.patchPreview} onReset={store.resetPreview} /></>;
 }
 
-it("has Preview's lighting, background and a floor that folds while off; editing it leaves the file's display", async () => {
+it("has Preview's lighting (global illumination with it), background and a floor that folds while off; editing it leaves the file's display", async () => {
   const user = userEvent.setup({ skipHover: true });
   render(<Harness />);
   for (const label of ['Exposure', 'Rotation', 'Softbox size', 'Fill', 'Background opacity', 'Floor opacity']) {
@@ -37,6 +37,12 @@ it("has Preview's lighting, background and a floor that folds while off; editing
   await user.keyboard('{ArrowRight}');
   expect(store.getSnapshot().preview.lighting.exposure).toBeCloseTo(0.1);
   expect(store.renderScene().view.lighting.exposure).toBeCloseTo(0.1);
+  // Global illumination is on by default, a checkbox of Lighting's that rides into the Render recipe.
+  const globalIllumination = screen.getByRole('checkbox', { name: 'Global illumination' });
+  expect(globalIllumination.getAttribute('aria-checked')).toBe('true');
+  await user.click(globalIllumination);
+  expect(store.getSnapshot().preview.lighting.globalIllumination).toBe(false);
+  expect(store.renderScene().render.configuration.lighting.globalIllumination).toBe(false);
   await user.click(screen.getByRole('checkbox', { name: 'Floor', exact: true }));
   expect(screen.queryByRole('button', { name: 'Floor colour' })).toBeNull();
   for (const label of ['Placement', 'Finish']) expect(screen.queryByRole('combobox', { name: label })).toBeNull();

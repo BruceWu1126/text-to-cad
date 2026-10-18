@@ -539,11 +539,16 @@ export function useViewerRuntime({
         fitCameraDepthRange(runtimeRef.current);
         // Nothing changed but, perhaps, the camera: the Render studio's frame may draw the next
         // sample of the picture on screen (it starts again itself if the camera really moved).
-        const still = interactionState.sceneChanged !== true && interactionState.shadowsDirty !== true;
+        let still = interactionState.sceneChanged !== true && interactionState.shadowsDirty !== true;
         let refining = false;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
           renderer.shadowMap.needsUpdate = interactionState.shadowsDirty === true;
           interactionState.shadowsDirty = false;
+          // A look that refines over frames of its own (Render's global illumination) takes its
+          // step before the frame is drawn: the loop stays open while it refines, and the
+          // studio's frame starts its picture again when it says the lighting is new.
+          const refined = runtimeRef.current?.refineFrame?.() || null;
+          if (refined?.restart) still = false;
           const didDraw = presentation.draw(
             runtimeRef.current,
             () => {
@@ -565,6 +570,7 @@ export function useViewerRuntime({
           } else {
             refining = false;
           }
+          refining = refining || refined?.refining === true;
         }
         perfMeasure(PERF_MEASURE_NAMES.frame, frameStartedAt, { interacting: interactionState.active === true });
         const previewOrbitActive = !!runtimeRef.current?.previewOrbitEnabled;
@@ -942,6 +948,10 @@ export function useViewerRuntime({
         environmentResourceIdentity: "",
         environmentReady: !renderMode,
         photographicStudio: null,
+        // Installed by a look that refines over frames (Render's global illumination): called
+        // once per frame before the draw; `{ refining, restart }`, whether it wants another
+        // frame and whether the studio's frame starts its picture again.
+        refineFrame: null,
         shadowMapSize: 2048,
         gridConfig: null,
         gridHelper: null,

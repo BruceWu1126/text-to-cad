@@ -37,7 +37,7 @@ The display also takes `clip` and `exploded`. Anything else is refused: there ar
 per-mode settings, style groups or axes. Preview's own settings (`parts`, `lighting`,
 `background`, `floor`) are a separate sparse object (`normalizePreviewSettings`): `parts`
 contains `colorMode` (`original`, `single`, `by-part`), `color` and `colors`; `lighting`
-contains `quality`, `exposure`, `rotation`, `size`, `fill`; `background` contains `color`,
+contains `quality`, `exposure`, `rotation`, `size`, `fill`, `globalIllumination` (on by default); `background` contains `color`,
 `opacity`; `floor` contains `enabled`, `placement`, `color`, `opacity`, `finish`.
 
 Viewer appearance inherits the host; snapshots default to light. Lighting quality inherits
@@ -126,8 +126,9 @@ enabled cut stays live. Explicit neutral boundaries
 still avoid unnecessary caps. See [responsive View updates](view-updates.md)
 for scheduling, resource caching, loading presentation and capture readiness.
 
-Render's floor stands at the document's Z=0 plane (Model origin), at 60% opacity, its opacity
-letting geometry below that plane show; Lowest point is a choice away and is remembered in Render, as Glossy is. A snapshot's Render floor stands
+Render's floor stands under the model's lowest point (Lowest point), at 60% opacity; Model
+origin, the document's Z=0 plane, its opacity letting geometry below that plane show, is a
+choice away and is remembered in Render, as Glossy is. A snapshot's Render floor stands
 where the viewer's does: both resolve it from the same mode default (`RENDER_FLOOR_PLACEMENT`).
 Render's floor carries a studio's soft grounding shadow, as deep
 as the floor is opaque: darkest where the model touches it, the key light's cast

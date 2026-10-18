@@ -518,7 +518,8 @@ It shows all groups under static section headings and dividers, with no collapsi
 sections or cascading settings menus. A heading is 24px of regular `text-tiny` in the
 foreground colour, a rule above every one but the first. A feature that switches on and off
 (Orbit, Floor) is the checkbox at its heading's right end, the title naming it; there is no
-separate row for it. While the feature is off its section is that heading alone. Every
+separate row for it. A setting that switches on and off within a section (Lighting's
+**Radiosity**, global illumination) is a row whose checkbox stands at the row's right end. While the feature is off its section is that heading alone. Every
 setting is one 24px row: its label in a 4rem muted column, its control filling the rest, so
 a form's controls start on one line. A label is short under its heading ("Colour",
 "Opacity" under Floor); the control's accessible name stays whole ("Floor opacity"). A
@@ -526,8 +527,8 @@ dropdown or colour is as wide as its value, at the row's right end. Sliders are 
 as everywhere, with a committed value field after them. By part's palette is a row of
 swatches, then add and remove. Choices use Select controls. Continuous values use compact
 slider and committed-number fields; their keyboard input stays with the field. Colours
-retain swatches and a custom colour picker. Floor is on by default, at the model's Z=0
-plane. A long form scrolls within the available viewer height. A nested Select or colour
+retain swatches and a custom colour picker. Floor is on by default, under the model's
+lowest point. A long form scrolls within the available viewer height. A nested Select or colour
 picker owns Escape and outside interaction before its parent surface. The last item is
 **Reset to default**, disabled at Preview's defaults; it removes only Preview's overrides,
 never the display.

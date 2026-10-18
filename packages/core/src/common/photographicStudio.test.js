@@ -119,7 +119,7 @@ test("photographic studio applies one scale-stable key, Neutral exposure, and or
   assert.equal(value.requestCount, 1);
 });
 
-test("floor defaults to the model origin (Z=0) and can stand at the lowest point", () => {
+test("floor defaults to the lowest point and can stand at the model origin (Z=0)", () => {
   const value = runtime();
   for (const minZ of [-40, 0, 40]) {
     value.modelBounds = { min: [-10, -10, minZ], max: [10, 10, minZ + 20] };
@@ -128,7 +128,7 @@ test("floor defaults to the model origin (Z=0) and can stand at the lowest point
     const state = applyPhotographicStudio(THREE, value, {});
     const keyPosition = state.keyLight.position.clone();
     const keyIntensity = state.keyLight.intensity;
-    assert.equal(state.ground.position.z, 0);
+    assert.equal(state.ground.position.z, minZ);
     assert.equal(state.ground.material.transparent, true);
     assert.equal(state.ground.material.opacity, 0.6);
     assert.equal(state.ground.material.side, THREE.DoubleSide);
@@ -146,12 +146,12 @@ test("floor defaults to the model origin (Z=0) and can stand at the lowest point
 
     applyPhotographicStudio(THREE, value, configuration({ groundPlacement: "lowest" }));
     assert.equal(state.ground.position.z, minZ);
-    applyPhotographicStudio(THREE, value, configuration({ transparent: true }));
-    assert.equal(state.ground.position.z, 0);
+    applyPhotographicStudio(THREE, value, { backdrop: { transparent: true } });
+    assert.equal(state.ground.position.z, minZ);
     assert.equal(state.ground.material.depthWrite, false);
     assert.equal(state.ground.material.polygonOffset, true);
     applyPhotographicStudio(THREE, value, {});
-    assert.equal(state.ground.position.z, 0);
+    assert.equal(state.ground.position.z, minZ);
   }
   disposePhotographicStudio(value);
 });
@@ -689,4 +689,87 @@ test("a still frame's samples move the key across its softbox, square to it and 
   const wider = state.keyLight.position.clone();
   sampleKey(state, 5);
   assert.ok(Math.abs(state.keyLight.position.distanceTo(wider) - 2 * offsets[4]) < 1e-6 * wider.length());
+});
+
+test("global illumination bakes only with a stepping host and float render targets, and takes the key's shadow once faded in", () => {
+  const studioRuntime = runtime();
+  const root = new THREE.Group();
+  root.add(new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshPhysicalMaterial()));
+  const base = configuration();
+  const on = { ...base, lighting: { ...base.lighting, globalIllumination: true } };
+  const off = { ...base, lighting: { ...base.lighting, globalIllumination: false } };
+  const host = { globalIllumination: { root } };
+
+  // No host (a snapshot): the recipe's flag is accepted and the spotlight keeps its shadow map.
+  let state = applyPhotographicStudio(THREE, studioRuntime, on);
+  assert.equal(state.keyLight.castShadow, true);
+  assert.equal(state.radiosity, null);
+  assert.equal(studioRuntime.refineFrame ?? null, null);
+
+  // A host, but a renderer without float render targets: still the shadow map.
+  state = applyPhotographicStudio(THREE, studioRuntime, on, host);
+  assert.equal(state.radiosity, null);
+
+  // Float render targets: the bake runs and installs the frame step, and shadows the spotlight
+  // by its softbox's cone, turning with the lighting's rotation and widening with Size.
+  studioRuntime.renderer.capabilities = { isWebGL2: true };
+  studioRuntime.renderer.extensions = { has: () => true };
+  state = applyPhotographicStudio(THREE, studioRuntime, on, host);
+  assert.ok(state.radiosity);
+  assert.equal(typeof studioRuntime.refineFrame, "function");
+  assert.equal(state.group.children.includes(state.radiosity.group), true);
+  assert.equal(state.radiosity._floorParams.level, state.ground.position.z);
+  const [key] = state.radiosity.directLights;
+  assert.ok(key.direction.distanceTo(new THREE.Vector3(...PHOTOGRAPHIC_STUDIO_KEY_DIRECTION).normalize()) < 1e-9);
+  assert.ok(Math.abs(key.angle - 0.11) < 1e-9);
+  state = applyPhotographicStudio(THREE, studioRuntime, { ...on, lighting: { ...on.lighting, rotation: 90, size: 2 } }, host);
+  const [turned] = state.radiosity.directLights;
+  assert.ok(turned.direction.distanceTo(state.keyLight.position.clone().sub(state.target.position).normalize()) < 1e-9);
+  assert.ok(Math.abs(turned.angle - 0.16) < 1e-9);
+
+  // Until the bake has faded in, the key keeps its shadow map and the floor its contact shadow;
+  // once it has, the bake shadows both; anything that starts it again hands them back.
+  let weight = 0, converged = false, finishing = false;
+  Object.defineProperty(state.radiosity, "active", { get: () => true });
+  Object.defineProperty(state.radiosity, "weight", { get: () => weight });
+  Object.defineProperty(state.radiosity, "converged", { get: () => converged });
+  // The solver converges during a step, as the real one does.
+  state.radiosity.step = () => { if (finishing) converged = true; return !converged; };
+  // Fading in: the picture starts again every frame, and the key keeps its shadow map.
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: true, restart: true });
+  assert.equal(state.keyLight.castShadow, true);
+  // Faded in: the bake takes the key's shadow, a frame of its own; then the frame converges over it.
+  weight = 1;
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: true, restart: true });
+  assert.equal(state.keyLight.castShadow, false);
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: true, restart: false });
+  // Converged: one last new picture, then nothing more is owed.
+  finishing = true;
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: false, restart: true });
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: false, restart: false });
+  // A setting re-applies the studio: the bake keeps the key while it is faded in.
+  state = applyPhotographicStudio(THREE, studioRuntime, on, host);
+  assert.equal(state.keyLight.castShadow, false);
+  // A pose starts the bake again: the shadow map has the key back at once.
+  weight = 0; converged = false; finishing = false;
+  assert.deepEqual(studioRuntime.refineFrame(), { refining: true, restart: true });
+  assert.equal(state.keyLight.castShadow, true);
+  assert.equal(studioRuntime.renderer.shadowMap.needsUpdate, true);
+
+  // A software renderer bakes nothing.
+  studioRuntime.softwareRendering = true;
+  state = applyPhotographicStudio(THREE, studioRuntime, on, host);
+  assert.equal(state.radiosity, null);
+  studioRuntime.softwareRendering = false;
+
+  // Turning it off restores the shadow map and removes the step; disposal releases the rest.
+  state = applyPhotographicStudio(THREE, studioRuntime, on, host);
+  assert.ok(state.radiosity);
+  state = applyPhotographicStudio(THREE, studioRuntime, off, host);
+  assert.equal(state.radiosity, null);
+  assert.equal(state.keyLight.castShadow, true);
+  assert.equal(studioRuntime.refineFrame, null);
+  applyPhotographicStudio(THREE, studioRuntime, on, host);
+  disposePhotographicStudio(studioRuntime);
+  assert.equal(studioRuntime.refineFrame, null);
 });

@@ -247,6 +247,12 @@ function hashFloat(h, v) {
   return hashInt(h, Math.round(v * 4096));
 }
 
+/**
+ * The most triangles a bake charts: about a quarter of a second of the main thread. Past it the
+ * stage bakes nothing (`info.skipped`).
+ */
+export const RADIOSITY_MAX_TRIANGLES = 500000;
+
 export const DEFAULT_RADIOSITY_STAGE_SETTINGS = Object.freeze({
   quality: "medium",
   directions: 16,
@@ -343,6 +349,14 @@ export class RadiosityStage {
 
   get converged() {
     return !!this._solver?.converged;
+  }
+
+  /**
+   * How far the lightmap has faded in on the display materials (0..1): 1 once it carries the
+   * lighting, 0 again after anything restarts the accumulation.
+   */
+  get weight() {
+    return this._displayUniforms.uRadWeight.value;
   }
 
   /** True when the last build produced at least one lit surface. */
@@ -561,8 +575,12 @@ export class RadiosityStage {
     }
     const state = this._computeStateHash();
     if (state !== this._stateHash) {
+      // Something moved: start again, but bounce only once it holds still for a frame. A
+      // routine or a dragged pose moves it every frame, and a bounce per frame would be spent
+      // on a picture the next frame throws away.
       this._stateHash = state;
       this._solver.reset();
+      return true;
     }
     const bounced = this._solver.bounce();
     this._syncLightmap();
@@ -629,6 +647,21 @@ export class RadiosityStage {
 
     const lit = meshes.filter((mesh) => mesh?.isMesh && mesh.geometry && isLitMaterial(mesh.material));
     if (!lit.length) {
+      this._floor.group.visible = false;
+      this._solver.setObjects([], null, UP, null);
+      return;
+    }
+    // Charting runs on the main thread at roughly 2 M triangles a second, and a scene that big
+    // has far more charts than an atlas holds: past the budget there is no bake at all (its
+    // host keeps the key's shadow map), rather than seconds of a frozen page and then none.
+    let triangles = 0;
+    for (const mesh of lit) {
+      const geometry = mesh.geometry;
+      triangles += (geometry.index ? geometry.index.count : geometry.getAttribute("position")?.count ?? 0) / 3;
+    }
+    if (triangles > RADIOSITY_MAX_TRIANGLES) {
+      console.warn(`radiosity: ${Math.round(triangles)} triangles exceed the ${RADIOSITY_MAX_TRIANGLES} a bake charts; disabled`);
+      this._info = { skipped: "triangles", triangles: Math.round(triangles) };
       this._floor.group.visible = false;
       this._solver.setObjects([], null, UP, null);
       return;

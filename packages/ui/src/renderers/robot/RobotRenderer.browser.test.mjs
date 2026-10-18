@@ -697,7 +697,18 @@ test('Preview draws the robot as it opens, and leaving it finds the tools view a
   const { page, pane } = robot;
   const opening = await robot.links();
   const away = async () => { const surface = await robot.surface(); await page.mouse.move(surface.x + surface.width - 90, surface.y + surface.height / 2); };
-  const enterPreview = async () => { await robot.preview(true); await robot.settled(); };
+  // Preview's picture as it comes to rest: its global illumination baked (where the GPU bakes
+  // it), then the studio's frame converged over it.
+  const enterPreview = async () => {
+    await robot.preview(true);
+    await page.waitForFunction(() => {
+      const stage = window.__cadStage?.();
+      const bake = stage?.globalIllumination;
+      const frame = stage?.studioFrame;
+      return (!bake?.active || bake.converged) && (!frame || frame.sample >= frame.samples);
+    });
+    await robot.settled();
+  };
   const exitPreview = () => robot.preview(false);
   // Preview opens still (Orbit off): the robot as Preview draws a file opened afresh.
   await away();
@@ -720,7 +731,11 @@ test('Preview draws the robot as it opens, and leaving it finds the tools view a
   await away();
   await enterPreview();
   assert.deepEqual(await robot.links(), opening, 'Preview poses the robot as it opens');
-  assert.ok((await robot.capture()).data.equals(authored), 'Preview draws the robot as it opens');
+  // The same picture, to the rounding of a GPU-accumulated bake: within one level a channel
+  // (a leaked pose or visual changes thousands of bytes by far more).
+  const again = (await robot.capture()).data;
+  assert.ok(again.length === authored.length && again.every((value, index) => Math.abs(value - authored[index]) <= 1),
+    'Preview draws the robot as it opens');
   // Preview has no file sidebar (a robot has no routine, so no playbar either), and the navbar holds
   // only its settings and the way out.
   assert.equal(await pane.locator('[data-file-sidebar-room]').isHidden(), true, 'no file sidebar in Preview');

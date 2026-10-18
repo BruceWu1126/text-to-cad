@@ -180,11 +180,17 @@ const differingPixels = (left, right) => {
   assert.deepEqual([left.width, left.height], [right.width, right.height]);
   let count = 0;
   for (let offset = 0; offset < left.data.length; offset += 4) {
-    if (left.data[offset] !== right.data[offset] || left.data[offset + 1] !== right.data[offset + 1] || left.data[offset + 2] !== right.data[offset + 2]) count += 1;
+    // Within one level a channel is the same picture: the rounding of Preview's GPU-accumulated bake.
+    if (Math.abs(left.data[offset] - right.data[offset]) > 1 || Math.abs(left.data[offset + 1] - right.data[offset + 1]) > 1
+      || Math.abs(left.data[offset + 2] - right.data[offset + 2]) > 1) count += 1;
   }
   return count;
 };
-const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+// Two frames on, and Preview's global illumination baked where the GPU bakes it (a pose starts it again).
+const settle = async page => {
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.waitForFunction(() => { const bake = window.__cadStage?.()?.globalIllumination; return !bake?.active || bake.converged; });
+};
 // Render is Preview's: in by Preview at the strip's end and out by Exit preview in the navbar, each once the view has
 // come together under its cover.
 async function togglePreview(page, pane, enter) {

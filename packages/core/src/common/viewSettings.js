@@ -23,7 +23,7 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
  * the photographic look (Render) the viewer's Preview draws, kept apart from the display.
  * @typedef {{
  *   parts?: ViewParts,
- *   lighting?: {quality?: "preview" | "final", exposure?: number, rotation?: number, size?: number, fill?: number},
+ *   lighting?: {quality?: "preview" | "final", exposure?: number, rotation?: number, size?: number, fill?: number, globalIllumination?: boolean},
  *   background?: {color?: string, opacity?: number},
  *   floor?: {enabled?: boolean, placement?: "origin" | "lowest", color?: string, opacity?: number, finish?: "matte" | "glossy"}
  * }} PreviewSettings
@@ -31,7 +31,7 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 /** @typedef {{enabled: boolean, projection: "orthographic" | "perspective", focalLength: number}} ViewCamera */
 /** @typedef {{enabled: boolean, style: "shaded" | "hidden" | "off", colorMode: "original" | "single" | "by-part", color: string, colors: string[], opacity: number}} ViewSurfaces */
 /** @typedef {{enabled: boolean, visibility: "visible" | "all", color: string}} ViewEdges */
-/** @typedef {{enabled: boolean, quality: "preview" | "final", exposure: number, rotation: number, size: number, fill: number}} ViewLighting */
+/** @typedef {{enabled: boolean, quality: "preview" | "final", exposure: number, rotation: number, size: number, fill: number, globalIllumination: boolean}} ViewLighting */
 /** @typedef {{enabled: boolean, color: string, opacity: number}} ViewPaint */
 /** @typedef {ViewPaint & {placement: "origin" | "lowest", finish: "matte" | "glossy"}} ViewFloor */
 /**
@@ -71,7 +71,9 @@ export const VIEW_CAMERA_KEYS = Object.freeze(["projection", "focalLength"]);
 export const PREVIEW_SETTING_KEYS = Object.freeze(["parts", "lighting", "background", "floor"]);
 const PREVIEW_GROUP_FIELDS = {
   parts: ["colorMode", "color", "colors"],
-  lighting: ["quality", "exposure", "rotation", "size", "fill"],
+  // `globalIllumination` (on by default): Preview's progressive radiosity bake, which lights the
+  // model from the studio environment and shadows the key softly (`photographicStudio.js`).
+  lighting: ["quality", "exposure", "rotation", "size", "fill", "globalIllumination"],
   background: ["color", "opacity"],
   floor: ["enabled", "placement", "color", "opacity", "finish"]
 };
@@ -112,7 +114,7 @@ const CHOICES = {
   placement: VIEW_FLOOR_PLACEMENT_VALUES, finish: VIEW_FLOOR_FINISH_VALUES
 };
 function field(key, entry, path) {
-  if (key === "enabled") return boolean(entry, path);
+  if (key === "enabled" || key === "globalIllumination") return boolean(entry, path);
   if (key === "color") return color(entry, path);
   if (key === "colors") {
     if (!Array.isArray(entry) || entry.length < 1 || entry.length > 50) throw new Error(`${path} must contain 1 to 50 hex colors`);
@@ -187,11 +189,11 @@ export function readPreviewSettings(input) {
   return readable;
 }
 
-// Where Render's floor stands: at the document's Z=0 plane ("origin", Model origin), where the
-// model was authored to stand, rather than its lowest point ("lowest"), which a person may still
-// choose. The Render recipe's own backdrop default (`sceneSettings.js`) is this too: one value for
-// the Viewer and the snapshot.
-export const RENDER_FLOOR_PLACEMENT = "origin";
+// Where Render's floor stands: under the model's lowest point ("lowest"), so the model always
+// stands on it, rather than at the document's Z=0 plane ("origin", Model origin), which a person
+// may still choose. The Render recipe's own backdrop default (`sceneSettings.js`) is this too: one
+// value for the Viewer and the snapshot.
+export const RENDER_FLOOR_PLACEMENT = "lowest";
 
 // The CAD edges' ink on a model's faces.
 const EDGE_COLOR = "#253443";
@@ -218,7 +220,8 @@ export function previewDefaults({ appearance = "light", lightingQuality = "final
   const dark = appearance === "dark";
   return {
     parts: { colorMode: "original", color: DEFAULT_PART_COLOR_SETTINGS.color, colors: [...DEFAULT_PART_COLOR_SETTINGS.colors] },
-    lighting: { quality: choice(lightingQuality, VIEW_LIGHTING_QUALITY_VALUES, "lightingQuality"), exposure: 0, rotation: 0, size: 1, fill: 0.25 },
+    lighting: { quality: choice(lightingQuality, VIEW_LIGHTING_QUALITY_VALUES, "lightingQuality"), exposure: 0, rotation: 0, size: 1, fill: 0.25,
+      globalIllumination: true },
     background: { color: dark ? "#202226" : "#ffffff", opacity: 1 },
     floor: { enabled: true, placement: RENDER_FLOOR_PLACEMENT, color: dark ? "#202226" : "#e7e7e5", opacity: 0.6, finish: "matte" }
   };

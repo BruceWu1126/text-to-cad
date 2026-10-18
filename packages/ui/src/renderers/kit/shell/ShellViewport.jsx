@@ -62,6 +62,15 @@ const STORED_CAMERA_COORDINATES = "cad-z-up-v1";
 /** How long after the open-time fit the viewport and projection may still be settling. */
 const OPEN_FIT_SETTLE_MS = 600;
 // The stage group holds only what the look put there.
+// Read-only seam (`__cadStage().globalIllumination`): Render's bake, while there is one.
+function globalIlluminationState(runtime) {
+  const studio = runtime?.photographicStudio;
+  const stage = studio?.radiosity;
+  if (!stage) return null;
+  return { active: stage.active, samples: stage.samples, weight: stage.weight, converged: stage.converged, info: stage.info,
+    directLights: stage.directLights.length, keyCastsShadow: studio.keyLight.castShadow };
+}
+
 function clearGroup(group) {
   for (const child of [...(group?.children || [])]) disposeSceneObject(child);
 }
@@ -282,7 +291,10 @@ const ShellViewport = forwardRef(function ShellViewport({
       // While a routine plays or a pose is dragged, the floor shadow's heights are measured at
       // most this often (its cast shadow still follows every frame), and once more at rest, in
       // a frame of their own that keeps the shadow maps.
-      contactShadow: { heightInterval: CONTACT_SHADOW_HEIGHT_INTERVAL_MS, requestFrame: () => runtime.requestFrame?.() }
+      contactShadow: { heightInterval: CONTACT_SHADOW_HEIGHT_INTERVAL_MS, requestFrame: () => runtime.requestFrame?.() },
+      // Global illumination bakes the meshes under the model group, and this viewport steps
+      // the bake every frame (`runtime.refineFrame`).
+      globalIllumination: { root: runtime.modelGroup }
     });
     runtime.photographicGroundZ = Number.isFinite(Number(studioState?.ground?.position?.z))
       ? Number(studioState.ground.position.z) : null;
@@ -529,7 +541,9 @@ const ShellViewport = forwardRef(function ShellViewport({
         // How many planes cut the model just now (Clip).
         cut: (active.activeClipPlanes || []).length,
         // How far Render's picture has converged (`pictureProgress`).
-        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null } : null;
+        studioFrame: active.photographicStudio?.frame ? { sample: active.photographicStudio.frame.sample, samples: active.photographicStudio.frame.samples } : null,
+        // Render's global illumination, while it bakes: how far along it is, and who shadows the key.
+        globalIllumination: globalIlluminationState(active) } : null;
     };
     // The view on screen answers: Preview's while it is open, and as it closes the view it
     // covered (the editor's) answers again.
