@@ -379,10 +379,11 @@ cleaning, validity, file imports -- and remembers, in the worker's memory for
 the life of the process, the live result of each under a key made of the
 operation, its parameters by value and the keys of the shapes it was given (a
 result by the operation that made it, a face or an edge by the shape it was
-taken from and its index there, a file by its bytes, a child model's result --
-decoded from the store, its decode keyed like an operation with no shape inputs
--- by its tree hash), so a second run of the
-same code hands back **the same live objects** the first run made, restored
+taken from and its index there, a file by its bytes, a child model's result and
+a STEP file a body reads (`read_step`) -- each decoded from the store, its
+decode keyed like an operation with no shape inputs -- by its tree hash), so a
+second run of the same code hands back **the same live objects** the first run
+made, restored
 to the state the operation returned them in, down to the point where an input
 changed, and executes everything from there. A hit is the previous run's
 object itself: nothing is reconstructed from bytes, no copy stands in for what

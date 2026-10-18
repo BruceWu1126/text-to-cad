@@ -111,6 +111,14 @@ def lookup_document_scene(step_path: Path, *, step_hash: str, lazy: bool = False
     return scene, scene is None
 
 
+def document_tree(step_path: Path) -> str | None:
+    """The tree the file's bytes map to now, or None when the store holds none for
+    them yet: what a read of the file decodes, named before decoding it."""
+    from cadgen.store.records import tree_for_document_hash
+
+    return tree_for_document_hash(hashlib.sha256(read_bytes_with_ladder(step_path)).hexdigest())
+
+
 def scene_from_render_package(step_path: Path, *, step_hash: str) -> LoadedStepScene | None:
     """A private scene from verified document objects, or None on a cache miss."""
     return lookup_document_scene(step_path, step_hash=step_hash)[0]
@@ -251,6 +259,7 @@ def _scene_from_document_tree(step_path: Path, *, step_hash: str, tree_hash: str
         prototype_identity=prototype_identity,
         prototype_components=prototype_components,
         step_hash=step_hash,
+        tree_hash=tree_hash,
         source_kind="step",
     )
 

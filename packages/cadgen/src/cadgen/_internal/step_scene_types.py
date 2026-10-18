@@ -48,6 +48,9 @@ class LoadedStepScene:
     prototype_identity: dict[int, tuple[str | None, dict[str, Any] | None]] = field(default_factory=dict)
     load_elapsed: float = 0.0
     step_hash: str | None = None
+    # The stored tree the scene was read from (``step_scene_package``), None for a
+    # scene parsed from the file's text: a read keys its geometry by it (``import_step``).
+    tree_hash: str | None = None
     source_kind: str = "step"
     source_path: str | None = None
     # Typed-mates kinematics block from kinematics= (JSON-ready dict; axis

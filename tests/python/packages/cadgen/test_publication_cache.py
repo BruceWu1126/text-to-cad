@@ -225,5 +225,77 @@ class PublicationCache(PublicationCacheCase):
                 self.assertEqual(prepared, [], "what was prepared after it is recalled")
 
 
+IMPORTING = """\
+from pathlib import Path
+
+from cadgen import build123d as bd
+from cadgen import read_step, step
+
+PIN = 1.0
+
+
+@step
+def rig():
+    vendor = read_step(Path(__file__).parent / "vendor.step")
+    bored = vendor.cut(bd.Solid.make_cylinder(1, 30))
+    assert bored.is_valid
+    bored.label = "bored"
+    peg = bd.Solid.make_cylinder(PIN, 5)
+    peg.label = "peg"
+    return bd.Compound(children=[bored, bd.Pos(20, 0, 0) * vendor, bd.Pos(0, 30, 0) * peg], label="rig")
+"""
+
+
+class ImportedPublication(PublicationCacheCase):
+    """A model reading a STEP file: an edit elsewhere prepares nothing made of the read, a
+    file with other bytes prepares what is made of it again, and each rebuild writes what a
+    cold build writes. Each store holds the file's compile before a build reads it, so what
+    a build prepares is its own."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from tests.python.support.inline_artifacts import inline_compiles
+
+        self.enterContext(inline_compiles())
+        self.script.write_text(IMPORTING, encoding="utf-8")
+        self.vendor(4)
+
+    def store(self) -> None:
+        super().store()
+        self.compile()
+
+    def compile(self) -> None:
+        from cadgen import step
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertTrue(step.compile(self.root / "vendor.step").ok)
+
+    def vendor(self, height: float) -> None:
+        from cadgen import build123d as bd
+        from cadgen.step_export import export_build123d_step_file
+
+        part = bd.Solid.make_box(8, 6, height)
+        part.label = "vendor_part"
+        export_build123d_step_file(part, self.root / "vendor.step")
+        if self.stores:
+            self.compile()
+
+    def test_a_rebuild_recalls_what_is_made_of_an_unchanged_read_and_writes_what_a_cold_build_writes(self) -> None:
+        self.cold()
+        self.store()
+        _record, _provenance, prepared = self.build()
+        self.assertEqual(set(prepared), {"bored", "vendor_part", "peg"})
+        self.script.write_text(IMPORTING.replace("PIN = 1.0", "PIN = 1.5"), encoding="utf-8")
+        before = kernel_memo.stats()
+        edited, edited_provenance, prepared = self.build()
+        self.assertEqual(kernel_memo.stats()["unkeyable"], before["unkeyable"])
+        self.assertEqual(prepared, ["peg"], "nothing made of the read is prepared again")
+        self.assert_built_as_cold((edited, edited_provenance), self.cold_build())
+        self.vendor(5)
+        changed, changed_provenance, prepared = self.build()
+        self.assertEqual(set(prepared), {"bored", "vendor_part"}, "another file's bytes are another tree")
+        self.assert_built_as_cold((changed, changed_provenance), self.cold_build())
+
+
 if __name__ == "__main__":
     unittest.main()

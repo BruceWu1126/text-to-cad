@@ -46,6 +46,9 @@ shapes are (a sub-shape taken out of one by its kind and index, as ever), and a
 later build's decode of that tree hands back the same objects, restored and
 reset as any hit's, so the parent's calls on them are hits down to the call an
 edit changed -- as a link to another document keeps its identity in FreeCAD. A
+STEP file's read (``cadgen.read_step``) is a decode of the tree its bytes map to,
+keyed alike under an operation of its own (``imported``), so a vendor part is
+handed back as a child is: an edited file is another tree and decodes whole. A
 decode is no feature, and no construction key names one (``_stable_id``): a
 child's elements keep no name in the parent, and what the parent makes of them
 goes by its content.
@@ -170,7 +173,8 @@ from OCP.TopTools import TopTools_IndexedMapOfShape
 from cadgen._internal import kernel_history
 from cadgen._internal.kernel_trace import Trace
 
-__all__ = ["CAPACITY", "clear", "construction_key", "decoded", "enabled", "install", "run", "stats", "uninstall"]
+__all__ = ["CAPACITY", "clear", "construction_key", "decoded", "enabled", "imported", "install", "run", "stats",
+           "uninstall"]
 
 # Entries of live results: a model's intermediate geometry for a few models at
 # once, so an edit loop over a large model keeps every unchanged step.
@@ -191,8 +195,10 @@ _KEY_IDS_NEXT = itertools.count(1)
 _ID_KEYS: dict[int, tuple] = {}
 _STABLE: dict[int, bytes] = {}
 _UNSTABLE: set[int] = set()
-# The operation a child's decode is keyed as (``decoded``): no method is named so.
+# The operations a child's decode and a file's read are keyed as (``decoded``,
+# ``imported``): no method is named so.
 _CHILD = "<child>"
+_IMPORT = "<import>"
 # The effects by id, while anything holds them: a key names an input's effects by id.
 _EFFECTS: "weakref.WeakValueDictionary[int, _Effect]" = weakref.WeakValueDictionary()
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
@@ -818,35 +824,92 @@ def decoded(tree: str, label: str | None, decode: Callable[[], Any]) -> Any:
     state = getattr(_LOCAL, "run", None)
     if state is None or state.depth:
         return decode()
-    key_id = _intern((_CHILD, (tree,), (("label", label),), ()))
+    key = _decode_key(_CHILD, tree, label, state)
+    result = _decode_hit(key, state)
+    if result is _MISSED:
+        result = _decode_keep(key, _decoding(decode, state), state)
+    return result
+
+
+def imported(tree: Callable[[], str | None], label: str | None,
+             decode: Callable[[], tuple[Any, str | None]]) -> Any:
+    """A STEP file's geometry as a run reads it (``cadgen.read_step``), a decode of
+    the tree its bytes map to keyed as a child's is (``decoded``): by the tree's
+    hash and the label, under an operation of its own -- the tree a file's bytes
+    map to may be a model's result, which a child's decode hands back otherwise.
+    ``tree()`` names the tree before anything is decoded, None when the store holds
+    none for the bytes yet; ``decode()`` reads the file -- compiling it first when it
+    has no tree -- and returns the geometry and the tree it was decoded from, None
+    for one parsed from the file's text. So a read with a tree held is a hit, and a
+    cold read compiles and is keyed by the tree its compile published, as is a read
+    whose bytes changed before the decode; a geometry no tree names is handed back
+    unkeyed, a shape no operation made. Outside a run, or inside a patched call, it
+    only decodes."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth:
+        return decode()[0]
+    named = tree()
+    key = None
+    if named is not None:
+        key = _decode_key(_IMPORT, named, label, state)
+        result = _decode_hit(key, state)
+        if result is not _MISSED:
+            return result
+    result, read = _decoding(decode, state)
+    if read is None:
+        return result
+    if read != named:
+        key = _decode_key(_IMPORT, read, label, state)
+    return _decode_keep(key, result, state)
+
+
+_MISSED = object()
+
+
+def _decode_key(op: str, tree: str, label: str | None, state: _Run) -> tuple[int, int]:
+    """A decode's key, ``(id, n)``: the n-th decode of one tree under one label in the
+    build, counted on its outermost run."""
+    key_id = _intern((op, (tree,), (("label", label),), ()))
     outermost = state
     while outermost.previous is not None:
         outermost = outermost.previous
-    n = outermost.count(key_id)
-    entry = None
-    if enabled():
-        with _LOCK:
-            entry = _MEMO.get((key_id, n))
-            if entry is not None:
-                _MEMO.move_to_end((key_id, n))
-    if entry is not None:
-        result = entry.snapshot.restore()
-        _reset(entry.made, state.id)
-        for made in entry.made:
-            made.born = next(_SEQUENCE)
-        entry.refresh(None, state, {})
-        return result
-    # The decode's own kernel calls are cadgen's: none is a feature or an entry.
+    return key_id, outermost.count(key_id)
+
+
+def _decode_hit(key: tuple[int, int], state: _Run) -> Any:
+    """The objects the entry's decode made, restored and reset, or ``_MISSED``."""
+    if not enabled():
+        return _MISSED
+    with _LOCK:
+        entry = _MEMO.get(key)
+        if entry is None:
+            return _MISSED
+        _MEMO.move_to_end(key)
+    result = entry.snapshot.restore()
+    _reset(entry.made, state.id)
+    for made in entry.made:
+        made.born = next(_SEQUENCE)
+    entry.refresh(None, state, {})
+    return result
+
+
+def _decoding(decode: Callable[[], Any], state: _Run) -> Any:
+    """``decode()``, its own kernel calls cadgen's: none is a feature or an entry."""
     state.depth += 1
     try:
-        result = decode()
+        return decode()
     finally:
         state.depth -= 1
+
+
+def _decode_keep(key: tuple[int, int], result: Any, state: _Run) -> Any:
+    """Keep a decode's result as the entry of ``key``: a snapshot of it, and its shapes
+    registered at their positions under no feature."""
     try:
         snapshot = _snapshot(result)
     except _Unkeyable:
         return result  # nothing to hand back next time: a shape no operation made
-    entry = _Entry(key=(key_id, n), inputs=[], snapshot=snapshot, effects=[])
+    entry = _Entry(key=key, inputs=[], snapshot=snapshot, effects=[])
     _replace(entry.key)
     entry.made = _register(result, entry.key, None, state, entry)
     # The tree's groups, its root among them, are compounds of their children,
@@ -1292,8 +1355,8 @@ def _stable_id(root: int) -> bytes:
         if key is None:
             raise _Unstable("a key the memo no longer holds")
         try:
-            if key[0] == _CHILD:
-                raise _Unstable("a child's decode")
+            if key[0] in (_CHILD, _IMPORT):
+                raise _Unstable("a child's decode or a file's read")
             dependencies = _dependencies(key)
         except _Unstable:
             _UNSTABLE.add(key_id)

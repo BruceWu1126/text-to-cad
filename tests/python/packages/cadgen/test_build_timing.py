@@ -142,7 +142,7 @@ class Measuring(unittest.TestCase):
                                                   ("decode", False, 4.0), (None, True, 3.0)):
             with self.subTest(failed_at=failed_at, nested=nested):
                 clock = _Clock()
-                scene, shape = object(), object()
+                scene, shape = mock.Mock(tree_hash=None), object()  # a scene parsed from text: no tree
                 refusal = ValueError("could not read vendor STEP")
                 source = Path("vendor.step").resolve()
 

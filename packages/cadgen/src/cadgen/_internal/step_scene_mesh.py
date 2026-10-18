@@ -167,18 +167,30 @@ def import_step(step_path: Path, *, label: str | None = None) -> Any:
     ``scene_to_build123d_compound``, so the returned shape is a colored drop-in.
     Cache misses compile and return through the same canonical representation as
     hits.
+
+    Inside a model run the read is the kernel memo's decode of that tree
+    (``kernel_memo.imported``), keyed by the tree's hash and the label as a child's
+    decode is: a later build's read of the same bytes is handed the objects the
+    earlier one made, restored, so what the model makes of them hits too. A read
+    with no tree yet compiles first and is keyed by the tree the compile published.
     """
+    from cadgen._internal import kernel_memo
     from cadgen._internal.build_timing import cadgen_work
+    from cadgen._internal.step_scene_package import document_tree
 
     # Loading/compiling the artifact and reconstructing its geometry are cadgen's
     # work for the caller, just as materializing a decorated child's result is.
     with cadgen_work():
         resolved = Path(step_path).expanduser().resolve()
-        scene = load_step_scene_cached(resolved)
-        # No filename fallback for the label: build123d keeps the STEP's own root
-        # name, and deriving it from the path would make identical STEP content
-        # produce different trees depending on where the file happens to live.
-        return scene_to_build123d_compound(scene, label=label)
+
+        def decode() -> tuple[Any, str | None]:
+            scene = load_step_scene_cached(resolved)
+            # No filename fallback for the label: build123d keeps the STEP's own root
+            # name, and deriving it from the path would make identical STEP content
+            # produce different trees depending on where the file happens to live.
+            return scene_to_build123d_compound(scene, label=label), scene.tree_hash
+
+        return kernel_memo.imported(lambda: document_tree(resolved), label, decode)
 
 
 def prototype_topology(shape: Any) -> dict[str, Any]:

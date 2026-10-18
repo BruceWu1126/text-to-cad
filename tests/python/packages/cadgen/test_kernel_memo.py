@@ -574,6 +574,70 @@ class DecodedChildTest(KernelMemoCase):
         self.assertEqual(held(piece2), expected)
 
 
+def _vendor(path: Path, height: float) -> None:
+    """A one-part STEP file, as a vendor ships it."""
+    from build123d import Solid
+
+    from cadgen.step_export import export_build123d_step_file
+
+    part = Solid.make_box(8, 6, height)
+    part.label = "vendor_part"
+    export_build123d_step_file(part, path)
+
+
+class ImportedFileTest(KernelMemoCase):
+    """A STEP file's read (``cadgen.read_step``) is a decode of the tree its bytes map to,
+    keyed by its hash (``kernel_memo.imported``); cut, checked and filleted, a second run
+    after an edit elsewhere is handed the same objects and hits on every call downstream of
+    the read, with nothing decoded again; a file with other bytes misses, and the geometry
+    is plain build123d's."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from tests.python.support.inline_artifacts import inline_compiles
+
+        temporary = generated_cad_directory(prefix="memo-imported-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        os.environ["CADGEN_CACHE_DIR"] = str(self.root / "store")
+        self.enterContext(inline_compiles())
+        self.vendor = self.root / "vendor.step"
+        _vendor(self.vendor, 4)
+
+    def _model(self, pin):
+        from build123d import Axis, Solid
+
+        from cadgen import read_step
+
+        vendor = read_step(self.vendor)
+        bored = vendor.cut(Solid.make_cylinder(1, 30))
+        valid = bored.is_valid
+        rounded = bored.fillet(0.5, bored.edges().filter_by(Axis.Z).sort_by(Axis.X)[:1])
+        return vendor, bored, valid, rounded, Solid.make_cylinder(pin, 5)
+
+    def test_what_is_made_of_a_read_hits_until_its_bytes_change(self) -> None:
+        plain = self._model(1.0)  # no run: plain build123d
+        (vendor, bored, valid, rounded, _peg), cold, cold_run = _run(self._model, 1.0)
+        self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
+        self.assertEqual(cold_run.tally["uncached"], 0)
+        self.assertTrue(valid)
+        with mock.patch.object(kernel_memo, "_decoding", wraps=kernel_memo._decoding) as made:
+            (vendor2, bored2, valid2, rounded2, _peg), edited, edited_run = _run(self._model, 1.5)
+        made.assert_not_called()  # nothing read again
+        self.assertEqual((edited["misses"], edited["unkeyable"]), (1, 0), "the peg alone")
+        self.assertEqual(edited["hits"], cold["misses"] - 1)
+        self.assertEqual(edited_run.tally, {"hits": edited["hits"], "misses": 1, "uncached": 0})
+        self.assertEqual([vendor2 is vendor, bored2 is bored, rounded2 is rounded], [True] * 3)
+        self.assertTrue(valid2)
+        self.assertEqual(_bytes(rounded2.wrapped), _bytes(plain[3].wrapped))
+        _vendor(self.vendor, 5)
+        (vendor3, bored3, _valid, rounded3, _peg), changed, _ = _run(self._model, 1.5)
+        self.assertIsNot(vendor3, vendor, "another file's bytes are another tree")
+        self.assertEqual((changed["hits"], changed["unkeyable"]), (2, 0), "the tool and the peg")
+        self.assertFalse(any(new.wrapped.IsPartner(old.wrapped) for new, old in ((bored3, bored), (rounded3, rounded))))
+        self.assertAlmostEqual(vendor3.volume, 8 * 6 * 5)
+
+
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""
 
