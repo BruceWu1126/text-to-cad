@@ -368,6 +368,10 @@ remapped by the maker. Moving a whole assembly therefore cannot count a
 sibling's primitive makers in a leaf's names or invent names for foreign
 leaves. Derivation structures are captured at the copy boundary and names are
 rendered on demand; a memo hit binds the context to the current run's features.
+Each run retains its own native registrations and maker bindings: a nested
+run's hits or entry replacements cannot remove the parent's source provenance.
+An unreplayable native mutation retires the shared registration in every run
+that still holds it; ordinary eviction does not invalidate unchanged geometry.
 A later consuming construction can pin an author label to that particular
 copied output. Distinct outputs of one assembly copy keep independent labels,
 even if their source bodies shared native geometry; earlier geometry keeps its

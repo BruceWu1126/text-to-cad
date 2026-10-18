@@ -417,8 +417,8 @@ def _helper(slot: str, function: Any) -> Any:
 
 
 class _Run:
-    """One model run: its trace, its per-key call counts, the results that are
-    not memoizable (registered for the run only) and the nesting depth."""
+    """One model run: its trace, call counts, native registrations and maker
+    bindings, transient results and nesting depth."""
 
     def __init__(self, script_path: Path | None) -> None:
         self.id = next(_RUN_IDS)
@@ -426,6 +426,11 @@ class _Run:
         self.counts: dict[int, int] = {}
         self.depth = 0
         self.transient: dict[Any, _Made] = {}
+        # Entry reuse and eviction belong to the shared memo. The registrations
+        # and feature indices already observed by this run remain its own.
+        self.registered: dict[Any, _Made] = {}
+        self.owners: dict[_Made, int] = {}
+        self.previous: _Run | None = getattr(_LOCAL, "run", None)
 
     def count(self, key_id: int) -> int:
         n = self.counts.get(key_id, 0) + 1
@@ -437,8 +442,7 @@ class _Run:
         made = _made_of(tshape, self)
         if made is None:
             return None
-        root = made.root()
-        return root.feature if root.run == self.id else None
+        return self.owners.get(made.root())
 
     def feature_of(self, shape: Any) -> int | None:
         """The feature that made ``shape``: the one that returned the object, else
@@ -562,7 +566,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             # The very shapes the miss made, so the history it captured is theirs: no maker runs.
             feature.history = entry.history
             copied = _copy_origins(feature, state)
-            entry.refresh(feature.index, state.id, copied)
+            entry.refresh(feature.index, state, copied)
             _STATS["hits"] += 1
             return None if kind == "constructor" else result
         try:
@@ -986,10 +990,29 @@ def _placed_key(shape: Any, state: _Run) -> tuple:
 
 
 def _made_of(tshape: Any, state: _Run | None) -> "_Made | None":
-    found = _REGISTRY.get(tshape)
-    if found is None and state is not None:
+    if state is not None:
+        found = state.registered.get(tshape)
+        if found is not None and not found.tainted:
+            return found
         found = state.transient.get(tshape)
-    return found
+        if found is not None and not found.tainted:
+            return found
+    found = _REGISTRY.get(tshape)
+    if found is not None and not found.tainted:
+        return found
+    # A nested run can receive an outer run's live input after its entry was
+    # evicted. Share that registration so a native mutation retires both views,
+    # without borrowing the ancestor's feature index for this run's trace.
+    ancestor = state.previous if state is not None else None
+    while ancestor is not None:
+        found = ancestor.registered.get(tshape)
+        if found is not None and not found.tainted:
+            return found
+        found = ancestor.transient.get(tshape)
+        if found is not None and not found.tainted:
+            return found
+        ancestor = ancestor.previous
+    return None
 
 
 def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made":
@@ -1015,6 +1038,7 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
     with _LOCK:
         if parent_made.persistent():
             _REGISTRY[tshape] = made
+            state.registered[tshape] = made
         else:
             state.transient[tshape] = made
     return made
@@ -1220,12 +1244,11 @@ def _stable_placed(placed: tuple) -> tuple:
 class _Made:
     """What the memo knows about one ``TShape``: the entry that made it and the
     position of the shape among that call's results (or the sub-shape relation
-    that names it), the feature of the current run that made it, the effects
-    operations have had on it since, and the sub-shapes of it that have entries
-    of their own."""
+    that names it), the effects operations have had on it since, and its own
+    registered sub-shapes. Runs bind their own features to this shared record."""
 
     __slots__ = ("tshape", "key", "position", "feature", "run", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born", "origin")
+                 "subs", "born", "origin", "tainted")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
@@ -1245,6 +1268,9 @@ class _Made:
         # Immutable source material, never a source _Made whose effects can grow.
         # None is a certified copy of unknown construction; _NO_COPY is no copy.
         self.origin = origin
+        # Unlike eviction, an unreplayable native mutation invalidates every
+        # run still holding this very registration and its sub-shape records.
+        self.tainted = False
 
     def root(self) -> "_Made":
         made = self
@@ -1330,7 +1356,9 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int, state: _Ru
                 state.transient[tshape] = made
             else:
                 _REGISTRY[tshape] = made
+                state.registered[tshape] = made
                 created.append(made)
+            state.owners[made] = feature
     return created
 
 
@@ -1342,7 +1370,8 @@ def _drop(entry: "_Entry") -> None:
     pending = list(entry.made)
     while pending:
         made = pending.pop()
-        _REGISTRY.pop(made.tshape, None)
+        if _REGISTRY.get(made.tshape) is made:
+            _REGISTRY.pop(made.tshape)
         for effect in made.effects:
             effect.forget()
         if made.parent is None:
@@ -1358,15 +1387,23 @@ def _taint(made: _Made | None, state: _Run) -> None:
         return
     root = made.root()
     with _LOCK:
+        pending = [root]
+        while pending:
+            item = pending.pop()
+            item.tainted = True
+            pending.extend(item.subs)
         if root.entry is not None:
-            _MEMO.pop(root.entry.key, None)
+            if _MEMO.get(root.entry.key) is root.entry:
+                _MEMO.pop(root.entry.key)
             _drop(root.entry)
         else:
             pending = [root]
             while pending:
                 item = pending.pop()
-                state.transient.pop(item.tshape, None)
-                _REGISTRY.pop(item.tshape, None)
+                if state.transient.get(item.tshape) is item:
+                    state.transient.pop(item.tshape)
+                if _REGISTRY.get(item.tshape) is item:
+                    _REGISTRY.pop(item.tshape)
                 pending.extend(item.subs)
 
 
@@ -1433,10 +1470,16 @@ class _Entry:
                 return False
         return True
 
-    def refresh(self, feature: int, run_id: int, copied: dict[int, tuple | None]) -> None:
+    def refresh(self, feature: int, state: _Run, copied: dict[int, tuple | None]) -> None:
         for made in self.made:
             made.feature = feature
-            made.run = run_id
+            made.run = state.id
+            state.owners[made] = feature
+            pending = [made]
+            while pending:
+                item = pending.pop()
+                state.registered[item.tshape] = item
+                pending.extend(item.subs)
             if made.position in copied:
                 made.origin = copied[made.position]
 

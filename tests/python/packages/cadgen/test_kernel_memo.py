@@ -337,6 +337,48 @@ class MissTest(KernelMemoCase):
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""
 
+    def test_nested_memo_reuse_keeps_the_parent_sources_deferred_copy_identity(self) -> None:
+        from build123d import Compound, Location, Solid
+
+        def part():
+            body = Solid.make_box(4, 4, 4).cut(Solid.make_cylinder(1, 6)).clean()
+            body.label = "part"
+            return body
+
+        def model(nested):
+            source = part()
+            first = source.moved(Location((10, 0, 0)))
+            if nested:
+                with kernel_memo.run(None) as child:
+                    reused = part()
+                    self.assertIsNotNone(child.made_by(reused.wrapped.TShape()))
+                    if kernel_memo.enabled():
+                        self.assertIs(reused, source, "a child hit returns the same native and Python object")
+                    else:
+                        self.assertIsNot(reused, source)
+            copied = Compound(children=[source, first]).moved(Location((1, 0, 0)))
+            state = kernel_memo._LOCAL.run
+            # Publication asks for the first account only after the child has
+            # refreshed or replaced the shared entries and the assembly copied.
+            return source, [state.identify(body) for body in (source, first, *copied.children)]
+
+        (_source, baseline), _, _ = _run(model, False)
+        self.assertIsNotNone(baseline[0][0])
+        self.assertTrue(all(baseline[0][1][kind] for kind in ("faces", "edges", "vertices")))
+        self.assertEqual(baseline, [baseline[0]] * 4)
+        kernel_memo.clear()
+        original = None
+        for memo in ("1", "1", "0"):
+            with self.subTest(memo=memo):
+                os.environ["CADGEN_KERNEL_MEMO"] = memo
+                (source, identities), stats, _ = _run(model, True)
+                self.assertEqual(stats["errors"], 0)
+                self.assertEqual(identities, baseline)
+                if original is None:
+                    original = source
+                elif memo == "1":
+                    self.assertIs(source, original)
+
     def test_nested_assembly_copies_preserve_each_leafs_deferred_identity(self) -> None:
         import copy
         from build123d import Compound, Location, Solid
@@ -560,6 +602,63 @@ class EffectTest(KernelMemoCase):
     """The kernel's changes to its inputs: an extrusion clears its profile's ``Free``
     flag and appends representations to the profile's edges (a boolean, run
     non-destructive, changes none: ``BooleanTest``)."""
+
+    def test_nested_unreplayable_mutation_retires_outer_views_without_evicting_a_replacement(self) -> None:
+        from build123d import Compound, Location, Solid
+        from OCP.BRep import BRep_Builder
+
+        addition = Solid.make_box(1, 1, 1).moved(Location((10, 0, 0)))
+        builder = BRep_Builder()
+
+        def part():
+            return Compound(children=[Solid.make_box(2, 3, 4)])
+
+        def mutate(root):
+            free = root.wrapped.Free()
+            root.wrapped.Free(True)
+            try:
+                builder.Add(root.wrapped, addition.wrapped)
+            finally:
+                root.wrapped.Free(free)
+            return root
+
+        mutation = kernel_memo._wrap("mutate", mutate, "function")
+        for replace in (False, True):
+            with self.subTest(replace=replace):
+                kernel_memo.clear()
+                with kernel_memo.run(None) as parent:
+                    source = part()
+                    before = parent.identify(source)
+                    made = kernel_memo._made_of(source.wrapped.TShape(), parent)
+                    face = source.faces()[0]
+                    kernel_memo._placed_key(face, parent)
+                    sub = kernel_memo._made_of(face.wrapped.TShape(), parent)
+                    self.assertIs(sub.root(), made)
+                    with kernel_memo.run(None) as child:
+                        if replace:
+                            with mock.patch.dict(os.environ, {"CADGEN_KERNEL_MEMO": "0"}):
+                                replacement = part()
+                            replacement_made = kernel_memo._made_of(replacement.wrapped.TShape(), child)
+                            self.assertIsNot(replacement_made.entry, made.entry)
+                            self.assertEqual(replacement_made.entry.key, made.entry.key)
+                        self.assertIs(kernel_memo._made_of(source.wrapped.TShape(), child), made,
+                                      "an evicted outer input still shares its live registration")
+                        self.assertIsNone(child.made_by(source.wrapped.TShape()),
+                                          "a child cannot borrow an outer feature index")
+                        mutation(source)
+                    self.assertTrue(made.tainted)
+                    self.assertTrue(sub.tainted)
+                    self.assertIsNone(parent.made_by(source.wrapped.TShape()))
+                    self.assertIsNone(kernel_memo._made_of(face.wrapped.TShape(), parent))
+                    self.assertIsNone(parent.identify(source)[0])
+                    copied = source.moved(Location((0, 5, 0)))
+                    self.assertIsNone(parent.identify(copied)[0])
+                    self.assertNotEqual(parent.identify(copied)[1], before[1])
+                if replace:
+                    same, stats, _ = _run(part)
+                    self.assertTrue(same.wrapped.IsSame(replacement.wrapped),
+                                    "tainting an old entry cannot evict its fresh replacement")
+                    self.assertEqual((stats["hits"], stats["misses"], stats["errors"]), (2, 0, 0))
 
     def test_effects_on_inputs_are_replayed_on_a_hit_and_undone_when_the_operation_is_gone(self) -> None:
         from build123d import Face, Solid, Vector, Wire
