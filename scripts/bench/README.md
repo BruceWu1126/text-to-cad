@@ -49,7 +49,7 @@ the edit loop about 25 minutes per side. The harness gives each commit a
 detached worktree under the output directory with this checkout's built
 runtime copied in, builds each model from that worktree's own sources and
 models with the venv's Python, `PYTHONPATH` on the worktree's
-`packages/cadgen/src`, a fresh store and no daemon, alternating base and head
+`packages/cadgen/src`, a fresh store and a fresh daemon, alternating base and head
 with the order flipped each round, then runs the moonwatch edit loop
 (`cadgen-performance/agent_edits.py`, on a disposable copy of each side's
 `models/moonwatch`) for both sides, and removes the worktrees. It writes

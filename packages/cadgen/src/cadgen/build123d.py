@@ -13,9 +13,9 @@ identity checks all behave exactly as they would on the real module.
 
 Why lazy: a model script's module body must stay featherweight so the
 ``@step`` decorator can gate (freshness check) and dispatch (warm daemon)
-BEFORE any OCP cost is paid. On the warm path the invoking process never
-resolves a single attribute; on a skipped (current) build nothing resolves at
-all, so even daemonless no-op re-runs stay fast.
+BEFORE any OCP cost is paid. The invoking process never resolves a single
+attribute; on a skipped (current) build nothing resolves at all, so a no-op
+re-run stays fast.
 
 This is a TRANSPARENT re-export by design rule: same names, same signatures,
 never "improved" — agents' build123d knowledge must transfer 1:1.

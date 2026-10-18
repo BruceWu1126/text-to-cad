@@ -219,7 +219,7 @@ the file IS the product, and both the CAD Viewer and `dxf snapshot` draw it
 straight from its own bytes. The drawing's gate makes a rebuild cheap: an unchanged
 source whose `.dxf` still verifies and whose part children are unchanged is a
 no-op, and `--force` rebuilds anyway. The bytes are a function of the
-drawing's GEOMETRY, so a cold run and a warm daemon worker write the same
+drawing's GEOMETRY, so a fresh daemon worker and a warm one write the same
 file. Builds never wait on or cancel one another; a drawing that calls parts
 builds the stale ones in its own process, one at a time, like any parent.
 

@@ -231,8 +231,8 @@ def _runtime_roots() -> tuple[Path, ...]:
         # would mark the model folder and every ``src/lib`` helper as runtime,
         # drop them from the recorded closure, and silently disable staleness
         # detection for exactly the layout the cad skill's project-layout reference mandates
-        # (and make the daemon and daemonless paths record DIFFERENT closures
-        # for one source). ``is_file()`` additionally rejects interactive /
+        # (and make a worker's build and one in a process the daemon started
+        # record DIFFERENT closures for one source). ``is_file()`` additionally rejects interactive /
         # stdin / ``-c`` placeholders like ``<stdin>``.
         try:
             resolved_main = Path(main_file).resolve()

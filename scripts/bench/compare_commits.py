@@ -6,7 +6,7 @@ scripts/bench/README.md). Each commit gets a detached worktree of its own under 
 directory, with this checkout's built runtime (packages/cadgen/src/cadgen/_runtime, from
 scripts/bundle/bundle.sh) copied in. Every run executes that worktree's own sources and models:
 the active venv's Python with PYTHONPATH on the worktree's packages/cadgen/src, a fresh store,
-no daemon. Runs alternate base and head, and the order flips every round, so drift on a shared
+a fresh daemon. Runs alternate base and head, and the order flips every round, so drift on a shared
 machine falls on both sides alike. The worktrees are removed when the harness exits.
 
 usage: scripts/bench/compare_commits.py --base REV --head REV [--rounds N] [--models a,b,c]
