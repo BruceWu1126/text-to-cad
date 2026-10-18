@@ -342,7 +342,7 @@ function ColorPicker({
           tabIndex={0}
           aria-label="Saturation and brightness"
           aria-valuetext={`${Math.round(colorNumbers.hsv.s)}% saturation, ${Math.round(colorNumbers.hsv.v)}% brightness`}
-          className="relative h-32 touch-none overflow-hidden rounded-md border shadow-inner outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          className="relative h-28 touch-none overflow-hidden rounded-md border shadow-inner outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
           style={{
             backgroundColor: svColor,
             backgroundImage: "linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)"
@@ -430,7 +430,7 @@ function ColorPicker({
         </div>
 
         {format === "hex" ? (
-          <div className="flex gap-2">
+          <div className="flex gap-1">
             <Input
               value={hexDraft}
               onChange={(event) => setHexDraft(event.currentTarget.value)}
@@ -448,6 +448,7 @@ function ColorPicker({
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="size-7 shrink-0"
                 onClick={pickFromScreen}
                 aria-label="Pick color from screen"
 
@@ -459,7 +460,7 @@ function ColorPicker({
         ) : null}
 
         {format === "rgb" ? (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-1">
             <ColorNumberInput label="R" value={colorNumbers.rgb.r} min={0} max={255} onChange={(nextValue) => setRgbChannel("r", nextValue)} />
             <ColorNumberInput label="G" value={colorNumbers.rgb.g} min={0} max={255} onChange={(nextValue) => setRgbChannel("g", nextValue)} />
             <ColorNumberInput label="B" value={colorNumbers.rgb.b} min={0} max={255} onChange={(nextValue) => setRgbChannel("b", nextValue)} />
@@ -467,7 +468,7 @@ function ColorPicker({
         ) : null}
 
         {format === "hsl" ? (
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-1">
             <ColorNumberInput label="H" value={colorNumbers.hsl.h} min={0} max={360} onChange={(nextValue) => setHslChannel("h", nextValue)} />
             <ColorNumberInput label="S" value={colorNumbers.hsl.s} min={0} max={100} onChange={(nextValue) => setHslChannel("s", nextValue)} />
             <ColorNumberInput label="L" value={colorNumbers.hsl.l} min={0} max={100} onChange={(nextValue) => setHslChannel("l", nextValue)} />
@@ -509,7 +510,7 @@ function ColorPicker({
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align={popoverAlign} className="w-64 space-y-3 p-3">{controls}
+      <PopoverContent align={popoverAlign} className="w-56 space-y-2 p-2">{controls}
       </PopoverContent>
     </Popover>
   )

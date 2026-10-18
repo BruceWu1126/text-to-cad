@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, promptReferenceIds } from './index.js';
+import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, parsePromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
 
 const reference = { resource: { kind: 'workspace-file', path: '/work/STEP/my part.step', revision: 'v1' }, target: { kind: 'cad-selector', selectors: ['o1.2.f45'] } };
 test('one context retains image/reference relationships and formats canonical references', () => {
@@ -13,12 +13,24 @@ test('one context retains image/reference relationships and formats canonical re
 });
 test('a message says what the person wrote, then the file, its references and a picture saved as a file', () => {
   const file = { resource: reference.resource, target: { kind: 'whole-resource' } };
-  const sketch = { id: 'sketch', kind: 'attachment', name: 'part-sketch.png', mimeType: 'image/png', content: new Blob(), about: ['file'], label: 'Sketch' };
-  const context = createPromptContext([textPart('Round this edge.\n'), referencePart(file, 'file'), referencePart(reference, 'face'), sketch]);
+  const annotation = { id: 'annotation', kind: 'attachment', name: 'part-annotation.png', mimeType: 'image/png', content: new Blob(), about: ['file'], label: 'Annotation' };
+  const context = createPromptContext([textPart('Round this edge.\n'), referencePart(file, 'file'), referencePart(reference, 'face'), annotation]);
   assert.equal(formatPromptMessage(context, { attachmentPath: part => `/tmp/${part.name}` }),
-    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#o1.2.f45\nSketch: /tmp/part-sketch.png');
+    'Round this edge.\n\nFile: "/work/STEP/my part.step"\nReferences:\n"/work/STEP/my part.step"#o1.2.f45\nAnnotation: /tmp/part-annotation.png');
   // A picture sent beside the text is not named in it.
-  assert.equal(formatPromptMessage(createPromptContext([textPart('Why?'), referencePart(file, 'file'), sketch])), 'Why?\n\nFile: "/work/STEP/my part.step"');
+  assert.equal(formatPromptMessage(createPromptContext([textPart('Why?'), referencePart(file, 'file'), annotation])), 'Why?\n\nFile: "/work/STEP/my part.step"');
+});
+
+test('a file already saved says where, as soon as it is; one that never will be fails the context', async () => {
+  const file = { resource: reference.resource, target: { kind: 'whole-resource' } };
+  const views = { id: 'views', kind: 'attachment', name: 'part.job.json', mimeType: 'application/json', content: new Blob(), about: ['file'],
+    label: 'Views', path: Promise.resolve('/tmp/p/part-1.job.json') };
+  const context = createPromptContext([textPart('Thicker.'), referencePart(file, 'file'), views]);
+  const paths = await resolveAttachmentPaths(context);
+  assert.deepEqual([...paths], [['views', '/tmp/p/part-1.job.json']]);
+  assert.equal(formatPromptMessage(context, { attachmentPath: part => paths.get(part.id) }),
+    'Thicker.\n\nFile: "/work/STEP/my part.step"\nViews: /tmp/p/part-1.job.json');
+  assert.throws(() => validatePromptContext({ ...context, parts: [...context.parts.slice(0, 2), { ...views, path: 7 }] }), /attachment path/);
 });
 test('code targets preserve explicit ranges rather than borrowing the CAD fragment grammar', () => {
   const code = { resource: { kind: 'workspace-file', path: '/work/src/bracket.py' }, target: { kind: 'text-range', start: { line: 4, character: 2 }, end: { line: 6, character: 0 } } };
@@ -32,13 +44,17 @@ test('a reference names its ids as a person reads them: each selector, a range f
   assert.deepEqual(promptReferenceIds({ ...range, target: { kind: 'whole-resource' } }), []);
 });
 
-test('a KiCad document names its references as board selectors, as the agent resolver reads them', () => {
+test('a KiCad board names its references as board selectors, as the agent resolver reads them', () => {
   const board = { resource: { kind: 'workspace-file', path: '/work/PCB/servo hat.kicad_pcb' }, target: { kind: 'cad-selector', selectors: ['#U3', '#J4.A4', '#net:"a,b"', '#@x1.5y-2'] } };
   assert.equal(formatPromptReference(referencePart(board).reference), '"/work/PCB/servo hat.kicad_pcb"#U3,J4.A4,net:"a,b",@x1.5y-2');
   assert.deepEqual(promptReferenceIds(board), ['#U3', '#J4.A4', '#net:"a,b"', '#@x1.5y-2']);
   // STEP's grammar is not a board's, and a board's is not STEP's.
   assert.throws(() => referencePart({ ...board, target: { kind: 'cad-selector', selectors: ['o1.2.f45'] } }), /invalid CAD/);
   assert.throws(() => referencePart({ ...reference, target: { kind: 'cad-selector', selectors: ['#U3.9'] } }), /invalid CAD/);
+  // A board's copied reference pasted into a note is that reference again, in the board's grammar.
+  assert.deepEqual(parsePromptReference('/work/blinky.kicad_pcb#R1,R1.2,net:VBUS'),
+    { resource: { kind: 'workspace-file', path: '/work/blinky.kicad_pcb' }, target: { kind: 'cad-selector', selectors: ['#R1', '#R1.2', '#net:VBUS'] } });
+  assert.equal(parsePromptReference('/work/blinky.kicad_pcb#R1 and more'), null);
 });
 
 test('invalid bundles fail before delivery, including dangling relationships and unknown targets', () => {
@@ -72,19 +88,16 @@ test('a delivery ledger delivers each operation once, bounds work in flight, and
   assert.equal(restarted, 1, 'the oldest completed operation was evicted');
 });
 
-test('a selection with a summary reads its summary, then its references', () => {
-  const summarized = { resource: { kind: 'workspace-file', path: '/work/board.kicad_pcb' }, target: { kind: 'cad-selector', selectors: ['#U2.7', '#C4.1'] },
-    summary: "U2's VDD: the nearest decoupling capacitor, C4, is 9.1 mm away (aim for under 3 mm)" };
-  assert.equal(formatPromptMessage(createPromptContext([textPart('fix this'), referencePart(summarized)])),
-    "fix this\n\nReferences:\nU2's VDD: the nearest decoupling capacitor, C4, is 9.1 mm away (aim for under 3 mm) · /work/board.kicad_pcb#U2.7,C4.1");
-});
 
-test('a part picked in a model keeps its message: a label alone is not written', () => {
-  const part = { resource: { kind: 'workspace-file', path: '/models/x.step' }, target: { kind: 'cad-selector', selectors: ['o1.2'] }, label: 'arm' };
-  assert.equal(formatPromptMessage(createPromptContext([textPart('fix this'), referencePart(part)])), 'fix this\n\nReferences:\n/models/x.step#o1.2');
-});
-
-test('a summary must be text', () => {
-  const bad = { resource: { kind: 'workspace-file', path: '/work/board.kicad_pcb' }, target: { kind: 'cad-selector', selectors: ['#U2'] }, summary: 4 };
-  assert.throws(() => validatePromptContext(createPromptContext([referencePart(bad)])), /summary must be text/);
+test('prompt serialization prefers inline text and preserves references without reading file bytes', async () => {
+  const { resolvePromptMessage } = await import('./index.js');
+  const small = { id: 'snapshot', kind: 'attachment', name: 'a.snapshot.json', mimeType: 'application/json',
+    content: { then() { throw new Error('must not fetch bytes'); } },
+    inlineText: Promise.resolve('Snapshot JSON:\n{"jobs":[]}'), path: Promise.resolve('') };
+  const context = createPromptContext([textPart('Keep it.'), small]);
+  assert.equal(await resolvePromptMessage(context), 'Keep it.\n\nSnapshot JSON:\n{"jobs":[]}');
+  assert.equal(await resolvePromptMessage(createPromptContext([textPart('Keep it.'), { ...small,
+    inlineText: Promise.resolve(null), path: Promise.resolve('/tmp/a.snapshot.json'), label: 'Snapshot' }])),
+    'Keep it.\n\nSnapshot: /tmp/a.snapshot.json');
+  await assert.rejects(resolvePromptMessage(createPromptContext([{ ...small, inlineText: Promise.reject(new Error('save failed')) }])), /save failed/);
 });

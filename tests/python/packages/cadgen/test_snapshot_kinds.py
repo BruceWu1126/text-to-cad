@@ -251,30 +251,29 @@ class GeneratedHelpTests(unittest.TestCase):
 
     def test_step_only_options_appear_for_the_step_door(self):
         step_help = door_help("step")
-        for present in ("--kinematics", "--animation", "--time", "--focus", "section", "--view-labels"):
+        for present in ("--kinematics", "--animation", "--time", "--focus", "--view-labels"):
             self.assertIn(present, step_help)
 
-    def test_display_is_the_one_view_option_on_every_door_that_has_a_scene(self):
+    def test_display_grid_and_preview_are_the_view_options_on_every_door_that_has_a_scene(self):
         for door in SCENE_DOORS:
             with self.subTest(door=door):
                 text = door_help(door)
-                self.assertIn("--display", text)
+                for present in ("--display", "--grid", "--preview"):
+                    self.assertIn(present, text)
                 self.assertNotIn("--render", text)
                 self.assertNotIn("--theme", text)
                 self.assertNotIn("--appearance", text)
 
-    def test_the_flat_doors_take_an_appearance_instead_of_a_display(self):
-        # The exception: there is no scene to configure, so `--appearance` is
-        # not a second spelling of `--display` — it is what is left when
-        # everything else has no meaning.
-        for door in FLAT_DOORS:
-            with self.subTest(door=door):
-                text = door_help(door)
-                self.assertIn("--appearance", text)
-                for absent in ("--display", "--camera", "--mode", "--view-labels", "--render", "--theme"):
-                    self.assertNotIn(absent, text, f"{absent} describes a scene a flat picture does not have")
+    def test_the_drawing_door_takes_an_appearance_instead_of_a_display(self):
+        # The exception, and the only one: there is no scene to configure, so
+        # `--appearance` is not a second spelling of `--display` — it is what
+        # is left when everything else has no meaning.
+        text = door_help("dxf")
+        self.assertIn("--appearance", text)
+        for absent in ("--display", "--grid", "--preview", "--camera", "--mode", "--view-labels", "--render", "--theme"):
+            self.assertNotIn(absent, text, f"{absent} describes a scene a drawing does not have")
 
-    def test_the_plot_door_takes_the_boards_display_and_an_appearance_and_nothing_of_a_scene(self):
+    def test_the_board_door_takes_the_boards_display_and_an_appearance_and_nothing_of_a_scene(self):
         # A board is as flat as a drawing, but it has a Display of its own in the
         # viewer — which layers are drawn, the pours, the side — and `--display`
         # here is that same object, so a snapshot draws what the Display shows.
@@ -285,7 +284,8 @@ class GeneratedHelpTests(unittest.TestCase):
                 self.assertIn("--display", text)
                 for word in ("board", "copper", "assembly", "placement", "layers", "poured", "side"):
                     self.assertIn(word, text)
-                for absent in ("--camera", "--mode", "--view-labels", "--render", "--theme", "lighting", "wireframe"):
+                for absent in ("--grid", "--preview", "--camera", "--mode", "--view-labels", "--render", "--theme",
+                               "lighting", "wireframe"):
                     self.assertNotIn(absent, text, f"{absent} describes a scene a board's picture does not have")
         pcb_help = door_help("pcb")
         self.assertIn(".kicad_pcb", pcb_help)

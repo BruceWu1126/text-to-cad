@@ -5,8 +5,13 @@
  * This is the CLI half of the viewer's DXF pane, and deliberately shares its
  * whole drawing path (`../lib/drawing2d`): the same fit, the same hairline rule,
  * the same default-pen resolution against the same theme pair. A drawing has
- * no scene, no camera and no lights, so nothing here touches three.js — the
+ * no scene and no lights, so nothing here renders with three.js — the
  * headless entry routes a `dxf` job straight past the mesh pipeline.
+ *
+ * A job may frame it (a plan-view `camera`, the window a Quick Edit's view was
+ * looking at) and draw over it (an `annotation` whose marks lie on the sheet, and
+ * Measure's `measurements`), with the code the pane draws them with
+ * (`../lib/drawing2d/marks.js`): so a prompt's views come back as they were seen.
  *
  * The payload arrives over the snapshot host's loopback asset server rather
  * than inside the job: cadgen renders it with ezdxf, caches it in the store and
@@ -16,20 +21,94 @@
  */
 import { appThemeColors } from "../lib/appTheme.js";
 import { clearSurface, drawDrawing, fitTransform, prepareDrawing } from "../lib/drawing2d/index.js";
-import { paintOutput, renderOutputs, renderScale } from "./headlessCanvas.js";
+import { drawAnnotationMarks, drawMeasurementMarks } from "../lib/drawing2d/marks.js";
+import { planTransform } from "../lib/drawing2d/planView.js";
+import { ANNOTATION_REFERENCE_HEIGHT_PX, normalizeAnnotation } from "./annotation.js";
 
-/** One output's PNG: the drawing fitted to it, on the appearance's background. */
-function drawOutput(drawable, { width, height, scale, background, foreground }) {
-  return paintOutput({ width, height, scale }, (context) => {
-    clearSurface(context, { width, height, pixelRatio: scale, background });
-    if (drawable.bounds) {
-      drawDrawing(context, drawable, {
-        transform: fitTransform(drawable.bounds, width, height),
-        foreground,
-        pixelRatio: scale
-      });
-    }
-  });
+/** What an output falls back to when the host sent no size (it always does). */
+const DEFAULT_OUTPUT_WIDTH = 1200;
+const DEFAULT_OUTPUT_HEIGHT = 900;
+/** `output.renderScale`'s range, as `renderOptions.configurePngRenderer` clamps it. */
+const MIN_RENDER_SCALE = 1;
+const MAX_RENDER_SCALE = 3;
+
+function positiveInteger(value, fallback) {
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function renderScale(job) {
+  const requested = Number(job?.output?.renderScale);
+  if (!Number.isFinite(requested)) {
+    return MIN_RENDER_SCALE;
+  }
+  return Math.min(MAX_RENDER_SCALE, Math.max(MIN_RENDER_SCALE, requested));
+}
+
+function canvasContext(width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("this browser gave no 2D canvas context, so the drawing cannot be painted");
+  }
+  return { canvas, context };
+}
+
+/**
+ * One output's PNG.
+ *
+ * Painted at `width * scale` and resampled to `width`, exactly as the mesh
+ * path supersamples its drawing buffer: the snapshot contract is expressed in
+ * OUTPUT pixels, so a render scale buys sampling quality and never changes the
+ * size of the file.
+ */
+function drawOutput(drawable, { width, height, scale, background, foreground, camera = null, annotation = null, measurements = null }) {
+  const { canvas, context } = canvasContext(
+    Math.max(1, Math.round(width * scale)),
+    Math.max(1, Math.round(height * scale))
+  );
+  clearSurface(context, { width, height, pixelRatio: scale, background });
+  // A plan view frames the window it names; without one the drawing is fitted whole.
+  const transform = camera ? planTransform(camera, width, height)
+    : drawable.bounds ? fitTransform(drawable.bounds, width, height) : null;
+  if (drawable.bounds && transform) {
+    drawDrawing(context, drawable, { transform, foreground, pixelRatio: scale });
+  }
+  if (transform && annotation?.marks?.length) {
+    drawAnnotationMarks(context, annotation.marks, { transform, pixelRatio: scale, lineScale: height / ANNOTATION_REFERENCE_HEIGHT_PX });
+  }
+  if (transform && measurements?.length) {
+    drawMeasurementMarks(context, measurements, { transform, width, height, pixelRatio: scale });
+  }
+  if (canvas.width === width && canvas.height === height) {
+    return canvas.toDataURL("image/png");
+  }
+  const resampled = canvasContext(width, height);
+  resampled.context.imageSmoothingEnabled = true;
+  if ("imageSmoothingQuality" in resampled.context) {
+    resampled.context.imageSmoothingQuality = "high";
+  }
+  resampled.context.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, width, height);
+  return resampled.canvas.toDataURL("image/png");
+}
+
+/**
+ * A job's annotation, checked as every annotation is, and lying on the sheet: a drawing has no
+ * parts for ink to hang on, so every mark is on none, its points in drawing coordinates.
+ */
+function drawingAnnotation(raw) {
+  if (raw == null) return null;
+  const annotation = normalizeAnnotation(raw);
+  const onPart = annotation.marks.find(mark => mark.part != null);
+  if (Object.keys(annotation.parts).length || onPart) {
+    throw new Error(
+      `annotation: a drawing has no parts for ink to hang on${onPart ? ` (${onPart.id} is on part ${onPart.part})` : ""}; `
+      + "its marks lie on the sheet, on no part, their points in drawing coordinates"
+    );
+  }
+  return annotation;
 }
 
 /**
@@ -51,6 +130,7 @@ export async function runHeadlessDrawingJob(job) {
     throw new Error(`the drawing payload could not be read (HTTP ${response.status} for ${url})`);
   }
   const drawable = prepareDrawing(await response.json());
+  const annotation = drawingAnnotation(job?.annotation);
   const warnings = [];
   if (!drawable.bounds) {
     // A true answer, and one nobody would guess from a blank PNG.
@@ -59,13 +139,26 @@ export async function runHeadlessDrawingJob(job) {
   const { background, foreground } = appThemeColors(job?.display?.appearance);
   const scale = renderScale(job);
   const transparent = job?.output?.transparent === true;
-  const outputs = renderOutputs(job, (width, height) => drawOutput(drawable, {
-    width,
-    height,
-    scale,
-    background: transparent ? null : background,
-    foreground
-  }));
+  const outputs = (Array.isArray(job?.outputs) ? job.outputs : []).map((output) => {
+    const width = positiveInteger(output?.width, DEFAULT_OUTPUT_WIDTH);
+    const height = positiveInteger(output?.height, DEFAULT_OUTPUT_HEIGHT);
+    return {
+      path: String(output?.path || ""),
+      width,
+      height,
+      mimeType: "image/png",
+      dataUrl: drawOutput(drawable, {
+        width,
+        height,
+        scale,
+        background: transparent ? null : background,
+        foreground,
+        camera: output?.camera && typeof output.camera === "object" ? output.camera : null,
+        annotation,
+        measurements: Array.isArray(job?.measurements) ? job.measurements : null
+      })
+    };
+  });
   return {
     ok: true,
     mode: "view",

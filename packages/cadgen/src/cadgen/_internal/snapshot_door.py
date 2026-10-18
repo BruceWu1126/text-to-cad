@@ -8,18 +8,20 @@ the loaders the verb already uses; library-side a real dict through the same
 parameter — so the signature IS the surface and ``cli_from_function`` derives
 the CLI exactly as it does for ``build`` and ``validate``.
 
-Four signature shapes cover the nine doors honestly (the old shared
+Five signature shapes cover the eight doors honestly (the old shared
 signature advertised STEP-only options to every door and refused them at
 runtime):
 
-- STEP: the full surface — section mode and its plane, display, kinematics, animation, focus/hide.
-- mesh (stl/3mf/glb): view/list renders of untyped geometry.
+- STEP: the full surface — display, kinematics, animation, focus/hide.
+- mesh (stl/3mf/glb): view/list renders of untyped geometry, cut by Clip and
+  (a GLB of several parts) exploded.
 - robot (urdf/sdf): the mesh shape plus ``joint_values``.
 - dxf: a DRAWING, not a scene. Where, how big, and light or dark — nothing
   else, because a flat 2D drawing has no camera to pose, no surfaces to
   shade and no parts to list.
-  The pcb door's PLOT — a KiCad board drawn from its file, layer by layer —
-  is as flat, and takes the same shape: light or dark is the surround.
+- pcb: a PLOT, a KiCad board drawn from its file, layer by layer: as flat as
+  a drawing, with the drawing's shape plus the board's own Display (which
+  layers, the pours, the side); light or dark is the surround.
 
 The polymorphic ``cadgen snapshot`` binds the UNION shape (STEP surface +
 ``joint_values``) over every kind at once: a job packet may mix formats, and
@@ -89,12 +91,15 @@ def _run(
     mode: str,
     camera: object,
     display: object = None,
+    grid: bool = False,
+    preview: bool = False,
     kinematics: object = None,
     animation: object = None,
     time: float | None = None,
     video: object = None,
-    section: object = None,
     joint_values: object = None,
+    annotation: object = None,
+    measurements: object = None,
     focus: tuple[str, ...] = (),
     hide: tuple[str, ...] = (),
     width: int | None,
@@ -126,6 +131,8 @@ def _run(
     # keyword), so this is the library caller's rule.
     if display is not None:
         options.display, options.display_specified = display, True
+    options.grid = bool(grid)
+    options.preview = bool(preview)
     if camera is not None:
         options.camera, options.camera_specified = camera, True
     if kinematics is not None:
@@ -149,10 +156,12 @@ def _run(
         options.animation, options.animation_time, options.animation_specified = animation, time, True
     if video is not None:
         options.video, options.video_specified = video, True
-    if section is not None:
-        options.section, options.section_specified = section, True
     if joint_values is not None:
         options.joint_values, options.joint_values_specified = joint_values, True
+    if annotation is not None:
+        options.annotation, options.annotation_specified = annotation, True
+    if measurements is not None:
+        options.measurements, options.measurements_specified = measurements, True
     options.focus = _refs(focus, "focus")
     options.hide = _refs(hide, "hide")
     options.focus_specified, options.hide_specified = bool(options.focus), bool(options.hide)
@@ -188,9 +197,12 @@ def step_snapshot_verb(door: str):
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        grid: bool = False,
+        preview: bool = False,
+        annotation: str | dict | None = None,
+        measurements: str | dict | None = None,
         kinematics: str | dict | None = None,
         animation: str | dict | None = None,
         time: float | None = None,
@@ -214,25 +226,27 @@ def step_snapshot_verb(door: str):
 
         target: the model to render — a .step/.stp document (a model script
             is refused by naming the run that writes the document).
-        out: destination path, written EXACTLY there — .png (section mode
-            also writes .svg, --video writes .mp4/.gif) — or a directory for
+        out: destination path, written EXACTLY there — .png
+            (--video writes .mp4/.gif) — or a directory for
             a generated timestamped name.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}. When given it wins: target/out are ignored, and
             the other flags override every job in it.
-        mode: view (default), section, or list.
-        section: where --mode section cuts, as PLANE[:OFFSET] — the plane is
-            XY, XZ or YZ (default XY) and the offset moves it along its normal
-            in model units (default 0): XZ:12.5 cuts at Y=12.5. In a job,
-            {"plane": "XZ", "offset": 12.5}.
+        mode: view (default) or list.
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: a preset name, grouped display JSON, or JSON file path. Presets
-            are solid (default), render, xray, hidden-line, wireframe and grid.
-            Omitted groups inherit the preset; group objects imply enabled unless
-            explicitly false. appearance is light (default) or dark.
+        display: a mode name, sparse display JSON, or JSON file path. Modes
+            are solid (default; shaded, with CAD edges), shaded (no edges),
+            parts (each part its own colour), xray, hidden-line and wireframe;
+            each is drawn at its defaults. The JSON takes mode, grid,
+            appearance (light, the default, or dark), camera (projection,
+            focalLength), clip and exploded.
+        grid: draw the measuring grid under the model, in any mode.
+        preview: draw Preview's photographic look — studio lighting, floor
+            and environment, perspective — instead of the display mode, at
+            Preview's defaults. View mode only.
         kinematics: pose values — a declared preset name or {dof: value}
             JSON, validated against the model's kinematics declaration;
             available in every display mode.
@@ -248,6 +262,14 @@ def step_snapshot_verb(door: str):
         focus: occurrence ref rendered at full opacity (repeatable); the rest
             of the assembly is ghosted in place.
         hide: occurrence ref left out (repeatable).
+        measurements: dimensions drawn over the picture, as the CAD Viewer's
+            Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
+            "label": "...", "color": "#rrggbb"} (one such object for one), or a path
+            to it. A Quick Edit job carries them; with --job it draws over every job.
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -262,8 +284,9 @@ def step_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, section=section,
+            camera=camera, display=display, grid=grid, preview=preview, kinematics=kinematics,
+            annotation=annotation, measurements=measurements,
+            animation=animation, time=time, video=video,
             focus=focus, hide=hide, width=width, height=height,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
@@ -296,22 +319,33 @@ DRAWING_NO_VIEW_NAME = (
 )
 
 
-def drawing_camera_refusal(subject: str, *, is_: str = DRAWING_IS) -> str:
+# The one camera a drawing takes: its plan view, the window the Viewer's DXF pane shows,
+# in the camera shape every snapshot job speaks (a Quick Edit's views send it).
+DRAWING_PLAN_VIEW = (
+    '{"target": [x, y, 0], "position": [x, y, d], "up": [0, 1, 0], "orthographicHalfHeight": h} '
+    "(looking straight down at the sheet, d > 0, centred on x, y and h drawing units above and below)"
+)
+
+
+def drawing_camera_refusal(
+    subject: str, *, is_: str = DRAWING_IS, noun: str = "a drawing", plan_view: str = DRAWING_PLAN_VIEW
+) -> str:
     """Why ``camera`` is refused -- ``subject`` is the file, or ``a drawing``.
 
-    ``is_`` is what the flat picture IS: a drawing's sentence, or a plot's
-    (:data:`PLOT_KINDS`).
+    ``is_``, ``noun`` and ``plan_view`` say what the flat picture is: a drawing's
+    words, or a board's (:data:`PLOT_KINDS`).
     """
     return (
-        f"camera poses a model in space; {is_}, so {subject} has no camera and no "
-        "views to choose between — it is always shown whole, the way it was drawn."
+        f"camera poses a model in space; {is_}, so {subject} has no camera to pose "
+        f"and no views to choose between. The one camera a job may give {noun} is its plan view, "
+        f"the window to frame: {plan_view}."
     )
 
 
 def drawing_mode_refusal(subject: str, *, is_: str = DRAWING_IS) -> str:
     """Why ``view`` is the only render mode a drawing (or a plot) has."""
     return (
-        f"{is_}: it has no parts to list and no solid to section, so view is the "
+        f"{is_}: it has no parts to list, so view is the "
         f"only mode {subject} renders in."
     )
 
@@ -333,11 +367,11 @@ def drawing_scene_refusal(
 # (`cadgen._internal.cli_from_function.retired_options`).
 DRAWING_RETIRED_OPTIONS: dict[str, str] = {
     "--camera": (
-        f"{drawing_camera_refusal('a drawing')} Drop the flag; there is no view to ask for."
+        f"{drawing_camera_refusal('a drawing')} Drop the flag; give a plan view as a job's camera."
     ),
     "--display": drawing_scene_refusal("display", "a drawing", plural=False),
     "--mode": (
-        f"mode chose between view, section and list; {drawing_mode_refusal('a drawing')} "
+        f"mode chose between view and list; {drawing_mode_refusal('a drawing')} "
         "Drop the flag."
     ),
     "--view-labels": (
@@ -350,13 +384,13 @@ DRAWING_RETIRED_OPTIONS: dict[str, str] = {
 def drawing_snapshot_verb(door: str):
     """The DRAWING-shaped verb: a flat 2D render of a ``.dxf``.
 
-    The narrowest door of the seven, and deliberately so. A DXF is drawn
+    The narrowest door of the eight, and deliberately so. A DXF is drawn
     exactly as the CAD Viewer's DXF pane draws it — the whole drawing, fitted
     to the image, in the pens the file declares on the theme's background — so
     every option that describes a 3D scene is absent from this signature
     rather than accepted and ignored: no ``camera`` (nothing to pose), no
     ``display`` (no surfaces, lighting or render mode), no ``mode`` (a drawing
-    has no parts to list and no solid to section), no ``view_labels`` (no view
+    has no parts to list), no ``view_labels`` (no view
     to label). ``appearance`` is what survives of display, because a default
     pen has no colour until a background is chosen.
 
@@ -471,6 +505,13 @@ PLOT_DOOR_PICTURES: dict[str, str] = {
         "background. KiCad need not be installed."
     ),
 }
+#: The one camera a board takes: its plan view, the window the Viewer's board view shows.
+PLOT_PLAN_VIEW = (
+    '{"target": [x, y, 0], "position": [x, y, d], "up": [0, 1, 0], "orthographicHalfHeight": h} '
+    "(looking straight down at the board, d > 0, centred on x, y and h millimetres above and below, "
+    "in the plot's millimetres with y up: a sheet point's y negated, mirrored about the sheet's middle "
+    "when the board is seen from below)"
+)
 #: What a plot's display IS, said where a scene's settings are refused.
 PLOT_APPEARANCE_HINT = (
     "A board's display is the viewer's Display — mode (board, copper, assembly or "
@@ -581,7 +622,7 @@ def plot_snapshot_verb(door: str):
 
 def mesh_snapshot_verb(door: str):
     """The mesh-shaped verb: view/list renders of untyped geometry —
-    no kinematics, section mode, or selection (nothing to act on)."""
+    no kinematics or selection (nothing to act on)."""
     kinds = DOOR_KINDS[door]
     suffixes = ", ".join(f".{kind}" for kind in kinds)
 
@@ -594,6 +635,10 @@ def mesh_snapshot_verb(door: str):
         mode: str = "view",
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        grid: bool = False,
+        preview: bool = False,
+        annotation: str | dict | None = None,
+        measurements: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
         size_profile: str = "",
@@ -618,11 +663,27 @@ def mesh_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, grouped display JSON, or a JSON file
-            path. Omitted groups inherit the preset; appearance defaults to
-            light. Projection belongs in display.camera. edges, clip, exploded,
-            the xray, hidden-line and wireframe modes and the hidden/off surface
-            styles describe a STEP model and are refused here.
+        display: solid (default), parts (each part or object its own colour),
+            sparse display JSON, or a JSON file path. The JSON takes mode,
+            grid, appearance (light, the default, or dark), camera
+            (projection, focalLength), clip and exploded. clip cuts the model
+            as the viewer's Clip does: {"axis": "x"|"y"|"z", "at": ...,
+            "invert": false}, at in the file's own unit (a GLB's metres, a
+            3MF's declared unit, an STL's numbers). exploded moves a GLB's
+            parts apart (a GLB of several parts only). shaded, xray,
+            hidden-line and wireframe are STEP-only and refused here.
+        grid: draw the measuring grid under the model.
+        preview: draw Preview's photographic look — studio lighting, floor
+            and environment, perspective — instead of the display mode, at
+            Preview's defaults. View mode only.
+        measurements: dimensions drawn over the picture, as the CAD Viewer's
+            Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
+            "label": "...", "color": "#rrggbb"} (one such object for one), or a path
+            to it. A Quick Edit job carries them; with --job it draws over every job.
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -637,7 +698,8 @@ def mesh_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, width=width, height=height,
+            camera=camera, display=display, grid=grid, preview=preview, width=width, height=height,
+            annotation=annotation, measurements=measurements,
             size_profile=size_profile, view_labels=view_labels, debug=debug,
         )
 
@@ -660,6 +722,10 @@ def robot_snapshot_verb(door: str):
         joint_values: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        grid: bool = False,
+        preview: bool = False,
+        annotation: str | dict | None = None,
+        measurements: str | dict | None = None,
         width: int | None = None,
         height: int | None = None,
         size_profile: str = "",
@@ -687,11 +753,25 @@ def robot_snapshot_verb(door: str):
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-        display: solid (default) or render, grouped display JSON, or a JSON file
-            path. Omitted groups inherit the preset; appearance defaults to
-            light. Projection belongs in display.camera. edges, clip, exploded,
-            the xray, hidden-line and wireframe modes and the hidden/off surface
-            styles describe a STEP model and are refused here.
+        display: solid (default), parts (each link its own colour), sparse
+            display JSON, or a JSON file path. The JSON takes mode, grid,
+            appearance (light, the default, or dark), camera (projection,
+            focalLength) and clip, which cuts the robot as the viewer's Clip
+            does: {"axis": "x"|"y"|"z", "at": <metres>, "invert": false}.
+            exploded, shaded, xray, hidden-line and wireframe are refused
+            here: a robot is posed with joint_values.
+        grid: draw the measuring grid under the robot.
+        preview: draw Preview's photographic look — studio lighting, floor
+            and environment, perspective — instead of the display mode, at
+            Preview's defaults. View mode only.
+        measurements: dimensions drawn over the picture, as the CAD Viewer's
+            Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
+            "label": "...", "color": "#rrggbb"} (one such object for one), or a path
+            to it. A Quick Edit job carries them; with --job it draws over every job.
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -706,7 +786,8 @@ def robot_snapshot_verb(door: str):
         return _run(
             kinds,
             target=target, out=out, job=job, mode=mode,
-            joint_values=joint_values, camera=camera, display=display,
+            joint_values=joint_values, camera=camera, display=display, grid=grid, preview=preview,
+            annotation=annotation, measurements=measurements,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )
@@ -727,9 +808,12 @@ def polymorphic_snapshot_verb():
         *,
         job: Path | None = None,
         mode: str = "view",
-        section: str | dict | None = None,
         camera: str | dict | None = None,
         display: str | dict | None = None,
+        grid: bool = False,
+        preview: bool = False,
+        annotation: str | dict | None = None,
+        measurements: str | dict | None = None,
         kinematics: str | dict | None = None,
         animation: str | dict | None = None,
         time: float | None = None,
@@ -748,32 +832,39 @@ def polymorphic_snapshot_verb():
         target: the document to render — STEP/STP, STL/3MF/GLB, DXF, a KiCad
             board (.kicad_pcb), or a robot description (URDF/SRDF/SDF). Run
             model scripts first, then snapshot the document they write.
-        out: destination path, written EXACTLY there — .png (a STEP section
-            also writes .svg, a STEP --video writes .mp4/.gif) — or a directory
+        out: destination path, written EXACTLY there — .png
+            (a STEP --video writes .mp4/.gif) — or a directory
             for a generated timestamped name. A refused request leaves an
             existing OUT untouched; an accepted one clears it first.
         job: a render-job JSON file — one job, an array of them, or
             {"jobs": [...]}; jobs may mix formats. When given it wins, and the
             other flags override every job in it.
-        mode: view (default), section (STEP only), or list (not a DXF or a
-            KiCad board: a drawing or a plot has no parts to list).
-        section: where a STEP --mode section cuts, as PLANE[:OFFSET] — XY, XZ
-            or YZ, offset along the plane's normal in model units: XZ:12.5.
+        mode: view (default) or list (not a DXF or a KiCad board: a
+            drawing or a board has no parts to list).
         camera: a preset (front, back, left, right, top, bottom, iso), an
             "azimuth:elevation" pair, or camera JSON;
             orthographicHalfHeight preserves an orthographic view's scale.
             Projection and focalLength (20..200 mm) belong in display.camera.
-            A DXF or a KiCad board is drawn flat and head on, and refuses a
-            camera.
-        display: solid (default), render, xray, hidden-line, wireframe or grid, grouped
-            display JSON, or a JSON file path. appearance defaults to light.
-            Omitted groups inherit the preset. edges, clip, exploded, the xray,
-            hidden-line and wireframe modes and the hidden/off surface styles
-            describe a STEP model; every other input takes solid or render. A
-            DXF takes appearance alone (`--appearance` on `cadgen dxf snapshot`);
+            A DXF or a KiCad board is drawn flat and head on, and takes no
+            camera but its plan view.
+        display: solid (default), shaded, parts, xray, hidden-line or
+            wireframe, sparse display JSON, or a JSON file path. The JSON
+            takes mode, grid, appearance (light, the default, or dark), camera
+            (projection, focalLength), clip and exploded. shaded, xray,
+            hidden-line and wireframe describe a STEP model; every other scene
+            input takes solid or parts. clip cuts any 3D input, at in its
+            file's unit (STEP millimetres; GLB, URDF and SDF metres; a 3MF's
+            declared unit); exploded takes a STEP model or a GLB of several
+            parts. A DXF takes appearance alone (`cadgen dxf snapshot --appearance`);
             a KiCad board takes its own Display — board, copper, assembly or
             placement, or JSON with mode, side, poured and layers (`cadgen pcb
             snapshot --display`) — and appearance.
+        grid: draw the measuring grid under the model, in any mode; not a DXF
+            or a KiCad board.
+        preview: draw Preview's photographic look — studio lighting, floor
+            and environment, perspective — instead of the display mode, at
+            Preview's defaults. View mode only; not a DXF or a KiCad board,
+            which are drawn flat.
         kinematics: pose values for a STEP model's kinematics — a preset
             name or {dof: value} JSON; available in every display mode.
         animation: one still frame of a STEP model's clip — the clip name
@@ -788,6 +879,14 @@ def polymorphic_snapshot_verb():
         focus: occurrence ref rendered at full opacity (STEP only,
             repeatable); the rest of the assembly is ghosted in place.
         hide: occurrence ref left out (STEP only, repeatable).
+        measurements: dimensions drawn over the picture, as the CAD Viewer's
+            Measure draws them -- a JSON list of {"start": [x, y, z], "end": [x, y, z],
+            "label": "...", "color": "#rrggbb"} (one such object for one), or a path
+            to it. A Quick Edit job carries them; with --job it draws over every job.
+        annotation: ink drawn over the model -- an annotation JSON file (the CAD Viewer
+            writes one with a Quick Edit prompt) or the annotation JSON itself. Each
+            mark is drawn on its part wherever the view puts it; with --job it
+            draws over every job.
         width: output width in pixels (1..8192), overriding the size profile;
             with --job it sizes every output in the packet.
         height: output height in pixels (1..8192), overriding the size profile.
@@ -802,9 +901,10 @@ def polymorphic_snapshot_verb():
         return _run(
             ALL_KINDS,
             target=target, out=out, job=job, mode=mode,
-            camera=camera, display=display, kinematics=kinematics,
-            animation=animation, time=time, video=video, section=section,
+            camera=camera, display=display, grid=grid, preview=preview, kinematics=kinematics,
+            animation=animation, time=time, video=video,
             joint_values=joint_values, focus=focus, hide=hide,
+            annotation=annotation, measurements=measurements,
             width=width, height=height, size_profile=size_profile,
             view_labels=view_labels, debug=debug,
         )

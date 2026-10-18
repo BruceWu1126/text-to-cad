@@ -1,5 +1,5 @@
-import { buildCadRefToken, parseCadRefSelector } from '../lib/cadRefs.js';
-import { buildBoardRefToken, isBoardRefPath, parseBoardRefSelector } from '../lib/boardRefs.js';
+import { buildCadRefToken, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
+import { buildBoardRefToken, isBoardRefPath, parseBoardRefSelector, parseBoardRefToken } from '../lib/boardRefs.js';
 
 let operationSequence = 0;
 const operationNamespace = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -21,13 +21,12 @@ export function validatePromptReference(reference) {
   }
   requireValue(resource.revision === undefined || typeof resource.revision === 'string', 'revision must be a string');
   requireValue(reference.label === undefined || typeof reference.label === 'string', 'label must be text');
-  requireValue(reference.summary === undefined || typeof reference.summary === 'string', 'summary must be text');
   if (target.kind === 'text-range') {
     requireValue(position(target.start) && position(target.end), 'invalid text range');
     requireValue(target.end.line > target.start.line || (target.end.line === target.start.line && target.end.character >= target.start.character), 'range end precedes its start');
   } else if (target.kind === 'cad-selector') {
     requireValue(resource.kind === 'workspace-file', 'CAD selectors require a workspace file');
-    // A KiCad document's selectors are board references (#U3, #U3.9, #net:VIN, #@x1y2); a model's, STEP's.
+    // A KiCad board's selectors are board references (#U3, #U3.9, #net:VIN, #@x1y2); a model's, STEP's.
     const board = isBoardRefPath(resource.path);
     requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => {
       if (typeof selector !== 'string' || selector !== selector.trim()) return false;
@@ -57,6 +56,8 @@ export function validatePromptContext(context) {
       requireValue(part.content && (typeof part.content.arrayBuffer === 'function' || typeof part.content.then === 'function'), 'attachment must provide binary content');
       requireValue(part.about === undefined || (Array.isArray(part.about) && part.about.every(id => typeof id === 'string')), 'attachment relationships must name reference parts');
       requireValue(part.label === undefined || typeof part.label === 'string', 'attachment label must be text');
+      requireValue(part.inlineText === undefined || typeof part.inlineText === 'string' || typeof part.inlineText?.then === 'function', 'inline attachment text must be text or its promise');
+      requireValue(part.path === undefined || typeof part.path === 'string' || typeof part.path?.then === 'function', 'attachment path must be a path or the promise of one');
     }
   }
   for (const part of context.parts) if (part.kind === 'attachment') {
@@ -96,6 +97,24 @@ export function promptReferenceIds(reference) {
   return reference.label ? [reference.label] : [];
 }
 
+/**
+ * A line that is one reference and nothing else — a file's absolute path and the ids in it, as a
+ * copied reference is written (`/models/base.step#o1.f2`) — as that reference; null for any other.
+ */
+export function parsePromptReference(text) {
+  const line = String(text || '').trim();
+  // A board's reference is its own grammar (`/boards/blinky.kicad_pcb#R1,net:VBUS`).
+  const board = line ? parseBoardRefToken(line) : null;
+  if (board && isBoardRefPath(board.path) && board.selectors.length) {
+    try { return validatePromptReference({ resource: { kind: 'workspace-file', path: board.path }, target: { kind: 'cad-selector', selectors: board.selectors } }); }
+    catch { return null; }
+  }
+  const parsed = line ? parseCadRefToken(line) : null;
+  if (!parsed || parsed.token.trim() !== line || !parsed.selectors.length) return null;
+  try { return validatePromptReference({ resource: { kind: 'workspace-file', path: parsed.cadPath }, target: { kind: 'cad-selector', selectors: parsed.selectors } }); }
+  catch { return null; }
+}
+
 /** Keep machine identity structured; these strings are the portable human/prompt representation. */
 export function formatPromptReference(reference) {
   validatePromptReference(reference);
@@ -119,30 +138,51 @@ export function formatPromptContextText(context) {
 }
 
 /**
+ * Where each attachment that is already saved is (`part.path`: a path, or the promise of one), by
+ * part id: what a message names when it carries the attachment as a file.
+ * @returns {Promise<Map<string, string>>}
+ */
+export async function resolveAttachmentPaths(context) {
+  const saved = new Map();
+  for (const part of context.parts) {
+    if (part.kind === 'attachment' && part.path !== undefined) saved.set(part.id, String(await part.path));
+  }
+  return saved;
+}
+
+/**
  * A context as one message, the way a person would write it: what they said, then what it is
  * about — each whole file on a `File:` line, the selections in it under `References:`, one per
  * line — then each attachment that travels as a file, by its label and path (`attachmentPath`;
  * one sent beside the text is left out). One spelling, whether the message is sent, queued or copied.
  */
-export function formatPromptMessage(context, { attachmentPath } = {}) {
+export function formatPromptMessage(context, { attachmentPath, attachmentText } = {}) {
   validatePromptContext(context);
   const said = context.parts.filter(part => part.kind === 'text').map(part => part.text.trim()).filter(Boolean);
   const files = [], references = [], attachments = [];
   for (const part of context.parts) {
-    if (part.kind === 'reference') {
-      const { reference } = part;
-      const token = formatPromptReference(reference);
-      if (reference.target.kind === 'whole-resource') files.push(token);
-      // A selection with a summary (a board's check) reads that sentence, then what it names.
-      else references.push(reference.target.kind === 'cad-selector' && reference.summary ? `${reference.summary} · ${token}` : token);
-    }
+    if (part.kind === 'reference') (part.reference.target.kind === 'whole-resource' ? files : references).push(formatPromptReference(part.reference));
     else if (part.kind === 'attachment') {
+      const inline = attachmentText?.(part);
+      if (inline) { attachments.push(inline); continue; }
       const path = attachmentPath?.(part);
       if (path) attachments.push(`${part.label || 'Attachment'}: ${path}`);
     }
   }
   const about = [...files.map(file => `File: ${file}`), ...(references.length ? ['References:', ...references] : []), ...attachments];
   return [said.join('\n\n'), about.join('\n')].filter(Boolean).join('\n\n');
+}
+
+/** Resolve a prompt's inline text or file paths after the host has bound its destination. */
+export async function resolvePromptMessage(context) {
+  validatePromptContext(context);
+  const inline = new Map(), paths = new Map();
+  await Promise.all(context.parts.filter(part => part.kind === 'attachment').map(async part => {
+    const text = await part.inlineText;
+    if (text) inline.set(part.id, text);
+    else if (part.path !== undefined) paths.set(part.id, String(await part.path));
+  }));
+  return formatPromptMessage(context, { attachmentText: part => inline.get(part.id), attachmentPath: part => paths.get(part.id) });
 }
 
 const failureMessage = error => error instanceof Error ? error.message : String(error);

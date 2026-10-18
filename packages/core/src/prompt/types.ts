@@ -8,14 +8,12 @@ export type ReferenceTarget =
   | { kind: 'whole-resource' }
   | { kind: 'text-range'; start: TextPosition; end: TextPosition }
   | { kind: 'cad-selector'; selectors: readonly string[] };
-export interface PromptReference { resource: ResourceRef; target: ReferenceTarget; label?: string;
-  /** A sentence saying what the selection is about (a board's check), written before its references. */
-  summary?: string }
+export interface PromptReference { resource: ResourceRef; target: ReferenceTarget; label?: string }
 export type PromptPart =
   | { id: string; kind: 'text'; text: string }
   | { id: string; kind: 'reference'; reference: PromptReference }
-  /** `label` says what it is in a word or two ("Sketch"), for a message that names it by path. */
-  | { id: string; kind: 'attachment'; name: string; mimeType: string; content: Blob | Promise<Blob>; about?: readonly string[]; label?: string };
+  /** `label` says what it is in a word or two ("Annotation"), for a message that names it by path; `path`, where it is already saved. */
+  | { id: string; kind: 'attachment'; name: string; mimeType: string; content: Blob | PromiseLike<Blob>; about?: readonly string[]; label?: string; path?: string | PromiseLike<string>; inlineText?: string | PromiseLike<string | null> };
 export interface PromptContext { schemaVersion: 1; operationId: string; parts: readonly PromptPart[] }
 export interface PromptDestinationState {
   kind: 'composer' | 'clipboard' | 'unavailable';
@@ -46,6 +44,8 @@ export interface PromptContextPort {
   send?(context: PromptContext): Promise<PromptDeliveryResult>;
 }
 export interface PromptMessageOptions {
+  /** Complete inline representation, used instead of the attachment path when present. */
+  attachmentText?: (part: Extract<PromptPart, { kind: 'attachment' }>) => string | null | undefined;
   /** Where an attachment was saved, for one that travels as a file; nothing for one sent beside the text. */
   attachmentPath?: (part: Extract<PromptPart, { kind: 'attachment' }>) => string | null | undefined;
 }

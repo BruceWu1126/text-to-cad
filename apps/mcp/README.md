@@ -21,8 +21,8 @@ extension):
   mounts a viewer card in the chat, and the host keeps the old cards. A card is
   the whole viewer at card size: its navbar (the logo, which opens the app menu,
   first; the file name that opens the explorer; the ⋯; then, at the right, the
-  update button, Full size where the host can show a view full size, and last Display
-  and Preview), the tools, the view cube, and Quick Edit. A
+  update button, and Full size where the host can show a view full size), the tool strip
+  ending in Display and Preview, the file sidebar, the view cube, and Quick Edit. A
   newer card retires the older ones.
 
 A client that renders no MCP Apps never loads this page: its `cad_show` answers
@@ -126,10 +126,7 @@ reference host `basic-host` does.
   id of the unedited chunk the CAD Viewer may ship. It is on by default once
   a `cadgen` command has said so, once, and nothing asks. The app menu's **Share usage
   stats** (`appSettings`, through `/__cad/analytics`) changes the answer, one answer for
-  this app and the browser viewer. Its **Quick edit** (on until
-  the person turns it off) is read and changed the same way, through `/__cad/features`, and kept
-  beside the analytics answer (`cadgen/features.py`): one choice for the sidebar, every
-  thread's tab, every inline card and the browser viewer. The channel is reported with the
+  this app and the browser viewer. The channel is reported with the
   counts; it decides nothing there. The agent's `cad_telemetry` reports the
   setting and turns it off, never on.
 - **Told how it is presented, before it greets the host.** A host that mounts
@@ -149,10 +146,10 @@ reference host `basic-host` does.
   context for the person's next message, `ui/update-model-context`) needs
   `updateModelContext`; a tab host is not asked: Codex forwards the method
   whether or not its frame declares it. **Send** (the person's message now,
-  `ui/message`) needs `message`, and carries a sketch as an image block only
-  where the host declares `message.image`; a host that declares it and still
-  refuses one (JSON-RPC -32602) gets the sketch saved and named by path
-  instead. A host that takes neither gets Copy Prompt alone
+  `ui/message`) needs `message`. Both actions capture the current view and distinct drawn views at the
+  press. Up to 1024 bytes of compact UTF-8 snapshot JSON goes into the text; larger
+  packets are written as `.snapshot.json` and named by saved path. Views share annotation and measurements. No images or file bytes are attached,
+  even where the host accepts images. A host that takes neither gets Copy Prompt alone
   (`unavailablePromptContext`): Queue and Send are left out, not disabled. In
   Codex, Send from a thread's CAD tab posts into that thread; from the
   sidebar page it goes to the page's own chat tab.
@@ -181,17 +178,16 @@ reference host `basic-host` does.
   client asks for 32 MiB), every GET asks for its first 4 MiB as a byte range,
   and a longer body comes back a range at a time, which the tunnel puts together
   for the client. A part of a body that changed meanwhile (its `etag`) fails the
-  read, and the cache verifies a tessellation's digest of the whole as of any
-  body. The server refuses any reply still longer (502), and an agent's
+  read, and the cache verifies a tessellation's digest of the whole as of
+  any body. The server refuses any reply still longer (502), and an agent's
   screenshot longer than that, rather than send it. 4 MiB loads as fast as 8 MiB
   did. The server produces such a body once: each later part names it
   (`if-range: <etag>`) and is cut from the body the first part kept, never by
   running the route again.
-- **One file.** The build inlines scripts, styles, workers (as blobs) and the
-  drawing editor's fonts (as data URIs) into `dist/index.html`, and fails if
-  anything would be left outside it: the host serves one resource and nothing
-  beside it. Its scripts are still split where the app imports lazily (each
-  renderer, the drawing editor and its libraries): each chunk is a gzip'd string
+- **One file.** The build inlines scripts, styles and workers (as blobs) into
+  `dist/index.html`, and fails if anything would be left outside it: the host
+  serves one resource and nothing beside it. Its scripts are still split where
+  the app imports lazily (each renderer): each chunk is a gzip'd string
   that becomes a blob module only when something imports it, so a view parses
   what it shows rather than all of the app (`vite.config.mjs`).
 - **Nothing waits unseen.** While the home's list is read, placeholder cards (or
@@ -229,13 +225,14 @@ reference host `basic-host` does.
 | `bridge.ts` | JSON-RPC 2.0 over `postMessage`: requests, the opening tool's result, host context, teardown |
 | `server.ts` | typed calls to the page's three tools: its sync, its answer to a capture, and `cad_http` |
 | `tunnel.ts` | the `fetch` over `cad_http`, a long body a range at a time, and the CAD client over it (`App.tsx` makes one per view): the library, Open, Reveal and the person's settings among its requests |
-| `prompt.ts` | Quick Edit's chat: `chatReach`, what the host's chat takes, and the prompt port over it — Queue through `ui/update-model-context` (a text block titled `Quick edit · <file>` and the sketch's image block, kept until the host clears its model context), Send through `ui/message` — with references as absolute paths (Copy Prompt spells them as copied references are) |
+| `prompt.ts` | Quick Edit's chat: `chatReach`, what the host's chat takes, and the prompt port over it — Queue through `ui/update-model-context` (a text block titled `Quick edit · <file>` naming the snapshot path, kept until the host clears its model context), Send through `ui/message` — with references as absolute paths (Copy Prompt spells them as copied references are) |
 | `live.ts`, `sync.ts` | the mounted view's live controller (`@text-to-cad/ui/host`'s registry), and its sync (`cad_sync`), every second: its state for the agent, the agent's requests (`show`, `capture`), the catalog's revision and its build feeds |
 | `presentation.ts` | how the host presents the page, and the election that retires older inline views |
+| `clipboard.ts` | the frame's clipboard, every copy's: the asynchronous clipboard where the host grants it (the resource asks for `clipboardWrite`), else the page's own copy command, still inside the press, for text |
 
 `ModelView.tsx` is the page: the shared `CadViewer` (`@text-to-cad/ui/cad-viewer`,
 the one the web Viewer shows) showing the launch's model, with this host's ports — its
-tunnel (which also carries a copied prompt's sketch to the server: `attachments`), the
+tunnel (which also carries a Quick Edit's views and annotation to the server, which makes their files: `promptFiles`), the
 explorer's folders and search over it (`createCadFileSource`), its chat, its file menu
 (copy path, Reveal), the app menu's links (its Send feedback and
 an alert's Report Issue open a new issue), followed through `ui/open-link`,
@@ -246,9 +243,12 @@ another model or the home drops it, as in the web Viewer. A view the
 host creates again (its frame re-created) starts afresh: nothing names a view across its
 frames, so there is nothing to keep its record under. `App.tsx` frames it (full page, or
 an inline card whose height the host is told; its Full size is the last of the navbar's
-own controls, before the view's Display and Preview). In a tab, preview's playbar sits on the line of Codex's
-composer, which floats over the page (`--cad-viewport-bottom-center`), and the
-home's list scrolls clear of it (`--cad-host-bottom-inset`).
+controls). In a tab, Codex's composer floats over the page, and the
+home's list scrolls clear of it (`--cad-host-bottom-inset`). The cube sits at bottom-left
+in this tab presentation, across sidebar, thread and file views, so the composer and
+sidebar chat button can occupy bottom-right. `App.tsx` supplies
+`--cad-viewport-corner-left: 2px` and `--cad-viewport-corner-right: auto`;
+inline hosts (including full-size cards) retain the default bottom-right placement.
 
 ## Develop
 
@@ -260,7 +260,9 @@ scripts/install/dev_install.py claude-desktop   # run it in Claude Desktop (then
 ```
 
 `scripts/test/test-js.sh --select mcp` is what CI runs: the tests, then the
-build. Every host `dev_install.py` takes is in CONTRIBUTING.md ("Test In Agent
-Apps"). A checkout's `cadgen mcp` serves `apps/mcp/dist` when it exists
+build. A build names itself in the app menu (`vite.config.mjs`, through
+`@text-to-cad/ui/build-id`): the release's own build shows `v<VERSION>`, any other
+`v<VERSION>-dev.<commit>`, the commit of the checkout it was built from. Every host
+`dev_install.py` takes is in CONTRIBUTING.md ("Test In Agent Apps"). A checkout's `cadgen mcp` serves `apps/mcp/dist` when it exists
 (`CADGEN_MCP_APP_DIR` overrides it); a wheel serves `cadgen/_runtime/mcp`,
 built by `scripts/bundle/bundle.sh`.

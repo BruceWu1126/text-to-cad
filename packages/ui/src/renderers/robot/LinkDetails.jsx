@@ -1,15 +1,14 @@
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
-import { CoordValue, InfoRow, MonoValue, REFERENCE_LINK_CLASS } from "../kit/inspector/referenceRows.jsx";
+import { CoordValue, InfoRow, MonoValue } from "../kit/inspector/referenceRows.jsx";
 
-// The Reference panel under Links in the tool stack: what the selection IS. Its heading names
-// what is selected (`LinksSection.jsx`), so the rows never repeat the name.
+// The card of a Quick Edit chip (`robotReferences.jsx`): what a selected link or object IS. Its
+// heading names it, so the rows never repeat the name.
 //
 // A link reads back what the description says about it (its inertial properties, its
 // visual and collision geometry, its parent joint with limits and origin); a named
 // mesh object reads back the mesh facts a person uses to tell two objects of one link
 // apart. What names something else can be followed: a mesh path opens that file, a
-// link name selects that link. There is no copy button: robot formats have no
-// reference grammar a CLI or a skill parses, so a copied locator would lead nowhere.
+// link name selects that link. A click on any other value copies it.
 
 function formatCount(value) {
   return Number(value || 0).toLocaleString();
@@ -40,6 +39,7 @@ function Section({ label, children }) {
   return <div className="mt-1 border-t border-sidebar-border/60 pt-1" aria-label={label}>{children}</div>;
 }
 
+const LINK_CLASS = "rounded-sm text-left text-sidebar-foreground underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [overflow-wrap:anywhere]";
 const isZero = vector => vector.every(value => Math.abs(value) < 1e-12);
 const isUnit = vector => vector.every(value => Math.abs(value - 1) < 1e-12);
 const vectorText = (vector, digits = 4) => vector.map(value => formatValue(value, digits)).join("  ");
@@ -47,7 +47,7 @@ const vectorText = (vector, digits = 4) => vector.map(value => formatValue(value
 /** Another link of the same robot: pressing it selects that link in the tree and the viewport. */
 function LinkName({ name, onSelect, selectable = true }) {
   if (!onSelect || !selectable) return name;
-  return <TooltipHint content="Select link"><button type="button" className={REFERENCE_LINK_CLASS} onClick={() => onSelect(name)} >{name}</button></TooltipHint>;
+  return <TooltipHint content="Select link"><button type="button" className={LINK_CLASS} onClick={() => onSelect(name)} >{name}</button></TooltipHint>;
 }
 
 // What a primitive IS, in the description's own metres.
@@ -73,7 +73,7 @@ function GeometryEntry({ entry, meshPath, onOpenFile }) {
       {entry.color && <TooltipHint content={entry.materialName || entry.color}><span className="size-2.5 shrink-0 self-center rounded-sm border border-border/70" style={{ backgroundColor: entry.color }}  aria-hidden="true"/></TooltipHint>}
       {entry.filename
         ? path && onOpenFile
-          ? <TooltipHint content="Open file"><button type="button" className={REFERENCE_LINK_CLASS} onClick={() => onOpenFile(path)} >{entry.filename}</button></TooltipHint>
+          ? <TooltipHint content="Open file"><button type="button" className={LINK_CLASS} onClick={() => onOpenFile(path)} >{entry.filename}</button></TooltipHint>
           : <span>{entry.filename}</span>
         : <span>{entry.type}</span>}
     </span>
@@ -83,7 +83,8 @@ function GeometryEntry({ entry, meshPath, onOpenFile }) {
 
 function GeometryRows({ label, entries, meshPath, onOpenFile }) {
   if (!entries) return null;
-  return <InfoRow label={label}>
+  // Its files are links, which keep their own click: nothing to copy.
+  return <InfoRow label={label} copy={false}>
     {entries.length
       ? entries.map((entry, index) => <GeometryEntry key={`${entry.filename || entry.type}:${index}`} {...{ entry, meshPath, onOpenFile }}/>)
       : <span className="text-muted-foreground">None</span>}
@@ -94,7 +95,8 @@ function GeometryRows({ label, entries, meshPath, onOpenFile }) {
 function InertiaRows({ inertia }) {
   if (!inertia) return null;
   const rows = [["ixx", "ixy", "ixz"], ["ixy", "iyy", "iyz"], ["ixz", "iyz", "izz"]];
-  return <InfoRow label="Inertia" title="Inertia at centre of mass (kg·m²)">
+  const copy = rows.map(row => row.map(term => formatValue(inertia[term], 6)).join(", ")).join("; ");
+  return <InfoRow label="Inertia" title="Inertia at centre of mass (kg·m²)" copy={copy}>
     {/* Three columns the panel's width: a value too long for its cell truncates (the whole of it
         is its hint), never wrapping inside the number. */}
     <span className="grid w-full grid-cols-3 gap-x-2 tabular-nums">
@@ -115,7 +117,7 @@ function LimitRows({ joint }) {
   const unit = angular ? "rad" : "m";
   const range = Number.isFinite(limit.lower) || Number.isFinite(limit.upper);
   return <>
-    {range && <InfoRow label="Limits" title={`Limits (${angular ? "radians" : "metres"})`}>
+    {range && <InfoRow label="Limits" title={`Limits (${angular ? "radians" : "metres"})`} copy={`${formatValue(limit.lower)} … ${formatValue(limit.upper)} ${unit}`}>
       <MonoValue>{`${formatValue(limit.lower)} … ${formatValue(limit.upper)} ${unit}`}</MonoValue>
       {angular && Number.isFinite(limit.lower) && Number.isFinite(limit.upper) &&
         <span className="block text-muted-foreground">{`${degrees(limit.lower)} … ${degrees(limit.upper)}`}</span>}
@@ -143,7 +145,7 @@ export function RobotLinkDetails({ facts, meshPath, onOpenFile, onSelectLink, ha
     {joint && <Section label="Parent joint">
       <InfoRow label="Joint">{joint.name}</InfoRow>
       <InfoRow label="Joint type">{joint.type}</InfoRow>
-      <InfoRow label="Parent">{/* A frame-only root has no row to go to; it is still named. */}<LinkName name={joint.parentLink} onSelect={onSelectLink} selectable={hasLinkRow(joint.parentLink)}/></InfoRow>
+      <InfoRow label="Parent" copy={onSelectLink && hasLinkRow(joint.parentLink) ? false : undefined}>{/* A frame-only root has no row to go to; it is still named. */}<LinkName name={joint.parentLink} onSelect={onSelectLink} selectable={hasLinkRow(joint.parentLink)}/></InfoRow>
       {joint.axis && <InfoRow label="Axis"><CoordValue vector={joint.axis} digits={4}/></InfoRow>}
       <LimitRows joint={joint}/>
       {joint.mimic && <InfoRow label={joint.mimic.kind === "fourBar" ? "Four-bar driver" : "Mimic"}><MonoValue>{joint.mimic.kind === "fourBar"
@@ -154,7 +156,7 @@ export function RobotLinkDetails({ facts, meshPath, onOpenFile, onSelectLink, ha
       </>}
     </Section>}
     {facts.childJoints.length > 0 && <Section label="Child joints">
-      <InfoRow label="Children"><span className="flex flex-col items-start">
+      <InfoRow label="Children" copy={onSelectLink ? false : undefined}><span className="flex flex-col items-start">
         {facts.childJoints.map(child => <span key={child.name}><LinkName name={child.childLink} onSelect={onSelectLink}/><span className="text-muted-foreground">{` · ${child.name} · ${child.type}`}</span></span>)}
       </span></InfoRow>
     </Section>}

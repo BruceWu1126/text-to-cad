@@ -72,6 +72,14 @@ export interface AppSetting {
   onCheckedChange: (checked: boolean) => void;
 }
 /**
+ * The person's colour scheme: System, Light or Dark, in the app menu over every file. The host keeps
+ * it and resolves System (the web against the OS, the CAD app against its host's theme).
+ */
+export interface ColorSchemeSetting {
+  preference: "system" | "light" | "dark";
+  onPreferenceChange: (preference: "system" | "light" | "dark") => void;
+}
+/**
  * A view's own history, where the host keeps one: what it showed, in order, as a browser keeps a
  * tab's. The navbar draws Back and Forward over it; a host whose page has a browser's history (the
  * web) hands none.
@@ -82,35 +90,18 @@ export interface ViewerHistory {
   back(): void;
   forward(): void;
 }
-/**
- * The viewer's features a person can turn off in the app menu, as the host keeps
- * them: each is on unless the host says it is off.
- */
-export interface ViewerFeatures {
-  /** Quick Edit: the note to the agent at the viewport's top-right, and every way it opens. */
-  quickEdit?: boolean;
-}
 export interface RendererViewProps {
   /** The host's notice: the viewport's top-right once the file is on screen, Quick Edit under it. */
   notice?: ReactNode;
-  /** The features the person has left on (in the app menu): what is off is not offered at all. */
-  features?: ViewerFeatures;
-  /** Optional host-owned controls inside the Display panel (the web's appearance). */
-  displayActions?: ReactNode;
   onNavigationActionsChange?: (actions: readonly FileNavigationAction[]) => void;
   file: FileMetadata;
   source: FileSource;
   /**
    * The navbar's box for the renderer's own view controls, last at its right end (the CAD
-   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn, as while the
-   * renderer shows its file fullscreen.
+   * viewer's Display and Preview, for a 3D view); null where no navbar is drawn (a compact view),
+   * when the renderer draws them over its view instead.
    */
-  navbarSlot: HTMLElement | null;
-  /**
-   * The renderer shows its file fullscreen (the CAD viewer's Preview), or no longer does: the
-   * navbar steps aside while it lasts.
-   */
-  onFullscreenChange: (fullscreen: boolean) => void;
+  navbarSlot?: HTMLElement | null;
   onReady: (ready: boolean) => void;
   /**
    * Show another file, by its absolute path, in this view (a robot's mesh). Absent where the view
@@ -151,8 +142,8 @@ export interface FileViewerProps {
   renderers: readonly RendererRegistration[];
   state: FileViewerState;
   onStateChange: (next: FileViewerState) => void;
-  /** Host controls inside the CAD Display panel. */
-  displayActions?: ReactNode;
+  /** The person's colour scheme, its rows in the app menu the navbar's logo opens over every file. */
+  colorScheme?: ColorSchemeSetting;
   /**
    * The person's on/off settings, in the app menu the navbar's logo opens over every file, with
    * the host's links (`host.links`).
@@ -165,13 +156,11 @@ export interface FileViewerProps {
   update?: ReactNode;
   /**
    * The host's Full size button, where the host shows the view small (inline in a conversation):
-   * the last of the navbar's own controls, before the renderer's view controls.
+   * last at the navbar's right end.
    */
   fullSize?: ReactNode;
   /** The view's own history, where the host keeps one: Back and Forward, between the navbar's logo and the file's name. */
   history?: ViewerHistory;
-  /** The features the person has left on (in the app menu), for every renderer (`RendererViewProps.features`). */
-  features?: ViewerFeatures;
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
   onError?: (error: Error) => void;

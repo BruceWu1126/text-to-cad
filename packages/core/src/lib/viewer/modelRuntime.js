@@ -1,10 +1,9 @@
 import { syncSectionCaps } from "./sectionCaps.js";
 import {
   applyDisplayRecordTransform,
-  buildStepClipPlane,
-  readBoundsCenter,
-  syncMaterialClipPlanes
+  readBoundsCenter
 } from "../../common/cadScene.js";
+import { buildStepClipPlane, syncMaterialClipPlanes } from "./clipPlane.js";
 import { cadEdgeInstanceSets } from "../../common/cadEdgeInstances.js";
 import {
   clampSceneModelRadius,

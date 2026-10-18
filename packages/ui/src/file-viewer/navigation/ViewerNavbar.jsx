@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Ellipsis } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis } from "lucide-react";
 import { useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
@@ -27,9 +27,9 @@ import { FolderExplorer } from "./FolderExplorer.jsx";
  * Right, only what a host or a file adds: the host's update button while its install is behind
  * (`update`, the blue `UpdateButton` from `@text-to-cad/ui/update`); the file's own actions (the
  * CAD viewer's one: a dismissed alert's icon, which brings its card back); the host's way to show
- * the view full size (`fullSize`), where it shows it small; and last the renderer's own view
- * controls (`controlsRef`, the box it draws them into: a 3D view's Display and Preview). Preview
- * takes the whole page, this row with it, and draws its own controls where these sat.
+ * the view full size (`fullSize`), where it shows it small; last, the renderer's own view controls,
+ * drawn into the box it is handed (`controlsRef`: a 3D view's Display and Preview, or in Preview
+ * its settings and the way out). The colour scheme is the app menu's.
  *
  * Nothing here is drawn for its own sake: a control appears only where it does something.
  */
@@ -103,6 +103,8 @@ function FileName({ path, explorer }) {
     <PopoverTrigger asChild>
       <button type="button" className={cn(NAV_ITEM_CLASS, "min-w-0 shrink px-1 text-left")} data-file-name="">
         <span className="truncate">{name}</span>
+        {/* The name opens the explorer; the chevron says so. A plain name (no explorer) has none. */}
+        <ChevronDown className="ml-0.5 size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     </PopoverTrigger>
     <PopoverContent align="start" sideOffset={8} data-file-explorer="" onOpenAutoFocus={focusFilter}
@@ -116,7 +118,7 @@ function FileName({ path, explorer }) {
 /**
  * @param {object} props
  * @param {(() => void) | undefined} [props.onHome] The host's home, where it has one: the menu's Back to files.
- * @param {{ links?: import("../../host/types.js").ViewerLinks, appSettings?: readonly import("../types.js").AppSetting[], platform?: string } | null} [props.menu]
+ * @param {{ links?: import("../../host/types.js").ViewerLinks, appSettings?: readonly import("../types.js").AppSetting[], colorScheme?: import("../types.js").ColorSchemeSetting, platform?: string } | null} [props.menu]
  *   The rest of the app's menu: the host's links and the person's settings.
  * @param {import("../types.js").ViewerHistory | null} [props.history] The view's own history, where the host keeps one: Back and Forward after the logo.
  * @param {string | null} [props.file] The open file, by its absolute path.
@@ -145,7 +147,7 @@ export function ViewerNavbar({ onHome, menu = null, history = null, file = null,
         {update}
         {trailing}
         {fullSize}
-        <div ref={controlsRef} className="contents" data-view-controls="" />
+        {controlsRef ? <div ref={controlsRef} className="contents" data-view-controls="" /> : null}
       </div>
     </header>
   );

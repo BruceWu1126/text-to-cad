@@ -29,6 +29,7 @@ leaves no file at all.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import functools
 import json
@@ -47,11 +48,11 @@ from cadgen._internal.doors import document_snapshot
 # they explain, so the flag that is gone and the job key that is refused say
 # the same thing about the same request.
 from cadgen._internal.snapshot_door import (
-    DRAWING_APPEARANCE_HINT,
     DRAWING_IS,
     DRAWING_NO_VIEW_NAME,
     PLOT_APPEARANCE_HINT,
     PLOT_KINDS,
+    PLOT_PLAN_VIEW,
     drawing_camera_refusal,
     drawing_mode_refusal,
     drawing_scene_refusal,
@@ -73,6 +74,7 @@ from cadgen.occurrence_groups import (
 from cadgen.cli_progress import cli_progress_line
 from cadgen.results import SnapshotResult
 from cadgen.snapshot_core import (
+    BatchSnapshotRenderer,
     PLOT_DISPLAY_KEYS,
     PLOT_INPUT_KINDS,
     SELECTION_KEYS,
@@ -91,7 +93,6 @@ from cadgen.snapshot_core import (
     normalize_render_mode,
     normalize_snapshot_job_packet,
     parse_camera_option,
-    parse_section_option,
     path_is_inside_or_equal,
     refuse_cad_model_requests,
     render_snapshot,
@@ -134,6 +135,8 @@ class SnapshotOptions:
     mode_specified: bool = False
     display: object = ""
     display_specified: bool = False
+    grid: bool = False
+    preview: bool = False
     camera: object = None
     camera_specified: bool = False
     width: int | None = None
@@ -146,10 +149,12 @@ class SnapshotOptions:
     animation_specified: bool = False
     video: object = None
     video_specified: bool = False
-    section: object = None
-    section_specified: bool = False
     joint_values: object = None
     joint_values_specified: bool = False
+    annotation: object = None
+    annotation_specified: bool = False
+    measurements: object = None
+    measurements_specified: bool = False
     focus: list[str] | None = None
     focus_specified: bool = False
     hide: list[str] | None = None
@@ -293,11 +298,110 @@ def _job_input_kind(job: Mapping[str, object], *, cwd: Path) -> str:
     return input_kind(resolve_input_path(raw_input, cwd=cwd)) if raw_input else ""
 
 
+# A measurement's closed vocabulary, and how many a job draws at most (the viewer's own bound).
+MEASUREMENT_KEYS = frozenset({"start", "end", "label", "color"})
+MAX_MEASUREMENTS = 64
+
+
+def normalize_measurements(value: object) -> list[dict[str, object]]:
+    """A job's ``measurements``: a list of ``{start, end, label, color}``, checked.
+
+    Each is a dimension between two world points (``start``, ``end``: three finite numbers),
+    its words (``label``) and its colour (``#rrggbb``), as the viewer's Measure drew it; the
+    page draws them over the picture with the same code.
+    """
+    if not isinstance(value, list):
+        raise SnapshotError("measurements is a list of {start, end, label, color}")
+    if len(value) > MAX_MEASUREMENTS:
+        raise SnapshotError(f"measurements: at most {MAX_MEASUREMENTS}")
+    marks: list[dict[str, object]] = []
+    for index, mark in enumerate(value):
+        at = f"measurements[{index}]"
+        if not is_plain_object(mark):
+            raise SnapshotError(f"{at} is {{start, end, label, color}}")
+        unknown = sorted(set(mark) - MEASUREMENT_KEYS)
+        if unknown:
+            raise SnapshotError(f"{at} has unknown field(s): {', '.join(unknown)}")
+        for key in ("start", "end"):
+            point = mark.get(key)
+            if not (isinstance(point, list) and len(point) == 3 and all(
+                    isinstance(axis, (int, float)) and not isinstance(axis, bool) and math.isfinite(axis) for axis in point)):
+                raise SnapshotError(f"{at}.{key} is [x, y, z]")
+        if not isinstance(mark.get("label"), str):
+            raise SnapshotError(f"{at}.label is its words")
+        color = mark.get("color")
+        if not (isinstance(color, str) and len(color) == 7 and color.startswith("#")
+                and all(digit in "0123456789abcdefABCDEF" for digit in color[1:])):
+            raise SnapshotError(f"{at}.color is #rrggbb")
+        marks.append({"start": list(mark["start"]), "end": list(mark["end"]), "label": mark["label"], "color": color})
+    return marks
+
+
+def load_measurements_option(value: object, *, cwd: Path) -> object:
+    """``measurements`` in job form: the list itself.
+
+    A job's ``measurements`` and the ``--measurements`` flag are the same value: the
+    list, one measurement object alone (what a Quick Edit chip copies), that JSON as
+    text, or the path of a file holding it (resolved against the working folder).
+    Its fields are checked by ``normalize_measurements``.
+    """
+    if is_plain_object(value):
+        return [value]
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if text.startswith(("[", "{")):
+        parsed = load_json_text(text, "measurements")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"measurements file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read measurements file {text}: {exc}") from exc
+    return [parsed] if is_plain_object(parsed) else parsed
+
+
+def load_annotation_option(value: object, *, cwd: Path) -> tuple[dict[str, object], str]:
+    """``annotation`` in job form: the annotation object, and the file it was read from ("" inline).
+
+    A job's ``annotation`` and the ``--annotation`` flag are the same value: an annotation
+    JSON file's path (resolved against the working folder, as a job's input is),
+    the annotation JSON as text, or -- from a library call or a job -- the object.
+    Only its outer shape is checked here; every field is checked by the page
+    that draws it (``normalizeAnnotation``), whose refusal names the file.
+    """
+    if is_plain_object(value):
+        return dict(value), ""
+    text = value.strip() if isinstance(value, str) else ""
+    if not text:
+        raise SnapshotError("annotation is the path of an annotation JSON file, or the annotation object itself")
+    source = ""
+    if text.startswith("{"):
+        parsed = load_json_text(text, "annotation")
+    else:
+        path = (cwd / Path(text).expanduser()).resolve()
+        if not path.is_file():
+            raise _missing(f"annotation file does not exist: {text}")
+        try:
+            parsed = load_json_text(path.read_text(encoding="utf-8"), str(path))
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SnapshotError(f"Cannot read annotation file {text}: {exc}") from exc
+        source = str(path)
+    if not is_plain_object(parsed):
+        raise SnapshotError(f"{source or 'annotation'}: an annotation is a JSON object with units, parts and marks")
+    return parsed, source
+
+
 def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd: Path) -> object:
     if not is_plain_object(job):
         return job
     if not any(
         [
+            bool(options.input),
+            options.annotation_specified,
+            options.measurements_specified,
             options.mode_specified,
             options.view_labels,
             options.debug,
@@ -307,15 +411,22 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
             options.kinematics_specified,
             options.animation_specified,
             options.video_specified,
-            options.section_specified,
             options.joint_values_specified,
             options.display_specified,
+            options.grid,
+            options.preview,
             options.camera_specified,
             option_focus_hide_specified(options),
         ]
     ):
         return job
     next_job = copy.deepcopy(job)
+    if options.input:
+        next_job["input"] = options.input
+    if options.annotation_specified:
+        next_job["annotation"] = options.annotation
+    if options.measurements_specified:
+        next_job["measurements"] = options.measurements
     if options.mode_specified:
         next_job["mode"] = normalize_render_mode(options.mode)
     if options.debug:
@@ -330,14 +441,18 @@ def apply_option_overrides_to_job(job: object, options: SnapshotOptions, *, cwd:
         next_job["display"] = load_display_option(
             options.display, cwd=cwd, modes=display_modes_for_kind(kind) if kind else None, kind=kind
         )
+    if options.grid:
+        # The grid joins whatever display the job asks for.
+        shown = load_display_option(next_job["display"] if next_job.get("display") is not None else {}, cwd=cwd)
+        next_job["display"] = ValidatedDisplay({**shown, "grid": True})
+    if options.preview:
+        next_job["preview"] = True
     if options.camera_specified:
         next_job["camera"] = parse_camera_option(options.camera)
     if options.animation_specified:
         next_job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         next_job["video"] = parse_video_option(options.video, cwd=cwd)
-    if options.section_specified:
-        next_job["section"] = parse_section_option(options.section)
     if options.width is not None or options.height is not None:
         # Size lives on each output, so the override lands on every one of them —
         # the same "every job in the packet" reach the other overrides have.
@@ -429,16 +544,22 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
         job["display"] = load_display_option(
             options.display, cwd=resolved_cwd, modes=option_display_modes(options), kind=input_kind(Path(options.input))
         )
+    if options.grid:
+        job["display"] = ValidatedDisplay({**job.get("display", {}), "grid": True})
+    if options.preview:
+        job["preview"] = True
     if options.kinematics_specified:
         job["kinematics"] = parse_kinematics_option(options.kinematics)
     if options.animation_specified:
         job["animation"] = parse_animation_option(options.animation, options.animation_time)
     if options.video_specified:
         job["video"] = parse_video_option(options.video, cwd=resolved_cwd)
-    if options.section_specified:
-        job["section"] = parse_section_option(options.section)
     if options.joint_values_specified:
         job["jointValues"] = parse_joint_values_option(options.joint_values)
+    if options.annotation_specified:
+        job["annotation"] = options.annotation
+    if options.measurements_specified:
+        job["measurements"] = options.measurements
     if options.debug:
         job["debug"] = True
     merge_focus_hide_options(job, options)
@@ -446,19 +567,28 @@ def load_job_from_options(options: SnapshotOptions, *, cwd: Path | None = None) 
 
 
 def input_kind(file_path: Path) -> str:
-    """The kind of snapshot input ``file_path`` is, by its suffix; ``""`` for none."""
     suffix = file_path.suffix.lower()
+    if suffix == ".step":
+        return "step"
+    if suffix == ".stp":
+        return "stp"
+    if suffix == ".dxf":
+        return "dxf"
+    if suffix == ".kicad_pcb":
+        return "kicad_pcb"
     if suffix == ".py":
         # DOCUMENTS-ONLY: a model script is a program. The kind survives only so
         # the resolver can refuse it by naming the run.
         return "python"
-    return _KIND_BY_SUFFIX.get(suffix, "")
-
-
-_KIND_BY_SUFFIX = {
-    ".step": "step", ".stp": "stp", ".dxf": "dxf", ".glb": "glb", ".stl": "stl", ".3mf": "3mf",
-    ".kicad_pcb": "kicad_pcb", ".urdf": "urdf", ".srdf": "srdf", ".sdf": "sdf",
-}
+    if suffix == ".glb":
+        return "glb"
+    if suffix == ".stl":
+        return "stl"
+    if suffix == ".3mf":
+        return "3mf"
+    if suffix in {".urdf", ".srdf", ".sdf"}:
+        return suffix[1:]
+    return ""
 
 
 def resolve_input_path(raw_input: object, *, cwd: Path) -> Path:
@@ -843,7 +973,6 @@ def check_robot_render_job(
     label = kind.upper()
     refuse_cad_model_requests(
         job,
-        mode=mode,
         subject=f"{label} robots",
         pose_hint=f"pose a {label} robot with jointValues",
         tessellation_hint="a robot's link meshes are existing meshes",
@@ -939,6 +1068,7 @@ class PreparedRenderJob:
     resolved_cwd: Path
     #: What the kind's check learned that its resolver needs (an SRDF's paired URDF).
     context: dict[str, object]
+    annotation_source: str = ""
 
 
 def prepare_render_job(
@@ -1021,12 +1151,10 @@ def prepare_render_job(
         display = ValidatedDisplay({"mode": "board", **display})
     job["display"] = display
     mode = normalize_render_mode(job.get("mode"))
-    lighting = display.get("lighting")
-    lighting_enabled = (
-        lighting.get("enabled", True) if is_plain_object(lighting) else display.get("mode") == "render"
-    )
-    if lighting_enabled and mode != "view":
-        raise SnapshotError("Render display supports only view mode")
+    if "preview" in job and not isinstance(job["preview"], bool):
+        raise SnapshotError("preview must be a boolean")
+    if job.get("preview") is True and mode != "view":
+        raise SnapshotError("preview draws one view: it supports only view mode")
 
     validate_selection_keys(job)
     selection = job.get("selection") if is_plain_object(job.get("selection")) else {}
@@ -1034,6 +1162,15 @@ def prepare_render_job(
         raise SnapshotError("selection.focus and selection.hide cannot be used in the same snapshot job")
 
     context = KIND_CHECKS[kind](job, kind=kind, input_path=input_path, mode=mode) or {}
+    annotation_source = ""
+    if job.get("annotation") is not None:
+        if mode != "view":
+            raise SnapshotError("an annotation is ink drawn over a view; only view mode draws it")
+        job["annotation"], annotation_source = load_annotation_option(job["annotation"], cwd=resolved_cwd)
+    if job.get("measurements") is not None:
+        if mode != "view":
+            raise SnapshotError("measurements are drawn over a view; only view mode draws them")
+        job["measurements"] = normalize_measurements(load_measurements_option(job["measurements"], cwd=resolved_cwd))
     normalized = normalize_common_job(
         job,
         mode=mode,
@@ -1050,12 +1187,13 @@ def prepare_render_job(
         reference_root=reference_root_for_input(input_path, resolved_cwd),
         resolved_cwd=resolved_cwd,
         context=dict(context),
+        annotation_source=annotation_source,
     )
 
 
 def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object]:
     """Build what an accepted job's render needs and attach it as ``resolved``."""
-    return KIND_RESOLVERS[prepared.kind](
+    resolved_job = KIND_RESOLVERS[prepared.kind](
         prepared.job,
         kind=prepared.kind,
         input_path=prepared.input_path,
@@ -1064,6 +1202,9 @@ def resolve_prepared_render_job(prepared: PreparedRenderJob) -> dict[str, object
         resolved_cwd=prepared.resolved_cwd,
         **prepared.context,
     )
+    if prepared.annotation_source:
+        resolved_job["resolved"] = {**resolved_job["resolved"], "annotationSource": prepared.annotation_source}
+    return resolved_job
 
 
 def resolve_render_job(
@@ -1318,9 +1459,9 @@ def resolve_step_render_job(
 # `cadgen.drawing_payload` the CAD Viewer's DXF pane paints, with the same
 # core code (@text-to-cad/core/lib/drawing2d), so the CLI cannot show a picture
 # the viewer cannot. Everything below is what that costs the option surface.
-# A PLOT is drawn too -- a KiCad board, from its file, by the viewer's plot pane
-# code (@text-to-cad/core/lib/plot2d) -- and costs the same, but its display is
-# the viewer's board Display (which layers, the pours, the side:
+# A PLOT is drawn too -- a KiCad board, from its file, by the viewer's board
+# view code (@text-to-cad/core/lib/plot2d) -- and costs the same, but its display
+# is the viewer's board Display (which layers, the pours, the side:
 # `cadgen.snapshot_core.PLOT_DISPLAY_KEYS`), not a scene's.
 #
 # `appearance` is the whole of a drawing's display: it picks the background,
@@ -1343,59 +1484,15 @@ DRAWING_OUTPUT_SETTING_REASONS = {
 }
 PLOT_OUTPUT_SETTING_REASONS = {
     "padding": (
-        "a plot is fitted with the fixed gutter the viewer leaves around it, "
-        "and there is no camera to pull further back"
+        "a board is fitted with the fixed gutter the viewer leaves around it, "
+        "and its one camera is the plan view a job frames it with"
     ),
-    "viewLabels": "a plot has no camera, so there is no view name to burn into the image",
+    "viewLabels": "a board's view is a window on its sheet, with no view name to burn into the image",
     "tightFrame": (
-        "a tight frame re-fits a camera to projected geometry; a plot is already "
-        "framed on its sheets"
+        "a tight frame re-fits a camera to projected geometry; a board is already "
+        "framed on its outline"
     ),
 }
-
-
-@dataclass(frozen=True, slots=True)
-class FlatPictureWords:
-    """What a flat render's refusals say about it: a drawing's words, or a plot's."""
-
-    is_: str  # What it IS: every refusal opens with it.
-    appearance_hint: str
-    units: str  # Where it is drawn, for the `scale` refusal.
-    named: str  # What it is called where an output setting is refused ("a DXF").
-    output_noun: str  # Whose output the settings are ("A drawing's").
-    output_reasons: Mapping[str, str]
-    subject: str  # The plural the shared non-STEP refusals talk about.
-    pose_hint: str
-    tessellation_hint: str
-
-
-DRAWING_WORDS = FlatPictureWords(
-    is_=DRAWING_IS,
-    appearance_hint=DRAWING_APPEARANCE_HINT,
-    units=" in its own drawing units,",
-    named="a DXF",
-    output_noun="A drawing's",
-    output_reasons=DRAWING_OUTPUT_SETTING_REASONS,
-    subject="DXF drawings",
-    pose_hint="a DXF drawing has no kinematics",
-    tessellation_hint="a DXF drawing is line work, not a tessellated surface",
-)
-
-
-def plot_words(kind: str) -> FlatPictureWords:
-    """A plot's refusal words, for one input kind (:data:`PLOT_KINDS`)."""
-    plot = PLOT_KINDS[kind]
-    return FlatPictureWords(
-        is_=plot.is_,
-        appearance_hint=PLOT_APPEARANCE_HINT,
-        units=", in millimetres,",
-        named=plot.noun,
-        output_noun="A plot's",
-        output_reasons=PLOT_OUTPUT_SETTING_REASONS,
-        subject=plot.plural,
-        pose_hint=f"{plot.noun} has no kinematics",
-        tessellation_hint=f"{plot.noun} is the picture its own tool draws, not a tessellated surface",
-    )
 
 
 def _drawing_output_cameras(job: Mapping[str, object]) -> bool:
@@ -1414,65 +1511,43 @@ def _drawing_output_labels(job: Mapping[str, object]) -> list[str]:
     })
 
 
-def check_flat_render_job(
-    job: Mapping[str, object], *, input_path: Path, mode: str, words: FlatPictureWords,
-    display_keys: frozenset[str] = DRAWING_DISPLAY_KEYS,
-) -> None:
-    """What a flat picture cannot be asked for: anything that describes a 3D scene.
+def _plan_vector(value: object) -> list[float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return None
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(float(item)) for item in value):
+        return None
+    return [float(item) for item in value]
 
-    A drawing and a plot are drawn flat, fitted to the image, head on, exactly
-    as the viewer shows them, so every request that describes a camera, a
-    surface, a light or a render mode is refused BY NAME here rather than
-    accepted and quietly ignored -- in the words of the picture being refused
-    (``words``).
+
+# How far off straight down (or off +Y up) a plan view may be: rounding, never a tilt.
+_PLAN_TOLERANCE = 1e-6
+
+
+def drawing_plan_view(
+    camera: object, label: str, *, refusal: Callable[[str], str] = drawing_camera_refusal
+) -> dict[str, object]:
+    """A drawing's camera, checked: its plan view (``DRAWING_PLAN_VIEW``), or the refusal.
+
+    The window the Viewer's DXF pane shows, in the camera shape every job speaks: what a
+    Quick Edit's views carry, so ``cadgen snapshot --job`` frames each picture as the person
+    framed it. Anything else -- a preset, a tilt, a perspective -- describes a model in space.
+    A board's plan view is checked the same way, refused in its words (``refusal``).
     """
-    label = input_path.name
-    is_ = words.is_
-    display = job.get("display") if is_plain_object(job.get("display")) else {}
-    scene = sorted(f"display.{key}" for key in set(display) - display_keys)
-    if scene:
-        raise SnapshotError(
-            drawing_scene_refusal(
-                ", ".join(scene), label, plural=len(scene) != 1, is_=is_, hint=words.appearance_hint
-            )
-        )
-    if job.get("camera") is not None or _drawing_output_cameras(job):
-        raise SnapshotError(drawing_camera_refusal(label, is_=is_))
-    if mode != "view" or job.get("section") is not None:
-        raise SnapshotError(drawing_mode_refusal(label, is_=is_))
-    if job.get("scale") is not None:
-        raise SnapshotError(
-            f"scale picks the units a 3D scene is lit and framed for (cad or urdf); {is_}"
-            f"{words.units} so {label} has no scene to scale."
-        )
-    labels = _drawing_output_labels(job)
-    if labels:
-        raise SnapshotError(
-            f"an output's {' and '.join(labels)} names the view burnt into the image; {is_} "
-            f"and {label} has no view to name."
-        )
-    settings = job.get("output") if is_plain_object(job.get("output")) else {}
-    unsupported = sorted(set(settings) - DRAWING_OUTPUT_SETTINGS_KEYS)
-    if unsupported:
-        # Every one of them, with its own reason: fixing them one refusal per run
-        # is three runs to learn what one message can say.
-        reasons = "; ".join(f"{key} — {words.output_reasons.get(key, is_)}" for key in unsupported)
-        named = ", ".join(f"output.{key}" for key in unsupported)
-        raise SnapshotError(
-            f"{named} {'has' if len(unsupported) == 1 else 'have'} no meaning for {words.named} "
-            f"({reasons}). {words.output_noun} output takes: "
-            f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
-        )
-    # The refusals every non-STEP input shares (selection, poses, clips, videos,
-    # tessellation). Mode and section are already decided above, with a sentence
-    # about this picture rather than about mesh inputs.
-    refuse_cad_model_requests(
-        job,
-        mode=mode,
-        subject=words.subject,
-        pose_hint=words.pose_hint,
-        tessellation_hint=words.tessellation_hint,
-    )
+    if not is_plain_object(camera) or not set(camera) <= {"position", "target", "up", "orthographicHalfHeight"}:
+        raise SnapshotError(refusal(label))
+    position, target = _plan_vector(camera.get("position")), _plan_vector(camera.get("target"))
+    up = _plan_vector(camera.get("up", [0, 1, 0]))
+    half = camera.get("orthographicHalfHeight")
+    if position is None or target is None or up is None or isinstance(half, bool) \
+            or not isinstance(half, (int, float)) or not math.isfinite(float(half)) or half <= 0:
+        raise SnapshotError(refusal(label))
+    look = [position[axis] - target[axis] for axis in range(3)]
+    length = math.sqrt(sum(value * value for value in look))
+    up_length = math.sqrt(sum(value * value for value in up))
+    if length <= 0 or up_length <= 0 or abs(look[0]) > _PLAN_TOLERANCE * length or abs(look[1]) > _PLAN_TOLERANCE * length \
+            or look[2] <= 0 or abs(up[0]) > _PLAN_TOLERANCE * up_length or abs(up[2]) > _PLAN_TOLERANCE * up_length or up[1] <= 0:
+        raise SnapshotError(refusal(label))
+    return {"position": position, "target": target, "up": [0.0, 1.0, 0.0], "orthographicHalfHeight": float(half)}
 
 
 def check_drawing_render_job(
@@ -1487,26 +1562,128 @@ def check_drawing_render_job(
     and quietly ignored. This is also the path `cadgen snapshot` routes a `.dxf`
     through, so the two cannot disagree.
 
+    What a drawing DOES take beyond its appearance is what the Viewer's DXF pane
+    can show and a Quick Edit's views carry: a plan view to frame
+    (``drawing_plan_view``), the annotation drawn over it (its marks on the sheet,
+    in drawing coordinates) and Measure's results.
+
     The flag half of the same cutover (`cadgen dxf snapshot --camera`) is
     refused while parsing, from the same sentences
     (`cadgen._internal.snapshot_door.DRAWING_RETIRED_OPTIONS`): one request, one
     answer, whichever surface it arrives on.
     """
-    check_flat_render_job(job, input_path=input_path, mode=mode, words=DRAWING_WORDS)
+    label = input_path.name
+    display = job.get("display") if is_plain_object(job.get("display")) else {}
+    scene = sorted(f"display.{key}" for key in set(display) - DRAWING_DISPLAY_KEYS)
+    if job.get("preview") is not None:
+        scene.insert(0, "preview")
+    if scene:
+        raise SnapshotError(
+            drawing_scene_refusal(", ".join(scene), label, plural=len(scene) != 1)
+        )
+    if _drawing_output_cameras(job):
+        raise SnapshotError(drawing_camera_refusal(label))
+    if job.get("camera") is not None:
+        job["camera"] = drawing_plan_view(job["camera"], label)
+    if mode != "view":
+        raise SnapshotError(drawing_mode_refusal(label))
+    if job.get("scale") is not None:
+        raise SnapshotError(
+            f"scale picks the units a 3D scene is lit and framed for (cad or urdf); {DRAWING_IS} "
+            f"in its own drawing units, so {label} has no scene to scale."
+        )
+    labels = _drawing_output_labels(job)
+    if labels:
+        raise SnapshotError(
+            f"an output's {' and '.join(labels)} names the view burnt into the image; {DRAWING_IS} "
+            f"and {label} has no view to name."
+        )
+    settings = job.get("output") if is_plain_object(job.get("output")) else {}
+    unsupported = sorted(set(settings) - DRAWING_OUTPUT_SETTINGS_KEYS)
+    if unsupported:
+        # Every one of them, with its own reason: fixing them one refusal per run
+        # is three runs to learn what one message can say.
+        reasons = "; ".join(
+            f"{key} — {DRAWING_OUTPUT_SETTING_REASONS.get(key, DRAWING_IS)}" for key in unsupported
+        )
+        named = ", ".join(f"output.{key}" for key in unsupported)
+        raise SnapshotError(
+            f"{named} {'has' if len(unsupported) == 1 else 'have'} no meaning for a DXF "
+            f"({reasons}). A drawing's output takes: "
+            f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
+        )
+    # The refusals every non-STEP input shares (selection, poses, clips, videos,
+    # tessellation). Mode is already decided above, with a sentence
+    # about drawings rather than about mesh inputs.
+    refuse_cad_model_requests(
+        job,
+        subject="DXF drawings",
+        pose_hint="a DXF drawing has no kinematics",
+        tessellation_hint="a DXF drawing is line work, not a tessellated surface",
+    )
 
 
 def check_plot_render_job(
     job: Mapping[str, object], *, kind: str, input_path: Path, mode: str, **_context: object
 ) -> None:
-    """What a plot cannot be asked for: what a drawing cannot, in a plot's words.
+    """What a board cannot be asked for: what a drawing cannot, in a board's words.
 
     `cadgen pcb snapshot` takes none of it (its signature is a drawing's, plus
     the board's own ``display``: :data:`cadgen.snapshot_core.PLOT_DISPLAY_KEYS`),
     and this is the path a job packet and `cadgen snapshot` route a board
-    through, so a request for a camera or a render mode is refused by name
-    rather than drawn as if it had not been made.
+    through, so a request for a scene, a camera that is not a plan view or a
+    render mode is refused by name rather than drawn as if it had not been made.
+
+    What a board DOES take is what the Viewer's board view can show and a Quick
+    Edit's views carry: a plan view to frame (``drawing_plan_view``, its window on
+    the sheet: the payload's millimetres with y up, mirrored from below), the
+    board's Display, the annotation drawn over it (its marks on the board, in the
+    sheet's millimetres, y down) and Measure's results (the same frame).
     """
-    check_flat_render_job(job, input_path=input_path, mode=mode, words=plot_words(kind), display_keys=PLOT_DISPLAY_KEYS)
+    plot = PLOT_KINDS[kind]
+    label = input_path.name
+    refusal = functools.partial(drawing_camera_refusal, is_=plot.is_, noun=plot.noun, plan_view=PLOT_PLAN_VIEW)
+    display = job.get("display") if is_plain_object(job.get("display")) else {}
+    scene = sorted(f"display.{key}" for key in set(display) - PLOT_DISPLAY_KEYS)
+    if job.get("preview") is not None:
+        scene.insert(0, "preview")
+    if scene:
+        raise SnapshotError(
+            drawing_scene_refusal(", ".join(scene), label, plural=len(scene) != 1, is_=plot.is_, hint=PLOT_APPEARANCE_HINT)
+        )
+    if _drawing_output_cameras(job):
+        raise SnapshotError(refusal(label))
+    if job.get("camera") is not None:
+        job["camera"] = drawing_plan_view(job["camera"], label, refusal=refusal)
+    if mode != "view":
+        raise SnapshotError(drawing_mode_refusal(label, is_=plot.is_))
+    if job.get("scale") is not None:
+        raise SnapshotError(
+            f"scale picks the units a 3D scene is lit and framed for (cad or urdf); {plot.is_} "
+            f"in millimetres, so {label} has no scene to scale."
+        )
+    labels = _drawing_output_labels(job)
+    if labels:
+        raise SnapshotError(
+            f"an output's {' and '.join(labels)} names the view burnt into the image; {plot.is_} "
+            f"and {label} has no view to name."
+        )
+    settings = job.get("output") if is_plain_object(job.get("output")) else {}
+    unsupported = sorted(set(settings) - DRAWING_OUTPUT_SETTINGS_KEYS)
+    if unsupported:
+        reasons = "; ".join(f"{key} — {PLOT_OUTPUT_SETTING_REASONS.get(key, plot.is_)}" for key in unsupported)
+        named = ", ".join(f"output.{key}" for key in unsupported)
+        raise SnapshotError(
+            f"{named} {'has' if len(unsupported) == 1 else 'have'} no meaning for {plot.noun} "
+            f"({reasons}). A board's output takes: "
+            f"{', '.join(sorted(DRAWING_OUTPUT_SETTINGS_KEYS))}."
+        )
+    refuse_cad_model_requests(
+        job,
+        subject=plot.plural,
+        pose_hint=f"{plot.noun} has no kinematics",
+        tessellation_hint=f"{plot.noun} is drawn from its file, not a tessellated surface",
+    )
 
 
 def resolve_drawing_render_job(
@@ -1654,7 +1831,7 @@ def plot_payload_file(source: Path) -> Path:
             f"snapshot input must be a {', '.join(suffixes[:-1])} or {suffixes[-1]} document: {source}"
         )
     if not source.is_file():
-        raise SnapshotError(f"snapshot input does not exist: {source}")
+        raise _missing(f"snapshot input does not exist: {source}")
     data = _plot_payload_bytes(source)
     payload_path = _drawing_payload_dir() / f"{sha256(data).hexdigest()}.plot.json"
     if not payload_path.is_file():
@@ -1841,12 +2018,18 @@ async def run_snapshot_async(
     kinds: Sequence[str],
     runtime_dir: Path | None = None,
     cwd: Path | None = None,
+    renderer: BatchSnapshotRenderer | None = None,
+    report: bool = True,
 ) -> SnapshotResult:
     """Render whatever ``options`` describes and report what was written.
 
     THE snapshot implementation: the CLI parses argv into ``options`` and prints
     what comes back, and the public ``<format>.snapshot()`` verbs build the same
     options object. Nothing here prints, so the two cannot report differently.
+
+    ``renderer`` is an optional browser session the caller keeps open across runs:
+    this run uses it and leaves it open. ``report=False`` paints no progress and narrates nothing, for
+    a caller that is not a terminal command.
     """
     enabled = enabled_kinds(kinds)
     with _failing_as("bad_request"):
@@ -1870,9 +2053,12 @@ async def run_snapshot_async(
     with _failing_as("input_error"):
         packet = resolve_prepared_job_packet(single, prepared)
     logger = CliLogger("snapshot", verbose=False)
-    with _failing_as("render_error"), cli_progress_line(
-        snapshot_progress_label(packet), logger=logger, fallback="Rendering..."
-    ) as sink:
+    painter = (
+        cli_progress_line(snapshot_progress_label(packet), logger=logger, fallback="Rendering...")
+        if report
+        else contextlib.nullcontext(None)
+    )
+    with _failing_as("render_error"), painter as sink:
         progress = ProgressReporter(
             sinks=[sink] if sink is not None else (),
             phases=SNAPSHOT.phases,
@@ -1882,8 +2068,9 @@ async def run_snapshot_async(
         result = await render_snapshot(
             packet,
             runtime_dir=browser_runtime_dir(runtime_dir),
+            renderer=renderer,
             progress=progress,
-            narrate=snapshot_narrator(logger),
+            narrate=snapshot_narrator(logger) if report else None,
         )
         progress.finish()
     return result

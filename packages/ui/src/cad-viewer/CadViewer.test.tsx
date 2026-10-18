@@ -50,7 +50,7 @@ test('the CAD viewer shows one file by its absolute path, the home with none, an
     library={homed ? library : undefined} onShow={next => shows.push(next)} onShown={next => shown.push(next)} />;
   const { rerender } = render(view('C:\\models\\a.step'));
   // One renderer per file family, every one reading the tab's settings.
-  expect(props().renderers.map(renderer => renderer.id)).toEqual(['step', 'dxf', 'plot', 'glb', 'mesh', 'robot']);
+  expect(props().renderers.map(renderer => renderer.id)).toEqual(['step', 'dxf', 'glb', 'mesh', 'robot']);
   // The file in the viewer's one spelling, which the host hears of once the catalog has it.
   expect([props().file, shown]).toEqual(['C:/models/a.step', [null]]);
   await act(async () => client.publish([{ file: 'C:/models/a.step' }]));
@@ -134,7 +134,7 @@ test('the home pictures a card out of sight, in a viewer of its own, from what i
 
 test("the person's settings go to the app menu over every file; the home shows the host's links", async () => {
   const client = cadClient();
-  const appSettings = [{ id: 'analytics', label: 'Share usage stats', checked: false, onCheckedChange: () => {} }];
+  const appSettings = [{ id: 'analytics', label: 'Share anonymous usage data', checked: false, onCheckedChange: () => {} }];
   render(<CadViewer client={client as never} host={ports(client, { links: viewerLinks({ version: '0.7.4' }) })} tabStore={createTabStore(memoryTabRecord())}
     live={createLiveRegistry()} file="/models/parts/a.step" library={library} appSettings={appSettings} onShow={() => {}} />);
   // FileViewer's navbar logo opens them (its own suite).
@@ -142,11 +142,4 @@ test("the person's settings go to the app menu over every file; the home shows t
   const home = render(props().presentation!.home as ReactElement);
   const row = await home.findByRole('navigation', { name: 'CAD links' });
   expect([...row.querySelectorAll('a, button')].map(node => node.getAttribute('aria-label'))).toEqual(['GitHub', 'Discord', 'X']);
-});
-
-test('the features the person left on reach every file the viewer shows', () => {
-  const client = cadClient();
-  render(<CadViewer client={client as never} host={ports(client)} tabStore={createTabStore(memoryTabRecord())} live={createLiveRegistry()}
-    file="/models/parts/a.step" features={{ quickEdit: false }} onShow={() => {}} />);
-  expect(props().features).toEqual({ quickEdit: false });
 });
