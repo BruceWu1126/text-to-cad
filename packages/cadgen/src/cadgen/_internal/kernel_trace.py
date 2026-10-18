@@ -582,8 +582,9 @@ class Trace:
         handle = feature.handles[j]
         found = ("foreign",)
         if handle is not None:
+            # A later mutation can re-register the same TShape; it made no earlier input.
             makers = [up for up in dict.fromkeys((self._made_by(handle.TShape()), feature.inputs[j]))
-                      if up is not None and up != index]
+                      if up is not None and up < index]
             if makers:
                 found = ("lost",)
                 for up in makers:
@@ -708,6 +709,8 @@ class Trace:
         feature = self.features[index]
         origins = feature.history.origins if feature.history is not None else {}
         given = [None if handle is None else [_map(handle, topabs) for topabs in _TOPABS] for handle in feature.handles]
+        held_inputs = [(j, held) for j, held in enumerate(given) if held is not None]
+        first_inputs: dict[int, tuple[Any, list[tuple[int, int]]]] = {}
         sames: dict[tuple[int, int], list[tuple | None]] = {}
 
         def same(j: int, kind: int, ordinal: int) -> tuple | None:
@@ -728,15 +731,26 @@ class Trace:
             table: list[list[tuple | None]] = [[None] * maps[kind].Extent() for kind in range(3)]
             for kind in range(3):
                 by_history = False
+                lookup = None
+                if len(held_inputs) > 1 and maps[kind].Extent():
+                    lookup = first_inputs.get(kind)
+                    if lookup is None:
+                        lookup = first_inputs[kind] = _input_index(held_inputs, kind)
                 for ordinal in range(1, maps[kind].Extent() + 1):
                     element = maps[kind].FindKey(ordinal)
                     rule = None
-                    for j, held in enumerate(given):
-                        if held is not None:
+                    if lookup is None:
+                        for j, held in held_inputs:
                             at = held[kind].FindIndex(element)
                             if at:
                                 rule = same(j, kind, at)
                                 break
+                    else:
+                        elements, owners = lookup
+                        at = elements.FindIndex(element)
+                        if at:
+                            j, source_ordinal = owners[at - 1]
+                            rule = same(j, kind, source_ordinal)
                     if rule is None and partners:
                         rule = same(partners[0], kind, ordinal)
                     if rule is None:
@@ -1166,6 +1180,21 @@ def _map(shape: Any, kind: Any) -> Any:
     found = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, kind, found)
     return found
+
+
+def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, list[tuple[int, int]]]:
+    """An element's first input and ordinal, under the input maps' ``IsSame`` equality.
+    A first input with no name still owns the element; later inputs never replace it.
+    Kept only while one feature's structure is computed, shared by all its results."""
+    elements = TopTools_IndexedMapOfShape()
+    owners: list[tuple[int, int]] = []
+    for j, held in given:
+        source = held[kind]
+        for ordinal in range(1, source.Extent() + 1):
+            at = elements.Add(source.FindKey(ordinal))
+            if at > len(owners):
+                owners.append((j, ordinal))
+    return elements, owners
 
 
 def _relative(element: Any, shape: Any) -> Any:
