@@ -436,11 +436,11 @@ Its panels follow these rules:
   over the viewport, the app menu and Display included, share `FLOATING_SURFACE_CLASS` (the
   background at 75%, blurred), so their text never competes with the model; and the file
   sidebar, mostly text but up for as long as the file is open, is between them
-  (`FILE_SIDEBAR_SURFACE_CLASS`: 55%, a 4px blur). Each tones what it floats over toward its
-  own background first (in the light theme the backdrop's contrast halved and its brightness
-  raised by a third, in the dark its brightness cut by a third), so over the theme's own scene
-  nothing changes, and a picture the other way round from the theme — a board keeps KiCad's dark
-  in the light theme — never takes the chrome's text.
+  (`FILE_SIDEBAR_SURFACE_CLASS`: 55%, a 4px blur). A view whose picture is dark whatever the
+  theme — a board, on KiCad's own background — says so on its root (`DARK_PICTURE_ATTRIBUTE`),
+  and inside it, in the light theme alone, each surface first tones what it floats over toward
+  its own background (the backdrop's contrast halved, then its brightness raised by a third), so
+  the dark picture never takes the chrome's text. Everywhere else the surfaces are as above.
 - **Scrolling.** Every scroll region in the viewer's chrome — the file sidebar, a panel's
   body, the stack's column, the explorer, a menu, the alert card — is the
   `ScrollArea` primitive (`primitives/scroll-area.jsx`, shadcn's): thin overlay

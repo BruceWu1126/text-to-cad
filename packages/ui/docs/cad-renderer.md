@@ -422,7 +422,9 @@ picture and what a person points at.
   core's (`@text-to-cad/core/lib/plot2d`: `layoutPlot`, `fitPlotTransform`, `drawPlot`), and the
   snapshot bundle draws the same payload with it (`common/headlessPlotRender.js`), so
   `cadgen pcb snapshot` cannot show what this view cannot. The board keeps KiCad's colours
-  (`plot2d/theme.js`) on KiCad's background in either theme; the surround is the theme's. The view
+  (`plot2d/theme.js`) on KiCad's background in either theme; the surround is the theme's, and the
+  frame declares its picture dark (`DARK_PICTURE_ATTRIBUTE`), so the chrome inside it tones its
+  backdrop in the light theme (`lib/floatingSurface.js`). The view
   keeps rasters of what it drew (`board/boardRasters.js`): a pan moves pixels, a zoom shows what it
   has and draws again once the view rests.
 - **Three frames** (`plot2d/boardView.js`): the SHEET (the payload's millimetres, y down), where

@@ -9,6 +9,7 @@ import {
   boardDisplayAirwires, boardDrawView, boardMirrorX, boardPlanProjection, marksInPlan, planToSheet
 } from "@text-to-cad/core/lib/plot2d/index.js";
 import { useViewerHost } from "../../host/context.js";
+import { DARK_PICTURE_ATTRIBUTE } from "../../lib/floatingSurface.js";
 import { useViewerMobile } from "../../file-viewer/responsive.js";
 import { annotationAt, withGroups } from "../../annotation/geometry.js";
 import { promptView } from "../../annotation/views.js";
@@ -53,6 +54,8 @@ import { useBoardView } from "./useBoardView.js";
  */
 
 const SAVE_DELAY_MS = 180;
+// What the frame says it draws: a board, a picture dark whatever the theme (the floating surfaces' cue).
+const BOARD_SURFACE = Object.freeze({ "data-board-surface": "", [DARK_PICTURE_ATTRIBUTE]: "" });
 // The file's slices: the board's Display and what is isolated, kept across rebuilds.
 const SLICES = Object.freeze({ board: "1", isolated: "1" });
 const BOARD_UPDATE_STATUS = Object.freeze({ pending: true, label: "Updating board…" });
@@ -386,7 +389,7 @@ function BoardSurface({ view, data }) {
   const cursor = measuring ? "cursor-crosshair" : pointing && !dragging ? "cursor-pointer" : "cursor-default";
 
   return (
-    <FlatViewFrame surface={{ "data-board-surface": "" }} containerRef={containerRef} busy={document.loading || document.updating}
+    <FlatViewFrame surface={BOARD_SURFACE} containerRef={containerRef} busy={document.loading || document.updating}
       file={file} mobile={mobile} compact={compact} chromeHidden={chromeHidden} loading={document.loading} loadingLabel="Reading board"
       updating={document.updating} updateStatus={BOARD_UPDATE_STATUS} tools={index ? strip : []} toolRow={index ? row : null} views={views}
       sidebar={sidebar} toolStack={handover.toolStack} onToolStackChange={handover.changeToolStack} notice={view.notice}
