@@ -747,14 +747,20 @@ def serve() -> int:
     # accept() cannot take a timeout the way a socket could, so idleness is watched from
     # the side: the watchdog closes the listener, which makes the pending accept return.
     # Closing is portable across both families and does not reach into Listener internals.
-    state = {"last_activity": time.monotonic(), "idle_exit": False, "draining": False}
+    state = {"last_activity": time.monotonic(), "idle_exit": False, "draining": False, "address_lost": False}
     _HOUSEKEEPER.active = lambda: bool(_active_requests()) or state["draining"] or server.closed
 
     def _watch_for_idle() -> None:
-        slice_seconds = max(0.5, min(idle_timeout / 4, 5.0))
         while not server.closed:
-            time.sleep(slice_seconds)
+            time.sleep(0.5)
             if server.closed:
+                return
+            # A removed or replaced socket cannot serve even this daemon's workers.
+            # Retire before considering activity: waiting for those jobs or the idle
+            # timeout would strand an unreachable daemon and its pool.
+            if not server.owns_address:
+                state["address_lost"] = True
+                server.close()
                 return
             _POOL.unbind_idle()
             active = _active_requests()
@@ -776,7 +782,9 @@ def serve() -> int:
         while True:
             conn = server.accept()
             if conn is None:
-                if state["idle_exit"]:
+                if state["address_lost"]:
+                    _log("address no longer names this daemon's socket; exiting")
+                elif state["idle_exit"]:
                     _log("idle timeout; exiting")
                 elif state["draining"]:
                     _log("version token changed; exiting")

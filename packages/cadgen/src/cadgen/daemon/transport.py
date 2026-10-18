@@ -568,7 +568,17 @@ class _SocketListener:
             self._socket.close()
             self._wakeup.close()
             raise
-        self._remove_file = weakref.finalize(self, _remove_socket_file, address, (bound.st_dev, bound.st_ino))
+        self._address, self._bound = address, (bound.st_dev, bound.st_ino)
+        self._remove_file = weakref.finalize(self, _remove_socket_file, address, self._bound)
+
+    @property
+    def owns_address(self) -> bool:
+        """Whether the address still names the socket this listener bound."""
+        try:
+            current = os.lstat(self._address)
+        except OSError:
+            return False
+        return stat.S_ISSOCK(current.st_mode) and (current.st_dev, current.st_ino) == self._bound
 
     def accept(self) -> mpc.Connection | None:
         ready = mpc.wait([self._socket, self._wakeup.reader])
@@ -619,6 +629,11 @@ class _PipeListener:
             _winapi.PIPE_UNLIMITED_INSTANCES, mpc.BUFSIZE, mpc.BUFSIZE,
             _winapi.NMPWAIT_WAIT_FOREVER, _winapi.NULL,
         )
+
+    @property
+    def owns_address(self) -> bool:
+        # A live pipe name cannot be unlinked or replaced like a filesystem socket.
+        return True
 
     def accept(self) -> mpc.PipeConnection | None:
         self._handles.append(self._new_handle())
@@ -916,6 +931,11 @@ class Server:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def owns_address(self) -> bool:
+        """Whether clients can still reach this listener through its address."""
+        return self._listener.owns_address
 
 
 def identity_digest(text: str) -> str:

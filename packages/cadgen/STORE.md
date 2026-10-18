@@ -1997,12 +1997,16 @@ still proving the key, and waits for their threads before it exits. Prevents:
 one connection whose challenge never reached its reader (another viewer thread
 read it off a reused file descriptor) holding every later request.
 
-**A daemon stops whatever became of its socket file.** Idle past its timeout,
-or retired once its last job ends, it closes its listener, which wakes the
-accept waiting on it through a pipe of the listener's own, never by connecting
-to the address. Prevents: a daemon whose socket file was deleted under it (its
-state directory removed, a tmp cleaner) waiting in accept forever with its
-workers, where nothing could reach it to stop it.
+**A daemon retires when its address no longer names its socket.** The supervisor
+checks ownership every half second, independently of activity and the idle
+timeout. A missing or replaced socket ends the daemon and its pool, even with
+jobs in flight: their dependencies cannot reach that daemon either. A live
+Windows pipe cannot lose its name this way. Every stop closes the listener,
+which wakes the accept waiting on it through a pipe of the listener's own,
+never by connecting to the address; cleanup removes only the socket it bound.
+Prevents: a daemon whose socket file was deleted under it (its state directory
+removed, a tmp cleaner) lingering with its workers where nothing can reach it,
+or removing the successor's socket when it exits.
 
 The **store root is a field on every request** (`store_root`), applied per
 job in the worker, never inherited from whichever build spawned the daemon:

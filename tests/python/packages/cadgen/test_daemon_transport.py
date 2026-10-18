@@ -690,23 +690,33 @@ class DaemonStopsTest(unittest.TestCase):
         self.assertEqual(self._await_exit(daemon, address), 0, self._log(address))
 
     @unittest.skipIf(os.name == "nt", "a named pipe has no file another daemon could take over")
-    def test_a_daemon_that_stops_leaves_a_successors_socket_alone(self):
+    def test_a_daemon_retires_when_its_address_names_a_successors_socket(self):
         # Its state directory removed under it, socket, key and locks with it, a client
         # starts a successor: a fresh lock file lets it bind the same address. Stopping,
         # the first daemon unlinked that address, the successor's socket, and every client
-        # then found no daemon while the successor held the lock. Every stop goes through
-        # the one release; a signal is the stop no job or timer has to set up.
-        state, address, daemon, _ = self._start_daemon()
+        # then found no daemon while the successor held the lock. Losing ownership itself
+        # retires the predecessor, without a signal, request or idle timeout.
+        state, address, daemon, _ = self._start_daemon(idle_timeout=3600)
         shutil.rmtree(state)
         successor = transport.Server(address, transport.ensure_authkey(address))
         self.addCleanup(successor.close)
         theirs = os.lstat(address).st_ino
-        daemon.terminate()
         self.assertEqual(self._await_exit(daemon, address), 0)
         left = os.lstat(address).st_ino if os.path.lexists(address) else None
         self.assertEqual(left, theirs, "the daemon that stopped removed its successor's socket")
 
-    def _start_daemon(self) -> tuple[Path, str, subprocess.Popen, dict]:
+    @unittest.skipIf(os.name == "nt", "a named pipe has no socket file to lose")
+    def test_a_daemon_retires_when_its_socket_is_deleted_even_with_a_job_in_flight(self):
+        _, address, daemon, status = self._start_daemon(idle_timeout=3600)
+        lease = client._connect(address)
+        self.addCleanup(lease.close)
+        lease.send(json.dumps({"kind": "slot", "label": "held", "token": status["token"]}).encode("utf-8"))
+        self.assertEqual(json.loads(lease.recv(30.0)), {"slot": "granted"})
+        os.unlink(address)
+        # Keep the lease open: ownership loss, not completion or idleness, ends the daemon.
+        self.assertEqual(self._await_exit(daemon, address), 0, self._log(address))
+
+    def _start_daemon(self, *, idle_timeout: int = 4) -> tuple[Path, str, subprocess.Popen, dict]:
         """A daemon of this test's own on a private address: its state directory, address,
         process and status."""
         state = Path(tempfile.mkdtemp(prefix="cgs-", dir=None if os.name == "nt" else "/tmp"))
@@ -716,7 +726,7 @@ class DaemonStopsTest(unittest.TestCase):
             "CADGEN_DAEMON_STATE_DIR": str(state),
             "CADGEN_DAEMON_SOCKET": address,
             "CADGEN_DAEMON_SPARES": "0",  # no worker, so no kernel import
-            "CADGEN_DAEMON_IDLE_TIMEOUT": "4",  # its watchdog looks every second
+            "CADGEN_DAEMON_IDLE_TIMEOUT": str(idle_timeout),
         }))
         daemon = client._spawn_daemon(address)
         self.addCleanup(self._kill, daemon)
