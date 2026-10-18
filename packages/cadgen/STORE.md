@@ -21,7 +21,7 @@ right.
 | [8](#8-gc-eviction-and-the-cap) | The sweeper: retired kinds, eviction to the cap, unreachable objects, a store two cadgens share, and why a pass needs no lock | anything that deletes |
 | [9](#9-the-daemon) | The build pool, job ledger and slots | daemon, workers, jobs |
 | [9a](#9a-children) | Children: a child call decodes the stored result or builds the child, serially, in the caller's process; its own captures, once per run, failure, queued files | a decorated call's return, a child's build |
-| [9b](#9b-editing-previews-and-explicit-saves) | The preview revision, the build feed's two events (the result, then the file), explicit saves | what the viewer says while a build runs |
+| [9b](#9b-editing-previews-and-explicit-saves) | The preview revision, the build feed's events (the result, the files it owes, then each file), explicit saves | what the viewer says while a build runs, what a door waits for |
 | [10](#10-debugging) | `store why`, resolving a tree, resets smallest first | diagnosing staleness |
 | [11](#11-never) | The explicit prohibitions | before proposing any of them |
 
@@ -720,8 +720,19 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   with the store is no newer result. A child's export under its parent is
   superseded the same way, by the child's own record.
   Nothing waits on anything after the write: every door given the file -- the
-  CAD Viewer, `read_step` and `read_scene`, a snapshot, the mesh doors,
-  `step compile`'s current check -- reads that entry and uses its tree. When
+  CAD Viewer's catalog read, `read_step` and `read_scene`, a snapshot, the mesh
+  doors, `step compile`'s current check -- reads that entry and uses its tree.
+  A door given a file a build is still writing waits for that write first
+  (`doors.await_writes`), bounded by it: it asks the daemon's job ledger --
+  process state, never a model record -- which lists each file a result owes
+  the moment it is recorded (`saving`) and the moment the file lands (`saved`,
+  §9b), and waits while the newest result that owes the file has not saved it
+  and its request runs; an older result's is no wait, since a newer result
+  supersedes its export (below). With no request writing the file, or no
+  daemon, it reads at once; inside a build, a file the build's own request owes
+  is written after its bodies return, so nothing there waits for it, and a
+  wait on another request's write gives up the job slot meanwhile. The viewer
+  draws the build's preview while its catalog read waits. When
   two models write equal bytes, the last export's entry stands. The model's
   declared meshes (`@stl`/`@glb`/`@threemf`) are then cut from the tree the
   file's bytes map to, keyed on those bytes as the record names them -- never a
@@ -1985,9 +1996,12 @@ state of its own beyond where each store's last housekeeping pass ended
 `--json` adds the **job ledger** (`cadgen.daemon.jobs`): every job the
 daemon ran in the last 120 s -- a row per request, and one per child a request
 built inside it (§9b) -- with its state (`submitted` → `queued` →
-`building` [phase, done/total] → `done` | `failed`) and the output paths it
-declared, parsed statically from the script it names. The ledger is the CAD
-Viewer's only progress source, and it is process state, never a file.
+`building` [phase, done/total] → `done` | `failed`), the output paths it
+declared, parsed statically from the script it names, and the files its
+results still owe (§9b); a row that still owes a file stays listed until its
+request ends. The ledger is the CAD Viewer's only progress source and what a
+door asks before it reads a file (§3, *Exports*), and it is process state,
+never a file.
 
 The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
 are themselves dispatched through the daemon, so they
@@ -2210,12 +2224,19 @@ the store holds (the stored parts first, then all of them once the build
 pool's job for the rest is done) and whether that is all of them, with its
 annotations as the one object they are (below) -- and the **file**, `saved`,
 the file-written event: the tree the bytes were written from and their digest,
-the moment the file lands. The ledger keeps nothing else of either. A child's
-row is `done` from its own done event, before its file is saved; the
-request's row, the root's, is `done` when the request ends, after the run's
-exports (`daemon/jobs.py`). Kinematics, appearance and animation travel in the
-sidecar for every durable reader, and in the preview's annotations object for
-the viewer alone.
+the moment the file lands. Between them, each file the result owes -- its STEP,
+its declared meshes -- is named once, `saving`, with the tree it is written
+from, the moment the result is recorded; each declared mesh gets its own
+`saved` when it is cut or found current. That pair is what a door reads to
+know a file is still being written (§3, *Exports*). The ledger keeps nothing
+else of any of them, each with the ledger's revision when it landed (the order
+of results across rows). A child's row is `done` from its own done event,
+before its file is saved; the request's row, the root's, is `done` when the
+request ends, after the run's exports (`daemon/jobs.py`). The request's end
+settles what its rows owed: a row that owed a file the failed request never
+saved fails with the request's reason. Kinematics, appearance and animation
+travel in the sidecar for every durable reader, and in the preview's
+annotations object for the viewer alone.
 
 Only model runs advance editing order: a compile of saved bytes is listed
 against the document but never hides a run's preview. A child built inside a

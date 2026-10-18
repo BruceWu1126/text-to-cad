@@ -24,8 +24,13 @@ _PLURAL = {"face": "faces", "edge": "edges", "vertex": "vertices"}
 def _resolve_input(step_path: Path | str, *, reader: str) -> Path:
     """Resolve a STEP a model asked for: it must exist, and must not be an
     output of the model reading it. The build's trace sees the read itself.
+    A file a build is still writing is read once it is written
+    (``doors.await_writes``).
     """
+    from cadgen._internal.doors import await_writes
+
     resolved = Path(step_path).expanduser().resolve()
+    await_writes(resolved)
     if not resolved.is_file():
         raise FileNotFoundError(
             f"{reader}: no STEP file at {resolved}. Check the path — it resolves "

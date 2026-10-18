@@ -73,7 +73,7 @@ this one:
 | Build status and preview: the viewer's feed says whether a build of a file is running or failed and, as soon as the build has its result, names the **preview revision** -- the result tree and the parts it draws with, artifact-side objects -- which the viewer draws labelled as a preview until the saved file replaces it in place; the file is exported from that very tree, and its bytes map to it once written, so the saved file's parts are the preview's and nothing is fetched twice | no reader reaches source, closure or a model record; a preview never stands in for a saved file, and no bytes map to a tree before they are written from it | [`STORE.md`](STORE.md) §9b |
 | Composition: what a decorated call returns -- the child's stored result, decoded, or built there and then -- and how a parent records it | the link/component decision, the child's key | [`STORE.md`](STORE.md) §6, §9a |
 | Display data: canonical trees pin encoded BREP and effective intrinsic face colors; each part's display data — ONE record naming two objects, OCCT's mesh at the one display tolerance and the selector table, both made from the component's topology facts, extracted in memory under an attested producer — is derived by the build pool, never on the build's thread (a daemon worker): the jobs a build asks for the moment its result exists -- one, or a pool slot's share each of a large batch -- and waits for before it reports done (a parent's children's builds had theirs derived); views only read, and a part missing from the store is derived by one build-pool job; cadgen is the only mesher — every client draws the store's meshes and holds no tolerance | geometry stays separate from display data — a part that fails to derive is a warning and never makes the geometry rebuild; `read_step` never waits for a part | [`STORE.md`](STORE.md) §3 |
-| Exports: a model's STEP written from its stored result by the build pool, its sidecar from its record, and the file's bytes mapped to the tree it was written from | the file written from the result is the result: its bytes map to it at once and finally, every door reads that map, and nothing parses the file to check it | [`STORE.md`](STORE.md) §3 |
+| Exports: a model's STEP written from its stored result by the build pool, its sidecar from its record, and the file's bytes mapped to the tree it was written from; a newer result of the model supersedes an older run's export | the file written from the result is the result: its bytes map to it at once and finally, every door reads that map -- once a write the build still owes it has landed, which a door waits for by asking the job ledger, never a record -- and nothing parses the file to check it | [`STORE.md`](STORE.md) §3 |
 
 ### 2. The store contains only derived results
 
@@ -107,7 +107,8 @@ coordination: a sweep keeps whatever a publish has claimed, and a racing
 reader re-misses and rebuilds. Store correctness needs
 no lock protocol: atomic writes, keys and the publish rule (`STORE.md` §5, §7)
 decide concurrent outcomes. Saved-file readers never wait for a source model
-to finish; missing derived artifacts are resolved through the build pool.
+to finish -- only for a write of the file a build already owes, once its result
+is recorded; missing derived artifacts are resolved through the build pool.
 *Pressure-test*: build a model and snapshot it, make the store read-only, then
 do both again: each succeeds and nothing under the store changes.
 

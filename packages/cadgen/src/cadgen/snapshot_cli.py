@@ -40,7 +40,7 @@ from pathlib import Path
 import cadgen.cad_ref_syntax as cad_ref_syntax
 import cadgen.lookup as lookup
 from cadgen.assets import browser_runtime_dir
-from cadgen._internal.doors import document_snapshot
+from cadgen._internal.doors import await_writes, document_snapshot
 # A drawing's refusals are written once, beside the signature whose absences
 # they explain.
 from cadgen._internal.snapshot_door import (
@@ -434,11 +434,13 @@ def input_kind(file_path: Path) -> str:
 
 
 def resolve_input_path(raw_input: object, *, cwd: Path) -> Path:
+    """A render input, once any build writing it has written it (``doors.await_writes``)."""
     input_text = str(raw_input or "").strip()
     if not input_text:
         raise SnapshotError("render job is missing input")
     raw_path = Path(input_text).expanduser()
     selected = raw_path.resolve() if raw_path.is_absolute() else (cwd / raw_path).resolve()
+    await_writes(selected)
     if not selected.exists():
         raise _missing(f"Render input does not exist: {input_text}")
     return selected

@@ -297,6 +297,20 @@ class _Export:
             if plan.kept is None:
                 self.job = _submit_export(tree, step["staged"], live=step["live"])
         run.exports.append(self)
+        # The files the result owes, in the build feed: a door given one waits until its
+        # ``saved`` lands or the request ends (``doors.await_writes``).
+        from cadgen.daemon import executors
+
+        for path in self.owed():
+            executors.emit_event(executors.model_event(_model_for_spec(spec), "building",
+                                                       saving={"output": str(path), "tree": tree}))
+
+    def owed(self) -> list[Path]:
+        """The files this export may still write: the STEP it publishes and the declared meshes
+        it cuts."""
+        files = [self.spec.step_path] if self.step is not None else []
+        files += [declared.path for declared in self.spec.mesh_exports]
+        return [Path(path).expanduser().resolve() for path in files]
 
     def finish(self) -> None:
         """Publish what the model owes, in order (the class docstring), and say so."""
@@ -1299,6 +1313,7 @@ def _produce_declared_mesh_exports(
             )
         )
     if not pending:
+        _note_meshes_saved(spec, model, tree_hash)
         return ()
     jobs = list(pending)
     exported = run_mesh_exporter(
@@ -1326,7 +1341,22 @@ def _produce_declared_mesh_exports(
         # A file open where no mesher could cover a face says so beside the line that wrote it.
         for warning in (entry or {}).get("warnings") or ():
             print(f"[cadgen] warning: {warning}", file=sys.stderr)
+    _note_meshes_saved(spec, model, tree_hash)
     return tuple(job.out for job in jobs)
+
+
+def _note_meshes_saved(spec: EntrySpec, model: str, tree: str) -> None:
+    """Each declared mesh's ``saved`` event, as its file now stands -- cut now or current
+    already -- with the digest the record names: the end of what the build owed there."""
+    from cadgen.daemon import executors
+    from cadgen.store.records import read_record
+
+    outputs = (read_record(model) or {}).get("outputs") or {}
+    for declared in spec.mesh_exports:
+        path = str(Path(declared.path).expanduser().resolve())
+        digest = str((outputs.get(path) or {}).get("sha256") or "") or None
+        executors.emit_event(executors.model_event(model, "building", saved={
+            "output": path, "tree": tree, "documentHash": digest}))
 
 
 def _selected_specs_for_targets(targets: Sequence[str]) -> tuple[list[EntrySpec], list[EntrySpec]]:
