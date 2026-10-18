@@ -260,6 +260,19 @@ class PlotRequestsAreRefusedByName(_Workspace):
             with self.subTest(job=sorted(set(job) - {"input"})):
                 self.refused(job, pattern)
 
+    def test_a_plan_view_frames_a_board_and_ink_and_measurements_are_drawn_over_it(self) -> None:
+        # What a board's Quick Edit carries: its window, as a drawing's, and what was drawn on the sheet.
+        plan = {"position": [20, -15, 60], "target": [20, -15, 0], "up": [0, 1, 0], "orthographicHalfHeight": 16}
+        annotation = {"units": "mm", "parts": {}, "marks": [
+            {"id": "1", "kind": "stroke", "part": None, "points": [3, 3, 0, 11, 3, 0], "color": "#ff00ff", "width": 2}]}
+        mark = {"start": [5, 15, 0], "end": [35, 15, 0], "label": "30.00 mm", "color": "#00ff00"}
+        _, prepared = snapshot_cli.prepare_render_job_packet(self.job(camera=plan, annotation=annotation, measurements=[mark]), cwd=self.root)
+        self.assertEqual({"position": [20.0, -15.0, 60.0], "target": [20.0, -15.0, 0.0], "up": [0.0, 1.0, 0.0], "orthographicHalfHeight": 16.0},
+                         prepared[0].job["outputs"][0]["camera"])
+        self.assertEqual((annotation, [mark]), (prepared[0].job["annotation"], prepared[0].job["measurements"]))
+        tilted = {"position": [10, -10, 10], "target": [0, 0, 0], "up": [0, 0, 1], "orthographicHalfHeight": 5}
+        self.refused(self.job(camera=tilted), r"The one camera a job may give a KiCad board is its plan view")
+
     def test_appearance_and_the_flat_output_settings_survive(self) -> None:
         single, prepared = snapshot_cli.prepare_render_job_packet(
             self.job(display={"appearance": "dark"}, output={"renderScale": 2, "transparent": True}), cwd=self.root

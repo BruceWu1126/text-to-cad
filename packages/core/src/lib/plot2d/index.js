@@ -1,5 +1,5 @@
 /**
- * Plots: a KiCad board drawn from its file, shared by the CAD Viewer's plot pane and the headless
+ * Plots: a KiCad board drawn from its file, shared by the CAD Viewer's board view and the headless
  * snapshot bundle. Payload in (`GET /__cad/plot`, schema 3: geometry per layer), Canvas 2D out in
  * KiCad's default colours, the view maths drawing2d's; and the board's Display contract
  * (`boardDisplay.js`), which both read the same way.
@@ -20,6 +20,7 @@ export {
   visiblePageRect
 } from "./plot.js";
 export { HOLE_COLORS, VIA_COLORS, itemColor, layerColor } from "./theme.js";
+export { boardMirrorX, boardPlanProjection, marksInPlan, measurementsInPlan, planToSheet, sheetToPlan } from "./boardView.js";
 export {
   BOARD_DISPLAY_DEFAULTS,
   BOARD_DISPLAY_MODES,

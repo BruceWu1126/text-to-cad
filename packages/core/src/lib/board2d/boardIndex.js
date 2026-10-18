@@ -19,8 +19,18 @@ import { bounds, nearestOnPolyline, point, pointInPolygon, polygonArea, polygonR
 import { boxOf, createSpatialGrid, nearBox } from "./spatialGrid.js";
 
 
-/** How a pick is filtered: the Select tool's modes. */
-export const BOARD_PICK_MODES = Object.freeze(["all", "parts", "pads", "nets"]);
+/**
+ * What a pick may take, by kind: `pads`; `copper` (a track or a via, the net's copper where it was
+ * pressed); `parts`; and `nets`, which takes whole nets instead — any copper under the pointer, a
+ * pad's or a pour's too, picks its net. The named sets are the old modes, a filter's shorthands.
+ */
+export const BOARD_PICK_KINDS = Object.freeze({
+  all: Object.freeze({ pads: true, copper: true, parts: true, nets: false }),
+  parts: Object.freeze({ pads: false, copper: false, parts: true, nets: false }),
+  pads: Object.freeze({ pads: true, copper: false, parts: false, nets: false }),
+  nets: Object.freeze({ pads: true, copper: true, parts: false, nets: true }),
+});
+export const BOARD_PICK_MODES = Object.freeze(Object.keys(BOARD_PICK_KINDS));
 
 const EMPTY = Object.freeze([]);
 function centre(polygon) {
@@ -87,7 +97,8 @@ export function createBoardIndex(board, sheet = {}) {
       kind: "part", ref, value: String(entry.value ?? ""), footprint: String(entry.footprint ?? ""),
       side: entry.side === "bottom" ? "bottom" : "top", at: page(entry.at) || [sheetX, sheetY], rotation: Number(entry.rotation) || 0,
       fields: entry.fields && typeof entry.fields === "object" ? { ...entry.fields } : {},
-      dnp: Boolean(entry.dnp), outline, area: outline.length > 2 ? polygonArea(outline) : Infinity, box: outline.length > 2 ? boxOf(outline) : null, pads: []
+      dnp: Boolean(entry.dnp), script: typeof entry.script === "string" ? entry.script : "",
+      outline, area: outline.length > 2 ? polygonArea(outline) : Infinity, box: outline.length > 2 ? boxOf(outline) : null, pads: []
     });
   }
 
@@ -148,17 +159,19 @@ export function createBoardIndex(board, sheet = {}) {
   // ---- picking ---------------------------------------------------------------
   /**
    * What is under page point `at`, as a hit `{ kind, selector, ... }`, or null.
-   * `mode`: all | parts | pads | nets. `view`: the side looked at (top | bottom). `tolerance`: page
-   * millimetres a small thing may be missed by (a few screen pixels at the view's scale).
+   * `kinds`: what may be taken (`BOARD_PICK_KINDS`), else `mode`'s set: all | parts | pads | nets.
+   * `view`: the side looked at (top | bottom). `tolerance`: page millimetres a small thing may be
+   * missed by (a few screen pixels at the view's scale).
    */
-  function pick(at, { mode = "all", view = "top", tolerance = 0 } = {}) {
+  function pick(at, { mode = "all", kinds = BOARD_PICK_KINDS[mode] || BOARD_PICK_KINDS.all, view = "top", tolerance = 0 } = {}) {
     if (!point(at)) return null;
     const reach = Math.max(0, Number(tolerance) || 0);
     const [x, y] = at;
     const candidates = [];
-    const wantPads = mode === "all" || mode === "pads" || mode === "nets";
-    const wantCopper = mode === "all" || mode === "nets";
-    const wantParts = mode === "all" || mode === "parts";
+    const wholeNets = Boolean(kinds.nets);
+    const wantPads = Boolean(kinds.pads);
+    const wantCopper = Boolean(kinds.copper);
+    const wantParts = Boolean(kinds.parts);
     if (wantPads) {
       padGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => {
         const shape = padShapes[order];
@@ -187,13 +200,13 @@ export function createBoardIndex(board, sheet = {}) {
       partGrid.visit(x, y, x, y, (order) => {
         const part = parted[order];
         if (nearBox(part.box, at, 0) && pointInPolygon(at, part.outline)) {
-          candidates.push({ rank: mode === "parts" ? 0 : 3, side: facing(part.side, view), size: part.area, distance: 0, order, hit: { kind: "part", part } });
+          candidates.push({ rank: 3, side: facing(part.side, view), size: part.area, distance: 0, order, hit: { kind: "part", part } });
         }
       });
     }
     // A pour is picked only for its net: under All, a press on bare board (inside a ground pour,
     // as most of a board is) clears the selection rather than taking the pour.
-    if (mode === "nets") {
+    if (wholeNets) {
       zoneGrid.visit(x, y, x, y, (order) => {
         const zone = zones[order];
         if (nearBox(zone.box, at, 0) && pointInPolygon(at, zone.outline)) candidates.push({ rank: 4, side: facing(layerSide(zone.layer), view), size: zone.area, distance: 0, order, hit: { kind: "zone", zone, at } });
@@ -203,14 +216,14 @@ export function createBoardIndex(board, sheet = {}) {
     // past one that names nothing (copper on no net) to the next.
     candidates.sort((a, b) => a.side - b.side || a.rank - b.rank || a.distance - b.distance || a.size - b.size || a.order - b.order);
     for (const candidate of candidates) {
-      const found = describeHit(candidate.hit, mode, at);
+      const found = describeHit(candidate.hit, wholeNets, at);
       if (found) return found;
     }
     return null;
   }
 
-  function describeHit(hit, mode, at) {
-    if (mode === "nets") {
+  function describeHit(hit, wholeNets, at) {
+    if (wholeNets) {
       const name = hit.pad?.net ?? hit.via?.net ?? hit.track?.net ?? hit.zone?.net ?? "";
       const net = nets.get(name);
       return net ? { kind: "net", net, selector: formatBoardRefSelector({ kind: "net", net: net.name }) } : null;
@@ -224,6 +237,37 @@ export function createBoardIndex(board, sheet = {}) {
     const [x, y] = toScript(hit.at || at);
     return { kind: "copper", net: nets.get(item.net) || netNamed(item.net), item, at: [round2(x), round2(y)],
       selector: formatBoardRefSelector({ kind: "copper", net: item.net, at: [round2(x), round2(y)] }) };
+  }
+
+  // ---- snapping: where Measure's ends land --------------------------------------
+  const holeGrid = createSpatialGrid(holes.map((hole) => boxOf([hole.at], hole.diameter / 2)));
+  const outlinePoints = outline.flat();
+  const outlineGrid = createSpatialGrid(outlinePoints.map(([px, py]) => [px, py, px, py]));
+  /**
+   * The point a measurement's end takes near page point `at`: the nearest pad, via or hole centre
+   * ("center"), or track end or outline vertex ("vertex"), within `tolerance` page millimetres, as
+   * `{ point, kind, what }`; null when nothing is that near.
+   */
+  function snap(at, { tolerance = 0 } = {}) {
+    if (!point(at)) return null;
+    const reach = Math.max(0, Number(tolerance) || 0);
+    const [x, y] = at;
+    let best = null;
+    const consider = (candidate, kind, what) => {
+      if (!candidate) return;
+      const distance = Math.hypot(candidate[0] - x, candidate[1] - y);
+      if (distance <= reach && (!best || distance < best.distance)) best = { point: [candidate[0], candidate[1]], kind, what, distance };
+    };
+    padGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => consider(padShapes[order].at, "center", "pad"));
+    viaGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => consider(vias[order].at, "center", "via"));
+    holeGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => consider(holes[order].at, "center", "hole"));
+    trackGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => {
+      const line = tracks[order].points;
+      consider(line[0], "vertex", "track");
+      consider(line[line.length - 1], "vertex", "track");
+    });
+    outlineGrid.visit(x - reach, y - reach, x + reach, y + reach, (order) => consider(outlinePoints[order], "vertex", "outline"));
+    return best ? { point: best.point, kind: best.kind, what: best.what } : null;
   }
 
   /** The board reference of a point (a press on bare board), to the hundredth of a millimetre. */
@@ -290,6 +334,6 @@ export function createBoardIndex(board, sheet = {}) {
   const shapesOf = (pad) => shapesByPin.get(`${pad.ref}.${pad.number}`) || [pad];
   return Object.freeze({
     document: "board", origin, parts, pads, padShapes, nets, tracks, vias, zones, holes, outline,
-    toScript, toPage, pick, pointSelector, resolve, extent, shapesOf
+    toScript, toPage, pick, snap, pointSelector, resolve, extent, shapesOf
   });
 }

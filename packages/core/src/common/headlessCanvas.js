@@ -1,6 +1,6 @@
 /**
- * The 2D half of the snapshot bundle's output contract, shared by every flat render (a DXF
- * drawing, a plot): one PNG per declared output, at exactly the size it asked for.
+ * The 2D half of the snapshot bundle's output contract for a board's render
+ * (`headlessPlotRender.js`): one PNG per declared output, at exactly the size it asked for.
  *
  * A picture is painted at `width * renderScale` and resampled to `width`, exactly as the mesh
  * path supersamples its drawing buffer: the snapshot contract is expressed in OUTPUT pixels,
@@ -66,10 +66,10 @@ export function paintOutput({ width, height, scale }, paint) {
 }
 
 /**
- * The job's declared outputs, each with its PNG: `render(width, height)` answers a data URL.
+ * The job's declared outputs, each with its PNG: `render(width, height, output)` answers a data URL.
  *
  * @param {object} job
- * @param {(width: number, height: number) => string} render
+ * @param {(width: number, height: number, output: object) => string} render
  */
 export function renderOutputs(job, render) {
   return (Array.isArray(job?.outputs) ? job.outputs : []).map((output) => {
@@ -80,7 +80,7 @@ export function renderOutputs(job, render) {
       width,
       height,
       mimeType: "image/png",
-      dataUrl: render(width, height)
+      dataUrl: render(width, height, output || {})
     };
   });
 }

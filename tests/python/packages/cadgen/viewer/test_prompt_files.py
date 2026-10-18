@@ -109,6 +109,26 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertNotIn("output", packet["jobs"][0])
         self.assertEqual(packet["jobs"][0]["outputs"], [{"path": str(self.files / "panel-1-view-1.png"), "width": 1600, "height": 900}])
 
+    def test_a_boards_view_is_its_plan_view_with_its_display_and_its_job_carries_ink_and_measurements(self) -> None:
+        """A board's Quick Edit, as a drawing's: the window as a plan-view camera, the board's Display,
+        the ink and the measurements on the sheet, in a job `cadgen pcb snapshot` takes."""
+        board = self.tmp / "blinky.kicad_pcb"
+        board.write_text("(kicad_pcb (version 20260901))\n", encoding="utf-8")
+        plan = {"position": [20, -15, 60], "target": [20, -15, 0], "up": [0, 1, 0], "orthographicHalfHeight": 16}
+        display = {"mode": "copper", "side": "bottom", "poured": False, "layers": ["B.Cu", "Edge.Cuts"]}
+        mark = {"start": [5, 15, 0], "end": [35, 15, 0], "label": "30.00 mm", "color": "#d59090"}
+        status, body, _ = self.call("POST", "/__cad/prompt-files", {
+            "name": "blinky.kicad_pcb", "input": str(board), "annotation": ANNOTATION, "measurements": [mark],
+            "views": [{"label": "current view", "camera": plan, "display": display, "width": 1600, "height": 1200}]})
+        self.assertEqual(status, 200, body)
+        packet = json.loads((self.files / "blinky-1.snapshot.json").read_text(encoding="utf-8"))
+        [prepared] = prepare_render_job_packet(packet, cwd=self.tmp)[1]
+        self.assertEqual((prepared.kind, prepared.job["camera"]), ("kicad_pcb", plan))
+        self.assertEqual({key: prepared.job["display"][key] for key in display}, display)
+        self.assertEqual((prepared.job["annotation"], prepared.job["measurements"]), (ANNOTATION, [mark]))
+        self.assertNotIn("output", packet["jobs"][0])
+        self.assertEqual(packet["jobs"][0]["outputs"], [{"path": str(self.files / "blinky-1-current-view.png"), "width": 1600, "height": 1200}])
+
     def test_a_prompt_without_an_annotation_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
         _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))
         _, second, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))

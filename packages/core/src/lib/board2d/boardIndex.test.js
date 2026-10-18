@@ -238,3 +238,22 @@ test("past copper on no net, a pick takes what lies under it", () => {
   // Under Nets, a pad on no net inside the ground pour is the pour's net.
   assert.equal(index.pick([15, 21], { mode: "nets" }).selector, "#net:GND");
 });
+
+test("Measure's ends snap to pad, via and hole centres, track ends and outline corners, within its reach", () => {
+  const index = createBoardIndex(BOARD);
+  assert.deepEqual(index.snap([14.3, 20.1], { tolerance: 0.3 }), { point: [14.175, 20], kind: "center", what: "pad" });
+  assert.deepEqual(index.snap([20.1, 15.1], { tolerance: 0.3 }), { point: [20, 15], kind: "center", what: "via" });
+  assert.deepEqual(index.snap([3.2, 2.9], { tolerance: 0.3 }), { point: [3, 3], kind: "center", what: "hole" });
+  assert.deepEqual(index.snap([14.2, 12.1], { tolerance: 0.3 }), { point: [14.175, 12], kind: "vertex", what: "track" });
+  assert.deepEqual(index.snap([39.9, 29.9], { tolerance: 0.3 }), { point: [40, 30], kind: "vertex", what: "outline" });
+  // The nearest wins; nothing that near, nothing at all.
+  assert.equal(index.snap([14.5, 20], { tolerance: 1 }).point[0], 14.175);
+  assert.equal(index.snap([10, 25], { tolerance: 0.3 }), null);
+});
+
+test("a pick takes what its kinds tick: no pads takes the copper or the part under them", () => {
+  const index = createBoardIndex(BOARD);
+  assert.equal(index.pick([14.175, 20], { kinds: { pads: false, copper: true, parts: true } }).selector, "#net:VIN@x9.18y-5");
+  assert.equal(index.pick([15.825, 20], { kinds: { pads: false, copper: true, parts: true } }).selector, "#R1");
+  assert.equal(index.pick([15.825, 20], { kinds: { pads: false, copper: false, parts: false } }), null);
+});

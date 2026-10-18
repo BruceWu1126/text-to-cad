@@ -1,5 +1,5 @@
 /**
- * KiCad's default colour theme, as the plot pane draws a board: the "KiCad Default" board colours,
+ * KiCad's default colour theme, as the board view draws a board: the "KiCad Default" board colours,
  * by layer, with the via, hole and ratsnest colours KiCad draws over every layer. The payload
  * carries geometry only (`docs/plot-payload.md`); what colour a layer is, is this module's.
  */

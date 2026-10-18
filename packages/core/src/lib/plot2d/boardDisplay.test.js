@@ -25,11 +25,10 @@ const SHEET = {
 };
 const ids = (view) => view.layers;
 
-test("a stored or requested display is read leniently: a display stored before modes as its mode, before the checkboxes on its mode's set", () => {
+test("a stored or requested display is read leniently: the defaults wherever it says nothing usable", () => {
   assert.deepEqual(readBoardDisplay(null), BOARD_DISPLAY_DEFAULTS);
   assert.deepEqual(readBoardDisplay({ mode: "placement", side: "bottom" }), { mode: "placement", side: "bottom", poured: true, layers: null });
   assert.deepEqual(readBoardDisplay({ layers: "all", poured: false }), { mode: "board", side: "top", poured: false, layers: null });
-  assert.equal(readBoardDisplay({ layers: "assembly" }).mode, "assembly");
   assert.equal(readBoardDisplay({ mode: "nonsense" }).mode, "board");
   // An explicit set is kept as given, unknown ids included (cadgen checks a snapshot's; a stored set outlives a rebuild), once each.
   assert.deepEqual(readBoardDisplay({ mode: "copper", layers: ["F.Cu", "F.Cu", "In9.Cu", 7, ""] }).layers, ["F.Cu", "In9.Cu"]);
@@ -60,16 +59,16 @@ test("an explicit set is what is drawn, and the pours are a choice only while a 
   assert.equal(boardDisplayDrawsCopper({ ...BOARD_DISPLAY_DEFAULTS, mode: "assembly" }, SHEET), false);
 });
 
-test("a display reads as Custom once its pours or its layers leave the mode's; choosing a mode reapplies both and keeps the side", () => {
+test("a display reads as Custom once its layers leave the mode's; the pours and the side are switches of their own, kept through a change of mode", () => {
   const unpoured = { mode: "copper", side: "bottom", poured: false, layers: null };
-  assert.equal(boardDisplayIsCustom(unpoured, SHEET), true);
-  assert.equal(boardDisplayIsCustom({ ...unpoured, poured: true }, SHEET), false);
+  assert.equal(boardDisplayIsCustom(unpoured, SHEET), false);
   // The mode's own set, spelt out, is not custom; one layer more or less is.
   assert.equal(boardDisplayIsCustom({ ...BOARD_DISPLAY_DEFAULTS, mode: "copper", layers: [...boardModeLayers("copper", SHEET)].reverse() }, SHEET), false);
   assert.equal(boardDisplayIsCustom({ ...BOARD_DISPLAY_DEFAULTS, mode: "copper", layers: ["F.Cu"] }, SHEET), true);
   assert.equal(boardDisplayIsCustom({ ...BOARD_DISPLAY_DEFAULTS, layers: null }, null), false);
-  assert.deepEqual(selectBoardMode({ ...unpoured, layers: ["F.Cu"] }, "copper"), { mode: "copper", side: "bottom", poured: true, layers: null });
-  assert.deepEqual(selectBoardMode(unpoured, "placement"), { mode: "placement", side: "bottom", poured: true, layers: null });
+  // Choosing a mode is its layers again; the pours and the side stay as they were.
+  assert.deepEqual(selectBoardMode({ ...unpoured, layers: ["F.Cu"] }, "copper"), { mode: "copper", side: "bottom", poured: false, layers: null });
+  assert.deepEqual(selectBoardMode(unpoured, "placement"), { mode: "placement", side: "bottom", poured: false, layers: null });
 });
 
 test("a checkbox toggles one layer in the sheet's order, and the set ticked back to the mode's is the mode's again", () => {

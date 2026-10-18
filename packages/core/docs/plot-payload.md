@@ -52,7 +52,12 @@ as it is made is every layer but the `courtyard`, `mask` and `paste` kinds; seen
 stack reverses and the `outline`, `via`, `ratsnest` and `drill` kinds stay on top, each layer
 mirrored about the sheet's vertical centre line. The board's Display (`plot2d/boardDisplay.js`:
 `{ mode, side, poured, layers }`, the viewer's and `cadgen pcb snapshot --display`'s one contract)
-is a view over these ids: a mode is a set of layer kinds, `layers` an explicit set of ids.
+is a view over these ids: a mode is a set of layer kinds, `layers` an explicit set of ids (one
+that differs from its mode's reads as Custom), `poured` and `side` switches of their own. What is
+drawn ON the board — an annotation's ink, Measure's ends — is kept in sheet millimetres, so it
+stays on what it marks from either side; the view's plan is the sheet with y negated, mirrored
+about its middle from below (`plot2d/boardView.js`), the frame a Quick Edit's plan-view camera
+speaks.
 
 ## The items
 

@@ -105,7 +105,7 @@ export interface CadPlotPayload {
   /** The board's connections still to make, each drawn as a ratsnest line. */
   unrouted: number | null;
   sheets: { name: string; width: number; height: number; background: string; layers: { id: string; kind: string; side: string; items: Record<string, unknown>[] }[] }[];
-  /** The board's index, in sheet millimetres: what the plot pane's tools point with. */
+  /** The board's index, in sheet millimetres: what the board view's tools point with. */
   board?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -207,7 +207,7 @@ export interface CadWorkspaceService {
   requestArtifact(file: string, options?: CadRequestOptions & {force?: boolean}): Promise<CadArtifactResult>;
   /** A `.dxf` flattened to 2D render primitives on the server; the client never parses DXF. */
   drawing(file: string, options?: CadRequestOptions): Promise<CadDrawingPayload>;
-  /** A KiCad board or schematic as the SVG sheets its tool plots, on the server. */
+  /** A KiCad board drawn from its file on the server: geometry per layer, and the board's index. */
   plotPayload(file: string, options?: CadRequestOptions): Promise<CadPlotPayload>;
   readonly resources: CadResourceProvider;
   /** `onReady` hears each component as soon as its row is ready, while the rest are still awaited. */

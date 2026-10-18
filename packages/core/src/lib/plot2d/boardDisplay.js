@@ -1,15 +1,16 @@
 /**
  * A board's Display: which of a plot's layers are drawn, with or without the pours, from which
- * side. One object serves the viewer's Display settings (`@text-to-cad/ui`'s
- * `renderers/plot/board/BoardDisplay.jsx`), the file view it is kept in, and
- * `cadgen pcb snapshot --display`, so a headless picture is exactly what the Display shows.
+ * side. One object serves the viewer's Display and Layers (`@text-to-cad/ui`'s
+ * `renderers/board/BoardDisplay.jsx`, `LayersSection.jsx`), the file view it is kept in, the views a
+ * Quick Edit carries, and `cadgen pcb snapshot --display`, so a headless picture is exactly what the
+ * Display shows.
  *
  * ```jsonc
  * { "mode": "board", "side": "top", "poured": true, "layers": ["F.Cu", "Edge.Cuts"] }
  * ```
  *
  * **Modes** are presets, as a 3D view's are (`ui/docs/render-mode.md`): each names the layer
- * KINDS it draws and whether pours are filled. **Board** is the board as it is made (`plot2d`'s
+ * KINDS it draws. **Board** is the board as it is made (`plot2d`'s
  * default view: every layer but the courtyards, mask and paste included). **Copper** is the
  * copper, vias, holes, outline and ratsnest. **Assembly** is the silkscreen, fab and courtyards
  * with the holes, outline and ratsnest. **Placement** is the board before it is wired: no copper
@@ -17,27 +18,25 @@
  * connection as an airwire (`board2d/boardOverlay.js`).
  *
  * `layers` is the ids drawn, or null for the mode's own set (resolved against the sheet, so a
- * rebuild that adds a layer draws it under the mode). A display whose layers or pours differ
- * from its mode's reads as Custom; the mode is kept as what Reset returns to. The side is not a
- * preset's, as a 3D view's camera is not.
+ * rebuild that adds a layer draws it under the mode). A display whose layers differ from its
+ * mode's reads as Custom; the mode is kept as what choosing it again returns to. The pours and
+ * the side are switches of their own, kept through a change of mode, as a 3D view's Grid is.
  *
  * Nothing here is React or canvas: pure functions over the payload's sheet (`layoutPlot`'s, or
  * the raw `payload.sheets[0]`: only `layers[].id`, `kind` and `side` are read).
  */
 
-/** What each mode draws, by layer kind (the outline always), its pours, and whether the overlay draws airwires. */
+/** What each mode draws, by layer kind (the outline always), and whether the overlay draws airwires. */
 export const BOARD_DISPLAY_MODES = Object.freeze({
-  board: Object.freeze({ kinds: Object.freeze(["copper", "mask", "paste", "silk", "fab", "adhesive", "user", "margin", "via", "drill", "outline", "ratsnest"]), poured: true, airwires: false }),
-  copper: Object.freeze({ kinds: Object.freeze(["copper", "via", "drill", "outline", "ratsnest"]), poured: true, airwires: false }),
-  assembly: Object.freeze({ kinds: Object.freeze(["silk", "fab", "courtyard", "drill", "outline", "ratsnest"]), poured: true, airwires: false }),
-  placement: Object.freeze({ kinds: Object.freeze(["fab", "courtyard", "outline"]), poured: true, airwires: true }),
+  board: Object.freeze({ kinds: Object.freeze(["copper", "mask", "paste", "silk", "fab", "adhesive", "user", "margin", "via", "drill", "outline", "ratsnest"]), airwires: false }),
+  copper: Object.freeze({ kinds: Object.freeze(["copper", "via", "drill", "outline", "ratsnest"]), airwires: false }),
+  assembly: Object.freeze({ kinds: Object.freeze(["silk", "fab", "courtyard", "drill", "outline", "ratsnest"]), airwires: false }),
+  placement: Object.freeze({ kinds: Object.freeze(["fab", "courtyard", "outline"]), airwires: true }),
 });
 /** The mode ids, in the order a menu lists them. */
 export const BOARD_DISPLAY_MODE_IDS = Object.freeze(["board", "copper", "assembly", "placement"]);
 export const BOARD_DISPLAY_SIDES = Object.freeze(["top", "bottom"]);
 export const BOARD_DISPLAY_DEFAULTS = Object.freeze({ mode: "board", side: "top", poured: true, layers: null });
-// Before modes a display named its layers with a word (`all`, `copper`, `assembly`); `all` is Board.
-const LEGACY_LAYERS = Object.freeze({ all: "board", copper: "copper", assembly: "assembly" });
 /** The ids of what goes through the board, and how the Display names them. */
 export const BOARD_THROUGH_LAYER_LABELS = Object.freeze({ vias: "Vias", ratsnest: "Ratsnest", drills: "Drills" });
 const INNER_COPPER = /^In\d+\.Cu$/;
@@ -54,14 +53,14 @@ const sameSet = (left, right) => left.length === right.length && left.every((id)
  */
 export function readBoardDisplay(raw) {
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const mode = BOARD_DISPLAY_MODES[value.mode] ? value.mode : LEGACY_LAYERS[value.layers] || BOARD_DISPLAY_DEFAULTS.mode;
+  const mode = BOARD_DISPLAY_MODES[value.mode] ? value.mode : BOARD_DISPLAY_DEFAULTS.mode;
   const layers = Array.isArray(value.layers)
     ? [...new Set(value.layers.filter((id) => typeof id === "string" && id))]
     : null;
   return {
     mode,
     side: value.side === "bottom" ? "bottom" : "top",
-    poured: typeof value.poured === "boolean" ? value.poured : BOARD_DISPLAY_MODES[mode].poured,
+    poured: typeof value.poured === "boolean" ? value.poured : BOARD_DISPLAY_DEFAULTS.poured,
     layers,
   };
 }
@@ -77,17 +76,15 @@ export function boardDisplayLayers(display, sheet) {
   return display.layers ?? boardModeLayers(display.mode, sheet);
 }
 
-/** Whether a display has left its mode's preset: its pours, or its layers (judged against the sheet). */
+/** Whether a display's layers have left its mode's set (judged against the sheet). */
 export function boardDisplayIsCustom(display, sheet = null) {
-  const preset = BOARD_DISPLAY_MODES[display.mode] || BOARD_DISPLAY_MODES.board;
-  if (display.poured !== preset.poured) return true;
   if (display.layers == null) return false;
   return !sameSet(display.layers, boardModeLayers(display.mode, sheet));
 }
 
-/** The display's mode chosen: the preset's layers and pours, the side kept. */
+/** The display's mode chosen: the preset's layers, the pours and the side kept. */
 export const selectBoardMode = (display, mode) => ({
-  mode, side: display.side, poured: (BOARD_DISPLAY_MODES[mode] || BOARD_DISPLAY_MODES.board).poured, layers: null,
+  mode: BOARD_DISPLAY_MODES[mode] ? mode : BOARD_DISPLAY_DEFAULTS.mode, side: display.side, poured: display.poured, layers: null,
 });
 
 /**

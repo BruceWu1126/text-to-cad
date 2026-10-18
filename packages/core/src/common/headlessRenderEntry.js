@@ -184,7 +184,7 @@ export async function runHeadlessRenderJob(job) {
     return runHeadlessDrawingJob(job);
   }
   // Nor does a plot: a board's layers are drawn on a 2D canvas, with the code the viewer's
-  // plot pane draws with (./headlessPlotRender.js).
+  // board view draws with (./headlessPlotRender.js).
   if (jobIsPlot(job)) {
     return runHeadlessPlotJob(job);
   }

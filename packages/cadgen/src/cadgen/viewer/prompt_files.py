@@ -41,7 +41,7 @@ def _slug(text: str, fallback: str) -> str:
 
 def _stem(name: str) -> str:
     base = os.path.basename(str(name or "").replace("\\", "/"))
-    for suffix in (".step", ".stp", ".stl", ".3mf", ".glb", ".urdf", ".srdf", ".sdf", ".dxf"):
+    for suffix in (".step", ".stp", ".stl", ".3mf", ".glb", ".urdf", ".srdf", ".sdf", ".dxf", ".kicad_pcb"):
         if base.lower().endswith(suffix):
             base = base[: -len(suffix)]
             break
@@ -122,9 +122,10 @@ class PromptFiles:
             prefix = f"{_stem(name or input_path)}-{self._count}"
         labels: set[str] = set()
         jobs = []
-        # A drawing's view is its plan view, framed as the pane framed it (its camera); it has no
-        # 3D framing to pin and no view name to carry (`check_drawing_render_job`).
-        drawing = str(input_path).lower().endswith(".dxf")
+        # A drawing's or a board's view is its plan view, framed as the pane framed it (its camera);
+        # it has no 3D framing to pin and no view name to carry (`check_drawing_render_job`,
+        # `check_plot_render_job`). A board's view also carries its Display.
+        drawing = str(input_path).lower().endswith((".dxf", ".kicad_pcb"))
         for index, view in enumerate(views):
             slug = _slug(view["label"].lower(), f"view-{index + 1}")
             while slug in labels:

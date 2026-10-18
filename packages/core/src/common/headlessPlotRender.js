@@ -1,16 +1,22 @@
 /**
  * `cadgen pcb snapshot` in the page: a `GET /__cad/plot` payload — a KiCad board drawn from its
- * file, geometry per layer — fitted on a 2D canvas, as a PNG.
+ * file, geometry per layer — on a 2D canvas, as a PNG.
  *
- * This is the CLI half of the viewer's plot pane, and shares its whole drawing path
+ * This is the CLI half of the viewer's board view, and shares its whole drawing path
  * (`../lib/plot2d`): the same layout of the sheet, the same fit (drawing2d's), the same frame
  * (`drawPlot`: the sheet on KiCad's board background, the layers the board's Display chooses,
  * back to front, from the side it says), on the same theme surround. The job's `display` is the
  * board's Display contract (`plot2d/boardDisplay.js`: `mode`, `side`, `poured`, `layers`, with
- * the surround's `appearance`), read exactly as the pane reads it, so a snapshot draws what the
- * Display shows — Placement's pads and airwires included (`board2d/boardOverlay.js`). The pane
+ * the surround's `appearance`), read exactly as the view reads it, so a snapshot draws what the
+ * Display shows — Placement's pads and airwires included (`board2d/boardOverlay.js`). The view
  * keeps rasters of a view so a pan costs nothing; this draws the geometry itself, once, which is
- * what those rasters are made of. So a CLI render cannot show what the pane cannot.
+ * what those rasters are made of. So a CLI render cannot show what the view cannot.
+ *
+ * A job may frame it (an output's plan-view `camera`: the window a Quick Edit's view was looking
+ * at, in the plan of that view) and draw over it (an `annotation` whose marks lie on the board, and
+ * Measure's `measurements`, both in the sheet's millimetres), with the code the view draws them
+ * with (`../lib/drawing2d/marks.js`, through `plot2d/boardView.js`'s frames, the board mirrored
+ * from below): so a prompt's views come back as they were seen.
  *
  * The payload arrives over the snapshot host's loopback asset server rather than inside the
  * job, as a drawing's does: cadgen reads the board, caches the payload in the store and writes
@@ -21,24 +27,53 @@ import { appThemeColors } from "../lib/appTheme.js";
 import { createBoardIndex } from "../lib/board2d/boardIndex.js";
 import { drawBoardOverlay } from "../lib/board2d/boardOverlay.js";
 import { clearSurface } from "../lib/drawing2d/index.js";
+import { drawAnnotationMarks, drawMeasurementMarks } from "../lib/drawing2d/marks.js";
+import { planTransform } from "../lib/drawing2d/planView.js";
 import {
-  boardDisplayAirwires, boardDrawView, drawPlot, fitPlotTransform, layoutPlot, readBoardDisplay
+  boardDisplayAirwires, boardDrawView, boardMirrorX, drawPlot, fitPlotTransform, layoutPlot, marksInPlan, measurementsInPlan,
+  readBoardDisplay
 } from "../lib/plot2d/index.js";
+import { ANNOTATION_REFERENCE_HEIGHT_PX, normalizeAnnotation } from "./annotation.js";
 import { paintOutput, renderOutputs, renderScale } from "./headlessCanvas.js";
 
-/** One output's PNG: the plot fitted to it under the board's Display, on the appearance's background. */
-function drawOutput(layout, display, { width, height, scale, background }) {
+/**
+ * A job's annotation, checked as every annotation is, and lying on the board: a board has no parts
+ * for ink to hang on, so every mark is on none, its points in the sheet's millimetres.
+ */
+function boardAnnotation(raw) {
+  if (raw == null) return null;
+  const annotation = normalizeAnnotation(raw);
+  const onPart = annotation.marks.find(mark => mark.part != null);
+  if (Object.keys(annotation.parts).length || onPart) {
+    throw new Error(
+      `annotation: a board has no parts for ink to hang on${onPart ? ` (${onPart.id} is on part ${onPart.part})` : ""}; `
+      + "its marks lie on the board, on no part, their points in the sheet's millimetres"
+    );
+  }
+  return annotation;
+}
+
+/** One output's PNG: the board framed (its plan view, else fitted) under its Display, on the appearance's background. */
+function drawOutput(layout, display, { width, height, scale, background, camera = null, annotation = null, measurements = null }) {
   const [sheet] = layout.sheets;
   const view = boardDrawView(display, sheet);
+  const mirrorX = boardMirrorX(sheet, view.side);
   return paintOutput({ width, height, scale }, (context) => {
     clearSurface(context, { width, height, pixelRatio: scale, background });
-    const transform = fitPlotTransform(layout, width, height);
+    // A plan view frames the window it names; without one the board is fitted whole.
+    const transform = camera ? planTransform(camera, width, height) : fitPlotTransform(layout, width, height);
+    if (!transform) return;
     drawPlot(context, layout, { transform, pixelRatio: scale, view });
-    // Placement: the pads, their holes and every connection as an airwire, as the pane's overlay draws them.
+    // Placement: the pads, their holes and every connection as an airwire, as the view's overlay draws them.
     if (boardDisplayAirwires(display) && layout.board) {
       const index = createBoardIndex(layout.board, { x: sheet.x, y: sheet.y });
-      const mirrorX = view.side === "bottom" ? sheet.x + sheet.width / 2 : null;
       drawBoardOverlay(context, index, { transform, pixelRatio: scale, width, height, placement: true, mirrorX });
+    }
+    if (annotation?.marks?.length) {
+      drawAnnotationMarks(context, marksInPlan(annotation.marks, mirrorX), { transform, pixelRatio: scale, lineScale: height / ANNOTATION_REFERENCE_HEIGHT_PX });
+    }
+    if (measurements?.length) {
+      drawMeasurementMarks(context, measurementsInPlan(measurements, mirrorX), { transform, width, height, pixelRatio: scale });
     }
   });
 }
@@ -63,6 +98,8 @@ export async function runHeadlessPlotJob(job) {
   }
   const layout = layoutPlot(await response.json());
   const display = readBoardDisplay(job?.display);
+  const annotation = boardAnnotation(job?.annotation);
+  const measurements = Array.isArray(job?.measurements) ? job.measurements : null;
   const warnings = [];
   if (layout.unrouted) {
     // A true answer, and one a thin line in a PNG does not shout — or one the Display leaves out.
@@ -75,11 +112,14 @@ export async function runHeadlessPlotJob(job) {
   const { background } = appThemeColors(job?.display?.appearance);
   const scale = renderScale(job);
   const transparent = job?.output?.transparent === true;
-  const outputs = renderOutputs(job, (width, height) => drawOutput(layout, display, {
+  const outputs = renderOutputs(job, (width, height, output) => drawOutput(layout, display, {
     width,
     height,
     scale,
-    background: transparent ? null : background
+    background: transparent ? null : background,
+    camera: output?.camera && typeof output.camera === "object" ? output.camera : null,
+    annotation,
+    measurements
   }));
   return {
     ok: true,

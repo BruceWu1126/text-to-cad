@@ -164,6 +164,25 @@ asks for a camera that is not its plan view, a display key outside those, a mode
 outside the four, a scale, a view label or an output setting that frames a camera
 is refused by name with what a board is.
 
+What a job may add is what the viewer's board view shows and a Quick Edit's views
+carry, as a drawing's. A `camera` that is the board's **plan view** — looking
+straight down, `up` +Y, in the plan of the side it was seen from: the sheet's
+millimetres with y negated, mirrored about the sheet's middle from below — frames
+the window it names in place of the fit:
+
+```json
+{"input": "board.kicad_pcb", "camera": {"target": [20, -15, 0], "position": [20, -15, 60], "up": [0, 1, 0],
+  "orthographicHalfHeight": 16}, "display": {"mode": "copper", "side": "bottom"},
+  "outputs": [{"path": "window.png", "width": 1600, "height": 1200}]}
+```
+
+(the middle of a 40 x 30 mm board, 16 mm above and below it). An `annotation`
+whose marks lie on the board (on no part, their points `x, y, 0` in the sheet's
+millimetres, y down from its top-left corner) and `measurements` (`start`/`end` in
+the same frame) are drawn over the board where they were put, mirrored with it
+when the display looks from below. A Quick Edit prompt on a board writes exactly
+this job, one per view, with the board's Display.
+
 ## Requests and OUT
 
 A request is accepted or refused before anything is built or deleted. Every
