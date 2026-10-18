@@ -73,7 +73,14 @@ tolerance, the seven flags, how many representations it holds, an edge's
 parametric flags -- read after the operation and compared with the state
 before it; the memo keeps the state it last read of every sub-shape of a
 memoized shape, written when a capture reads it and when a ledger row sets it,
-so an input is walked once per operation, after it. A change is a sparse delta
+so an input is walked once per operation, after it -- except by a compound's
+constructor, which adds each shape it is given to the container it makes
+(``TopoDS_Builder::Add``) and so changes nothing of one but its own ``Free``
+flag: its capture reads each input's own state alone, never what lies below it
+(``_capture``'s ``top``), and its hit resets its container alone, each child
+being its own maker's to reset (``_reset``), as a decoded tree's hit resets its
+groups -- so an assembly's compound costs its children's count, not their
+sub-shapes'. A change is a sparse delta
 per sub-shape (the scalars, and the representations appended, by count), noted
 in a ledger by sub-shape. A hit replays the delta, so a hot run leaves every
 input as a cold run would; a hit of a shape's maker undoes, through the ledger,
@@ -84,8 +91,12 @@ input's maker forgets its entry, the input is rebuilt by the next run, and the
 operation runs on it again, as it always could; a change outside that state (a
 representation rewritten in place) is not seen. A call that runs uncached still
 captures what it does to a memoized input, and a memoized shape embedded in a
-foreign or transient one that the call changed is forgotten the same way.
-Results registered only for a run's lineage have no entry to replay or forget:
+foreign or transient one that the call changed is forgotten the same way. A
+foreign input walked once and found to embed no persistent root is noted for
+the run by its TShape and its count of children, and not walked again
+(``_Run.foreign``): a native edit of its children changes that count, and one
+deeper inside it, like a raw edit of any memoized shape, is not seen. Results
+registered only for a run's lineage have no entry to replay or forget:
 uncached calls on them keep a topology map to detect structural changes, which
 forget their old registration so the result has this call's lineage. Each
 persistent root embedded in such an input has its own state captured: changing
@@ -438,7 +449,7 @@ def _helper(slot: str, function: Any) -> Any:
 
 class _Run:
     """One model run: its trace, call counts, native registrations and maker
-    bindings, transient results and nesting depth, and how its
+    bindings, transient results, foreign inputs and nesting depth, and how its
     features went: hits, misses and calls that ran uncached (``tally``, what the
     build's time line reports)."""
 
@@ -449,6 +460,9 @@ class _Run:
         self.tally = {"hits": 0, "misses": 0, "uncached": 0}
         self.depth = 0
         self.transient: dict[Any, _Made] = {}
+        # Foreign inputs walked once and found to embed no persistent root, by
+        # TShape, with how many children each held then (``_capture``).
+        self.foreign: dict[Any, int] = {}
         # Entry reuse and eviction belong to the shared memo. The registrations
         # and feature indices already observed by this run remain its own.
         self.registered: dict[Any, _Made] = {}
@@ -600,7 +614,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             state.tally["hits"] += 1
             return None if kind == "constructor" else result
         try:
-            captured = _capture(shapes)
+            captured = _capture(shapes, top=kind == "constructor" and label == "Compound")
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
@@ -646,6 +660,9 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                        history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
+        if kind == "constructor" and label == "Compound":
+            for made in entry.made:
+                made.container = True  # the children it was given are their makers'
         _keep(entry)
         return function_result
     finally:
@@ -680,7 +697,8 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     inputs = state.trace.given(shapes, state.feature_of)
     verified = capture
     try:
-        captured = _capture(shapes, embedded=True) if capture else []
+        top = kind == "constructor" and op == "Compound"
+        captured = _capture(shapes, embedded=True, top=top) if capture else []
     except Exception:  # noqa: BLE001
         _STATS["errors"] += 1
         captured = []
@@ -831,6 +849,12 @@ def decoded(tree: str, label: str | None, decode: Callable[[], Any]) -> Any:
     entry = _Entry(key=(key_id, n), inputs=[], snapshot=snapshot, effects=[])
     _replace(entry.key)
     entry.made = _register(result, entry.key, None, state, entry)
+    # The tree's groups, its root among them, are compounds of their children,
+    # each registered here: a reset reads a group's own TShape alone.
+    groups = {_wrapped(shape).TShape() for shape in _result_shapes(result)
+              if shape.__dict__.get("_NodeMixin__children")}
+    for made in entry.made:
+        made.container = made.tshape in groups
     _keep(entry)
     return result
 
@@ -1361,7 +1385,7 @@ class _Made:
     registered sub-shapes. Runs bind their own features to this shared record."""
 
     __slots__ = ("tshape", "key", "position", "feature", "run", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born", "origin", "tainted")
+                 "subs", "born", "origin", "tainted", "container")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
@@ -1384,6 +1408,9 @@ class _Made:
         # Unlike eviction, an unreplayable native mutation invalidates every
         # run still holding this very registration and its sub-shape records.
         self.tainted = False
+        # A compound whose native shape is its children and nothing more: a
+        # compound's constructor's, or a group of a decoded tree (``_reset``).
+        self.container = False
 
     def root(self) -> "_Made":
         made = self
@@ -1418,11 +1445,14 @@ def _reset(makers: list[_Made], run_id: int) -> None:
     operations' and stay. The makers were made, and are re-made, in order, so one
     held inside an earlier one (an occurrence of a decoded tree, a child of a
     compound) had every row its own walk would undo undone by that walk, and is
-    not walked again; with no row in the ledger there is nothing to walk."""
+    not walked again; with no row in the ledger there is nothing to walk. A
+    container (``_Made.container``) is read alone: below its own TShape lie its
+    children, each reset by its own maker -- one of this entry's, made with it, or
+    one this run's hits handed the model, born before the container was."""
     covered: set = set()
     for maker in makers:
         if _LEDGER and maker.tshape not in covered:
-            for tshape in _mapped(maker.handle())[1]:
+            for tshape in [maker.tshape] if maker.container else _mapped(maker.handle())[1]:
                 covered.add(tshape)
                 rows = _LEDGER.get(tshape)
                 if not rows:
@@ -1715,16 +1745,21 @@ _STATE: dict[Any, tuple] = {}
 
 class _Captured:
     """One input before the operation: its full map, the TShape of each of its
-    sub-shapes by ordinal and each one's state. A transient-only input keeps no
-    scalar states: its topology alone guards its lineage registration."""
+    sub-shapes by ordinal and each one's state -- or, for a compound's
+    constructor (``top``), its own TShape and state alone. A transient-only input
+    keeps no scalar states: its topology alone guards its lineage registration."""
 
-    __slots__ = ("index", "handle", "mapped", "tshapes", "rows", "embedded", "known")
+    __slots__ = ("index", "handle", "mapped", "tshapes", "rows", "embedded", "known", "top")
 
     def __init__(self, index: int, handle: Any, embedded: list[_Made], known: bool, *,
-                 topology: tuple[Any, list] | None = None, structural_only: bool = False) -> None:
+                 topology: tuple[Any, list] | None = None, structural_only: bool = False,
+                 top: bool = False) -> None:
         self.index = index
         self.handle = handle
         self.embedded = embedded
+        self.top = top
+        if top:
+            topology = (None, [handle.TShape()])
         # A directly memoized shape's sub-shapes have states the memo keeps.
         # Roots reached through uncontrolled wrappers are read fresh and kept nowhere.
         self.known = known
@@ -1743,13 +1778,18 @@ class _Captured:
             self.rows = [_state(tshape) for tshape in self.tshapes]
 
 
-def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
+def _capture(shapes: list, *, embedded: bool = False, top: bool = False) -> list[_Captured]:
     """The inputs the operation may change: one per TShape, in call order, less
     any that is a sub-shape of another input (its ancestor's delta covers it).
     With ``embedded`` (an uncached call), each persistent root a foreign or
     transient input embeds is captured separately, with fresh scalar state. A
     transient input keeps only its topology map so a structural change forgets
-    its old registration without blaming the unchanged roots it contains."""
+    its old registration without blaming the unchanged roots it contains. A
+    foreign input that embeds none is noted for the run (``_Run.foreign``) and
+    passed over without a walk while its children are as many as when noted.
+    With ``top`` (a compound's constructor, which changes nothing of an input but
+    its own ``Free`` flag), each memoized input is captured as its own TShape
+    alone, and nothing else is: no input's structure or embedded root can change."""
     state = getattr(_LOCAL, "run", None)
     distinct: list[_Captured] = []
     protected: dict[Any, _Captured] = {}
@@ -1763,19 +1803,30 @@ def _capture(shapes: list, *, embedded: bool = False) -> list[_Captured]:
             continue
         seen.add(tshape)
         made = _made_of(tshape, state)
+        if top:
+            if made is not None and made.persistent():
+                distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), [], known=True, top=True))
+            continue
         topology = None
         structural_only = False
         if embedded and (made is None or not made.persistent()):
+            if made is None and state is not None and state.foreign.get(tshape) == tshape.NbChildren():
+                continue
             topology = _mapped(wrapped)
-            for root in _embedded(wrapped, state, tshapes=topology[1]):
+            roots = _embedded(wrapped, state, tshapes=topology[1])
+            for root in roots:
                 if root.tshape not in protected:
                     protected[root.tshape] = _Captured(index, root.handle(), [root], known=False)
             if made is None:
+                if not roots and state is not None:
+                    state.foreign[tshape] = tshape.NbChildren()
                 continue
             structural_only = made.origin is _NO_COPY or made.origin is None
         distinct.append(_Captured(index, wrapped.Located(wrapped.Location()), [],
                                   known=made is not None and made.persistent(),
                                   topology=topology, structural_only=structural_only))
+    if top:
+        return distinct  # one TShape each: none covers another's state
     # A protected root is captured once even if it is also a direct input. Keep
     # each root's protection independent of the wrappers' topology guards and
     # of other roots that share or contain some of its native sub-shapes.
@@ -1805,7 +1856,7 @@ def _effects(captured: list[_Captured], state: _Run) -> tuple[list[tuple[int, "_
     sound = True
     rowed: set = set()
     for item in captured:
-        _mapped_after, tshapes = _mapped(item.handle)
+        tshapes = item.tshapes if item.top else _mapped(item.handle)[1]
         if item.rows is None:
             if tshapes != item.tshapes:
                 _STATS["unreplayable"] += 1

@@ -408,8 +408,9 @@ own topology and state decide whether its maker is forgotten; a change to the
 wrapper alone leaves an unchanged root's construction and lineage intact.
 A result registered only for the run's lineage keeps a topology map to detect
 structural changes; its artifact tags do not exempt embedded memoized geometry.
-Every build's time line ends with how its model's calls went: hits, misses,
-and calls that ran uncached. The memo never reaches the store and
+A foreign input found to embed no memoized root is walked once per run, not
+once per call. Every build's time line ends with how its model's calls went:
+hits, misses, and calls that ran uncached. The memo never reaches the store and
 never outlives the worker: a cold run computes everything, and
 `CADGEN_KERNEL_MEMO=0` turns hits off and nothing else -- every call runs and is
 keyed and traced as ever. The memo's key for the construction that made a

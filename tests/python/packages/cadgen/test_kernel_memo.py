@@ -333,6 +333,68 @@ class MissTest(KernelMemoCase):
                          "placements of foreign geometry have no construction key or element lineage")
         self.assertEqual(traces, [traces[0]] * 3)
 
+    def test_a_foreign_input_is_walked_once_per_run(self) -> None:
+        """An uncached call walks a foreign input for the memoized roots it may embed;
+        one that embeds none is noted, and the run's next call on it walks nothing."""
+        from build123d import Compound, Location, Solid
+
+        foreign = Compound(children=[Solid.make_box(4, 4, 4)])  # made outside any run
+        tshape = foreign.wrapped.TShape()
+
+        def model():
+            return [foreign.cut(Solid.make_cylinder(0.5, 10).moved(Location((x, 2, -1)))) for x in (1, 2, 3)]
+
+        walks = []
+        mapped = kernel_memo._mapped
+
+        def counting(handle):
+            walks.append(handle.TShape() == tshape)
+            return mapped(handle)
+
+        plain = [_bytes(cut.wrapped) for cut in model()]
+        for attempt in range(2):
+            walks.clear()
+            with mock.patch.object(kernel_memo, "_mapped", side_effect=counting):
+                cuts, stats, run = _run(model)
+            self.assertEqual((stats["unkeyable"], stats["errors"]), (3, 0))
+            self.assertEqual(run.tally["uncached"], 3)
+            self.assertEqual(walks.count(True), 1, f"run {attempt}: walked once, then noted")
+            self.assertEqual([_bytes(cut.wrapped) for cut in cuts], plain)
+
+    def test_a_noted_foreign_input_that_takes_a_memoized_root_is_walked_again(self) -> None:
+        """The note holds while the input's children are as many as when it was noted: a
+        memoized body added to it natively is protected as ever."""
+        from build123d import Compound, Solid
+        from OCP.BRep import BRep_Builder
+
+        foreign = Compound(children=[Solid.make_box(1, 1, 1)])  # made outside any run
+
+        def probe(wrapper):
+            return None
+
+        def mutate(wrapper):
+            tshape = body.wrapped.TShape()
+            tshape.Free(not tshape.Free())
+            return None
+
+        uncached_probe = kernel_memo._wrap("probe", probe, "function")
+        uncached_mutation = kernel_memo._wrap("mutate", mutate, "function")
+        body = None
+
+        def model():
+            nonlocal body
+            uncached_probe(foreign)  # walked: embeds no memoized root, noted
+            body = Solid.make_box(2, 3, 4)
+            self.assertTrue(kernel_memo._made_of(body.wrapped.TShape(), kernel_memo._LOCAL.run).persistent())
+            BRep_Builder().Add(foreign.wrapped, body.wrapped)
+            return uncached_mutation(foreign)
+
+        _, stats, run = _run(model)
+        self.assertEqual((stats["unkeyable"], stats["errors"]), (2, 0))
+        self.assertIn(foreign.wrapped.TShape(), run.foreign)
+        fresh, rebuilt, _ = _run(lambda: Solid.make_box(2, 3, 4))
+        self.assertEqual((rebuilt["hits"], rebuilt["misses"]), (0, 1))
+        self.assertIsNot(fresh, body, "the mutation through the grown wrapper retired the body's maker")
 
 
 class DecodedChildTest(KernelMemoCase):
@@ -376,7 +438,18 @@ class DecodedChildTest(KernelMemoCase):
         self.assertFalse(piece.children[0].wrapped.IsPartner(again.children[0].wrapped))
         self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
         self.assertEqual(cold_run.tally, {"hits": 0, "misses": cold["misses"], "uncached": 0})
-        (assembly2, piece2, again2, bored2), hot, hot_run = _run(self._parent)
+        walked: list = []
+        mapped = kernel_memo._mapped
+
+        def walking(handle):
+            walked.append(handle.TShape())
+            return mapped(handle)
+
+        with mock.patch.object(kernel_memo, "_mapped", side_effect=walking):
+            (assembly2, piece2, again2, bored2), hot, hot_run = _run(self._parent)
+        self.assertTrue(any(tshape == piece.children[0].wrapped.TShape() for tshape in walked), "a leaf is walked")
+        self.assertFalse(any(tshape == piece.wrapped.TShape() for tshape in walked),
+                         "the tree's root is a compound of its children: read alone")
         self.assertEqual((hot["misses"], hot["unkeyable"], hot["errors"]), (0, 0, 0))
         self.assertEqual(hot["hits"], cold["misses"])
         self.assertEqual(hot_run.tally, {"hits": hot["hits"], "misses": 0, "uncached": 0})
@@ -998,6 +1071,57 @@ class EffectTest(KernelMemoCase):
         self.assertEqual(_bytes(boss2.wrapped), _bytes(plain_boss.wrapped))
         self.assertEqual(_bytes(boss2.wrapped), _bytes(boss.wrapped))
 
+    def test_a_compound_reads_its_childrens_own_state_alone(self) -> None:
+        """A compound's constructor changes nothing of a child but the child's own
+        ``Free`` flag: its capture reads each child's TShape alone, never the
+        sub-shapes below it, and the flag it clears is replayed on a hit and undone
+        when the compound is edited out, as any effect is."""
+        from build123d import Compound, Location, Solid
+
+        reads: list = []
+        state = kernel_memo._state
+
+        def counting(tshape):
+            reads.append(tshape)
+            return state(tshape)
+
+        def parts():
+            return [Solid.make_box(1, 1, 1).moved(Location((2 * i, 0, 0))) for i in range(3)]
+
+        def assembled():
+            made = parts()
+            reads.clear()
+            with mock.patch.object(kernel_memo, "_state", side_effect=counting):
+                assembly = Compound(children=made)
+            return made, assembly, list(reads)
+
+        free = [part.wrapped.TShape().Free() for part in parts()]  # plain build123d, as made
+        plain = _bytes(Compound(children=parts()).wrapped)
+        (made, assembly, read), cold, _ = _run(assembled)
+        self.assertEqual(cold["unkeyable"], 0)
+        tops = [part.wrapped.TShape() for part in made]
+        self.assertTrue(read and all(any(tshape == top for top in tops) for tshape in read), "a child's own TShape alone")
+        self.assertEqual([part.wrapped.TShape().Free() for part in made], [False] * 3, "added: no longer free")
+        walked: list = []
+        mapped = kernel_memo._mapped
+
+        def walking(handle):
+            walked.append(handle.TShape())
+            return mapped(handle)
+
+        with mock.patch.object(kernel_memo, "_mapped", side_effect=walking):
+            (made2, assembly2, read2), hot, _ = _run(assembled)
+        self.assertEqual((hot["misses"], read2), (0, []))
+        self.assertTrue(walked, "each child's maker resets what it made")
+        self.assertFalse(any(tshape == assembly2.wrapped.TShape() for tshape in walked),
+                         "the compound's hit resets its container alone")
+        self.assertEqual([part.wrapped.TShape().Free() for part in made2], [False] * 3, "the hit replays the flag")
+        self.assertEqual(_bytes(assembly2.wrapped), plain)
+        alone, edited, _ = _run(parts)
+        self.assertEqual(edited["misses"], 0)
+        self.assertEqual([part is first for part, first in zip(alone, made)], [True] * 3)
+        self.assertEqual([part.wrapped.TShape().Free() for part in alone], free, "the compound edited out")
+
     def test_uncached_mutation_taints_persistent_roots_in_foreign_and_transient_wrappers(self) -> None:
         from build123d import Compound, Location, Solid
         from cadgen.store.materialize import TREE_TAG
@@ -1059,13 +1183,13 @@ class EffectTest(KernelMemoCase):
             body, wrapper = inner()
             state = kernel_memo._LOCAL.run
             identity = None if deferred else state.identify(body)
-            members = set(kernel_memo._mapped(body.wrapped)[1])
             self.assertTrue(wrapper.wrapped.Free())
             with mock.patch.object(kernel_memo, "_state", wraps=kernel_memo._state) as reads:
                 outer = Compound(children=[wrapper])
             self.assertFalse(wrapper.wrapped.Free(), "the containing compound changes only its wrapper")
-            self.assertEqual({call.args[0] for call in reads.call_args_list}, members,
-                             "capture the embedded root, without scalar reads of the wrapper or foreign geometry")
+            self.assertEqual(reads.call_args_list, [],
+                             "a compound reads nothing below the children it is given, and a transient "
+                             "wrapper's own flag is no memoized state")
             return body, outer, identity, state.identify(body)
 
         expected, traces = None, []
