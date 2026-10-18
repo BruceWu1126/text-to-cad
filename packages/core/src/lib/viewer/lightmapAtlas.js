@@ -11,8 +11,11 @@
  *   sized in the atlas by the face's world size (a per-face Jacobian estimate
  *   so u and v get texels proportional to their world length).
  * - A face without UVs (the GLB render packages carry none) is split by the
- *   dominant axis of each triangle's normal into up to six planar charts (box
- *   projection). Triangles without a face id form one extra face.
+ *   dominant axis of each triangle's normal into planar charts (box
+ *   projection), one per connected piece of the face along that axis, so the
+ *   surfaces a projection would fold onto each other (a cup's outer and inner
+ *   wall) keep their own texels. Triangles without a face id form one extra
+ *   face, which the same split carves into its pieces.
  * - Vertices shared by triangles of different charts are duplicated, so the
  *   output may carry more vertices than the input (`remap` maps new → old).
  *   Render packages are de-indexed per triangle, so in practice nothing is
@@ -93,6 +96,77 @@ function resolveFaceOfTriangle(mesh, triCount) {
     return { faceOfTri, faceCount };
   }
   return { faceOfTri, faceCount: 1 };
+}
+
+/**
+ * Connected pieces of the planar triangles: triangles of one chart key that
+ * share a vertex position are one piece. Positions are welded within a tiny
+ * tolerance, so meshes de-indexed per triangle (the render packages) connect
+ * as well as indexed ones. Returns the piece (root triangle) per triangle;
+ * UV-charted triangles get -1.
+ */
+function connectedPieces(world, nv, index, triCount, triKey, triAxis) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+  for (let v = 0; v < nv; v++) {
+    const x = world[v * 3];
+    const y = world[v * 3 + 1];
+    const z = world[v * 3 + 2];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  const extent = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 1e-12);
+  const invEps = 1e6 / extent;
+  const weldIds = new Map();
+  const weldOfVertex = new Int32Array(nv);
+  for (let v = 0; v < nv; v++) {
+    const key = `${Math.round(world[v * 3] * invEps)},${Math.round(world[v * 3 + 1] * invEps)},${Math.round(world[v * 3 + 2] * invEps)}`;
+    let id = weldIds.get(key);
+    if (id === undefined) {
+      id = weldIds.size;
+      weldIds.set(key, id);
+    }
+    weldOfVertex[v] = id;
+  }
+  const weldCount = weldIds.size;
+
+  const parent = new Int32Array(triCount);
+  for (let t = 0; t < triCount; t++) parent[t] = t;
+  const find = (t) => {
+    while (parent[t] !== t) {
+      parent[t] = parent[parent[t]];
+      t = parent[t];
+    }
+    return t;
+  };
+  // First triangle seen at each (chart key, welded vertex); later ones join it.
+  const seed = new Map();
+  for (let t = 0; t < triCount; t++) {
+    if (triAxis[t] < 0) continue;
+    const base = triKey[t] * weldCount;
+    for (let k = 0; k < 3; k++) {
+      const node = base + weldOfVertex[index[t * 3 + k]];
+      const first = seed.get(node);
+      if (first === undefined) {
+        seed.set(node, t);
+      } else {
+        const a = find(first);
+        const b = find(t);
+        if (a !== b) parent[b] = a;
+      }
+    }
+  }
+  const piece = new Int32Array(triCount);
+  for (let t = 0; t < triCount; t++) piece[t] = triAxis[t] < 0 ? -1 : find(t);
+  return piece;
 }
 
 /**
@@ -213,19 +287,14 @@ export function chartMesh(mesh, minUvArea = 1e-10) {
     }
   }
 
-  // --- Chart key per triangle: UV faces → face; planar → face*7 + axis ---
-  // Chart ids are assigned in first-seen order.
-  const chartKeyToId = new Map();
-  const chartOfTri = new Uint32Array(triCount);
-  const chartAxis = []; // -1 for UV charts, 0..5 for planar
-  const chartFace = [];
+  // --- Chart key per triangle: UV faces → face*7 + 6; planar → face*7 + axis ---
+  const triKey = new Float64Array(triCount);
+  const triAxis = new Int8Array(triCount); // -1 for UV charts, 0..5 for planar
+  let planarTris = 0;
   for (let t = 0; t < triCount; t++) {
     const f = faceOfTri[t];
-    let key;
     let axis = -1;
-    if (faceUvOk[f]) {
-      key = f * 7 + 6;
-    } else {
+    if (!faceUvOk[f]) {
       const a = index[t * 3];
       const b = index[t * 3 + 1];
       const c = index[t * 3 + 2];
@@ -244,14 +313,35 @@ export function chartMesh(mesh, minUvArea = 1e-10) {
       if (ax >= ay && ax >= az) axis = nx >= 0 ? 0 : 1;
       else if (ay >= az) axis = ny >= 0 ? 2 : 3;
       else axis = nz >= 0 ? 4 : 5;
-      key = f * 7 + axis;
+      planarTris++;
     }
+    triKey[t] = f * 7 + (axis < 0 ? 6 : axis);
+    triAxis[t] = axis;
+  }
+
+  // --- Planar groups split into connected pieces ---
+  // A (face, axis) group can hold surfaces that fold onto each other under
+  // the projection and would share texels: a cup's outer and inner wall, the
+  // two sides of a torus, every surface of a mesh that arrived without face
+  // ids. Such pieces never touch within the group, so each piece connected
+  // through (welded) vertex positions becomes a chart of its own.
+  const pieceOfTri = planarTris > 0 ? connectedPieces(world, nv, index, triCount, triKey, triAxis) : null;
+
+  // Chart ids are assigned in first-seen order.
+  const chartKeyToId = new Map();
+  const chartOfTri = new Uint32Array(triCount);
+  const chartAxis = []; // -1 for UV charts, 0..5 for planar
+  const chartFace = [];
+  for (let t = 0; t < triCount; t++) {
+    const axis = triAxis[t];
+    // Pieces are numbered per triangle group below the UV keys' range.
+    const key = axis < 0 ? triKey[t] : -1 - pieceOfTri[t];
     let id = chartKeyToId.get(key);
     if (id === undefined) {
       id = chartKeyToId.size;
       chartKeyToId.set(key, id);
       chartAxis.push(axis);
-      chartFace.push(f);
+      chartFace.push(faceOfTri[t]);
     }
     chartOfTri[t] = id;
   }

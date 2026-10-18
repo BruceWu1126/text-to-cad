@@ -92,6 +92,42 @@ test("triangles without a face id share one extra face, split by normal axis", (
   assert.equal(charted.planarFaces, 6);
 });
 
+test("surfaces that fold onto each other under the projection get their own charts", () => {
+  // Two quads facing +X at x = 0 and x = 1 (the outer and inner wall of a
+  // box), sharing no vertex, as one topology face and again without face ids.
+  const positions = new Float32Array([
+    0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1,
+    1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1
+  ]);
+  const index = new Uint32Array([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]);
+  for (const faceIds of [Uint32Array.from([3, 3, 3, 3]), null]) {
+    const charted = chartMesh({ positions, index, uv: null, faceIds, matrixWorld: null });
+    assert.equal(charted.charts.length, 2);
+    assert.equal(charted.planarFaces, 2);
+    assert.equal(charted.remap, null);
+    // Each piece spans its whole chart.
+    for (const c of charted.charts) {
+      assertClose(c.w, 1);
+      assertClose(c.h, 1);
+    }
+    const first = charted.chartOfVertex[0];
+    for (let v = 0; v < 4; v++) assert.equal(charted.chartOfVertex[v], first);
+    for (let v = 4; v < 8; v++) assert.notEqual(charted.chartOfVertex[v], first);
+  }
+});
+
+test("pieces connect through welded positions in a de-indexed mesh", () => {
+  // One quad as two separate triangles (vertices duplicated, as render
+  // packages are): a single chart, not one per triangle.
+  const positions = new Float32Array([
+    0, 0, 0, 0, 1, 0, 0, 1, 1,
+    0, 0, 0, 0, 1, 1, 0, 0, 1
+  ]);
+  const charted = chartMesh({ positions, index: null, uv: null, faceIds: null, matrixWorld: null });
+  assert.equal(charted.charts.length, 1);
+  assert.equal(charted.vertexCount, 6);
+});
+
 test("trianglesPerFace is accepted as an alternative grouping", () => {
   const mesh = cube({ faceIds: false });
   mesh.trianglesPerFace = [2, 2, 2, 2, 2, 2];

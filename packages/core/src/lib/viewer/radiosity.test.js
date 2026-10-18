@@ -335,6 +335,11 @@ test("RadiosityStage rebuilds when a geometry is re-tessellated in place", async
   const finer = new THREE.SphereGeometry(1, 8, 8);
   mesh.geometry.setAttribute("position", finer.getAttribute("position"));
   mesh.geometry.setIndex(finer.getIndex());
-  assert.notEqual(stage._computeSceneHash([mesh]), h1, "new vertex and index counts change the hash");
+  const h2 = stage._computeSceneHash([mesh]);
+  assert.notEqual(h2, h1, "new vertex and index counts change the hash");
+  // Face ids arrive a frame after the mesh first draws: charts built without
+  // them fold a part's facing surfaces together, so they must trigger a re-chart.
+  mesh.userData.faceIds = new Uint32Array(mesh.geometry.getIndex().count / 3);
+  assert.notEqual(stage._computeSceneHash([mesh]), h2, "attached face ids change the hash");
   stage.dispose();
 });

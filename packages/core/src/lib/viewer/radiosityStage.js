@@ -842,6 +842,10 @@ export class RadiosityStage {
       h = hashInt(h, position ? position.version : -1);
       h = hashInt(h, geometry?.index ? geometry.index.count : -1);
       h = hashInt(h, geometry?.index ? geometry.index.version : -1);
+      // The viewer attaches topology face ids after the mesh first draws;
+      // charts drawn without them fold a part's facing surfaces together.
+      const faceIds = mesh.userData?.faceIds;
+      h = hashInt(h, faceIds instanceof Uint32Array ? faceIds.length : -1);
       h = hashInt(h, isLitMaterial(mesh.material) ? 1 : 0);
     }
     h = hashInt(h, this._floorParams ? 1 : 0);
