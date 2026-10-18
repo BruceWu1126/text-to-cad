@@ -311,7 +311,7 @@ test("render display source loading keeps kinematics and a supplied selector run
   const source = await loadSource({
     kind: "step",
     meshData: meshData(),
-    display: { mode: "render" },
+    preview: true,
     cadPath: "hinge.step",
     articulation: HINGE_ARTICULATION,
     controls: { swing: 45 },

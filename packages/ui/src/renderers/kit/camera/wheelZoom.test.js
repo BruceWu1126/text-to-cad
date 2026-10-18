@@ -10,6 +10,7 @@ import {
   orbitControlsBoostsPinch,
   WHEEL_PINCH_DELTA_BOOST
 } from "./viewportCameraKit.js";
+import { COARSE_POINTER_ZOOM_SPEED, DEFAULT_ZOOM_SPEED, restingZoomSpeed } from "./zoomSpeeds.js";
 
 // The wheel-zoom step nobody could see. These numbers used to differ by 20x across ordinary
 // desktop setups -- and no test said so, which is exactly why it shipped. This file pins the
@@ -170,4 +171,11 @@ test("the OrbitControls these steps model is the installed one: its pinch boost 
   assert.equal(controls._customWheelEvent(pinch).deltaY, normalizeWheelDelta(pinch, controls), "and then nothing is boosted");
   assert.equal(orbitControlsBoostsPinch(pinch, controls), false);
   controls.dispose();
+});
+
+test("at rest a touch page keeps the touch zoom speed: its pinch is OrbitControls' dolly, which a desktop wheel's speed made ~22x for a 2x spread", () => {
+  assert.equal(restingZoomSpeed(true), COARSE_POINTER_ZOOM_SPEED);
+  assert.equal(restingZoomSpeed(false), DEFAULT_ZOOM_SPEED);
+  // OrbitControls dollies a pinch by (end / start) ^ zoomSpeed: fingers twice as far apart.
+  assert.ok(2 ** restingZoomSpeed(true) < 4 && 2 ** DEFAULT_ZOOM_SPEED > 20);
 });

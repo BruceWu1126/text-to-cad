@@ -106,7 +106,7 @@ export default function PoseControlsSection({ runtime = null }) {
 
   return (
     <>
-      {poseNames.length ? (
+      {poseNames.length || controls.length ? (
         <KinematicsPoseRow
           poses={poseNames.map((poseName) => ({ value: poseName, label: poseName }))}
           activeValue={activePose}

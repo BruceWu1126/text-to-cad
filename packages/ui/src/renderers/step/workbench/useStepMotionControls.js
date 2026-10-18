@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { advanceAnimationElapsed, animationClipDuration, animationNowMs,
   clampAnimationElapsed, clampAnimationSpeed, createAnimationFramePacer, findAnimationClip,
   firstAnimationClipId } from "@text-to-cad/core/common/animationClock.js";
-import {
-  articulationControl, articulationPoses, clampControlValue, normalizeControlValues, poseControlValues
-} from "@text-to-cad/core/common/articulation.js";
+import { articulationControl, articulationPoses, clampControlValue, normalizeControlValues, poseControlValues }
+  from "@text-to-cad/core/common/articulation.js";
 import { useAnimationClockStore } from "./animationClockStore.js";
-import { stepPoseLogic } from "./motionRestore.js";
 
 // Single command boundary for STEP motion. Refs are published synchronously so
 // queued playback callbacks cannot resurrect the previous motion owner.
+//
+// One of four at a time: Explode, Clip, Position and a routine's frame replace each other, the
+// others going back to their defaults when one is SET (its value changed; a tool taken up or a
+// panel pressed changes nothing) — nothing is set aside to come back. Position and the routine are
+// both here; Explode and Clip are the host's view settings, so `host.onUse(motion)` tells it which
+// of these two was used ("position" or "animation") and it takes Explode and Clip off. The tools view and Preview each have their own motion
+// (`useStepMotion`, `useStepPreviewMotion`): their own values, their own routine and its `clock`.
 export function useStepMotionControls({
   selectedStepModuleDefinition, selectedAnimationClips, selectedActiveAnimationClip,
   animationState, animationStateRef, setAnimationState, stepModuleParameterValuesRef,
-  setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef
+  setStepModuleParameterValues, setAppliedStepPoseName, motionRevisionRef, clock = null, host = null
 }) {
-  const { getAnimationClock, setAnimationClock, resetAnimationClock } = useAnimationClockStore();
+  const hostRef = useRef(host);
+  hostRef.current = host;
+  const contextClock = useAnimationClockStore(clock);
+  const { getAnimationClock, setAnimationClock, resetAnimationClock } = clock || contextClock;
   const writeParameters = useCallback((values) => {
     const current = stepModuleParameterValuesRef.current;
     // Scrubbing/speed edits must not reapply the kinematics tree on every event
@@ -25,69 +33,75 @@ export function useStepMotionControls({
     stepModuleParameterValuesRef.current = values;
     setStepModuleParameterValues(values);
   }, [stepModuleParameterValuesRef, setStepModuleParameterValues]);
-  const articulation = selectedStepModuleDefinition?.articulation || null;
   const resetPosition = useCallback(() => {
     setAppliedStepPoseName("");
-    writeParameters(normalizeControlValues(articulation, null));
-  }, [articulation, setAppliedStepPoseName, writeParameters]);
-  // What Position had set when a routine took the pose. A routine plays from the model at rest,
-  // so taking the pose puts Position's values aside rather than throwing them away; handing
-  // the pose back (leaving preview or the Animation tool, or touching Position) puts them back first. They are a pose
-  // like any other: an update whose joints and named poses are unchanged keeps them (a routine
-  // may play on through it), and one that changed them drops them.
-  const heldPositionRef = useRef(null);
-  const poseLogic = useMemo(() => stepPoseLogic(selectedStepModuleDefinition), [selectedStepModuleDefinition]);
-  useEffect(() => { heldPositionRef.current = null; }, [poseLogic]);
-  // Handing the pose to Position stops the routine and rewinds its clock, and nothing more: the
-  // transport preferences the Animation tool and preview's playbar set (the routine, its speed, the
-  // loop) are the person's, and a joint nudge or a trip to another tool keeps them for the next play.
-  const activatePositionControls = useCallback(() => {
+    writeParameters(normalizeControlValues(selectedStepModuleDefinition?.articulation, null));
+  }, [selectedStepModuleDefinition, setAppliedStepPoseName, writeParameters]);
+  // The routine back to rest: stopped, its clock rewound, the pose no longer its. Nothing more: the
+  // transport preferences (the routine, its speed, the loop) are the person's, kept for the next play.
+  const rewindAnimation = useCallback(() => {
     motionRevisionRef.current += 1;
-    const next = { ...animationStateRef.current, enabled: false, playing: false, elapsedSec: 0 };
+    const current = animationStateRef.current;
+    if (current.enabled === false && !current.playing && !current.elapsedSec) return;
+    const next = { ...current, enabled: false, playing: false, elapsedSec: 0 };
     animationStateRef.current = next;
     setAnimationState(next);
     resetAnimationClock();
-    const held = heldPositionRef.current;
-    heldPositionRef.current = null;
-    if (held) writeParameters(normalizeControlValues(articulation, held));
-  }, [resetAnimationClock, articulation, writeParameters]);
-  const activateAnimationControls = useCallback(() => {
+  }, [resetAnimationClock]);
+  // Position used — a joint, a value, a named pose: the routine goes back to rest, and the host
+  // takes Explode off.
+  const claimPosition = useCallback(() => {
+    rewindAnimation();
+    hostRef.current?.onUse?.("position");
+  }, [rewindAnimation]);
+  // A routine used — played, scrubbed, rewound: it plays from the model at rest, so the pose goes
+  // back to its default, and the host takes Explode off.
+  const claimAnimation = useCallback(() => {
     motionRevisionRef.current += 1;
-    heldPositionRef.current ||= { ...stepModuleParameterValuesRef.current };
     resetPosition();
+    hostRef.current?.onUse?.("animation");
   }, [resetPosition]);
+  // The model at rest: the default pose and the routine rewound. Position's Reset, and what using
+  // Explode does to the other two.
   const resetMotion = useCallback(() => {
-    activatePositionControls();
+    rewindAnimation();
     resetPosition();
-  }, [activatePositionControls, resetPosition]);
+  }, [rewindAnimation, resetPosition]);
   const handleStepModuleParameterChange = useCallback((parameterId, value) => {
     const id = String(parameterId || "").trim();
-    const control = articulationControl(articulation, id);
+    const control = articulationControl(selectedStepModuleDefinition?.articulation, id);
     if (!control) {
       return;
     }
-    activatePositionControls();
+    claimPosition();
     // Moving a control by hand leaves the named pose behind, so the dropdown stops claiming
     // it and goes back to reading the values (the robot's group state does the same).
     setAppliedStepPoseName("");
     writeParameters({ ...stepModuleParameterValuesRef.current, [id]: clampControlValue(control, value) });
-  }, [activatePositionControls, articulation, writeParameters]);
+  }, [claimPosition, selectedStepModuleDefinition, writeParameters]);
 
+  const applyStepModuleParameterValues = useCallback((values) => {
+    if (!selectedStepModuleDefinition) return;
+    claimPosition();
+    setAppliedStepPoseName("");
+    writeParameters(normalizeControlValues(selectedStepModuleDefinition?.articulation, { ...stepModuleParameterValuesRef.current, ...values }));
+  }, [claimPosition, selectedStepModuleDefinition, writeParameters]);
   const handleResetStepModuleParameters = resetMotion;
 
   const handleApplyPose = useCallback((poseName) => {
-    if (!articulationPoses(articulation)[poseName]) {
+    if (!articulationPoses(selectedStepModuleDefinition?.articulation)[poseName]) {
       return;
     }
-    activatePositionControls();
-    const nextParameterValues = poseControlValues(articulation, poseName);
+    claimPosition();
+    const nextParameterValues = poseControlValues(selectedStepModuleDefinition?.articulation, poseName);
     setAppliedStepPoseName(String(poseName || ""));
     // A pose is written like any other value: where the mechanism is from this
     // frame on. Motion over time belongs to preview mode.
     writeParameters(nextParameterValues);
-  }, [activatePositionControls, articulation, setAppliedStepPoseName, writeParameters]);
+  }, [claimPosition, selectedStepModuleDefinition, setAppliedStepPoseName, writeParameters]);
 
-  // Every animation command claims ownership before publishing its frame.
+  // Choosing a routine puts it at its start, at rest: it is not a use of it until it plays or is
+  // scrubbed, so the pose and Explode stay as they are.
   const handleAnimationClipSelect = useCallback((clipId) => {
     const clip = findAnimationClip(selectedAnimationClips, clipId);
     if (!clip) {
@@ -96,11 +110,11 @@ export function useStepMotionControls({
       // pausing is handled by the transport.
       return;
     }
-    activateAnimationControls();
+    motionRevisionRef.current += 1;
     const nextState = {
       ...animationStateRef.current,
       activeClipId: clip.id,
-      enabled: true,
+      enabled: false,
       playing: false,
       elapsedSec: 0,
       // The loop preference follows the newly-selected clip's own default.
@@ -109,7 +123,7 @@ export function useStepMotionControls({
     animationStateRef.current = nextState;
     setAnimationState(nextState);
     resetAnimationClock();
-  }, [selectedAnimationClips, activateAnimationControls]);
+  }, [selectedAnimationClips]);
 
   const handleAnimationPlayToggle = useCallback(() => {
     const currentState = animationStateRef.current;
@@ -125,7 +139,7 @@ export function useStepMotionControls({
     if (!clip) {
       return;
     }
-    activateAnimationControls();
+    claimAnimation();
     const duration = animationClipDuration(clip);
     if (currentState.playing) {
       const nextState = {
@@ -154,11 +168,11 @@ export function useStepMotionControls({
     animationStateRef.current = nextState;
     setAnimationState(nextState);
     setAnimationClock(elapsedSec);
-  }, [selectedAnimationClips, activateAnimationControls]);
+  }, [selectedAnimationClips, claimAnimation]);
 
   const handleAnimationRestart = useCallback(() => {
     if (!selectedActiveAnimationClip) return;
-    activateAnimationControls();
+    claimAnimation();
     const nextState = {
       ...animationStateRef.current,
       enabled: true,
@@ -168,14 +182,14 @@ export function useStepMotionControls({
     animationStateRef.current = nextState;
     setAnimationState(nextState);
     resetAnimationClock();
-  }, [selectedActiveAnimationClip, activateAnimationControls]);
+  }, [selectedActiveAnimationClip, claimAnimation]);
 
   const handleAnimationScrub = useCallback((elapsedSec) => {
     const clip = selectedActiveAnimationClip;
     if (!clip) {
       return;
     }
-    activateAnimationControls();
+    claimAnimation();
     const clampedElapsedSec = clampAnimationElapsed(elapsedSec, animationClipDuration(clip));
     const nextState = {
       ...animationStateRef.current,
@@ -185,32 +199,26 @@ export function useStepMotionControls({
     animationStateRef.current = nextState;
     setAnimationState(nextState);
     setAnimationClock(clampedElapsedSec);
-  }, [selectedActiveAnimationClip, activateAnimationControls]);
+  }, [selectedActiveAnimationClip, claimAnimation]);
 
+  // Speed and Loop are how the routine plays, not a use of it: the pose and its frame stay.
   const handleAnimationSpeedChange = useCallback((speed) => {
     if (!selectedActiveAnimationClip) return;
-    activateAnimationControls();
-    const nextState = {
-      ...animationStateRef.current,
-      enabled: true,
-      speed: clampAnimationSpeed(speed)
-    };
+    const nextState = { ...animationStateRef.current, speed: clampAnimationSpeed(speed) };
     animationStateRef.current = nextState;
     setAnimationState(nextState);
-  }, [selectedActiveAnimationClip, activateAnimationControls]);
+  }, [selectedActiveAnimationClip]);
 
   const handleAnimationLoopToggle = useCallback((nextLoopEnabled) => {
     if (!selectedActiveAnimationClip) return;
-    activateAnimationControls();
     const currentState = animationStateRef.current;
     const nextState = {
       ...currentState,
-      enabled: true,
       loopEnabled: typeof nextLoopEnabled === "boolean" ? nextLoopEnabled : !currentState.loopEnabled
     };
     animationStateRef.current = nextState;
     setAnimationState(nextState);
-  }, [selectedActiveAnimationClip, activateAnimationControls]);
+  }, [selectedActiveAnimationClip]);
 
   // The playback loop. The clock is published through the external store rather
   // than React state so a playing clip re-renders only the render pane and the
@@ -280,45 +288,11 @@ export function useStepMotionControls({
     };
   }, [animationState.enabled, animationState.playing, selectedActiveAnimationClip]);
 
-  // Leaving preview or the Animation tool: the clip hands the pose back to Position, as Position
-  // left it, and keeps nothing of where it was — only the transport preferences, for the next play.
-  // A routine already at rest, with nothing of Position's set aside, has nothing to hand back.
-  const releaseAnimation = useCallback(() => {
-    const current = animationStateRef.current;
-    if (current.enabled === false && !current.playing && !current.elapsedSec && !heldPositionRef.current) return;
-    activatePositionControls();
-  }, [activatePositionControls]);
-  // Preview's routine is its own (`kit/shell/useRendererShell.js`): the tools view's is saved as it
-  // stands — which routine, where its clock is, whether it plays, its Speed and Loop — and handed
-  // back as it was. A routine that owned the pose takes it again, Position's values set aside as before.
-  const savePlayback = useCallback(() => {
-    const { activeClipId, enabled, playing, elapsedSec, speed, loopEnabled } = animationStateRef.current;
-    return { activeClipId, enabled, playing, elapsedSec: playing ? getAnimationClock() : elapsedSec, speed, loopEnabled };
-  }, [getAnimationClock]);
-  // Preview opens on the routine at rest, at its own Speed and Loop, whatever the tools view chose.
-  const resetPlayback = useCallback(() => {
-    releaseAnimation();
-    const clip = findAnimationClip(selectedAnimationClips, animationStateRef.current.activeClipId);
-    const nextState = { ...animationStateRef.current, speed: 1, loopEnabled: clip ? clip.loop !== false : true };
-    animationStateRef.current = nextState;
-    setAnimationState(nextState);
-  }, [releaseAnimation, selectedAnimationClips]);
-  const restorePlayback = useCallback((saved) => {
-    const clip = findAnimationClip(selectedAnimationClips, saved?.activeClipId);
-    if (!clip) return;
-    const elapsedSec = clampAnimationElapsed(saved.elapsedSec, animationClipDuration(clip));
-    if (saved.enabled !== false) activateAnimationControls();
-    else motionRevisionRef.current += 1;
-    const nextState = { ...animationStateRef.current, activeClipId: clip.id, enabled: saved.enabled !== false,
-      playing: saved.enabled !== false && saved.playing === true, elapsedSec,
-      speed: clampAnimationSpeed(saved.speed), loopEnabled: saved.loopEnabled !== false };
-    animationStateRef.current = nextState;
-    setAnimationState(nextState);
-    setAnimationClock(elapsedSec);
-  }, [selectedAnimationClips, activateAnimationControls]);
+  // Back to rest: the routine stopped and rewound, the model as Position has it. Its Reset.
+  const releaseAnimation = rewindAnimation;
 
-  return { handleStepModuleParameterChange, handleResetStepModuleParameters,
+  return { handleStepModuleParameterChange, applyStepModuleParameterValues, handleResetStepModuleParameters,
     handleApplyPose, handleAnimationClipSelect, handleAnimationPlayToggle, handleAnimationRestart,
     handleAnimationScrub, handleAnimationSpeedChange, handleAnimationLoopToggle, resetMotion, resetPosition,
-    releaseAnimation, savePlayback, resetPlayback, restorePlayback };
+    releaseAnimation };
 }

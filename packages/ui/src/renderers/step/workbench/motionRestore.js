@@ -1,5 +1,5 @@
 import { normalizeControlValues } from "@text-to-cad/core/common/articulation.js";
-import { restoreAnimationState } from "@text-to-cad/core/common/animationClock.js";
+import { buildDefaultAnimationState, restoreAnimationState } from "@text-to-cad/core/common/animationClock.js";
 import { canonicalJson } from "./canonicalJson.js";
 
 // What a STEP's pose is made of: the controls its joints are driven by (each one's id, unit,
@@ -28,5 +28,10 @@ export function restoreMotionParameters(definition, values, animation) {
 // loaded. A routine never resumes: every open, and every reload of the clips, starts at rest.
 export function restoreMotionAnimation(current, clips) {
   const restored = restoreAnimationState(current, clips);
-  return { ...restored, playing: false, elapsedSec: 0 };
+  return { ...restored, enabled: false, playing: false, elapsedSec: 0 };
+}
+
+/** A new Preview owns a new routine at rest, independently of the tools view. */
+export function restingAnimationState(clips) {
+  return restoreMotionAnimation(buildDefaultAnimationState(), clips || {});
 }

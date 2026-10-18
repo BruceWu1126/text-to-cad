@@ -35,8 +35,6 @@ async function open(server) {
   await pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
   await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Select', exact: true }).waitFor();
-  await page.evaluate(() => window.cadHarness.a.controller.setDisplaySettings({ axes: { enabled: false } }));
-  await page.waitForFunction(() => window.cadHarness.a.controller.readState().display.axes?.enabled === false);
   // The opening fit at rest, the same camera two frames running: `at` projects from it.
   await page.waitForFunction(() => {
     const camera = JSON.stringify(window.__cadCamera());
@@ -57,36 +55,51 @@ async function open(server) {
 test('a single-part STEP names a picked face after its part, by the name the view gives it', async () => {
   const view = await open(lone);
   const { page, pane, at, errors } = view;
-  const reference = pane.getByRole('region', { name: 'Reference details', exact: true });
-  // The staging is what cadgen writes: one part, named `base` in the view, in `hinge_base.step`.
-  assert.equal(lone.fixture.view.occurrences[0].name, 'base');
-  assert.equal(await view.tool('Explode').count(), 0, 'a single part: no Explode, so this is the lone-part view');
-  // A single part has no tree under Select (its one row would be all of it), and nothing marks
-  // Select; its modes are in the navbar, All, Faces and Edges, with no Parts.
-  assert.equal(await pane.locator('[data-cad-tool-stack] [data-tool-panel][aria-label="Features"]').count(), 0, 'no tree for a part file');
-  assert.equal(await view.tool('Select').locator('[data-tool-panel-closed]').count(), 0);
-  await pane.locator('[data-view-controls]').getByRole('button', { name: 'Select mode: All', exact: true }).click();
-  assert.deepEqual(await page.locator('[role=menu][aria-label="Select mode"]').getByRole('menuitemradio').allInnerTexts(), ['All', 'Faces', 'Edges']);
+  // What is picked is Quick Edit's: a chip each, by its words, and its card on a rest of the pointer.
+  const refs = pane.locator('[data-quick-edit-refs]');
+  const chips = () => refs.locator('[data-quick-edit-ref] > button:first-child').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
+  const chipCard = async label => {
+    await refs.getByRole('button', { name: label, exact: true }).hover();
+    const card = page.locator('[data-quick-edit-ref-card]').filter({ has: page.getByText(label, { exact: true }) });
+    await card.waitFor();
+    return card;
+  };
+  // The native fixture carries its authored part name; a picked face keeps that name.
+  const partName = lone.fixture.view.occurrences[0].name;
+  assert.equal(partName, 'base');
+  // A single part has no Explode, as it has no tree: one part separates nothing.
+  assert.equal(await view.tool('Explode').count(), 0, 'no Explode for a part file');
+  assert.equal(await view.tool('Clip').count(), 1, 'Clip stays');
+  // A single part has no tree under Select (its one row would be all of it), and no panel in its
+  // place: Select's selection filter is the chevron after its button on the strip, everything
+  // ticked, with no Parts (a part is one thing) and no Position (nothing moves).
+  assert.equal(await pane.locator('[data-tool-panel][aria-label="Model tree"]').count(), 0, 'no tree for a part file');
+  assert.equal(await pane.getByRole('region', { name: 'Select', exact: true }).count(), 0, 'and no Select card');
+  await pane.locator('[data-cad-toolbar]').getByRole('button', { name: 'Selection filter: everything', exact: true }).click();
+  assert.deepEqual(await page.locator('[role=menu][aria-label="Selection filter"] [data-select-filter]').allInnerTexts(),
+    ['Select all', 'Faces', 'Edges', 'Annotations', 'Measurement']);
   await page.keyboard.press('Escape');
   await page.locator('[role=menu]').waitFor({ state: 'detached' });
-  // Its faces load once Select is up: under All a press picks one.
+  // Its faces load once Select is up: picking everything, a press picks one.
   await page.mouse.click(...at([6, 6, 5]));
   await page.waitForFunction(() => /\/f:[\w.]+$/.test(window.cadHarness.a.controller.readState().selectedReferenceIds.join()));
   const face = (await view.state()).selectedReferenceIds[0].split('|').at(-1);
-  const name = face.replace(/^.*\//, '');
-  assert.match((await reference.innerText()).replace(/\s+/g, ' '), new RegExp(`^base · face ${name.replaceAll('.', '\\.')} Area `),
-    'the heading is the part, by its own name rather than the file\'s, and the kind, over the face\'s area');
-  // A second face: the picker's name and every one of its entries read the same way.
+  const component = lone.fixture.view.components[lone.fixture.view.occurrences[0].component];
+  const table = JSON.parse(lone.fixture.partData.get(component.part).selectors.bytes);
+  const ordinal = table.faces.find(row => row[0] === face.split('/')[1])[1];
+  assert.deepEqual(await chips(), [`${partName} · face ${ordinal}`], 'the chip is the part, by its own name rather than the file\'s, and the kind');
+  assert.match((await (await chipCard(`${partName} · face ${ordinal}`)).innerText()).replace(/\s+/g, ' '), new RegExp(`^${partName} · face ${ordinal} ID \\S+ Area `),
+    'and its card is the face\'s area');
+  // A second face of the part joins the first in one chip, and its card names each the same way.
   await page.keyboard.down('Shift');
   await page.mouse.click(...at([10, 0, 0]));
   await page.keyboard.up('Shift');
   await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedReferenceIds.length === 2);
-  const picker = reference.getByRole('combobox', { name: 'Inspect selected reference' });
-  assert.match((await picker.innerText()).replace(/\s+/g, ' '), /^base · face f:[\w.]+ 2\/2$/);
-  await picker.click();
-  const options = await page.getByRole('option').allInnerTexts();
-  assert.equal(options.length, 2);
-  assert.ok(options.every(option => /^base · face f:[\w.]+$/.test(option.trim())), `the picker's entries: ${options}`);
-  await page.keyboard.press('Escape');
+  assert.deepEqual(await chips(), [`${partName} · 2 faces`]);
+  const card = await chipCard(`${partName} · 2 faces`);
+  const rows = await card.locator('[data-info-row]').evaluateAll(nodes => nodes.map(node => node.innerText.replace(/\s+/g, ' ').trim()));
+  const faceRows = rows.filter(row => !row.startsWith('ID '));
+  assert.equal(faceRows.length, 2, `a row a face: ${rows}`);
+  assert.ok(faceRows.every(row => /^face \d+ [\d,.]+ mm²$/.test(row)), `the card's rows: ${rows}`);
   assert.deepEqual(errors, []);
 });

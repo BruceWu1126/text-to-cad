@@ -78,7 +78,7 @@ it('leaving Animation for another tool keeps the transport preferences too', () 
   expect(clock.getAnimationClock()).toBe(0);
 });
 
-it.each(['play', 'scrub', 'restart', 'clip', 'speed', 'loop'])('%s returns a posed model to its authored values', command => {
+it.each(['play', 'scrub', 'restart'])('%s returns a posed model to its authored values', command => {
   const { result, clock } = setup();
   act(() => result.current.handleApplyPose('open'));
   expect(result.current.values.hinge).toBe(80);
@@ -184,7 +184,7 @@ it('every pose write lands at once and asks for no frame: a value, a named pose,
   expect(frames.size).toBe(0);
 });
 
-it('a routine puts Position aside while it plays and gives it back when the pose is handed back', () => {
+it('a routine replaces Position, and releasing it never restores an old pose', () => {
   const { result } = setup();
   act(() => result.current.handleStepModuleParameterChange('hinge', 45));
   expect(result.current.values).toEqual({ hinge: 45, slide: 2 });
@@ -192,16 +192,30 @@ it('a routine puts Position aside while it plays and gives it back when the pose
   expect(result.current.values, 'a routine plays from the model at rest').toEqual(definition.defaultParameterValues);
   act(() => { result.current.handleAnimationScrub(1); result.current.handleAnimationPlayToggle(); });
   act(() => result.current.releaseAnimation());
-  expect(result.current.values, 'leaving Animation restores what Position had set').toEqual({ hinge: 45, slide: 2 });
+  expect(result.current.values, 'the routine replaced the previous pose').toEqual(definition.defaultParameterValues);
   expect(result.current.animation.enabled).toBe(false);
   // Handing the pose back by touching Position starts from Position's values too.
   act(() => result.current.handleAnimationPlayToggle());
   act(() => result.current.handleStepModuleParameterChange('slide', 9));
-  expect(result.current.values).toEqual({ hinge: 45, slide: 9 });
+  expect(result.current.values).toEqual({ hinge: 5, slide: 9 });
   // Reset still means the model at rest, and leaves nothing held for later.
   act(() => result.current.handleAnimationPlayToggle());
   act(() => result.current.handleResetStepModuleParameters());
   expect(result.current.values).toEqual(definition.defaultParameterValues);
   act(() => result.current.releaseAnimation());
   expect(result.current.values).toEqual(definition.defaultParameterValues);
+});
+
+
+it.each(['clip', 'speed', 'loop'])('%s changes the transport without claiming the posed model', command => {
+  const { result } = setup();
+  act(() => result.current.handleApplyPose('open'));
+  act(() => {
+    if (command === 'clip') result.current.handleAnimationClipSelect('close');
+    if (command === 'speed') result.current.handleAnimationSpeedChange(2);
+    if (command === 'loop') result.current.handleAnimationLoopToggle(false);
+  });
+  expect(result.current.values).toEqual({ hinge: 80, slide: 2 });
+  expect(result.current.pose).toBe('open');
+  expect(result.current.animation.enabled).toBe(false);
 });

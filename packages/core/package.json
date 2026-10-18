@@ -20,10 +20,6 @@
       "types": "./dist/prompt/index.d.ts",
       "import": "./dist/prompt/index.js"
     },
-    "./drawing": {
-      "types": "./dist/drawing/index.d.ts",
-      "import": "./dist/drawing/index.js"
-    },
     "./chunk-ids": "./scripts/chunk-ids.mjs",
     "./source-maps": "./scripts/source-maps.mjs"
   },

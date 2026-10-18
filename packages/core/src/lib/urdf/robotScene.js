@@ -1,3 +1,6 @@
+import { hitTriangle } from "../viewer/meshMeasure.js";
+import { shareGeometry, releaseGeometry } from "../render/sharedGeometry.js";
+import { ROBOT_SCENE_UNITS } from "../viewer/sceneUnits.js";
 import { resolveCadEdgeSettings } from "../../common/cadInk.js";
 import { jointMotionMatrix, jointValues, normalizeControlValues } from "../../common/articulation.js";
 import {
@@ -67,7 +70,7 @@ function partGeometry(THREE, part, wearsVertexColors) {
     geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(sourceColors), 3));
   }
   geometry.computeBoundingSphere();
-  return { geometry, sourceColors };
+  return { geometry, sourceColors, owners: 1 };
 }
 
 function boxOf(bounds) {
@@ -85,10 +88,11 @@ function boxOf(bounds) {
  *   `setHiddenPartIds(ids)`, `jointRow(id)`, `motionFrame(jointId)`, `linkFrames()`, `linkCentre(name)`, `hasComponent(id)`,
  *   and `stats` (test seam: matrix writes per pose).
  */
-export function createRobotScene(THREE, { robot, parts }) {
+export function createRobotScene(THREE, { robot, parts }, { shareFrom = null } = {}) {
   const articulation = robot?.articulation || null;
   // Hidden visuals: out of the render, the pick and the highlight, their meshes kept for a reveal.
   let hiddenPartIds = new Set();
+  let clipPlanes = [];
   const isVisible = record => !hiddenPartIds.has(record.mesh.userData.partId);
   const root = new THREE.Group();
   root.name = "robot";
@@ -125,7 +129,14 @@ export function createRobotScene(THREE, { robot, parts }) {
     const described = hex(part.descriptionColor);
     const wearsVertexColors = !described && Boolean(part.hasSourceColors);
     const key = `${String(part.sourceMeshKey || part.meshUrl || part.id)}:${wearsVertexColors ? "source-colors" : "flat"}`;
-    if (!geometries.has(key)) geometries.set(key, partGeometry(THREE, part, wearsVertexColors));
+    if (!geometries.has(key)) {
+      const shared = shareFrom?.get(key);
+      if (shared) {
+        const owner = shared.owner || shared;
+        owner.owners += 1;
+        geometries.set(key, { geometry: shareGeometry(THREE, shared.geometry, { own: ["color"] }), sourceColors: shared.sourceColors, owner });
+      } else geometries.set(key, partGeometry(THREE, part, wearsVertexColors));
+    }
     const entry = geometries.get(key);
     if (!entry) continue;
     const vertexColors = Boolean(entry.sourceColors);
@@ -302,6 +313,7 @@ export function createRobotScene(THREE, { robot, parts }) {
       // Only a SELECTED part shows through what hides it.
       record.ghostRecord ||= { mesh: record.mesh, geometry: record.mesh.geometry, partId: record.mesh.userData.partId, baseColor: selectedColor };
       syncPartOcclusionGhost(THREE, record.ghostRecord, { visible: true, color: selectedColor });
+      if (record.ghostRecord.ghostMaterial) record.ghostRecord.ghostMaterial.clippingPlanes = clipPlanes;
     }
   }
 
@@ -321,6 +333,14 @@ export function createRobotScene(THREE, { robot, parts }) {
     restBounds,
     stats,
     partCount: meshes.length,
+    units: ROBOT_SCENE_UNITS,
+    createSibling() { return createRobotScene(THREE, { robot, parts }, { shareFrom: geometries }); },
+    setClipPlanes(planes) {
+      if (disposed) return;
+      clipPlanes = Array.isArray(planes) ? planes : [];
+      look.setClipPlanes(clipPlanes);
+      applyHighlight();
+    },
     // A robot authors no finish: Render is the studio's surface over the same colours.
     setSurfaceLook(next) {
       if (disposed) return;
@@ -389,11 +409,11 @@ export function createRobotScene(THREE, { robot, parts }) {
       if (disposed) return null;
       root.updateMatrixWorld();
       raycaster.ray.copy(ray);
-      const hit = raycaster.intersectObjects(pickable, false).find(candidate => candidate.object.visible);
+      const hit = raycaster.intersectObjects(pickable, false).find(candidate => candidate.object.visible && clipPlanes.every(plane => plane.distanceToPoint(candidate.point) >= 0));
       if (!hit) return null;
       const componentId = hit.object.userData.componentId || "";
       const linkName = hit.object.userData.linkName || "";
-      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point };
+      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point, triangle: hitTriangle(hit) };
     },
     dispose() {
       if (disposed) return;
@@ -405,7 +425,13 @@ export function createRobotScene(THREE, { robot, parts }) {
       }
       look.dispose();
       for (const material of materials) material.dispose();
-      for (const entry of geometries.values()) entry?.geometry.dispose();
+      for (const entry of geometries.values()) {
+        if (!entry) continue;
+        if (entry.owner) releaseGeometry(entry.geometry);
+        const owner = entry.owner || entry;
+        owner.owners -= 1;
+        if (owner.owners === 0) releaseGeometry(owner.geometry);
+      }
     }
   };
 }

@@ -29,7 +29,7 @@ export function loadingProgress(progress, { finding = false, preparing = false }
     // cadgen is meshing parts the store did not hold (a cold open); a warm open only reads them.
     : phase === "meshing" ? "Meshing parts"
     : phase === "read" ? "Reading model"
-    : /geometry|mesh|surface/.test(hint) ? "Loading geometry"
+    : /geometry|mesh|surface|tessellat/.test(hint) ? "Loading geometry"
     : /view|finaliz|writing|saving|saved|module|building assembly/.test(hint) ? "Preparing view"
     : "Opening model";
   const frame = stageFraction(progress);

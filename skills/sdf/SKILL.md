@@ -148,14 +148,22 @@ or a mesh file that is missing. A link mesh that cannot be loaded fails the snap
 than leaving the link out. Robots are authored in metres and are framed on the robot scene
 scale automatically.
 
-A normal snapshot uses the Solid preset and Light appearance; omitted groups inherit preset defaults.
-Pass `--display render` for the shared photographic scene. Inline display JSON and
-JSON files use grouped settings such as `lighting`, `background`, and `floor`;
-`appearance` is `light` (default) or `dark`. Projection and focal length belong
-in `display.camera`. Top-level `--camera` and `--joint-values` remain active in every display
-mode. The display modes are `solid` and `render`: `edges`, `clip`, `exploded`, the
-`xray`, `hidden-line` and `wireframe` modes and the `hidden`/`off` surface styles
-describe a STEP model's CAD edges, parts and solids, and are refused by name here.
+A normal snapshot uses Solid mode and Light appearance. The display mode is `solid`
+(the default) or `parts` (each link its own colour), each at its own defaults;
+`--grid` draws the measuring grid under the robot, and `--preview` draws Preview's
+shared photographic scene instead, in perspective. Inline display JSON and JSON files
+are the Viewer's display object: `mode`, `grid`, `appearance` (`light`, the default,
+or `dark`), `camera` (projection and focal length) and `clip`.
+Top-level `--camera` and `--joint-values` remain active in every display mode.
+`display.clip` cuts the robot as the viewer's Clip does
+(`{"clip":{"axis":"x","at":0.05}}`, `at` in metres); `exploded`, and `shaded`, `xray`,
+`hidden-line` and `wireframe`, describe a STEP model's CAD edges and parts, and are
+refused by name here. A Quick Edit job from the viewer replays as it is: its `jointValues`, its
+`selection.hide` (the parts hidden in the Links panel, by their ids), its clip, annotation and
+measurements (`cadgen snapshot --job <file>`). Quick Edit supplies inline JSON or a
+`.snapshot.json` path; save inline JSON to a temporary file before using `--job`.
+Inspect supplied annotations before editing. Without annotations, the captured
+view is optional context; render it when useful to the request.
 
 Link meshes are resolved relative to the description, so they must be present: an
 unhydrated Git LFS pointer is not a mesh and fails the snapshot. Run

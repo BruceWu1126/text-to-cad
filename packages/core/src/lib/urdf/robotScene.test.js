@@ -322,3 +322,20 @@ test("visuals that name one mesh share one geometry, and dispose releases everyt
   assert.equal(scene.pick(new THREE.Ray(new THREE.Vector3(0, 0, 10), new THREE.Vector3(0, 0, -1))), null, "a disposed scene answers nothing");
   assert.equal(scene.setControlValues({ pitch: 10 }), false);
 });
+
+
+test("Clip removes surfaces from a robot's picks and keeps the selection ghost cut", () => {
+  const scene = createRobotScene(THREE, robotOf(ARM));
+  const ray = new THREE.Ray(new THREE.Vector3(-1, 0, 0.05), new THREE.Vector3(1, 0, 0));
+  assert.ok(scene.pick(ray).point.x < 0, "the near side is picked before Clip");
+  const plane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+  scene.setClipPlanes([plane]);
+  assert.ok(scene.pick(ray).point.x > 0, "the removed half cannot win a pick or a measurement");
+  scene.setHighlight({ selectedLinks: ["base"] });
+  let ghost = null;
+  scene.object3D.traverse(object => { if (object.userData.isOcclusionGhost) ghost = object; });
+  assert.deepEqual(ghost.material.clippingPlanes, [plane]);
+  scene.setClipPlanes([]);
+  assert.deepEqual(ghost.material.clippingPlanes, [], "an existing ghost follows a changed cut");
+  scene.dispose();
+});

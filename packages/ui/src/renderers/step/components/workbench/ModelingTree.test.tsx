@@ -2,9 +2,14 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import ModelingTreeView from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
+import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
 
 Object.assign(globalThis,{React});
 afterEach(()=>{cleanup();vi.unstubAllGlobals();});
+// The tree as it ships: a section of the file sidebar, opened by its tile, headed by its search box.
+const inSidebar=(tree:React.ReactElement)=><FileSidebar layout={{panels:{},collapsed:{}}} onLayoutChange={()=>{}}>{tree}</FileSidebar>;
+const openModelTree=()=>fireEvent.click(within(screen.getByRole('group',{name:'File sidebar'})).getByRole('button',{name:'Model tree'}));
+const search=()=>screen.getByRole('textbox',{name:'Filter model'}) as HTMLInputElement;
 const refs=(o='o1')=>[1,2].map(n=>({id:`${o}.f${n}`,selectorType:'face',occurrenceId:o,normalizedSelector:`${o}.f${n}`}));
 const partNode=(id:string,name:string,componentId?:string)=>({id,nodeType:'part',name,leafPartIds:[id],children:[],...(componentId?{componentId}:{})});
 const assemblyRoot={id:'document',nodeType:'assembly',name:'tom',children:[{id:'arm',nodeType:'assembly',name:'Arm',leafPartIds:['arm.wrist'],children:[partNode('arm.wrist','Wrist','c')]},partNode('base','Base','c')]};
@@ -19,13 +24,16 @@ it('double-click isolates subassemblies and components',()=>{
  expect(onFocusTreeNode).toHaveBeenCalledTimes(2);
 });
 
-it('starts the compact tree immediately below the filter and keeps disclosure separate from selection',()=>{
+it('starts the compact tree immediately below its search box and keeps disclosure separate from selection',()=>{
  const onSelectTreeNode=vi.fn(),onToggleTreeNode=vi.fn(),onLoadTopology=vi.fn();
  const controls={expandedTreeNodeIds:[],onSelectTreeNode,onToggleTreeNode};
  const props={stepRoot:assemblyRoot,active:true,onLoadTopology,partControls:controls};
- const {rerender}=render(<ModelingTreeView {...props}/>);
+ const {rerender}=render(inSidebar(<ModelingTreeView {...props}/>));
+ openModelTree();
  expect(screen.queryByRole('button',{name:'Select tom'})).toBeNull();
- const filter=screen.getByRole('textbox',{name:'Filter model'}).parentElement!.parentElement!;
+ // The section's head is its search box, no heading, then the X that closes the section.
+ const head=document.querySelector<HTMLElement>('[data-sidebar-head]')!;
+ expect([head.contains(search()),search().placeholder,head.querySelector('[data-tool-panel-heading]')]).toEqual([true,'Filter…',null]);
  expect(screen.queryByLabelText('Model tree summary')).toBeNull();
  const select=screen.getByRole('button',{name:'Select Arm'});
  expect(select.parentElement?.style.height).toBe('24px'); // the dense tree's rows
@@ -38,8 +46,22 @@ it('starts the compact tree immediately below the filter and keeps disclosure se
  expect(screen.queryByRole('button',{name:'Isolate Arm'})).toBeNull();
  const eye=screen.getByRole('button',{name:'Hide Arm'});
  expect(eye.className).toContain('text-muted-foreground');
- rerender(<ModelingTreeView {...props} partControls={{...controls,hiddenPartIds:['base']}}/>);
- expect(within(filter).getByRole('button',{name:'Show all'})).toBeTruthy();
+ // Show all, while parts are hidden, follows the search box, before the section's X.
+ rerender(inSidebar(<ModelingTreeView {...props} partControls={{...controls,hiddenPartIds:['base']}}/>));
+ const actions=[...head.querySelectorAll('button')].map(button=>button.getAttribute('aria-label')||button.textContent);
+ expect(actions).toEqual(['Show all','Close model tree']);
+});
+
+it('the search box is always there: Escape clears a query and Clear filter does too, the tree back each time',()=>{
+ render(inSidebar(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[]}}/>));
+ openModelTree();
+ fireEvent.change(search(),{target:{value:'Wheel'}});
+ expect(screen.queryByRole('list',{name:'Model'})).toBeNull();
+ fireEvent.keyDown(search(),{key:'Escape'});
+ expect([search().value,screen.getByRole('list',{name:'Model'})!==null]).toEqual(['',true]);
+ fireEvent.change(search(),{target:{value:'Wheel'}});
+ fireEvent.click(screen.getByRole('button',{name:'Clear filter'}));
+ expect([search().value,screen.getByRole('list',{name:'Model'})!==null]).toEqual(['',true]);
 });
 
 it('a part is a leaf in every mode: nothing opens under it, and only its assemblies have a disclosure',()=>{
@@ -111,9 +133,9 @@ function ControlledSearch({onSelectTreeNode,onToggleTreeNode,...props}:any){
 
 it('finds a nested part inside a collapsed subassembly, showing its owner path, without touching expansion',async()=>{
  const onToggleTreeNode=vi.fn(),onLoadTopology=vi.fn();
- render(<ModelingTreeView stepRoot={assemblyRoot} active onLoadTopology={onLoadTopology} partControls={{expandedTreeNodeIds:[],onToggleTreeNode}}/>);
+ render(inSidebar(<ModelingTreeView stepRoot={assemblyRoot} active onLoadTopology={onLoadTopology} partControls={{expandedTreeNodeIds:[],onToggleTreeNode}}/>));
  expect(screen.queryByRole('button',{name:'Select Wrist'})).toBeNull();
- fireEvent.change(screen.getByRole('textbox',{name:'Filter model'}),{target:{value:'Wrist'}});
+ fireEvent.change(search(),{target:{value:'Wrist'}});
  await screen.findByRole('list',{name:'Model search results'});
  const hit=screen.getByRole('button',{name:'Select Wrist'});
  expect(hit.title).toBe(''); // no native tooltip competing with the shared hint
@@ -122,10 +144,10 @@ it('finds a nested part inside a collapsed subassembly, showing its owner path, 
  expect(onLoadTopology).not.toHaveBeenCalled();
 });
 
-it('expands a search hit’s collapsed ancestor once selected, then restores it collapsed and pressed after clearing',async()=>{
+it('expands a search hit’s collapsed ancestor once selected, then restores it collapsed and pressed once the search is cleared',async()=>{
  const onSelectTreeNode=vi.fn(),onToggleTreeNode=vi.fn();
- render(<ControlledSearch stepRoot={assemblyRoot} active onSelectTreeNode={onSelectTreeNode} onToggleTreeNode={onToggleTreeNode}/>);
- fireEvent.change(screen.getByRole('textbox',{name:'Filter model'}),{target:{value:'Wrist'}});
+ render(inSidebar(<ControlledSearch stepRoot={assemblyRoot} active onSelectTreeNode={onSelectTreeNode} onToggleTreeNode={onToggleTreeNode}/>));
+ fireEvent.change(search(),{target:{value:'Wrist'}});
  await screen.findByRole('list',{name:'Model search results'});
  fireEvent.click(screen.getByRole('button',{name:'Select Wrist'}));
  expect(onSelectTreeNode).toHaveBeenCalledWith('arm.wrist',expect.any(Object));
@@ -138,8 +160,8 @@ it('expands a search hit’s collapsed ancestor once selected, then restores it 
 });
 
 it('disables a hidden search hit and one outside the isolate frontier, like the tree rows they mirror',async()=>{
- render(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[],hiddenPartIds:['w1'],selectableNodeIds:['w1','w3']}}/>);
- fireEvent.change(screen.getByRole('textbox',{name:'Filter model'}),{target:{value:'Wheel'}});
+ render(inSidebar(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[],hiddenPartIds:['w1'],selectableNodeIds:['w1','w3']}}/>));
+ fireEvent.change(search(),{target:{value:'Wheel'}});
  await screen.findByRole('list',{name:'Model search results'});
  expect(screen.getByRole('button',{name:'Select Left Wheel'}).hasAttribute('disabled')).toBe(true);
  expect(screen.getByRole('button',{name:'Select Right Wheel'}).hasAttribute('disabled')).toBe(true);
@@ -148,8 +170,8 @@ it('disables a hidden search hit and one outside the isolate frontier, like the 
 
 it('clears the search on Escape and selects the second hit with ArrowDown then Enter',async()=>{
  const onSelectTreeNode=vi.fn();
- render(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[],onSelectTreeNode}}/>);
- const input=screen.getByRole('textbox',{name:'Filter model'});
+ render(inSidebar(<ModelingTreeView stepRoot={wheelsRoot} active partControls={{expandedTreeNodeIds:[],onSelectTreeNode}}/>));
+ const input=search();
  fireEvent.change(input,{target:{value:'Wheel'}});
  const list=await screen.findByRole('list',{name:'Model search results'});
  const rows=within(list).getAllByRole('listitem');

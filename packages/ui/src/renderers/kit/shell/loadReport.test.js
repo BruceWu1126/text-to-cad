@@ -11,12 +11,6 @@ test("a renderer that passes nothing gets the plain download report", () => {
     progress: { label: "Opening model", detail: "", counts: "", percent: null, connectionLost: null } });
 });
 
-// A build whose own preview revision is drawn is no wait: the report says preview instead.
-test("a drawn preview revision ends the build's wait and labels the view", () => {
-  const report = shellLoadReport({ load: { busy: false, editPending: true, currentPreview: true }, ...base, previousView: true });
-  assert.deepEqual([report.updating, report.busy, report.preview], [false, false, true]);
-});
-
 test("busy with nothing on screen opens; busy over a complete view updates", () => {
   const opening = shellLoadReport({ load: { busy: true }, ...base });
   assert.deepEqual([opening.opening, opening.updating], [true, false]);

@@ -144,10 +144,3 @@ test("the person's settings go to the app menu over every file; the home shows t
   const row = await home.findByRole('navigation', { name: 'CAD links' });
   expect([...row.querySelectorAll('a, button')].map(node => node.getAttribute('aria-label'))).toEqual(['GitHub', 'Discord', 'X']);
 });
-
-test('the features the person left on reach every file the viewer shows', () => {
-  const client = cadClient();
-  render(<CadViewer client={client as never} host={ports(client)} tabStore={createTabStore(memoryTabRecord())} live={createLiveRegistry()}
-    file="/models/parts/a.step" features={{ quickEdit: false }} onShow={() => {}} />);
-  expect(props().features).toEqual({ quickEdit: false });
-});

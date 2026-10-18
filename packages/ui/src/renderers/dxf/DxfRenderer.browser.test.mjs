@@ -15,7 +15,7 @@ import { PNG } from 'pngjs';
 // `__fixtures__/README.md` says how to regenerate the pair.
 const SAMPLE = JSON.parse(await readFile(new URL('./__fixtures__/sample.drawing.json', import.meta.url), 'utf8'));
 // A drawing whose modelspace is empty: `bounds: null`, and nothing to frame.
-const EMPTY = { schemaVersion: SAMPLE.schemaVersion, units: SAMPLE.units, bounds: null, layers: [], fonts: [], primitives: [] };
+const EMPTY = { schemaVersion: SAMPLE.schemaVersion, units: SAMPLE.units, bounds: null, layers: [], entities: [], fonts: [], primitives: [] };
 const BAD_DXF_MESSAGE = 'plate.dxf is not a readable DXF document: run `ezdxf audit` on it, or export it again.';
 
 // The fixture's own measurements, so an assertion can say WHICH edge it is reading.
@@ -30,7 +30,7 @@ const HARNESS_SIZE = '<style>#root > div { width: var(--harness-width, 800px) !i
 let temporary, server, browser;
 before(async () => {
   temporary = await mkdtemp(join(tmpdir(), 'text-to-cad-dxf-browser-'));
-  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.woff2': 'dataurl', '.svg': 'dataurl' } });
+  await build({ entryPoints: [fileURLToPath(new URL('../harness/index.tsx', import.meta.url))], outfile: join(temporary, 'harness.js'), bundle: true, format: 'esm', platform: 'browser', conditions: ['production'], jsx: 'automatic', loader: { '.webp': 'dataurl', '.avif': 'dataurl', '.svg': 'dataurl' } });
   const bundle = await readFile(join(temporary, 'harness.js'));
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   const files = ['sample.dxf', 'empty.dxf', 'broken.dxf'];
@@ -90,7 +90,8 @@ async function frame(pane, before = null) {
   let last = null;
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await settle(pane.page());
-    const shot = await canvasOf(pane).screenshot();
+    // The drawing alone: the tools that float over it (the strip, Quick Edit) are not its picture.
+    const shot = await canvasOf(pane).screenshot({ style: '[data-cad-tool-groups], [data-viewport-top-right] { visibility: hidden !important; }' });
     if (last?.equals(shot) && !before?.shot.equals(shot)) return Object.assign(PNG.sync.read(shot), { shot });
     last = shot;
   }
@@ -170,6 +171,15 @@ test('a drawing opens fitted and centred, in the theme’s ink, and flips with t
   const { page, pane, errors } = await open(t, 'sample.dxf');
   await drawn(pane);
 
+  // This harness opens dark. Ask for the light token cascade before measuring its light ink;
+  // the later switch on html then exercises the same host theme change in the other direction.
+  await page.evaluate(() => {
+    for (let element = document.querySelector('[data-drawing-surface]'); element; element = element.parentElement) {
+      element.classList.remove('dark');
+    }
+    document.documentElement.classList.add('light');
+  });
+
   const light = await frame(pane);
   const box = inkBox(light);
   // Fitted: the drawing's own aspect, centred, filling the pane but for the gutter.
@@ -235,6 +245,8 @@ test('strokes stay hairlines when the drawing is zoomed in eight times', async (
 
   // Zoom about a point ON that bottom edge, so the edge stays under the column.
   await wheelAt(page, canvas, { x: column, y: fitted.maxY }, deltaForFactor(8));
+  // The pointer leaves, so Select lights nothing under it: the strokes are measured unlit.
+  await page.mouse.move(0, 0);
   const zoomed = await frame(pane, fittedShot);
   const bottomAtZoom = columnRuns(zoomed, column).at(-1);
 

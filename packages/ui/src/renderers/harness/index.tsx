@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { FileViewer } from '@text-to-cad/ui/file-viewer';
 import type { FileSource } from '@text-to-cad/ui/file-viewer';
-import { createCadClient } from '@text-to-cad/core/client';
+import { createCadClient, createHttpPromptFiles } from '@text-to-cad/core/client';
 import { createTabStore, memoryTabRecord, useTabViewerState } from '@text-to-cad/ui/tab-store';
 import type { TabRecordStorage, TabStore } from '@text-to-cad/ui/tab-store';
 import { createStepRenderer } from '@text-to-cad/ui/renderers/step';
@@ -20,6 +20,7 @@ import type { ViewerCommands as CadCommands } from '@text-to-cad/ui/renderers/wo
 // default mesh) is `/models/arm.urdf`.
 const requested = new URLSearchParams(location.search).get('file') || 'part.stl';
 const file = requested.startsWith('/') ? requested : `/models/${requested}`;
+const promptMessages: string[] = [];
 const captures: { file: string; size: number; type: string; references: unknown }[] = [];
 // What a renderer asked the host to open (a mesh a robot description names, say).
 const opened: string[] = [];
@@ -67,7 +68,8 @@ function workspace(id: string, store: TabStore) {
   };
   const destination = { kind: (window as unknown as { __cadPromptDestination?: 'clipboard' }).__cadPromptDestination || 'composer' as const, available: true };
   const host: ViewerHost = { files: source, navigation: { openFile(path) { opened.push(path); } }, environment: { colorScheme: 'dark', platform: keyboardPlatform },
-    clipboard: { writeText: async () => {}, writeImage: async () => {} },
+    clipboard: { writeText: async text => { promptMessages.push(await text); }, writeImage: async () => {} },
+    promptFiles: createHttpPromptFiles({ origin: `${location.origin}/${id}` }),
     promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async context => {
       const attachment = context.parts.find(part => part.kind === 'attachment');
       if (attachment?.kind === 'attachment') { const blob = await attachment.content; captures.push({ file, size: blob.size, type: blob.type, references: context.parts.filter(part => part.kind === 'reference').map(part => part.reference) }); }
@@ -91,8 +93,8 @@ function App() {
   const { state: otherState, onStateChange: onOtherStateChange } = useTabViewerState(otherTabStore);
   const [second, setSecond] = useState(false);
   const [mounted, setMounted] = useState(true);
-  Object.assign(window, { cadHarness: { a, b, state, otherState, preferences, tabStore, record: tabStore.getSnapshot(), captures, opened, capture: a.capture, selectReference: a.selectReference, second: setSecond, mounted: setMounted } });
-  return <div style={{ display: 'flex', width: '1200px', height: '720px' }}>
+  Object.assign(window, { cadHarness: { a, b, state, otherState, preferences, tabStore, record: tabStore.getSnapshot(), captures, promptMessages, opened, capture: a.capture, selectReference: a.selectReference, second: setSecond, mounted: setMounted } });
+  return <div className="dark" style={{ display: 'flex', width: '1200px', height: '720px' }}>
     <section data-testid="one" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
       {mounted && <FileViewer file={file} host={a.host} renderers={a.renderers} state={state} onStateChange={onStateChange} />}
     </section>

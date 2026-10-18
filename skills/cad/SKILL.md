@@ -140,10 +140,32 @@ face = selection.shape()  # owned native geometry, in document world coordinates
 print(selection.ref, face.area)
 ```
 
-A note from the viewer's Quick Edit reads: what the person wants, then
-`File:` (the document it is about), `References:` (one per line, as above) and,
-when they sketched on the view, `Sketch: <path>`: a PNG of the view with their
-markup (or the image itself, attached).
+A Quick Edit prompt names its document under `File:`, selected entities under
+`References:`, and snapshot context as inline JSON or a `.snapshot.json` path.
+Read `measurements` for endpoints in model units and displayed labels; these are
+reference dimensions, not constraints automatically applied to geometry.
+To render, save inline JSON to a temporary `.snapshot.json` and run
+`cadgen snapshot --job <snapshot file>` (`--job` takes a file path).
+Inspect supplied annotations before editing. Without annotations, the captured
+view is optional context; render it when useful to the request. After editing,
+replay relevant views to check the change. See
+[annotations and Quick Edit views](references/snapshot-review.md#annotations-and-quick-edit-views)
+for the packet schema and capture behavior.
+
+A reference into a file that is not a STEP names what the viewer picked in it, in that
+file's own terms (none is a STEP selector `read_scene` resolves):
+
+| File | Reference | Means |
+| --- | --- | --- |
+| URDF, SRDF, SDF | `/work/arm/arm.urdf#upper_arm` | the link `upper_arm` |
+| GLB | `/work/out/model.glb#n12` | the glTF node `nodes[12]` (0-based, the file's own index) |
+| 3MF | `/work/out/plate.3mf#o2.1` | the 2nd `<build><item>`'s 1st `<component>` (1-based); `#o3` is the 3rd build item |
+| STL | the file alone, on `File:` | one mesh: nothing in it is picked |
+
+A measurement taken on a mesh (a GLB, a 3MF or a robot's links) is between two points of
+its triangles, in the file's unit, and APPROXIMATE: its label starts with `≈` ("≈ 0.0425 m").
+Never read a width across two facets of a tessellated curve as an exact diameter; measure
+the source model for that.
 
 A bare `#o:4b1f9e2a7c03/f:bracket.make_box1.6` belongs to the document the
 conversation is about. A ref names geometry, never a position. An occurrence's
@@ -240,6 +262,6 @@ validation don't replace this.
   or reuses it. Read `url` from its one JSON line (never guess the port), and for each
   file return `url?file=<its URL-encoded absolute path>`. If it fails to launch, say so.
 
-The viewer never runs model scripts: it shows what was last generated. Existing
-STEP files compile on open when needed. Topology selection and measurement
-require STEP; meshes are visual only.
+Generate changed artifacts first: the viewer never runs model scripts. Existing
+STEP files compile on open when needed. Exact topology selection and measurement
+require STEP; supported mesh viewers also offer approximate measurements on triangles.

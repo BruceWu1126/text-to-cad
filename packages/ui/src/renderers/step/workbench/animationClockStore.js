@@ -7,8 +7,8 @@ const AnimationClockContext = createContext(null);
 export function AnimationClockProvider({ value, children }) {
   return createElement(AnimationClockContext.Provider, { value }, children);
 }
-export function useAnimationClockStore() {
-  const clock = useContext(AnimationClockContext);
+export function useAnimationClockStore(fallback = null) {
+  const clock = useContext(AnimationClockContext) || fallback;
   if (!clock) throw new Error("CAD playback requires its renderer's animation clock.");
   return clock;
 }

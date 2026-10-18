@@ -20,7 +20,9 @@ import React, { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ModelingTree from '../../../dist/renderers/step/components/workbench/ModelingTree.js';
 import { createHoverStore } from '../../../dist/renderers/step/workbench/hoverStore.js';
-// ?groups=&parts= size the assembly; the default is ${GROUPS} groups of ${PARTS} parts.
+import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
+// ?groups=&parts= size the assembly; the default is ${GROUPS} groups of ${PARTS} parts. ?sidebar
+// draws the tree as the viewer does, a section of the file sidebar its tile opens, headed by its search box.
 const query = new URLSearchParams(location.search);
 const GROUPS = +query.get('groups') || ${GROUPS}, PARTS = +query.get('parts') || ${PARTS};
 const groups = Array.from({length:GROUPS}, (_, g) => {
@@ -42,12 +44,15 @@ function App(){
   Object.assign(window.treeTest,{refresh:()=>setTick(n=>n+1),loading:()=>setLoading(value=>!value),select:id=>{setPicked([]);setSelected([id]);setReveal(n=>n+1);},setMode,
     // What a face picked in the viewport hands the tree: that face, as the selected reference.
     pickFace:(id,n)=>{setSelected([]);setPicked([face(id,n)]);setReveal(k=>k+1);}});
+  const tree = <ModelingTree active disabled={false} mode={mode} stepRoot={root} selectedPartIds={selected} selectedReferences={picked}
+    activeTreeNodeScrollKey={reveal} onLoadTopology={onLoadTopology} partControls={partControls} loading={loading} hoverStore={hoverStore}/>;
   // As the viewer holds it: the tool stack beside the viewport's canvas, in one surface.
   return <div data-cad-surface="" style={{display:'flex'}}>
     <canvas data-testid="viewport" width="200" height="200" style={{width:200,height:200}}/>
     <section data-testid="model" data-tick={tick} style={{height:420,width:320,display:'flex',flexDirection:'column',gap:8,padding:16}}>
-      <ModelingTree active disabled={false} mode={mode} stepRoot={root} selectedPartIds={selected} selectedReferences={picked}
-        activeTreeNodeScrollKey={reveal} onLoadTopology={onLoadTopology} partControls={partControls} loading={loading} hoverStore={hoverStore}/>
+      {query.has('sidebar') ? <div style={{position:'relative',flex:1}}>
+        <FileSidebar layout={{panels:{},collapsed:{}}} onLayoutChange={()=>{}} style={{inset:0}}>{tree}</FileSidebar>
+      </div> : tree}
     </section>
   </div>;
 }
@@ -168,7 +173,11 @@ createRoot(document.getElementById('root')).render(<App/>);
   check(await layout(), 'revealed');
 
   // Search: two hundred ranked hits in the same rows; the cursor walks them from the keyboard,
-  // each step in view, and Enter selects the hit under it.
+  // each step in view, and Enter selects the hit under it. The field heads the tree as the file
+  // sidebar's section, which scrolls as one.
+  await page.goto(`http://127.0.0.1:${server.address().port}/?sidebar`);
+  await model.getByRole('group', { name: 'File sidebar' }).getByRole('button', { name: 'Model tree', exact: true }).click();
+  await model.getByRole('button', { name: 'Select Part 0-0', exact: true }).waitFor();
   const search = model.getByRole('textbox', { name: 'Filter model' });
   await search.fill('part 1');
   const results = model.locator('[aria-label="Model search results"]');
@@ -182,7 +191,7 @@ createRoot(document.getElementById('root')).render(<App/>);
   const cursor = await results.evaluate(list => {
     const rows = [...list.querySelectorAll(':scope > li')];
     const row = rows.find(li => li.firstElementChild?.classList.contains('bg-accent/30'));
-    const scroller = list.closest('[data-tool-panel-body]'), box = row.getBoundingClientRect(), view = scroller.getBoundingClientRect();
+    const scroller = list.closest('[data-file-sidebar-scroller]'), box = row.getBoundingClientRect(), view = scroller.getBoundingClientRect();
     return { id: row.dataset.searchRow, top: box.top - list.getBoundingClientRect().top, visible: box.top >= view.top - 1 && box.bottom <= view.bottom + 1 };
   });
   assert.equal(cursor.top, 45 * 24, 'the cursor is the 46th hit');
@@ -191,6 +200,8 @@ createRoot(document.getElementById('root')).render(<App/>);
   assert.equal(`model:${(await page.evaluate(() => window.treeTest.events.selected)).at(-1)}`, cursor.id, 'Enter selects the hit under the cursor');
   await search.fill('');
   await model.locator('[aria-label="Model"]').waitFor();
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await model.getByRole('button', { name: 'Select Part 0-0', exact: true }).waitFor();
 
   // A large tree (more than LARGE_TREE_ROWS rows of assemblies and parts) under Faces: its
   // assemblies stay open and locked, its parts are leaves, and nothing asks for topology for being

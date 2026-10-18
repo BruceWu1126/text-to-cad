@@ -7,7 +7,7 @@ persistent storage or page navigation. DOM, canvas, workers and layout remain
 shared. Missing optional methods mean an operation is unsupported.
 
 The host contains `files`, optional native `fileActions`, `clipboard`,
-`promptContext`, the optional `attachments`, `navigation` (the optional `openFile(path)` and
+`promptContext`, the optional `promptFiles`, `navigation` (the optional `openFile(path)` and
 `home()`), the optional `links` (the app menu's), the optional `usage`
 (`used(feature)`: what the person used, for the host's telemetry to count, never what
 they made; absent, nothing is counted) and `environment`. `environment` carries the resolved `colorScheme`,
@@ -17,8 +17,8 @@ the keyboard `platform` (`darwin` shows ⌘, anything else Ctrl), the app's own
 of sight), where a CAD renderer draws the model alone — no tools, view actions,
 view cube or Quick Edit — and FileViewer draws no navbar. A view shown small in a
 conversation is not compact: it is the whole viewer, and its host hands it a way
-to full size as `fullSize` (`CadViewerProps.fullSize`), the last of the navbar's own
-controls (the view's follow it) and the home's. CAD is a separate registration supplied with a
+to full size as `fullSize` (`CadViewerProps.fullSize`), among the last of the navbar's
+controls and the home's, before the host's colour scheme control. CAD is a separate registration supplied with a
 `CadWorkspaceService`; the generic FileViewer does not import CAD. The HTTP CAD
 adapter can serve both apps, while desktop owns native runtime startup/recovery.
 See [workspace resources](../../core/docs/workspace-resources.md) for resource
@@ -49,11 +49,11 @@ are for reading and maintaining the contracts.
 
 | Contract | Definition | Public entry point |
 | --- | --- | --- |
-| `ViewerHost`, `ClipboardPort`, `AttachmentStore` (where a copied prompt's picture is saved), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
+| `ViewerHost`, `ClipboardPort`, `PromptFiles` (a Quick Edit's views and annotations, saved as JSON), `usage` | [Host types](../src/host/types.ts) | `@text-to-cad/ui/host` |
 | `FileSource` (`stat`, and `list` and `search` where the host has them), `FileActions`, `FileViewerState` | [File viewer types](../src/file-viewer/types.ts) | `@text-to-cad/ui/file-viewer` |
 | `PromptContextPort` (`deliver`, `send`), bundles, references, delivery receipts and `formatPromptMessage` (the one message a Quick Edit is) | [Prompt types](../../core/src/prompt/types.ts) | `@text-to-cad/core/prompt` |
 | `CadWorkspaceService` (the catalog of the files on screen, `folder`, `search`), `createCadClient` (`{ origin, fetch, … }`), `isMissingFileError`, `CadResourceProvider`, worker tickets | [CAD service types](../../core/src/client/types.ts) | `@text-to-cad/core/client` |
-| `createHttpAttachmentStore` (the viewer server's `AttachmentStore`: it saves a PNG through `POST /__cad/sketches`) | [Attachment store](../../core/src/client/attachments.js) | `@text-to-cad/core/client` |
+| `createHttpPromptFiles` (the viewer server's `PromptFiles`: `POST /__cad/prompt-files`, writes JSON and returns paths) | [Prompt files](../../core/src/client/promptFiles.js) | `@text-to-cad/core/client` |
 | `StepRendererOptions`, `CadLiveBinding` | [STEP registration](../src/renderers/step/index.ts) | `@text-to-cad/ui/renderers/step` |
 | `TabStore`, `TabRecordStorage`, `createTabStore`, `useTabViewerState` (the tab's one store: its settings, the view of the file on screen, and `FileViewer`'s state from both) | [Tab store](../src/tab-store/tabStore.ts), [the record](../src/tab-store/tabRecord.ts) | `@text-to-cad/ui/tab-store` |
 | `CadPreferenceSource`, `createCadPreferences` (the tab's settings as renderers read them) | [Viewer preferences](../src/renderers/workspace/preferences.ts) | `@text-to-cad/ui/renderers/workspace` |
@@ -78,40 +78,41 @@ use the [explicit fake host](../src/host/testing/host.ts).
 
 ## A CAD renderer's controls
 
-The controls of a CAD renderer (STEP, GLB, mesh, robot, DXF) are panels of its own tool
-stack over the viewport (`settings-ui.md#the-tool-stack`), and nothing it does opens or
-closes the explorer (only the file's name opens that). The tool stack's layout — the
-sizes a person dragged the tree, the Reference and Position panels to, the folded panels,
-whether the tree is closed and whether the tools are hidden — is one
+The controls of a CAD renderer (STEP, GLB, mesh, robot) are its own, over the viewport: its
+tool strip, the tool in hand's sub-toolbar and its file sidebar, its view's controls (Display,
+Preview) drawn into the navbar's `navbarSlot` (`settings-ui.md#the-file-sidebar-and-the-tool-stack`); a
+DXF's are its own canvas's. Nothing a renderer does opens or closes the explorer (only the
+file's name opens that). The layout a person gives the file sidebar — each section's size —
+and the tool stack's panels is one
 of the tab's settings (`settings.toolStack` of the tab record, `@text-to-cad/ui/tab-store`),
 beside the appearance and the home's layout.
 
 ## Preview and renderer navigation actions
 
-Preview is the shared shell's own state (`previewing`); there is no host prop
-for it and a host cannot start or observe it. It is a 3D view's alone, and each
+Preview is the shared shell's own state (`previewing`); there is no host
+prop for it and a host cannot start or observe it. It is a 3D view's alone, and each
 renderer says whether its view is one: it declares `previewable` to the shell
 (`useRendererShell`), as STEP, GLB, STL/3MF and URDF/SRDF/SDF do. A view that does
 not — a DXF's 2D drawing, which draws its own surface without the shell — has no
-Preview at all, no control and not a disabled one, and nothing that asks for
-Preview (a link or a host request, should either come to) takes it there: it keeps
+Preview at all, no control and not a disabled one, and nothing that asks for it
+(a link or a host request, should either come to) takes it there: it keeps
 the normal view. The CAD app's Full size, inline, is the host's display mode, not
-Preview: it shows the normal view, of any file. It is fullscreen
-(`onFullscreenChange`, below): the navbar, with everything in it (the app menu and the
-explorer too), steps aside while it lasts. It never uses the browser Fullscreen API.
+Preview: it shows the normal view, of any file. Preview keeps the navbar, so the app
+menu and the explorer still lead to other files; the host is not told it is on.
 Preview and the tools view are two states: entering leaves the tools view's state as it
-is (the pose, the selection, hidden and isolated parts, Explode and Clip, measurements,
-the camera, the Animation tool's routine, the tool and its panels) and preview starts
-from the model as authored, with its own camera and its own routine at rest; leaving
-throws preview's state away and gives the tools view back exactly as it was. A renderer
-draws preview from its opening view instead of resetting its own state (`useRendererShell`'s
-`preview`), and the shell saves the tools view's camera and routine on the way in and
-restores them on the way out; nothing of preview is persisted. Orbit
-starts by default, with its speed, unless the file's Orbit says otherwise: the file's
-view's `playback` — orbit on or off and its speed, Autoplay, and the tools view's chosen
-speed and loop — is kept between previews and across a reload, and a file's routine
-plays on entry only when its Autoplay is on. Preview's own speed and loop start at the
-routine's every time and are never written there. The rules are in
+is (the pose, the routine, the selection, hidden and isolated parts, Explode and Clip,
+measurements, the camera, the tool and its panels) and Preview starts from the model as
+authored, with its own camera, still, and its routine at rest, drawn in Render whatever the
+file's display mode (the tools view never draws Render); leaving throws Preview's state
+away and gives the tools view back exactly as it was, its routine included, in the file's
+mode. Preview is a view of its own, mounted over the tools view's while it is open
+(`kit/shell/PreviewView.jsx`), with its own scene, camera, pose and routine, sharing only the
+page's GPU device; the tools view's viewport stays mounted under it and nothing of it changes.
+Nothing of Preview is persisted. Routines play from the file sidebar's Animation section in either
+view. Preview opens still: Orbit is off every time it opens, and its settings panel turns it
+on. The file's view's `playback` — Orbit's speed, Autoplay, and the chosen speed and loop —
+is kept between visits to Preview and across a reload, and a file's routine plays on entry
+only when its Autoplay is on. The rules are in
 [settings-ui.md](settings-ui.md#camera-animation-and-preview).
 
 A renderer can publish `FileNavigationAction[]` through
@@ -120,7 +121,7 @@ while a person has put away an alert card the model survives: the card's own ico
 colour, named after the alert, which brings the card back (`useAlertDismissal`,
 `kit/status/ViewerAlertCard.jsx`). The
 shared navbar shows these at its right, after the host's update button and before the
-host's Full size and the view's own controls. Each action declares its icon, accessible label, an
+host's Full size and colour scheme control. Each action declares its icon, accessible label, an
 optional shorter hover `hint`, disabled state and invocation callback. Registration belongs to the mounted
 file generation: publish an empty list on cleanup; departing renderers cannot
 replace a new file's actions. Publish only when action metadata changes; stable
@@ -128,14 +129,10 @@ commands should read the current viewport through a ref, avoiding parent/child
 render loops. These actions use existing host capabilities for effects. What a
 person tells the agent about a CAD file is [Quick Edit](#prompt-handoff)'s.
 
-A renderer's controls for the view are the renderer's own, drawn into the navbar: FileViewer
-hands it the box at the row's right end (`RendererViewProps.navbarSlot`, null where no navbar
-is drawn), and the CAD viewer's controls for a 3D view (a STEP's Select modes while Select is
-the tool, then Display and Preview) are portaled there, last.
-A renderer that shows its file fullscreen (the CAD viewer's Preview) says so through
-`onFullscreenChange(true)`, and `false` when it stops: the navbar, the box with it, steps
-aside while it lasts, and the renderer draws its own controls where they sat (preview's
-corner: Orbit, Display, Exit preview). The host's `captureRequest`
+A renderer's controls for the view are the renderer's own, drawn into the box FileViewer
+hands it at the navbar's right end (`navbarSlot`): the CAD viewer's for a 3D view, Display and
+Preview, and in Preview its Preview settings and Exit preview; the navbar stays over it.
+Where there is no navbar (a view shown small) the renderer draws them over its view. The host's `captureRequest`
 command is the same capture: to a composer destination it delivers the view and
 the selection through `promptContext.deliver`. Neither route detects the platform.
 
@@ -204,8 +201,10 @@ The portable types and validators live at `@text-to-cad/core/prompt`. One versio
 bundle contains ordered text, reference and attachment parts with unique IDs.
 An attachment has a MIME type, name and Blob or Promise of Blob. Its optional
 `about` array names reference-part IDs, so a screenshot and several selections
-can travel together, and its optional `label` ("Sketch") says what it is for a
-message that names it by path. Producers freeze resource and selection identity before
+can travel together, its optional `label` ("Annotation") says what it is for a
+message that names it by path, and its optional `path` (a path, or the promise of
+one) is where it is already saved: `resolveAttachmentPaths(context)` waits for
+them all. Producers freeze resource and selection identity before
 asynchronous capture. Blob URLs are delivery leases, never portable identity.
 
 A reference contains a workspace-file identity (the file's absolute path,
@@ -218,10 +217,11 @@ references do not promise to survive edits. Shared serialization handles quoting
 
 `formatPromptMessage(context, { attachmentPath })` is the one
 message a Quick Edit is, whether sent, queued or copied: what the person wrote;
-then `File: <path>`; then `References:` and one reference per line; then
-`Sketch: <path>` (the attachment's label) when the picture travels as a file,
-where `attachmentPath` says where it was saved. A picture sent beside the text
-as an image block is not named.
+then `File: <path>`; then `References:` and one reference per line; then each
+JSON file by its label and path (`Views (cadgen snapshot --job): <job.json>`,
+`Annotation: <file.annotation.json>`), where `attachmentPath` says where it was saved.
+No pictures are rendered, attached or sent.
+
 
 `PromptContextAction` (a host renderer's prompt action) reads the subscribed
 destination and labels the action Add to prompt or Copy for prompt. It calls delivery during the
@@ -245,13 +245,27 @@ Hosts must resolve/validate accepted attachments and consume failed encoders;
 they do not transfer Promise or Blob values across native IPC.
 
 Quick Edit is the shared, host-neutral note to the agent
-([the design system](settings-ui.md#quick-edit)), there while the person has it on
-(`features.quickEdit`, above), and its buttons are what the host can carry out. **Copy Prompt** is always there: the message goes through
+([the design system](settings-ui.md#quick-edit)), and its buttons are what the host can carry out.
+Copy, Queue and Send carry the words and references, with a snapshot packet captured
+at the press when the displayed revision matches the saved input. If a build preview
+is unsaved or the viewer retains a previous revision, Quick Edit keeps the note and
+references available and explicitly says they describe that displayed revision; the
+saved file may differ. It omits replay jobs rather than naming that saved file as the
+picture on screen. The packet, when available, includes the current view plus distinct drawn views
+with remaining ink; an equivalent drawn entry uses the exact current framing.
+Shared input, inline annotation ([annotation](annotation.md)) and measurements
+appear once. Each job may override shared fields. Projection and lens are preserved.
+Packets up to 1024 bytes of compact UTF-8 JSON are inlined; larger packets are
+written as one temporary `.snapshot.json` and named by path. Hosts use
+`resolvePromptMessage` to resolve an attachment's optional `inlineText` before its
+path, keeping destination binding inside the gesture. Drawing, selecting and typing
+keep data in memory. Nothing renders at the press. The agent saves inline JSON to
+a temporary file before calling `cadgen snapshot --job <file>`.
+**Copy Prompt** is always there: the message goes through
 `ClipboardPort.writeText`, which takes a `Promise<string>` so the write starts
-inside the gesture while a sketch is still being saved; its references name their
-files by absolute path, as copied references do (below), and a sketch is saved through
-`host.attachments` and named by path, since text cannot carry a picture (without
-`attachments`, a copied prompt names none). **Queue** is there where the
+inside the gesture while the files are still being made; its references name their
+files by absolute path, as copied references do (below), and every file is named by
+its path, since text carries no file (without `promptFiles`, a prompt carries none). **Queue** is there where the
 destination is a composer (`destination.kind === "composer"`): `deliver`, the
 context for the person's next message. **Send** is there where the prompt port
 has `send`. The context is built at the press, from what is live then; a changed
@@ -259,12 +273,20 @@ document or revision never retargets it. A Quick Edit that reached its destinati
 (copied, queued or sent: no `failed` or `cancelled` receipt) tells the host once,
 `usage.used('quickEdit')`, for its count; a host that throws there changes nothing.
 
-`ViewerHost.attachments` is an `AttachmentStore`: `save(image, name)` answers the
-saved file's absolute path. `createHttpAttachmentStore({ origin, fetch })` from
-`@text-to-cad/core/client` is the viewer server's: it posts the PNG to
-`POST /__cad/sketches?name=<name>`, which keeps it as scratch in the system's
-temporary directory. Both apps pass one; the MCP app's reaches the server through
-its tunnel.
+`ViewerHost.promptFiles` is a `PromptFiles`: `create({ name, input, views, annotation, measurements })`
+answers `{ inline: compactJson }` or `{ snapshot: absolutePath }`, `read(path)` fetches JSON,
+and optional `save({ name, kind, data })` remains for older clients that export individual
+annotation or measurement files. Current chips do not call it. `createHttpPromptFiles({ origin, fetch })` from
+`@text-to-cad/core/client` posts to `POST /__cad/prompt-files`, which validates the packet in memory and returns inline JSON or writes the larger
+snapshot and returns its path with HTTP 200. The client advertises `acceptInline: true`;
+requests without it always receive a saved path, so already-open clients remain compatible. There is no render worker
+or polling endpoint. Guarded `GET /__cad/prompt-files/<name>` serves JSON only;
+`POST /__cad/prompt-files/save` supports those older clients. The files
+are scratch in the system's temporary directory and outlive the viewer until the
+system clears them. The response and persisted snapshot name input and output
+files by absolute path; annotation data is inline, so replay works from another
+working folder. Both apps pass one; the MCP app's
+reaches the server through its tunnel.
 
 ## App-specific interfaces
 
@@ -300,15 +322,14 @@ picture's size — one model at a time, each once per visit, and only a model wh
 artifact status is already `compiled`, and keeps the picture through `onThumbnail`
 as it keeps the file on screen's. The home never builds anything: an unbuilt model
 keeps its placeholder until a view shows it.
-`readState().display` and `setDisplaySettings(patch)` use the same sparse grouped
-schema as snapshots: `mode` selects `solid`, `render`, `xray`, `hidden-line`, or
-`wireframe`; camera, surfaces, edges, lighting, background, floor, grid and axes
-are independent groups. Patches merge fields within a group. A mode patch
-reapplies that preset before its explicit group overrides; clipping and exploded
-view remain independent tools. Custom is derived from the effective overrides,
-not a sixth mode. `setRenderMode(true/false)` selects Render/Solid through that
-same state. Grouped camera projection/lens changes preserve the viewport's pose
-and zoom. Display Reset restores the selected preset and disables both tools.
+`readState().display` and `setDisplaySettings(patch)` use the same sparse display
+schema as snapshots: `mode` selects `solid`, `shaded`, `parts`, `xray`, `hidden-line`,
+or `wireframe` (each a look at its own defaults), `grid` switches the measuring grid,
+and appearance, camera, clip and exploded are shared. Patches merge supplied fields;
+a mode has no settings of its own, and a patch naming any is refused. There is no
+Custom state or legacy shape migration. Render is no mode: it is Preview's, which no
+live command opens, so `mode: "render"` is refused as any unknown mode is; Preview's
+own settings are the viewer's panel's, not the display's. Camera projection/lens changes preserve viewport pose and zoom.
 `resetCamera` frames the model again without turning the camera — exactly what
 STEP's context-menu "Zoom to fit" does. Cube shortcuts change only orientation.
 
@@ -347,7 +368,7 @@ the defaults), thrown out with the tab and kept across a reload. The host suppli
 lives through one adapter, `TabRecordStorage` — a synchronous read and write of the
 whole record: the web over `sessionStorage`, the CAD app over memory
 (`memoryTabRecord`) — and the package owns the record's shape, version and normalization. `settings` is
-`{ toolStack, appearance, library }`: tab-wide (the tool stack's layout, the
+`{ toolStack, appearance, library }`: tab-wide (the file sidebar's and tool stack's layout, the
 appearance, the home's layout), and what every renderer reads as its preferences;
 `files` holds the view of the file on screen, under `[absolute path, renderer id]`, and no
 other: a write keeps the newest alone (`TAB_FILE_LIMIT`), and `CadViewer` drops the view
@@ -360,11 +381,11 @@ at the defaults. In the CAD app there is one record per view: a view the host
 creates again (its frame re-created) starts afresh, since nothing names a view across its
 frames. A view is `{ camera, display, playback, renderer }` (`kit/shell/fileView.js`):
 the camera is restored in place of the open-time fit, the display settings with their
-Clip and Explode, the playback settings (Orbit on or off and its speed, Autoplay, and the
-Animation tool's chosen speed and loop — never preview's, which are forgotten on leaving it), and the renderer's own slices each behind the
+Clip and Explode, the playback settings (Orbit's speed, Autoplay, and the chosen speed and
+loop), and the renderer's own slices each behind the
 signature it was written against — a slice that no longer fits the file on screen is
 dropped, the camera, the display and the playback never. Not in it, and started afresh
-on every open: the tool in hand, the selection, measurements, ink, preview, a
+on every open: the tool in hand, the selection, measurements, ink, Preview, a
 routine's time and Quick Edit's note. Apps merge
 what a view changed into the store (`files.merge`); a stale view must not overwrite
 another view's entries. Material appearance is source-owned and read-only. Live
@@ -388,9 +409,8 @@ tests remain required for resource changes.
 Viewer shortcuts consume only events from their own viewer, or from the page
 background after a pointer press in it, so another viewer or the composer never
 receives Escape, copy or orbit keys on its behalf
-([settings-ui.md](settings-ui.md#keyboard)). The standalone
-`DrawingEditor` takes the host's keyboard `platform` as a prop for its undo and
-redo keys.
+([settings-ui.md](settings-ui.md#keyboard)). Annotate's surface reads the host's
+keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 ## Host chrome slots
 
@@ -407,9 +427,9 @@ manager, each where `fileActions` can do it, and is absent where it can do none 
 right-click on the name). Right, only what a host or a file adds: the host's update button
 first (`update`, while its install is behind), the renderer's navigation actions, the
 host's Full size where it shows the view small
-(`fullSize`, the inline card's way to full size, in the home's row too) and, last, the
-renderer's view controls in their box (`navbarSlot`: a 3D view's own, then Display and Preview). The
-navbar holds no settings.
+(`fullSize`, the inline card's way to full size, in the home's row too), and last the host's
+colour scheme control (`colorSchemeControl`), where it has one. The navbar holds no
+settings and no view controls.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
@@ -439,22 +459,16 @@ directory in anything else is `~/`. A label is a suggestion: GitHub applies a UR
 for someone with triage access to the repository and drops them for everyone else. A link opens
 the ordinary way unless the host supplies
 `links.open` (a page in a sandboxed frame hands it to its host), which every link of the
-menu follows. `displayActions`
-passes host-owned appearance controls into the Display section beside Projection
-via `RendererViewProps`. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
+menu follows. `colorSchemeControl` (a `CadViewer` prop, a React node) is the host's own
+light/dark control, where it has one: `CadViewer` passes it to FileViewer, whose navbar
+draws it last, after `fullSize`, in the page's top-right corner, and to the home
+(`ModelLibrary`), last in its links row. The web viewer passes `ViewerAppearance` (System,
+Light, Dark); the CAD app passes none, since it takes its host's theme. Display holds no
+appearance control. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
 a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
-order they come (Share anonymous usage data, Quick edit, in both apps), the same in the
+order they come (Share anonymous usage data, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
-host owns what each one does and where it is kept. `@text-to-cad/ui/features` is the
-feature switches, which both apps share: `useFeatures(features)` turns the host's call — `features()`
-reads them, `features(change)` changes some and answers them all — into the features the person
-left on (`ViewerFeatures`: `quickEdit`, each on until they turn it off) and their `appSettings` rows.
-The host hands the first to `CadViewer` as `features` (on to FileViewer and
-`RendererViewProps.features`: the shell offers no Quick Edit while it is off) and the second
-with its `appSettings`, and keeps the choice where it keeps the analytics answer: the web
-Viewer and the CAD app alike through the client's `features` (`/__cad/features`), in the
-person's settings (`cadgen/features.py`), so it holds in every view, tab and app, across
-reloads — a page's own storage would not, the web Viewer's origin changing with its port.
+host owns what each one does and where it is kept.
 `@text-to-cad/ui/consent` is the usage stats toggle both apps share:
 `useAnalyticsConsent(consent)`, which turns the host's consent call into its `appSettings` row
 (Share anonymous usage data). Nothing asks: cadgen's telemetry is on by default once a `cadgen` command
@@ -471,7 +485,7 @@ to the agent's chat through the host's `send`, where the host can, and otherwise
 `copy`, its button then Copy prompt; the prompt has a copy icon in its top-right corner either way; the host decides which it supplies. Its
 Manual installation link, the notice's `instructions`, opens through the host's `onLink`. The shell
 handles placement and hides the toolbar in
-preview; the host owns callbacks and preferences. None of these imply platform
+Preview; the host owns callbacks and preferences. None of these imply platform
 detection or move application-specific release/network behavior into shared UI.
 
 The explorer is a popover under the file's name (`FolderExplorer.jsx`;
@@ -483,10 +497,10 @@ A file that will not open leaves the navbar over a page of the host's
 when it is missing (`isMissingFileError`), and "Could not open that file" and the
 reason otherwise, each with a Go home button where the host has a home.
 
-The viewport's corners are the shell's, never the host's: the tool strip and its
-stack at the top-left, Quick Edit at the top-right, and the view cube at the
-bottom-left; the view's own controls (a STEP's Select modes, Display and Preview, a 3D view's) are the navbar's
-last. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
+The viewport's edges and corners are the shell's, never the host's: the tool strip at the
+top centre, ending in the view's own controls (Display and Preview, a 3D view's), the tool in
+hand's sub-toolbar under it, the file sidebar down the left edge, Quick Edit at the
+top-right, and the view cube at the bottom-right. A host's one notice goes through the shell too: `notice` is drawn at the top-right once the
 file is on screen, never while it loads or after it failed to, with Quick Edit stacked under
 it while it stands; the home never shows it. Neither app has one now.
 What Quick Edit offers follows the subscribed destination capability and
@@ -494,8 +508,8 @@ the ports, never an app name: Copy Prompt always, Queue for a composer
 destination, Send where the prompt port has `send`. Native clipboard effects
 remain in the host implementation.
 
-STEP's Reference panel (Copy, or Copy All with several references) and Draw's
-panel (Copy, once there is ink) use `ClipboardPort` directly, including on
+A STEP's selection copy (a chip's click, the copy shortcut) and Annotate's
+copy shortcut (the view with its annotations) use `ClipboardPort` directly, including on
 desktop: the references as text, the view with its ink as a PNG through
 `writeImage`. Their copy shortcut and double-click topology copy follow the same
 path. Double-clicking a component or subassembly isolates it instead; only
@@ -515,12 +529,22 @@ A copied reference names its file by its absolute path (`<path>#<selector>`), an
 does a copied Quick Edit: every view spells a file the same way, so a reference pasted
 into a chat or a tool says exactly which file it means.
 
-Preview's playback bars centre on one line, `3.5rem` above the viewport's bottom
-edge; nothing else sits at the bottom centre. A host whose own control floats over
-that edge (a chat's composer) sets `--cad-viewport-bottom-center` on an ancestor
-to put the line on its control's, and `--cad-host-bottom-inset` to the height it
-covers: the model library scrolls its last rows clear of it. Both are lengths, like
-any design token, and say nothing about which host it is.
+Nothing of the viewer sits at the bottom centre. A host whose own control floats over
+that edge (a chat's composer) sets `--cad-host-bottom-inset` on an ancestor to the height it
+covers: the model library scrolls its last rows clear of it. A host whose own control
+floats over the view's bottom-right corner sets `--cad-viewport-corner-bottom` to the room
+it takes from the bottom edge, and the view cube sits that much higher. To choose the
+opposite corner instead, set `--cad-viewport-corner-left: 2px` and
+`--cad-viewport-corner-right: auto`; their defaults are `auto` and the cube's right inset.
+Codex's tab presentation uses the left corner across sidebar, thread and file views.
+The shared viewer consumes these layout values without identifying the host.
 
-A renderer's update status is its own: the CAD renderers show it centred at the
-top of the viewport, level with the tool strip. The navbar carries none.
+A renderer's update status is its own: the CAD renderers show it centred under the tool
+strip and its sub-toolbar. The navbar carries none.
+
+
+A build preview and a retained predecessor are useful for a Quick Edit's note and references,
+but do not prove which bytes the file contains. While either is displayed, Quick Edit says so
+in the box and in its prompt context, and makes no replay packet. Once the matching saved
+revision is displayed, snapshot handoff resumes. Ordinary progressive component loading does
+not change this saved-document identity rule.

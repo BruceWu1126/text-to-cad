@@ -4,20 +4,17 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ModelingTreeView from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
 import { useStepPanels } from '../../../../../dist/renderers/step/components/workbench/StepPanels.js';
-import { useModelTools } from '../../../../../dist/renderers/step/components/workbench/ModelTools.js';
+import { useModelTools } from '../../../../../dist/renderers/kit/tools/model-effects/ModelTools.js';
 import { buildPositionSection } from '../../../../../dist/renderers/step/components/workbench/MotionControlsSection.js';
-import { PositionToolIcon, positionValuesAreDefault } from '../../../../../dist/renderers/kit/inspector/kinematicsControls.js';
 import FloatingToolBar from '../../../../../dist/renderers/kit/tools/FloatingToolBar.js';
 import ToolPanel from '../../../../../dist/renderers/kit/tools/ToolPanel.js';
-import ToolStack from '../../../../../dist/renderers/kit/tools/ToolStack.js';
-import { TOOL_PANEL_WIDTH } from '../../../../../dist/renderers/kit/tools/toolStackLayout.js';
-import { ViewerMobileContext } from '../../../../../dist/file-viewer/responsive.js';
+import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
 
-// The STEP renderer's panels in the tool stack — Select's Features and Reference, the kept effects
-// (Explode, Clip), Position — each where it is decided, under the stack that holds them. The
-// viewport that picks and draws is the browser suite's (`StepRenderer.browser.test.mjs`).
+// The STEP renderer's sections in the file sidebar — an assembly's Model tree, Position — and the
+// panels of its tools in the tool stack (Explode, Clip), each where it is decided, under what holds
+// them. The viewport that picks and draws is the browser suite's (`StepRenderer.browser.test.mjs`).
 
-// jsdom lays nothing out: the stack's column is given a height, and a panel its own style's size.
+// jsdom lays nothing out: the stack's column and the sidebar's room are given a height, and a panel its own style's size.
 const STACK_HEIGHT = 600;
 const restores: (() => void)[] = [];
 function override(target: object, key: string, descriptor: PropertyDescriptor) {
@@ -27,7 +24,7 @@ function override(target: object, key: string, descriptor: PropertyDescriptor) {
 }
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  override(HTMLElement.prototype, 'clientHeight', { get(this: HTMLElement) { return this.hasAttribute('data-cad-tool-stack') ? STACK_HEIGHT : 0; } });
+  override(HTMLElement.prototype, 'clientHeight', { get(this: HTMLElement) { return this.hasAttribute('data-cad-tool-stack') || this.hasAttribute('data-file-sidebar-room') ? STACK_HEIGHT : 0; } });
   override(Element.prototype, 'scrollIntoView', { value() {} });
   for (const name of ['setPointerCapture', 'releasePointerCapture']) override(Element.prototype, name, { value() {} });
   override(Element.prototype, 'hasPointerCapture', { value: () => false });
@@ -37,32 +34,33 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); while (restores.length) rest
 // An assembly: a hinge of a base and an arm, and a pin beside it.
 const partNode = (id: string, name: string) => ({ id, nodeType: 'part', name, leafPartIds: [id], children: [] });
 const stepRoot = { id: 'document', nodeType: 'assembly', name: 'fixture', children: [
-  { id: 'o:0a1b2c3d4e5f', nodeType: 'assembly', name: 'hinge', children: [partNode('o:0b1c2d3e4f5a', 'base'), partNode('o:0c1d2e3f4a5b', 'arm')] }, partNode('o:0d1e2f3a4b5c', 'pin')] };
+  { id: 'o1.1', nodeType: 'assembly', name: 'hinge', children: [partNode('o1.1.1', 'base'), partNode('o1.1.2', 'arm')] }, partNode('o1.2', 'pin')] };
 
 const rows = () => [...document.querySelectorAll('[aria-label="Modeling tree"] button')].map(button => button.getAttribute('aria-label'))
   .filter(label => /^(?:Select|Expand|Collapse) /.test(label || ''));
 const locks = () => [...document.querySelectorAll<HTMLElement>('[aria-label="Modeling tree"] [data-disclosure-locked]')].map(mark => mark.dataset.disclosureLocked);
-// The Features panel, on screen or closed (`hidden`, still mounted).
-const features = () => document.querySelector<HTMLElement>('section[data-tool-panel][aria-label="Features"]')!;
-const shown = () => [...document.querySelectorAll<HTMLElement>('[data-cad-tool-stack] section[data-tool-panel]')].filter(node => !node.hidden).map(node => node.getAttribute('aria-label'));
+// The Model tree section; the sidebar's sections on screen, and the stack's panels.
+const features = () => document.querySelector<HTMLElement>('section[data-tool-panel][aria-label="Model tree"]')!;
+const sections = () => [...document.querySelectorAll<HTMLElement>('[data-cad-file-sidebar] section[data-tool-panel]')].filter(node => !node.hidden).map(node => node.getAttribute('aria-label'));
 
 /** The layout a host keeps, applying what the stack writes back. */
-function useLayout(initial: any = { panels: {}, collapsed: {}, closed: {} }) {
+function useLayout(initial: any = { panels: {}, collapsed: {} }) {
   const [layout, setLayout] = useState<any>(initial);
   return [layout, (patch: any) => setLayout((current: any) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }))] as const;
 }
-function Features({ mode = 'all', initialLayout = undefined as any, mobile = false }) {
-  const [layout, change] = useLayout(initialLayout);
+// `mobile`: a phone's sidebar, one tile opening its panel (`phone`).
+function Features({ mode = 'all', mobile = false }) {
+  const [layout, change] = useLayout();
   const [expanded, setExpanded] = useState<string[]>([]);
-  // The shell hands the stack the viewer's layout, as it hands every panel (`RendererShell.jsx`).
-  return <ViewerMobileContext.Provider value={mobile}><ToolStack layout={layout} onLayoutChange={change} mobile={mobile}>
+  // The shell hands the sidebar the viewer's layout (`RendererShell.jsx`).
+  return <FileSidebar layout={layout} onLayoutChange={change} phone={mobile}>
     <ModelingTreeView stepRoot={stepRoot} active mode={mode} onLoadTopology={() => {}}
       partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded,
         onToggleTreeNode: (id: string) => setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }} />
-  </ToolStack></ViewerMobileContext.Provider>;
+  </FileSidebar>;
 }
 
-it("each Select mode holds the tree: Parts, Faces and Edges every assembly open, locked; All the person's own tree again", () => {
+it("the geometry Select picks shapes the tree: Parts, Faces or Edges alone every assembly open, locked; all of it the person's own tree again", () => {
   const view = render(<Features />);
   // All: the tree is the person's own — open the hinge. A part is a leaf.
   expect(rows()).toEqual(['Expand hinge', 'Select hinge', 'Select pin']);
@@ -81,112 +79,132 @@ it("each Select mode holds the tree: Parts, Faces and Edges every assembly open,
   expect(locks()).toEqual([]);
 });
 
-it("Features is its filter and its tree: no X, nothing to fold, and no stored choice closes it, on a desktop or a phone", async () => {
+it("Model tree is its filter over its tree — Select's modes are the strip's — opened by its tile, closed by its X or the tile again, never folding, its search kept while closed", async () => {
   const user = userEvent.setup();
-  render(<Features initialLayout={{ panels: {}, collapsed: {}, closed: { tree: true } }} />);
-  expect(shown()).toEqual(['Features']);
-  const search = screen.getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
-  expect(search.getAttribute('placeholder')).toBe('Filter…');
-  // Neither the mode menu (the navbar's) nor an X in its filter row, and no fold.
-  expect([...features().querySelectorAll('[data-slot=tree-filter] button')].map(button => button.getAttribute('aria-label'))).toEqual([]);
-  expect(within(features()).queryByRole('button', { name: /^(?:Close|Collapse|Expand) features$/ })).toBeNull();
-  await user.click(search);
-  await user.keyboard('ba');
-  expect(within(features()).getByRole('status').textContent).toMatch(/match/);
-  cleanup();
-  render(<Features mobile />);
-  expect(shown()).toEqual(['Features']);
-});
-
-it("Features opens as tall as its rows need, up to the whole column, on desktop and phone alike, and is the person's to size by its corner", () => {
-  const phone = render(<Features mobile />);
-  expect(features().style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  phone.unmount();
   render(<Features />);
-  expect([...features().querySelectorAll('[role=separator]')].map(handle => handle.getAttribute('aria-label'))).toEqual(['Resize features']);
-  expect(features().style.maxHeight).toBe(`${STACK_HEIGHT}px`);
+  const tile = within(screen.getByRole('group', { name: 'File sidebar' })).getByRole('button', { name: 'Model tree' });
+  // Open: its tile pressed, the panel out with the section in it. Closing, the panel slides away with it.
+  const open = () => [tile.getAttribute('aria-pressed'), document.querySelector('[data-cad-file-sidebar]')!.hasAttribute('data-open')];
+  // None is open as the file opens; the tile opens it.
+  expect([sections(), open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['Model tree'], ['false', false], true]);
+  await user.click(tile);
+  expect([open(), features().hasAttribute('data-sidebar-closed')]).toEqual([['true', true], false]);
+  // Its head: the search box and the section's X; no heading, nothing to fold.
+  const head = features().querySelector<HTMLElement>('[data-sidebar-head]')!;
+  const search = within(head).getByRole('textbox', { name: 'Filter model' }) as HTMLInputElement;
+  expect([head.querySelector('[data-tool-panel-heading]'), search.getAttribute('placeholder')]).toEqual([null, 'Filter…']);
+  expect([...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Close model tree']);
+  expect(within(features()).queryByRole('button', { name: /^(?:Collapse|Expand) features$/ })).toBeNull();
+  await user.type(search, 'ba');
+  expect(within(features()).getByRole('status').textContent).toMatch(/match/);
+  // Its X closes it; the tile opens it again, as it was left; a second press of the tile closes it.
+  await user.click(within(head).getByRole('button', { name: 'Close model tree' }));
+  expect(open()).toEqual(['false', false]);
+  await user.click(tile);
+  expect([open(), search.value]).toEqual([['true', true], 'ba']);
+  await user.click(tile);
+  expect(open()).toEqual(['false', false]);
 });
 
-// What Select shows (`StepPanels.js`): an assembly's tree and, with a selection, the Reference
-// under it; a part file has no tree, its one row being all there would be, and the Reference alone.
-const face = { id: 'o:0b1c2d3e4f5a/f:base.extrude1.2', normalizedSelector: 'o:0b1c2d3e4f5a/f:base.extrude1.2', selectorType: 'face', occurrenceId: 'o:0b1c2d3e4f5a', pickData: { surfaceType: 'plane' } };
-function SelectPanels({ assembly = false, references = [] as any[], onClearSelection = () => {} }) {
+it("Model tree is as tall as its rows, on desktop and phone alike: no cap, scroller or grip of its own, its rows scrolling with the sidebar", () => {
+  for (const mobile of [true, false]) {
+    render(<Features mobile={mobile} />);
+    expect([features().style.maxHeight, features().querySelector('[role=separator]')]).toEqual(['', null]);
+    expect(features().querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
+    expect(features().closest('[data-file-sidebar-scroller]')).not.toBeNull();
+    cleanup();
+  }
+});
+
+// What Select shows (`StepPanels.js`): an assembly's tree; a part file has no tree, its one row
+// being all there would be, and nothing else — its modes are the strip's. What is picked is
+// Quick Edit's, as chips (`StepReferenceSection.test.tsx`): no panel of the stack shows it.
+const face = { id: 'o1.1.1.f2', normalizedSelector: 'o1.1.1.f2', selectorType: 'face', occurrenceId: 'o1.1.1', pickData: { surfaceType: 'plane', area: 20 } };
+function SelectPanels({ assembly = false, references = [] as any[] }) {
   const partRoot = { id: '__step_model__', nodeType: 'part', name: 'hinge.step', leafPartIds: ['__model__'], children: [] };
   return useStepPanels({ selectActive: true, selectedEntry: { file: '/models/hinge.step' }, isAssemblyView: assembly,
-    stepTreeRoot: assembly ? stepRoot : partRoot, selectedReferences: references, onClearSelection,
-    selectionCopy: references.length ? { label: 'Copy', shortcut: '⌘C', onCopy: async () => true } : null });
+    stepTreeRoot: assembly ? stepRoot : partRoot, selectedReferences: references });
 }
 function Panels(props: any) {
   const [layout, change] = useLayout();
-  return <ToolStack layout={layout} onLayoutChange={change}><SelectPanels {...props} /></ToolStack>;
+  return <FileSidebar layout={layout} onLayoutChange={change}><SelectPanels {...props} /></FileSidebar>;
 }
 
-it("a part file shows no tree under Select, only the Reference for what is picked; an assembly its tree, then the Reference, capped at the column, its Copy at its foot and its X clearing the selection", () => {
+it("a part file with no joints has no section, picked or not; an assembly its tree", () => {
   const view = render(<Panels />);
-  expect(shown()).toEqual([]);
+  expect(sections()).toEqual([]);
+  // A pick changes nothing here.
   view.rerender(<Panels references={[face]} />);
-  expect(shown()).toEqual(['Reference details']);
+  expect(sections()).toEqual([]);
   view.unmount();
-  const onClearSelection = vi.fn();
-  render(<Panels assembly references={[face]} onClearSelection={onClearSelection} />);
-  expect(shown()).toEqual(['Features', 'Reference details']);
-  const reference = within(screen.getByRole('region', { name: 'Reference details' }));
-  expect(reference.getByRole('heading').textContent).toBe('base · face f:base.extrude1.2');
-  expect(reference.getByRole('button', { name: 'Copy' }).getAttribute('aria-keyshortcuts')).toBe('Meta+C');
-  expect(screen.getByRole('region', { name: 'Reference details' }).style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  fireEvent.click(reference.getByRole('button', { name: 'Clear selection' }));
-  expect(onClearSelection).toHaveBeenCalledOnce();
+  render(<Panels assembly references={[face]} />);
+  expect(sections()).toEqual(['Model tree']);
 });
 
-// ---- the kept effects: Explode and Clip ---------------------------------------------------------
+// ---- Explode and Clip ---------------------------------------------------------------------------
 
 const neutral = () => ({ exploded: { enabled: false, amount: 0 }, clip: { enabled: false, axis: 'x', invert: false } });
 const part = (id: string) => ({ id, bounds: { min: [0, 0, 0], max: [10, 10, 10] } });
 let viewSettings = neutral();
 /** Select, Measure, Explode and Clip on a strip over a stack, and the Display settings they write — as the STEP surface composes them. */
-function Workbench({ measure = null as any, extraPanels = null as React.ReactNode }) {
+function Workbench() {
   const [view, setView] = useState(neutral);
   const [selectedTool, setTool] = useState('references');
-  const [layout, change] = useLayout();
   viewSettings = view;
   const store = { patch: (patch: any) => setView(current => ({
     exploded: { ...current.exploded, ...patch.exploded },
     clip: { ...current.clip, ...patch.clip } })) };
-  const modelTools = useModelTools({ modelKey: 'fixture', view, features: { sections: ['exploded', 'clip'] }, store,
-    mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool, measure });
+  const modelTools = useModelTools({ view, features: { settings: ['exploded', 'clip'] }, store,
+    mesh: { parts: [part('a'), part('b')], bounds: { min: [0, 0, 0], max: [10, 10, 10] } }, disabled: false, selectedTool, onSelect: setTool });
   const own = (id: string, label: string) => ({ id, label, active: selectedTool === id, icon: <span>{label[0]}</span>, onSelect: () => setTool(id) });
   return <>
     <FloatingToolBar tools={[own('references', 'Select'), own('measure', 'Measure'), ...modelTools.tools]} />
-    <ToolStack layout={layout} onLayoutChange={change}>{extraPanels}{modelTools.panels}</ToolStack>
+    {modelTools.subToolbar}
   </>;
 }
 const tool = (name: string) => within(screen.getByRole('group', { name: 'Interaction tools' })).getByRole('button', { name });
 const pressed = () => within(screen.getByRole('group', { name: 'Interaction tools' })).getAllByRole('button')
   .filter(button => button.getAttribute('aria-pressed') === 'true').map(button => button.getAttribute('aria-label'));
-const region = (name: string) => screen.queryByRole('region', { name });
+const row = (name: string) => screen.queryByRole('toolbar', { name });
+const subRows = () => screen.queryAllByRole('toolbar').map(node => node.getAttribute('aria-label'));
 const slider = (name: string) => screen.getByRole('slider', { name });
+// What a row says, left to right: its lead, its value, its actions and its Reset.
+const reads = (name: string) => [...row(name)!.querySelectorAll('[data-model-tool-amount], button[aria-label]')]
+  .map(node => node.getAttribute('aria-label') || node.textContent);
+// Whether its Reset can take anything away.
+const resettable = (name: string, tool: string) => !within(row(name)!).getByRole('button', { name: `Reset ${tool}` }).hasAttribute('disabled');
 
-it('Explode and Clip open neutral, stack under the strip one width, are headed by their name, amount and X, and a second press or the X takes an applied effect away without resetting the other', async () => {
+it('Explode and Clip open neutral, each one row under the strip with its amount and a Reset, idle until set; only the tool in hand has one, and an effect stays on the model without it', async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   render(<Workbench />);
   await user.click(tool('Explode'));
-  expect(pressed()).toEqual(['Explode']);
+  expect([pressed(), subRows()]).toEqual([['Explode'], ['Explode controls']]);
   expect(screen.getByRole('group', { name: 'Interaction tools' }).querySelector('[role=separator]')).toBeNull();
+  // A row of its own, no panel of a stack: its slider, its amount, its Reset (idle).
+  expect([row('Explode controls')!.hasAttribute('data-cad-sub-toolbar'), row('Explode controls')!.closest('[data-tool-panel], [data-cad-tool-stack]')]).toEqual([true, null]);
+  expect([reads('Explode controls'), resettable('Explode controls', 'explode')]).toEqual([['0%', 'Reset explode'], false]);
+  // No rule parts a row: lead, slider, value, actions, Reset; Explode's lead is its name.
+  expect([row('Explode controls')!.querySelector('[role=separator]'), row('Explode controls')!.firstElementChild!.textContent]).toEqual([null, 'Explode']);
   expect(slider('Explode amount').getAttribute('aria-valuenow')).toBe('0');
   expect(viewSettings.exploded.enabled).toBe(false);
   fireEvent.keyDown(slider('Explode amount'), { key: 'End' });
-  expect(viewSettings.exploded).toEqual({ enabled: true, amount: 1 });
+  expect([viewSettings.exploded, reads('Explode controls'), resettable('Explode controls', 'explode')])
+    .toEqual([{ enabled: true, amount: 1 }, ['100%', 'Reset explode'], true]);
   await user.click(tool('Clip'));
-  expect(pressed()).toEqual(['Explode', 'Clip']);
-  const clip = region('Clip controls')!;
-  expect(viewSettings.clip.enabled).toBe(false);
-  // The body is the axis and ONE slider: no typed value, no Flip. Changing the axis stays neutral.
+  // Only the tool in hand is lit, and has its row: the applied Explode stays on the model.
+  expect([pressed(), subRows(), viewSettings.exploded.enabled]).toEqual([['Clip'], ['Clip controls'], true]);
+  const clip = row('Clip controls')!;
+  expect([viewSettings.clip.enabled, reads('Clip controls'), resettable('Clip controls', 'clip')]).toEqual([false, ['Clip axis: X', '0%', 'Flip clip', 'Reset clip'], false]);
+  expect(clip.querySelector('[role=separator]')).toBeNull();
+  // Its axis, a dropdown, ONE slider (no typed value), its value, and Flip, idle with no cut to flip.
+  // Changing the axis stays neutral.
   expect(within(clip).queryByLabelText('Clip amount value')).toBeNull();
-  expect(within(clip).queryByRole('checkbox', { name: 'Flip' })).toBeNull();
+  const flip = () => within(row('Clip controls')!).getByRole('button', { name: 'Flip clip' });
+  expect([flip().hasAttribute('disabled'), flip().getAttribute('aria-pressed')]).toEqual([true, 'false']);
   for (const axis of ['Y', 'Z', 'X']) {
-    await user.click(within(clip).getByRole('combobox', { name: 'Clip axis' }));
-    await user.click(screen.getByRole('option', { name: axis }));
-    expect(within(clip).getByRole('combobox', { name: 'Clip axis' }).textContent).toBe(axis);
+    await user.click(clip.querySelector<HTMLElement>('[data-clip-axis]')!);
+    await user.click(screen.getByRole('menuitemradio', { name: axis }));
+    expect(within(clip).getByRole('button', { name: `Clip axis: ${axis}` }).textContent).toBe(axis);
     expect(['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map(name => slider('Clip amount').getAttribute(name))).toEqual(['0', '100', '0']);
     expect(viewSettings.clip.enabled).toBe(false);
   }
@@ -195,151 +213,88 @@ it('Explode and Clip open neutral, stack under the strip one width, are headed b
   fireEvent.keyDown(slider('Clip amount'), { key: 'Home' });
   expect(viewSettings.clip.enabled).toBe(false);
   fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
-  expect(viewSettings.clip.enabled).toBe(true);
-  // Neither folds: a heading of its name and its amount, and the X; each a fixed panel the one width.
-  for (const [name, label] of [['Explode', 'Explode controls'], ['Clip', 'Clip controls']]) {
-    const heading = region(label)!.querySelector<HTMLElement>('[data-tool-panel-heading]')!;
-    expect(within(heading).getByRole('heading').textContent).toBe(name);
-    expect(heading.textContent).toMatch(new RegExp(`^${name}\\d+%$`));
-    expect([...heading.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual([`Close ${name.toLowerCase()} controls`]);
-    expect([region(label)!.getAttribute('data-tool-panel'), region(label)!.style.width]).toEqual(['fixed', `${TOOL_PANEL_WIDTH}px`]);
-  }
-  // Select is the tool again; both applied effects keep their panels, in the order they were taken up.
-  await user.click(tool('Select'));
-  expect(pressed()).toEqual(['Select', 'Explode', 'Clip']);
-  expect(shown()).toEqual(['Explode controls', 'Clip controls']);
-  // A second press on an applied Clip removes it; Explode keeps its amount.
+  const share = clip.querySelector('[data-model-tool-amount]')!.textContent;
+  expect([viewSettings.clip.enabled, share, resettable('Clip controls', 'clip')]).toEqual([true, expect.stringMatching(/^\d+%$/), true]);
+  // Flip turns the cut round, the same share of the model cut away, and is lit while flipped.
+  await user.click(flip());
+  expect([viewSettings.clip.invert, flip().getAttribute('aria-pressed'), clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([true, 'true', share]);
+  await user.click(flip());
+  expect([viewSettings.clip.invert, flip().getAttribute('aria-pressed'), clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([false, 'false', share]);
+  // A second press on the tool in hand does nothing.
   await user.click(tool('Clip'));
-  expect(region('Clip controls')).toBeNull();
-  expect(pressed()).toEqual(['Select', 'Explode']);
-  expect(viewSettings.clip.enabled).toBe(false);
+  expect([pressed(), subRows()]).toEqual([['Clip'], ['Clip controls']]);
+  // Select is the tool again: no row at all, both effects on the model.
+  await user.click(tool('Select'));
+  expect([pressed(), subRows(), viewSettings.exploded.enabled, viewSettings.clip.enabled]).toEqual([['Select'], [], true, true]);
+  // A press on Clip takes it up again as it is: the cut is set.
+  await user.click(tool('Clip'));
+  expect([pressed(), viewSettings.clip.enabled, resettable('Clip controls', 'clip')]).toEqual([['Clip'], true, true]);
+  // Reset takes the cut away and leaves Clip the tool, neutral, its Reset idle.
+  await user.click(within(row('Clip controls')!).getByRole('button', { name: 'Reset clip' }));
+  expect([pressed(), viewSettings.clip.enabled, resettable('Clip controls', 'clip')]).toEqual([['Clip'], false, false]);
+  // Explode, taken up again, is at the amount it was left at; its Reset takes it away.
+  await user.click(tool('Explode'));
   expect(slider('Explode amount').getAttribute('aria-valuenow')).toBe('100');
-  await user.click(within(region('Explode controls')!).getByRole('button', { name: 'Close explode controls' }));
-  expect(region('Explode controls')).toBeNull();
-  expect(viewSettings.exploded.enabled).toBe(false);
-  // A neutral Clip is the tool in hand, not an effect kept beside Select; reopening starts neutral.
+  await user.click(within(row('Explode controls')!).getByRole('button', { name: 'Reset explode' }));
+  expect([viewSettings.exploded.enabled, reads('Explode controls'), resettable('Explode controls', 'explode')]).toEqual([false, ['0%', 'Reset explode'], false]);
+  // A neutral Clip starts neutral when taken up, and leaves nothing when put down.
   await user.click(tool('Clip'));
-  expect(pressed()).toEqual(['Clip']);
   expect([viewSettings.clip.enabled, viewSettings.clip.invert]).toEqual([false, false]);
-  await user.click(tool('Clip'));
-  expect(region('Clip controls')).toBeNull();
-  expect(pressed()).toEqual(['Select']);
-  await user.click(tool('Explode'));
-  await user.click(tool('Explode'));
-  expect(region('Explode controls')).toBeNull();
-  expect(pressed()).toEqual(['Select']);
-});
-
-it('a neutral effect leaves with the next tool, an applied one stays until cleared, and a panel whose value passes through neutral under a held pointer stays until it lets go', async () => {
-  const user = userEvent.setup();
-  render(<Workbench />);
-  await user.click(tool('Clip'));
-  expect(pressed()).toEqual(['Clip']);
   await user.click(tool('Select'));
-  expect(region('Clip controls')).toBeNull();
-  await user.click(tool('Explode'));
-  expect(viewSettings.exploded.amount).toBe(0);
-  await user.click(tool('Measure'));
-  expect(region('Explode controls')).toBeNull();
-  // Applied, both stay under another tool.
-  await user.click(tool('Explode'));
-  fireEvent.keyDown(slider('Explode amount'), { key: 'End' });
-  await user.click(tool('Clip'));
-  fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
-  await user.click(tool('Measure'));
-  expect(shown()).toEqual(['Explode controls', 'Clip controls']);
-  // Back to zero from the keyboard, the cut is gone and so is its panel.
-  fireEvent.keyDown(slider('Clip amount'), { key: 'Home' });
-  expect(region('Clip controls')).toBeNull();
-  // A press held in a kept panel while its value passes through zero keeps the panel under the pointer...
-  const heading = () => region('Explode controls')!.querySelector('[data-tool-panel-heading]')!;
-  fireEvent.pointerDown(heading());
-  fireEvent.keyDown(slider('Explode amount'), { key: 'Home' });
-  expect(viewSettings.exploded.amount).toBe(0);
-  expect(region('Explode controls')).not.toBeNull();
-  fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });
-  act(() => { window.dispatchEvent(new Event('pointerup')); });
-  expect(region('Explode controls')).not.toBeNull();
-  // ...and let go at zero, it goes.
-  fireEvent.pointerDown(heading());
-  fireEvent.keyDown(slider('Explode amount'), { key: 'Home' });
-  expect(region('Explode controls')).not.toBeNull();
-  act(() => { window.dispatchEvent(new Event('pointerup')); });
-  expect(region('Explode controls')).toBeNull();
-});
-
-it('a short viewer: the tree gives way first, then the details panels, a kept effect never; the column is bounded by the stack and scrolls rather than cutting a panel', () => {
-  const measure = { shown: true, controls: <p>0 measurements</p>, onRemove() {} };
-  render(<Workbench measure={measure} extraPanels={<SelectPanels assembly references={[face]} />} />);
-  fireEvent.click(tool('Explode'));
-  fireEvent.keyDown(slider('Explode amount'), { key: 'PageUp' });
-  fireEvent.click(tool('Clip'));
-  fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
-  expect(shown()).toEqual(['Features', 'Reference details', 'Measure controls', 'Explode controls', 'Clip controls']);
-  // How each gives way (`ToolPanel.jsx`'s fit): the tree first, then the details, the kept effects never.
-  expect(Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-cad-tool-stack] section[data-tool-panel]')]
-    .map(panel => [panel.getAttribute('aria-label'), panel.getAttribute('data-tool-panel')]))).toEqual({
-    Features: 'tree', 'Reference details': 'details', 'Measure controls': 'details', 'Explode controls': 'fixed', 'Clip controls': 'fixed' });
-  // The panels' column is exactly the stack's height, inside the stack's own scroll region.
-  const column = features().parentElement!;
-  expect(column.style.maxHeight).toBe(`${STACK_HEIGHT}px`);
-  expect(column.closest('[data-tool-stack-scroller]')).not.toBeNull();
+  expect([subRows(), pressed()]).toEqual([[], ['Select']]);
 });
 
 // ---- Position ------------------------------------------------------------------------------------
 
 const hinge = { url: '/hinge.step.json', articulation: { schemaVersion: 2,
   controls: [{ id: 'hinge', label: 'hinge', unit: 'deg', min: -180, max: 180, default: 0 }],
-  joints: [], carries: {}, handles: [], poses: { open: { hinge: 90 } }, opening: { hinge: 0 } } };
-/** STEP's Position panel as the tool stack draws it (`StepPanels.js`) over a pose runtime, and the strip's Position icon. */
-function Position({ onClose }: { onClose(): void }) {
+  joints: [], handles: [], carries: {}, poses: { open: { hinge: 90 } }, opening: { hinge: 0 } } };
+/** STEP's Position section as the file sidebar draws it (`StepPanels.js`) over a pose runtime. */
+function Position() {
   const [values, setValues] = useState<Record<string, number>>({ hinge: 0 });
   const [activePose, setActivePose] = useState('');
+  const [layout, change] = useLayout();
   const runtime = { definition: hinge, parameterValues: values, activePose,
     onApplyPose: (name: string) => { setActivePose(name); setValues({ hinge: (hinge.articulation.poses as any)[name].hinge }); },
     onResetMotion: () => { setActivePose(''); setValues({ hinge: 0 }); },
     onParameterChange: (id: string, value: number) => { setActivePose(''); setValues(current => ({ ...current, [id]: value })); } };
   const position = buildPositionSection({ poseRuntime: runtime })!;
-  return <>
-    <button type="button" aria-label="Position"><PositionToolIcon custom={!positionValuesAreDefault(values, hinge.articulation.opening)} /></button>
-    <ToolPanel id="position" title={position.title} actions={position.actions} label="Position controls" fit="details" resizable
-      collapsible={false} onClose={onClose} closeLabel="Close position">{position.content}</ToolPanel>
-  </>;
+  return <FileSidebar layout={layout} onLayoutChange={change}>
+    <ToolPanel id="position" title={position.title} label="Position controls" fit="details">{position.content}</ToolPanel>
+  </FileSidebar>;
 }
 
-it("Position is headed with its Reset and its X, offers Default beside a named pose, names every joint's slider, and marks its tool while posed", async () => {
+it("Position's Pose is the body's first row — Default, then the named poses — its Reset the heading's, and every joint's slider is named", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
-  const onClose = vi.fn();
-  render(<Position onClose={onClose} />);
+  render(<Position />);
   const panel = screen.getByRole('region', { name: 'Position controls' });
-  const heading = panel.querySelector<HTMLElement>('[data-tool-panel-heading]')!;
-  expect(within(heading).getByRole('heading').textContent).toBe('Position');
-  // It does not fold: Reset, then the X.
-  expect([...heading.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['Reset', 'Close position']);
-  const preset = within(panel).getByRole('combobox', { name: 'Pose' });
+  const head = panel.querySelector<HTMLElement>('[data-sidebar-head]')!;
+  const pose = () => within(panel.querySelector<HTMLElement>('[data-tool-panel-body] [data-pose-row]')!).getByRole('button', { name: /^Pose: / });
+  const reset = () => within(head).getByRole('button', { name: 'Reset position' }) as HTMLButtonElement;
   const value = within(panel).getByLabelText('hinge slider value') as HTMLInputElement;
-  expect(preset.textContent).toBe('Default');
-  expect(panel.querySelector('[data-position-header]')!.textContent).toContain('Pose');
-  expect(within(panel).getAllByRole('slider').filter(thumb => !thumb.getAttribute('aria-label'))).toEqual([]);
-  expect(within(panel).getByRole('slider', { name: 'hinge' })).toBeTruthy();
-  await user.click(preset);
-  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Default', 'open']);
-  await user.click(screen.getByRole('option', { name: 'open' }));
-  expect([value.value, preset.textContent]).toEqual(['90.0°', 'open']);
-  await user.click(preset);
-  await user.click(screen.getByRole('option', { name: 'Default' }));
-  expect([value.value, preset.textContent]).toEqual(['0.00°', 'Default']);
-  // Posed off its default, the strip's Position icon carries a dot; Reset takes it away.
-  const custom = () => screen.getByRole('button', { name: 'Position' }).querySelector('[data-position-custom]');
-  expect(custom()).toBeNull();
+  // The heading: its name, then Reset (idle at Default) and the section's X; the pose a full-width row under it.
+  expect([within(head).getByRole('heading').textContent, [...head.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))])
+    .toEqual(['Position', ['Reset position', 'Close position']]);
+  expect([pose().getAttribute('aria-label'), pose().hasAttribute('data-pose-menu'), reset().disabled]).toEqual(['Pose: Default', true, true]);
+  expect(panel.querySelector('[data-position-header]')).toBeNull();
+  expect(within(panel).getAllByRole('slider').map(thumb => thumb.getAttribute('aria-label'))).toEqual(['hinge']);
+  const choose = async (name: string) => {
+    await user.click(pose());
+    const menu = document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!;
+    await user.click(within(menu).getByRole('menuitemradio', { name }));
+  };
+  await user.click(pose());
+  expect(within(document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!).getAllByRole('menuitemradio')
+    .map(item => [item.textContent, item.getAttribute('aria-checked')])).toEqual([['Default', 'true'], ['open', 'false']]);
+  await user.keyboard('{Escape}');
+  await choose('open');
+  expect([value.value, pose().getAttribute('aria-label'), reset().disabled]).toEqual(['90.0°', 'Pose: open', false]);
+  await choose('Default');
+  expect([value.value, pose().getAttribute('aria-label')]).toEqual(['0.00°', 'Pose: Default']);
+  // A joint set by hand is Custom; Reset puts it back.
   await user.clear(value);
   await user.type(value, '25{Enter}');
-  expect(preset.textContent).toBe('Custom');
-  expect(custom()).not.toBeNull();
-  await user.click(within(heading).getByRole('button', { name: 'Reset' }));
-  expect([value.value, preset.textContent]).toEqual(['0.00°', 'Default']);
-  expect(custom()).toBeNull();
-  await user.click(within(heading).getByRole('button', { name: 'Close position' }));
-  expect(onClose).toHaveBeenCalledOnce();
+  expect(pose().getAttribute('aria-label')).toBe('Pose: Custom');
+  await user.click(reset());
+  expect([value.value, pose().getAttribute('aria-label'), reset().disabled]).toEqual(['0.00°', 'Pose: Default', true]);
 });
-

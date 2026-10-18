@@ -1,19 +1,29 @@
-import { normalizeViewSettings, resolveViewSettings } from "./viewSettings.js";
-
-// A job's camera poses and frames the view. Projection and focal length are
-// display.camera's, so a job's camera has no such fields, though the viewer's
-// own camera spec (camera.js) carries them.
-const DISPLAY_CAMERA_FIELDS = Object.freeze(["projection", "focalLength"]);
+import { normalizeAnnotation } from "./annotation.js";
+import { normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
+import { normalizeViewSettings } from "./viewSettings.js";
 
 export function validateSnapshotRenderJob(job = {}) {
+  const mode = String(job.mode || "view").trim().toLowerCase();
+  if (!["view", "list"].includes(mode)) {
+    throw new Error(`Unsupported render mode: ${mode}. Modes: list, view`);
+  }
+  for (const field of ["theme", "section"]) {
+    if (Object.hasOwn(job, field)) throw new Error(`Unsupported snapshot field: ${field}`);
+  }
+  // Preview is its own request beside the display, never a display mode: `preview: true`.
+  if (Object.hasOwn(job, "preview") && typeof job.preview !== "boolean") throw new Error("preview must be a boolean");
   normalizeViewSettings(Object.hasOwn(job, "display") ? job.display : {});
+  // The ink drawn over the model (`annotation.js`): refused before anything loads, by what is wrong.
+  if (job.annotation != null) normalizeAnnotation(job.annotation);
+  // Measure's results drawn over the picture (`measureDimension.js`), refused the same way.
+  if (job.measurements != null) normalizeMeasurementMarks(job.measurements);
   for (const camera of [job.camera, ...(Array.isArray(job.outputs) ? job.outputs.map(output => output.camera) : [])]) {
     if (camera && typeof camera === "object") {
-      const unsupported = DISPLAY_CAMERA_FIELDS.filter(key => Object.hasOwn(camera, key));
-      if (unsupported.length) throw new Error(`Unsupported camera fields: ${unsupported.join(", ")}`);
+      const moved = ["projection", "focalLength"].filter(key => Object.hasOwn(camera, key));
+      if (moved.length) throw new Error(`Camera ${moved.join(", ")} moved to display.camera`);
     }
   }
-  if (resolveViewSettings(job.display ?? {}).lighting.enabled && String(job.mode || "view").trim().toLowerCase() !== "view") {
-    throw new Error("Render display supports only view mode");
+  if (job.preview === true && String(job.mode || "view").trim().toLowerCase() !== "view") {
+    throw new Error("Preview supports only view mode");
   }
 }

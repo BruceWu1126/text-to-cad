@@ -5,10 +5,13 @@ const definition = { url: '/x.step.json', articulation: { schemaVersion: 2,
   controls: [{ id: 'x', label: 'x', unit: 'deg', min: -100, max: 100, default: 2 }],
   joints: [], carries: {}, handles: [], poses: { up: { x: 90 } }, opening: { x: 2 } } };
 const clips = { turn: { id: 'turn', duration: 5, tracks: [] } };
-test('a routine that owns the pose keeps Position\'s values off the model, and a load never resumes it', () => {
+test('a load restores the routine at rest without taking ownership of Position', () => {
   const animation = restoreMotionAnimation({ enabled: true, activeClipId: 'turn', elapsedSec: 3, playing: true, speed: 2 }, clips);
   assert.deepEqual([animation.elapsedSec, animation.playing, animation.speed, animation.activeClipId], [0, false, 2, 'turn']);
-  assert.deepEqual(restoreMotionParameters(definition, { x: 50 }, animation), { x: 2 });
+  assert.equal(animation.enabled, false);
+  assert.deepEqual(restoreMotionParameters(definition, { x: 50 }, animation), { x: 50 });
+  assert.deepEqual(restoreMotionParameters(definition, { x: 50 }, { ...animation, enabled: true }), { x: 2 },
+    'a played routine takes ownership, a restored one does not');
 });
 test('a pose owned by Position comes through, whatever the clock says', () => {
   const animation = restoreMotionAnimation({ enabled: false, activeClipId: 'turn', elapsedSec: 3 }, clips);

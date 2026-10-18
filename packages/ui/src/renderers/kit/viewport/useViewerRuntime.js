@@ -21,22 +21,37 @@ import { PERF_MEASURE_NAMES, perfMeasure, perfStart } from "@text-to-cad/core/li
 import { viewerDepthSettings, viewerLogarithmicDepthBuffer } from "./renderDepthPolicy.js";
 import { createZoomPivotReanchor } from "../camera/zoomPivotReanchor.js";
 import { createFramePresentation } from "./framePresentation.js";
+import { acquireGpuDevice } from "./gpuDevice.js";
 
 // A pan moves what it grabs 1.35x as far as the cursor, in either projection (`handlePanPress`).
 const PAN_SPEED = 1.35;
 
-function createWebGlRenderer(THREE) {
+function createWebGlRenderer(THREE, canvas = undefined) {
   return createCadWebGlRenderer(THREE, {
     allowFallback: true,
     isRecoverableError: isWebGlContextCreationError,
-    logarithmicDepthBuffer: viewerLogarithmicDepthBuffer()
+    logarithmicDepthBuffer: viewerLogarithmicDepthBuffer(),
+    canvas
   });
+}
+
+// The viewport's renderer: a view of the page's GPU device (`gpuDevice.js`), drawn on a canvas
+// of its own, or, where the browser cannot have a device, a renderer of its own.
+function createViewRenderer(THREE) {
+  const device = acquireGpuDevice(THREE, canvas => createWebGlRenderer(THREE, canvas));
+  if (!device) return createWebGlRenderer(THREE);
+  try {
+    return device.createView(document.createElement("canvas"));
+  } catch (error) {
+    device.release();
+    throw error;
+  }
 }
 
 export function useViewerRuntime({
   mountRef,
   runtimeRef,
-  previewModeRef,
+  previewRef,
   setError,
   setViewerReadyTick,
   viewerTheme,
@@ -203,7 +218,7 @@ export function useViewerRuntime({
       syncCameraViewport(perspectiveCamera, width, height);
       syncCameraViewport(orthographicCamera, width, height);
 
-      const renderer = createWebGlRenderer(THREE);
+      const renderer = createViewRenderer(THREE);
       const presentation = createFramePresentation({ canvas: renderer.domElement, renderMode, onPresent: onFramePresented });
       const softwareRendering = isSoftwareWebGlRenderer(renderer);
       let idlePixelRatioCap = softwareRendering
@@ -312,6 +327,10 @@ export function useViewerRuntime({
         pixelRatio: getPixelRatioCap(idlePixelRatioCap),
         renderQueued: false,
         renderQueuedAt: 0,
+        // Whether anything but the camera changed since the last frame drawn: a scene
+        // mutation or a highlight (`runtime.requestRender`/`requestFrame`). The Render studio's
+        // frame starts its picture again then; a camera that moved it judges for itself.
+        sceneChanged: true,
         renderFallbackTimerId: 0,
         restoreTimerId: 0,
         shadowsDirty: true,
@@ -441,8 +460,13 @@ export function useViewerRuntime({
       // Set at teardown. Its context is lost then, so a frame something still asks of this
       // runtime (a timer, a holder of its `requestRender`) draws nothing.
       let released = false;
+      // Suspended (`setSuspended`): the view is covered by another (Preview over the editor) and
+      // draws nothing; a frame asked of it meanwhile is owed, and drawn the moment it is resumed.
+      let suspended = false;
+      let owedWhileSuspended = false;
       const requestRender = () => {
         if (released) return;
+        if (suspended) { owedWhileSuspended = true; return; }
         if (interactionState.renderQueued) {
           const now = typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
@@ -483,6 +507,7 @@ export function useViewerRuntime({
       // ResizeObserver), whose picture a frame scheduled for later would leave stale.
       const renderNow = () => {
         if (released) return;
+        if (suspended) { owedWhileSuspended = true; return; }
         if (interactionState.renderQueued) {
           window.cancelAnimationFrame(rafId);
         }
@@ -495,6 +520,7 @@ export function useViewerRuntime({
 
       function renderFrame(timestamp) {
         if (released) return;
+        if (suspended) { owedWhileSuspended = true; interactionState.renderQueued = false; return; }
         const frameStartedAt = perfStart();
         interactionState.renderQueued = false;
         interactionState.renderQueuedAt = 0;
@@ -509,6 +535,10 @@ export function useViewerRuntime({
           emitPerspectiveChange(runtimeRef.current);
         }
         fitCameraDepthRange(runtimeRef.current);
+        // Nothing changed but, perhaps, the camera: the Render studio's frame may draw the next
+        // sample of the picture on screen (it starts again itself if the camera really moved).
+        const still = interactionState.sceneChanged !== true && interactionState.shadowsDirty !== true;
+        let refining = false;
         if (!runtimeRef.current?.viewUpdateGate?.held) {
           renderer.shadowMap.needsUpdate = interactionState.shadowsDirty === true;
           interactionState.shadowsDirty = false;
@@ -518,11 +548,21 @@ export function useViewerRuntime({
               if (viewportBuffer.flush()) {
                 syncScreenSpaceLineMaterials();
               }
-              renderer.render(scene, runtimeRef.current?.camera || camera);
+              const drawCamera = runtimeRef.current?.camera || camera;
+              // Render's lighting is drawn through its studio's frame, which converges a still
+              // view over its next frames (`photographicStudio.js`); anything else is one draw.
+              const studioFrame = runtimeRef.current?.photographicStudio?.frame;
+              if (studioFrame) refining = studioFrame.render(renderer, scene, drawCamera, { still }).refining;
+              else renderer.render(scene, drawCamera);
             },
             presentationRequestRef?.current,
           );
-          if (didDraw) runtimeRef.current?.viewUpdateGate?.didDraw();
+          if (didDraw) {
+            interactionState.sceneChanged = false;
+            runtimeRef.current?.viewUpdateGate?.didDraw();
+          } else {
+            refining = false;
+          }
         }
         perfMeasure(PERF_MEASURE_NAMES.frame, frameStartedAt, { interacting: interactionState.active === true });
         const previewOrbitActive = !!runtimeRef.current?.previewOrbitEnabled;
@@ -548,6 +588,9 @@ export function useViewerRuntime({
           (interactionState.active && runtimeRef.current?.renderOnDemandOnly !== true) ||
           previewOrbitActive
         ) {
+          requestRender();
+        } else if (refining) {
+          // The next sample of a still view: a frame nothing else asked for.
           requestRender();
         }
       }
@@ -761,7 +804,7 @@ export function useViewerRuntime({
 
       const handleKeyDown = (event) => {
         if (
-          previewModeRef.current ||
+          previewRef.current ||
           event.defaultPrevented ||
           !ownsKey(event) ||
           event.ctrlKey ||
@@ -836,6 +879,15 @@ export function useViewerRuntime({
       };
 
       runtimeRef.current = {
+        // Covered by another view, or uncovered: resuming draws, now, a frame owed meanwhile (the
+        // caller runs before paint, so the view is current in the frame it is uncovered in).
+        setSuspended(next) {
+          suspended = next === true;
+          if (!suspended && owedWhileSuspended) {
+            owedWhileSuspended = false;
+            renderNow();
+          }
+        },
         renderMode: renderModeRef.current,
         previousViewState: previousViewStateRef.current,
         THREE,
@@ -911,12 +963,14 @@ export function useViewerRuntime({
         // last shadow map.
         requestRender: () => {
           interactionState.shadowsDirty = true;
+          interactionState.sceneChanged = true;
           requestRender();
         },
         // A frame for a change that moves, shows, hides and reshapes no shadow caster (a
         // highlight's colour, an overlay, the floor shadow's deferred bake): the shadow maps
         // it has are kept, as on a frame that only moved the camera.
         requestFrame: () => {
+          interactionState.sceneChanged = true;
           requestRender();
         },
         invalidateShadows: () => {
@@ -1004,7 +1058,9 @@ export function useViewerRuntime({
         disposeSceneObject(runtime.axesHelper);
         disposeTexture(runtime.sceneBackgroundTexture);
         runtime.viewUpdateGate?.dispose();
-        runtime.studioEnvironmentCache?.dispose();
+        // A device's studio environments are every view's: they go with the device.
+        if (!runtime.renderer.sharedDevice) runtime.studioEnvironmentCache?.dispose();
+        else if (runtime.studioEnvironmentCache?.owns(runtime.environmentResource)) runtime.environmentResource = null;
         runtime.environmentResource?.dispose();
         disposeStudio?.(runtime);
         runtime.keyLight?.shadow?.map?.dispose?.();
@@ -1015,12 +1071,16 @@ export function useViewerRuntime({
         if (container.contains(runtime.renderer.domElement)) {
           container.removeChild(runtime.renderer.domElement);
         }
-        // dispose() frees what the renderer tracks, not the context: three's shared textures (its
-        // module-level empty and lookup textures) keep a dispose listener of every renderer that drew
-        // them, so the context stays reachable, and alive with its GPU memory, for as long as the
-        // page. Losing it now frees that memory whatever still holds it. A handoff loses nothing in
-        // use: the next runtime draws in a context of its own, and `onRelease` above ran first.
-        if (!runtime.renderer.getContext().isContextLost()) runtime.renderer.forceContextLoss();
+        // Shadow maps belong to their lights, which the context never freed for us on a shared
+        // device: every light of this view's scene lets go of its own.
+        runtime.scene?.traverse?.(object => { if (object.isLight) object.shadow?.dispose?.(); });
+        // A view of the GPU device lets go of the view (`dispose` above): the device and what it
+        // shares stay. A renderer of its own is ended here: dispose() frees what the renderer tracks,
+        // not the context: three's shared textures (its module-level empty and lookup textures) keep
+        // a dispose listener of every renderer that drew them, so the context stays reachable, and
+        // alive with its GPU memory, for as long as the page. Losing it now frees that memory whatever
+        // still holds it. A handoff loses nothing in use: `onRelease` above ran first.
+        if (!runtime.renderer.sharedDevice && !runtime.renderer.getContext().isContextLost()) runtime.renderer.forceContextLoss();
         runtimeRef.current = null;
       };
     }

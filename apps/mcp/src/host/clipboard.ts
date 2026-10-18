@@ -37,7 +37,7 @@ function copyBySelection(text: string): boolean {
 /**
  * The page's own clipboard. The host grants its frame clipboard writes (the resource asks for
  * `clipboardWrite`); a host that does not, or whose sandbox has no clipboard API, still lets the
- * page's copy command copy text.
+ * page's copy command copy text. Reading is the host's to allow and may be refused.
  */
 export const frameClipboard: ClipboardPort = {
   async writeText(text) {
@@ -58,6 +58,10 @@ export const frameClipboard: ClipboardPort = {
     // A clipboard that takes no pending text gets the text itself, once it has arrived.
     if (copyBySelection(await text)) return;
     throw refused ?? new Error('Copying is not available here.');
+  },
+  async readText() {
+    if (!navigator.clipboard?.readText) throw new Error('Pasting is not available here.');
+    return navigator.clipboard.readText();
   },
   async writeImage(image) {
     if (!navigator.clipboard?.write || typeof ClipboardItem !== 'function') throw new Error('Copying images is not available here.');

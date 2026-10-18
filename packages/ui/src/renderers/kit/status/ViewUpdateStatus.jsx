@@ -21,20 +21,6 @@ export function modelUpdateStatus(progress) {
   return { pending: true, label: `Meshing parts${progress.counts ? ` ${progress.counts}` : ""}…` };
 }
 
-/**
- * The model on screen is a build's own preview revision, not the saved file (loading.md section 5):
- * said where the update status is said, for as long as it is drawn -- through the rest of the build,
- * and under the alert of one that failed -- and gone once the saved file replaces it in place.
- */
-export function ViewPreviewLabel({ className }) {
-  return <div className={cn('pointer-events-auto flex min-w-0 items-center gap-1.5 bg-transparent text-xs font-medium text-foreground', className)}
-    role="status" aria-live="polite" data-view-preview-label>
-    <TooltipHint content="A preview of the build in progress. The saved file replaces it when the build finishes.">
-      <span className="flex items-center gap-1.5"><Eye className="size-3.5 shrink-0" aria-hidden="true" />Preview</span>
-    </TooltipHint>
-  </div>;
-}
-
 export function ViewUpdateStatus({ status, onRetry, className }) {
   const mobile = useViewerMobile();
   const [visible, setVisible] = useState(false);
@@ -59,5 +45,19 @@ export function ViewUpdateStatus({ status, onRetry, className }) {
     {status.error ? <><TooltipHint content={status.error}><span >Couldn’t update view</span></TooltipHint>
       <Button size="icon-xs" variant="ghost" aria-label="Retry view update" onClick={onRetry}><RotateCcw className="size-3.5" /></Button></>
       : <><LoaderCircle className="size-3.5 shrink-0 animate-spin" aria-hidden="true" /><span className="truncate">{status.label || 'Updating view…'}</span></>}
+  </div>;
+}
+
+/**
+ * The model on screen is a build's own preview revision, not the saved file (loading.md section 5):
+ * said where the update status is said, for as long as it is drawn -- through the rest of the build,
+ * and under the alert of one that failed -- and gone once the saved file replaces it in place.
+ */
+export function ViewPreviewLabel({ className }) {
+  return <div className={cn('pointer-events-auto flex min-w-0 items-center gap-1.5 bg-transparent text-xs font-medium text-foreground', className)}
+    role="status" aria-live="polite" data-view-preview-label>
+    <TooltipHint content="A preview of the build result. The saved file replaces it after this revision is saved.">
+      <span className="flex items-center gap-1.5"><Eye className="size-3.5 shrink-0" aria-hidden="true" />Preview</span>
+    </TooltipHint>
   </div>;
 }

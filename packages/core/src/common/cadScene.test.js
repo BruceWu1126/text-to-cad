@@ -610,15 +610,11 @@ test("buildModel draws a part's CAD edges as ONE instanced screen-space draw wit
   assert.equal(transparent.displayRecords[0].material.polygonOffset, true);
   transparent.dispose();
 
-  // Rendered mode draws no linework at all; wireframe draws the mesh wires instead.
+  // Rendered mode draws no linework at all.
   const rendered = buildModel(THREE, partMeshData(), { displayMode: CAD_DISPLAY_MODE.SHADED, renderPartsIndividually: true });
   assert.equal(rendered.displayRecords[0].edges, null);
   assert.equal(rendered.displayRecords[0].edgeInstance, null);
   rendered.dispose();
-  const wire = buildModel(THREE, partMeshData(), { displayMode: CAD_DISPLAY_MODE.WIREFRAME, renderPartsIndividually: true });
-  assert.equal(wire.displayRecords[0].edges.geometry.type, "WireframeGeometry");
-  assert.equal(wire.displayRecords[0].edgeInstance, null);
-  wire.dispose();
   scene.dispose();
   assert.equal(set.disposed, true, "disposing the scene disposes its instance sets");
 });
@@ -936,7 +932,7 @@ test("buildModel reuses cached geometry for posed wrappers with the same geometr
   movedScene.dispose();
 });
 
-test("buildModel wireframe mode keeps a translucent surface and wire edges", () => {
+test("buildModel wireframe mode keeps a translucent surface and the CAD edges, never the triangles", () => {
   const theme = cloneThemePresetSettings("workbench-light");
   const scene = buildModel(THREE, sampleMeshData(), {
     theme,
@@ -948,10 +944,13 @@ test("buildModel wireframe mode keeps a translucent surface and wire edges", () 
   assert.equal(scene.displayRecords.length, 2);
   assert.equal(scene.displayRecords[0].material.type, "MeshBasicMaterial");
   assert.equal(scene.displayRecords[0].material.opacity, 0.035);
-  assert.equal(scene.displayRecords[0].edges.geometry.type, "WireframeGeometry");
+  assert.equal(scene.displayRecords[0].edges.geometry.type, "EdgesGeometry");
   scene.dispose();
 });
 
+// Wireframe is "All CAD edges through the model": the lines every mode draws, so switching to
+// it builds nothing per triangle. It once built three's WireframeGeometry over every triangle
+// of every component on the main thread (10 s and a gigabyte on a large model).
 test("buildModel display modes control edges, transparency, and flat surfaces", () => {
   const theme = cloneThemePresetSettings("workbench-light");
   const renderedScene = buildModel(THREE, sampleMeshData(), {
@@ -1120,7 +1119,7 @@ test("buildModel uses part records when only source opacity differs", () => {
   scene.dispose();
 });
 
-test("buildModel ignores deprecated mesh edge detail and keeps wireframe all-edge mode", () => {
+test("buildModel ignores deprecated mesh edge detail, and wireframe draws the same edges, not the triangles", () => {
   const baseTheme = cloneThemePresetSettings("workbench-light");
   const deprecatedDetailScene = buildModel(THREE, squareMeshData(), {
     theme: baseTheme,
@@ -1134,8 +1133,8 @@ test("buildModel ignores deprecated mesh edge detail and keeps wireframe all-edg
 
   assert.equal(edgeSegmentCount(deprecatedDetailScene.displayRecords[0]), 4);
   assert.notEqual(deprecatedDetailScene.displayRecords[0].edges.geometry.type, "WireframeGeometry");
-  assert.equal(edgeSegmentCount(wireScene.displayRecords[0]), 5);
-  assert.equal(wireScene.displayRecords[0].edges.geometry.type, "WireframeGeometry");
+  assert.equal(edgeSegmentCount(wireScene.displayRecords[0]), 4, "the outline, without the diagonal");
+  assert.equal(wireScene.displayRecords[0].edges.geometry.type, "EdgesGeometry");
   deprecatedDetailScene.dispose();
   wireScene.dispose();
 });
@@ -1834,7 +1833,9 @@ test("update({ source }) rebuilds when the build settings change with it", () =>
   scene.update({ source: twoComponentPackage(component, component, [0, 1, 2]), displayMode: CAD_DISPLAY_MODE.WIREFRAME });
   assert.notEqual(scene.displayRecords[0], before, "a display-mode change rebuilds every record");
   assert.equal(scene.displayRecords.length, 3);
-  assert.equal(scene.displayRecords[0].edges.geometry.type, "WireframeGeometry");
+  assert.equal(scene.displayRecords[0].edgeInstance.set.segments, before.edgeInstance.set.segments,
+    "wireframe draws the component's CAD edges");
+  assert.equal(scene.displayRecords[0].edges, null);
   scene.dispose();
 });
 
@@ -1914,8 +1915,9 @@ test("shared component GPU resources survive another scene's removal and disposa
   assert.equal(geometryDisposals, 1);
 });
 
-test("shared wireframe geometry is freed only after its last scene, and retained uploads can be released later", () => {
-  const component = partMeshData();
+test("shared edge geometry is freed only after its last scene, and retained uploads can be released later", () => {
+  // A component without CAD edge segments: its records draw a cached edge geometry.
+  const { cadEdgePositions: _p, cadEdgeIndices: _i, cadEdgeClassRanges: _r, ...component } = partMeshData();
   const source = twoComponentPackage(component, component, [0, 1]);
   const settings = { renderPartsIndividually: true, displayMode: CAD_DISPLAY_MODE.WIREFRAME };
   const first = buildModel(THREE, source, settings);

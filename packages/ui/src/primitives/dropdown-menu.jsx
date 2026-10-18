@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight, Minus } from "lucide-react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 
 import { cn } from "@text-to-cad/ui/utils"
@@ -88,8 +88,9 @@ function DropdownMenuCheckboxItem({
       {...props}
     >
       <span className="pointer-events-none absolute right-2 flex size-3.5 items-center justify-center">
+        {/* A box some of whose items are ticked (`checked` "indeterminate") shows a dash, not a tick. */}
         <DropdownMenuPrimitive.ItemIndicator>
-          <Check className="size-4" />
+          {checked === "indeterminate" ? <Minus className="size-4" /> : <Check className="size-4" />}
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}
@@ -127,6 +128,21 @@ function DropdownMenuRadioItem({
   );
 }
 
+function DropdownMenuLabel({
+  className,
+  inset,
+  ...props
+}) {
+  return (
+    <DropdownMenuPrimitive.Label
+      data-slot="dropdown-menu-label"
+      data-inset={inset}
+      className={cn("px-2 py-1.5 text-tiny leading-4 font-normal data-[inset]:pl-8", className)}
+      {...props}
+    />
+  );
+}
+
 function DropdownMenuSeparator({
   className,
   ...props
@@ -135,6 +151,19 @@ function DropdownMenuSeparator({
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
       className={cn("-mx-1 my-1 h-px bg-border", className)}
+      {...props}
+    />
+  );
+}
+
+function DropdownMenuShortcut({
+  className,
+  ...props
+}) {
+  return (
+    <span
+      data-slot="dropdown-menu-shortcut"
+      className={cn("ml-auto text-micro tracking-widest text-muted-foreground", className)}
       {...props}
     />
   );
@@ -194,9 +223,11 @@ export {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,

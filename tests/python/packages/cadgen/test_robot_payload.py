@@ -31,7 +31,9 @@ from cadgen.robot_payload import (  # noqa: E402
     RobotReadError,
     four_bar_input_angle,
     locate_robot_payload,
+    prepare_robot_description,
     read_robot_description,
+    resolve_robot_primitives,
     robot_control_values,
     robot_payload_bytes,
 )
@@ -170,6 +172,32 @@ class _Workspace(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         return path
+
+
+class PreparingDescriptions(_Workspace):
+    def test_preparation_validates_controls_without_meshing_or_store_writes(self) -> None:
+        urdf = self.write("arm.urdf", ARM_URDF)
+        srdf = self.write("arm.srdf", ARM_SRDF)
+        sdf = self.write("swing.sdf", SWING_SDF)
+        for path in (urdf, srdf, sdf):
+            with self.subTest(kind=path.suffix):
+                before = sorted(self.roots.cache_dir.rglob("*"))
+                with (
+                    mock.patch.dict("sys.modules", {"cadgen._internal.primitive_mesh": None}),
+                    mock.patch("cadgen.store.objects.put_object", side_effect=AssertionError("prepare wrote an object")),
+                ):
+                    prepared = prepare_robot_description(path)
+                    self.assertTrue(robot_control_values(prepared, None))
+                    with self.assertRaisesRegex(RobotReadError, "Unknown joint"):
+                        robot_control_values(prepared, {"unknown": 1})
+                self.assertEqual(sorted(self.roots.cache_dir.rglob("*")), before)
+                self.assertTrue(all("_primitive" in visual["mesh"] for visual in prepared["visuals"]))
+                resolved = resolve_robot_primitives(prepared)
+                self.assertEqual(resolved, read_robot_description(path))
+                self.assertNotIn("_primitive", json.dumps(resolved))
+                self.assertTrue(all("object" in visual["mesh"] for visual in resolved["visuals"]))
+                self.assertTrue(all("_primitive" in visual["mesh"] for visual in prepared["visuals"]),
+                                "resolving leaves the accepted request untouched")
 
 
 class UrdfArticulation(_Workspace):

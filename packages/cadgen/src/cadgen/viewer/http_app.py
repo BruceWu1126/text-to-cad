@@ -262,12 +262,14 @@ class CadApp:
 
         from .drawings import DrawingRenders
         from .parts import FaceMeasures, PartSubscribers
+        from .prompt_files import PromptFiles
         from .warm import CatalogWarmer
 
         self.part_subscribers = PartSubscribers()
         self.measures = FaceMeasures()
         # The drawing route's renders, off the request and one per drawing (``drawings.py``).
         self.drawings = DrawingRenders(on_crash=lambda error: self._crashed(error, bugs_only=True))
+        self.prompt_files = PromptFiles()
         # What a watched build saves, its catalog row computed before a read asks (``warm.py``).
         self.catalog_warm = CatalogWarmer()
         self.start = to_posix_path(os.path.abspath(start if start is not None else _working_folder()))
@@ -313,7 +315,8 @@ class CadApp:
         """``SourceReloader``'s idle gate: nothing this restart would destroy -- no request
         in flight, no compile the build route started and left running, and no drawing it is
         rendering."""
-        return self.busy_requests() == 0 and not self.ops.client.any_in_flight() and not self.drawings.any_in_flight()
+        return (self.busy_requests() == 0 and not self.ops.client.any_in_flight()
+                and not self.drawings.any_in_flight())
 
     # --- server info ------------------------------------------------------
 
@@ -414,9 +417,7 @@ class CadApp:
         an ordinary static server: serve the file if the bundle has it,
         otherwise fall back to index.html — EXCEPT under ``/assets/``, where a
         miss must be a 404 rather than HTML, or a stale hashed bundle reference
-        turns into an ES-module parse error instead of a readable status. The
-        drawing editor's fonts under ``/excalidraw/`` are the same: a family the
-        bundle leaves out must read as missing, not as an HTML "font".
+        turns into an ES-module parse error instead of a readable status.
         """
         if not self.dist_dir:
             # No built client. Answering here rather than joining against an
@@ -438,7 +439,7 @@ class CadApp:
             return
         if self._serve_file(response, file_path, content_type_for_static_asset(file_path)):
             return
-        if request_path.startswith(("/assets/", "/excalidraw/")):
+        if request_path.startswith("/assets/"):
             response.send_plain(404, "Not found")
             return
         index_html = os.path.join(self.dist_dir, "index.html")
@@ -520,6 +521,8 @@ class CadApp:
                     self._handle_tube_skins(request, response, query)
                 elif pathname == "/__cad/robot":
                     self._handle_robot(request, response, query)
+                elif pathname == "/__cad/prompt-files" or pathname.startswith("/__cad/prompt-files/"):
+                    self._handle_prompt_files_get(request, response, pathname, query)
                 elif pathname == "/__cad/store":
                     self._handle_store_asset(request, response, query)
                 elif pathname == "/__cad/asset":
@@ -606,13 +609,23 @@ class CadApp:
                         return
                     copy_png(request.body())
                     response.send_empty(204)
-                elif pathname == "/__cad/sketches":
-                    # A Quick Edit's sketch, saved for a copied prompt to name (`sketches.py`).
-                    from .sketches import MAX_PNG_BYTES as MAX_SKETCH_BYTES, save_sketch
-                    if int(request.headers.get("content-length") or 0) > MAX_SKETCH_BYTES:
+                elif pathname == "/__cad/prompt-files":
+                    from .prompt_files import MAX_BODY_BYTES
+                    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
                         response.send_empty(413, [("connection", "close")])
                         return
-                    response.send_json(200, {"ok": True, "path": save_sketch(request.body(), str(query.get("name") or ""))})
+                    status, body = self.prompt_files.create(request.body())
+                    response.send_json(status, body)
+                elif pathname == "/__cad/prompt-files/save":
+                    from .prompt_files import MAX_BODY_BYTES
+                    if int(request.headers.get("content-length") or 0) > MAX_BODY_BYTES:
+                        response.send_empty(413, [("connection", "close")])
+                        return
+                    try:
+                        status, body = self.prompt_files.save(request.body())
+                    except ValueError as error:
+                        status, body = 400, {"ok": False, "error": str(error)}
+                    response.send_json(status, body)
                 elif pathname == "/__cad/parts":
                     if int(request.headers.get("content-length") or 0) > 128 * 1024:
                         response.send_empty(413, [("connection", "close")])
@@ -880,6 +893,21 @@ class CadApp:
             response.send_bytes(status, body, content_type, RAW_FILE_HEADERS if content_type.startswith("model/") else ())
             return
         response.send_json(status, body)
+
+    def _handle_prompt_files_get(self, request, response, pathname, query):
+        """Read a prompt JSON file; every request carries the viewer guard."""
+        if not request.header(POST_GUARD_HEADER):
+            response.send_json(403, {"ok": False, "error": f"missing {POST_GUARD_HEADER} header; send '{POST_GUARD_HEADER}: 1'"})
+            return
+        if pathname == "/__cad/prompt-files":
+            response.send_json(404, {"ok": False, "error": "Not found"})
+            return
+        found = self.prompt_files.file(pathname[len("/__cad/prompt-files/"):])
+        if found is None:
+            response.send_json(404, {"ok": False, "error": "Not found"})
+            return
+        data, content_type = found
+        response.send_bytes(200, data, content_type, RAW_FILE_HEADERS)
 
     def _handle_asset(self, request, response, query):
         candidate = asset_path(query.get("file") or "")

@@ -28,19 +28,12 @@ await build({
 });
 const { ViewerAppearance, createElement, renderToStaticMarkup } = await import(pathToFileURL(output).href);
 
-test('appearance is a compact single-choice control with the saved preference selected', () => {
-  for (const preference of ['system', 'light', 'dark']) {
-    const markup = renderToStaticMarkup(createElement(ViewerAppearance, { colorSchemePreference: preference }));
-    assert.match(markup, /aria-label="Appearance"/);
-    assert.match(markup, /role="combobox"/);
-    assert.ok(markup.includes(`lucide-${{ system: 'sun', light: 'sun', dark: 'moon' }[preference]}`));
+test("appearance is the navbar's icon button, its icon always the look on screen, its menu shut", () => {
+  for (const [preference, resolved, icon] of [['system', 'light', 'sun'], ['system', 'dark', 'moon'], ['light', 'light', 'sun'], ['dark', 'dark', 'moon']]) {
+    const markup = renderToStaticMarkup(createElement(ViewerAppearance, { colorSchemePreference: preference, resolvedColorSchemeMode: resolved }));
+    assert.match(markup, new RegExp(`aria-label="Appearance: ${{ system: 'System', light: 'Light', dark: 'Dark' }[preference]}"`));
+    assert.ok(markup.includes(`lucide-${icon}`));
+    assert.doesNotMatch(markup, /lucide-monitor/);
     assert.match(markup, /aria-expanded="false"/);
-    assert.doesNotMatch(markup, /menuitem/);
   }
-});
-
-test('system preference displays the resolved dark appearance without changing the preference', () => {
-  const markup = renderToStaticMarkup(createElement(ViewerAppearance, { colorSchemePreference: 'system', resolvedColorSchemeMode: 'dark' }));
-  assert.match(markup, /lucide-moon/);
-  assert.match(markup, />Dark</);
 });

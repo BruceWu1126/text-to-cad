@@ -94,7 +94,9 @@ __all__ = [
     "four_bar_input_angle",
     "locate_robot_payload",
     "paired_urdf_for_srdf",
+    "prepare_robot_description",
     "read_robot_description",
+    "resolve_robot_primitives",
     "robot_control_values",
     "robot_payload_bytes",
     "robot_payload_scheme",
@@ -327,6 +329,11 @@ def _primitive_mesh(shape: str, dimensions: dict) -> dict:
     return {"format": "glb", "object": put_object(primitive_glb(shape, dimensions))}
 
 
+def _primitive_descriptor(shape: str, dimensions: dict) -> dict:
+    """A prepared visual's mesh request, internal until resolution stores its GLB."""
+    return {"format": "glb", "_primitive": {"shape": shape, "dimensions": dimensions}}
+
+
 # --- URDF ------------------------------------------------------------------------------------
 
 
@@ -473,7 +480,7 @@ def _read_urdf(path: Path) -> _Description:
                     if shape not in DRAWABLE_SHAPES:
                         raise RobotReadError(f"{where} uses geometry the viewer cannot draw; give it a mesh, box, cylinder or sphere")
                     dimensions = {key: facts[key] for key in ("size", "radius", "length") if facts.get(key) is not None}
-                    mesh = _primitive_mesh(shape, dimensions)
+                    mesh = _primitive_descriptor(shape, dimensions)
                     label = shape
                     local = _multiply(local, _mesh_scale(mesh["format"]))
             except RobotReadError as exc:
@@ -883,7 +890,7 @@ def _read_sdf(path: Path) -> _Description:
                     if (kind == "box" and "size" not in dimensions) or (kind != "box" and "radius" not in dimensions) \
                             or (kind in ("cylinder", "capsule") and "length" not in dimensions):
                         raise RobotReadError(f"{where} is a <{kind}> with missing or non-positive dimensions; give it positive dimensions")
-                    mesh = _primitive_mesh(kind, dimensions)
+                    mesh = _primitive_descriptor(kind, dimensions)
                     local = _multiply(local, _mesh_scale(mesh["format"]))
                     label = kind
                 else:
@@ -1452,10 +1459,13 @@ def _payload(description: _Description) -> dict[str, Any]:
     }
 
 
-def read_robot_description(path: Path | str) -> dict[str, Any]:
-    """The payload of the description at ``path`` (``.urdf``, ``.sdf`` or ``.srdf``), read
-    now: validated through its format's validator, its frames resolved, its primitives meshed
-    into the store. ``RobotReadError`` names what to change."""
+def prepare_robot_description(path: Path | str) -> dict[str, Any]:
+    """Validate and resolve a description's frames and articulation without meshing or writing.
+
+    The result is internal prepared data: primitive visual meshes remain descriptors until
+    :func:`resolve_robot_primitives`. ``robot_control_values`` can validate a request against
+    it before the caller clears any output or starts geometry work.
+    """
     resolved = Path(path).expanduser().resolve()
     kind = resolved.suffix.lower()
     if kind not in ROBOT_SUFFIXES:
@@ -1469,6 +1479,29 @@ def read_robot_description(path: Path | str) -> dict[str, Any]:
     else:
         description = _read_srdf(resolved)
     return _payload(description)
+
+
+def resolve_robot_primitives(prepared: Mapping[str, Any]) -> dict[str, Any]:
+    """Materialize the prepared description's primitive meshes into the store.
+
+    Return the wire payload without changing the prepared data. Mesh files, placements and
+    articulation already came from the description's one preparation path.
+    """
+    payload = copy.deepcopy(dict(prepared))
+    for visual in payload.get("visuals") or []:
+        primitive = visual["mesh"].get("_primitive")
+        if primitive is not None:
+            visual["mesh"] = _primitive_mesh(primitive["shape"], primitive["dimensions"])
+    return payload
+
+
+def read_robot_description(path: Path | str) -> dict[str, Any]:
+    """The validated description's payload, with its primitive meshes stored as GLBs.
+
+    ``RobotReadError`` names what to change. Request-only callers can prepare and validate
+    controls first, then resolve primitives once the whole request has been accepted.
+    """
+    return resolve_robot_primitives(prepare_robot_description(path))
 
 
 def robot_payload_scheme() -> str:

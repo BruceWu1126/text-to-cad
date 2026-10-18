@@ -69,16 +69,19 @@ export interface CadDrawingPayload {
   schemaVersion: number;
   units: { insunits: number; name: string; toMillimetres: number };
   bounds: [number, number, number, number] | null;
-  layers: { name: string; color: string | null; count: number }[];
+  layers: { name: string; color: string | null; entities: number }[];
+  entities: { handle: string; type: string; layer: string; block?: string; center?: number[]; radius?: number }[];
   /** The faces `text` primitives are set in, which a `text` names by index. */
   fonts: { family: string; weight: number; italic: boolean }[];
   primitives: ({
     type: 'point' | 'lines' | 'path' | 'filled-paths' | 'filled-polygon';
+    entity: string;
     layer: string;
     color: string | null;
     geometry: unknown;
   } | {
     type: 'text';
+    entity: string;
     layer: string;
     color: string | null;
     text: string;

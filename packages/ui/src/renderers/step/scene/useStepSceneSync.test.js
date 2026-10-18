@@ -68,7 +68,7 @@ function mountSceneSync(meshData, props = {}) {
   return Object.assign(sync, { view, store, stepScene });
 }
 
-test("an edge colour edit recolours the live CAD edges without a rebuild, and Reset puts the default ink back", () => {
+test("appearance changes preserve fixed CAD ink without rebuilding the scene", () => {
   const sync = mountSceneSync(stepPackage());
   const { view, store, stepScene } = sync;
   const record = stepScene.displayRecords[0];
@@ -76,13 +76,13 @@ test("an edge colour edit recolours the live CAD edges without a rebuild, and Re
   assertInk(set, ["#253443", "#667788"], "the default ink");
 
   sync.frames = 0;
-  view.update({ scene: store.patch({ edges: { color: "#ff0000" } }).scene });
+  view.update({ scene: store.configure({ appearance: "dark" }).scene });
   assert.equal(stepScene.displayRecords[0], record, "the record on screen is kept: nothing was rebuilt");
   assert.equal(record.edgeInstance.set, set, "and so is its instanced edge draw");
-  assertInk(set, ["#ff0000", "#ff0000"], "the edited colour");
+  assertInk(set, ["#253443", "#667788"], "the model ink is appearance-independent");
   assert.ok(sync.frames > 0, "a frame is asked for");
 
-  view.update({ scene: store.reset().scene });
+  view.update({ scene: store.configure({ appearance: "light" }).scene });
   assert.equal(stepScene.displayRecords[0], record);
   assertInk(set, ["#253443", "#667788"], "Reset's default ink");
   view.unmount();

@@ -41,7 +41,7 @@ import {
   applyDisplayRecordTransform,
   composeDisplayRecordEffectMatrix
 } from "./displayRecordTransform.js";
-import { axisIndex, clipAxisBounds, clipAxisPosition, normalizeStepClipSettings } from "../lib/viewer/clipPlane.js";
+import { normalizeStepClipSettings, buildStepClipPlane, syncMaterialClipPlanes } from "../lib/viewer/clipPlane.js";
 import {
   PART_HOVER_EDGE_EMPHASIS,
   PART_HOVER_EMISSIVE_INTENSITY,
@@ -611,23 +611,26 @@ function buildEdgeGeometryFromIndices(THREE, vertices, edgeIndices) {
   return geometry;
 }
 
-function buildEdgeGeometry(THREE, meshData, part, sourceGeometry, displayMode, edgeSettings = {}) {
-  void edgeSettings;
+// A record's edge lines when its component carries no CAD edge segments (a baked GLB-era
+// mesh): its explicit B-rep edge indices, else the mesh's feature edges. Every mode draws the
+// same lines, Wireframe included ("All CAD edges through the model"), so the key names no mode
+// and one build serves them all while the component is cached. Wireframe once drew every
+// TRIANGLE here (three's WireframeGeometry, a string-keyed set over all of a mesh's edges):
+// ~10 s of main thread and a gigabyte on a large model, for a picture that read as a solid blob.
+function buildEdgeGeometry(THREE, meshData, part, sourceGeometry) {
   const cache = cacheForOwner(cacheOwnerForPart(meshData, part));
   const partId = part ? String(part?.id || part?.occurrenceId || "").trim() : MODEL_PART_ID;
   const sourceMeshKey = part?.sourceMesh
     ? String(part?.sourceMeshKey || part?.meshUrl || part?.partFileRef || "").trim()
     : "";
-  const edgeKey = `${displayMode}:${sourceMeshKey ? `source:${sourceMeshKey}` : (partId || MODEL_PART_ID)}`;
+  const edgeKey = `edges:${sourceMeshKey ? `source:${sourceMeshKey}` : (partId || MODEL_PART_ID)}`;
   const cached = cache.edge.get(edgeKey);
   if (cached) {
     return cached;
   }
 
   let geometry = null;
-  if (displayModeIsWireframe(displayMode)) {
-    geometry = new THREE.WireframeGeometry(sourceGeometry);
-  } else if (part) {
+  if (part) {
     const edgeIndexOffset = toNumber(part?.edgeIndexOffset, 0);
     const edgeIndexCount = toNumber(part?.edgeIndexCount, 0);
     const hasExplicitPartEdges = edgeIndexCount >= 2 && isNumericArray(meshData?.edge_indices, 2);
@@ -1212,72 +1215,7 @@ function applyParameters(THREE, runtime, parameters, meshData, callbacks = {}) {
   return effectiveBoundsFromRecords(THREE, runtime.displayRecords, runtime.baseBounds);
 }
 
-export function buildStepClipPlane(THREE, clip, bounds, modelOffset = null) {
-  const normalized = normalizeStepClipSettings(clip);
-  if (!normalized.enabled || (normalized.at === undefined && !bounds)) {
-    return null;
-  }
-  const index = axisIndex(normalized.axis);
-  // `at` in millimetres in the model's frame; without it, the middle of the model at rest.
-  const position = clipAxisPosition(bounds, normalized);
-  // A plane that cuts nothing (at or past the face on the kept side) activates no clipping
-  // shaders or stencil caps, so an idle tool costs nothing.
-  if (bounds) {
-    const { min, max } = clipAxisBounds(bounds, normalized.axis);
-    if (normalized.invert ? position <= min : position >= max) return null;
-  }
-  const normal = new THREE.Vector3(
-    index === 0 ? 1 : 0,
-    index === 1 ? 1 : 0,
-    index === 2 ? 1 : 0
-  );
-  // Keep the lower-coordinate half by default, exposing the cut toward the
-  // default camera. Flip reverses that side without moving the section plane.
-  if (!normalized.invert) {
-    normal.multiplyScalar(-1);
-  }
-  const point = modelOffset?.clone ? modelOffset.clone() : new THREE.Vector3(0, 0, 0);
-  point.setComponent(index, point.getComponent(index) + position);
-  return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point);
-}
 
-export function syncMaterialClipPlanes(material, clipPlanes) {
-  if (!material) {
-    return;
-  }
-  const materials = Array.isArray(material) ? material : [material];
-  const clippingEnabled = Array.isArray(clipPlanes) && clipPlanes.length > 0;
-  for (const item of materials) {
-    if (!item) {
-      continue;
-    }
-    const previousEnabled = item.userData?.cadClipPlaneEnabled === true;
-    const previousCount = Number(item.userData?.cadClipPlaneCount) || 0;
-    const previousShaderClipping = item.clipping === true;
-    item.clippingPlanes = clippingEnabled ? clipPlanes : null;
-    item.clipIntersection = false;
-    item.clipShadows = clippingEnabled;
-    if ("clipping" in item) {
-      item.clipping = clippingEnabled;
-    }
-    const clipPlaneCount = clippingEnabled ? clipPlanes.length : 0;
-    if (item.userData?.cadClipPlaneEnabled !== clippingEnabled
-      || item.userData?.cadClipPlaneCount !== clipPlaneCount) {
-      item.userData = {
-        ...(item.userData || {}),
-        cadClipPlaneEnabled: clippingEnabled,
-        cadClipPlaneCount: clipPlaneCount
-      };
-    }
-    if (
-      previousEnabled !== clippingEnabled ||
-      previousCount !== (clippingEnabled ? clipPlanes.length : 0) ||
-      previousShaderClipping !== (item.clipping === true)
-    ) {
-      item.needsUpdate = true;
-    }
-  }
-}
 
 function syncClip(runtime, clip, bounds, modelOffset = null) {
   const clipPlane = buildStepClipPlane(runtime.THREE, clip, bounds, modelOffset);
@@ -1793,7 +1731,11 @@ function createDisplayRecord(THREE, runtime, meshData, settings, {
   const wireframeMode = displayModeIsWireframe(displayMode);
   const forceFill = materialSettings.overrideSourceColors === true || wireframeMode;
   const sourceVertexColors = !!geometryEntry.geometry.getAttribute("color");
-  const cadEdges = !wireframeMode && edgeSettings.enabled ? cadEdgeLinesForPart(meshData, part) : null;
+  // Wireframe's edges are the CAD edges every other mode draws: the component's cached
+  // segment texture, not a new build.
+  const drawsEdges = settings.selection?.showEdges !== false &&
+    (edgeSettings.enabled || (wireframeMode && !settings.surfaceSettings));
+  const cadEdges = drawsEdges ? cadEdgeLinesForPart(meshData, part) : null;
   const sourceColor = sourceColorForPart(THREE, part, meshData);
   const sourceOpacity = sourceOpacityForPart(part);
   const hasSourceColor = sourceVertexColors || !!sourceColor;
@@ -1887,7 +1829,7 @@ function createDisplayRecord(THREE, runtime, meshData, settings, {
     }
   }
 
-  if (settings.selection?.showEdges !== false && (edgeSettings.enabled || (wireframeMode && !settings.surfaceSettings))) {
+  if (drawsEdges) {
     if (cadEdges) {
       attachCadEdgeInstance(THREE, runtime, record, cadEdges);
     } else {
@@ -1895,7 +1837,7 @@ function createDisplayRecord(THREE, runtime, meshData, settings, {
         THREE,
         runtime,
         record,
-        buildEdgeGeometry(THREE, meshData, part, geometryEntry.geometry, displayMode, edgeSettings),
+        buildEdgeGeometry(THREE, meshData, part, geometryEntry.geometry),
         settings
       );
     }

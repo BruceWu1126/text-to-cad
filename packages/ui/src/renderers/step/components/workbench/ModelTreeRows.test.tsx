@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ModelingTree from '../../../../../dist/renderers/step/components/workbench/ModelingTree.js';
 import { FolderExplorer } from '../../../../../dist/file-viewer/navigation/FolderExplorer.js';
+import FileSidebar from '../../../../../dist/renderers/kit/tools/FileSidebar.js';
 
 // The file explorer the navbar's file name opens and the viewer's model tree drawn side by side.
 // jsdom has no layout, so what is asserted is what PRODUCES the geometry: both build their rows
@@ -24,13 +25,15 @@ const root = { id: '__step_model__', nodeType: 'assembly', displayName: 'Documen
 const source = { list: async () => [{ path: '/models/part.step', name: 'part.step', kind: 'file' }],
   search: async () => ({ paths: ['/models/part.step'], truncated: false }) };
 
-function Trees({ expanded = [] as string[] }) {
+// `sidebar`: the tree in the file sidebar, as it ships, headed by its search box.
+function Trees({ expanded = [] as string[], sidebar = false }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const tree = <ModelingTree active disabled={false} stepRoot={root}
+    selectedPartIds={selected} partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded, onToggleTreeNode() {}, hiddenPartIds: [],
+      onSelectTreeNode: (id: string) => setSelected([id]), onTogglePartVisibility() {}, onFocusTreeNode() {} }} />;
   return <>
     <section data-testid="files"><FolderExplorer source={source} file="/models/part.step" onOpen={() => {}} /></section>
-    <section data-testid="model"><ModelingTree active disabled={false} stepRoot={root}
-      selectedPartIds={selected} partControls={{ isAssemblyView: true, expandedTreeNodeIds: expanded, onToggleTreeNode() {}, hiddenPartIds: [],
-        onSelectTreeNode: (id: string) => setSelected([id]), onTogglePartVisibility() {}, onFocusTreeNode() {} }} /></section>
+    <section data-testid="model">{sidebar ? <FileSidebar layout={{ panels: {}, collapsed: {} }} onLayoutChange={() => {}}>{tree}</FileSidebar> : tree}</section>
   </>;
 }
 
@@ -72,7 +75,7 @@ it('the file explorer and the model tree share one row primitive and one horizon
 });
 
 it('model search hits keep the tree\'s row and its inset', async () => {
-  render(<Trees />);
+  render(<Trees sidebar />);
   const model = screen.getByTestId('model');
   const shared = { list: ['px-1'], between: [], box: ['w-full'] };
   // "part 1" ranks the nested Part 1 — inside the still-collapsed Subassembly — above Part 10 and 11.

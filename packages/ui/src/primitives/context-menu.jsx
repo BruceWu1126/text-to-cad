@@ -73,10 +73,27 @@ function ContextMenuSeparator({
   );
 }
 
+function ContextMenuShortcut({
+  className,
+  ...props
+}) {
+  return (
+    <span
+      data-slot="context-menu-shortcut"
+      className={cn(
+        "ml-auto text-micro tracking-widest text-muted-foreground",
+        className
+      )}
+      {...props}
+    />
+  );
+}
+
 export {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 };

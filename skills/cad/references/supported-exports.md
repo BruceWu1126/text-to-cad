@@ -85,10 +85,30 @@ cadgen 3mf snapshot 3MF/bracket.3mf tmp/bracket_3mf.png
 cadgen glb snapshot meshes/bracket.glb tmp/bracket_glb.png
 ```
 
-A mesh has no CAD topology: its door takes `--display solid` (default) or
-`render`, and refuses the STEP-only options by name (`edges`, `clip`, `exploded`,
-`--focus`/`--hide`, `--kinematics`, `--animation`). A GLB renders as
-its own glTF scene, with its authored materials, at rest.
+A mesh carries no CAD topology. Its snapshot door accepts `--display solid`
+(the default) or `--display parts` (each object or mesh its own colour), `--grid`
+for the measuring grid, and `--preview` for Preview's photographic view. Inline JSON
+and JSON files are the Viewer's display object: `mode`, `grid`, `appearance`,
+`camera`, `clip` and `exploded`. `display.clip` cuts it (`at` in the file's own
+unit: a GLB's metres, a 3MF's declared unit, an STL's own numbers) and
+`display.exploded` moves a GLB's nodes apart (a GLB of one is refused as it renders).
+The `shaded`, `xray`, `hidden-line` and `wireframe` modes are STEP-only and are
+refused by name, as `exploded` is for an STL or a 3MF.
+Mesh doors do not have
+`--focus`/`--hide`, `--kinematics`, or `--animation`/`--time`; meshes have no
+canonical CAD occurrences, kinematics,
+or document animation clips for those controls to act on. `cadgen step snapshot`
+refuses a mesh input and names the door that takes it.
+
+The picture is the scene the CAD Viewer draws for the same file, built by the same code:
+an STL or a 3MF is its objects in their colours, and a GLB is its own glTF scene (nodes,
+skins, morph targets and authored materials), so `--preview` shows the finish the
+file authored. A GLB's clips play in the viewer; its snapshot is the file at rest.
+
+For a mesh-only model, this is its required visual review. When a STEP is also
+produced, review that document and render the mesh when tessellation or external
+tool output is the question. Pure format conversion with unchanged geometry
+follows the skip cases in [snapshot review](snapshot-review.md).
 
 ## Mesh tolerance
 

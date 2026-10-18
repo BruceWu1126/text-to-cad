@@ -1,6 +1,8 @@
 import { createInspectEnvironmentResource, hasAuthoredMaterials } from "./inspectEnvironment.js";
 import { resolveCadEdgeSettings } from "./cadInk.js";
 import * as THREE from "three";
+import { createAnnotationLayer, normalizeAnnotation, ANNOTATION_REFERENCE_HEIGHT_PX } from "./annotation.js";
+import { drawMeasurementMark, measurementMarkLayout, normalizeMeasurementMarks } from "../lib/viewer/measureDimension.js";
 import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
@@ -27,6 +29,7 @@ import {
   syncTopologyDisplayEdgeLine
 } from "../lib/viewer/topologyDisplayEdgeLine.js";
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
+import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
 import {
   applyExplodedViewProgress,
@@ -60,7 +63,7 @@ import {
   resolveDisplayMaterialSettings,
   resolveViewSceneSettings
 } from "./sceneSettings.js";
-import { ALL_VIEW_FEATURES, EDGELESS_VIEW_FEATURES } from "./viewSettings.js";
+import { viewFeaturesForKind } from "./viewSettings.js";
 import {
   createEnvironmentResource,
   disposeEnvironmentResource
@@ -69,8 +72,22 @@ import {
   applyPhotographicStudio,
   disposePhotographicStudio
 } from "./photographicStudio.js";
-import { PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
+import { PHOTOGRAPHIC_STUDIO_FRAME, PHOTOGRAPHIC_STUDIO_MATERIAL_SETTINGS } from "./photographicStudioRig.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
+import { isSoftwareWebGlRenderer } from "../lib/viewer/webglSupport.js";
+
+// A snapshot draws its studio frame (`studioFrame.js`) supersampled at its render scale, so the
+// frame needs no MSAA of its own.
+const SNAPSHOT_STUDIO_FRAME = Object.freeze({ multisample: 0 });
+
+/**
+ * How many samples a snapshot's studio frame converges over: a still's, all of them; a video's
+ * frame (a `frameBounds` capture) and a software renderer's, one, which is a whole picture of
+ * its own (its occlusion smoothed, its shadows the key's own) at the cost of one draw.
+ */
+export function snapshotStudioSamples({ video = false, softwareRendering = false } = {}) {
+  return video || softwareRendering ? 1 : PHOTOGRAPHIC_STUDIO_FRAME.stillSamples;
+}
 
 const DEFAULT_RENDER_SCALE = 1;
 const RENDER_SCENE_SCALE_SETTINGS = Object.freeze({
@@ -175,8 +192,12 @@ function configureRenderer(width, height, job, context) {
   });
 }
 
-function rendererDataUrlWithOptionalLabel(renderer, label, job, size) {
-  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size);
+function shouldBurnInViewLabels(job = {}) {
+  return sharedShouldBurnInViewLabels(job);
+}
+
+function rendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay = null) {
+  return sharedRendererDataUrlWithOptionalLabel(renderer, label, job, size, overlay);
 }
 
 export function disposeSnapshotSceneResources(scene, modelRoot = null, extraTextures = []) {
@@ -420,8 +441,12 @@ export function renderJobContext(meshData, job = {}) {
     appearance: "light",
     camera: job.camera || null,
     display: job.display ?? {},
-    // The viewer's rule: only a CAD model has edges to draw, parts to explode or solids to section.
-    features: stepDisplayEnabled ? ALL_VIEW_FEATURES : EDGELESS_VIEW_FEATURES
+    // Preview's look is the job's own request (`preview: true`), over the same display, at
+    // Preview's defaults: a snapshot has no Preview settings of its own.
+    preview: job.preview === true,
+    // The viewer's rule for this file: only a CAD model has edges to draw; Parts colours a file of
+    // several parts; a GLB of several parts explodes; every 3D file is cut by Clip (`viewFeaturesForKind`).
+    features: viewFeaturesForKind(sourceKind, { parts: meshData.partCount || 0, explodeParts: meshData.explodeParts || 0 })
   });
   // Neutral CAD lights remain available when only the background/floor is on.
   const theme = sceneSettings.theme;
@@ -596,10 +621,10 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       // The viewer sizes the studio floor from the REST placement (`groundBounds`), so a posed
       // still must too, or the CLI and the viewer disagree about how big the ground is.
       groundBounds: viewportOptions.floorBounds ? null : restGroundBounds,
-      sceneScale: context.sceneScale,
       shadowMapSize: context.quality.shadowMapSize,
       // Each kept pixel averages renderScale² drawn ones: the floor's dither is drawn that much wider.
-      ditherScale: renderer.getPixelRatio()
+      ditherScale: renderer.getPixelRatio(),
+      frame: SNAPSHOT_STUDIO_FRAME
     });
   } else if (normalizeBoolean(job.output?.transparent, false) || context.theme.background?.type === "transparent") {
     scene.background = null;
@@ -675,7 +700,10 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      viewport.annotationLayer?.layer.dispose();
+      viewport.annotationLayer = null;
       if (viewport.clipRuntime) disposeSectionCaps(viewport.clipRuntime);
+      viewport.sceneClip?.dispose();
       model.dispose?.();
       scene.remove?.(model.root);
       if (studioRuntime) disposePhotographicStudio(studioRuntime);
@@ -784,18 +812,64 @@ function syncViewportTopologyDisplayEdges(viewport) {
   );
 }
 
+function measurementsOverlay(job, camera) {
+  if (!Array.isArray(job.measurements) || !job.measurements.length) return null;
+  const marks = normalizeMeasurementMarks(job.measurements);
+  return (context, width, height) => {
+    const scale = height / ANNOTATION_REFERENCE_HEIGHT_PX;
+    const rect = { left: 0, top: 0, width: width / scale, height: height / scale };
+    camera.updateMatrixWorld?.();
+    context.save();
+    context.scale(scale, scale);
+    for (const mark of marks) {
+      const layout = measurementMarkLayout(mark, camera, rect);
+      if (layout) drawMeasurementMark(context, layout, mark, { active: true, bounds: rect });
+    }
+    context.restore();
+  };
+}
+
+
+function boundsRadius(bounds) {
+  const min = bounds?.min, max = bounds?.max;
+  if (!Array.isArray(min) || !Array.isArray(max)) return 1;
+  const radius = Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2;
+  return Number.isFinite(radius) && radius > 0 ? radius : 1;
+}
+
+// The job's annotation (`job.annotation`, the ink a person drew with the viewer's Annotate tool), drawn over this
+// output with the viewer's own code (`annotation.js`): each mark on its part as the scene now has it,
+// cut by the same clip planes. Its ink is as heavy against this output's height as it was against a
+// viewer `ANNOTATION_REFERENCE_HEIGHT_PX` tall, so one layer serves every output of that height and is
+// rebuilt only for an output of another.
+function syncViewportAnnotation(viewport, job, { height }) {
+  if (job.annotation == null) return;
+  const lineScale = (height / ANNOTATION_REFERENCE_HEIGHT_PX) * (viewport.renderer.getPixelRatio?.() || 1);
+  if (viewport.annotationLayer?.lineScale !== lineScale) {
+    viewport.annotationLayer?.layer.dispose();
+    const { model } = viewport;
+    const layer = createAnnotationLayer(
+      { THREE, Line2, LineGeometry, LineMaterial },
+      normalizeAnnotation(job.annotation),
+      { radius: model.runtime?.modelRadius || boundsRadius(model.restBounds || model.bounds || viewport.context?.bounds), lineScale }
+    );
+    viewport.scene.add(layer.group);
+    viewport.annotationLayer = { layer, lineScale };
+  }
+  if (viewport.renderer) viewport.renderer.localClippingEnabled = true;
+  viewport.annotationLayer.layer.place(viewport.model.root, viewport.clipRuntime?.activeClipPlanes || viewport.sceneClip?.planes || []);
+}
+
 export async function captureModel(viewport, captureOptions = {}) {
   const job = captureOptions.job || {};
   const context = viewport.context || renderJobContext(viewport.model.meshData, job);
   const meshData = viewport.model.meshData;
   const {
     mode,
-    theme,
     sceneScale,
     bounds,
     outputs,
-    warnings,
-    edgeSettings
+    warnings
   } = context;
   const modelBounds = viewport.model?.bounds || meshData?.bounds || bounds;
 
@@ -848,9 +922,19 @@ export async function captureModel(viewport, captureOptions = {}) {
     const restBounds = viewport.model.restBounds || null;
     let outputBounds = baseOutputBounds;
     // The exploded view, topology edges and their screen-space line widths are a CAD
-    // model's (`buildModel`'s runtime). A family's scene has none of them: the viewer's
-    // rule for it (`EDGELESS_VIEW_FEATURES`), which the job was resolved under too.
-    if (viewport.model.runtime) {
+    // model's (`buildModel`'s runtime). A family's scene has no edges; it explodes and is cut
+    // through the scene contract, as the viewer's viewport explodes and cuts it
+    // (`sceneExplode.js`, `sceneClip.js`), under the features the job was resolved with.
+    if (!viewport.model.runtime) {
+      const familyScene = viewport.model.scene;
+      const exploded = context.displaySettings.exploded;
+      if (familyScene.setExplode) {
+        familyScene.setExplode(exploded?.enabled === true ? Number(exploded.amount) || 0 : 0);
+        outputBounds = captureOptions.frameBounds || familyScene.bounds;
+      }
+      viewport.sceneClip ??= createSceneClip(THREE, { stage: viewport.scene });
+      viewport.sceneClip.sync(familyScene, context.displaySettings.clip);
+    } else {
       outputBounds = applyViewportExplodedView(viewport, baseOutputBounds, restBounds || baseOutputBounds);
       syncViewportTopologyDisplayEdges(viewport);
       // The Clip tool cuts and caps the model as the viewer's does, on every material, edge set and
@@ -913,21 +997,33 @@ export async function captureModel(viewport, captureOptions = {}) {
         // viewer's are (and as `renderModel` placed them), so an exploded view or a pose never
         // rescales or slides them; a video's locked frame keeps its union box for both.
         groundBounds: captureOptions.frameBounds ? null : restBounds,
-        sceneScale,
         shadowMapSize: context.quality.shadowMapSize,
-        ditherScale: viewport.renderer.getPixelRatio?.() ?? 1
+        ditherScale: viewport.renderer.getPixelRatio?.() ?? 1,
+        frame: SNAPSHOT_STUDIO_FRAME
       });
       fitDepth();
       if (outputTimings) outputTimings.prepareStudioMs = Math.round(performance.now() - stageStarted);
     }
     stageStarted = performance.now();
-    viewport.renderer.render(viewport.scene, renderCamera);
+    syncViewportAnnotation(viewport, job, { height });
+    // Render is drawn through its studio's frame, every sample of it; anything else is one draw.
+    const studioFrame = viewport.studioRuntime?.photographicStudio?.frame || null;
+    if (studioFrame) {
+      studioFrame.renderStill(viewport.renderer, viewport.scene, renderCamera, {
+        samples: snapshotStudioSamples({
+          video: Boolean(captureOptions.frameBounds),
+          softwareRendering: isSoftwareWebGlRenderer(viewport.renderer)
+        })
+      });
+    } else {
+      viewport.renderer.render(viewport.scene, renderCamera);
+    }
     if (outputTimings) outputTimings.drawSubmitMs = Math.round(performance.now() - stageStarted);
     // WebGL submission can return before GPU completion. PNG readback may
     // wait for that work, so this is image readback/encoding, not pure CPU PNG.
     stageStarted = performance.now();
     const viewLabel = String(output.viewLabel || output.label || resolvedCamera.name || "").toUpperCase();
-    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height });
+    const dataUrl = rendererDataUrlWithOptionalLabel(viewport.renderer, viewLabel, job, { width, height }, measurementsOverlay(job, renderCamera));
     if (outputTimings) {
       outputTimings.encodeImageMs = Math.round(performance.now() - stageStarted);
       stageTimings.outputs.push(outputTimings);
@@ -959,4 +1055,22 @@ export async function captureModel(viewport, captureOptions = {}) {
     },
     warnings
   };
+}
+
+export async function renderMeshJob(meshData, job = {}) {
+  const context = renderJobContext(meshData, job);
+  const model = buildModel(THREE, meshData, modelOptionsForRenderJob(context, job));
+  if (context.mode === "list") {
+    try {
+      return await captureModel({ model, context }, { job });
+    } finally {
+      model.dispose();
+    }
+  }
+  const viewport = renderModel(THREE, model, { job, context });
+  try {
+    return await captureModel(viewport, { job });
+  } finally {
+    viewport.dispose();
+  }
 }

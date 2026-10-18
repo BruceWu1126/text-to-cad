@@ -2,7 +2,7 @@ import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Boxes, Focus } from 'lucide-react';
 import { Button } from '@text-to-cad/ui/primitives/button';
-import { ROW_NAME_UNDER_ACTIONS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TREE_ROW_DENSE_HEIGHT, TREE_ROW_DENSE_ICON_CLASS, TreeRowSurface, TreeRowChevron, TreeRowGuides, TreeRowLabel } from '@text-to-cad/ui/primitives/tree-row';
+import { ROW_NAME_UNDER_ACTIONS, TREE_GLYPH_STROKE, TREE_INDENT_PX, TREE_ROW_INSET_PX, TREE_ROW_DENSE_ICON_CLASS, TreeRowSurface, useTreeRowHeight, TreeRowChevron, TreeRowGuides, TreeRowLabel } from '@text-to-cad/ui/primitives/tree-row';
 import { TreeFilterHighlight, TreeFilterInput } from '@text-to-cad/ui/primitives/tree-filter';
 import { cn } from '@text-to-cad/ui/utils';
 import ModelPartMenu from './ModelPartMenu.jsx';
@@ -11,7 +11,7 @@ import { modelingSelectionPaths } from '../../workbench/modelingSelection.js';
 import ToolPanel from '../../../kit/tools/ToolPanel.jsx';
 import { implicitModelingRoots, presentModelingAssembly } from '../../workbench/modelingPresentation.js';
 import { modelTreeSearchChain, useTreeSearch } from '../../../kit/inspector/modelTreeSearch.js';
-import VirtualRows from '../../../kit/inspector/VirtualRows.jsx';
+import VirtualRows, { revealRow } from '../../../kit/inspector/VirtualRows.jsx';
 
 const EMPTY = [];
 const NO_CONTROLS = {};
@@ -75,7 +75,7 @@ function findNodeLabel(nodes, selectionId) {
   return '';
 }
 
-// The disclosure a row shows: a button, or — while the Select mode decides the tree's shape —
+// The disclosure a row shows: a button, or — while Select's filter decides the tree's shape —
 // the same chevron as a mark nobody can press.
 function Disclosure({ node, open, locked, toggle }) {
   if (locked) return <span aria-hidden="true" data-disclosure-locked={open ? "open" : "shut"} className="grid h-6 w-3 shrink-0 place-items-center opacity-50"><TreeRowChevron expanded={open}/></span>;
@@ -157,6 +157,7 @@ const MemoModelingSearchRow = memo(ModelingSearchRow);
  */
 function ModelingTree({ active, disabled, mode='all', loading=false, selectedPartIds=EMPTY, selectedReferences=EMPTY, onLoadTopology, onClearSelection, stepRoot, activeTreeNodeScrollKey, partControls=NO_CONTROLS, hoverStore=null }) {
   const [localExpanded,setLocalExpanded]=useState(()=>new Set());
+  const rowHeight=useTreeRowHeight();
   const tree=useMemo(()=>presentModelingAssembly(stepRoot),[stepRoot]);
   const implicitRoots=useMemo(()=>implicitModelingRoots(tree),[tree]);
   const locked=mode !== 'all',topologyMode=mode === 'faces' || mode === 'edges';
@@ -205,7 +206,7 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
       openedRoots.current.add(node.id);
     }
   },[active,disabled,implicitRoots,partControls.expandedTreeNodeIds,partControls.onToggleTreeNode,availability]);
-  // The tree as the rows the list draws: what is open, under the Select mode's lock or the person's.
+  // The tree as the rows the list draws: what is open, under Select's filter's lock or the person's.
   const rows=useMemo(()=>visibleRows(visibleRoots,expanded,availability,implicitOwner),[visibleRoots,expanded,availability,implicitOwner]);
   const rowIndex=useMemo(()=>{const index=new Map();rows.forEach((row,at)=>{if(!index.has(row.node.id))index.set(row.node.id,at);});return index;},[rows]);
   // The mounted rows, by key: the reveal scrolls the selection's row, which the list keeps mounted.
@@ -254,7 +255,7 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
     // tree holds; the one scroll waits for the tree to be back on screen.
     if(searching)return;
     const row=rowElements.current.get(target.id);
-    if(row){row.scrollIntoView?.({block:'nearest'});reveal.current.complete=true;}
+    if(row){revealRow(row);reveal.current.complete=true;}
   },[active,revealKey,paths,expanded,locked,partControls.onToggleTreeNode,searching]);
 
   // The rows' callbacks never change; each reads the tree as it is when pressed.
@@ -336,12 +337,13 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
       selected={on} joinAbove={on && at > 0 && highlighted.has(matches[at-1].entry.node.id)} joinBelow={on && at < matches.length-1 && highlighted.has(matches[at+1].entry.node.id)}
       choose={choose} disabled={disabled} partControls={rowControls}/>;
   };
-  // No heading: the filter is the panel's top row, and stays put while the tree scrolls under it.
-  return <ToolPanel id="tree" label="Features" fit="tree" resizable collapsible={false} hidden={!active}
-    header={<TreeFilterInput dense label="Filter model" placeholder="Filter…" yieldWhileTyping value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown}
-      trailing={<>
+  // Headed by its filter, always there (the tile and the section are named "Model tree", CAD's name for an
+  // assembly's parts tree), then what is loading and Show all while parts are hidden.
+  return <ToolPanel id="tree" label="Model tree" fit="tree" resizable collapsible={false} hidden={!active}
+    header={<TreeFilterInput label="Filter model" placeholder="Filter…" value={query} onChange={changeQuery} onKeyDown={onSearchKeyDown} dense
+      className="px-0 shadow-none" trailing={<>
         {loading && <span role="status" className="shrink-0 text-micro text-muted-foreground">Loading…</span>}
-        {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
+        {partControls.hiddenPartIds?.length > 0 && <Button disabled={disabled} type="button" variant="ghost" size="sm" className="h-5 shrink-0 px-1.5 text-tiny text-muted-foreground" onClick={partControls.showAllHiddenParts}>Show all</Button>}
       </>}/>}>
     <div ref={treeRef} className="flex flex-col text-tiny" aria-label="Modeling tree">
       <div ref={listRef} className="px-1 py-1" aria-label="Model tree area"
@@ -353,10 +355,10 @@ function ModelingTree({ active, disabled, mode='all', loading=false, selectedPar
         </div>}
         {searching && <p role="status" className="px-2 py-1 text-micro text-muted-foreground">{found.total > found.matches.length ? `First ${found.matches.length} of ${found.total.toLocaleString()} matches` : `${found.total} ${found.total === 1 ? 'match' : 'matches'}`}</p>}
         {searching ? found.matches.length
-          ? <VirtualRows key="search" aria-label="Model search results" count={matches.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={searchPinned}
+          ? <VirtualRows key="search" aria-label="Model search results" count={matches.length} rowHeight={rowHeight} pinned={searchPinned}
             rowKey={at=>matches[at].entry.node.id} rowProps={at=>({className:'min-w-0','data-search-row':matches[at].entry.node.id})} renderRow={renderSearchRow}/>
           : deferredQuery.trim() && <p className="px-3 py-6 text-center text-tiny text-muted-foreground">{`No part matches “${deferredQuery.trim()}”`}</p>
-        : <VirtualRows key="tree" aria-label="Model" count={rows.length} rowHeight={TREE_ROW_DENSE_HEIGHT} pinned={treePinned}
+        : <VirtualRows key="tree" aria-label="Model" count={rows.length} rowHeight={rowHeight} pinned={treePinned}
           rowKey={at=>rows[at].key} rowProps={at=>({className:'min-w-0','aria-level':rows[at].depth+1,'data-tree-part':rows[at].node.kind === 'part' ? rows[at].node.id : undefined})}
           renderRow={renderTreeRow} registerRow={registerRow} onVisibleRange={onVisibleRows}/>}
       </div>

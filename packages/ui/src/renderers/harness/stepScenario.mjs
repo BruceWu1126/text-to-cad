@@ -372,6 +372,7 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
   const { bundle, bundledCss } = await harnessBundle();
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   const requests = [];
+  const promptPackets = [];
   // What the server is answering right now, and who waits for it to answer nothing (`idle`).
   const answering = new Map();
   let idlers = [];
@@ -395,6 +396,12 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
     if (url.pathname === '/harness.js') { response.setHeader('Content-Type', 'text/javascript'); response.end(bundle); return; }
     if (url.pathname === '/styles.css') { response.setHeader('Content-Type', 'text/css'); response.end(css); return; }
     if (url.pathname === '/harness.css') { response.setHeader('Content-Type', 'text/css'); response.end(bundledCss); return; }
+    if (url.pathname.endsWith('/__cad/prompt-files')) {
+      const packet = await readBody(request);
+      promptPackets.push(packet);
+      json(response, { ok: true, inline: JSON.stringify({ input: packet.input, jobs: packet.views }) });
+      return;
+    }
     if (url.pathname.endsWith('/__cad/catalog')) { json(response, { entries: [failing ? unbuiltEntry(listed) : listed] }); return; }
     if (url.pathname.endsWith('/__cad/preview')) {
       json(response, { output: `/models/${fixture.file}`, file: `/models/${fixture.file}`, ...feed, feedCursor: `harness:${feedSerial}` });
@@ -570,6 +577,6 @@ export async function serveStepHarness(t, { progressive = false, singlePart = fa
     const named = (extra = {}) => ({ tree: staged.view.tree, producer: staged.view.producer, parts: staged.parts, complete: true, annotations: null, ...extra });
     return { tree: staged.view.tree, parts: staged.parts, annotations, named };
   };
-  return { open, closePages, requests, idle, fixture, release: gate => { closed.delete(gate); }, hold,
+  return { open, closePages, requests, promptPackets, idle, fixture, release: gate => { closed.delete(gate); }, hold,
     declare: on => { declaring = on !== false; }, announce, preview, revise };
 }

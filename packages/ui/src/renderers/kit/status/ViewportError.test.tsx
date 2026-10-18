@@ -80,7 +80,7 @@ it('copies the whole of Details, however far they scroll, from the icon in their
     const alert = { severity: 'error', title: 'Couldn’t prepare the model', message: 'The viewer couldn’t finish processing this model.',
       recovery: 'Try again. If this continues, check the viewer’s terminal output.', details, reload: true };
     const writeText = vi.fn(async (_text: string | Promise<string>) => {});
-    const host = testHost({ clipboard: { writeText, writeImage: async () => {} } });
+    const host = testHost({ clipboard: { writeText, readText: async () => '', writeImage: async () => {} } });
     render(<ViewerHostContext.Provider value={host}>
       <ViewerAlertCard alert={alert} hasContent={false} onReload={() => {}} file="/Users/ada/parts/gear.step" />
     </ViewerHostContext.Provider>);

@@ -6,9 +6,6 @@
   "files": [
     "dist",
     "docs",
-    "licenses",
-    "scripts/drawing-assets.mjs",
-    "scripts/drawing-assets.d.mts",
     "scripts/build-id.mjs",
     "scripts/build-id.d.mts",
     "README.md"
@@ -60,10 +57,6 @@
       "types": "./dist/consent/index.d.ts",
       "import": "./dist/consent/index.js"
     },
-    "./features": {
-      "types": "./dist/features/index.d.ts",
-      "import": "./dist/features/index.js"
-    },
     "./update": {
       "types": "./dist/update/index.d.ts",
       "import": "./dist/update/index.js"
@@ -88,11 +81,6 @@
       "types": "./dist/file-viewer/navigation/links.d.ts",
       "import": "./dist/file-viewer/navigation/links.js"
     },
-    "./drawing": {
-      "types": "./dist/drawing/index.d.ts",
-      "import": "./dist/drawing/index.js"
-    },
-    "./drawing-assets": "./scripts/drawing-assets.mjs",
     "./build-id": "./scripts/build-id.mjs"
   },
   "scripts": {
@@ -107,13 +95,13 @@
     "three": "0.186.1"
   },
   "dependencies": {
-    "@betteroffice/fonts": "0.4.0",
     "class-variance-authority": "0.7.1",
     "radix-ui": "1.6.7",
     "@text-to-cad/core": "*",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.7.0",
-    "@excalidraw/excalidraw": "0.18.1"
+    "perfect-freehand": "1.2.0",
+    "vaul": "1.1.2"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
