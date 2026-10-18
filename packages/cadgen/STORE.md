@@ -1895,7 +1895,10 @@ by its socket address (`cadgen.daemon.transport.SingletonLock`: `flock` on
 POSIX, `msvcrt.locking` on Windows, released by the kernel when the holder
 dies) before it binds, and holds it while it serves that address — a private
 socket is a private daemon. A daemon that stops serving removes its address and
-then releases the lock, before any teardown. A second daemon starting for the
+then releases the lock, before any teardown — the socket file only while it is
+the one it bound: a daemon whose state directory was removed under it, lock file
+and all, can find a successor's socket there, bound under a fresh lock, and
+leaves it alone. A second daemon starting for the
 same address waits up to five seconds for the lock — its predecessor may be
 between those two steps, or, when an upgrade replaces an earlier version, still
 shutting its pool down with the lock held — and otherwise stands down, touching

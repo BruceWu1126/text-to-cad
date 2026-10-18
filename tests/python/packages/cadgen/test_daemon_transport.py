@@ -661,7 +661,8 @@ class ServerShutdownTest(unittest.TestCase):
 
 
 class DaemonStopsTest(unittest.TestCase):
-    """A daemon stops when it decides to, whatever became of its socket file.
+    """A daemon stops when it decides to, whatever became of its socket file, and removes
+    no socket but its own.
 
     It woke its own blocked accept by connecting to its address. With the socket file
     gone -- its state directory deleted, a tmp cleaner, a test tearing down -- that connect
@@ -673,18 +674,7 @@ class DaemonStopsTest(unittest.TestCase):
     STOP_SECONDS = 30.0
 
     def test_a_retired_daemon_stops_when_its_last_job_ends_though_its_socket_file_is_gone(self):
-        state = Path(tempfile.mkdtemp(prefix="cgs-", dir=None if os.name == "nt" else "/tmp"))
-        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
-        address = rf"\\.\pipe\cadgen-stops-{uuid.uuid4().hex}" if os.name == "nt" else str(state / "d.sock")
-        self.enterContext(mock.patch.dict(os.environ, {
-            "CADGEN_DAEMON_STATE_DIR": str(state),
-            "CADGEN_DAEMON_SOCKET": address,
-            "CADGEN_DAEMON_SPARES": "0",  # no worker, so no kernel import
-            "CADGEN_DAEMON_IDLE_TIMEOUT": "4",  # its watchdog looks every second
-        }))
-        daemon = client._spawn_daemon(address)
-        self.addCleanup(self._kill, daemon)
-        status = self._await_status(daemon)
+        _, address, daemon, status = self._start_daemon()
         # A job in flight: a worker's slot, held for as long as its connection is open.
         lease = client._connect(address)
         self.addCleanup(lease.close)
@@ -697,11 +687,46 @@ class DaemonStopsTest(unittest.TestCase):
         if os.name != "nt":
             os.unlink(address)  # a named pipe has no file to lose
         lease.close()  # the last job ends, so the daemon stops
+        self.assertEqual(self._await_exit(daemon, address), 0, self._log(address))
+
+    @unittest.skipIf(os.name == "nt", "a named pipe has no file another daemon could take over")
+    def test_a_daemon_that_stops_leaves_a_successors_socket_alone(self):
+        # Its state directory removed under it, socket, key and locks with it, a client
+        # starts a successor: a fresh lock file lets it bind the same address. Stopping,
+        # the first daemon unlinked that address, the successor's socket, and every client
+        # then found no daemon while the successor held the lock. Every stop goes through
+        # the one release; a signal is the stop no job or timer has to set up.
+        state, address, daemon, _ = self._start_daemon()
+        shutil.rmtree(state)
+        successor = transport.Server(address, transport.ensure_authkey(address))
+        self.addCleanup(successor.close)
+        theirs = os.lstat(address).st_ino
+        daemon.terminate()
+        self.assertEqual(self._await_exit(daemon, address), 0)
+        left = os.lstat(address).st_ino if os.path.lexists(address) else None
+        self.assertEqual(left, theirs, "the daemon that stopped removed its successor's socket")
+
+    def _start_daemon(self) -> tuple[Path, str, subprocess.Popen, dict]:
+        """A daemon of this test's own on a private address: its state directory, address,
+        process and status."""
+        state = Path(tempfile.mkdtemp(prefix="cgs-", dir=None if os.name == "nt" else "/tmp"))
+        self.addCleanup(shutil.rmtree, state, ignore_errors=True)
+        address = rf"\\.\pipe\cadgen-stops-{uuid.uuid4().hex}" if os.name == "nt" else str(state / "d.sock")
+        self.enterContext(mock.patch.dict(os.environ, {
+            "CADGEN_DAEMON_STATE_DIR": str(state),
+            "CADGEN_DAEMON_SOCKET": address,
+            "CADGEN_DAEMON_SPARES": "0",  # no worker, so no kernel import
+            "CADGEN_DAEMON_IDLE_TIMEOUT": "4",  # its watchdog looks every second
+        }))
+        daemon = client._spawn_daemon(address)
+        self.addCleanup(self._kill, daemon)
+        return state, address, daemon, self._await_status(daemon)
+
+    def _await_exit(self, daemon: subprocess.Popen, address: str) -> int:
         try:
-            code = daemon.wait(self.STOP_SECONDS)
+            return daemon.wait(self.STOP_SECONDS)
         except subprocess.TimeoutExpired:
-            self.fail(f"the daemon still runs {self.STOP_SECONDS:.0f} s after its last job ended:\n{self._log(address)}")
-        self.assertEqual(code, 0, self._log(address))
+            self.fail(f"the daemon still runs {self.STOP_SECONDS:.0f} s after it was told to stop:\n{self._log(address)}")
 
     def _await_status(self, daemon: subprocess.Popen) -> dict:
         deadline = time.monotonic() + self.STOP_SECONDS

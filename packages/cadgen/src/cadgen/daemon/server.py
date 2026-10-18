@@ -719,18 +719,16 @@ def serve() -> int:
     server = _bind(address, wait=LOCK_HANDOVER_SECONDS)
     if server is None:
         return 0
-    bound = {"address": True}
 
     def _release_address() -> None:
-        """Stop serving the address: the listener, the socket file, then the lock.
+        """Stop serving the address: the listener and its socket file, then the lock.
 
         In that order, so this process can never unlink a successor's socket, and
-        before any teardown, so a client told to restart finds the lock free.
+        before any teardown, so a client told to restart finds the lock free. The
+        listener removes the file only while it is the one it bound: a successor that
+        took a fresh lock, this daemon's state directory removed under it, bound its own.
         """
         server.close()
-        if bound["address"]:
-            bound["address"] = False
-            transport.clear_address(address)
         _release_lock()
 
     def _shutdown_handler(*_args) -> None:

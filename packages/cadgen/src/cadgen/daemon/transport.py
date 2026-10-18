@@ -535,22 +535,31 @@ class _Wakeup:
                 end.close()
 
 
-def _remove_socket_file(path: str) -> None:
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(path)
+def _remove_socket_file(path: str, bound: tuple[int, int]) -> None:
+    """Unlink ``path`` while it is still the socket file bound there (its device and inode).
+
+    A daemon whose state directory was removed under it, lock file and all, can find a
+    successor's socket at its address by the time it stops: a fresh lock let one bind
+    there, and that file is not this one's to remove. Nor is a file it cannot judge; a
+    dead one is swept by the next daemon to take the address's lock."""
+    with contextlib.suppress(OSError):
+        info = os.lstat(path)
+        if (info.st_dev, info.st_ino) == bound:
+            os.unlink(path)
 
 
 class _SocketListener:
     """A listening AF_UNIX socket whose accept also returns, with no peer, on ``wake()``.
 
-    Its file goes as the stdlib listener's does: when it closes, or, never closed, when it
-    is collected or the process exits."""
+    Its file goes as the stdlib listener's does -- when it closes, or, never closed, when
+    it is collected or the process exits -- but only while it is still the file it bound."""
 
     def __init__(self, address: str, backlog: int) -> None:
         self._wakeup = _Wakeup()
         self._socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             self._socket.bind(address)
+            bound = os.lstat(address)
             self._socket.listen(backlog)
             # The wait says when a peer is there, so accepting never blocks: a peer gone
             # before it is taken is no peer, rather than a wait for the next one.
@@ -559,7 +568,7 @@ class _SocketListener:
             self._socket.close()
             self._wakeup.close()
             raise
-        self._remove_file = weakref.finalize(self, _remove_socket_file, address)
+        self._remove_file = weakref.finalize(self, _remove_socket_file, address, (bound.st_dev, bound.st_ino))
 
     def accept(self) -> mpc.Connection | None:
         ready = mpc.wait([self._socket, self._wakeup.reader])
