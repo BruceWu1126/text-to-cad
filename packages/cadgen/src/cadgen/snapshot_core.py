@@ -573,12 +573,13 @@ def validate_display_settings_values(
                 _validate_display_group(value, keys, field)
 
 
-# What belongs to a CAD model (STEP) alone. Edges are drawn from B-rep topology,
-# Explode separates an assembly's parts and Clip sections its solids; a mesh, a robot
-# description or a drawing has none of those. The shared viewer does not offer them
-# for such a file, and the presets built from edges with them.
-CAD_MODEL_DISPLAY_GROUPS = ("clip", "exploded")
+# What a 3D input's view offers, as the shared viewer offers it (`viewFeaturesForKind` in
+# @text-to-cad/core's viewSettings.js). Edges are drawn from B-rep topology, so the presets
+# built from them are a STEP's alone. Clip cuts whatever any 3D input draws; Explode moves
+# parts apart, which a STEP assembly and a GLB's nodes have and an STL, a 3MF or a robot
+# description (whose links are posed, not separated) do not.
 CAD_MODEL_DISPLAY_MODES = frozenset({"xray", "hidden-line", "wireframe"})
+EXPLODABLE_KINDS = frozenset({"step", "stp", "glb"})
 CAD_MODEL_KINDS = frozenset({"step", "stp"})
 # Inputs that are DRAWN rather than staged. Nothing in `display` but
 # ``appearance`` reaches them, which is a stricter rule than the one below and is
@@ -588,11 +589,12 @@ DRAWING_KINDS = frozenset({"dxf"})
 
 
 def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input_label: str) -> None:
-    """Refuse STEP-only display settings for an input that is not a STEP model.
+    """Refuse the display settings an input's view does not offer.
 
-    Asking to clip a mesh would otherwise render a picture that silently
+    Asking to explode an STL would otherwise render a picture that silently
     ignores the request, so the request is refused by name, as the viewer refuses
-    to offer the control.
+    to offer the control. (How many parts a GLB has is known only once it is read:
+    the render refuses Explode on a GLB of one.)
 
     A drawing is skipped, not exempt: its own check refuses the whole of
     ``display`` but ``appearance``, and would otherwise be pre-empted here by a
@@ -600,7 +602,13 @@ def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input
     """
     if kind in CAD_MODEL_KINDS or kind in DRAWING_KINDS or not is_plain_object(display):
         return
-    requested = [f"display.{name}" for name in CAD_MODEL_DISPLAY_GROUPS if name in display]
+    if "exploded" in display and kind not in EXPLODABLE_KINDS:
+        raise SnapshotError(
+            f"display.exploded moves a model's parts apart; {input_label} has none to move "
+            "(Explode takes a STEP model or a GLB of several parts). Remove the setting; "
+            "Clip (display.clip) cuts it."
+        )
+    requested = []
     mode = display.get("mode")
     if isinstance(mode, str) and mode in CAD_MODEL_DISPLAY_MODES:
         requested.append(f"display.mode {mode!r}")
@@ -612,7 +620,7 @@ def validate_display_for_kind(display: Mapping[str, object], *, kind: str, input
     if requested:
         raise SnapshotError(
             f"{', '.join(requested)} {'applies' if len(requested) == 1 else 'apply'} to STEP models only; "
-            f"{input_label} has no CAD edges, parts to explode or solids to section. "
+            f"{input_label} has no CAD edges. "
             "Remove the setting; this input's display mode is 'solid' (or render it with --render)."
         )
 
@@ -1303,10 +1311,15 @@ def refuse_cad_model_requests(
     the plural the message talks about ("STL mesh inputs"); ``joints`` says whether
     the input is a robot, the one thing ``jointValues`` poses.
     """
-    if selection_filter_values(job):
+    selection = job.get("selection") if is_plain_object(job.get("selection")) else {}
+    # A robot's parts can be hidden, as its Links panel hides them (a Quick Edit's view names
+    # them); focus, and anything of any other input, needs a STEP's occurrences.
+    if (selection_value_list(selection.get("focus"))
+            or (selection_value_list(selection.get("hide")) and not joints)):
         raise SnapshotError(
             f"selection focus/hide require STEP topology; {subject} have no "
             "part/subassembly selectors"
+            + (" (a robot's selection.hide takes its part ids)" if joints else "")
         )
     if has_kinematics_render_values(job.get("kinematics")):
         raise SnapshotError(f"kinematics values require a STEP model; {pose_hint}")

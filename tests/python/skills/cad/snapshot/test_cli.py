@@ -345,16 +345,23 @@ class SnapshotCliTests(unittest.TestCase):
             validate({"mode": "solid", "modes": {"render": {"lighting": {"exposure": 0.5},
                       "floor": {"placement": "lowest"}}, "solid": {"grid": {"enabled": False}}}},
                      kind=kind, input_label=f"part.{kind}")
+            # Clip cuts any 3D input, as the viewer's Clip does.
+            validate({"clip": {"axis": "x", "at": 0.01}}, kind=kind, input_label=f"part.{kind}")
             for request, named in (
-                ({"clip": {"axis": "x"}}, r"display\.clip applies to STEP models only"),
-                ({"exploded": {"amount": 0.4}}, r"display\.exploded applies to STEP models only"),
                 ({"modes": {"solid": {"edges": {"enabled": False}}}}, r"display\.modes\.solid\.edges applies to STEP models only"),
                 ({"modes": {"wireframe": {}}}, r"display\.modes\.wireframe applies to STEP models only"),
                 ({"mode": "xray"}, r"display\.mode 'xray' applies to STEP models only"),
-                ({"mode": "wireframe", "clip": {"axis": "z"}}, r"display\.clip, display\.mode 'wireframe' apply to STEP models only"),
+                ({"mode": "wireframe", "clip": {"axis": "z"}}, r"display\.mode 'wireframe' applies to STEP models only"),
             ):
                 with self.subTest(kind=kind, request=request), self.assertRaisesRegex(SnapshotError, named):
                     validate(request, kind=kind, input_label=f"part.{kind}")
+        # Explode moves parts apart: a GLB's nodes (one of a single node is refused as it renders);
+        # an STL, a 3MF or a robot has none to move.
+        validate({"exploded": {"amount": 0.4}}, kind="glb", input_label="part.glb")
+        for kind in ("stl", "3mf", "urdf", "srdf", "sdf"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(
+                    SnapshotError, rf"display\.exploded moves a model's parts apart; part\.{kind} has none to move"):
+                validate({"exploded": {"amount": 0.4}}, kind=kind, input_label=f"part.{kind}")
         with self.assertRaisesRegex(SnapshotError, r"part\.stl has no CAD edges.*display mode is 'solid' \(or render it with --render\)"):
             validate({"mode": "hidden-line"}, kind="stl", input_label="part.stl")
 
@@ -1280,13 +1287,13 @@ class SnapshotCliTests(unittest.TestCase):
             )
             self.assertEqual(packet["jobs"][0]["outputs"][0]["camera"], {"preset": "top"})
 
-    def test_render_job_rejects_exploded_display_for_mesh_input(self) -> None:
+    def test_render_job_refuses_exploded_display_for_an_input_without_parts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            root = self._mesh_job_env(temporary_directory, "widget.glb", b"glTF")
-            with self.assertRaisesRegex(SnapshotError, r"display\.exploded applies to STEP models only"):
+            root = self._mesh_job_env(temporary_directory, "widget.stl", b"solid widget\nendsolid widget\n")
+            with self.assertRaisesRegex(SnapshotError, r"display\.exploded moves a model's parts apart; widget\.stl has none"):
                 resolve_render_job_packet(
                     {
-                        "input": "models/widget.glb",
+                        "input": "models/widget.stl",
                         "display": {"exploded": {"enabled": True, "amount": 1}},
                         "outputs": [{"path": "tmp/iso.png", "camera": "iso"}],
                     },
@@ -1648,10 +1655,13 @@ class SnapshotCliTests(unittest.TestCase):
             # A robot IS parametric, just not by STEP sidecar — the error says which key to use.
             with self.assertRaisesRegex(SnapshotError, "pose a URDF robot with jointValues"):
                 resolve_render_job_packet({**base, "kinematics": {"width": 5}}, cwd=root)
-            with self.assertRaisesRegex(SnapshotError, r"display\.exploded applies to STEP models only; arm\.urdf"):
+            with self.assertRaisesRegex(SnapshotError, r"display\.exploded moves a model's parts apart; arm\.urdf has none"):
                 resolve_render_job_packet(
                     {**base, "display": {"exploded": {"enabled": True, "amount": 1}}}, cwd=root
                 )
+            # The parts a Quick Edit's view hid travel to the render, which knows the robot's part ids.
+            packet = resolve_render_job_packet({**base, "selection": {"hide": ["arm:v1"]}}, cwd=root)
+            self.assertEqual(packet["jobs"][0]["selection"], {"hide": ["arm:v1"]})
             with self.assertRaisesRegex(SnapshotError, "Unsupported render mode: section"):
                 resolve_render_job_packet({**base, "mode": "section"}, cwd=root)
 

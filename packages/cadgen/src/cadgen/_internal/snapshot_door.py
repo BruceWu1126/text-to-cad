@@ -13,7 +13,8 @@ signature advertised STEP-only options to every door and refused them at
 runtime):
 
 - STEP: the full surface — display, kinematics, animation, focus/hide.
-- mesh (stl/3mf/glb): view/list renders of untyped geometry.
+- mesh (stl/3mf/glb): view/list renders of untyped geometry, cut by Clip and
+  (a GLB of several parts) exploded.
 - robot (urdf/sdf): the mesh shape plus ``joint_values``.
 - dxf: a DRAWING, not a scene. Where, how big, and light or dark — nothing
   else, because a flat 2D drawing has no camera to pose, no surfaces to
@@ -488,8 +489,11 @@ def mesh_snapshot_verb(door: str):
         display: solid (default), sparse display JSON, or a JSON file path.
             Per-mode settings live under modes and inherit that mode's
             defaults; appearance defaults to light. Projection belongs in
-            display.camera. edges, clip, exploded, xray, hidden-line and
-            wireframe are STEP-only and refused here.
+            display.camera. clip cuts the model as the viewer's Clip does:
+            {"axis": "x"|"y"|"z", "at": ..., "invert": false}, at in the file's
+            own unit (a GLB's metres, a 3MF's declared unit, an STL's numbers).
+            exploded moves a GLB's parts apart (a GLB of several parts only).
+            edges, xray, hidden-line and wireframe are STEP-only and refused here.
         render: draw the photographic Render — studio lighting, floor and
             environment, perspective — instead of the display mode, with
             Render's own settings from display's modes.render. View mode only.
@@ -572,8 +576,10 @@ def robot_snapshot_verb(door: str):
         display: solid (default), sparse display JSON, or a JSON file path.
             Per-mode settings live under modes and inherit that mode's
             defaults; appearance defaults to light. Projection belongs in
-            display.camera. edges, clip, exploded, xray, hidden-line and
-            wireframe are STEP-only and refused here.
+            display.camera. clip cuts the robot as the viewer's Clip does:
+            {"axis": "x"|"y"|"z", "at": <metres>, "invert": false}. exploded,
+            edges, xray, hidden-line and wireframe are refused here: a robot
+            is posed with joint_values.
         render: draw the photographic Render — studio lighting, floor and
             environment, perspective — instead of the display mode, with
             Render's own settings from display's modes.render. View mode only.
@@ -661,9 +667,11 @@ def polymorphic_snapshot_verb():
         display: solid (default), xray, hidden-line or wireframe, sparse
             display JSON, or a JSON file path. appearance defaults to light.
             Per-mode settings live under modes and inherit that mode's defaults.
-            edges, clip, exploded, xray, hidden-line and wireframe describe a STEP
-            model; every other scene input takes solid. A DXF takes
-            appearance alone (`cadgen dxf snapshot --appearance`).
+            edges, xray, hidden-line and wireframe describe a STEP model; every
+            other scene input takes solid. clip cuts any 3D input, at in its
+            file's unit (STEP millimetres; GLB, URDF and SDF metres; a 3MF's
+            declared unit); exploded takes a STEP model or a GLB of several
+            parts. A DXF takes appearance alone (`cadgen dxf snapshot --appearance`).
         render: draw the photographic Render — studio lighting, floor and
             environment, perspective — instead of the display mode, with
             Render's own settings from display's modes.render. View mode only;

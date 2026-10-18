@@ -100,7 +100,7 @@ class RefusedRequestsLeaveOutUntouched(_Workspace):
         svg = self.root / "review.svg"
         cases = [
             (stl_door, [self.stl, self.out, "--display", "wireframe"], r"applies to STEP models only"),
-            (stl_door, [self.stl, self.out, "--display", '{"clip":{"axis":"x"}}'], r"display\.clip applies to STEP"),
+            (stl_door, [self.stl, self.out, "--display", '{"exploded":{"amount":0.5}}'], r"display\.exploded moves a model's parts apart"),
             (stl_door, [self.stl, self.out, "--display", '{"modes":{"render":{"lighting":{"fill":9}}}}'], r"display\.modes\.render\.lighting\.fill"),
             (step_door, [self.stl, self.out], r"does not render \.stl inputs"),
             (step_door, [script, self.out], r"a model script is a program"),
