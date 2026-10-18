@@ -238,8 +238,13 @@ returns the live catalog entry of the prepared file, the prompt `resource`, the
 `useDeclinedSelectReference` consumes a host's request to select a reference in
 a file that has none without changing the view. A renderer is then its
 scene hook, its tool list, its tools' rows and its sidebar sections, if it has any
-(`glb/GlbRenderer.jsx`, `mesh/MeshRenderer.jsx`, `robot/RobotRenderer.jsx`). The DXF renderer uses the workspace module without the
-shell: it has no scene, so it reaches the same catalog entry and commands directly.
+(`glb/GlbRenderer.jsx`, `mesh/MeshRenderer.jsx`, `robot/RobotRenderer.jsx`). A flat view — a
+drawing — uses the workspace module without the shell: it has no scene, so it reaches the same
+catalog entry and commands directly, through the kit's flat frame (`FlatViewFrame.jsx`: the
+strip, its row, the sidebar, Quick Edit, the loading cover and the alert card, laid out as the
+shell lays out a 3D view's; `useFlatView.js`: the tools and the handover — the host's commands,
+Quick Edit's context and its views, the copy key, the live binding; `viewport/useFlatCanvasView.js`:
+the canvas, fit, pan, zoom about the pointer, taps and hover).
 
 The shell's behaviour has one real-browser test,
 `kit/shell/RendererShell.browser.test.mjs` (deferred files, warm reopen, isolated
@@ -293,7 +298,8 @@ viewport, no scene, no Display settings, no Preview. The questions the old
 Material/Bends tabs answered were about a sheet-metal part the viewer was inventing
 from the file; a drawing is not that. What it has is what a person needs to talk about
 a drawing — the kit's chrome, composed around the canvas rather than around
-`ShellViewport` (`DxfRenderer.jsx`): the strip at the top centre, the tool's row under
+`ShellViewport`, in the kit's flat frame (`DxfRenderer.jsx` over
+`kit/shell/FlatViewFrame.jsx`): the strip at the top centre, the tool's row under
 it, the file sidebar, Quick Edit at the top-right.
 
 - **Tools** (`dxf/tools.js`): **Select** (in hand; the view's hand too: a drag pans, a
@@ -361,7 +367,7 @@ it, the file sidebar, Quick Edit at the top-right.
   primitive's inner rings are its holes; merging two overlapping regions of one colour
   into a single path would turn their overlap into a hole as well. Fills go down
   before strokes, which is the one ordering that never hides an edge.
-- **Interaction** (`dxf/useDrawingView.js`): fit on open and on resize until the
+- **Interaction** (`dxf/useDrawingView.js`, over the kit's `viewport/useFlatCanvasView.js`): fit on open and on resize until the
   person moves the view, drag to pan (a primary press, one finger, once it has travelled
   more than a tap's 4 px; a press that lets go before is the tool's tap), wheel or pinch to
   zoom about the pointer, double-click to fit again. The view lives in a REF and the

@@ -344,7 +344,7 @@ file with routines (`kit/tools/playbar/AnimationSection.jsx`). A file with none 
 sidebar. It is a toolbar of its own at the view's top-left, 8px in, on the strip's line and of
 its surface, padding and 24px tiles (`data-file-sidebar-tools`, "File sidebar"): one tile per
 section, a tree's a tree icon named for it (Model tree, Links), Position's a spline, Animation's a
-clapperboard, any other section's a page named for it. Preview offers its Position and
+clapperboard, a Layers section's the layers icon, any other section's a page named for it. Preview offers its Position and
 Animation alone, their tiles bare in its top-left corner; the rest stay mounted, out of sight.
 
 - **One section at a time.** None is open as a file opens. A tile opens its section in a panel
@@ -431,7 +431,11 @@ Its panels follow these rules:
   over the viewport, the app menu and Display included, share `FLOATING_SURFACE_CLASS` (the
   background at 75%, blurred), so their text never competes with the model; and the file
   sidebar, mostly text but up for as long as the file is open, is between them
-  (`FILE_SIDEBAR_SURFACE_CLASS`: 55%, a 4px blur).
+  (`FILE_SIDEBAR_SURFACE_CLASS`: 55%, a 4px blur). Each tones what it floats over toward its
+  own background first (in the light theme the backdrop's contrast halved and its brightness
+  raised by a third, in the dark its brightness cut by a third), so over the theme's own scene
+  nothing changes, and a picture the other way round from the theme — a board keeps KiCad's dark
+  in the light theme — never takes the chrome's text.
 - **Scrolling.** Every scroll region in the viewer's chrome — the file sidebar, a panel's
   body, the stack's column, the explorer, a menu, the alert card — is the
   `ScrollArea` primitive (`primitives/scroll-area.jsx`, shadcn's): thin overlay
@@ -492,7 +496,8 @@ Preview, and shows the current mode's sphere icon. It opens a stock shadcn dropd
 (`DisplayPopover.jsx`): a muted **Display** label, the modes as a `DropdownMenuRadioGroup`,
 a separator, then **Grid**, a `DropdownMenuCheckboxItem`. On a phone the strip's **More**
 menu has a Display row whose nested submenu is the same list (`DisplayMenuItems`), with no
-label. Checks sit at the row's right end. Choosing a mode closes the menu; ticking Grid
+label; a submenu wider than the room beside More's list slides over the list, as far as it must
+to stay on screen. Checks sit at the row's right end. Choosing a mode closes the menu; ticking Grid
 toggles it and leaves the menu open (`onSelect` prevents the close). Clicking outside or
 pressing Escape closes it. Opening it leaves the active tool and its controls in place. A
 2D view has no Display or Preview control.

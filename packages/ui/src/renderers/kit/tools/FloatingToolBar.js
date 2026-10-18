@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent,
@@ -121,6 +121,40 @@ export function touchStripFit(entries, room, { more = false } = {}) {
   return count;
 }
 
+// How far a menu keeps from the window's edges: every menu's collision padding.
+const MENU_EDGE_PX = 8;
+
+/**
+ * A More row's submenu, beside More's list as any submenu is. A phone is narrow, and a submenu
+ * wider than the room on either side of the list (a board's Display, beside a short strip) would
+ * run off the screen: then, once it is placed, it slides over the list just as far as it must.
+ * Radix puts a submenu at a side of its row and only ever shifts it along the row, so the slide is
+ * the content's own (`translate`), which Radix's placement never reads back.
+ */
+function OnScreenSubContent({ style, ...props }) {
+  const [slide, setSlide] = useState(0);
+  const frame = useRef(0);
+  // The content is there only while the submenu is open: each time it opens, it is measured afresh.
+  const content = useCallback((element) => {
+    cancelAnimationFrame(frame.current);
+    if (!element) { setSlide(0); return; }
+    let frames = 0;
+    const settle = () => {
+      // Radix holds a submenu off the screen, unanimated, until it is placed (a frame or two).
+      const placed = element.style.animation !== "none" && !element.parentElement?.style.transform.includes("-200%");
+      if (!placed) { if ((frames += 1) < 30) frame.current = requestAnimationFrame(settle); return; }
+      if (!element.offsetWidth) return;
+      // Its place is its wrapper's, which its opening animation (a slide and a zoom) never moves.
+      const box = element.parentElement.getBoundingClientRect(), width = document.documentElement.clientWidth;
+      const left = MENU_EDGE_PX - box.left, right = box.left + element.offsetWidth - (width - MENU_EDGE_PX);
+      if (left > 0 || right > 0) setSlide(left > 0 ? left : -right);
+    };
+    frame.current = requestAnimationFrame(settle);
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  return <DropdownMenuSubContent ref={content} style={slide ? { ...style, translate: `${Math.round(slide)}px 0` } : style} {...props} />;
+}
+
 /**
  * A phone's strip: one row of 36px tiles across the view, its tools; the view's controls are always
  * the rows of a More menu (an ellipsis, last on the strip), with any tools that do not fit, from the
@@ -184,9 +218,9 @@ function TouchStrip({ tools, views }) {
                   <DropdownMenuSubTrigger disabled={entry.control.disabled}>
                     <span className={MORE_ICON_CLASS} aria-hidden="true">{entry.control.icon}</span>{entry.control.label}
                   </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent aria-label={entry.control.label} collisionPadding={8} className={cn(FLOATING_SURFACE_CLASS, "data-[state=closed]:animate-none!")}>
+                  <OnScreenSubContent aria-label={entry.control.label} collisionPadding={MENU_EDGE_PX} className={cn(FLOATING_SURFACE_CLASS, "data-[state=closed]:animate-none!")}>
                     {entry.control.submenu({ openPopover: () => { pending.current = entry.control.id; } })}
-                  </DropdownMenuSubContent>
+                  </OnScreenSubContent>
                 </DropdownMenuSub>
               : entry.control.active !== undefined
                 ? <DropdownMenuCheckboxItem key={entry.control.id} checked={entry.control.active === true} disabled={entry.control.disabled}

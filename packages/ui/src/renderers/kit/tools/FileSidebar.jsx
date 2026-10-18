@@ -191,7 +191,8 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   const [metaTick, setMetaTick] = useState(0);
   const register = useCallback((id, next) => {
     const current = meta.current.get(id);
-    if (current && current.title === next.title && current.fit === next.fit && Boolean(current.changed) === Boolean(next.changed)) return;
+    if (current && current.title === next.title && current.fit === next.fit && Boolean(current.changed) === Boolean(next.changed)
+      && current.icon === next.icon) return;
     meta.current.set(id, next);
     setMetaTick(tick => tick + 1);
   }, []);
@@ -214,7 +215,9 @@ export default function FileSidebar({ layout: stored, onLayoutChange, hidden = f
   }), [reveal, shown, closeSection, tabbed, register, measured.viewer, layout, settle]);
   const tiles = ids.map(id => {
     const section = meta.current.get(id) || {};
-    const tile = section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
+    // A section that names its own glyph (`ToolPanel`'s `icon`: a drawing's or a board's Layers) is drawn with it.
+    const tile = section.icon ? { label: section.title || id, Icon: section.icon }
+      : section.fit === "tree" ? { label: section.title || "Tree", Icon: ListTree }
       : id === "position" ? { label: "Position", Icon: PositionIcon }
         : id === "animation" ? { label: "Animation", Icon: Clapperboard }
         : { label: section.title || id, Icon: FileText };
