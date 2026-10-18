@@ -337,6 +337,129 @@ class MissTest(KernelMemoCase):
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""
 
+    def test_requested_siblings_keep_independent_sources_across_real_geometry_effects(self) -> None:
+        from build123d import Compound, Face, Solid, Vector, Wire
+        from OCP.BRep import BRep_Builder
+        from OCP.TopoDS import TopoDS_Compound
+
+        def container(width):
+            profile = Face(Wire.make_circle(width))
+            native = TopoDS_Compound()
+            builder = BRep_Builder()
+            builder.MakeCompound(native)
+            builder.Add(native, profile.wrapped)
+            # No Python children: the profile's native elements belong to the
+            # returned container feature, not a separate profile construction.
+            return Compound(native)
+
+        def collect(left, right):
+            return Compound(children=[Face(left.faces()[0].wrapped), Face(right.faces()[0].wrapped)])
+
+        source = kernel_memo._wrap("container", container, "function")
+        gather = kernel_memo._wrap("collect", collect, "function")
+
+        def model(eager, deferred=True):
+            left, right = source(4), source(6)
+            bundle = gather(left, right)
+            first, second = bundle.children
+            state = kernel_memo._LOCAL.run
+            index = state.feature_of(bundle)
+            right_index = state.feature_of(right)
+            if eager:
+                state.trace._structure(index)
+            before = state.identify(first)
+            if not eager and deferred:
+                self.assertNotIn(right_index, state.trace._structures,
+                                 "requesting A must leave the distinct source B uncomputed")
+            unchanged = _bytes(first.wrapped)
+            second_before = _bytes(second.wrapped)
+            boss = Solid.extrude(second, Vector(0, 0, 3))
+            self.assertEqual(_bytes(first.wrapped), unchanged)
+            self.assertNotEqual(_bytes(second.wrapped), second_before, "the real extrusion changes B's profile")
+            after = state.identify(second)
+            self.assertEqual(state.identify(first), before, "B's effect cannot reinterpret A's earlier account")
+            self.assertTrue(all(name is not None for kind in ("faces", "edges", "vertices")
+                                for name in after[1][kind]))
+            return before, after, state.identify(boss), _bytes(boss.wrapped)
+
+        expected, _, _ = _run(model, True)
+        kernel_memo.clear()
+        for attempt, memo in enumerate(("1", "1", "0")):
+            with self.subTest(memo=memo):
+                os.environ["CADGEN_KERNEL_MEMO"] = memo
+                actual, stats, _ = _run(model, False, attempt != 1)
+                self.assertEqual(stats["errors"], 0)
+                self.assertEqual(actual, expected)
+
+    def test_requested_siblings_freeze_old_topology_before_a_later_mutation(self) -> None:
+        from build123d import Compound, Location, Solid
+        from OCP.BRep import BRep_Builder
+        from OCP.TopoDS import TopoDS_Compound, TopoDS_Iterator
+
+        builder = BRep_Builder()
+        addition = Solid.make_box(1, 2, 3).moved(Location((20, 0, 0)))
+
+        def held(body):
+            native = TopoDS_Compound()
+            builder.MakeCompound(native)
+            builder.Add(native, body)
+            return native
+
+        def container(width):
+            return Compound(held(Solid.make_box(width, 3, 4).wrapped))
+
+        def collect(left, right):
+            # Independent wrapper roots inherit the source solids' elements;
+            # adding a solid to a wrapper cannot change either cached source.
+            return Compound(children=[Compound(held(TopoDS_Iterator(item.wrapped).Value()))
+                                      for item in (left, right)])
+
+        def mutate(target):
+            free = target.wrapped.Free()
+            target.wrapped.Free(True)
+            try:
+                builder.Add(target.wrapped, addition.wrapped)
+            finally:
+                target.wrapped.Free(free)
+            return Compound(target.wrapped)
+
+        source = kernel_memo._wrap("container", container, "function")
+        gather = kernel_memo._wrap("collect", collect, "function")
+        change = kernel_memo._wrap("mutate", mutate, "function")
+
+        def model(eager):
+            left, right = source(2), source(4)
+            wrapper = gather(left, right)
+            first, second = wrapper.children
+            state = kernel_memo._LOCAL.run
+            if eager:
+                state.trace._structure(state.feature_of(wrapper))
+            before = state.identify(first)
+            unchanged = _bytes(first.wrapped)
+            if not eager:
+                self.assertNotIn(state.feature_of(right), state.trace._structures)
+            changed = change(second)
+            self.assertEqual(state.identify(first), before)
+            self.assertEqual(_bytes(first.wrapped), unchanged)
+            self.assertEqual(len(changed.solids()), 2)
+            self.assertAlmostEqual(changed.volume, 54)
+            lineage, name = _named(state, changed)
+            added = [name(face) for face in addition.faces()]
+            self.assertTrue(all(text.startswith("f:model.mutate1.") for text in added),
+                            "new native faces must belong to the mutator, never an earlier collector")
+            self.assertTrue(all(text is not None for kind in ("faces", "edges", "vertices")
+                                for text in lineage[kind]))
+            return state.identify(changed), added, _bytes(changed.wrapped)
+
+        expected, _, _ = _run(model, True)
+        kernel_memo.clear()
+        for memo in ("1", "1", "0"):
+            with self.subTest(memo=memo):
+                os.environ["CADGEN_KERNEL_MEMO"] = memo
+                actual, stats, _ = _run(model, False)
+                self.assertEqual(stats["errors"], 0)
+                self.assertEqual(actual, expected)
+
     def test_nested_memo_reuse_keeps_the_parent_sources_deferred_copy_identity(self) -> None:
         from build123d import Compound, Location, Solid
 

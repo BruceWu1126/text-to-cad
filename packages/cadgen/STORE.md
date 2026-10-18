@@ -395,6 +395,17 @@ and it runs again on every run. The history a miss composed is kept with the
 memo's entry, and the naming computed from it with that, so a hit -- which
 hands back the miss's shapes -- names as the miss did without running a maker
 (README law 18).
+When every element of a requested result follows its first geometric input
+unchanged, the trace can complete that result alone, including unknown foreign
+elements. Complete identity tables are kept separately from full feature
+structures as input indices and ordinals; hits bind them to the current run.
+Native first-owner indexes are shared across requested siblings only within
+that trace. Any unproved element uses the full feature computation in result
+order, preserving its made ordinals. Certified copies still freeze their full
+source structures and ordinal bindings before later geometry changes.
+If model code makes another kernel call after a partial account, the trace
+first completes those observed features, preserving their pre-call topology
+and source ordinals even when that call changes native geometry in place.
 
 **Geometric tokens are the fallback matcher.** An element no lineage names --
 every element of a file read, and those a model took from a shape no feature

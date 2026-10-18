@@ -88,12 +88,17 @@ class History:
     element's position among what the maker reported of that source (a tuple, one
     position per maker of the chain that made it out of another: FreeCAD's index, which
     tells apart elements made alike from the same sources). An element no maker reported
-    has no entry. ``structures`` is the trace's naming of the feature, computed from it
-    once and kept with it (``kernel_trace``)."""
+    has no entry. ``structures`` holds only complete feature naming structures;
+    ``result_rules`` separately holds complete first-input identity tables for
+    individual results, computed by the trace and reused on hits (``kernel_trace``)."""
 
     origins: dict[tuple[int, int, int], tuple[tuple[int, int, int, str, tuple[int, ...]], ...]] = field(
         default_factory=dict)
     structures: dict[Any, Any] = field(default_factory=dict, repr=False)
+    # Complete first-input identity tables, separately from full structures:
+    # (structure key, result position) -> immutable s/x rules, or a null result.
+    # Only input indices/ordinals, never native maps or a run's feature nodes.
+    result_rules: dict[Any, Any] = field(default_factory=dict, repr=False)
     # A whole body copied by an actual Copy maker, not inferred from element
     # history: result position -> source body and result-to-source ordinals.
     copies: dict[int, "Copy"] = field(default_factory=dict, repr=False)

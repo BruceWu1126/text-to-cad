@@ -80,7 +80,11 @@ is, its sources, its parent candidates, its lower elements, its number -- is com
 from its history and the live shapes once, the first time a component needs it, and kept
 with the history, so a hit's feature (whose history is its miss's) reuses it; it depends
 on whether the elements of the feature's inputs have names, so it is kept per account of
-that (``_skey``). The names themselves are rendered per part, as a feature's name is the
+that (``_skey``). A complete result made entirely of first-input identities can be
+computed alone; its s/x rules are cached separately from full feature structures.
+Every unproved result uses the full result-ordered algorithm, including its global made
+ordinals. The native first-owner indexes stay in the Trace and are released when all
+results or the full feature are completed. The names themselves are rendered per part, as a feature's name is the
 part's: strings, from those structures, with no maker run and no map built on a warm run.
 
 A complete whole-body Copy certificate also preserves the source component's naming
@@ -251,6 +255,58 @@ class _Structure:
     rules: list[list[list[tuple]] | None]
 
 
+_MISSING = object()
+
+
+class _IdentityInputs:
+    """A feature's first geometric owners, shared by requested and full results.
+
+    Native indexes stay in this Trace only. Build one kind at a time, keeping
+    its union and owner ordinals but discarding the redundant input maps.
+    """
+
+    def __init__(self, handles: list[Any]) -> None:
+        self.handles = [(j, handle) for j, handle in enumerate(handles) if handle is not None]
+        self.indexes: dict[int, tuple[Any, list[tuple[int, int]] | None]] = {}
+        self.counts: dict[tuple[int, int], int] = {}
+
+    def _index(self, kind: int) -> tuple[Any, list[tuple[int, int]] | None]:
+        found = self.indexes.get(kind)
+        if found is None:
+            if len(self.handles) == 1:
+                j, handle = self.handles[0]
+                elements = _map(handle, _TOPABS[kind])
+                self.counts[(j, kind)] = elements.Extent()
+                found = self.indexes[kind] = (elements, None)
+                return found
+            given = []
+            for j, handle in self.handles:
+                maps = [None, None, None]
+                maps[kind] = _map(handle, _TOPABS[kind])
+                self.counts[(j, kind)] = maps[kind].Extent()
+                given.append((j, maps))
+            found = self.indexes[kind] = _input_index(given, kind)
+        return found
+
+    def owner(self, kind: int, element: Any) -> tuple[int, int] | None:
+        if not self.handles:
+            return None
+        elements, owners = self._index(kind)
+        at = elements.FindIndex(element)
+        if not at:
+            return None
+        return (self.handles[0][0], at) if owners is None else owners[at - 1]
+
+    def count(self, j: int, kind: int) -> int:
+        self._index(kind)
+        return self.counts[(j, kind)]
+
+
+def _same_rule(j: int, ordinal: int, rule: tuple | None) -> tuple | None:
+    """Translate the source's knownness once, for both identity completion modes."""
+    return None if rule is None else ("x",) if rule[0] == "x" else ("s", j, ordinal)
+
+
 @dataclass
 class _CopyContext:
     """A source's derivation nodes and naming boundary, without rendered lineage.
@@ -300,6 +356,8 @@ class Trace:
         # an input's resolves to (``_origin``), and maps of results in their own frames.
         self._sources: dict[tuple[int, int], tuple] = {}
         self._structures: dict[int, _Structure] = {}
+        self._results: dict[int, dict[int, tuple | None]] = {}
+        self._identity_inputs: dict[int, _IdentityInputs] = {}
         self._skeys: dict[int, bytes] = {}
         self._origins: dict[tuple, tuple | None] = {}
         self._inputs: dict[tuple, tuple | None] = {}
@@ -360,6 +418,12 @@ class Trace:
         """The inputs of a call as it is given them, taken before it runs: each shape,
         the feature that made it (``feature_of``) and a handle of its ``TopoDS`` then --
         an in-place operation (``clean``) leaves its input object wrapping the result."""
+        # An account formerly completed these whole features immediately. Keep
+        # that causal snapshot before any later kernel call can mutate native
+        # topology, including constructors with implicit builder inputs.
+        if self._results:
+            for index in sorted(self._results):
+                self._structure(index)
         return [(shape, feature_of(shape), handle_of(shape)) for shape in shapes]
 
     def record(self, op: str, frame: tuple[str, int, str], inputs: list[tuple[Any, int | None, Any]],
@@ -495,11 +559,14 @@ class Trace:
         """Withdraw a current call's inheritance before any later feature sees it."""
         feature.copies.clear()
         self._structures.pop(feature.index, None)
+        self._results.pop(feature.index, None)
+        self._identity_inputs.pop(feature.index, None)
         self._skeys.pop(feature.index, None)
         self._origins = {node: origin for node, origin in self._origins.items() if node[0] != feature.index}
         if feature.history is not None:
             feature.history.copies.clear()
             feature.history.structures.clear()
+            feature.history.result_rules.clear()
 
     def _copy_context(self, body: Any, ordinals: tuple, made_by: Callable[[Any], int | None]) -> _CopyContext:
         previous = self._copy_of(body, made_by)
@@ -788,11 +855,136 @@ class Trace:
 
     def _rule(self, node: tuple) -> tuple | None:
         index, position, kind, ordinal = node
-        structure = self._structures.get(index)
-        rules = (structure if structure is not None else self._structure(index)).rules[position]
+        rules = self._result_rules(index, position)
         if rules is None or not 0 < ordinal <= len(rules[kind]):
             return None
         return rules[kind][ordinal - 1]
+
+    def _cached_result(self, index: int, position: int) -> Any:
+        full = self._structures.get(index)
+        if full is not None:
+            return full.rules[position]
+        partial = self._results.get(index)
+        if partial is not None and position in partial:
+            return partial[position]
+        history = self.features[index].history
+        if history is not None:
+            key = self._skey(index)
+            full = history.structures.get(key)
+            if full is not None:
+                # Full structures retain the original completed-ancestry
+                # invariant, including when the current run adopts a hit.
+                return self._structure(index).rules[position]
+            found = history.result_rules.get((key, position), _MISSING)
+            if found is not _MISSING:
+                self._local_result(index, position, found)
+                return found
+        return _MISSING
+
+    def _identity(self, index: int) -> _IdentityInputs:
+        found = self._identity_inputs.get(index)
+        if found is None:
+            found = self._identity_inputs[index] = _IdentityInputs(self.features[index].handles)
+        return found
+
+    def _local_result(self, index: int, position: int, rules: tuple | None) -> None:
+        partial = self._results.setdefault(index, {})
+        partial[position] = rules
+        if len(partial) == len(self.features[index].results):
+            self._identity_inputs.pop(index, None)
+
+    def _proven_result(self, index: int, position: int, rules: tuple | None) -> None:
+        self._local_result(index, position, rules)
+        history = self.features[index].history
+        if history is not None:
+            history.result_rules[(self._skey(index), position)] = rules
+
+    def _identity_nodes(self, index: int, position: int) -> tuple | None:
+        """First-owner correspondences for every ordinal, or an unproved result.
+
+        The pending tuples contain no native handles: input index, its ordinal,
+        and the source node (None only for an actually foreign input).
+        """
+        feature = self.features[index]
+        if position in feature.copies or not any(handle is not None for handle in feature.handles):
+            return None
+        identity = self._identity(index)
+        kinds = []
+        for kind, topabs in enumerate(_TOPABS):
+            elements = _map(feature.results[position], topabs)
+            nodes = []
+            for ordinal in range(1, elements.Extent() + 1):
+                owner = identity.owner(kind, elements.FindKey(ordinal))
+                if owner is None:
+                    return None
+                j, source_ordinal = owner
+                source = self._source(index, j)
+                if source[0] == "foreign":
+                    node = None
+                else:
+                    node = self._input_node(index, j, kind, source_ordinal)
+                    if node is None or not 0 <= node[0] < index:
+                        return None
+                nodes.append((j, source_ordinal, node))
+            kinds.append(tuple(nodes))
+        return tuple(kinds)
+
+    def _result_rules(self, index: int, position: int) -> Any:
+        """Complete one all-identity result, or fall back to the full feature.
+
+        Only complete s/x tables escape this postorder worklist. Mixed results
+        retain the full algorithm's global, result-ordered made numbering.
+        """
+        found = self._cached_result(index, position)
+        if found is not _MISSING:
+            return found
+        stack = [(index, position, False)]
+        pending: dict[tuple[int, int], tuple] = {}
+        while stack:
+            current, at, ready = stack.pop()
+            if self._cached_result(current, at) is not _MISSING:
+                pending.pop((current, at), None)
+                continue
+            if self.features[current].results[at] is None:
+                self._proven_result(current, at, None)
+                continue
+            if not ready:
+                nodes = self._identity_nodes(current, at)
+                if nodes is None:
+                    self._structure(current)
+                    continue
+                pending[(current, at)] = nodes
+                stack.append((current, at, True))
+                dependencies = dict.fromkeys((node[0], node[1]) for kind in nodes
+                                             for _j, _ordinal, node in kind if node is not None)
+                stack.extend((up, place, False) for up, place in dependencies
+                             if self._cached_result(up, place) is _MISSING)
+                continue
+            table = []
+            complete = True
+            for kind, nodes in enumerate(pending.pop((current, at))):
+                held = []
+                for j, ordinal, node in nodes:
+                    source_rule = ("x",)
+                    if node is not None:
+                        up, place, source_kind, source_ordinal = node
+                        source = self._cached_result(up, place)
+                        source_rule = (source[source_kind][source_ordinal - 1]
+                                       if source is not _MISSING and source is not None
+                                       and 0 < source_ordinal <= len(source[source_kind]) else None)
+                    rule = _same_rule(j, ordinal, source_rule)
+                    if rule is None:
+                        complete = False
+                        break
+                    held.append(rule)
+                if not complete:
+                    break
+                table.append(tuple(held))
+            if complete:
+                self._proven_result(current, at, tuple(table))
+            else:
+                self._structure(current)
+        return self._cached_result(index, position)
 
     def _structure(self, index: int) -> _Structure:
         """Feature ``index``'s naming (:class:`_Structure`), with every feature it descends
@@ -807,6 +999,8 @@ class Trace:
                 continue
             if ready:
                 self._structures[current] = self._built(current)
+                self._results.pop(current, None)
+                self._identity_inputs.pop(current, None)
                 continue
             stack.append((current, True))
             for j in range(len(self.features[current].handles)):
@@ -819,14 +1013,21 @@ class Trace:
         """What a feature's structure was computed from, beside its own history and shapes:
         for each input, the same of the feature that made it, or that none of this run did.
         The same in every run of the same code, so a hit's structure is its miss's."""
-        found = self._skeys.get(index)
-        if found is None:
-            parts = []
-            for j in range(len(self.features[index].handles)):
-                source = self._source(index, j)
-                parts.append(self._skey(source[1]) if source[0] == "followed" else source[0].encode())
-            found = self._skeys[index] = hashlib.blake2b(b"|".join(parts), digest_size=12).digest()
-        return found
+        stack = [(index, False)]
+        while stack:
+            current, ready = stack.pop()
+            if current in self._skeys:
+                continue
+            sources = [self._source(current, j) for j in range(len(self.features[current].handles))]
+            if ready:
+                parts = [self._skeys[source[1]] if source[0] == "followed" else source[0].encode()
+                         for source in sources]
+                self._skeys[current] = hashlib.blake2b(b"|".join(parts), digest_size=12).digest()
+            else:
+                stack.append((current, True))
+                stack.extend((source[1], False) for source in sources
+                             if source[0] == "followed" and source[1] not in self._skeys)
+        return self._skeys[index]
 
     def _built(self, index: int) -> _Structure:
         feature = self.features[index]
@@ -839,6 +1040,8 @@ class Trace:
         structure = self._computed(index)
         if history is not None:
             history.structures[key] = structure
+            for partial in [partial for partial in history.result_rules if partial[0] == key]:
+                del history.result_rules[partial]
         return structure
 
     def _same(self, index: int, j: int, kind: int, ordinal: int) -> tuple | None:
@@ -847,14 +1050,12 @@ class Trace:
         follow the input."""
         source = self._source(index, j)
         if source[0] == "foreign":
-            return ("x",)
+            return _same_rule(j, ordinal, ("x",))
         node = self._input_node(index, j, kind, ordinal)
         if node is None:
             return None
         rule = self._rule(node)
-        if rule is None:
-            return None
-        return ("x",) if rule[0] == "x" else ("s", j, ordinal)
+        return _same_rule(j, ordinal, rule)
 
     def _sames(self, index: int, j: int, kind: int, count: int) -> list[tuple | None]:
         """:meth:`_same` of each of the ``count`` elements of one kind of input ``j`` of
@@ -868,23 +1069,21 @@ class Trace:
         _followed, up, position, location = source
         if location is not None:
             return [self._same(index, j, kind, ordinal) for ordinal in range(1, count + 1)]
-        rules = self._structure(up).rules[position]
+        rules = self._result_rules(up, position)
         held = () if rules is None else rules[kind]
-        return [None if ordinal > len(held) else ("x",) if held[ordinal - 1][0] == "x" else ("s", j, ordinal)
+        return [_same_rule(j, ordinal, held[ordinal - 1] if ordinal <= len(held) else None)
                 for ordinal in range(1, count + 1)]
 
     def _computed(self, index: int) -> _Structure:
         feature = self.features[index]
         origins = feature.history.origins if feature.history is not None else {}
-        given = [None if handle is None else [_map(handle, topabs) for topabs in _TOPABS] for handle in feature.handles]
-        held_inputs = [(j, held) for j, held in enumerate(given) if held is not None]
-        first_inputs: dict[int, tuple[Any, list[tuple[int, int]]]] = {}
+        identity = self._identity(index)
         sames: dict[tuple[int, int], list[tuple | None]] = {}
 
         def same(j: int, kind: int, ordinal: int) -> tuple | None:
             found = sames.get((j, kind))
             if found is None:
-                found = sames[(j, kind)] = self._sames(index, j, kind, given[j][kind].Extent())
+                found = sames[(j, kind)] = self._sames(index, j, kind, identity.count(j, kind))
             return found[ordinal - 1]
 
         made = [TopTools_IndexedMapOfShape() for _kind in _TOPABS]
@@ -892,6 +1091,12 @@ class Trace:
         for position, result in enumerate(feature.results):
             if result is None:
                 rules.append(None)
+                continue
+            proven = self._results.get(index, {}).get(position, _MISSING)
+            if proven is _MISSING and feature.history is not None:
+                proven = feature.history.result_rules.get((self._skey(index), position), _MISSING)
+            if proven is not _MISSING:
+                rules.append(None if proven is None else [list(kind) for kind in proven])
                 continue
             copied = feature.copies.get(position)
             if copied is not None:
@@ -905,26 +1110,13 @@ class Trace:
             table: list[list[tuple | None]] = [[None] * maps[kind].Extent() for kind in range(3)]
             for kind in range(3):
                 by_history = False
-                lookup = None
-                if len(held_inputs) > 1 and maps[kind].Extent():
-                    lookup = first_inputs.get(kind)
-                    if lookup is None:
-                        lookup = first_inputs[kind] = _input_index(held_inputs, kind)
                 for ordinal in range(1, maps[kind].Extent() + 1):
                     element = maps[kind].FindKey(ordinal)
                     rule = None
-                    if lookup is None:
-                        for j, held in held_inputs:
-                            at = held[kind].FindIndex(element)
-                            if at:
-                                rule = same(j, kind, at)
-                                break
-                    else:
-                        elements, owners = lookup
-                        at = elements.FindIndex(element)
-                        if at:
-                            j, source_ordinal = owners[at - 1]
-                            rule = same(j, kind, source_ordinal)
+                    owner = identity.owner(kind, element)
+                    if owner is not None:
+                        j, source_ordinal = owner
+                        rule = same(j, kind, source_ordinal)
                     if rule is None and partners:
                         rule = same(partners[0], kind, ordinal)
                     if rule is None:
@@ -939,6 +1131,7 @@ class Trace:
                     if rule is None:
                         table[kind][ordinal - 1] = ("m", made[kind].Add(maps[kind].FindKey(ordinal)))
             rules.append(table)
+        self._identity_inputs.pop(index, None)
         return _Structure(rules)
 
     @staticmethod

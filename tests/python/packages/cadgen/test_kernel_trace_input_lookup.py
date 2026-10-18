@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -187,6 +188,190 @@ class InputLookupTest(unittest.TestCase):
         structure = trace._structure(1)
         self.assertTrue(all(rule == ("x",) for rules in structure.rules[0] for rule in rules))
         self.assertEqual(trace.account(placed.Located(TopLoc_Location()), makers.get), (None, {}))
+
+    def test_requested_identity_result_keeps_global_made_order_and_mixed_fallback(self):
+        mixed = _compound(self.a, self.c)
+        results = [self.b, self.a, self.c, self.b, mixed, None]
+
+        def fixture():
+            trace = kernel_trace.Trace(None)
+            _record(trace, "Solid.make_box", [], [self.a])
+            feature = _record(trace, "multi", [(self.a, 0)], results)
+            feature.history = kernel_history.History()
+            trace._made_by = lambda _shape: 1
+            return trace, feature
+
+        eager, _feature = fixture()
+        expected = eager._structure(1)
+        accounts = [eager.account(body, eager._made_by) for body in (self.a, self.b, self.c, mixed)]
+        self.assertEqual([rule[1] for rule in expected.rules[2][kernel_trace.FACE]], list(range(7, 13)))
+        self.assertEqual(expected.rules[0], expected.rules[3], "repeated new topology keeps its made ordinals")
+        for order in ((1, 0, 2, 4), (2, 1, 0, 4), (5, 1, 4, 2, 0)):
+            with self.subTest(order=order):
+                trace, feature = fixture()
+                with mock.patch.object(trace, "_computed", wraps=trace._computed) as computed:
+                    for offset, position in enumerate(order):
+                        rules = trace._result_rules(1, position)
+                        self.assertEqual(None if rules is None else [list(kind) for kind in rules],
+                                         expected.rules[position])
+                        if offset == 0 and position == 1:
+                            self.assertNotIn(1, trace._structures)
+                            self.assertTrue(feature.history.result_rules)
+                            self.assertNotIn(mock.call(1), computed.call_args_list,
+                                             "the requested inherited slot skips every unrelated output")
+                self.assertEqual(trace._structure(1), expected)
+                self.assertEqual([trace.account(body, trace._made_by) for body in (self.a, self.b, self.c, mixed)],
+                                 accounts)
+                self.assertNotIn(1, trace._identity_inputs)
+                self.assertFalse(feature.history.result_rules, "full completion owns the authoritative table")
+
+    def test_requested_identity_keeps_foreign_masking_overlap_locations_and_lost_sources(self):
+        foreign = _compound(self.a)
+        left, right = _compound(self.a), _compound(self.a)
+        cases = [
+            ([(foreign, None), (self.a, 0)], self.a, False, False),
+            ([(self.a, 0), (foreign, None)], self.a, True, False),
+            ([(self.face, 0), (self.overlap, 2)], self.overlap, True, False),
+            ([(self.a, 0), (self.placed, 3), (self.a.Reversed(), 0)],
+             _compound(self.a, self.placed), True, False),
+            ([(self.a, 1)], self.a, True, True),
+        ]
+        for inputs, output, known, lost in cases:
+            with self.subTest(known=known, lost=lost, placed=output.IsSame(self.overlap)):
+                def fixture():
+                    trace = kernel_trace.Trace(None)
+                    for op, body in (("left", self.a), ("right", self.b),
+                                     ("Compound", self.overlap), ("moved", self.placed)):
+                        _record(trace, op, [], [body])
+                    feature = _record(trace, "Compound", inputs, [output])
+                    feature.history = kernel_history.History()
+                    # Input claims are captured in the feature, independently
+                    # of any later registry maker for these native handles.
+                    trace._made_by = lambda _shape: 4
+                    return trace
+
+                eager, requested = fixture(), fixture()
+                expected = eager._structure(4).rules[0]
+                result = requested._result_rules(4, 0)
+                self.assertEqual([list(kind) for kind in result], expected)
+                self.assertEqual(any(rule != ("x",) for kind in result for rule in kind), known)
+                self.assertEqual(4 in requested._structures, lost)
+
+        # Overlapping named containers have different source features even
+        # though they hold the very same native face/edge/vertex identities.
+        for reverse in (False, True):
+            trace = kernel_trace.Trace(None)
+            _record(trace, "left", [], [left])
+            _record(trace, "right", [], [right])
+            inputs = [(left, 0), (right, 1)]
+            feature = _record(trace, "Compound", inputs[::-1] if reverse else inputs, [self.a])
+            feature.history = kernel_history.History()
+            owners = {left.TShape(): 0, right.TShape(): 1, self.a.TShape(): 2}
+            account = trace.account(self.a, owners.get)[0]
+            self.assertTrue(all(name.startswith("f:fixture." + ("right1." if reverse else "left1."))
+                                for name in account["faces"]))
+
+    def test_proven_tables_rebind_warm_without_native_maps_and_release_workspaces(self):
+        histories = [kernel_history.History() for _ in range(3)]
+        assembly = _compound(self.a, self.b)
+
+        def fixture(prefix, shared):
+            trace = kernel_trace.Trace(None)
+            if prefix:
+                _record(trace, "unrelated", [], [self.c])
+            for body, history in zip((self.a, self.b), shared):
+                feature = _record(trace, "Solid.make_box", [], [body])
+                feature.history = history
+            feature = _record(trace, "Compound", [(self.a, prefix), (self.b, prefix + 1)],
+                              [assembly, self.a, self.b, None])
+            feature.history = shared[2]
+            owners = {self.a.TShape(): prefix + 2, self.b.TShape(): prefix + 2,
+                      assembly.TShape(): prefix + 2}
+            trace._made_by = owners.get
+            return trace, feature
+
+        cold, feature = fixture(0, histories)
+        with mock.patch.object(kernel_trace, "_map", wraps=kernel_trace._map) as maps:
+            cold._result_rules(2, 1)
+            mapped = maps.call_count
+            self.assertNotIn(2, cold._structures)
+            self.assertIn(2, cold._identity_inputs)
+            cold._result_rules(2, 2)
+            self.assertEqual(maps.call_count - mapped, 6,
+                             "a sibling maps only itself and its previously unused source")
+        expected = cold.account(self.a, cold._made_by)[0]
+        self.assertTrue(histories[2].result_rules)
+        self.assertFalse(histories[2].structures)
+
+        def portable(value):
+            return value is None or isinstance(value, (str, int)) or isinstance(value, tuple) and all(
+                portable(item) for item in value)
+
+        self.assertTrue(all(portable(table) for table in histories[2].result_rules.values()))
+        warm, _feature = fixture(1, histories)
+        with mock.patch.object(kernel_trace, "_map", side_effect=AssertionError("a warm proof rebuilt native maps")):
+            warm._result_rules(3, 1)
+            warm._result_rules(3, 2)
+        account, names = warm.account(self.a, warm._made_by)
+        self.assertEqual(account, expected)
+        self.assertEqual(names["fixture.make_box1"], 1, "portable rules bind the current run's source feature")
+        cold._result_rules(2, 0)
+        cold._result_rules(2, 3)
+        self.assertNotIn(2, cold._identity_inputs, "all completed slots release their native index")
+        # Loading the last cached table must likewise release a partially used workspace.
+        warm._identity(3).owner(kernel_trace.FACE, self.face)
+        warm._result_rules(3, 0)
+        warm._result_rules(3, 3)
+        self.assertNotIn(3, warm._identity_inputs)
+        cold._structure(2)
+        adopted, _feature = fixture(1, histories)
+        with mock.patch.object(kernel_trace, "_map", side_effect=AssertionError("a full warm hit rebuilt maps")):
+            adopted._result_rules(3, 1)
+        self.assertTrue({1, 2, 3}.issubset(adopted._structures),
+                        "a full History hit also completes the current run's source ancestry")
+        deferred, _feature = fixture(0, [kernel_history.History() for _ in range(3)])
+        deferred._result_rules(2, 1)
+        self.assertNotIn(1, deferred._structures)
+        self.assertEqual(deferred.given([], lambda _shape: None), [])
+        self.assertTrue({0, 1, 2}.issubset(deferred._structures),
+                        "even a zero-input call freezes earlier partial accounts before it can mutate")
+        self.assertFalse(deferred._results)
+        self.assertFalse(deferred._identity_inputs)
+        cold.reject_copies(feature)
+        self.assertNotIn(2, cold._results)
+        self.assertFalse(histories[2].result_rules)
+        rejected, rejected_feature = fixture(0, [kernel_history.History() for _ in range(3)])
+        rejected._result_rules(2, 1)
+        self.assertIn(2, rejected._identity_inputs)
+        self.assertTrue(rejected_feature.history.result_rules)
+        rejected.reject_copies(rejected_feature)
+        self.assertNotIn(2, rejected._results)
+        self.assertNotIn(2, rejected._identity_inputs)
+        self.assertFalse(rejected_feature.history.result_rules)
+
+    def test_deep_shared_identity_dependencies_and_structure_keys_use_no_recursion(self):
+        count = sys.getrecursionlimit() + 25
+
+        def fixture():
+            trace = kernel_trace.Trace(None)
+            _record(trace, "Solid.make_box", [], [self.a])
+            for index in range(1, count):
+                inputs = [(self.a, index - 1)]
+                if index > 1:
+                    inputs.append((self.a, index - 2))
+                feature = _record(trace, "pass", inputs, [self.a])
+                feature.history = kernel_history.History()
+            trace._made_by = lambda _shape: count - 1
+            return trace
+
+        eager, requested = fixture(), fixture()
+        expected = eager._structure(count - 1).rules[0]
+        actual = requested._result_rules(count - 1, 0)
+        self.assertEqual([list(kind) for kind in actual], expected)
+        self.assertEqual(requested._skey(count - 1), eager._skey(count - 1))
+        self.assertEqual(requested.account(self.a, requested._made_by), eager.account(self.a, eager._made_by))
+        self.assertFalse(requested._identity_inputs)
+        self.assertNotIn(count - 1, requested._structures)
 
 
 if __name__ == "__main__":
