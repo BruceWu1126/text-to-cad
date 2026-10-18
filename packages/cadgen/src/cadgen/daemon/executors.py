@@ -115,7 +115,7 @@ class Job:
 # --- events -------------------------------------------------------------------------
 
 _EVENT_SINK: Callable[[dict], None] | None = None
-_EVENT_LOCK = threading.Lock()
+_EVENT_LOCK = threading.RLock()
 _EVENT_SEQUENCE = itertools.count(1)
 _RESULT_CAPTURE = threading.local()
 
@@ -162,16 +162,16 @@ def emit_event(event: dict) -> None:
         capture._observe(event)
     with _EVENT_LOCK:
         sink = _EVENT_SINK
-    if sink is None:
-        return
-    if "job" not in event:
-        producer = os.environ.get("CADGEN_JOB_ID")
-        if producer:
-            event = {**event, "job": producer, "sequence": next(_EVENT_SEQUENCE)}
-    try:
-        sink(event)
-    except Exception:  # noqa: BLE001 - reporting never fails a build
-        pass
+        if sink is None:
+            return
+        if "job" not in event:
+            producer = os.environ.get("CADGEN_JOB_ID")
+            if producer:
+                event = {**event, "job": producer, "sequence": next(_EVENT_SEQUENCE)}
+        try:
+            sink(event)
+        except Exception:  # noqa: BLE001 - reporting never fails a build
+            pass
 
 
 def model_event(model: Path | str, state: str, **extra: Any) -> dict:

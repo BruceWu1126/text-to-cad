@@ -2311,7 +2311,9 @@ crash-resumable save queue hidden in the cache.
 
 The daemon identifies each accepted request by an epoch and monotonic ordinal,
 records its store root and declared output paths, and attaches producer IDs to
-events. An editing session selects the newest request for its output and store;
+events. Assigning a producer sequence and delivering its event are serialized,
+so concurrent preview completion cannot overtake an announced save. An editing
+session selects the newest request for its output and store;
 late older events cannot replace it. It may retain the previous visible model
 while the newer request builds. A daemon restart expires request ordering; a
 disconnected preview is labelled as such. The ledger is short-lived and
