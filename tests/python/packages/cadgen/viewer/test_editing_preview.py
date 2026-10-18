@@ -122,6 +122,15 @@ class BuildStatusTests(unittest.TestCase):
         ])
         self.assertEqual(result["state"], "disconnected")
 
+    def export(self, ledger, request, model, outputs, tree):
+        """The export job ``request``'s build handed over for ``model``, owing ``outputs``."""
+        step, *meshes = outputs
+        return ledger.owe(request, model, {
+            "kind": "export", "model": f"{model}::source", "tree": tree, "state": "b" * 64, "step": step,
+            "name": "source", "expected": {}, "previous": {"key": None, "outputs": {}}, "displays": [],
+            "meshes": [{"fmt": "stl", "path": mesh, "chord": None, "angle": None} for mesh in meshes]},
+            store_root=self.store)
+
     def test_save_failure_is_a_recorded_result_for_this_output_not_merely_a_preview(self):
         from cadgen.daemon.jobs import JobLedger
 
@@ -143,16 +152,37 @@ class BuildStatusTests(unittest.TestCase):
                     self.assertEqual(invalid["preview"]["parts"], {"c1": "part"})
                     request = ledger.start(tool="run", subject=script, store_root=self.store)
                     event(1, preview={"output": self.output, **preview})
-                event(2, saving={"output": self.output, "tree": tree})
+                job = self.export(ledger, request, script, [self.output], tree)
+                ledger.finish(request, 0)
                 pending = preview_status(self.output, jobs=ledger.snapshot())
                 self.assertEqual(pending["saving"], {"tree": tree})
-                ledger.finish(request, 1, error="disk full")
+                self.assertIn(pending["state"], ("submitted", "building"), "the request is open while its job writes")
+                ledger.finish(job, 1, error="disk full")
                 failed = preview_status(self.output, jobs=ledger.snapshot())
                 self.assertEqual((failed["state"], failed["failureStage"], failed["error"]),
                                  ("failed", "save", "disk full"))
                 self.assertEqual(failed["saveFailure"], {"output": self.output, "tree": tree})
                 self.assertNotIn("saving", failed)
                 self.assertEqual(failed["preview"] is not None, preview is not None)
+
+    def test_a_file_its_job_renamed_into_place_is_no_move_past_the_build(self):
+        """The job moves the file into place a moment before the ledger hears it landed: the
+        build that owes it has not been moved past."""
+        from cadgen.daemon.jobs import JobLedger
+
+        script = str(self.root / "source.py")
+        ledger = JobLedger(clock=lambda: 1000.0)
+        request = ledger.start(tool="run", subject=script, store_root=self.store)
+        ledger.observe({"event": {"job": request["id"], "model": script, "sequence": 1, "state": "building",
+                                  "preview": {"output": self.output, "tree": "a" * 64}}})
+        self.export(ledger, request, script, [self.output], "a" * 64)
+        ledger.finish(request, 0)
+        Path(self.output).write_bytes(b"the job's file, landed")
+        os.utime(self.output, (3000.0, 3000.0))
+        result = preview_status(self.output, jobs=ledger.snapshot())
+        self.assertNotIn("superseded", result)
+        self.assertEqual(result["preview"]["tree"], "a" * 64)
+        self.assertEqual(result["saving"], {"tree": "a" * 64})
 
     def test_a_failed_mesh_save_does_not_fail_the_step_that_landed_in_the_same_run(self):
         from cadgen.catalog import artifact_file_hash
@@ -182,24 +212,28 @@ class BuildStatusTests(unittest.TestCase):
         def event(model, sequence, state="building", **extra):
             ledger.observe({"event": {"job": request["id"], "model": model, "sequence": sequence,
                                        "state": state, **extra}})
-        event(parent, 1, saving={"output": self.output, "tree": "parent"})
-        event(child, 1, saving={"output": child_step, "tree": "child"})
-        event(child, 2, saving={"output": child_mesh, "tree": "child"})
-        event(child, 3, saving={"output": child_failed_step, "tree": "child"})
+        parent_tree, child_tree = "a" * 64, "c" * 64
+        parent_job = self.export(ledger, request, parent, [self.output], parent_tree)
+        event(child, 1)
+        child_job = self.export(ledger, request, child, [child_step, child_mesh], child_tree)
+        other_job = self.export(ledger, request, child, [child_failed_step], child_tree)
         event(child, 4, state="done")
         # A child closes at result. An intervening write its save refuses is older than
         # the save failure, so it must not hide that failure as though it happened later.
         Path(child_failed_step).write_bytes(b"edited while exporting")
         os.utime(child_failed_step, (1001.0, 1001.0))
         Path(child_step).write_bytes(b"saved child")
-        event(child, 5, saved={"output": child_step, "tree": "child", "documentHash": artifact_file_hash(Path(child_step))})
+        ledger.published(child_job, {"output": child_step, "tree": child_tree,
+                                     "documentHash": artifact_file_hash(Path(child_step))})
         now = 1002.0
-        ledger.finish(request, 1, error="destination changed")
+        ledger.finish(request, 0)
+        for job in (parent_job, child_job, other_job):
+            ledger.finish(job, 1, error="destination changed")
         jobs = ledger.snapshot()
         root = preview_status(self.output, jobs=jobs)
         unsaved_child = preview_status(child_failed_step, jobs=jobs)
-        self.assertEqual(root["saveFailure"], {"output": self.output, "tree": "parent"})
-        self.assertEqual(unsaved_child["saveFailure"], {"output": child_failed_step, "tree": "child"})
+        self.assertEqual(root["saveFailure"], {"output": self.output, "tree": parent_tree})
+        self.assertEqual(unsaved_child["saveFailure"], {"output": child_failed_step, "tree": child_tree})
         self.assertNotIn("superseded", unsaved_child)
         self.assertEqual(preview_status(child_step, jobs=jobs)["state"], "done")
         os.utime(child_failed_step, (1003.0, 1003.0))

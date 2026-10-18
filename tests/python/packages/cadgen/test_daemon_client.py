@@ -147,91 +147,38 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertEqual(outcome, 0)
         self.assertEqual(err, "hello\n")
 
-    def test_a_released_frame_ends_the_request_with_its_code_before_the_exit(self):
-        """the worker releases its client once the command's answer is
-        complete and writes the files after; the client returns on the frame and reads
-        nothing more (the exit frame reaches nobody)."""
-        outcome, out, _err = self._run([{"stream": "stdout", "data": "current part.step\n"}, {"released": 0}])
-        self.assertEqual((outcome, out), (0, "current part.step\n"))
-
-    def test_a_nested_compile_keeps_its_terminal_failure_after_releasing_the_answer(self):
-        released, said = [], []
-        channel = _ScriptedChannel([
-            {"released": 0},
-            {"stream": "stderr", "data": "finishing failed\n"},
-            {"exit": 1},
-        ])
-        code = client._run_request(channel, PAYLOAD, on_release=released.append, on_stream=said.append)
-        self.assertEqual((released, code, said), ([0], 1, ["finishing failed\n"]))
-
-    def test_a_restart_after_release_fails_terminally_without_replaying_the_request(self):
-        released, said = [], []
-        channel = _ScriptedChannel([{"released": 0}, {"restart": True}])
-        with mock.patch.object(client, "_connect_or_spawn", return_value=channel) as connected:
-            code = client._run_with_retry(PAYLOAD, on_release=released.append, on_stream=said.append)
-        self.assertEqual((released, code), ([0], 1))
-        connected.assert_called_once()
-        self.assertIn("restarted before confirming the completed request", "".join(said))
-        self.assertIn("NOT retried", "".join(said))
-
-    def test_a_compile_job_keeps_late_events_and_failure_out_of_a_later_build_sink(self):
+    def test_a_compile_job_settles_with_its_exit_and_closes_its_tree_line_once(self):
+        """A compile answers with its exit: what its result owes after (its display data) is
+        the daemon's. Its events reach the build tree until then, and its outcome -- a failure,
+        a transport fault -- settles the job with the reason in its output."""
         from cadgen.daemon import executors
 
-        finish = threading.Event()
-        events = []
-
-        def run(*args, on_release, on_event, on_stream, **kwargs):
-            on_release(0)
-            if not finish.wait(5):
-                raise AssertionError("test did not finish the released compile")
-            on_event({"state": "failed", "phase": "late compile event"})
-            on_stream("terminal compile failure\n")
-            return 1
-
-        with tempfile.TemporaryDirectory(prefix="compile-terminal-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="compile-exit-") as temporary:
             document = pathlib.Path(temporary) / "part.step"
             document.write_bytes(b"selected document bytes")
-            with mock.patch.object(client, "run_nested", side_effect=run), \
-                    mock.patch.object(executors, "emit_event", side_effect=events.append):
-                job = executors.submit_compile(document)
-                try:
-                    self.assertEqual(job.wait(5), 0)
-                    self.assertEqual(sum(event["state"] == "done" for event in events), 1)
-                    with self.assertRaises(TimeoutError):
-                        job.wait_terminal(0)
-                finally:
-                    finish.set()
-                self.assertEqual(job.wait_terminal(5), 1)
-                self.assertEqual(job.wait(), 0, "a terminal failure cannot rewrite the native answer")
-                self.assertEqual(job.output(), "terminal compile failure\n")
-        self.assertFalse(any(event["state"] == "failed" for event in events), events)
-
-    def test_a_compile_transport_outcome_settles_its_job_and_narrates_only_its_answer(self):
-        from cadgen.daemon import executors
-
-        with tempfile.TemporaryDirectory(prefix="compile-terminal-") as temporary:
-            document = pathlib.Path(temporary) / "part.step"
-            document.write_bytes(b"selected document bytes")
-            for release, fail in ((False, False), (False, True), (True, True)):
-                with self.subTest(release=release, fail=fail):
+            for outcome in ("done", "failed", "fault"):
+                with self.subTest(outcome=outcome):
                     events = []
 
-                    def run(*args, on_release, **kwargs):
-                        if release:
-                            on_release(0)
-                        if fail:
+                    def run(*args, on_event, on_stream, **kwargs):
+                        on_event({"state": "building", "phase": "compile"})
+                        if outcome == "fault":
                             raise RuntimeError("unexpected transport fault")
-                        return 0
+                        if outcome == "failed":
+                            on_stream("compile failure\n")
+                        return int(outcome == "failed")
 
                     with mock.patch.object(client, "run_nested", side_effect=run), \
                             mock.patch.object(executors, "emit_event", side_effect=events.append):
                         job = executors.submit_compile(document)
-                        self.assertEqual(job.wait_terminal(5), int(fail))
-                        self.assertEqual(job.wait(), int(fail and not release))
+                        self.assertEqual(job.wait(5), int(outcome != "done"))
                     final = [event["state"] for event in events if event["state"] in {"done", "failed"}]
-                    self.assertEqual(final, ["failed" if fail and not release else "done"])
-                    if fail:
+                    self.assertEqual(final, ["done" if outcome == "done" else "failed"])
+                    self.assertIn({"state": "building", "phase": "compile"}, events)
+                    if outcome == "fault":
                         self.assertIn("RuntimeError: unexpected transport fault", job.output())
+                    if outcome == "failed":
+                        self.assertEqual(job.output(), "compile failure\n")
 
 
 class ResidentProcessLifecycle(unittest.TestCase):
@@ -545,60 +492,77 @@ class ServerRelaysTheDeath(unittest.TestCase):
                 self.assertEqual(pool.release.call_args.kwargs["cancelled"], ended == "cancelled")
                 self.assertEqual(next(frame["workerDied"]["exitStatus"] for frame in conn.frames if "workerDied" in frame), status)
 
-    def test_a_job_that_released_its_client_finishes_after_the_client_left(self):
-        """a worker that released its client goes on writing the files; the
-        client leaving after that is no loss -- the worker is not killed, its job ends with
-        its exit frame as done, not cancelled, and the ledger closes it then."""
-        class Releasing:
-            pid = 778
-            extra = False
+    def test_a_build_answers_with_its_exit_while_the_job_it_handed_over_writes_its_file(self):
+        """A build hands the supervisor the job its result owes (``owes``): the supervisor puts it
+        in the ledger and tells the worker so before anything else, then runs it on a worker of its
+        own. The build's exit is its answer and its worker goes back to the pool at once; its row
+        reads as building, the file as being written, until the job says the file landed."""
+        from cadgen.daemon import broker as broker_mod
+        from cadgen.daemon.artifacts import normalize_request, result_frame
+        from cadgen.daemon.jobs import being_written
+
+        step = os.path.realpath("/w/part.step")
+        request = normalize_request({
+            "kind": "export", "model": "/w/part.py::part", "tree": "a" * 64, "state": "b" * 64, "step": step,
+            "name": "part", "expected": {}, "previous": {"key": None, "outputs": {}}, "displays": [], "meshes": []})
+        landed = threading.Event()
+
+        class Build:
+            pid, extra = 778, False
 
             def __init__(self) -> None:
                 self.sent: list[dict] = []
 
-            def send(self, request: dict) -> None:
-                self.sent.append(request)
+            def send(self, message: dict) -> None:
+                self.sent.append(message)
 
             def frames(self, **_kwargs):
+                yield {"event": {"model": "/w/part.py", "state": "building", "phase": "Saving STEP"}}
                 yield {"stream": "stdout", "data": "built part.step\n"}
-                yield {"released": 0}
-                yield {"event": {"model": "/w/part.py", "state": "building", "phase": "STEP saved",
-                                 "saved": {"output": "/w/part.step", "tree": "t" * 64, "documentHash": "d" * 64}}}
+                yield {"owes": {"request": request, "model": "/w/part.py"}}
                 yield {"exit": 0}
 
             def alive(self) -> bool:
                 return True
 
-            def kill(self) -> None:
-                raise AssertionError("the worker was killed after releasing its client")
+        class Export(Build):
+            pid = 779
 
-        class Leaves(self._Conn):
-            """A client that returns on the released frame: every send after it fails."""
+            def frames(self, **_kwargs):
+                if not landed.wait(10):
+                    raise AssertionError("the test never let the export land")
+                yield {"published": {"output": step, "tree": "a" * 64, "documentHash": "d" * 64}}
+                yield {"artifactResult": result_frame(request, {"saved": [], "superseded": None})}
+                yield {"exit": 0}
 
-            gone = False
-
-            def send(self, raw: bytes) -> None:
-                if self.gone:
-                    raise BrokenPipeError("the client left")
-                super().send(raw)
-                self.gone = "released" in self.frames[-1]
-
+        build, export = Build(), Export()
         pool = mock.Mock()
-        worker = Releasing()
-        pool.acquire.return_value = worker
-        conn = Leaves()
+        pool.acquire.side_effect = [build, export]
+        conn = self._Conn()
         jobs = JobLedger()
         with mock.patch.object(server, "_JOBS", jobs), mock.patch.object(server, "_POOL", pool), \
-                mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0):
-            server._handle_request(conn, {"tool": "run", "argv": ["/w/part.py"], "cwd": "/w",
-                                          "prog": "python part.py"})
-        self.assertEqual([next(iter(frame)) for frame in conn.frames if frame != {"stream": "stdout", "data": ""}],
-                         ["stream", "released"], "the client heard its release and nothing after")
-        pool.release.assert_called_once_with(worker, healthy=True, cancelled=False)
-        (job,) = jobs.snapshot()
-        self.assertEqual((job["state"], job["exit"]), ("done", 0))
-        self.assertEqual(job["savedResults"][os.path.realpath("/w/part.step")]["documentHash"], "d" * 64,
-                         "the save landed after the release")
+                mock.patch.object(server, "_BROKER", broker_mod.Broker()), mock.patch.object(server, "_HOUSEKEEPER"), \
+                mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0), \
+                mock.patch.object(server.telemetry, "build", return_value=mock.Mock()):
+            server._handle_request(conn, {"tool": "run", "argv": ["/w/part.py"], "cwd": "/w", "prog": "python part.py",
+                                          "store_root": "/store"})
+            self.assertEqual(conn.frames[-1], {"exit": 0})
+            self.assertNotIn("owes", json.dumps(conn.frames), "a handed-over job is never relayed")
+            owed = next(message for message in build.sent if message.get("kind") == "owed")
+            [row] = [job for job in jobs.snapshot() if job["tool"] == "run"]
+            self.assertEqual(row["state"], "building", "its file is still being written")
+            self.assertTrue(being_written(jobs.snapshot(), step))
+            self.assertEqual(pool.release.call_args_list[0], mock.call(build, healthy=True, cancelled=False))
+            [thread] = [thread for thread in list(server._INFLIGHT) if thread.name == "cadgen-owed"]
+            landed.set()
+            thread.join(10)
+        rows = {job["id"]: job for job in jobs.snapshot()}
+        row = rows[row["id"]]
+        self.assertEqual((row["state"], row["exit"]), ("done", 0))
+        self.assertEqual(row["savedResults"][step]["documentHash"], "d" * 64)
+        self.assertFalse(being_written(list(rows.values()), step))
+        self.assertEqual(rows[owed["job"]]["state"], "done")
+        self.assertEqual(export.sent[0]["artifact"], request)
 
     def test_a_job_whose_caller_left_is_released_as_cancelled_not_crashed(self):
         class Gone(self._Conn):

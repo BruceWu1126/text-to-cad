@@ -341,26 +341,55 @@ class Lifecycle(unittest.TestCase):
         self.clock.now += 61.0
         self.assertEqual([], self.ledger.snapshot())
 
-    # --- the files a request still owes ---------------------------------------------------
+    # --- what a build owes once its result is recorded ---------------------------------
 
-    def _owing(self, request, model, sequence, output, tree):
-        self.ledger.observe(self._event(model, "building", job=request["id"], sequence=sequence,
-                                       saving={"output": output, "tree": tree}))
+    TREE, OTHER, PRODUCER = "a" * 64, "b" * 64, {"build123d": "0.11", "ocp": "7.9", "cadqueryOcp": "7.9.1"}
 
-    def _saved(self, request, model, sequence, output, tree):
-        self.ledger.observe(self._event(model, "building", job=request["id"], sequence=sequence,
-                                       saved={"output": output, "tree": tree, "documentHash": "d" * 64}))
+    def _export(self, model, outputs, tree=TREE):
+        """An export job's request for ``model`` writing ``outputs`` (the STEP first)."""
+        step, *meshes = outputs
+        return {"kind": "export", "model": f"{model}::widget", "tree": tree, "state": "c" * 64, "step": step,
+                "name": "widget", "expected": {}, "previous": {"key": None, "outputs": {}}, "displays": [],
+                "meshes": [{"fmt": "stl", "path": mesh, "chord": None, "angle": None} for mesh in meshes]}
 
-    def test_a_file_a_result_owes_is_being_written_until_it_is_saved(self):
+    def _display(self, cids, tree=TREE):
+        return {"kind": "display", "tree": tree, "cids": list(cids), "producer": self.PRODUCER}
+
+    def _owe(self, request, model, artifact):
+        return self.ledger.owe(request, model, artifact, store_root=request["storeRoot"])
+
+    def _saved(self, job, output, tree=TREE):
+        self.ledger.published(job, {"output": output, "tree": tree, "documentHash": "d" * 64})
+
+    def test_a_file_a_result_owes_is_being_written_until_its_job_saves_it(self):
         from cadgen.daemon.jobs import being_written
 
         request = self.ledger.start(tool="run", subject=self.model)
         output = str(Path(self.model).with_suffix(".step"))
         self.assertFalse(being_written(self.ledger.snapshot(), output))
-        self._owing(request, self.model, 1, output, "t" * 64)
+        job = self._owe(request, self.model, self._export(self.model, [output]))
         self.assertTrue(being_written(self.ledger.snapshot(), output))
-        self._saved(request, self.model, 2, output, "t" * 64)
+        self._saved(job, output)
         self.assertFalse(being_written(self.ledger.snapshot(), output))
+        self.assertEqual(self.ledger.snapshot()[0]["savedResults"][output]["documentHash"], "d" * 64)
+
+    def test_a_request_that_ended_well_stays_open_until_the_jobs_it_handed_over_end(self):
+        """Its process exits with its answer; the row reads as building, and is listed, until
+        the last job its rows owe has ended -- then done."""
+        from cadgen.daemon.jobs import being_written
+
+        request = self.ledger.start(tool="run", subject=self.model)
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, phase="Saving STEP"))
+        output = str(Path(self.model).with_suffix(".step"))
+        job = self._owe(request, self.model, self._export(self.model, [output]))
+        self.ledger.finish(request, 0)
+        self.assertEqual(("building", None, None), (request["state"], request["exit"], request["finishedAt"]))
+        self.clock.now += 600.0  # a STEP of hundreds of megabytes
+        self.assertTrue(being_written(self.ledger.snapshot(), output))
+        self._saved(job, output)
+        self.ledger.finish(job, 0)
+        self.assertEqual(("done", 0), (request["state"], request["exit"]))
+        self.assertIsNotNone(request["finishedAt"])
 
     def test_only_the_newest_result_that_owes_a_file_is_waited_for(self):
         # Two edits in a row: the older run's export is skipped once the newer result is
@@ -370,13 +399,16 @@ class Lifecycle(unittest.TestCase):
         output = str(Path(self.model).with_suffix(".step"))
         older = self.ledger.start(tool="run", subject=self.model)
         newer = self.ledger.start(tool="run", subject=self.model)
-        self._owing(older, self.model, 1, output, "a" * 64)
-        self._owing(newer, self.model, 1, output, "b" * 64)
+        older_job = self._owe(older, self.model, self._export(self.model, [output], tree=self.OTHER))
+        newer_job = self._owe(newer, self.model, self._export(self.model, [output]))
         self.assertTrue(being_written(self.ledger.snapshot(), output))
-        self._saved(newer, self.model, 2, output, "b" * 64)
+        self._saved(newer_job, output)
         self.assertFalse(being_written(self.ledger.snapshot(), output), "the older run's export is no wait")
+        self.ledger.finish(newer_job, 0)
         self.ledger.finish(newer, 0)
         self.assertFalse(being_written(self.ledger.snapshot(), output), "finishing the newer request cannot revive the older write")
+        self.ledger.finish(older_job, 0)  # superseded: it wrote nothing, and fails nothing
+        self.assertNotIn("saveFailures", older)
         self.clock.now += 121
         self.assertFalse(being_written(self.ledger.snapshot(), output), "expiry cannot revive it either")
 
@@ -386,33 +418,14 @@ class Lifecycle(unittest.TestCase):
         output = str(Path(self.model).with_suffix(".step"))
         older = self.ledger.start(tool="run", subject=self.model)
         newer = self.ledger.start(tool="run", subject=self.model)
-        self._owing(older, self.model, 1, output, "a" * 64)
-        self._owing(newer, self.model, 1, output, "b" * 64)
-        self.ledger.finish(newer, 1, error="publish refused")
+        self._owe(older, self.model, self._export(self.model, [output], tree=self.OTHER))
+        newer_job = self._owe(newer, self.model, self._export(self.model, [output]))
+        self.ledger.finish(newer_job, 1, error="publish refused")
         self.assertFalse(being_written(self.ledger.snapshot(), output))
 
-    def test_a_file_the_asking_request_owes_is_no_wait_inside_it(self):
-        # A body's own run writes its files after the bodies return: waiting would never end.
-        from cadgen.daemon.jobs import being_written
-
-        parent = str((Path(self.tmp.name) / "rig.py").resolve())
-        request = self.ledger.start(tool="run", subject=parent)
-        output = str(Path(self.model).with_suffix(".step"))
-        self._owing(request, self.model, 1, output, "t" * 64)
-        rows = self.ledger.snapshot()
-        self.assertTrue(being_written(rows, output))
-        self.assertFalse(being_written(rows, output, own=request["id"]), "a child row is its request's own")
-
-    def test_a_requests_end_settles_what_its_rows_owed(self):
-        from cadgen.daemon.jobs import being_written
-
-        request = self.ledger.start(tool="run", subject=self.model)
-        output = str(Path(self.model).with_suffix(".step"))
-        self._owing(request, self.model, 1, output, "t" * 64)
-        self.ledger.finish(request, 0)
-        self.assertFalse(being_written(self.ledger.snapshot(), output))
-
-    def test_save_failures_are_recorded_per_unsaved_output_never_from_a_provisional_preview(self):
+    def test_a_failed_job_fails_each_file_it_did_not_save_never_a_preview_alone(self):
+        """A save failure is per output: a mesh the job could not write fails, the STEP it
+        saved first stays saved. A build that failed with only a preview owes no save."""
         output = str(Path(self.model).with_suffix(".step"))
         early = self.ledger.start(tool="run", subject=self.model)
         self.ledger.observe(self._event(self.model, "building", job=early["id"], sequence=1,
@@ -422,73 +435,134 @@ class Lifecycle(unittest.TestCase):
 
         request = self.ledger.start(tool="run", subject=self.model)
         mesh = str(Path(output).with_suffix(".stl"))
-        self._owing(request, self.model, 1, output, "recorded")
-        self._owing(request, self.model, 2, mesh, "recorded")
-        self._saved(request, self.model, 3, output, "recorded")
-        self.ledger.finish(request, 1, error="mesh destination is read-only")
-        self.assertNotIn("saving", request, "the request no longer writes anything")
+        job = self._owe(request, self.model, self._export(self.model, [output, mesh]))
+        self._saved(job, output)
+        self.ledger.finish(request, 0)
+        self.ledger.finish(job, 1, error="mesh destination is read-only")
+        self.assertNotIn("saving", request, "the request writes nothing more")
         self.assertEqual(set(request["saveFailures"]), {mesh})
-        self.assertEqual(request["saveFailures"][mesh]["tree"], "recorded")
-        self.assertEqual(request["savedResults"][output]["tree"], "recorded")
+        self.assertEqual(request["saveFailures"][mesh]["tree"], self.TREE)
+        self.assertEqual(request["savedResults"][output]["tree"], self.TREE)
+        self.assertEqual((request["state"], request["exit"], request["error"]),
+                         ("failed", 1, "mesh destination is read-only"))
 
     def test_newer_results_supersede_retained_save_failures_only_in_their_store(self):
         output = str(Path(self.model).with_suffix(".step"))
         older = self.ledger.start(tool="run", subject=self.model, store_root="/one")
-        self._owing(older, self.model, 1, output, "old")
-        self.ledger.finish(older, 1, error="disk full")
+        self.ledger.finish(self._owe(older, self.model, self._export(self.model, [output], tree=self.OTHER)), 1,
+                           error="disk full")
         other = self.ledger.start(tool="run", subject=self.model, store_root="/two")
-        self._owing(other, self.model, 1, output, "other store")
+        self._owe(other, self.model, self._export(self.model, [output]))
         self.assertNotIn("supersededOutputs", older)
         newer = self.ledger.start(tool="run", subject=self.model, store_root="/one")
-        self._owing(newer, self.model, 1, output, "new")
+        job = self._owe(newer, self.model, self._export(self.model, [output]))
         self.assertEqual(older["supersededOutputs"], [output])
         self.assertTrue(older["saveFailures"][output]["superseded"])
-        self._saved(newer, self.model, 2, output, "new")
+        self._saved(job, output)
+        self.ledger.finish(job, 0)
         self.ledger.finish(newer, 0)
         self.assertNotIn("saveFailures", newer, "a successful retry carries no old failure")
 
-    def test_a_cancelled_request_does_not_turn_a_recorded_result_into_a_save_failure(self):
+    def test_a_cancelled_request_still_saves_what_its_jobs_write(self):
+        """Its caller left: the request ends cancelled, and the job it handed over goes on --
+        the result is recorded, and its file is the result's."""
+        from cadgen.daemon.jobs import being_written
+
         request = self.ledger.start(tool="run", subject=self.model)
-        self._owing(request, self.model, 1, str(Path(self.model).with_suffix(".step")), "recorded")
+        output = str(Path(self.model).with_suffix(".step"))
+        job = self._owe(request, self.model, self._export(self.model, [output]))
         self.ledger.finish(request, 1, error="client left", cancelled=True)
         self.assertEqual(request["state"], "cancelled")
+        self.assertTrue(being_written(self.ledger.snapshot(), output))
+        self._saved(job, output)
+        self.ledger.finish(job, 0)
+        self.assertEqual(request["state"], "cancelled")
         self.assertNotIn("saveFailures", request)
+        self.assertIn(output, request["savedResults"])
 
-    def test_a_failed_request_fails_the_closed_row_that_owed_a_file(self):
-        # A child's row closes at its own done, before its file is written; its export failing
-        # after is the request's failure, and the file's reader sees it on the child's row.
+    def test_a_failed_job_fails_the_closed_child_row_that_owed_its_file(self):
+        # A child's row closes at its own done, before its file is written; its job failing
+        # after is its failure, and the file's reader sees it on the child's row. A sibling
+        # whose file landed stays done; the request fails with the reason when it closes.
         parent = str((Path(self.tmp.name) / "rig.py").resolve())
         request = self.ledger.start(tool="run", subject=parent)
         output = str(Path(self.model).with_suffix(".step"))
-        self._owing(request, self.model, 1, output, "t" * 64)
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, parent=parent))
+        child_job = self._owe(request, self.model, self._export(self.model, [output]))
         self.ledger.observe(self._event(self.model, "done", job=request["id"], sequence=2, parent=parent))
         sibling = str((Path(self.tmp.name) / "pin.py").resolve())
-        self._owing(request, sibling, 3, str(Path(sibling).with_suffix(".step")), "p" * 64)
+        sibling_step = str(Path(sibling).with_suffix(".step"))
+        self.ledger.observe(self._event(sibling, "building", job=request["id"], sequence=3, parent=parent))
+        sibling_job = self._owe(request, sibling, self._export(sibling, [sibling_step], tree=self.OTHER))
         self.ledger.observe(self._event(sibling, "done", job=request["id"], sequence=4, parent=parent))
-        self._saved(request, sibling, 5, str(Path(sibling).with_suffix(".step")), "p" * 64)
-        self.ledger.finish(request, 1, error="the STEP file or its annotations changed during the build")
-        rows = {job["subject"]: job for job in self.ledger.snapshot()}
+        self._saved(sibling_job, sibling_step, tree=self.OTHER)
+        self.ledger.finish(sibling_job, 0)
+        self.ledger.finish(request, 0)
+        self.ledger.finish(child_job, 1, error="the STEP file or its annotations changed during the build")
+        rows = {job["subject"]: job for job in self.ledger.snapshot() if job["tool"] == "run"}
         self.assertEqual(("failed", "the STEP file or its annotations changed during the build"),
                          (rows[self.model]["state"], rows[self.model]["error"]))
         self.assertEqual(("done", None), (rows[sibling]["state"], rows[sibling]["error"]),
                          "a row whose file landed stays done")
-        self.assertEqual(rows[self.model]["saveFailures"][output]["tree"], "t" * 64)
+        self.assertEqual(rows[self.model]["saveFailures"][output]["tree"], self.TREE)
         self.assertNotIn("saveFailures", rows[sibling])
-        self.assertEqual("failed", rows[parent]["state"])
+        self.assertEqual(("failed", 1), (rows[parent]["state"], rows[parent]["exit"]))
 
-    def test_a_row_still_owing_a_file_is_kept_until_its_request_ends(self):
+    def test_a_row_still_owing_a_file_is_kept_until_its_job_ends(self):
         from cadgen.daemon.jobs import being_written
 
         parent = str((Path(self.tmp.name) / "rig.py").resolve())
         request = self.ledger.start(tool="run", subject=parent)
         output = str(Path(self.model).with_suffix(".step"))
-        self._owing(request, self.model, 1, output, "t" * 64)
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, parent=parent))
+        job = self._owe(request, self.model, self._export(self.model, [output]))
         self.ledger.observe(self._event(self.model, "done", job=request["id"], sequence=2, parent=parent))
-        self.clock.now += 61.0  # a long parent body after the child's done
+        self.ledger.finish(request, 1, error="the parent's body failed")
+        self.clock.now += 61.0  # a long export after the request failed
         self.assertTrue(being_written(self.ledger.snapshot(), output))
-        self.ledger.finish(request, 0)
+        self._saved(job, output)
+        self.ledger.finish(job, 0)
         self.clock.now += 61.0
-        self.assertEqual([], self.ledger.snapshot())
+        self.assertEqual([], [row for row in self.ledger.snapshot() if row["tool"] == "run"])
+
+    def test_the_display_jobs_a_build_handed_over_name_its_preview_parts_as_they_answer(self):
+        """The preview names the parts the store holds and those its jobs derive (``pending``);
+        each job's answer names its parts -- in the parent's preview too, whose tree places a
+        child's components by the same ids, even one announced after the child's job answered.
+        A job that fails leaves its parts unnamed and a warning, never a failed row."""
+        from cadgen.daemon.artifacts import result_frame
+
+        parent = str((Path(self.tmp.name) / "rig.py").resolve())
+        request = self.ledger.start(tool="run", subject=parent)
+        child_output, parent_output = (str(Path(path).with_suffix(".step")) for path in (self.model, parent))
+
+        def preview(model, output, tree, parts, pending, sequence):
+            self.ledger.observe(self._event(model, "building", job=request["id"], sequence=sequence, preview={
+                "output": output, "tree": tree, "producer": self.PRODUCER, "parts": parts, "pending": pending,
+                "complete": not pending}))
+
+        preview(self.model, child_output, self.OTHER, {}, {"1" * 16: "k1"}, 1)
+        child_display = self._display(["1" * 16], tree=self.OTHER)
+        child_job = self._owe(request, self.model, child_display)
+        self.ledger.record_artifact_result(child_job, result_frame(child_display, {"1" * 16: {}}))
+        self.ledger.finish(child_job, 0)
+        child = next(row for row in self.ledger.snapshot() if row["subject"] == self.model)
+        self.assertEqual((child["previews"][child_output]["parts"], child["previews"][child_output]["complete"]),
+                         ({"1" * 16: "k1"}, True))
+        # The parent's preview, announced after the child's job answered: the child's part is named.
+        preview(parent, parent_output, self.TREE, {}, {"1" * 16: "k1", "2" * 16: "k2", "3" * 16: "k3"}, 2)
+        own = self._display(["2" * 16, "3" * 16])
+        job = self._owe(request, parent, own)
+        self.ledger.finish(request, 0)
+        self.ledger.record_artifact_result(job, result_frame(own, {"2" * 16: {}}))
+        self.ledger.finish(job, 1, error="component 3333333333333333: MeshProductionError: boom")
+        [row] = [row for row in self.ledger.snapshot() if row["id"] == request["id"]]
+        named = row["previews"][parent_output]
+        self.assertEqual(named["parts"], {"1" * 16: "k1", "2" * 16: "k2"})
+        self.assertEqual((named["pending"], named["complete"]), ({"3" * 16: "k3"}, False))
+        self.assertEqual(row["warnings"], ["display data not derived: component 3333333333333333: "
+                                           "MeshProductionError: boom"])
+        self.assertEqual(("done", 0), (row["state"], row["exit"]), "display data is never the build's failure")
 
     def test_a_transition_for_an_unknown_finished_job_is_ignored(self):
         self.ledger.observe(self._event(self.model, "done"))

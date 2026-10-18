@@ -99,9 +99,9 @@ class ModelsPerFile(unittest.TestCase):
         from unittest import mock
 
         with mock.patch.dict(os.environ, self.env):
-            script = Path(argv[0])
-            if script.suffix == ".py":
-                for output in declared_output_paths((cwd or self.src) / script):
+            # Each file the run owes has its own door, a child's (another script's) too.
+            for script in sorted((cwd or self.src).glob("*.py")):
+                for output in declared_output_paths(script):
                     await_writes(output)
         return completed
 

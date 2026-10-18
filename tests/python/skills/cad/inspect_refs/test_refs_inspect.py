@@ -125,7 +125,7 @@ class StepSceneTests(unittest.TestCase):
         from cadgen._internal import component_package
         with mock.patch.object(component_package, "decode_geometry_component", wraps=component_package.decode_geometry_component) as decoded, \
              mock.patch("cadgen.store.parts.derive", side_effect=AssertionError("inspection requested display data")), \
-             mock.patch("cadgen.store.parts.request_display", side_effect=AssertionError("inspection requested display data")), \
+             mock.patch("cadgen.store.parts.display_requests", side_effect=AssertionError("inspection requested display data")), \
              mock.patch("cadgen._internal.topology_extract.extract_topology_facts", side_effect=AssertionError("inspection extracted topology facts")):
             scene = read_scene(self.path)
             scene.resolve("#housing")

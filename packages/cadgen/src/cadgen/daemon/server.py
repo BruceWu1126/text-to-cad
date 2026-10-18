@@ -27,6 +27,13 @@ Routing: a request that names a model script goes to THAT model's worker
 calls. A busy worker means an extra, never a wait; a model with no worker binds
 a spare; no spare means a spawn. Requests that name no script borrow a spare
 for one job. Nothing here caps, counts memory or queues.
+
+What a build's results owe once they are recorded -- their display data, their
+files -- the build hands here (the ``owes`` frame, ``worker._hand_off``): the
+supervisor runs each as an artifact job of its own (``_start_owed``), keeps the
+build's ledger row open until it ends and folds what it saves into that row
+(``jobs.JobLedger.owe``), so the build answers with its exit and its worker is
+free for the model's next edit at once.
 """
 
 from __future__ import annotations
@@ -161,7 +168,6 @@ def _watch_client(
     *,
     finishes_alone: bool = False,
     left: threading.Event | None = None,
-    released: threading.Event | None = None,
 ) -> None:
     """Kill the WORKER when the requesting client vanishes mid-job.
 
@@ -171,24 +177,21 @@ def _watch_client(
     for every client, so it doubles as the liveness probe.
 
     Killing the one worker leaves the supervisor and every other job alone; the pool
-    binds a fresh worker to that model on its next request.
+    binds a fresh worker to that model on its next request. What the job handed the
+    supervisor before (``_start_owed``) is the supervisor's, and goes on.
 
     A job that ``finishes_alone`` (an artifact job, ``_handle_request``) is never killed
     for its client: the worker stops it before its next derivation unless an identical
     request has attached, and stays warm.
 
-    ``left`` is set before a kill: the job was stopped, not lost to a crash. ``released``
-    is set once the job answered its client before its files were written
-    (the ``released`` frame): the client leaving is then no loss, and the worker finishes.
+    ``left`` is set before a kill: the job was stopped, not lost to a crash.
     """
     while not done.wait(CLIENT_LIVENESS_INTERVAL_SECONDS):
-        if released is not None and released.is_set():
-            return
         try:
             with send_lock:
                 _send(conn, {"stream": "stdout", "data": ""})
         except OSError:
-            if done.is_set() or (released is not None and released.is_set()):
+            if done.is_set():
                 return
             if finishes_alone:
                 _log(f"{tool}: client left; worker {worker.pid} stops before its next derivation")
@@ -215,25 +218,20 @@ def _wait_for_inflight_consumer(conn: transport.Channel, entry: dict) -> int | N
 
     A request client sends no more messages, so a nonblocking receive is purely
     an EOF probe. It emits no heartbeat frames and cannot disturb other users of
-    the same in-flight entry. An artifact result or command release is relayed as it
-    lands. A released caller may leave; this waiter stays for the owner's actual
-    exit so its ledger row receives the final outcome, including a finishing failure.
+    the same in-flight entry. An artifact result is relayed as it lands; this waiter
+    stays for the owner's exit so its ledger row receives the final outcome.
     """
     result_seen = False
-    released = False
     while True:
         result, done, code = _BROKER.wait_update(entry, result_seen=result_seen)
         try:
             if result is not None:
                 _send(conn, result)
                 result_seen = True
-                released = "released" in result
         except OSError:
             return None
         if done:
             return code
-        if released:
-            continue
         try:
             if conn.recv(0.0) == b"":
                 return None
@@ -344,8 +342,10 @@ def _document_path(candidates, base: object) -> str:
     return ""
 
 
-def _handle_request(conn: transport.Channel, request: dict) -> None:
-    """Relay one job to a warm worker and stream its frames back to the client."""
+def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None = None) -> None:
+    """Relay one job to a warm worker and stream its frames back to the client. ``job`` is the
+    ledger row of an artifact job a build handed the supervisor (``_start_owed``), registered
+    already; its "client" is the ledger."""
     send_lock = threading.Lock()
     started = time.perf_counter()
 
@@ -388,7 +388,9 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     # file are still one job).
     subject = "" if is_artifact else model or _document_path(argv, cwd)
     closure = str(request.get("closure") or "")
-    if is_artifact:
+    if job is not None:
+        pass  # a job a build handed over, in the ledger since the build's frame
+    elif is_artifact:
         job = _JOBS.start_artifact(artifact, store_root=root, dependency=request.get("dependency"))
     else:
         job = _JOBS.start(tool=tool, subject=subject, argv=argv, store_root=str(request.get("store_root") or ""))
@@ -467,13 +469,10 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     # derived, the derivation in hand finished and the worker warm. A model build or a
     # door whose caller left is still killed: there a cancel means stop.
     finishes_alone = is_artifact
-    # Set once the job released its client before its files were written:
-    # the client is expected to leave, and the worker finishes the files.
-    released = threading.Event()
     watchdog = threading.Thread(
         target=_watch_client,
         args=(conn, send_lock, watchdog_done, tool, worker, preserve_coalesced_work),
-        kwargs={"finishes_alone": finishes_alone, "left": left, "released": released},
+        kwargs={"finishes_alone": finishes_alone, "left": left},
         daemon=True,
     )
     watchdog.start()
@@ -517,12 +516,19 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                 break
             if frame.get("stream") == "stderr":
                 stderr_tail.append(str(frame.get("data") or ""))
-            if "released" in frame:
+            if "owes" in frame:
                 if is_artifact:
-                    raise _WorkerBrokeProtocol("artifact worker released its client")
-                released.set()
-                if inflight is not None:
-                    _BROKER.publish_release(inflight, int(frame["released"]))
+                    raise _WorkerBrokeProtocol("artifact worker handed over a job")
+                # In the ledger before the worker hears back, and before its exit: the files
+                # the job owes are being written from this frame on. Never relayed.
+                try:
+                    owed = _start_owed(job, frame["owes"], request)
+                except (ValueError, TypeError, KeyError, OSError) as exc:
+                    # The build fails, saying so (``worker._hand_off``); the worker stays warm.
+                    worker.send({"kind": "owed", "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+                worker.send({"kind": "owed", "job": owed["id"]})
+                continue
             if not is_artifact:
                 _JOBS.observe(frame)
             if is_artifact:
@@ -531,6 +537,14 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                 if "artifactNext" in frame:
                     # Answered at once: the worker waits on it. Never relayed.
                     worker.send({"kind": "artifactNext", "goOn": wanted()})
+                    continue
+                if "published" in frame:
+                    # A file an export or mesh job saved: the news of the build that owes it.
+                    # Never relayed.
+                    try:
+                        _JOBS.published(job, frame["published"])
+                    except (ValueError, TypeError, KeyError) as exc:
+                        raise _WorkerBrokeProtocol(f"invalid published file: {exc}") from exc
                     continue
                 if "artifactResult" in frame:
                     from cadgen.daemon.artifacts import validate_result
@@ -550,7 +564,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                     with send_lock:
                         _send(conn, frame)
                 except OSError:
-                    if finishes_alone or released.is_set() or preserve_coalesced_work():
+                    if finishes_alone or preserve_coalesced_work():
                         relay_connected = False
                     else:
                         raise
@@ -620,6 +634,49 @@ class _WorkerBrokeProtocol(Exception):
     """A worker's frame the job cannot accept: a failure of the job, not of its client."""
 
 
+class _Ledger:
+    """The "client" of a job a build handed over (``_start_owed``): nobody reads its frames
+    -- what it does reaches the ledger as it relays -- and it never leaves, so the job is
+    wanted to its end."""
+
+    def send(self, data: bytes) -> None:
+        pass
+
+    def recv(self, timeout: float | None = None) -> bytes | None:
+        return None  # nothing to read, and still here
+
+    def close(self) -> None:
+        pass
+
+
+_OWED_KINDS = ("display", "export", "mesh")
+
+
+def _start_owed(owner: dict, owes: object, owner_request: dict) -> dict:
+    """Run a build-pool job a build's result owes (the build's ``owes`` frame,
+    ``worker._hand_off``) as an artifact job of the supervisor's own, against the build's store
+    and in its environment, and return its ledger row: registered on the owning model's row
+    now -- the files it writes, the preview parts it derives (``JobLedger.owe``) -- so the
+    build's row stays open until it ends, and the job's thread is one of the daemon's requests
+    in flight, so neither a drain nor housekeeping runs past it."""
+    from cadgen.daemon.artifacts import normalize_request, store_path
+
+    if not isinstance(owes, dict) or not isinstance(owes.get("model"), str) or not owes["model"]:
+        raise ValueError("an owed job names the model whose result owes it")
+    artifact = normalize_request(owes.get("request"))
+    if artifact["kind"] not in _OWED_KINDS:
+        raise ValueError(f"a build owes no {artifact['kind']} job")
+    root = store_path(owner_request.get("store_root"))
+    job = _JOBS.owe(owner, owes["model"], artifact, store_root=root)
+    payload = {"tool": "artifact", "argv": [], "artifact": artifact, "store_root": root,
+               "env": owner_request.get("env"), "dependency": True, "cwd": None, "prog": None}
+    thread = threading.Thread(target=_serve_connection, args=(_Ledger(), payload), kwargs={"job": job},
+                              name="cadgen-owed", daemon=True)
+    _INFLIGHT.add(thread)
+    thread.start()
+    return job
+
+
 _INFLIGHT: set[threading.Thread] = set()
 _JOBS = JobLedger()
 _STARTED_AT = time.time()
@@ -632,9 +689,9 @@ _INSTALLATION_GONE = threading.Event()
 _HOUSEKEEPER = Housekeeper(active=lambda: bool(_active_requests()), log=lambda message: _log(message))
 
 
-def _serve_connection(conn, request) -> None:
+def _serve_connection(conn, request, *, job: dict | None = None) -> None:
     try:
-        _handle_request(conn, request)
+        _handle_request(conn, request, job=job)
     except Exception as error:  # noqa: BLE001 - a job must never kill the supervisor
         _log("unhandled error serving a job:\n" + traceback.format_exc())
         from cadgen import analytics

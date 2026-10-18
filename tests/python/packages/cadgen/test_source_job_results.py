@@ -128,19 +128,27 @@ class SourceJobResults(unittest.TestCase):
         self.assertEqual(result["tree"], checked_tree)
         self.assertEqual(read_record(script)["tree"], newer_tree)
 
-    def test_mesh_only_export_uses_its_source_result_after_a_newer_record(self):
+    def test_a_mesh_job_cuts_the_result_it_pins_and_nothing_once_a_newer_record_replaced_it(self):
         from build123d import Box
-        from cadgen._internal.generation import _produce_declared_mesh_exports
-        from cadgen._internal.generation_spec import _entry_spec_from_source
-        from cadgen.catalog import source_from_path
+        from cadgen.daemon.artifacts import normalize_request
         from cadgen.store.build import build_tree_from_compound
-        from cadgen.store.records import write_record
+        from cadgen.store.exports import run_meshes, state_digest
+        from cadgen.store.records import read_record, write_record
 
         script = self.root / "part.py"
         script.write_text("from cadgen import stl, build123d as bd\n@stl\ndef part():\n    return bd.Box(4, 3, 2)\n", encoding="utf-8")
+        from cadgen._internal.mesh_export import mesh_recipe
+
+        model = f"{script.resolve()}::part"
         old = build_tree_from_compound(Box(4, 3, 2), root_name="part")[0]
         newer = build_tree_from_compound(Box(40, 3, 2), root_name="part")[0]
-        write_record(script, {"tree": newer, "outputs": {}})
+        mesh = str((self.root / "part.stl").resolve())
+        # The record a build writes at its result: the mesh's recipe listed, its bytes owed.
+        write_record(model, {"tree": old, "outputs": {mesh: {"sha256": "", **mesh_recipe("stl", None, None, "part")}}})
+        request = normalize_request({
+            "kind": "mesh", "model": model, "tree": old, "state": state_digest(read_record(model)), "step": None,
+            "name": "part", "expected": {mesh: None}, "previous": {"key": None, "outputs": {}}, "displays": [],
+            "meshes": [{"fmt": "stl", "path": mesh, "chord": None, "angle": None}]})
         seen = []
 
         def export(source, jobs, **kwargs):
@@ -149,10 +157,13 @@ class SourceJobResults(unittest.TestCase):
                 job.out.write_bytes(b"requested mesh result")
             return {"ok": True, "files": [{"path": str(job.out), "format": job.fmt, "triangleCount": 12} for job in jobs]}
 
-        spec = _entry_spec_from_source(source_from_path(script))
         with mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=export):
-            _produce_declared_mesh_exports(spec, logger=None, source_tree=old)
+            self.assertEqual([saved["output"] for saved in run_meshes(request)["saved"]], [mesh])
+            write_record(model, {"tree": newer, "outputs": {}})
+            Path(mesh).unlink()
+            self.assertEqual(run_meshes(request)["superseded"], mesh)
         self.assertEqual(seen, [old])
+        self.assertFalse(Path(mesh).exists(), "a newer result's file is its own build's to write")
 
     def _nested(self, *, discard: bool, child_fails: bool) -> tuple[int, str]:
         child = self.root / "child.py"

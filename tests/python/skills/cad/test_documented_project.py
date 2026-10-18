@@ -61,8 +61,10 @@ class TheTemplateBuilds(unittest.TestCase):
         from unittest import mock
 
         with mock.patch.dict(os.environ, self.environment):
-            for output in declared_output_paths(self.project / argv[0]):
-                await_writes(output)
+            # Each file the run owes has its own door, a child's (another script's) too.
+            for script in sorted((self.project / "src").glob("*.py")):
+                for output in declared_output_paths(script):
+                    await_writes(output)
         return completed
 
     def test_the_root_builds_everything_beneath_it(self) -> None:

@@ -16,9 +16,14 @@ A fourth, ``{"heartbeat": {"phase": ..., "cpu": ...}}``, is the worker's livenes
 while a job runs (``_heartbeat``); the supervisor consumes it and never relays it.
 A fifth, ``{"artifactNext": true}``, is an artifact job asking before each derivation
 whether anyone still wants it (``_wanted``); the supervisor answers ``{"goOn": ...}``
-on stdin and never relays it. A sixth, ``{"released": code}``, says a build command has
-answered -- every model's result recorded -- while its display data and files are still
-owed: the client returns on it, and the worker finishes them before its exit frame.
+on stdin and never relays it. A sixth, ``{"owes": {"request": ..., "model": ...}}``, is a
+build handing the supervisor a build-pool job its model's result owes -- its display data,
+its files (``authoring.supervised``) -- which the supervisor runs, answering
+``{"kind": "owed", "job": <job id>}`` on stdin once the job is in its ledger; never
+relayed. So the command's answer is its exit frame: nothing is left for the worker to
+finish after it. A seventh, ``{"published": {...}}``, is an export or mesh job saying a
+file has landed (``store.exports``); the supervisor folds it into the ledger row of the
+build that owes the file and never relays it.
 
 One request kind, ``run`` — a CLI tool, output streamed as frames. The store root
 arrives on every request (``store_root``) and is applied per job, so one daemon serves
@@ -274,19 +279,15 @@ def _run(request: dict) -> int:
             telemetry.job_failed("missing_file")  # the folder it was asked from is gone
             return 1
         sys.argv = [prog or f"cadgen {tool}", *argv]
-        from cadgen.authoring import finished_after_answer
+        from cadgen.authoring import supervised
         from cadgen.daemon.artifacts import worker_context
 
+        # What the command's models owe after their results are recorded -- display data,
+        # files -- is the supervisor's (STORE.md §3, *Exports*): the command answers with its
+        # exit, and this worker takes its next job at once.
         with worker_context(request.get("store_root")), contextlib.redirect_stdout(out), \
-                contextlib.redirect_stderr(err), finished_after_answer() as held:
-            code = _command(tool, argv, prog, err)
-            if held:
-                # The command has answered: every model's result is recorded. Its client
-                # returns now, and the display data and files its runs owe are finished
-                # here, the job open in the ledger until they are (STORE.md §3, *Exports*).
-                _emit({"released": code})
-                code = _finish_held(held, code, prog or f"cadgen {tool}")
-        return code
+                contextlib.redirect_stderr(err), supervised(_hand_off):
+            return _command(tool, argv, prog, err)
     except BaseException as error:  # noqa: BLE001 - a failed job must not kill the worker
         err.write(traceback.format_exc())
         _report(error, bugs_only=False)
@@ -325,20 +326,22 @@ def _command(tool: str, argv: list[str], prog: str | None, err: _FrameWriter) ->
         return 1
 
 
-def _finish_held(held: list, code: int, prog: str) -> int:
-    """Finish the runs a command left owing, after its answer: each run's display data, then
-    its files. A failure there is the job's, not the released caller's: its line on stderr,
-    in the command's failure voice, which the job ledger keeps as the reason the build feed
-    shows, and the job's exit code."""
-    from cadgen._internal.cli_from_function import report_failure
+def _hand_off(request: dict, model: str) -> None:
+    """Hand the supervisor a build-pool job ``model``'s result owes (``BuildRun.owe``), and
+    return once it is in the supervisor's ledger: a door this job asks next finds the files it
+    owes being written. The answer is one line on stdin, as ``_wanted``'s is. The model is
+    named as its build-tree events name it (``executors.model_event``), so the job lands on
+    the ledger row those events made."""
+    from cadgen.store.index import display_model
 
-    for run in held:
-        try:
-            run.finish()
-        except Exception as error:  # noqa: BLE001 - the next run still gets its turn
-            report_failure(error, prog=prog, as_json=False, verbose_hint=False)
-            code = code or 1
-    return code
+    _emit({"owes": {"request": request, "model": display_model(model)}})
+    try:
+        answer = json.loads(sys.stdin.readline())
+    except ValueError:
+        answer = {}
+    if not isinstance(answer, dict) or answer.get("kind") != "owed" or not answer.get("job"):
+        raise RuntimeError(f"the build service did not take a job this build owes: "
+                           f"{(answer or {}).get('error') or 'no answer'}")
 
 
 def _wanted() -> bool:
@@ -356,14 +359,17 @@ def _wanted() -> bool:
         return False
 
 
-# The refusals an artifact job answers with (``store.parts``): reported by their message alone.
+# The refusals an artifact job answers with (``store.parts``, ``store.exports``): reported by
+# their message alone.
 _REFUSALS = frozenset({("cadgen._internal.tessellate", "MeshProductionError"),
-                       ("cadgen.store.parts", "ProducerUnavailable")})
+                       ("cadgen.store.parts", "ProducerUnavailable"),
+                       ("cadgen.store.exports", "PublicationRefused")})
 
 
 def _run_artifact(request: dict) -> int:
     """A typed operation has no parser, script path, declared outputs or hygiene scan. It
-    asks its supervisor before each derivation whether anyone still wants it (``_wanted``)."""
+    asks its supervisor before each derivation whether anyone still wants it (``_wanted``),
+    and an export or mesh job says each file it saves as it lands (``published``)."""
     from cadgen.daemon import artifacts, broker
 
     out, err = _FrameWriter("stdout"), _FrameWriter("stderr")
@@ -379,7 +385,8 @@ def _run_artifact(request: dict) -> int:
         # Something waits on this job (a build, a view): it goes ahead of jobs not yet started.
         with broker.held(f"artifact:{operation['kind']}", required=True, first=True), \
              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            result = artifacts.result_frame(operation, artifacts.execute(operation, keep_going=_wanted))
+            result = artifacts.result_frame(operation, artifacts.execute(
+                operation, keep_going=_wanted, published=lambda saved: _emit({"published": saved})))
             _emit({"artifactResult": result})
         return 0
     except BaseException as error:  # the worker stays reusable, but no success is emitted

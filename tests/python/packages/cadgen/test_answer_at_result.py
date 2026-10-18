@@ -1,4 +1,5 @@
-"""A build answers with its stored result; its worker finishes display data and files."""
+"""A build answers with its stored result; what its result owes -- its files, its display data --
+is build-pool jobs, its daemon worker's supervisor's to run, so the worker is free at once."""
 
 from __future__ import annotations
 
@@ -17,9 +18,9 @@ from tests.python.support.tmp_root import generated_cad_directory
 
 add_repo_path("packages/cadgen/src")
 
-from cadgen.authoring import finished_after_answer  # noqa: E402
+from cadgen.authoring import supervised  # noqa: E402
 from cadgen.cli._run_model import run_model_argv  # noqa: E402
-from cadgen.daemon import executors  # noqa: E402
+from cadgen.daemon import artifacts, executors  # noqa: E402
 
 CHILD = """\
 from cadgen import step
@@ -62,31 +63,52 @@ class AnswerAtResult(unittest.TestCase):
         self.assertEqual(code, 0, err.getvalue())
         return out.getvalue(), err.getvalue()
 
-    def test_worker_shape_answers_before_files_then_finishes_every_file(self):
+    @contextlib.contextmanager
+    def supervised(self):
+        """The command under a daemon worker's supervisor: the jobs its runs owe are handed over
+        (here, collected as ``(request, model)``) and never awaited."""
+        handed: list[tuple[dict, str]] = []
+        with supervised(lambda request, model: handed.append((request, model))):
+            yield handed
+
+    def run_handed(self, handed):
+        """Run the jobs a build handed over, as the supervisor does: each from its request alone."""
+        for request, _model in handed:
+            artifacts.execute(request)
+
+    def test_a_worker_build_answers_saving_and_its_handed_jobs_alone_write_every_file(self):
         events = []
         executors.set_event_sink(events.append)
         self.addCleanup(executors.set_event_sink, None)
-        with finished_after_answer() as held:
+        with self.supervised() as handed:
             out, _err = self.command("--json")
         (entry,) = [json.loads(line) for line in out.splitlines() if line.startswith('{"ok":')]
         expected = {str(self.root / f"{name}.step"): "saving" for name in ("child", "parent")}
         self.assertEqual(entry["files"], expected)
         self.assertFalse(any(event.get("saved") for event in events))
-        self.assertEqual(len(held), 1)
-        held[0].finish()
-        self.assertEqual(len([event for event in events if event.get("saved")]), 2)
+        exports = [request for request, _model in handed if request["kind"] == "export"]
+        self.assertEqual([request["step"] for request in exports], list(expected), "children first")
+        self.assertEqual({model for _request, model in handed},
+                         {f"{self.root / name}.py::{name}" for name in ("child", "parent")})
         for path in expected:
-            self.assertTrue(Path(path).is_file())
+            self.assertFalse(Path(path).exists(), "nothing is written on the build's thread")
+        self.run_handed(handed)
+        from cadgen.catalog import artifact_file_hash
+        from cadgen.store.records import read_record, tree_for_document_hash
+
+        for name in ("child", "parent"):
+            step = self.root / f"{name}.step"
+            record = read_record(self.root / f"{name}.py")
+            self.assertEqual(tree_for_document_hash(artifact_file_hash(step)), record["tree"])
+            self.assertEqual(record["outputs"][str(step)]["sha256"], artifact_file_hash(step))
 
     def test_text_answer_lists_each_file_still_saving(self):
-        with finished_after_answer() as held:
+        with self.supervised() as handed:
             out, _err = self.command()
-        try:
-            self.assertTrue(out.startswith("built "), out)
-            for name in ("child", "parent"):
-                self.assertRegex(out, rf"saving .*{name}\.step \(cadgen export .*{name}\.step waits for it\)")
-        finally:
-            held[0].finish()
+        self.assertTrue(out.startswith("built "), out)
+        for name in ("child", "parent"):
+            self.assertRegex(out, rf"saving .*{name}\.step \(cadgen export .*{name}\.step waits for it\)")
+        self.run_handed(handed)
 
     def test_without_a_worker_the_answer_names_saved_files(self):
         out, _err = self.command("--json")
@@ -113,20 +135,26 @@ class AnswerAtResult(unittest.TestCase):
             self.assertEqual(tree_for_document_hash(artifact_file_hash(document)), tree)
 
     def test_failed_publication_is_owed_and_the_next_run_says_so_first(self):
+        from cadgen.store.exports import PublicationRefused
         from cadgen.store.records import read_record
 
-        with finished_after_answer() as held:
+        step = self.parent.with_suffix(".step")
+        with self.supervised() as handed:
             self.command()
-        with mock.patch("cadgen._internal.generation._Export._publish_step", side_effect=RuntimeError("publish refused")):
-            with self.assertRaisesRegex(RuntimeError, "publish refused"):
-                held[0].finish()
-        entry = read_record(self.parent)["outputs"][str(self.parent.with_suffix(".step"))]
+        step.write_bytes(b"another writer's document")  # what the build found is gone
+        [request] = [request for request, _model in handed if request.get("step") == str(step)]
+        with self.assertRaisesRegex(PublicationRefused, "changed during the build"):
+            artifacts.execute(request)
+        entry = read_record(self.parent)["outputs"][str(step)]
         self.assertGreater(entry["owed"]["since"], 0)
-        self.assertEqual(entry["owed"]["error"], "RuntimeError: publish refused")
+        self.assertIn("PublicationRefused: ", entry["owed"]["error"])
+        self.assertEqual(step.read_bytes(), b"another writer's document")
+        step.unlink()
         _out, err = self.command()
         self.assertIn("owed since", err.splitlines()[0])
-        self.assertIn("publish refused", err.splitlines()[0])
-        self.assertNotIn("owed", read_record(self.parent)["outputs"][str(self.parent.with_suffix(".step"))])
+        self.assertIn("changed during the build", err.splitlines()[0])
+        self.assertNotIn("owed", read_record(self.parent)["outputs"][str(step)])
+        self.assertTrue(step.is_file())
 
     def test_step_build_answers_with_the_generated_tree_and_saving_paths(self):
         from cadgen import step
@@ -134,43 +162,61 @@ class AnswerAtResult(unittest.TestCase):
 
         self.command()
         destination = self.root / "copy.step"
-        with finished_after_answer() as held:
+        with self.supervised() as handed:
             result = step.build(self.parent.with_suffix(".step"), destination)
-        try:
-            self.assertTrue(result.ok)
-            self.assertEqual(result.tree, read_record(destination)["tree"])
-            self.assertEqual(result.saving, (destination,))
-            self.assertTrue(any(line.startswith("saving ") for line in result.human_lines()))
-            self.assertFalse(destination.exists())
-        finally:
-            for run in held:
-                run.finish()
+        self.assertTrue(result.ok)
+        self.assertEqual(result.tree, read_record(destination)["tree"])
+        self.assertEqual(result.saving, (destination,))
+        self.assertTrue(any(line.startswith("saving ") for line in result.human_lines()))
+        self.assertFalse(destination.exists())
+        self.run_handed(handed)
+        self.assertTrue(destination.is_file())
 
 
 class WorkerAnswer(unittest.TestCase):
-    def test_worker_releases_then_reports_finishing_failure_and_exits_failed(self):
-        from cadgen.authoring import build_run
+    def run_worker(self, command, answer: str) -> tuple[int, list[dict]]:
+        """``command`` as a worker's job, the supervisor answering each hand-off with ``answer``."""
         from cadgen.daemon import worker
 
-        frames = []
+        frames: list[dict] = []
+        with mock.patch.object(worker, "_emit", side_effect=frames.append), \
+                mock.patch.object(worker, "_tool_main", return_value=command), \
+                mock.patch.object(worker, "_enter", return_value=True), \
+                mock.patch.object(worker.sys, "stdin", io.StringIO(answer)), \
+                mock.patch.object(worker, "_park"), mock.patch.object(worker, "_evict_first_party_modules"):
+            return worker._run({"tool": "run", "argv": [], "prog": "python part.py"}), frames
 
-        def command(*_args):
+    def test_a_worker_hands_each_owed_job_to_its_supervisor_and_answers_with_its_exit(self):
+        """Each job is handed over as an ``owes`` frame, the model named as its events name it,
+        and the build goes on only once the supervisor says the job is in its ledger; nothing
+        is left for the worker after the command's exit."""
+        from cadgen.authoring import build_run
+
+        request = {"kind": "display", "tree": "a" * 64, "cids": ["1" * 16], "producer": {}}
+
+        def command(_argv, **_kwargs):
             with build_run() as run:
-                run.exports.append(mock.Mock(finish=mock.Mock(side_effect=RuntimeError("publish refused"))))
+                self.assertIsNone(run.owe(request, model="/w/part.py::part"))
             print("built part.step")
             return 0
 
-        with mock.patch.object(worker, "_emit", side_effect=frames.append), \
-                mock.patch.object(worker, "_command", side_effect=command), \
-                mock.patch.object(worker, "_enter", return_value=True), \
-                mock.patch.object(worker, "_park"), mock.patch.object(worker, "_evict_first_party_modules"):
-            code = worker._run({"tool": "run", "argv": [], "prog": "python part.py"})
+        code, frames = self.run_worker(command, '{"kind": "owed", "job": "epoch:job-2"}\n')
+        self.assertEqual(code, 0)
+        self.assertEqual([frame for frame in frames if "owes" in frame],
+                         [{"owes": {"request": request, "model": "/w/part.py"}}])
+
+    def test_a_build_fails_saying_so_when_its_supervisor_refuses_a_job(self):
+        from cadgen.authoring import build_run
+
+        def command(_argv, **_kwargs):
+            with build_run() as run:
+                run.owe({"kind": "display"}, model="/w/part.py::part")
+            return 0
+
+        code, frames = self.run_worker(command, '{"kind": "owed", "error": "ValueError: no"}\n')
         self.assertEqual(code, 1)
-        release = frames.index({"released": 0})
-        failures = [index for index, frame in enumerate(frames)
-                    if frame.get("stream") == "stderr" and "publish refused" in frame.get("data", "")]
-        self.assertEqual(len(failures), 1)
-        self.assertGreater(failures[0], release)
+        said = "".join(frame.get("data", "") for frame in frames if frame.get("stream") == "stderr")
+        self.assertIn("did not take a job this build owes: ValueError: no", said)
 
 
 if __name__ == "__main__":

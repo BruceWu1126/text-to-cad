@@ -6,8 +6,9 @@ build accepts, on the file it saves, the bytes the same model's previous export 
 its body ran, and still refuses anyone else's. A kept STEP whose bytes the store maps to
 another tree is mapped back to its result.
 
-The older run is held open in this process -- its exports queued, not yet finished -- while
-the newer build runs through the daemon, as two edits in a row do.
+The older run is built in this process, its export jobs held -- submitted, not yet run
+(``held_jobs``) -- while the newer build runs through the daemon, as two edits in a row do;
+or its job runs here, and the newer result lands while the job writes.
 """
 
 from __future__ import annotations
@@ -102,6 +103,50 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+class _HeldJobs:
+    """The export and mesh jobs this process's builds submitted, not yet run."""
+
+    def __init__(self) -> None:
+        self.pending: list[tuple[dict, object]] = []
+
+    def run(self) -> None:
+        """Run them now, here, each as a pool worker would (``artifacts.execute``)."""
+        from cadgen.daemon import artifacts
+
+        pending, self.pending = self.pending, []
+        for request, future in pending:
+            try:
+                future.set_result(artifacts.execute(request))
+            except Exception as error:  # noqa: BLE001 - the job's failure is its future's, as a worker's is
+                future.set_exception(error)
+
+
+@contextlib.contextmanager
+def held_jobs():
+    """Every artifact job this process submits runs here -- a display job at once, an export or
+    mesh job only when the test runs ``held.run()``: an older run whose files are still being
+    written while a newer build runs."""
+    from concurrent.futures import Future
+
+    from cadgen.daemon import artifacts
+
+    held = _HeldJobs()
+
+    def submit(request, *, store_root=None):
+        future = Future()
+        if request["kind"] in ("export", "mesh"):
+            held.pending.append((request, future))
+            return future
+        try:
+            future.set_result(artifacts.execute(request))
+        except Exception as error:  # noqa: BLE001 - as a worker's
+            future.set_exception(error)
+        return future
+
+    with mock.patch.object(artifacts, "submit_artifact", side_effect=submit):
+        yield held
+
+
 class ExportSupersession(unittest.TestCase):
     def setUp(self):
         temporary = generated_cad_directory(prefix="supersession-")
@@ -126,18 +171,21 @@ class ExportSupersession(unittest.TestCase):
 
     @contextlib.contextmanager
     def held(self, script: Path):
-        """A run of ``script`` built in this process, its exports queued and finished only as
-        the block ends."""
+        """A run of ``script`` built in this process, its export jobs held until the test runs
+        them (``jobs.run()``, else as the block ends); the run awaits them as the block ends."""
         from cadgen._internal.generation import _selected_specs_for_targets, build_model
         from cadgen.authoring import build_run
         from cadgen.cli_logging import CliLogger
 
         self.stores.add(os.path.realpath(self.root / "store"))
         logger = CliLogger("cadgen", verbose=False)
-        with build_run(logger) as run:
+        with held_jobs() as jobs, build_run(logger):
             _specs, (spec,) = _selected_specs_for_targets([str(script)])
             build_model(spec, generator=None, force=False, profile=False, logger=logger)
-            yield run
+            try:
+                yield jobs
+            finally:
+                jobs.run()
 
     def finish_waiting(self, process: subprocess.Popen) -> None:
         # Killing an early-answer client would leave its daemon body waiting for go.
@@ -173,31 +221,34 @@ class ExportSupersession(unittest.TestCase):
         script = self.root / "part.py"
         script.write_text(PART.format(width=10.0), encoding="utf-8")
         said = io.StringIO()
-        with contextlib.redirect_stderr(said), self.held(script):
+        with contextlib.redirect_stderr(said), self.held(script) as jobs:
             older = read_record(script)["tree"]
             script.write_text(PART.format(width=11.0), encoding="utf-8")
             newer = self.build(script)
             self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
+            jobs.run()
         self.assertRegex(said.getvalue(), r"part\.step not written: a newer build of \S*part\.py replaced this result")
         self.assertNotEqual(self.assert_holds_its_result(script), older, "the file holds the newer result")
 
-    def test_a_newer_result_landing_while_an_export_is_awaited_supersedes_it(self):
+    def test_a_newer_result_landing_while_an_export_writes_supersedes_it(self):
+        from cadgen.store import exports
+
         script = self.root / "part.py"
         script.write_text(PART.format(width=10.0), encoding="utf-8")
+        original = exports.export_step
+
+        def newer_lands(*args, **kwargs):
+            result = original(*args, **kwargs)
+            script.write_text(PART.format(width=11.0), encoding="utf-8")
+            newer = self.build(script)
+            self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
+            self.assert_holds_its_result(script)
+            return result
+
         said = io.StringIO()
-        with contextlib.redirect_stderr(said), self.held(script) as run:
-            export = run.exports[-1]
-            original = export.job.result
-
-            def newer_lands():
-                result = original()
-                script.write_text(PART.format(width=11.0), encoding="utf-8")
-                newer = self.build(script)
-                self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
-                self.assert_holds_its_result(script)
-                return result
-
-            export.job.result = newer_lands
+        with contextlib.redirect_stderr(said), mock.patch.object(exports, "export_step", side_effect=newer_lands), \
+                self.held(script) as jobs:
+            jobs.run()
         self.assertRegex(said.getvalue(), r"part\.step not written: a newer build")
         self.assertNotIn("changed during the build", said.getvalue())
         self.assert_holds_its_result(script)
@@ -224,8 +275,9 @@ class ExportSupersession(unittest.TestCase):
 
         said = io.StringIO()
         with contextlib.redirect_stderr(said), \
-                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=prepared), self.held(script):
-            pass
+                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=prepared), \
+                self.held(script) as jobs:
+            jobs.run()
         self.assertRegex(said.getvalue(), r"part\.stl not written: a newer build")
         self.assertEqual(_digest(document), newer["digest"])
         self.assertEqual(read_record(script), newer["record"], "an old receipt cannot enter the newer record")
@@ -258,8 +310,9 @@ class ExportSupersession(unittest.TestCase):
 
         said = io.StringIO()
         with contextlib.redirect_stderr(said), \
-                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=newer_recipe), self.held(script):
-            pass
+                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=newer_recipe), \
+                self.held(script) as jobs:
+            jobs.run()
         self.assertEqual((before["key"], before["tree"]), (after["key"], after["tree"]))
         self.assertEqual(after["outputs"][str(document)]["chord"], "0.025")
         self.assertEqual(read_record(script), after)
@@ -280,8 +333,9 @@ class ExportSupersession(unittest.TestCase):
             return result
 
         with self.assertRaisesRegex(RuntimeError, "mesh file changed during the build"), \
-                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=edited), self.held(script):
-            pass
+                mock.patch("cadgen._internal.mesh_export.run_mesh_exporter", side_effect=edited), \
+                self.held(script) as jobs:
+            jobs.run()
         self.assertEqual(document.read_bytes(), b"foreign mesh")
         self.assertIn("mesh file changed", read_record(script)["outputs"][str(document)]["owed"]["error"])
 
@@ -292,32 +346,25 @@ class ExportSupersession(unittest.TestCase):
         parent = self.root / "parent.py"
         parent.write_text(PARENT, encoding="utf-8")
         said = io.StringIO()
-        with contextlib.redirect_stderr(said), self.held(parent):
+        with contextlib.redirect_stderr(said), self.held(parent) as jobs:
             older = {name: read_record(self.root / f"{name}.py")["tree"] for name in ("child", "parent")}
             (self.root / "child.py").write_text(CHILD.format(depth=3.0), encoding="utf-8")
             newer = self.build(parent)
             self.assertEqual(newer.returncode, 0, newer.stderr[-3000:])
+            jobs.run()
         for name in ("child", "parent"):
             self.assertRegex(said.getvalue(), rf"{name}\.step not written: a newer build of \S*{name}\.py replaced this result")
             self.assertNotEqual(self.assert_holds_its_result(self.root / f"{name}.py"), older[name], name)
 
-    def test_an_export_its_build_abandoned_writes_nothing(self):
-        from cadgen.store.exports import abandon, export_step
-
-        stage = self.root / ".stage"
-        stage.mkdir()
-        abandon(stage / "part.step")
-        self.assertEqual(export_step("0" * 64, stage / "part.step"), {"skipped": True})
-        self.assertFalse((stage / "part.step").exists())
-
     def test_the_models_previous_export_landing_during_a_build_is_its_own(self):
         script = self.root / "part.py"
         script.write_text(PART.format(width=10.0), encoding="utf-8")
-        with self.held(script):
+        with self.held(script) as jobs:
             script.write_text(WAITING_PART.format(width=11.0), encoding="utf-8")
             newer = subprocess.Popen(**self._command(script))
             self.addCleanup(self.finish_waiting, newer)
             self.await_started(newer)
+            jobs.run()
         # The older run's export landed while the newer build's body runs.
         older = self.assert_holds_its_result(script)
         (self.root / "go").write_text("go", encoding="utf-8")

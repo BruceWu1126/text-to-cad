@@ -148,7 +148,8 @@ class PublishRuleTest(unittest.TestCase):
         import errno
         import hashlib
 
-        from cadgen._internal import atomic_replace, generation
+        from cadgen._internal import atomic_replace
+        from cadgen.store import exports
 
         step = self.root / "widget.step"
         step.write_bytes(b"ISO-10303-21;\n")
@@ -163,7 +164,7 @@ class PublishRuleTest(unittest.TestCase):
 
         with mock.patch.object(atomic_replace, "_OPEN_REFUSAL_IS_ERRNO_ONLY", True), \
                 mock.patch.object(Path, "open", peer_renaming), mock.patch("time.sleep"):
-            digest, _sidecar = generation._document_pair_state(step)
+            digest, _sidecar = exports.document_pair_state(step)
         self.assertTrue(refused)
         self.assertEqual(hashlib.sha256(b"ISO-10303-21;\n").hexdigest(), digest)
 

@@ -20,12 +20,15 @@ done | failed) and from the request's exit code; a job whose requester left ends
 cancelled. Stdlib only; nothing here
 imports the kernel — a job's outputs come from ``cadgen.metadata``'s AST parse.
 
-A row also says which files its build still owes: a ``saving`` result names each file a
-model's result owes the moment it is recorded, and the file's ``saved`` result follows when
-it lands. A door given a path asks this (:func:`being_written`) and waits while a request
-is still writing the file (STORE.md §3, *Exports*). The request's end settles what it owed:
-its rows owe nothing more, and a row that owed a file the failed request never saved fails
-with the request's reason.
+A row also says what its build still owes once its results are recorded: build-pool jobs
+the build handed the supervisor (:meth:`JobLedger.owe`, ``server._start_owed``) -- the
+export or mesh job writing its files, each file named ``saving`` until the job says it has
+landed (``saved``, :meth:`JobLedger.published`), and the display jobs deriving its preview's
+parts, which name each part as their answers come (``pending`` to ``parts``). A door given a
+path asks this (:func:`being_written`) and waits while a job is still writing the file
+(STORE.md §3, *Exports*). A request's row stays open until every job its rows owe has ended,
+however its process ended; a file a job failed to save fails the row that owed it, with the
+job's reason.
 """
 
 from __future__ import annotations
@@ -47,49 +50,62 @@ RETAIN_SECONDS = 120.0
 _RUNNING = ("submitted", "queued", "building")
 # What a job keeps of a build's results, by output (``viewer.preview`` reads them): of the
 # preview revision its tree, the producer its parts are keyed under, the part key of each
-# component the store holds and whether that is all of them; of the preview's annotations
-# the one object's hash; of a file the build owes the tree it is written from; of the saved
-# document its tree and digest, which tell whether the file moved on. A status names objects
-# and carries no geometry or annotation content. Each is kept with the ledger's revision when
-# it landed, the order of results across rows.
+# component the store holds and of each it does not yet (``pending``), and whether that is all
+# of them; of the preview's annotations the one object's hash; of the saved document its tree
+# and digest, which tell whether the file moved on. A status names objects and carries no
+# geometry or annotation content. Each is kept with the ledger's revision when it landed, the
+# order of results across rows. The files a build owes are no event's: the supervisor names
+# them as it takes the job writing them (:meth:`JobLedger.owe`).
 _KEPT_RESULT_FIELDS = {
-    "preview": ("previews", ("tree", "producer", "parts", "complete")),
+    "preview": ("previews", ("tree", "producer", "parts", "pending", "complete")),
     "annotations": ("annotations", ("tree", "object")),
-    "saving": ("saving", ("tree",)),
     "saved": ("savedResults", ("tree", "documentHash")),
 }
+# The pool jobs a build hands over, and what each writes or derives.
+_PUBLISHING = ("export", "mesh")
+# A row keeps this many of the warnings its owed jobs leave (a display job's failure).
+_WARNINGS_KEPT = 16
+_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def _owes(job: dict[str, Any], output: str) -> bool:
-    """Whether ``job``'s build still owes ``output``: it named the file as owed (``saving``)
-    and has saved nothing there since."""
+    """Whether ``job``'s build still owes ``output``: a job it handed over is writing the file,
+    and no newer result of the model has taken the file over since."""
     owed = (job.get("saving") or {}).get(output)
-    if not isinstance(owed, dict) or owed.get("superseded"):
-        return False
-    saved = (job.get("savedResults") or {}).get(output)
-    return not isinstance(saved, dict) or int(saved.get("sequence") or 0) < int(owed.get("sequence") or 0)
+    return isinstance(owed, dict) and not owed.get("superseded")
 
 
-def being_written(jobs: list[dict[str, Any]], output: str, *, own: str | None = None) -> bool:
-    """Whether a request in ``jobs`` (the ledger's rows for ``output``) is still writing it.
+def being_written(jobs: list[dict[str, Any]], output: str) -> bool:
+    """Whether a job of a request in ``jobs`` (the ledger's rows for ``output``, of one store)
+    is still writing it. Only the newest result that owes the file is the one it will hold: an
+    older build's export is skipped or refused once a newer result of the model is recorded
+    (STORE.md §3, *Exports*), and a newer result's job takes the file over from older ones as
+    the supervisor takes it (:meth:`JobLedger.owe`), so it is waited for alone, until it
+    saves the file or ends. A file the asking request's own run owes is waited for like any
+    other: a pool job writes it, never the build that waits."""
+    return any(_owes(job, output) for job in jobs)
 
-    The newest result that owes the file is the one it will hold: an older build's export is
-    skipped or refused once a newer result of the model is recorded (STORE.md §3, *Exports*),
-    so only the newest owed result is waited for, until it saves the file or its request
-    ends. ``own`` is the asking request's id (``CADGEN_JOB_ID``): a file its own run owes is
-    written after its bodies return, so nothing in it waits for that."""
-    newest: tuple[dict[str, Any], dict[str, Any]] | None = None
-    for job in jobs:
-        owed = (job.get("saving") or {}).get(output)
-        if isinstance(owed, dict) and (newest is None or int(owed.get("revision") or 0)
-                                       > int(newest[0].get("revision") or 0)):
-            newest = (owed, job)
-    if newest is None:
-        return False
-    job = newest[1]
-    if own and own in (job.get("id"), job.get("request")):
-        return False
-    return _owes(job, output)
+
+def _publication_outputs(request: dict) -> list[str]:
+    """The files an export or mesh request writes (``artifacts.publication_files``): the STEP,
+    then the meshes."""
+    return ([str(request["step"])] if request["kind"] == "export" else []) + \
+        [str(mesh["path"]) for mesh in request.get("meshes") or ()]
+
+
+def _answer(frame: object) -> object:
+    """An artifact job's answer, from the result frame it came in (``{"request", "result"}``)."""
+    return frame.get("result") if isinstance(frame, dict) else None
+
+
+def _artifact_summary(request: dict) -> dict[str, Any]:
+    """What a row keeps of an artifact request: the request itself, or, for one that publishes
+    a model's files, what a reader asks of it -- the model, the tree and the files -- never the
+    pins it carries for the job."""
+    if request.get("kind") in _PUBLISHING:
+        return {"kind": request["kind"], "model": request["model"], "tree": request["tree"],
+                "outputs": [_real(path) for path in _publication_outputs(request)]}
+    return copy.deepcopy(request)
 
 # The two shapes a failed job's stderr ends in: the CLI's own failure line
 # (``[cadgen step compile] FAILED: RuntimeError: ...``) or, under --verbose, a raw
@@ -233,17 +249,202 @@ class JobLedger:
     def start_artifact(self, request: dict, *, store_root: str, dependency=False) -> dict[str, Any]:
         job = self.start(tool="artifact", subject="", store_root=store_root)
         with self._guard:
-            job["artifact"] = copy.deepcopy(request)
+            job["artifact"] = _artifact_summary(request)
             job["dependency"] = bool(dependency)
             self._notify(job)
         return job
 
+    def owe(self, owner: dict[str, Any], model: str, request: dict, *, store_root: str) -> dict[str, Any]:
+        """A job ``owner``'s build handed over (``server._start_owed``): the build-pool job
+        ``model``'s result owes, as an artifact row of its own, registered on the model's row
+        -- ``owner`` itself, or the child row it built (:meth:`_child_row`). An export or mesh
+        job's files are owed (``saving``) from now on, each taking the file over from any
+        older result's job in the store; a display job derives the parts its row's preview of
+        the tree names ``pending``. The row, and its request's, stays open until the job ends
+        (:meth:`finish`)."""
+        job = self.start_artifact(request, store_root=store_root, dependency=True)
+        now = self._clock()
+        with self._guard:
+            subject = _model_subject(str(model))
+            row = owner if _same_model(subject, owner["subject"]) else self._child_row(owner, subject, now)
+            job["owner"], job["ownerRow"] = owner["id"], row["id"]
+            if request["kind"] in _PUBLISHING:
+                for output in job["artifact"]["outputs"]:
+                    self._supersede(row, output)
+                    self._revision += 1
+                    row.setdefault("saving", {})[output] = {
+                        "output": output, "tree": str(request["tree"]), "artifact": job["id"],
+                        "sequence": int(row.get("eventSequence") or 0), "revision": self._revision}
+                    if output not in row["outputs"]:
+                        row["outputs"].append(output)
+            row.setdefault("owing", []).append(job["id"])
+            row["updatedAt"] = now
+            self._notify(job)
+            self._notify(row)
+        return job
+
+    def published(self, job: dict[str, Any], payload: dict) -> None:
+        """A file ``job`` (an export or mesh job) saved: the ``saved`` result of the row whose
+        build owes it, the moment it lands, which owes that file no more."""
+        output, tree = _real(str(payload["output"])), str(payload["tree"])
+        digest = payload.get("documentHash")
+        artifact = job.get("artifact") or {}
+        if job.get("tool") != "artifact" or artifact.get("kind") not in _PUBLISHING:
+            raise ValueError("only an export or mesh job saves a file")
+        if output not in artifact.get("outputs") or tree != artifact.get("tree"):
+            raise ValueError("a job saved a file its request does not write")
+        if digest is not None and (not isinstance(digest, str) or not _DIGEST.fullmatch(digest)):
+            raise ValueError("a saved file's digest is a sha256")
+        now = self._clock()
+        with self._guard:
+            row = self._jobs.get(str(job.get("ownerRow") or ""))
+            if row is None:
+                return  # a job no build of this daemon handed over: nobody's row to tell
+            owed = (row.get("saving") or {}).get(output)
+            self._revision += 1
+            row.setdefault("savedResults", {})[output] = {
+                "tree": tree, **({"documentHash": digest} if digest else {}), "output": output,
+                "sequence": int((owed or {}).get("sequence") or row.get("eventSequence") or 0),
+                "revision": self._revision}
+            if isinstance(owed, dict) and owed.get("artifact") == job["id"]:
+                self._settle_owed(row, output)
+            row["updatedAt"] = now
+            self._notify(row)
+
     def record_artifact_result(self, job: dict[str, Any], result: dict) -> None:
+        """``job``'s answer (its result frame, ``artifacts.result_frame``)."""
         with self._guard:
             if job["tool"] == "artifact" and job.get("artifactResult") is None:
                 job["artifactResult"] = copy.deepcopy(result)
                 job["updatedAt"] = self._clock()
+                self._name_parts(job, _answer(result))
                 self._notify(job)
+
+    # --- what a row's build owes -------------------------------------------------------
+
+    def _supersede(self, row: dict[str, Any], output: str) -> None:
+        """A newer result takes ``output`` over, even after its row expires: remember that on
+        each older row's obligation (and retained failure) for it in the store, so finishing or
+        sweeping the newer request cannot make a door wait on it again."""
+        for older in self._jobs.values():
+            if older is row or older.get("storeRoot") != row.get("storeRoot"):
+                continue
+            for bucket in ("saving", "saveFailures"):
+                superseded = (older.get(bucket) or {}).get(output)
+                if isinstance(superseded, dict) and not superseded.get("superseded"):
+                    superseded["superseded"] = True
+                    if output not in older.setdefault("supersededOutputs", []):
+                        older["supersededOutputs"].append(output)
+                    self._notify(older)
+
+    @staticmethod
+    def _settle_owed(row: dict[str, Any], output: str) -> None:
+        row["saving"].pop(output, None)
+        if not row["saving"]:
+            row.pop("saving")
+
+    def _name_parts(self, job: dict[str, Any], result: object) -> None:
+        """The parts a display job ``job`` handed over stored (its answer, ``{cid: record}``),
+        named in each preview of its request that is waiting for them -- its own model's, and
+        a parent's, whose tree places the child's components by the same ids -- under the same
+        producer: moved from ``pending`` to ``parts``, the preview ``complete`` once nothing
+        is pending."""
+        artifact = job.get("artifact") or {}
+        row = self._jobs.get(str(job.get("ownerRow") or ""))
+        if row is None or artifact.get("kind") != "display" or not isinstance(result, dict):
+            return
+        for waiting in self._rows_of(self._request_of(row)):
+            for preview in (waiting.get("previews") or {}).values():
+                pending = preview.get("pending")
+                if not isinstance(pending, dict) or preview.get("producer") != artifact.get("producer"):
+                    continue
+                named = {cid: pending.pop(cid) for cid in list(pending) if cid in result}
+                if not named:
+                    continue
+                preview.setdefault("parts", {}).update(named)
+                preview["complete"] = not pending
+                self._revision += 1
+                preview["revision"] = self._revision
+                waiting["updatedAt"] = self._clock()
+                self._notify(waiting)
+
+    def _name_stored_parts(self, row: dict[str, Any], preview: dict[str, Any]) -> None:
+        """A preview announced after a display job of its request answered -- a child's,
+        whose parts the parent's tree places -- names the parts that job stored at once."""
+        pending = preview.get("pending")
+        if not isinstance(pending, dict) or not pending:
+            return
+        request = self._request_of(row)
+        owners = {owner["id"] for owner in self._rows_of(request)}
+        for job in self._jobs.values():
+            artifact = job.get("artifact") or {}
+            result = _answer(job.get("artifactResult"))
+            if (job.get("ownerRow") not in owners or artifact.get("kind") != "display"
+                    or artifact.get("producer") != preview.get("producer") or not isinstance(result, dict)):
+                continue
+            named = {cid: pending.pop(cid) for cid in list(pending) if cid in result}
+            if named:
+                preview.setdefault("parts", {}).update(named)
+                preview["complete"] = not pending
+
+    def _owed_job_ended(self, job: dict[str, Any], exit_code: int, error: str | None, now: float) -> None:
+        """A job ``job``'s build handed over has ended: the files it still owed are no longer
+        written -- each a save failure of its row when the job failed (the row fails with the
+        job's reason; its request's too, once it closes), else (a newer result took the file
+        over, or nobody wanted it) owed no more -- a display job's failure is its row's
+        warning, and the row, and its request's, may close (:meth:`_close_if_settled`)."""
+        row = self._jobs.get(str(job.get("ownerRow") or ""))
+        if row is None:
+            return
+        failed = False
+        for output, owed in list((row.get("saving") or {}).items()):
+            if owed.get("artifact") != job["id"]:
+                continue
+            self._settle_owed(row, output)
+            if exit_code != 0 and not owed.get("superseded"):
+                self._revision += 1
+                row.setdefault("saveFailures", {})[output] = {
+                    "output": output, "tree": owed["tree"], "sequence": owed["sequence"], "revision": self._revision}
+                failed = True
+        reason = str(error or "") or f"the build service's job exited {exit_code}"
+        if failed:
+            request = self._request_of(row)
+            for failing in {id(row): row, id(request): request}.values():
+                if failing.get("finishedAt") is None:
+                    failing["saveError"] = reason  # its state when it closes
+                elif failing.get("state") != "failed":
+                    # Closed already (a child at its done, a request cancelled): it fails now.
+                    failing.update(state="failed", exit=1, error=reason, finishedAt=now)
+                    self._notify(failing)
+        elif exit_code != 0 and (job.get("artifact") or {}).get("kind") == "display":
+            warnings = row.setdefault("warnings", [])
+            warnings.append(f"display data not derived: {reason}")
+            del warnings[:-_WARNINGS_KEPT]
+        owing = row.get("owing") or []
+        if job["id"] in owing:
+            owing.remove(job["id"])
+        if not owing:
+            row.pop("owing", None)
+        row["updatedAt"] = now
+        self._notify(row)
+        self._close_if_settled(self._request_of(row), now)
+
+    def _request_of(self, row: dict[str, Any]) -> dict[str, Any]:
+        return self._jobs.get(str(row.get("request") or ""), row)
+
+    def _rows_of(self, request: dict[str, Any]) -> list[dict[str, Any]]:
+        return [request, *(row for row in self._jobs.values() if row.get("request") == request["id"])]
+
+    def _close_if_settled(self, request: dict[str, Any], now: float) -> None:
+        """Close a request whose process ended well (``exited``) once no row of it owes a job:
+        done, or failed when a file it owed was not saved."""
+        if request.get("exited") is None or any(row.get("owing") for row in self._rows_of(request)):
+            return
+        failed = request.pop("saveError", None)
+        request.pop("exited")
+        request.update(state="failed" if failed else "done", exit=1 if failed else 0, error=failed or None,
+                       finishedAt=now, updatedAt=now)
+        self._notify(request)
 
     def waiting(self, job: dict[str, Any], detail: str | None) -> None:
         """What a job waits on before it has a worker (``detail``), or None once it has one.
@@ -315,7 +516,7 @@ class JobLedger:
                         job["error"] = str(event["error"])
                     job["finishedAt"] = now
             # A build's results fold in whenever they land, a saved document after its
-            # row closed included (a child's export lands after its done): the names a
+            # row closed included (a kept file published after a child's done): the names a
             # reader reads, never a state the row has left.
             for field, (bucket, kept) in _KEPT_RESULT_FIELDS.items():
                 payload = event.get(field)
@@ -325,23 +526,11 @@ class JobLedger:
                 updates = job.setdefault(bucket, {})
                 previous = updates.get(output)
                 if previous is None or ordinal > int(previous.get("sequence") or 0):
-                    if field == "saving":
-                        # A newer result takes over this file even after its row expires.
-                        # Remember that on each older obligation, so finishing or sweeping
-                        # the newer request cannot make a door wait on it again.
-                        for older in self._jobs.values():
-                            if older is job or older.get("storeRoot") != job.get("storeRoot"):
-                                continue
-                            for bucket in ("saving", "saveFailures"):
-                                superseded = (older.get(bucket) or {}).get(output)
-                                if isinstance(superseded, dict) and not superseded.get("superseded"):
-                                    superseded["superseded"] = True
-                                    if output not in older.setdefault("supersededOutputs", []):
-                                        older["supersededOutputs"].append(output)
-                                    self._notify(older)
                     updates[output] = {**{key: copy.deepcopy(payload[key]) for key in kept
                                           if payload.get(key) is not None},
                                        "output": output, "sequence": ordinal, "revision": self._revision + 1}
+                    if field == "preview":
+                        self._name_stored_parts(job, updates[output])
                 if output not in job["outputs"]:
                     job["outputs"].append(output)
             job["updatedAt"] = now
@@ -374,38 +563,36 @@ class JobLedger:
         showing the document builds it again rather than reporting a failure that was
         only a closed connection.
 
-        The request's end settles the files its rows owed (``saving``): none is written
-        after it. A row that owed a file the request never saved -- a child whose own done
-        closed its row before its file was written -- fails with the request's reason when
-        the request failed, so the file's reader sees why, under the row's preview.
+        A child row the request leaves running -- its worker died, its caller left -- ends as
+        the request does. The jobs its rows handed over are the supervisor's and go on: a
+        request that ended well stays open while any of them runs (``exited``), so it reads
+        as building until its files land, and closes as the last ends
+        (:meth:`_close_if_settled`); one that failed or was cancelled closes now, and the
+        files its jobs write still land on their rows. A job a build handed over settles
+        what it owed as it ends (:meth:`_owed_job_ended`).
         """
         now = self._clock()
         with self._guard:
-            # A child row the request leaves running -- its worker died, its caller left --
-            # ends as the request does; one already closed settles what it owed.
+            if job.get("ownerRow"):
+                self._owed_job_ended(job, int(exit_code), error, now)
             rows = [job, *(row for row in self._jobs.values() if row.get("request") == job["id"]
-                           and (row["state"] in _RUNNING or "saving" in row))]
+                           and row["state"] in _RUNNING)]
             for row in rows:
-                closing = row is job or row["state"] in _RUNNING
-                # Only a recorded result owes a save. A provisional preview can precede
-                # validation, so it cannot distinguish a model failure from a failed save.
-                # Keep that distinction after the live obligations are removed below, per
-                # output: a failed mesh must not make its already-saved STEP fail too.
-                if exit_code != 0 and not cancelled:
-                    failures = {output: copy.deepcopy(owed) for output, owed in (row.get("saving") or {}).items()
-                                if _owes(row, output)}
-                    if failures:
-                        row["saveFailures"] = failures
-                unsaved = not closing and exit_code != 0 and not cancelled and any(
-                    not failure.get("superseded") for failure in (row.get("saveFailures") or {}).values())
-                if closing or unsaved:
-                    if row["state"] in _RUNNING or unsaved:
-                        row["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
-                    row["exit"] = int(exit_code)
+                if row is job and exit_code == 0 and not cancelled and job["tool"] != "artifact" \
+                        and any(owing.get("owing") for owing in self._rows_of(job)):
+                    job["exited"] = 0
+                    job["updatedAt"] = now
+                    continue
+                if row["state"] in _RUNNING or row is job:
+                    failed = exit_code != 0 or bool(row.get("saveError"))
+                    row["state"] = "cancelled" if cancelled else "failed" if failed else "done"
+                    row["exit"] = int(exit_code) if exit_code != 0 or not row.get("saveError") else 1
                     if exit_code != 0 and error and not cancelled:
                         row["error"] = str(error)
-                    row["finishedAt"] = now if unsaved else row["finishedAt"] or now
-                row.pop("saving", None)
+                    elif row.get("saveError") and not cancelled:
+                        row["error"] = row["saveError"]
+                    row.pop("saveError", None)
+                    row["finishedAt"] = row["finishedAt"] or now
                 row["updatedAt"] = now
             self._sweep(now)
             for row in rows:
@@ -484,10 +671,11 @@ class JobLedger:
         return None
 
     def _sweep(self, now: float) -> None:
-        # A row whose request is still writing a file it owes stays: a door reads it until the
-        # file is saved or the request ends (``finish``).
+        # A row whose build still owes a job it handed over stays: a door reads it until the
+        # file is saved or the job ends (``_owed_job_ended``).
         for key, job in list(self._jobs.items()):
             finished = job.get("finishedAt")
-            if finished is not None and now - finished > self._retain and "saving" not in job:
+            if finished is not None and now - finished > self._retain and "saving" not in job \
+                    and not job.get("owing"):
                 self._jobs.pop(key, None)
                 self._notify()

@@ -15,10 +15,10 @@ written is the model's record's business (``cadgen store why`` and the build
 tree answer it), never a door's and never the viewer's.
 
 Before it reads a file, a door asks whether a build is still writing it
-(:func:`await_writes`): a build answers once its results are recorded and writes
-its files after, so a door given one of them waits for that write and then reads
-the bytes. It asks the daemon's job ledger -- process state -- and never a model
-record.
+(:func:`await_writes`): a build answers once its results are recorded and the
+build pool writes its files after, so a door given one of them waits for that
+write and then reads the bytes. It asks the daemon's job ledger -- process state
+-- and never a model record.
 
 Stdlib-light: these run before any CAD import, on the ``--help`` path and on a
 model script's pre-gate path.
@@ -42,14 +42,14 @@ __all__ = [
 def await_writes(path: Path | str) -> None:
     """Wait while a build is still writing the file at ``path`` (STORE.md §3, *Exports*).
 
-    The daemon's ledger lists the files each request's results owe (``saving``) and the
-    moment each lands (``saved``): while the newest result that owes this file has not saved
-    it and its request runs, the file on disk is about to change, and a door reading it now
-    would read the bytes it replaces. So the door waits for that write -- bounded by the
-    write, which ends in the file or in the request's end -- and reads the file after. With no
-    request writing it, or no daemon, nothing waits. Inside a build, a file the build's own
-    request owes is written after its bodies return, so nothing waits for it there; waiting
-    on another request's write gives up the job slot meanwhile."""
+    The daemon's ledger lists the files each request's results owe (``saving``) -- each
+    written by a build-pool job the build handed the supervisor -- and the moment each lands
+    (``saved``): while the newest result that owes this file has not saved it and its job
+    runs, the file on disk is about to change, and a door reading it now would read the bytes
+    it replaces. So the door waits for that write -- bounded by the job, which ends in the
+    file or in its failure -- and reads the file after. With no job writing it, or no daemon,
+    nothing waits. A build waits for a file its own request owes like any other (a pool job
+    writes it, never the build), giving up its job slot meanwhile."""
     import os
     import time
 
@@ -58,14 +58,13 @@ def await_writes(path: Path | str) -> None:
     from cadgen.store.paths import store_root
 
     target, root = os.path.realpath(path), os.path.realpath(store_root())
-    own = os.environ.get("CADGEN_JOB_ID") or None
     update = watch_jobs(None, output=target, store_root=root)
-    if update is None or not being_written(update["jobs"], target, own=own):
+    if update is None or not being_written(update["jobs"], target):
         return
     from cadgen.daemon import broker
 
     with broker.yielded():
-        while update is not None and being_written(update["jobs"], target, own=own):
+        while update is not None and being_written(update["jobs"], target):
             if update.get("jobsWatchLimited"):
                 time.sleep(0.5)  # every waiter the daemon keeps is taken: ask again shortly
             update = watch_jobs(update["jobsCursor"], output=target, store_root=root)

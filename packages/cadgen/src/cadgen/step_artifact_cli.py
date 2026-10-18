@@ -171,8 +171,8 @@ def build_step_artifact(
 
     ``step`` must be an existing STEP/STP file. The document itself is never
     written, and nothing appears beside it: the tree is keyed by its bytes.
-    A worker answers with that native result and finishes its display jobs after;
-    a direct call without a worker finishes them before returning."""
+    A worker answers with that native result, its display jobs the daemon's after it;
+    a direct call without a worker awaits them before returning."""
     repo_root = Path(repo_root).expanduser().resolve()
     step_path = Path(step).expanduser().resolve()
     if not step_path.is_file():

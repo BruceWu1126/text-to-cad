@@ -60,10 +60,10 @@ class Events(unittest.TestCase):
 
         def observe(event):
             try:
-                if "saving" in event:
+                if "saved" in event:
                     first_sink_entered.set()
                     if not release_first.wait(5):
-                        errors.append("saving sink was never released")
+                        errors.append("saved sink was never released")
                         return
                 delivered.append(event["sequence"])
                 ledger.observe({"event": event})
@@ -76,18 +76,18 @@ class Events(unittest.TestCase):
         def emit(field):
             try:
                 executors.emit_event({"model": model, "state": "building",
-                                      field: {"output": model, "tree": "result-tree"}})
+                                      field: {"output": model, "tree": "result-tree", "documentHash": "d" * 64}})
             except Exception as error:
                 errors.append(error)
 
         threads = [threading.Thread(target=emit, args=(field,), daemon=True)
-                   for field in ("saving", "preview")]
+                   for field in ("saved", "preview")]
         with mock.patch.object(executors, "_EVENT_LOCK", ObservedLock()), \
                 mock.patch.dict(os.environ, {"CADGEN_JOB_ID": job["id"]}):
             executors.set_event_sink(observe)
             try:
                 threads[0].start()
-                self.assertTrue(first_sink_entered.wait(5), "saving sink never started")
+                self.assertTrue(first_sink_entered.wait(5), "saved sink never started")
                 threads[1].start()
                 self.assertTrue(progress.wait(5), "preview neither contended nor arrived")
             finally:
@@ -98,7 +98,7 @@ class Events(unittest.TestCase):
             self.assertFalse(any(thread.is_alive() for thread in threads), "emitter did not retire")
         self.assertEqual(errors, [])
         self.assertEqual(delivered, [1, 2])
-        saved = ledger.snapshot()[0]["saving"][model]
+        saved = ledger.snapshot()[0]["savedResults"][model]
         self.assertEqual((saved["tree"], saved["sequence"]), ("result-tree", 1))
 
     def test_sink_can_inspect_and_replace_itself(self):

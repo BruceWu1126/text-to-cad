@@ -181,7 +181,7 @@ class ExplicitExport(unittest.TestCase):
     def test_a_changed_recipe_is_pending_before_the_current_result_export_starts(self):
         from dataclasses import replace
 
-        from cadgen.authoring import build_run, finished_after_answer
+        from cadgen.authoring import build_run, supervised
         from cadgen._internal.generation import _hit, _selected_specs_for_targets
         from cadgen.cli_logging import CliLogger
         from cadgen.store.records import read_record
@@ -191,19 +191,18 @@ class ExplicitExport(unittest.TestCase):
         _all, (spec,) = _selected_specs_for_targets([str(self.script)])
         spec = replace(spec, mesh_exports=tuple(replace(item, mesh_tolerance=0.025) if item.fmt == "stl"
                                                else item for item in spec.mesh_exports))
-        with finished_after_answer() as held, contextlib.redirect_stdout(io.StringIO()), \
+        handed = []
+        with supervised(lambda request, model: handed.append(request)), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()):
-            with build_run() as run:
+            with build_run():
                 _hit(spec, previous["tree"], logger=CliLogger("cadgen"), display=False)
-        try:
-            current = read_record(self.script)
-            self.assertFalse((self.root / "body-ran").exists(), "a current result does not run its body")
-            self.assertEqual((current["key"], current["tree"]), (previous["key"], previous["tree"]))
-            self.assertEqual(current["outputs"][str(self.root / "mesh.stl")],
-                             {"sha256": "", "declared": "stl", "chord": "0.025", "angle": "0.3", "name": "part"})
-        finally:
-            for run in held:
-                run.finish()
+        current = read_record(self.script)
+        self.assertFalse((self.root / "body-ran").exists(), "a current result does not run its body")
+        self.assertEqual((current["key"], current["tree"]), (previous["key"], previous["tree"]))
+        self.assertEqual(current["outputs"][str(self.root / "mesh.stl")],
+                         {"sha256": "", "declared": "stl", "chord": "0.025", "angle": "0.3", "name": "part"})
+        self.assertEqual([(request["kind"], [mesh["path"] for mesh in request["meshes"]]) for request in handed],
+                         [("mesh", [str(self.root / "mesh.stl")])], "the changed recipe's mesh is owed, alone")
 
     def test_loss_fails_without_rebuilding_or_replacing_the_existing_file(self):
         from cadgen.store.objects import object_path
@@ -242,21 +241,27 @@ class ExplicitExport(unittest.TestCase):
         write_entry("result", record["key"], snapshot)
         self.assertIsNone(read_result(record["key"]))
 
+    def exporting_with(self, before):
+        """``export_saved``'s export job run in this process, ``before(request)`` first: what
+        happens while a pool job writes the file."""
+        from cadgen.daemon import artifacts
+        from tests.python.support.inline_artifacts import inline_artifacts
+
+        def run(request):
+            if request["kind"] in ("export", "mesh"):
+                before(request)
+            return artifacts.execute(request)
+
+        return inline_artifacts(run)
+
     def test_foreign_destination_write_during_retry_is_refused(self):
         from cadgen._internal.export_saved import export_saved
-        from cadgen._internal.generation import _submit_export
         from cadgen.store.records import read_record
 
         self.build()
         path = self.root / "named-shape.step"
         path.unlink()
-
-        def edited(*args, **kwargs):
-            job = _submit_export(*args, **kwargs)
-            path.write_bytes(b"foreign document")
-            return job
-
-        with mock.patch("cadgen._internal.generation._submit_export", side_effect=edited):
+        with self.exporting_with(lambda _request: path.write_bytes(b"foreign document")):
             with self.assertRaisesRegex(RuntimeError, "changed during the build"):
                 export_saved(path)
         self.assertEqual(path.read_bytes(), b"foreign document")
@@ -264,7 +269,6 @@ class ExplicitExport(unittest.TestCase):
 
     def test_explicit_retry_follows_a_new_result_instead_of_returning_a_skipped_export(self):
         from cadgen._internal.export_saved import export_saved
-        from cadgen._internal.generation import _submit_export
         from cadgen._internal.doors import await_writes
         from cadgen.store.records import read_record
 
@@ -274,18 +278,17 @@ class ExplicitExport(unittest.TestCase):
         original = read_record(self.script)["tree"]
         newer = []
 
-        def superseded(*args, **kwargs):
-            job = _submit_export(*args, **kwargs)
-            if not newer:
-                self.script.write_text(SOURCE.replace("bd.Box(8, 5, 3)", "bd.Box(9, 5, 3)"), encoding="utf-8")
-                done = self.command(self.script.name)
-                self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-                await_writes(path)
-                newer.append(read_record(self.script)["tree"])
-                path.unlink()  # the newest result still owes the requested file
-            return job
+        def a_newer_build_lands(_request):
+            if newer:
+                return
+            self.script.write_text(SOURCE.replace("bd.Box(8, 5, 3)", "bd.Box(9, 5, 3)"), encoding="utf-8")
+            done = self.command(self.script.name)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            await_writes(path)
+            newer.append(read_record(self.script)["tree"])
+            path.unlink()  # the newest result still owes the requested file
 
-        with mock.patch("cadgen._internal.generation._submit_export", side_effect=superseded):
+        with self.exporting_with(a_newer_build_lands):
             self.assertEqual(export_saved(path), path)
         self.assertNotEqual(newer[0], original)
         from cadgen.store.records import tree_for_document_hash
@@ -293,7 +296,6 @@ class ExplicitExport(unittest.TestCase):
 
     def test_step_receipt_keeps_a_sibling_completion_that_lands_while_its_job_waits(self):
         from cadgen._internal.export_saved import export_saved
-        from cadgen._internal.generation import _submit_export
         from cadgen._internal.mesh_export import record_mesh_export
         from cadgen.store.records import read_record, write_record
 
@@ -306,56 +308,52 @@ class ExplicitExport(unittest.TestCase):
         write_record(record["model"], record)
         path.unlink()
 
-        def sibling_lands(*args, **kwargs):
-            job = _submit_export(*args, **kwargs)
+        def sibling_lands(_request):
             record_mesh_export(mesh, model=record["model"], document_hash=source_hash, fmt="stl",
                                mesh_tolerance=0.05, mesh_angular_tolerance=0.3)
-            return job
 
-        with mock.patch("cadgen._internal.generation._submit_export", side_effect=sibling_lands):
+        with self.exporting_with(sibling_lands):
             export_saved(path)
         updated = read_record(self.script)
         self.assertEqual(updated["outputs"][str(mesh)]["sha256"], digest(mesh))
         self.assertEqual(updated["outputs"][str(path)]["sha256"], digest(path))
 
-    def test_cli_waits_for_an_in_flight_build_write_before_returning_ready(self):
-        from cadgen.daemon.client import status
+    def test_export_waits_for_an_in_flight_build_write_before_returning_ready(self):
+        """A file a build's job is still writing is waited for, not exported again: the
+        command answers ready once the job's file lands (``doors.await_writes``)."""
+        import threading
 
-        source = SOURCE.replace('@glb(out="colored.glb")\n', '').replace(
-            '@stl(out="mesh.stl", mesh_tolerance=0.05, mesh_angular_tolerance=0.3)\n', '')
-        hook = '''
-    from cadgen._internal import generation
-    import time
-    original = generation._Export.finish
-    def held(export):
-        generation._Export.finish = original
-        (HERE / "waiting").write_text("waiting")
-        while not (HERE / "go").exists():
-            time.sleep(0.01)
-        return original(export)
-    generation._Export.finish = held
-'''
-        self.script.write_text(source.replace('    shape = bd.Box', hook + '    shape = bd.Box'), encoding="utf-8")
-        built = self.command(self.script.name)
-        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-        deadline = time.monotonic() + 60
-        while not (self.root / "waiting").exists():
-            self.assertLess(time.monotonic(), deadline, "the build never reached its held write")
-            time.sleep(0.01)
-        process = subprocess.Popen([sys.executable, "-m", "cadgen.cli", "export", "named-shape.step"],
-                                   cwd=self.root, env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        try:
-            while not any(row["tool"] == "export" for row in (status() or {}).get("jobs", [])):
-                self.assertLess(time.monotonic(), deadline, "the export request never reached the daemon")
-                self.assertIsNone(process.poll(), process.communicate()[1] if process.poll() is not None else "")
-                time.sleep(0.01)
-            self.assertFalse((self.root / "named-shape.step").exists())
-        finally:
-            (self.root / "go").touch()
-        out, err = process.communicate(timeout=60)
-        self.assertEqual(process.returncode, 0, out + err)
-        self.assertIn("ready named-shape.step", out)
-        self.assertTrue((self.root / "named-shape.step").is_file())
+        from cadgen._internal import export_saved as exporting
+        from cadgen.daemon.jobs import JobLedger
+        from cadgen.store.records import read_record
+
+        self.build()
+        path = self.root / "named-shape.step"
+        written = path.read_bytes()
+        path.unlink()
+        ledger, waiting = JobLedger(), threading.Event()
+        request = ledger.start(tool="run", subject=str(self.script), store_root=str(self.root / "store"))
+        job = ledger.owe(request, str(self.script), {
+            "kind": "export", "model": read_record(self.script)["model"], "tree": "a" * 64, "state": "b" * 64,
+            "step": str(path), "name": "named-shape", "expected": {}, "previous": {"key": None, "outputs": {}},
+            "displays": [], "meshes": []}, store_root=str(self.root / "store"))
+
+        def watch_jobs(after=None, *, output=None, store_root=None):
+            if after is not None:
+                waiting.set()
+            return ledger.watch(after, output=output, store_root=store_root)
+
+        answered = {}
+        with mock.patch("cadgen.daemon.client.watch_jobs", side_effect=watch_jobs), \
+                mock.patch.object(exporting, "_queue", side_effect=AssertionError("exported a file being written")):
+            exporter = threading.Thread(target=lambda: answered.setdefault("path", exporting.export_saved(path)))
+            exporter.start()
+            self.assertTrue(waiting.wait(30), "the export never waited for the write")
+            self.assertNotIn("path", answered)
+            path.write_bytes(written)
+            ledger.published(job, {"output": str(path), "tree": "a" * 64, "documentHash": digest(path)})
+            exporter.join(30)
+        self.assertEqual(answered["path"], path)
 
 
 if __name__ == "__main__":

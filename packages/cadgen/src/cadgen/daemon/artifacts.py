@@ -1,12 +1,15 @@
 """Build-pool artifact jobs, independent of source models: this runtime's producer
-(``kind: producer``); the display data of the parts a view found missing from the
-store (``kind: display``: one request, one job, one worker); one face's exact area and
+(``kind: producer``); the display data of parts the store lacks, for a build's result or a
+view (``kind: display``: one request, one job, one worker); one face's exact area and
 centroid, measured on its component's stored BREP for a view or a mate's axis that asks
-(``kind: measure``, ``store.parts.measure_face``); a stored tree written to
-a staged STEP (``kind: export``, ``store/exports.py``). A job runs on a daemon
-worker, never in the process that asks: the caller's own thread never imports
-the native producer. Requests contain immutable pins and may name a staged file,
-never a script, a declared output, or an instruction to run arbitrary Python.
+(``kind: measure``, ``store.parts.measure_face``); a model's STEP written from its stored
+result and published as its saved file, then its declared meshes cut (``kind: export``,
+``store.exports.run_export``); a model's declared meshes alone (``kind: mesh``,
+``store.exports.run_meshes``). A job runs on a daemon worker, never in the process that
+asks: the caller's own thread never imports the native producer. Requests contain
+immutable pins -- a tree, a model's identity and the digest of the result it names, the
+files to write and the bytes found there -- never a script or an instruction to run
+arbitrary Python.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ import copy
 from concurrent.futures import Future
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -54,12 +58,116 @@ def _producer(value):
     return result
 
 
-def _path(value, name):
+def _path(value, name, suffixes=(".step", ".stp")):
     if not isinstance(value, str) or not value or not os.path.isabs(value):
         raise ValueError(f"artifact {name} must be an absolute path")
-    if Path(value).suffix.lower() not in (".step", ".stp"):
-        raise ValueError(f"artifact {name} must name a STEP document")
+    if Path(value).suffix.lower() not in suffixes:
+        raise ValueError(f"artifact {name} must name a {'/'.join(suffixes)} file")
     return str(Path(value))
+
+
+def _optional_digest(value, name):
+    return None if value is None else _digest(value, name)
+
+
+def _model(value):
+    """A model's identity (``store.index.model_ref``): its absolute script path, with
+    ``::function``, or an absolute document path."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("artifact model must be a model's identity")
+    script = value.rpartition("::")[0] if "::" in value else value
+    if not os.path.isabs(script):
+        raise ValueError("artifact model must name its script by an absolute path")
+    return value
+
+
+def _tolerance(value, name):
+    if value is None:
+        return None
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"artifact {name} must be a positive finite number or null")
+    return float(value)
+
+
+def _display(request):
+    if not isinstance(request, dict) or request.get("kind") != "display" \
+            or set(request) != {"kind", "tree", "cids", "producer"}:
+        raise ValueError("artifact display must have exactly kind, tree, cids and producer")
+    cids = request["cids"]
+    if not isinstance(cids, (list, tuple)) or not cids:
+        raise ValueError("artifact cids must be a nonempty list")
+    cids = [_digest(cid, "cid", _CID) for cid in cids]
+    if len(cids) != len(set(cids)):
+        raise ValueError("artifact cids must not contain duplicates")
+    return {"kind": "display", "tree": _digest(request["tree"], "tree"), "cids": sorted(cids),
+            "producer": _producer(request["producer"])}
+
+
+_MESH_SUFFIX = {"stl": ".stl", "3mf": ".3mf", "glb": ".glb"}
+
+
+def _meshes(value, *, required):
+    if not isinstance(value, list) or (required and not value):
+        raise ValueError("artifact meshes must be a list" + (", not empty" if required else ""))
+    meshes = []
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"fmt", "path", "chord", "angle"} \
+                or item["fmt"] not in _MESH_SUFFIX:
+            raise ValueError("artifact mesh must have exactly fmt (stl, 3mf or glb), path, chord and angle")
+        meshes.append({"fmt": item["fmt"], "path": _path(item["path"], "mesh path", (_MESH_SUFFIX[item["fmt"]],)),
+                       "chord": _tolerance(item["chord"], "chord"), "angle": _tolerance(item["angle"], "angle")})
+    if len({mesh["path"] for mesh in meshes}) != len(meshes):
+        raise ValueError("artifact mesh paths must be distinct")
+    return meshes
+
+
+def _files(step, meshes):
+    """The files an export or mesh request writes, each by its absolute path: the STEP and its
+    sidecar, then the meshes."""
+    files = [step, f"{step}.json"] if step is not None else []
+    return files + [mesh["path"] for mesh in meshes]
+
+
+def _publication(request, kind):
+    """An export or mesh request: what its job publishes, pinned (``store/exports.py``)."""
+    if set(request) != {"kind", "model", "tree", "state", "step", "name", "expected", "previous", "displays",
+                        "meshes"}:
+        raise ValueError(f"artifact {kind} must have exactly model, tree, state, step, name, expected, previous, "
+                         "displays and meshes")
+    step = _path(request["step"], "step") if kind == "export" or request["step"] is not None else None
+    meshes = _meshes(request["meshes"], required=kind == "mesh")
+    files = set(_files(step, meshes))
+    name = request["name"]
+    if not isinstance(name, str) or not name:
+        raise ValueError("artifact name must name the meshes' document")
+    expected, previous = request["expected"], request["previous"]
+    if not isinstance(expected, dict) or not set(expected) <= files:
+        raise ValueError("artifact expected must map files the request writes to the digests found there")
+    if not isinstance(previous, dict) or set(previous) != {"key", "outputs"} \
+            or not isinstance(previous["outputs"], dict) or not set(previous["outputs"]) <= files:
+        raise ValueError("artifact previous must have exactly key and the outputs it recorded for these files")
+    if not isinstance(request["displays"], list):
+        raise ValueError("artifact displays must be a list of display requests")
+    return {
+        "kind": kind,
+        "model": _model(request["model"]),
+        "tree": _digest(request["tree"], "tree"),
+        "state": _digest(request["state"], "state"),
+        "step": step,
+        "name": name,
+        "expected": {path: _optional_digest(digest, "expected digest") for path, digest in sorted(expected.items())},
+        "previous": {"key": _optional_digest(previous["key"], "previous key"),
+                     "outputs": {path: _digest(digest, "previous digest")
+                                 for path, digest in sorted(previous["outputs"].items())}},
+        "displays": [_display(display) for display in request["displays"]],
+        "meshes": meshes,
+    }
+
+
+def publication_files(request):
+    """The files a normalized export or mesh request writes, in order: the STEP, then the
+    meshes (its sidecar is published with the STEP and owes nothing of its own)."""
+    return ([request["step"]] if request["kind"] == "export" else []) + [mesh["path"] for mesh in request["meshes"]]
 
 
 def normalize_request(request):
@@ -69,25 +177,18 @@ def normalize_request(request):
     kind = request.get("kind")
     if kind == "producer" and set(request) == {"kind"}:
         return {"kind": "producer"}
-    if kind == "export" and set(request) == {"kind", "tree", "out"}:
-        return {"kind": kind, "tree": _digest(request["tree"], "tree"), "out": _path(request["out"], "out")}
+    if kind in ("export", "mesh"):
+        return _publication(request, kind)
     if kind == "measure" and set(request) == {"kind", "tree", "cid", "face"}:
         face = request["face"]
         if type(face) is not int or face < 1:
             raise ValueError("artifact face must be a face ordinal, an integer from 1")
         return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cid": _digest(request["cid"], "cid", _CID),
                 "face": face}
-    if kind != "display" or set(request) != {"kind", "tree", "cids", "producer"}:
+    if kind != "display":
         raise ValueError("artifact request must be producer; display with exactly tree, cids and producer; "
-                         "measure with tree, cid and face; or export with tree and out")
-    cids = request["cids"]
-    if not isinstance(cids, (list, tuple)) or not cids:
-        raise ValueError("artifact cids must be a nonempty list")
-    cids = [_digest(cid, "cid", _CID) for cid in cids]
-    if len(cids) != len(set(cids)):
-        raise ValueError("artifact cids must not contain duplicates")
-    return {"kind": kind, "tree": _digest(request["tree"], "tree"), "cids": sorted(cids),
-            "producer": _producer(request["producer"])}
+                         "measure with tree, cid and face; or export or mesh with what they publish")
+    return _display(request)
 
 
 def request_key(request):
@@ -133,11 +234,13 @@ def worker_context(root):
         _WORKER.root = previous
 
 
-def execute(request, *, keep_going=None):
+def execute(request, *, keep_going=None, published=None):
     """Worker-only native entry. Source and model lookup are absent by design.
 
-    ``keep_going`` is asked before each part (``parts.derive``): a daemon worker's asks
-    its supervisor whether anyone still wants the job. An export is one step."""
+    ``keep_going`` is asked before each part (``parts.derive``), and before an export or a
+    mesh job writes and before it publishes: a daemon worker's asks its supervisor whether
+    anyone still wants the job. ``published`` hears each file an export or mesh job saves,
+    the moment it lands (the worker sends it to the supervisor, ``daemon/worker.py``)."""
     request = normalize_request(request)
     from cadgen.store import parts
 
@@ -145,10 +248,11 @@ def execute(request, *, keep_going=None):
         return parts.producer_identity()
     if request["kind"] == "measure":
         return parts.measure_face(request["tree"], request["cid"], request["face"])
-    if request["kind"] == "export":
+    if request["kind"] in ("export", "mesh"):
         from cadgen.store import exports
 
-        return exports.export_step(request["tree"], Path(request["out"]))
+        run = exports.run_export if request["kind"] == "export" else exports.run_meshes
+        return run(request, keep_going=keep_going, published=published)
     return parts.derive(request["tree"], request["cids"], producer=request["producer"], keep_going=keep_going)
 
 

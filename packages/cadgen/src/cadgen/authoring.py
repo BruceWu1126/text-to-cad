@@ -23,7 +23,7 @@ Semantics:
   progress (``__main__``, a REPL, a test) runs the full pipeline — freshness
   gate, progress, incremental package build, ``.step``/``.dxf`` output — on the
   warm daemon, and returns once every model's result is recorded (a drawing's
-  ``.dxf`` written): the daemon writes the STEP and mesh files after it
+  ``.dxf`` written): the build pool writes the STEP and mesh files after it
   (STORE.md §3, *Exports*), and every command that reads one waits for it. A real-file
   ``__main__`` bare call whose result is immediately discarded returns
   ``None`` without loading the shape back into the initiator. Callers that use
@@ -36,8 +36,9 @@ Semantics:
   store holds one for its inputs as they are, else run -- serially, in this
   process, as its own build with its own record -- and the shape handed back is
   its stored result, decoded (STORE.md §9a). The files a call owes (its STEP,
-  its meshes) are queued as its result is recorded and written once the command
-  has answered, children first (``build_run``). A drawing's body runs inline.
+  its meshes) are build-pool jobs, started as its result is recorded, so a child's
+  file is written while its parent's body goes on (``build_run``). A drawing's body
+  runs inline.
   The root model is only the first call.
 - **A model is ``script::function``.** A file may hold several models; each is
   its own record, output and job (``cadgen.store.index.model_ref``), and they
@@ -163,27 +164,46 @@ class BuildFrame:
 class BuildRun:
     """One top-level build in this process, shared by every frame nested in it:
     the models decoded or run so far, each once per run (``results``: model ->
-    (key, tree)), what those calls still owe once their results are recorded -- the
-    display data the build pool derives for each result (``displays``) and the files
+    (key, tree)), what those calls owe once their results are recorded -- the display
+    data the build pool derives for each result (``displays``) and the files
     (``exports``: each a ``generation._Export``, queued as its model's result is
-    recorded) -- finished after the command has answered, in that order, and what the
-    root command owns for the run (its logger)."""
+    recorded) -- and what the root command owns for the run (its logger).
 
-    def __init__(self, logger: Any = None) -> None:
+    What a call owes is build-pool jobs (STORE.md §3, *Exports*): ``owe`` hands each to the
+    supervisor of the daemon worker the command runs on (``hand_off``, :func:`supervised`),
+    which runs it, keeps the request's row in its job ledger open until it ends, and folds
+    what it saves there, so the worker is free the moment the command answers. With no
+    worker (``hand_off`` None) this process submits them itself and awaits them before the
+    command answers (:meth:`finish`)."""
+
+    def __init__(self, logger: Any = None, *, hand_off: Callable[[dict, str], None] | None = None) -> None:
         self.logger = logger
         self.results: dict[str, tuple[str, str]] = {}
+        self.hand_off = hand_off
         self.displays: list[Any] = []
         self.exports: list[Any] = []
+
+    def owe(self, request: dict, *, model: str) -> Any:
+        """Have the build pool run ``request`` (an artifact request, ``daemon/artifacts.py``),
+        a job ``model``'s result owes: handed to the supervisor, which answers nothing back
+        (None), or submitted from this process (its future)."""
+        if self.hand_off is not None:
+            self.hand_off(request, model)
+            return None
+        from cadgen.daemon.artifacts import submit_artifact
+
+        return submit_artifact(request)
 
     def owed(self) -> list[Path]:
         """The files this run still writes: every queued export's, in the order queued."""
         return [path for export in self.exports for path in export.owed()]
 
     def finish(self) -> None:
-        """Finish what the run owes: the display data its builds asked the pool for, then
-        every export queued, in the order queued -- children before the parent that called
-        them -- each writing the files its model owes. Every export has its turn; the first
-        failure is raised after the last one, the others printed."""
+        """Await what the run submitted itself (none of it in a run whose jobs were handed
+        off): the display data its builds asked the pool for, then every export queued, in the
+        order queued -- children before the parent that called them -- each saying what its
+        job wrote. Every export has its turn; the first failure is raised after the last one,
+        the others printed."""
         from cadgen._internal.generation import _await_display
 
         for display, name in self.displays:
@@ -203,8 +223,9 @@ class BuildRun:
             raise failure
 
     def abandon(self) -> None:
-        """Leave what the run owes: the pool's display jobs stop once no one wants them,
-        every file stays as it was, and the next run exports again what is owed."""
+        """Leave what the run submitted itself: each job stops before it writes or publishes
+        once no one wants it, every file stays as it was, and the next run exports again what
+        is owed. A job handed off is the supervisor's, which finishes it."""
         for display, _name in self.displays:
             display.abandon()
         self.displays.clear()
@@ -218,41 +239,38 @@ def current_run() -> BuildRun | None:
 
 
 @contextlib.contextmanager
-def finished_after_answer() -> Iterator[list[BuildRun]]:
-    """Hold the runs the command this thread runs leaves owing, for the daemon worker to
-    finish once the command has answered (``daemon.worker``): a build answers the moment
-    every model's result is recorded, and its display data and files follow."""
-    previous = getattr(_BUILD_STATE, "held", None)
-    held: list[BuildRun] = []
-    _BUILD_STATE.held = held
+def supervised(hand_off: Callable[[dict, str], None]) -> Iterator[None]:
+    """Run the command this thread runs under a daemon worker's supervisor: every build run it
+    opens hands the pool jobs its models owe to ``hand_off`` (``daemon.worker``) instead of
+    awaiting them, so the command answers -- and the worker takes its next job -- the moment
+    every model's result is recorded, and the supervisor sees each job to its end."""
+    previous = getattr(_BUILD_STATE, "hand_off", None)
+    _BUILD_STATE.hand_off = hand_off
     try:
-        yield held
+        yield
     finally:
-        _BUILD_STATE.held = previous
+        _BUILD_STATE.hand_off = previous
 
 
 def _finish(run: BuildRun) -> None:
-    """Finish ``run`` now, or hold it for the worker to finish after the command answers."""
-    held = getattr(_BUILD_STATE, "held", None)
-    if held is None:
+    """Await what ``run`` submitted itself; a run whose jobs were handed off owes nothing here."""
+    if run.hand_off is None:
         run.finish()
-    else:
-        held.append(run)
 
 
 @contextlib.contextmanager
 def build_run(logger: Any = None) -> Iterator[BuildRun]:
     """The run a top-level command owns (``generation``): every decorated call made
     inside it, at any depth, belongs to this run, and what those calls owe once their
-    results are recorded -- display data, then files -- is finished after the command's
-    bodies have returned: by the daemon worker once the command has answered
-    (:func:`finished_after_answer`), or, in a process with no worker to finish it, as the
-    block ends, before the command answers. A run that failed still finishes them (the
-    children built before the failure owe their files, and the pool is writing them), its
-    own failure the one reported; an interrupted one abandons them. Nests for a build
-    started inside a build (a test's), each its own."""
+    results are recorded -- display data and files, build-pool jobs -- is handed to the
+    daemon worker's supervisor as each result is recorded (:func:`supervised`), or, in a
+    process with no worker, submitted from here and awaited as the block ends, before the
+    command answers. A run that failed still awaits them (the children built before the
+    failure owe their files, and the pool is writing them), its own failure the one
+    reported; an interrupted one abandons what it submitted. Nests for a build started
+    inside a build (a test's), each its own."""
     previous = current_run()
-    run = _BUILD_STATE.run = BuildRun(logger)
+    run = _BUILD_STATE.run = BuildRun(logger, hand_off=getattr(_BUILD_STATE, "hand_off", None))
     try:
         try:
             yield run
