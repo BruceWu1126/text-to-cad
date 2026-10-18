@@ -61,7 +61,7 @@ export default function LayersSection({ sheet, display, onDisplayChange }) {
               <span className={cn("flex h-full min-w-0 flex-1 items-center gap-1.5 pl-1 pr-2", hidden && "text-muted-foreground",
                 hidden ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover)}>
                 <TreeRowLabel className="max-w-full shrink-0">{layer.label}</TreeRowLabel>
-                <TreeRowLabel className="flex-1 text-muted-foreground">{(counts.get(layer.id) ?? 0).toLocaleString("en-US")}</TreeRowLabel>
+                <TreeRowLabel className="flex-1 text-micro text-muted-foreground">{(counts.get(layer.id) ?? 0).toLocaleString("en-US")}</TreeRowLabel>
               </span>
               <LayerEye id={layer.id} hidden={hidden} onToggle={toggle} />
             </TreeRowSurface>

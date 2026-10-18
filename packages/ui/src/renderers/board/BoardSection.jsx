@@ -78,7 +78,7 @@ function BoardRow({ node, depth, branch, open, selected, isolated, toggle, choos
         branch && "pl-1", eye && (isolated ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover))}>
       {branch ? null : <KindGlyph kind={node.kind} />}
       <TreeRowLabel className="max-w-full shrink-0">{node.label}</TreeRowLabel>
-      {node.detail ? <TreeRowLabel className="flex-1 text-muted-foreground">{node.detail}</TreeRowLabel> : null}
+      {node.detail ? <TreeRowLabel className="flex-1 text-micro text-muted-foreground">{node.detail}</TreeRowLabel> : null}
     </button>
     {eye ? <IsolateEye node={node} on={isolated} onToggle={onIsolate} /> : null}
   </TreeRowSurface>;
@@ -96,7 +96,7 @@ function BoardSearchRow({ match, selected, isolated, cursor, choose, hover, onIs
         eye && (isolated ? ROW_NAME_UNDER_ACTIONS.shown : ROW_NAME_UNDER_ACTIONS.hover))}>
       <KindGlyph kind={node.kind} />
       <TreeRowLabel className="max-w-full shrink-0"><TreeFilterHighlight indices={indices} text={entry.label} /></TreeRowLabel>
-      <TreeRowLabel className="flex-1 text-muted-foreground">
+      <TreeRowLabel className="flex-1 text-micro text-muted-foreground">
         {alias ? <TreeFilterHighlight indices={alias.indices} text={alias.text} /> : node.detail || entry.prefix.slice(0, -1)}
       </TreeRowLabel>
     </button>
