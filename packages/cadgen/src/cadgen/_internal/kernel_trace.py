@@ -1650,3 +1650,225 @@ def _transform(location: Any) -> tuple[int, ...]:
     transform = location.Transformation()
     return tuple(int(round(transform.Value(row, column) / (_POSITION_QUANTUM if column == 4 else _DIRECTION_QUANTUM)))
                  for row in (1, 2, 3) for column in (1, 2, 3, 4))
+
+
+# --- a component's naming, restated (store/build.py's prepared components) -------------------
+
+
+class _Unstated(Exception):
+    """A feature the account reads has no history to stand for it in another run."""
+
+
+@dataclass(frozen=True, eq=False)
+class _Closure:
+    """The features an account of a part with given ancestors can read, in call order:
+    ``features``, each restated; ``histories``, theirs; and what a part's restatement takes
+    of them -- those outside the ancestors, the labelled ones inside (with their places), and
+    the labelled copy contexts."""
+
+    features: tuple
+    histories: tuple
+    outside: tuple
+    labelled: tuple
+    contexts: tuple
+
+
+def account_basis(trace: Trace, body: Any, made_by: Callable[[Any], int | None],
+                  memo: dict) -> tuple[tuple, tuple, tuple] | None:
+    """What :meth:`Trace.account` reads of ``trace`` to name the unlocated component ``body``,
+    besides ``body``'s own topology, restated in terms no run owns, as ``(part, closure,
+    histories)``: for one TShape, in any two runs, equal parts and closures give one lineage,
+    and one map of feature names up to the features' places in the run (the account's second
+    result). None where a feature it reads has no history.
+
+    The account reads the features the part descends from (its ``_Names``' ancestors, those
+    of the copy contexts it renders through included) and the features their inputs are
+    registered to (``made_by``): their operations and functions (a name's stem, and its count
+    among the ancestors), their histories (what made each element, and the naming structures
+    kept with them, which hold the results and inputs the history's entry was computed with),
+    the feature that gave and the one that made each input, their copy contexts, and the
+    labels pinned on them by the time the part was made; and of the part, the features that
+    made it, its body, the last of its features and the copies it holds. A feature stands for
+    itself by its history: the memo's entry's, which every hit hands to its feature and no
+    other feature of a run holds, and whose identity is compared (``histories`` holds them).
+    The ``closure`` -- every such feature restated, in call order -- is one object for every
+    part a ``memo`` (the caller's, one per trace) restates with the same ancestors."""
+    try:
+        return _account_basis(trace, body, made_by, memo)
+    except _Unstated:
+        return None
+
+
+def _account_basis(trace: Trace, body: Any, made_by: Callable[[Any], int | None],
+                   memo: dict) -> tuple[tuple, tuple, tuple]:
+    ids = _history_ids(trace, memo)
+    copied = trace._copy_of(body, made_by)
+    if copied is not None and copied.names is None and copied.made is None:
+        owner = made_by(body.TShape())
+        return (("unnamed copy", _stands(ids, owner), trace.features[owner].position_of(body.TShape())), (),
+                (trace.features[owner].history,))
+    maker = trace._maker(made_by, body)
+    owners = trace._owners(made_by, body)
+    if maker is None and not owners:
+        return ("unnamed",), (), ()
+    made_feature = copied.made if copied is not None else None if maker is None else trace.unwrapped(maker)
+    roots = [index for _shape, index in owners] + ([made_feature] if made_feature is not None else [])
+    made_at = max(roots)
+    ancestors = copies = 0
+    for index in roots:
+        ancestors |= trace._ancestors[index]
+        copies |= trace._copy_ancestors[index]
+    held = [trace._copy_contexts[identity] for identity in _bit_indices(copies)]
+    closure = _closure(trace, ids, ancestors, tuple(context.owner[0] for context in held), made_by, memo)
+    if owners and owners[0][0] is body:
+        owned: tuple = ("whole", _stands(ids, owners[0][1]))
+    else:
+        from cadgen._internal.entity_ordinals import shape_entities
+
+        owned = tuple((position, _stands(ids, index)) for position, entity in enumerate(shape_entities(body))
+                      if (index := made_by(entity.TShape())) is not None)
+    part = (
+        "part", owned,
+        None if maker is None else _stands(ids, maker),
+        None if made_feature is None else _stands(ids, made_feature),
+        _stands(ids, made_at),
+        closure.outside,
+        # The labels the part's names read: pinned by the time it was made, on a feature of
+        # it other than its body's.
+        tuple((stands, label) for index, stands, label in closure.labelled
+              if index != made_feature and trace.features[index].pinned_at <= made_at),
+        tuple(_copy_key(ids, context) for context in held),
+        tuple((*key, label) for context, key, label in closure.contexts
+              if context.pinned_at is not None and context.pinned_at <= made_at),
+    )
+    return part, closure.features, closure.histories
+
+
+def _closure(trace: Trace, ids: list, ancestors: int, owners: tuple[int, ...],
+             made_by: Callable[[Any], int | None], memo: dict) -> _Closure:
+    """The features an account of a part with these ancestors (and copy contexts owned by
+    ``owners``) can read: the ancestors, and every feature a restatement of one names."""
+    key = ("closure", ancestors, owners)
+    found = memo.get(key)
+    if found is None:
+        members = set(_bit_indices(ancestors)) | set(owners)
+        pending = list(members)
+        while pending:
+            for reached in _feature_basis(trace, ids, pending.pop(), made_by, memo)[1]:
+                if reached not in members:
+                    members.add(reached)
+                    pending.append(reached)
+        order = sorted(members)
+        inside = set(_bit_indices(ancestors))
+        contexts = ((context, _copy_key(ids, context), context.label) for index in order
+                    for _position, context in sorted(trace.features[index].copies.items()))
+        found = memo[key] = _Closure(
+            features=tuple(memo[("feature", index)][0] for index in order),
+            histories=tuple(trace.features[index].history for index in order),
+            outside=_all_stand(ids, [index for index in order if index not in inside]),
+            labelled=tuple((index, _stands(ids, index), trace.features[index].label) for index in order
+                           if index in inside and trace.features[index].label is not None
+                           and trace.features[index].pinned_at is not None),
+            contexts=tuple(context for context in contexts if context[2] is not None),
+        )
+    return found
+
+
+def _feature_basis(trace: Trace, ids: list, index: int, made_by: Callable[[Any], int | None], memo: dict) -> tuple:
+    """One feature restated, and the features that restatement names: its history, its
+    operation and function, per input the feature that made its shape (and whether it ran
+    before this one) and the one that gave it, and its copy contexts."""
+    key = ("feature", index)
+    found = memo.get(key)
+    if found is None:
+        feature = trace.features[index]
+        reached: list[int] = []
+        inputs = []
+        for j, handle in enumerate(feature.handles):
+            if handle is None:
+                inputs.append(None)
+                continue
+            up, given = made_by(handle.TShape()), feature.inputs[j]
+            reached.extend(other for other in (up, given) if other is not None)
+            inputs.append((None if up is None else _stands(ids, up), up is not None and up < index,
+                           None if given is None else _stands(ids, given)))
+        copies = []
+        for position, context in sorted(feature.copies.items()):
+            reached.extend(other for other in (context.made, context.owner[0]) if other is not None)
+            if context.names is not None:
+                names = context.names
+                reached.extend(_bit_indices(names.ancestors))
+                reached.extend(other for other in (names.body, names.made_at) if other is not None)
+                reached.extend(trace._copy_contexts[identity].owner[0] for identity in _bit_indices(names.copies))
+            copies.append((position, _context_basis(trace, ids, context)))
+        found = memo[key] = ((_stands(ids, index), feature.op, feature.function, tuple(inputs), tuple(copies)),
+                             tuple(reached))
+    return found
+
+
+def _context_basis(trace: Trace, ids: list, context: _CopyContext) -> tuple:
+    """A copy context restated: the feature that made its source, its owner, its label, and
+    the names it renders its source with."""
+    names = context.names
+    if names is None:
+        restated = None
+    else:
+        if names.overrides:
+            raise _Unstated("a labelled copy's names")
+        members = _bit_indices(names.ancestors)
+        features = trace.features
+        restated = (
+            _all_stand(ids, members),
+            None if names.body is None else _stands(ids, names.body),
+            _stands(ids, names.made_at),
+            tuple((ids[index], features[index].label) for index in members
+                  if features[index].label is not None and index != names.body
+                  and features[index].pinned_at is not None and features[index].pinned_at <= names.made_at),
+            tuple((*_copy_key(ids, held), held.label, held.pinned_at is not None and held.pinned_at <= names.made_at)
+                  for held in (trace._copy_contexts[identity] for identity in _bit_indices(names.copies))),
+        )
+    return (None if context.made is None else _stands(ids, context.made), *_copy_key(ids, context),
+            context.label, restated)
+
+
+def _copy_key(ids: list, context: _CopyContext) -> tuple:
+    return _stands(ids, context.owner[0]), context.owner[1]
+
+
+def _history_ids(trace: Trace, memo: dict) -> list:
+    """Each feature of the trace as no run's place names it: its history's identity, or
+    None for one with no history. Read once per ``memo``: no feature is recorded once the
+    run has returned."""
+    ids = memo.get("history ids")
+    if ids is None:
+        ids = memo["history ids"] = [None if feature.history is None else id(feature.history)
+                                     for feature in trace.features]
+    return ids
+
+
+def _stands(ids: list, index: int) -> int:
+    """The feature ``index`` as no run's place names it."""
+    found = ids[index]
+    if found is None:
+        raise _Unstated(f"feature {index} has no history")
+    return found
+
+
+def _all_stand(ids: list, indices: list[int]) -> tuple:
+    found = tuple(ids[index] for index in indices)
+    if None in found:
+        raise _Unstated("a feature with no history")
+    return found
+
+
+def _bit_indices(bits: int) -> list[int]:
+    """The places a bit set holds, ascending: a few, stepped through; many, read off its
+    binary digits."""
+    if bits.bit_count() < 64:
+        found = []
+        while bits:
+            low = bits & -bits
+            found.append(low.bit_length() - 1)
+            bits ^= low
+        return found
+    return [place for place, bit in enumerate(reversed(bin(bits)[2:])) if bit == "1"]

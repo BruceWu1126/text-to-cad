@@ -542,6 +542,49 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   the prepared native input. A forced compile derives and fences every
   component again.
 
+  **A worker remembers the components it published.** Preparing a component --
+  naming it (`kernel_memo._Run.account`), encoding, privately decoding and hashing
+  it -- is most of what a publication costs, and the kernel memo hands an unchanged
+  part back as the very kernel object it was. So a worker keeps each component it
+  published, in its memory and never in the store (`store/build.py`,
+  `_Remembered`): its prepared entry -- BREP bytes and digest, face colours,
+  construction key, lineage object and hash, content hash -- by the live object it
+  was prepared from: the TShape, its orientation, its face colours. A publication
+  of that object takes the remembered component in place of preparing it again,
+  and only while all the preparation read is as it was: the construction key the
+  run names it by (`kernel_memo.construction_key_in`); the rows the memo's ledger
+  holds on each of its sub-shapes (`kernel_memo.ledger_snapshot`: every change the
+  memo made to one since its maker returned it, flags included, which BinTools
+  writes -- the representations an extrusion appends to a profile's edges the part
+  shares, the flag a compound clears), with none met since of the changes the memo
+  counts as unreplayable or failed to capture (`unreplayable`, `errors`: it notes no
+  row for one, on whatever shapes share the sub-shape); and the run's naming of it
+  (`kernel_trace.account_basis`): the features it descends from and those their
+  inputs are registered to, each by its history (its memo entry's, which a hit
+  hands on), with its operation, function, inputs and copy contexts, and the labels
+  pinned on them by the time the part was made. Anything else prepares it as a
+  fresh worker would, so a remembered component changes no tree, component, lineage
+  or part key: a new kernel object, an appended representation, a recoloured face,
+  a label pinned on a feature it descends from by a call it does not, is prepared
+  again; a part relabelled or moved -- its occurrence's change -- is not. With hits
+  off nothing is recalled, as every run makes new objects. Each feature name of a
+  recalled component's lineage stands, in the provenance of the run (*Provenance*,
+  below), for the feature holding the history it stood for. A change the memo does
+  not see (a representation rewritten in place, a mutation outside the patched
+  surface) is seen by neither the memo nor this, nor is one it forgets a root for
+  without counting it (an uncached call changing a memoized root it was handed
+  inside a foreign shape) on a sub-shape that root shares with a part that is not
+  it: the root's own parts lose their construction key, and are prepared again. A
+  worker remembers only what the memo holds, and forgets at its next publication
+  what the memo let go (no hit can hand it back, and nothing here keeps it alive),
+  within 8192 components and 512 MiB of their bytes, the least recently recalled
+  first; a worker the daemon reclaims takes it all with it. The sub-shapes are
+  hashed, to read the ledger's rows on them, the first time a component is
+  recalled: until then, one that never comes back costs its publication only its
+  naming's restatement. A recalled component was checked against its bytes by the
+  publication that prepared it; its store objects are checked as every
+  component's are.
+
   A view of a tree (`store/view.py`, `parts.view_from_geometry`) names a
   runtime producer separately from the tree: the loaded build123d, OCP
   and distribution versions. Each component of a view names its **part**: the
@@ -1237,7 +1280,9 @@ holds the **features** the body ran, in call order (§2) -- each one's
 operation, the source frame in the model's own code that called it (file, line
 and the enclosing function) and the features that made the shapes it was
 given -- the **components** the build made, each with the feature every name
-of its lineage stands for, and the **occurrences** of those components in the
+of its lineage stands for (this run's, for a component the worker remembered
+publishing: the feature with the history the name stood for, §3 *Tree*), and the
+**occurrences** of those components in the
 result, each with the feature whose call made the shape it places. A component
 names its elements by those features through its lineage object (§2, §3),
 which is how an element finds the feature that made it and the one that last

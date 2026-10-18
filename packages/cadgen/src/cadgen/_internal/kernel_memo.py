@@ -2076,3 +2076,35 @@ class _Effect:
                 _LEDGER[row.tshape] = kept
             else:
                 del _LEDGER[row.tshape]
+
+
+# --- read-only, for a publication after the run (store/build.py's prepared components) -------
+
+
+def construction_key_in(run: _Run, shape: Any) -> str | None:
+    """:func:`construction_key` as ``run`` names ``shape``, read once the run has returned:
+    the ``construction`` a component ``_Run.account`` names carries."""
+    return _construction_key(shape, run)
+
+
+def held(tshapes: Any) -> set:
+    """Those of ``tshapes`` the memo holds as made by an entry it keeps, untainted: the only
+    TShapes a later run's hit can hand back."""
+    with _LOCK:
+        return {tshape for tshape in tshapes if (made := _REGISTRY.get(tshape)) is not None and not made.tainted}
+
+
+def ledger_snapshot() -> dict[int, tuple]:
+    """The ledger as it stands: for each ``hash`` of a sub-shape it holds rows for, placed at
+    the identity (so a function of its TShape alone), that hash's ``(TShape, rows)`` pairs,
+    each row ``(before, after, appended)`` in the order applied -- every change the memo has
+    made to that sub-shape since its maker returned it. A shape whose sub-shapes' pairs are
+    the same at two moments is, as far as the memo can know, in the same state at both: the
+    same serialization, flags included (BinTools writes them)."""
+    with _LOCK:
+        snapshot: dict[int, tuple] = {}
+        for tshape, rows in _LEDGER.items():
+            key = hash(_handle_of(tshape))
+            snapshot[key] = (*snapshot.get(key, ()),
+                             (tshape, tuple((row.before, row.after, row.appended) for row in rows)))
+        return snapshot
