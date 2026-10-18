@@ -1901,7 +1901,12 @@ daemon's.
 key is the model (`script::function` — two models in one file are two
 subjects, two workers): a request for a model whose worker is
 idle takes it; whose worker is busy binds a spare as an **extra** for that
-one job (the extra returns to the spare set after); a model with no worker
+one job (the extra returns to the spare set after) -- unless that worker has
+answered its build and is still writing the build's files (§3, *Exports*), in
+which case the request waits for it: the worker holds the kernel memo the next
+build of the model hits (README law 18), and an extra would run the whole model
+cold; the wait ends with the worker's job, and the build tree says what it
+waits for; a model with no worker
 binds a spare and a replacement starts in the background; no spare means a
 spawn. Spares load build123d/OCP as well as the lazy tool parsers before
 announcing readiness; importing the supervisor never loads the kernel.
@@ -2149,8 +2154,10 @@ CPU scheduling and reuse remain independent of memory admission:
 2. **In-flight coalescing.** A compile or an artifact job matching one already
    in flight (`(store, bytes)`; `(store, request)`) attaches to that job instead
    of starting another. In flight only, never a lookup into the past, and never
-   a model build: a second `python a.py` still runs, on an extra, and two
-   parents needing one stale child build it once per run (§9a), not per pool.
+   a model build: a second `python a.py` still runs, on an extra (or, while
+   a.py's worker writes its last build's files, on that worker once it has),
+   and two parents needing one stale child build it once per run (§9a), not
+   per pool.
    Coalesced compile callers receive the owner's `released` frame when its
    native answer is ready, including callers attaching while its display jobs
    finish. Owner and follower ledger rows stay open until the owner exits and

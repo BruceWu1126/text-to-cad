@@ -719,29 +719,6 @@ def _ensure_step_ready(step_path: Path) -> None:
         )
 
 
-@dataclass(frozen=True)
-class _ArtifactJob:
-    name: str
-    run: Callable[[], object]
-
-
-def _run_artifact_jobs(
-    jobs: Sequence[_ArtifactJob],
-    *,
-    logger: CliLogger | None = None,
-) -> dict[str, object]:
-    # Always supply a logger: `logger.timed` spans below this boundary are
-    # born orphaned whenever a caller drops the logger (the STEP-export spans
-    # were invisible for exactly that reason). A default non-verbose CliLogger
-    # gives every span a sink and lets verbosity alone decide what prints.
-    logger = logger or CliLogger("cad")
-    results: dict[str, object] = {}
-    for job in jobs:
-        with logger.timed(f"write {job.name}"):
-            results[job.name] = job.run()
-    return results
-
-
 def _spec_output_dir(spec: EntrySpec, model_format: str) -> str | None:
     """The progress SCOPE for this spec's generator, if it has one.
 

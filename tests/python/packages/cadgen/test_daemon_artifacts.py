@@ -266,7 +266,7 @@ class ArtifactCoalescing(unittest.TestCase):
             running.finish.set()
             owner.result(5)
             follower.result(5)
-        pool.acquire.assert_called_once_with("", dependency=True, on_start=mock.ANY)
+        pool.acquire.assert_called_once_with("", dependency=True, on_start=mock.ANY, on_wait=mock.ANY)
         pool.release.assert_called_once_with(running, healthy=True, cancelled=False)
         self.assertEqual(running.request["kind"], "artifact")
         self.assertEqual(running.request["argv"], [])
@@ -313,7 +313,7 @@ class ArtifactCoalescing(unittest.TestCase):
             owner.result(5)
             follower.result(5)
         self.assertFalse(running.killed)
-        pool.acquire.assert_called_once_with("", dependency=False, on_start=mock.ANY)
+        pool.acquire.assert_called_once_with("", dependency=False, on_start=mock.ANY, on_wait=mock.ANY)
         pool.release.assert_called_once_with(running, healthy=True, cancelled=False)
         self.assertEqual(late.frames[-1], {"exit": 0})
         self.assertEqual(sorted(job["state"] for job in ledger.snapshot()), ["done", "done"])
@@ -722,7 +722,7 @@ class ArtifactLeases(unittest.TestCase):
             for handler in handlers:
                 handler.join(3)
             self.assertTrue(all(not handler.is_alive() for handler in handlers))
-        pool.acquire.assert_called_once_with("", dependency=False, on_start=mock.ANY)
+        pool.acquire.assert_called_once_with("", dependency=False, on_start=mock.ANY, on_wait=mock.ANY)
         self.assertFalse(running.killed)
         self.assertEqual(self.settled()["peakRunning"], 1)
 

@@ -32,10 +32,8 @@ from cadgen._internal.step_scene import (
     step_file_hash,
 )
 from cadgen._internal.generation_runner import (
-    _ArtifactJob,
     _ensure_step_ready,
     _mark_scene_python_backed,
-    _run_artifact_jobs,
     _spec_output_dir,
     run_script_generator,
 )
@@ -754,10 +752,6 @@ def _generate_part_outputs(
 
         return GeneratedStepResult(spec=spec, scene=scene, tree=result_tree_for(spec.step_path))
 
-    jobs: list[_ArtifactJob] = []
-
-    artifact_results: dict[str, object] = {}
-
     # UNIFIED render artifact: every model — part or assembly, generated or imported — is
     # a TREE (a store object keyed by content hash: assembly.json plus content-addressed
     # components). Packaging follows the shape itself: a Compound placing children
@@ -1127,12 +1121,10 @@ def _generate_part_outputs(
         stats["key"] = key
         return stats
 
-    jobs.append(_ArtifactJob("tree", component_package_job))
-
     # A build that fails after its preview leaves the preview standing under the failure: its
     # parts' job is the run's, which awaits it after the command has answered.
-    artifact_results.update(_run_artifact_jobs(jobs, logger=logger))
-    tree_result = artifact_results.get("tree") or {}
+    with logger.timed("write tree"):
+        tree_result = component_package_job()
     return GeneratedStepResult(spec=spec, scene=scene, tree=str(tree_result.get("tree") or "") or None,
                                key=tree_result.get("key"))
 

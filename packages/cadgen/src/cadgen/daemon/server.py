@@ -24,9 +24,12 @@ Protocol — one JSON request per connection, JSON-lines response:
 
 Routing: a request that names a model script goes to THAT model's worker
 (STORE.md §9), which builds the model and, inside its body, every child it
-calls. A busy worker means an extra, never a wait; a model with no worker binds
-a spare; no spare means a spawn. Requests that name no script borrow a spare
-for one job. Nothing here caps, counts memory or queues.
+calls. A busy worker means an extra, never a wait -- except a worker that has
+answered its build and is still writing that build's files (the ``released``
+frame): the next request for its model waits for it, since it holds the memo
+that build's edits hit; a model with no worker binds a spare; no spare means a
+spawn. Requests that name no script borrow a spare for one job. Nothing here
+caps, counts memory or queues.
 """
 
 from __future__ import annotations
@@ -422,8 +425,17 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
         # nothing the job runs can report, since its worker does not exist yet.
         _JOBS.waiting(job, "Starting a geometry kernel")
 
+    def waiting_for_files() -> None:
+        # The model's worker is writing the files of the build it last answered: this
+        # request waits for it, warm, rather than running the model cold on an extra.
+        _JOBS.waiting(job, "Waiting for the previous build to finish writing its files")
+        with contextlib.suppress(OSError), send_lock:
+            _send(conn, {"stream": "stderr", "data": f"[cadgen] waiting for the previous build of "
+                                                     f"{os.path.basename(model)} to finish writing its files\n"})
+
     try:
-        worker = _POOL.acquire(model, dependency=bool(request.get("dependency")), on_start=starting_worker)
+        worker = _POOL.acquire(model, dependency=bool(request.get("dependency")), on_start=starting_worker,
+                               on_wait=waiting_for_files)
     except (pool_mod.WorkerGone, pool_mod.MemoryAdmissionError) as exc:
         # Failed spawn or memory admission: the request fails, saying why.
         _JOBS.waiting(job, None)
@@ -521,6 +533,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
                 if is_artifact:
                     raise _WorkerBrokeProtocol("artifact worker released its client")
                 released.set()
+                _POOL.finishing(worker)
                 if inflight is not None:
                     _BROKER.publish_release(inflight, int(frame["released"]))
             if not is_artifact:

@@ -40,6 +40,7 @@ class _StubWorker:
         self.pid = _StubWorker._next_pid
         self.busy = False
         self.extra = False
+        self.finishing = False
         self.model = ""
         self.jobs_served = 0
         self.last_used = 0.0
@@ -109,6 +110,70 @@ class Binding(_PoolFixture):
         self.assertEqual(self.pool.snapshot()["concurrent"], 1)
         self.pool.release(extra)
         self.pool.release(primary)
+
+    def _acquire_while(self, model: str, worker, *, on_wait):
+        """Acquire ``model`` on a thread while ``worker`` is finishing; the caller
+        releases ``worker`` and takes the result."""
+        waited = []
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.addCleanup(executor.shutdown)
+        self.pool.finishing(worker)
+        second = executor.submit(self.pool.acquire, model, on_wait=lambda: (waited.append(True), on_wait()))
+        deadline = time.monotonic() + 5
+        while not waited and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(waited, "the request never waited for the finishing worker")
+        return second
+
+    def test_a_model_whose_worker_is_finishing_its_files_waits_for_that_worker(self):
+        with self._spares(0):
+            primary = self.pool.acquire("/m/a.py")
+            second = self._acquire_while("/m/a.py", primary, on_wait=lambda: None)
+            self.assertFalse(second.done(), "the request took a worker while the model's was finishing")
+            self.assertTrue(self.pool.snapshot()["workers"][0]["finishing"])
+            self.pool.release(primary)
+            again = second.result(timeout=5)
+        self.assertIs(again, primary, "the next build of a model runs on the worker that holds its memo")
+        self.assertFalse(again.extra)
+        self.assertFalse(again.finishing)
+        self.assertEqual(self.pool.snapshot()["concurrent"], 0)
+        self.assertEqual(_StubWorker.spawned, 1)
+        self.pool.release(again)
+
+    def test_a_finishing_worker_that_goes_away_frees_its_waiter_to_bind_afresh(self):
+        with self._spares(0):
+            primary = self.pool.acquire("/m/a.py")
+            second = self._acquire_while("/m/a.py", primary, on_wait=lambda: None)
+            primary.kill()
+            self.pool.release(primary, healthy=False, cancelled=True)
+            fresh = second.result(timeout=5)
+        self.assertIsNot(fresh, primary)
+        self.assertEqual(fresh.model, "/m/a.py")
+        self.assertFalse(fresh.extra)
+        self.pool.release(fresh)
+
+    def test_a_worker_busy_in_a_body_still_gets_an_extra_after_a_finishing_wait(self):
+        """Two requests wait for one finishing worker: the first takes it, the second finds
+        it busy in a body again and runs on an extra, as any busy model does."""
+        with self._spares(0):
+            primary = self.pool.acquire("/m/a.py")
+            first = self._acquire_while("/m/a.py", primary, on_wait=lambda: None)
+            waited = []
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            self.addCleanup(executor.shutdown)
+            second = executor.submit(self.pool.acquire, "/m/a.py", on_wait=lambda: waited.append(True))
+            deadline = time.monotonic() + 5
+            while not waited and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(waited)
+            self.pool.release(primary)
+            workers = {first.result(timeout=5), second.result(timeout=5)}
+        self.assertIn(primary, workers)
+        extra = next(w for w in workers if w is not primary)
+        self.assertTrue(extra.extra)
+        self.assertEqual(self.pool.snapshot()["concurrent"], 1)
+        for worker in workers:
+            self.pool.release(worker)
 
     def test_an_extra_returns_to_the_spare_set_when_its_job_ends(self):
         with self._spares(1):
@@ -621,7 +686,8 @@ class Status(_PoolFixture):
             self.pool.release(extra)
             snapshot = self.pool.snapshot()
         rows = {w["pid"]: w for w in snapshot["workers"]}
-        self.assertEqual(rows[primary.pid], {"pid": primary.pid, "model": "/m/a.py", "busy": True, "extra": False, "jobs": 0})
+        self.assertEqual(rows[primary.pid], {"pid": primary.pid, "model": "/m/a.py", "busy": True, "finishing": False,
+                                             "extra": False, "jobs": 0})
         for key in ("spares", "imports", "concurrent", "jobsServed", "recycles", "crashes"):
             self.assertIn(key, snapshot)
         self.assertEqual(snapshot["concurrent"], 1)

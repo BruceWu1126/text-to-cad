@@ -3,8 +3,13 @@
 One rule decides routing here: **nothing waits on another build.** A request
 for a model whose worker is idle takes that worker. A request for a model whose
 worker is busy gets an *extra* — a spare bound to the same model for the length
-of one job — and runs now. A request for a model with no worker binds a spare. A
-request with no spare left spawns if its memory reservation fits. Admission
+of one job — and runs now. The one wait is not on a build: a model's worker that
+has answered its build and is still writing that build's files (``finishing``,
+STORE.md §3, *Exports*) holds the kernel memo the next build of the model hits
+(README law 18), so a request for that model waits for it rather than running
+the whole model cold on an extra; the wait ends with the worker's job. A request
+for a model with no worker binds a spare. A request with no spare left spawns if
+its memory reservation fits. Admission
 counts resident worker trees (including extraction children), keeps headroom
 for dependencies, and reclaims idle workers first. That reservation is not
 configured: it starts at the seed and is recalibrated on every accounting pass
@@ -323,6 +328,9 @@ class Worker:
         self.jobs_served = 0
         self.busy = False
         self.extra = False
+        # Its job has answered its client and the worker is writing that build's files
+        # (``Pool.finishing``): a request for its model waits for it (``Pool.acquire``).
+        self.finishing = False
         self.last_used = time.monotonic()
         self.use_seq = next(_USE_SEQUENCE)
         # The MODEL this worker is bound to (its script path), "" while a spare.
@@ -570,25 +578,60 @@ class Pool:
 
     # --- acquire / release -------------------------------------------------------
 
-    def acquire(self, model: str = "", *, dependency: bool = False, on_start=None) -> Worker:
+    def finishing(self, worker: Worker) -> None:
+        """``worker``'s job has answered its client and is writing the files it owes
+        (``server._handle_request``, the ``released`` frame): until its release, a
+        request for its model waits for it (:meth:`acquire`)."""
+        with self._cv:
+            worker.finishing = True
+
+    def _await_finishing(self, model: str, on_wait) -> Worker | None:
+        """The model's worker once it has finished the files of the build it answered,
+        reserved for the caller; None when no worker of the model is finishing, or the
+        one that was went away (the model binds afresh). The wait ends with the worker's
+        job: its exit frame, or the silence watchdog that kills a wedged one."""
+        with self._cv:
+            if not any(w.finishing for w in self._workers if w.model == model and not w.extra):
+                return None
+        if on_wait is not None:
+            on_wait()
+        with self._cv:
+            while not self._closed:
+                self._reap_dead_locked()
+                bound = [w for w in self._workers if w.model == model and not w.extra]
+                idle = [w for w in bound if not w.busy]
+                if idle:
+                    idle[0].busy = True  # reserved: admission answers for it below
+                    return idle[0]
+                if not any(w.finishing for w in bound):
+                    return None
+                self._cv.wait(timeout=0.05)
+            return None
+
+    def acquire(self, model: str = "", *, dependency: bool = False, on_start=None, on_wait=None) -> Worker:
         """A worker for ``model``, or an explicit memory-admission failure.
 
         ``model`` is the script path (the routing key); "" means a request with
-        no model subject, which borrows a spare without binding it. ``on_start``
-        is called when no warm worker can take the request and one is started for
-        it, before that wait.
+        no model subject, which borrows a spare without binding it. A model whose
+        worker is busy gets an extra, unless that worker is finishing the files of a
+        build it has answered (:meth:`finishing`): it holds the memo the next build of
+        the model hits, so the request waits for it. ``on_start`` is called when no
+        warm worker can take the request and one is started for it, before that wait;
+        ``on_wait`` when the request waits for the model's finishing worker, before
+        that wait.
         """
+        worker = self._await_finishing(model, on_wait) if model else None
         with self._cv:
             if self._closed:
                 raise WorkerGone("worker pool is closed")
             self._reap_dead_locked()
             bound = []
-            worker = None
             if model:
                 bound = [w for w in self._workers if w.model == model and not w.extra]
-                idle = [w for w in bound if not w.busy]
-                if idle:
-                    worker = idle[0]
+                if worker is None:
+                    idle = [w for w in bound if not w.busy]
+                    if idle:
+                        worker = idle[0]
             if worker is None:
                 worker = self._take_spare_locked()
             if worker is not None:
@@ -807,6 +850,7 @@ class Pool:
         with self._cv:
             borrowed = worker.extra and not worker.model
             worker.busy = False
+            worker.finishing = False
             worker.last_used = self._clock()
             worker.jobs_served += 1
             self._stats["jobsServed"] += 1
@@ -885,6 +929,7 @@ class Pool:
                     "pid": getattr(w, "pid", None),
                     "model": w.model,
                     "busy": w.busy,
+                    "finishing": w.finishing,
                     "extra": w.extra,
                     "jobs": w.jobs_served,
                 }
