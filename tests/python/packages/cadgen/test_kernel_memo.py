@@ -303,6 +303,36 @@ class MissTest(KernelMemoCase):
         self.assertEqual(again["hits"], 1, "the cylinder hits; the cut on the foreign base runs again")
         self.assertEqual(again["unkeyable"], 1)
 
+    def test_transient_only_uncached_calls_skip_state_capture_and_keep_geometry_and_lineage(self) -> None:
+        from build123d import Location, Solid
+
+        foreign = Solid.make_box(2, 3, 4)
+
+        def model():
+            return foreign.moved(Location((1, 2, 3))).translate((2, 0, 0))
+
+        plain = _bytes(model().wrapped)
+        identities, traces = [], []
+        for enabled in ("1", "1", "0"):
+            os.environ["CADGEN_KERNEL_MEMO"] = enabled
+            with mock.patch.object(kernel_memo, "_state", wraps=kernel_memo._state) as state_reads:
+                body, stats, run = _run(model)
+            state_reads.assert_not_called()
+            self.assertEqual((stats["hits"], stats["misses"], stats["unkeyable"], stats["errors"]), (0, 0, 2, 0))
+            self.assertEqual(_bytes(body.wrapped), plain)
+            made = kernel_memo._made_of(body.wrapped.TShape(), run)
+            self.assertIsNotNone(made, "uncached results remain registered for lineage")
+            self.assertFalse(made.persistent())
+            self.assertEqual(run.feature_of(body), 1)
+            identities.append(run.identify(body))
+            traces.append(run.trace.feature_rows())
+            self.assertEqual([feature.op for feature in run.trace.features], ["moved", "translate"])
+            self.assertEqual(run.trace.features[1].inputs, [0])
+            self.assertTrue(all(feature.history is not None for feature in run.trace.features))
+        self.assertEqual(identities, [(None, None)] * 3,
+                         "placements of foreign geometry have no construction key or element lineage")
+        self.assertEqual(traces, [traces[0]] * 3)
+
 
 class EffectTest(KernelMemoCase):
     """The kernel's changes to its inputs: an extrusion clears its profile's ``Free``
@@ -352,6 +382,83 @@ class EffectTest(KernelMemoCase):
         self.assertEqual(_bytes(profile2.wrapped), _bytes(plain_profile.wrapped))
         self.assertEqual(_bytes(boss2.wrapped), _bytes(plain_boss.wrapped))
         self.assertEqual(_bytes(boss2.wrapped), _bytes(boss.wrapped))
+
+    def test_uncached_mutation_taints_persistent_roots_in_foreign_and_transient_wrappers(self) -> None:
+        from build123d import Compound, Location, Solid
+        from cadgen.store.materialize import TREE_TAG
+
+        def primitive():
+            return Solid.make_box(2, 3, 4)
+
+        # A controlled native mutation through the real uncached call path: a
+        # wrapper's changed sub-shape must retire that sub-shape's memoized maker.
+        def mutate(wrapper):
+            tshape = body.wrapped.TShape()
+            tshape.Free(not tshape.Free())
+            return wrapper
+
+        uncached_mutation = kernel_memo._wrap("mutate", mutate, "function")
+        for transient in (False, True):
+            for tag in (TREE_TAG, "__cadgen_component_identity__"):
+                with self.subTest(transient=transient, tag=tag):
+                    kernel_memo.clear()
+                    body, _, made_run = _run(primitive)
+                    memoized = kernel_memo._made_of(body.wrapped.TShape(), made_run)
+                    self.assertTrue(memoized.persistent())
+                    # Built outside a run: the container has no maker, but the
+                    # native body it holds is still a persistent memo result.
+                    foreign = Compound(children=[body])
+                    foreign.__dict__[tag] = "artifact metadata"
+
+                    def model():
+                        wrapper = foreign.moved(Location((5, 0, 0))) if transient else foreign
+                        state = kernel_memo._LOCAL.run
+                        if transient:
+                            made = kernel_memo._made_of(wrapper.wrapped.TShape(), state)
+                            self.assertIsNotNone(made, "the first uncached call registered the wrapper")
+                            self.assertFalse(made.persistent())
+                        self.assertEqual(kernel_memo._embedded(wrapper.wrapped, state), [memoized],
+                                         "only the persistent body needs protection")
+                        return uncached_mutation(wrapper)
+
+                    _, stats, _ = _run(model)
+                    self.assertEqual(stats["errors"], 0)
+                    fresh, rebuilt, _ = _run(primitive)
+                    self.assertEqual((rebuilt["hits"], rebuilt["misses"]), (0, 1))
+                    self.assertIsNot(fresh, body, "the uncached mutation retired the embedded body's maker")
+
+    def test_uncached_topology_change_registers_transient_aliases_to_the_mutating_feature(self) -> None:
+        from build123d import Compound, Location, Solid
+        from OCP.BRep import BRep_Builder
+
+        foreign = Compound(children=[Solid.make_box(2, 3, 4)])
+        addition = Solid.make_box(1, 1, 1).moved(Location((10, 0, 0)))
+        builder = BRep_Builder()
+
+        def mutate(wrapper):
+            builder.Add(wrapper.wrapped, addition.wrapped)
+            return Compound(wrapper.wrapped)  # a new object around the changed TShape
+
+        uncached_mutation = kernel_memo._wrap("mutate", mutate, "function")
+
+        def model():
+            transient = foreign.moved(Location((0, 5, 0)))
+            changed = uncached_mutation(transient)
+            return changed, Compound(changed.wrapped)  # no object-level trace to hide a stale maker
+
+        with mock.patch.object(kernel_memo, "_state", wraps=kernel_memo._state) as state_reads:
+            (changed, alias), stats, run = _run(model)
+        state_reads.assert_not_called()
+        self.assertEqual((stats["unkeyable"], stats["unreplayable"], stats["errors"]), (2, 1, 0))
+        self.assertEqual(len(alias.solids()), 2)
+        self.assertIsNot(changed, alias)
+        self.assertTrue(changed.wrapped.IsSame(alias.wrapped))
+        self.assertIsNone(run.trace.feature_of(alias), "the fresh alias must use the TShape's maker")
+        self.assertEqual(run.feature_of(alias), 1)
+        self.assertEqual(run.made_by(alias.wrapped.TShape()), 1)
+        # Raw BRep_Builder.Add reports no supported maker history, so retagging
+        # the TShape must not invent a name for the native mutation's result.
+        self.assertEqual(run.identify(alias), (None, None))
 
 
 class CapacityTest(KernelMemoCase):
