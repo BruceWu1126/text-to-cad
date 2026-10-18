@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Box, MousePointer2, Spline } from "lucide-react";
-import { EDGELESS_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
+import { viewFeaturesForKind } from "@text-to-cad/core/common/viewSettings.js";
+import { URDF_JOINT_VALUE_EPSILON } from "@text-to-cad/core/lib/urdf/jointValues.js";
 import { resolveLocalAssetFileRef } from "@text-to-cad/core/lib/urdf/meshAssetUrl.js";
 import { createRobotScene } from "@text-to-cad/core/lib/urdf/robotScene.js";
 import { srdfGroupNamesByLink } from "@text-to-cad/core/lib/urdf/parseSrdf.js";
@@ -12,6 +13,7 @@ import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell
 import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
 import { failureAlert } from "../kit/status/loadAlerts.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
+import { useSceneToolState, useSceneTools } from "../kit/tools/sceneTools.jsx";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { PointerPick } from "../kit/tools/select/usePointerPick.js";
 import SelectFilterMenu from "../kit/tools/select/SelectFilterMenu.jsx";
@@ -36,6 +38,12 @@ const menuIcon = Icon => <Icon className="size-3.5" strokeWidth={2} aria-hidden=
 // knobs, each on its own; it opens with both.
 const ROBOT_SELECT_KINDS = Object.freeze([{ id: "links", label: "Links", icon: menuIcon(Box) }, { id: "position", label: "Position", icon: menuIcon(Spline) }]);
 const ROBOT_SELECT_DEFAULT = Object.freeze(ROBOT_SELECT_KINDS.map(kind => kind.id));
+// Solid, cut by Clip: a robot is posed, never exploded.
+const FEATURES = viewFeaturesForKind("urdf");
+const CLIP_OFF = Object.freeze({ clip: { enabled: false, axis: "x", invert: false } });
+// Whether a pose has a joint off its opening pose: Position is set.
+const poseIsSet = pose => Boolean(pose) && Object.entries(pose.getSnapshot().values)
+  .some(([name, value]) => Math.abs(value - (pose.defaults[name] ?? value)) > URDF_JOINT_VALUE_EPSILON);
 function RobotSurface({ view, data }) {
   const document = useWorkspaceDocument({ view, data });
   const loaded = useRobotDocument({ entry: document.entry, resources: document.client.resources });
@@ -69,6 +77,12 @@ function RobotSurface({ view, data }) {
   // Preview: a robot of its own (`previewScene`, below), posed by its own Position.
   const preview = usePreviewState();
   const previewing = preview.previewing;
+  // The tool in hand, and Measure's session (`kit/tools/sceneTools.jsx`): Quick Edit reads it.
+  const tools = useSceneToolState({ toolModes: ROBOT_TOOL_MODES, previewing, fileKey: document.modelKey, revision: robot?.revision || "",
+    measurable: true, resource: document.resource });
+  const { measure } = tools;
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
 
   // ---- scene ----------------------------------------------------------------------------
   const [scene, setScene] = useState(null);
@@ -105,10 +119,17 @@ function RobotSurface({ view, data }) {
     })
   }), []);
   const escape = useMemo(() => ({
-    active: selection.active,
-    // Escape clears the selection.
-    handle: () => { if (!selectionRef.current.active) return false; selectionRef.current.clear(); return true; }
-  }), [selection.active]);
+    active: selection.active || measure.drafting || measure.selected.length > 0,
+    // Escape cancels a measurement in progress, then clears what is picked.
+    handle: () => {
+      const now = measureRef.current;
+      if (now.drafting) { now.cancelDraft(); return true; }
+      if (now.selected.length) { now.select([]); return true; }
+      if (!selectionRef.current.active) return false;
+      selectionRef.current.clear();
+      return true;
+    }
+  }), [selection.active, measure.drafting, measure.selected.length]);
 
   const requestVisibilityRender = useCallback(() => {
     shellRef.current?.requestRender();
@@ -124,8 +145,8 @@ function RobotSurface({ view, data }) {
 
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: robot?.revision || "",
-    features: EDGELESS_VIEW_FEATURES, toolModes: ROBOT_TOOL_MODES, previewable: true, preview, scene,
-    sceneScaleMode: VIEWER_SCENE_SCALE.URDF,
+    features: FEATURES, toolModes: ROBOT_TOOL_MODES, tool: tools.tool, previewable: true, preview, scene, sceneEffects: true,
+    sceneScaleMode: VIEWER_SCENE_SCALE.URDF, measurements: tools.measurements, deleteSelection: measure.removeSelected,
     load: { busy: (loaded.busy && !scene) || (Boolean(robot) && !scene), updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
     live, escape, rendererState,
     // A prompt's view: the robot's pose and the parts hidden. A robot is drawn in metres.
@@ -133,6 +154,30 @@ function RobotSurface({ view, data }) {
   });
   shellRef.current = shell;
   useDeclinedSelectReference(document);
+
+  // ---- one motion at a time: Position and Clip ----------------------------------------------
+  // Clip turned on puts the pose back at the opening pose; a joint moved off it takes Clip off,
+  // heard on the pose store itself, outside React: a pose step renders nothing.
+  const clipSet = Boolean(shell.viewSettings.view.clip?.enabled);
+  const clipSetRef = useRef(clipSet);
+  clipSetRef.current = clipSet;
+  useEffect(() => {
+    if (!pose) return undefined;
+    let wasSet = poseIsSet(pose);
+    return pose.subscribe(() => {
+      const set = poseIsSet(pose);
+      if (set && !wasSet && clipSetRef.current) shellRef.current?.viewSettings.store.patch(CLIP_OFF);
+      wasSet = set;
+    });
+  }, [pose]);
+  // Clip turned on on this file (not a file opening cut): the pose goes back.
+  const clipSeen = useRef({ file: document.modelKey, on: clipSet });
+  useEffect(() => {
+    const seen = clipSeen.current;
+    clipSeen.current = { file: document.modelKey, on: clipSet };
+    if (!clipSet || seen.on || seen.file !== document.modelKey || !pose || !poseIsSet(pose)) return;
+    pose.reset();
+  }, [clipSet, document.modelKey, pose]);
 
   // ---- a pose step: k matrices, one frame, no component ----------------------------------
   const handlesRef = useRef(NO_HANDLES);
@@ -230,12 +275,14 @@ function RobotSurface({ view, data }) {
   const meshPath = useCallback((filename) => resolveLocalAssetFileRef(hostPath, filename), [hostPath]);
   const groupNamesByLink = useMemo(() => (robot?.description?.srdf ? srdfGroupNamesByLink(robot.description) : null), [robot]);
 
-  // The one tool, Select, its filter the chevron's menu: Position offered where a control can be
-  // driven (until the robot has loaded that is not known, and it is offered meanwhile).
-  const tools = [
+  // Select, its filter the chevron's menu: Position offered where a control can be driven (until
+  // the robot has loaded that is not known, and it is offered meanwhile); then Annotate, Measure and Clip.
+  const sceneTools = useSceneTools({ shell, scene, features: FEATURES, state: tools, measurable: true, clearParts: clearSelection });
+  const strip = [
     shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON,
       menu: <SelectFilterMenu value={selectFilter} kinds={!robot || posable ? ROBOT_SELECT_KINDS : ROBOT_SELECT_KINDS.slice(0, 1)}
-        onChange={value => { setSelectFilter(value); selectTool(ROBOT_TOOL.SELECT); }} /> })
+        onChange={value => { setSelectFilter(value); selectTool(ROBOT_TOOL.SELECT); }} /> }),
+    ...sceneTools.tools
   ];
   // The file sidebar, whatever the tool: the Links (and an SDF's own metadata), then Position's controls.
   const sidebarShown = !shell.previewing;
@@ -263,11 +310,13 @@ function RobotSurface({ view, data }) {
   const nameLink = useCallback(reference => (reference?.resource?.path === resourcePath && reference.target?.kind === "cad-selector"
     ? { name: reference.target.selectors.join(", "), kind: "solid" } : ""), [resourcePath]);
 
-  return <RendererShell shell={shell} tools={tools} sidebar={sidebar} previewView={previewView}
+  return <RendererShell shell={shell} tools={strip} subToolbar={sceneTools.subToolbar} sidebar={sidebar} previewView={previewView}
     references={shell.previewing ? NO_REFERENCES : references} referenceChips={shell.previewing ? NO_REFERENCES : referenceChips}
     nameReference={nameLink}
-    onClearReferences={clearSelection}
+    onClearReferences={() => { clearSelection(); measure.select([]); }}
+    onSelectPress={sceneTools.onSelectPress} onSelectHover={sceneTools.onSelectHover}
     viewportOverlay={viewport => <>
+      {sceneTools.overlay(viewport)}
       {poseActive ? <JointHandleOverlay handlesRef={handlesRef} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
       <PointerPick viewport={viewport} scene={scene} enabled={picksLinks} onPick={handlePick} onHover={selection.hoverHit} />
     </>} />;

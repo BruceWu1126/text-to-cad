@@ -33,14 +33,15 @@ const root = path.resolve(args.dir || ".");
 // One fixture per LOAD PATH: an exact-surface STEP package, a mesh, a 2D drawing,
 // a robot description.
 const fixtures = [
-  // `tools` is the file's own tool strip (a mesh and a drawing have none: a tool that does not
-  // apply is hidden, not disabled); `threeD` has Display and Preview at the navbar's right end; `sections`
+  // `tools` is the file's own tool strip (an STL has no Select or Measure, a drawing no tools at
+  // all: a tool that does not apply is hidden, not disabled); `threeD` has Display and Preview at
+  // the navbar's right end; `sections`
   // are file sidebar tiles it must have (what there is to read of the file, whatever the tool).
-  { format: "stl", file: "smoke.stl", parts: false, tools: [], sections: [], threeD: true },
+  { format: "stl", file: "smoke.stl", parts: false, tools: ["Annotate", "Clip"], sections: [], threeD: true },
   { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure"], sections: ["Model tree"], threeD: true },
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: [], sections: [], threeD: false, minCoverage: 0.003 },
-  { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select"], sections: ["Links"], threeD: true },
+  { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Links"], threeD: true },
 ];
 // Small enough that software WebGL and the PNG encode stay cheap on CI, large enough for the
 // layout to be the desktop one.

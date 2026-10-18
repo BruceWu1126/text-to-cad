@@ -105,15 +105,33 @@ async function open(t, file) {
 }
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
-// A mesh has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Preview.
-const noTools = async (pane) => {
-  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a mesh has no tools, and no strip');
+// A mesh file's strip: an STL's Annotate and Clip, nothing in hand; a 3MF's Select (in hand),
+// Annotate, Measure and Clip. Its view's controls end the navbar: Display, then Preview.
+const STL_TOOLS = ['Annotate:false', 'Clip:false'];
+const THREE_MF_TOOLS = ['Select:true', 'Annotate:false', 'Measure:false', 'Clip:false'];
+const meshTools = async (pane, expected) => {
+  assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
+    .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
+  expected);
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Display mode: Solid', 'Preview'], 'its view\'s controls end the navbar');
-  for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position', 'Animation']) {
-    assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
-  }
+  for (const name of ['Orbit', 'Draw', 'Explode', 'Position', 'Animation']) assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
 };
+/** World point -> page coordinates, from the camera the viewport publishes. */
+function projector(camera, box) {
+  const sub = (a, b) => a.map((value, index) => value - b[index]);
+  const norm = vector => { const length = Math.hypot(...vector); return vector.map(value => value / length); };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a.reduce((sum, value, index) => sum + value * b[index], 0);
+  const forward = norm(sub(camera.target, camera.position));
+  const right = norm(cross(forward, camera.up));
+  const up = cross(right, forward);
+  const halfWidth = camera.halfHeight * (box.width / box.height);
+  return point => {
+    const offset = sub(point, camera.target);
+    return [box.x + (dot(offset, right) / halfWidth * 0.5 + 0.5) * box.width, box.y + (0.5 - dot(offset, up) / camera.halfHeight * 0.5) * box.height];
+  };
+}
 const displayButton = pane => pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button', { name: /^Display mode: / });
 // Display's settings: its per-mode settings page.
 async function openDisplay(pane) {
@@ -185,16 +203,15 @@ const GUIDES_OFF = { modes: { solid: { grid: { enabled: false }, axes: { enabled
 const isRed = ([r, g, b]) => r > 150 && g < 90 && b < 90;
 const isBlue = ([r, g, b]) => b > 150 && r < 90 && g < 130;
 
-test('an STL opens as one mesh with no tools: display settings, orbit, host commands and state all work', async (t) => {
+test('an STL opens as one mesh with nothing in hand: display settings, orbit, host commands and state all work', async (t) => {
   const requested = requests.length;
   const { page, pane, errors } = await open(t, 'part.stl');
   await ready(pane);
   assert.deepEqual(errors, []);
 
-  // Nothing of a mesh picks, measures, poses, plays or is drawn on: the viewport
-  // simply orbits, pans and zooms, with no tools over it.
-  await noTools(pane);
-  assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a mesh has nothing to pick');
+  // An STL is one mesh in no unit: nothing to select or measure; it is drawn on and cut.
+  await meshTools(pane, STL_TOOLS);
+  assert.equal(await pane.locator('[data-quick-edit-box]').count(), 0, 'Quick Edit opens on a mark, never by itself');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
     'an STL is 3D: Preview ends the navbar after Display');
 
@@ -287,8 +304,8 @@ test('an STL opens as one mesh with no tools: display settings, orbit, host comm
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/part.stl', 'one-part.stl', false, []]);
   const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
-  assert.match(declined, /A mesh file has nothing to select/);
-  assert.match(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), /no selection to clear/);
+  assert.match(declined, /A mesh file has no references a command can select/);
+  assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'a selection clears, an STL\'s empty one too');
   // A host's request to select a reference is consumed without a notification.
   await page.evaluate(() => window.cadHarness.selectReference('o1.f1'));
   await page.waitForFunction(() => !window.cadHarness.a.commands.getSnapshot().selectReference);
@@ -327,8 +344,8 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   const { page, pane, errors } = await open(t, 'pair.3mf');
   await ready(pane);
   await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
-  await noTools(pane);
-  // A 3MF's controls are a mesh's: no tools, and Display shut as it opens, the same dropdown an STL has.
+  await meshTools(pane, THREE_MF_TOOLS);
+  // Display shut as it opens, the same dropdown an STL has.
   await openDisplay(pane);
   await displayButton(pane).click();
   await displayPanel(pane).waitFor({ state: 'detached' });
@@ -367,6 +384,36 @@ test('a 3MF is one mesh per object with its source colour; an uncoloured one tak
   assert.equal(neutral.length, 1, JSON.stringify(neutral));
   assert.ok(Math.max(...neutral[0]) - Math.min(...neutral[0]) < 60, JSON.stringify(neutral));
   assert.deepEqual(plain.errors, []);
+});
+
+test('a 3MF\'s tools: Select picks an object by its place in the build, Measure reads its declared millimetres approximately, and Clip cuts it as it cuts an STL', async (t) => {
+  const { page, pane, errors } = await open(t, 'pair.3mf');
+  await ready(pane);
+  await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
+  await display(page, GUIDES_OFF);
+  await settle(page);
+  const box = await pane.locator('[data-cad-surface] canvas').first().boundingBox();
+  const at = projector(await page.evaluate(() => window.__cadCamera()), box);
+  const chips = () => pane.locator('[data-quick-edit-refs] [data-quick-edit-ref] > button:first-child')
+    .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
+  // The base: the first build item, a 20 mm cube at the origin.
+  await page.mouse.click(...at([10, 10, 20]));
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedObjects?.join() === 'o1');
+  assert.deepEqual(await chips(), ['base'], 'the object, by its name: pair.3mf#o1');
+
+  await pane.getByRole('button', { name: 'Measure', exact: true }).click();
+  assert.equal(await pane.locator('[data-measure-size]').innerText(), '≈ 40.0 × 20.0 × 20.0 mm', 'the size, in the unit the file declares');
+  for (const corner of [[0.2, 0.2, 20], [19.8, 0.2, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
+  await page.waitForFunction(() => document.querySelectorAll('[data-quick-edit-box] [data-quick-edit-ref]').length === 2);
+  assert.ok((await chips()).includes('Measurement 1: ≈ 20.0 mm (approximate)'), JSON.stringify(await chips()));
+
+  await display(page, { clip: { enabled: true, axis: 'x' } });
+  await page.waitForFunction(() => window.__cadStage().cut === 1);
+  const stl = await open(t, 'part.stl');
+  await ready(stl.pane);
+  await display(stl.page, { clip: { enabled: true, axis: 'z' } });
+  await stl.page.waitForFunction(() => window.__cadStage().cut === 1);
+  assert.deepEqual([...errors, ...stl.errors], []);
 });
 
 test('a corrupt mesh raises the viewer\'s load alert and an empty one says there is no geometry', async (t) => {

@@ -90,15 +90,32 @@ async function open(t, file, { record = null } = {}) {
 
 const ready = pane => pane.locator('[aria-busy="false"] > div > canvas').first().waitFor();
 
-// A GLB has no interaction tools, so it has no strip; its view's controls end the navbar: Display, then Preview.
-const noTools = async (pane) => {
-  assert.equal(await pane.getByRole('group', { name: 'Interaction tools' }).count(), 0, 'a GLB has no tools, and no strip');
+// A GLB of two nodes that draw has a GLB's every tool on its strip, Select in hand; its view's
+// controls end the navbar: Display, then Preview.
+const GLB_TOOLS = ['Select:true', 'Annotate:false', 'Measure:false', 'Explode:false', 'Clip:false'];
+const glbTools = async (pane) => {
+  assert.deepEqual(await pane.getByRole('group', { name: 'Interaction tools' }).getByRole('button')
+    .evaluateAll(buttons => buttons.filter(button => button.hasAttribute('aria-pressed')).map(button => `${button.getAttribute('aria-label')}:${button.getAttribute('aria-pressed')}`)),
+  GLB_TOOLS, 'Select, Annotate, Measure, Explode and Clip');
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls]').getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Display mode: Solid', 'Preview'], 'its view\'s controls end the navbar');
-  for (const name of ['Orbit', 'Annotate', 'Draw', 'Select', 'Measure', 'Position']) {
-    assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
-  }
+  for (const name of ['Orbit', 'Draw', 'Position']) assert.equal(await pane.getByRole('button', { name, exact: true }).count(), 0, name);
 };
+/** World point -> page coordinates, from the camera the viewport publishes. */
+function projector(camera, box) {
+  const sub = (a, b) => a.map((value, index) => value - b[index]);
+  const norm = vector => { const length = Math.hypot(...vector); return vector.map(value => value / length); };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a, b) => a.reduce((sum, value, index) => sum + value * b[index], 0);
+  const forward = norm(sub(camera.target, camera.position));
+  const right = norm(cross(forward, camera.up));
+  const up = cross(right, forward);
+  const halfWidth = camera.halfHeight * (box.width / box.height);
+  return point => {
+    const offset = sub(point, camera.target);
+    return [box.x + (dot(offset, right) / halfWidth * 0.5 + 0.5) * box.width, box.y + (0.5 - dot(offset, up) / camera.halfHeight * 0.5) * box.height];
+  };
+}
 // The file sidebar's tiles (an animated GLB's Animation), and a section opened by its tile.
 const tileNames = pane => pane.locator('[data-file-sidebar-tools] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
 async function openSection(pane, name) {
@@ -196,15 +213,13 @@ async function captureMatching(page, expected, message) {
 }
 const display = (page, patch) => page.evaluate(next => window.cadHarness.a.controller.setDisplaySettings(next), patch);
 
-test('a static GLB opens on its native scene with no tools: display settings, orbit, host commands and state all work', async (t) => {
+test('a static GLB opens on its native scene in Select: display settings, orbit, host commands and state all work', async (t) => {
   const { page, pane, errors } = await open(t, 'static.glb');
   await ready(pane);
   assert.deepEqual(errors, []);
 
-  // Nothing of a GLB picks, measures, poses or is drawn on: the viewport simply
-  // orbits, pans and zooms, with no tools over it.
-  await noTools(pane);
-  assert.equal(await pane.locator('[data-quick-edit]').count(), 0, 'Quick Edit is a STEP file\'s: a GLB has nothing to pick');
+  await glbTools(pane);
+  assert.equal(await pane.locator('[data-quick-edit-box]').count(), 0, 'Quick Edit opens on a pick or a mark, never by itself');
   assert.equal(await pane.locator('[data-view-controls]').getByRole('button', { name: 'Preview', exact: true }).count(), 1,
     'a GLB is 3D: Preview ends the navbar after Display');
   assert.equal(await pane.locator('[data-file-sidebar-tools]').count(), 0, 'a static GLB has nothing for the file sidebar');
@@ -283,8 +298,8 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   const state = await page.evaluate(() => window.cadHarness.a.controller.readState());
   assert.deepEqual([state.resource.path, state.revision, state.loading, state.selection], ['/models/static.glb', 'one-static.glb', false, []]);
   const declined = await page.evaluate(() => window.cadHarness.a.controller.select({ selectors: ['o1.f1'] }).then(() => '', error => error.message));
-  assert.match(declined, /A GLB has nothing to select/);
-  assert.match(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), /no selection to clear/);
+  assert.match(declined, /A GLB's nodes are picked by a person in the viewport under Select/);
+  assert.equal(await page.evaluate(() => window.cadHarness.a.controller.clearSelection().then(() => '', error => error.message)), '', 'its node selection clears');
 
   // A secondary press is the camera's: no menu of the viewer's, and the browser's own stays off the canvas.
   await page.evaluate(() => {
@@ -326,10 +341,10 @@ test('a static GLB opens on its native scene with no tools: display settings, or
   assert.deepEqual(errors, []);
 });
 
-test('an animated GLB opens at rest with no tools, its clips the file sidebar\'s Animation section; in Preview they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving puts the model back at rest', async (t) => {
+test('an animated GLB opens at rest, its clips the file sidebar\'s Animation section; in Preview they play in Render without moving the camera or the floor, Orbit turns the camera, and leaving puts the model back at rest', async (t) => {
   const { page, pane, errors } = await open(t, 'animated.glb');
   await ready(pane);
-  await noTools(pane);
+  await glbTools(pane);
   // Its routines are the sidebar's: one tile, its section closed as the file opens.
   assert.deepEqual(await tileNames(pane), ['Animation']);
   assert.equal(await animationSection(pane).isVisible(), false, 'no section open as the file opens');
@@ -420,6 +435,39 @@ test("an animated GLB's Speed and Loop are the file's: chosen in its Animation s
   await openSection(pane, 'Animation');
   assert.deepEqual(await settings(), ['Animation speed: 0.5×', 'false'], 'the file\'s, kept');
   await togglePreview(page, pane, false);
+  assert.deepEqual(errors, []);
+});
+
+test('a GLB\'s tools: Select picks a node into Quick Edit, Measure reads metres approximately, Explode moves the nodes apart and Clip, set, takes it off', async (t) => {
+  const { page, pane, errors } = await open(t, 'static.glb');
+  await ready(pane);
+  await page.waitForFunction(() => window.cadHarness.a.controller?.readState().loading === false);
+  await display(page, { modes: { solid: { grid: { enabled: false }, axes: { enabled: false } } } });
+  await settle(page);
+  const box = await pane.locator('[data-cad-surface] canvas').first().boundingBox();
+  const at = projector(await page.evaluate(() => window.__cadCamera()), box);
+  const chips = () => pane.locator('[data-quick-edit-refs] [data-quick-edit-ref] > button:first-child')
+    .evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')));
+  // The base: glTF's 20 mm cube at the origin, drawn Z-up in CAD millimetres (x 0..20, y -20..0, z 0..20).
+  await page.mouse.click(...at([10, -10, 20]));
+  await page.waitForFunction(() => window.cadHarness.a.controller.readState().selectedNodes?.join() === 'n0');
+  assert.deepEqual(await chips(), ['base'], 'the node, by its name: model.glb#n0');
+
+  // Measure: the base's top edge, corner to corner, snapped to its triangles' vertices.
+  await pane.getByRole('button', { name: 'Measure', exact: true }).click();
+  assert.match(await pane.locator('[data-measure-size]').innerText(), /^≈ 0\.040 × 0\.020 × 0\.020 m$/, 'the model\'s size, in glTF\'s metres');
+  for (const corner of [[0.2, -0.2, 20], [19.8, -0.2, 20]]) { await page.mouse.click(...at(corner)); await settle(page); }
+  await page.waitForFunction(() => document.querySelectorAll('[data-quick-edit-box] [data-quick-edit-ref]').length === 2);
+  assert.ok((await chips()).includes('Measurement 1: ≈ 0.0200 m (approximate)'), JSON.stringify(await chips()));
+
+  // Explode: the two nodes move apart, and the stage follows the box they make.
+  const width = (await page.evaluate(() => window.__cadStage().bounds)).max[0];
+  await display(page, { exploded: { enabled: true, amount: 1 } });
+  await page.waitForFunction(rest => window.__cadStage().bounds.max[0] > rest + 1, width);
+  // Clip set, by its own slider: the model is cut, and Explode goes off (one motion at a time).
+  await pane.getByRole('button', { name: 'Clip', exact: true }).click();
+  await pane.getByRole('slider', { name: 'Clip amount' }).press('End');
+  await page.waitForFunction(() => window.__cadStage().cut === 1 && window.cadHarness.a.controller.readState().display.exploded?.enabled !== true);
   assert.deepEqual(errors, []);
 });
 

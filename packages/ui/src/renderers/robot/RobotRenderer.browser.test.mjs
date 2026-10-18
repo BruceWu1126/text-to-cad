@@ -53,6 +53,8 @@ const SWING_SDF = `<?xml version="1.0"?>
   <joint name="hinge" type="revolute"><pose relative_to="base">0 0 0.2 0 0 0</pose><parent>base</parent><child>arm</child><axis><xyz>0 1 0</xyz><limit><lower>-1.2</lower><upper>1.2</upper></limit></axis></joint>
 </model></world></sdf>`;
 // A chain long enough that a per-pose cost proportional to the robot would show.
+// The strip with Select in hand: a robot's four tools (`robot/tools.js`).
+const SELECT_IN_HAND = ['Select:true', 'Annotate:false', 'Measure:false', 'Clip:false'];
 const CHAIN_LINKS = 30;
 const CHAIN_URDF = `<?xml version="1.0"?>\n<robot name="chain">\n${Array.from({ length: CHAIN_LINKS }, (_, index) => `  <link name="l${index}">${box('0.1 0.04 0.04', '0.05 0 0', '0.5 0.5 0.55 1')}</link>`).join('\n')}
 ${Array.from({ length: CHAIN_LINKS - 1 }, (_, index) => `  <joint name="j${index}" type="revolute"><parent link="l${index}"/><child link="l${index + 1}"/><origin xyz="0.1 0 0"/><axis xyz="0 ${index % 2} ${1 - (index % 2)}"/>${limit(-1, 1)}</joint>`).join('\n')}\n</robot>\n`;
@@ -269,11 +271,11 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   // filter can pick Position's knobs alone. Its controls are the file sidebar's, under the Links,
   // whatever Select picks; the tool stack holds nothing of a robot's.
   await page.waitForFunction(() => window.__cadJointHandles?.().length > 0);
-  assert.deepEqual(await robot.toolNames(), ['Select:true']);
+  assert.deepEqual(await robot.toolNames(), SELECT_IN_HAND);
   assert.equal(await robot.tool('Position').count(), 0, 'Position is no tool of its own');
   await robot.openPosition();
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
-  assert.equal(await robot.tool('Annotate').count(), 0, 'Annotate is a STEP tool; a robot description has none');
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Position']);
+  assert.equal(await robot.tool('Explode').count(), 0, 'a robot is posed, never exploded');
   // Display and Preview are the view's controls, at the navbar's right end, for a robot as for any 3D file.
   assert.deepEqual(await pane.locator('[data-viewer-navbar] [data-view-controls] button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))),
     ['Display mode: Solid', 'Preview']);
@@ -463,7 +465,7 @@ test('a robot\'s knobs are Select\'s while it picks Position, beside the sidebar
   await robot.jointField('shoulder').click();
   await robot.settle();
   assert.deepEqual([await robot.toolNames(), await robot.filter(), await page.evaluate(() => window.__cadJointHandles().length)],
-    [['Select:true'], 'Selection filter: Links', 0]);
+    [SELECT_IN_HAND, 'Selection filter: Links', 0]);
   assert.equal(await robot.jointField('shoulder').inputValue(), '-40°');
   await robot.openPosition();
   await page.waitForFunction(() => window.__cadJointHandles().length === 4);
@@ -492,7 +494,7 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   await page.mouse.click(...onScreen(spots.lift).map((value, index) => value + (index ? 14 : 14)));
   await robot.settle();
   await robot.pressed([]);
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Position']);
   // Links is the sidebar's, whatever Select picks: on screen picking Position, and picking links.
   assert.equal(await robot.linksPanel().isVisible(), true);
   await robot.pickLinks();
@@ -505,7 +507,7 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
 
   // A row is the selection.
   await pane.getByRole('button', { name: 'Select upper_arm', exact: true }).click();
-  assert.deepEqual(await robot.toolNames(), ['Select:true']);
+  assert.deepEqual(await robot.toolNames(), SELECT_IN_HAND);
   await robot.pressed(['Select upper_arm']);
   // What is selected is Quick Edit's: a chip for the link, by its name, and no panel comes with it.
   // The chip's card, on a rest of the pointer, is what the description says of the link.
@@ -530,7 +532,7 @@ test('Select picks a visual at once; a selection outlives Select; Links shows wh
   // what Select picks; a second press puts it away.
   await robot.openDisplay();
   assert.deepEqual([await robot.sidebar(), await robot.stack()], [['Links', 'Position controls'], []]);
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Position']);
   await robot.displayButton().click();
   await robot.displayPanel().waitFor({ state: 'detached' });
 
@@ -674,7 +676,7 @@ test('a reload of the tab brings the pose and the hidden visuals back, and nothi
   // The tool is never saved, nor what it picks: the reloaded file opens in Select picking links and
   // knobs, Display shut, no section open.
   await robot.openSection('Links');
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: everything']);
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: everything']);
   await pane.getByRole('button', { name: 'Reveal upper_arm', exact: true }).waitFor();
   assert.equal(await robot.displayPanel().count(), 0, 'it comes back with Display shut');
   await robot.openSection('Position');
@@ -743,7 +745,7 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   const { page, pane } = robot;
   await robot.openPosition();
   await page.waitForFunction(() => window.__cadJointHandles?.().length === 1);
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Position']);
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Position']);
   // The same sections as any robot, whatever the format on disk, whatever Select picks: SDF is the
   // sidebar's, its tile after Links' (what the description says about itself sits with its links).
   const sections = [['Links', 'SDF', 'Position controls'], [], ['Links', 'SDF', 'Position']];
@@ -772,7 +774,7 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   await page.keyboard.press('Escape');
   await rootMenu.waitFor({ state: 'detached' });
   // Display was never the tool: Select was in hand throughout, picking links, and still is.
-  assert.deepEqual([await robot.toolNames(), await robot.filter()], [['Select:true'], 'Selection filter: Links']);
+  assert.deepEqual([await robot.toolNames(), await robot.filter()], [SELECT_IN_HAND, 'Selection filter: Links']);
 
   await page.evaluate(() => window.cadHarness.capture());
   await page.waitForFunction(() => window.cadHarness.captures.length === 1);
