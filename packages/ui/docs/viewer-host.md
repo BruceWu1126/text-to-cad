@@ -306,13 +306,13 @@ artifact status is already `compiled`, and keeps the picture through `onThumbnai
 as it keeps the file on screen's. The home never builds anything: an unbuilt model
 keeps its placeholder until a view shows it.
 `readState().display` and `setDisplaySettings(patch)` use the same sparse per-mode
-schema as snapshots: `mode` selects `solid`, `render`, `xray`, `hidden-line`, or
+schema as snapshots: `mode` selects `solid`, `xray`, `hidden-line`, or
 `wireframe`; `modes.<mode>` holds that mode's settings, while appearance, camera,
 clip and exploded are shared. Patches merge supplied fields within each mode's
 groups. A mode patch selects its remembered overrides without clearing anything.
 Reset removes only the named mode's overrides. There is no Custom state or legacy
-shape migration. Render is Preview's alone, which no live command opens: the tools
-view draws a file whose mode is `render` in Solid, and `modes.render` is Preview's
+shape migration. Render is no mode: it is Preview's, which no live command opens, so
+`mode: "render"` is refused as any unknown mode is, and `modes.render` is Preview's
 Render settings. Camera projection/lens changes preserve viewport pose and zoom.
 `resetCamera` frames the model again without turning the camera — exactly what
 STEP's context-menu "Zoom to fit" does. Cube shortcuts change only orientation.

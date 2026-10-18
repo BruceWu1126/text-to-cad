@@ -260,7 +260,7 @@ export function useRendererShell({
   previewPrepare.current = signal => {
     const prepare = viewerRef.current?.prepareViewSettings;
     if (!prepare || viewerRef.current.softwareRendering?.()) return null;
-    return prepare(previewViewScene(viewSettingsStore.sceneFor("render")), signal);
+    return prepare(previewViewScene(viewSettingsStore.renderScene()), signal);
   };
 
   // The camera the file was left at, scoped to this model: the viewport applies it in place of
@@ -627,12 +627,11 @@ export function useRendererShell({
   const offeredModes = normalizeViewFeatures(features).modes;
   const displayMode = {
     value: desiredScene.view.mode,
-    // Render is Preview's, never a display mode (`DisplayModeOptions.js`).
     options: DISPLAY_MODE_OPTIONS.filter(option => offeredModes.includes(option.value)),
     onChange: viewSettingsStore.selectMode,
   };
-  // The scene Preview's own view draws (`PreviewView.jsx`): the file's Render, as its settings stand.
-  const previewDesiredScene = useMemo(() => previewViewScene(viewSettingsStore.sceneFor("render")),
+  // The scene Preview's own view draws (`PreviewView.jsx`): Render over the file's settings as they stand.
+  const previewDesiredScene = useMemo(() => previewViewScene(viewSettingsStore.renderScene()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [viewSettingsStore, displaySettings, colorScheme, features]);
   const display = mode => <DisplayModeSettings mode={mode} features={features} display={displaySettings}

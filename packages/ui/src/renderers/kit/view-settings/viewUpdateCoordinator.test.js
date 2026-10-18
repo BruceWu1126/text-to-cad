@@ -5,7 +5,8 @@ import { resolveViewSceneSettings } from '@text-to-cad/core/common/sceneSettings
 import { createViewUpdateCoordinator } from './viewUpdateCoordinator.js';
 import { afterViewPaint, viewPreparationKey } from './viewUpdatePlan.js';
 
-const scene = value => resolveViewSceneSettings({ display: value, lightingQuality: "preview" });
+// A display, drawn in its mode or, with `render`, in Render (Preview's).
+const scene = (value, render = false) => resolveViewSceneSettings({ display: value, render, lightingQuality: "preview" });
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve, reject; const promise = new Promise((a,b) => { resolve=a; reject=b; }); return { promise, resolve, reject }; }
 function harness(options = {}) {
@@ -22,7 +23,7 @@ function harness(options = {}) {
 }
 
 test('rapid mode changes prepare and present only the last target', async () => {
-  const h = harness(), render = scene({ mode: 'render' }), xray = scene({ mode: 'xray' });
+  const h = harness(), render = scene({}, true), xray = scene({ mode: 'xray' });
   h.request(render); h.request(xray);
   await h.whenReady();
   assert.deepEqual(h.calls, [['prepare', xray], ['apply', xray], ['present']]);
@@ -31,7 +32,7 @@ test('rapid mode changes prepare and present only the last target', async () => 
 
 test('return to visible settings during preparation cancels work and settles captures', async () => {
   const h = harness({ prepare: (_, signal) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new Error('cancelled')))) });
-  h.request(scene({ mode: 'render' })); await tick();
+  h.request(scene({}, true)); await tick();
   const capture = h.whenReady(); h.request(h.initial);
   await capture;
   assert.deepEqual(h.calls, []);
@@ -41,7 +42,7 @@ test('return to visible settings during preparation cancels work and settles cap
 test('a superseded reconciliation is restored without presenting the stale recipe', async () => {
   const first = deferred(), applied = [], presented = [];
   const h = harness({ apply: async target => { applied.push(target); if(applied.length===1) await first.promise; }, present: async () => presented.push(applied.at(-1)) });
-  const render = scene({ mode: 'render' });
+  const render = scene({}, true);
   h.request(render); await tick();
   h.request(h.initial); first.resolve();
   await h.whenReady();
@@ -61,7 +62,7 @@ test('live edits skip preparation and capture waits for the actual presented fra
 test('failures surface once, reject captures, and retry the requested values', async () => {
   let fail = true;
   const h = harness({ present: async () => { if (fail) throw new Error('GPU failure'); } });
-  const render = scene({ mode: 'render' }); h.request(render);
+  const render = scene({}, true); h.request(render);
   await assert.rejects(h.whenReady(), /GPU failure/);
   assert.equal(h.statuses.at(-1).error, 'GPU failure');
   fail = false; h.retry(); await h.whenReady();
@@ -71,20 +72,20 @@ test('failures surface once, reject captures, and retry the requested values', a
 test('unmount aborts preparation and rejects pending captures', async () => {
   let signal;
   const h = harness({ prepare: (_, value) => { signal=value; return new Promise(()=>{}); } });
-  h.request(scene({ mode: 'render' })); await tick();
+  h.request(scene({}, true)); await tick();
   const capture = h.whenReady(); h.dispose();
   await assert.rejects(capture, /Viewer closed/); assert.equal(signal.aborted, true);
 });
 
 test('only resource boundaries prepare; clip motion, exposure, rotation and color stay live', () => {
-  const render = scene({ mode: 'render', clip: { enabled: true } });
+  const render = scene({ clip: { enabled: true } }, true);
   for (const patch of [
     { modes: { render: { lighting: { exposure: 1, rotation: 35 } } } }, { clip: { enabled: true, at: 0.7 } },
     { modes: { render: { floor: { color: '#abcabc', opacity: 0.7 } } } }, { modes: { render: { parts: { color: '#abcdef' } } } },
     { camera: { projection: 'orthographic' } },
-  ]) assert.equal(viewPreparationKey(scene({ mode: 'render', clip: { enabled: true }, ...patch })), viewPreparationKey(render));
+  ]) assert.equal(viewPreparationKey(scene({ clip: { enabled: true }, ...patch }, true)), viewPreparationKey(render));
   for (const patch of [ { clip: { enabled: false } }, { modes: { render: { lighting: { quality: 'final' } } } }, { modes: { render: { lighting: { size: 2 } } } } ]) {
-    assert.notEqual(viewPreparationKey(scene({ mode: 'render', clip: { enabled: true }, ...patch })), viewPreparationKey(render));
+    assert.notEqual(viewPreparationKey(scene({ clip: { enabled: true }, ...patch }, true)), viewPreparationKey(render));
   }
 });
 

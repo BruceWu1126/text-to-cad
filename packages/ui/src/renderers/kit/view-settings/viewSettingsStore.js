@@ -7,8 +7,8 @@ import { shareSettingsValue } from "./shareSettingsValue.js";
 // write here. Resolved defaults are outputs, never written back as new edits.
 // Every mode keeps its own settings: choosing a mode shows them, editing one mode's
 // (the one on screen or another) leaves the rest alone, and Reset takes one mode's away. Render is
-// Preview's (`sceneFor("render")`, drawn in a view of its own): the scene this store draws is
-// never Render, and a file left in Render is drawn in Solid, its mode its own.
+// no mode: it is Preview's (`renderScene()`, drawn in a view of its own), over the same settings
+// with Render's own (`modes.render`).
 export function createViewSettingsStore(initial = {}, defaults = {}) {
   let context = defaults;
   let snapshot;
@@ -17,7 +17,7 @@ export function createViewSettingsStore(initial = {}, defaults = {}) {
     const display = normalizeViewSettings(settings);
     const next = shareSettingsValue(snapshot, {
       display,
-      scene: resolveViewSceneSettings({ ...context, display: display.mode === "render" ? { ...display, mode: "solid" } : display })
+      scene: resolveViewSceneSettings({ ...context, display })
     });
     if (next === snapshot) return snapshot;
     snapshot = next;
@@ -36,7 +36,7 @@ export function createViewSettingsStore(initial = {}, defaults = {}) {
     selectMode: mode => commit(mergeViewerDisplaySettings(snapshot.display, { mode })),
     patchMode: (mode, patch) => commit(mergeViewerDisplaySettings(snapshot.display, { modes: { [mode]: patch } })),
     resetMode: mode => commit(resetViewMode(snapshot.display, mode)),
-    /** The scene the store would draw in `mode`, the file's settings as they stand: nothing is committed. */
-    sceneFor: mode => resolveViewSceneSettings({ ...context, display: { ...snapshot.display, mode } })
+    /** Render over the file's settings as they stand (Preview's scene): nothing is committed. */
+    renderScene: () => resolveViewSceneSettings({ ...context, display: snapshot.display, render: true })
   };
 }

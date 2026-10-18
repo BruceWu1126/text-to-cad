@@ -1319,9 +1319,8 @@ class SnapshotCliTests(unittest.TestCase):
             packet = resolve_render_job_packet(
                 {"input": "models/widget.glb", "render": True,
                  "outputs": [{"path": "tmp/iso.png", "camera": "iso"}]}, cwd=root)
-            # Said by the display the page draws: Render's mode.
-            self.assertEqual(packet["jobs"][0]["display"]["mode"], "render")
-            self.assertNotIn("render", packet["jobs"][0])
+            # The page's own flag, beside the display: Render is no display mode.
+            self.assertEqual((packet["jobs"][0]["display"]["mode"], packet["jobs"][0]["render"]), ("solid", True))
 
     def test_render_job_allows_shaded_and_camera_projection_for_mesh_input(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -16,7 +16,7 @@ test("a missing, foreign or older record restores nothing and never throws", () 
 });
 
 test("the camera and the display are always kept; a slice comes back only under the signature it was written against", () => {
-  const display = readFileView({ version: FILE_VIEW_VERSION, display: { mode: "render", modes: { render: { parts: { colorMode: "single", color: "#00c040" } } } } }).display;
+  const display = readFileView({ version: FILE_VIEW_VERSION, display: { mode: "xray", modes: { render: { parts: { colorMode: "single", color: "#00c040" } } } } }).display;
   const written = writeFileView({ camera, display, renderer: { tree: { expanded: ["o1"] }, pose: { hinge: 30 }, plain: { note: 1 }, skipped: undefined },
     signatures: { tree: "geo:1", pose: "motion:1" } });
   assert.deepEqual(Object.keys(written.renderer), ["tree", "pose", "plain"], "an undefined slice is not written");
@@ -24,12 +24,12 @@ test("the camera and the display are always kept; a slice comes back only under 
   const copy = JSON.parse(JSON.stringify(written));
   const same = readFileView(copy, { tree: "geo:1", pose: "motion:1" });
   assert.deepEqual(same.camera, camera);
-  assert.deepEqual([same.display.mode, same.display.modes.render.parts.colorMode, same.display.modes.render.parts.color], ["render", "single", "#00c040"]);
+  assert.deepEqual([same.display.mode, same.display.modes.render.parts.colorMode, same.display.modes.render.parts.color], ["xray", "single", "#00c040"]);
   assert.deepEqual(same.renderer, { tree: { expanded: ["o1"] }, pose: { hinge: 30 }, plain: { note: 1 } });
   // A rebuilt model: the geometry slice is dropped, the motion slice and everything else kept.
   const rebuilt = readFileView(copy, { tree: "geo:2", pose: "motion:1" });
   assert.deepEqual(rebuilt.camera, camera);
-  assert.equal(rebuilt.display.mode, "render");
+  assert.equal(rebuilt.display.mode, "xray");
   assert.deepEqual(rebuilt.renderer, { pose: { hinge: 30 }, plain: { note: 1 } });
   // Reading is a copy: what comes back is nobody else's object.
   same.renderer.tree.expanded.push("o2");
@@ -55,11 +55,12 @@ test("preview's playback settings are the view's: written whole, read back bound
 });
 
 test("a chosen floor finish is kept with the display, in the record either app writes", () => {
-  const display = readFileView({ version: FILE_VIEW_VERSION, display: { mode: "render", modes: { render: { floor: { finish: "glossy" } } } } }).display;
+  const display = readFileView({ version: FILE_VIEW_VERSION, display: { modes: { render: { floor: { finish: "glossy" } } } } }).display;
   assert.deepEqual(display.modes.render.floor, { finish: "glossy" });
   const copy = JSON.parse(JSON.stringify(writeFileView({ camera, display })));
   assert.deepEqual(readFileView(copy).display.modes.render.floor, { finish: "glossy" });
-  assert.equal(readFileView({ version: FILE_VIEW_VERSION, display: { mode: "render", floor: { finish: "chrome" } } }).display.mode, "solid");
+  assert.deepEqual(readFileView({ version: FILE_VIEW_VERSION, display: { mode: "xray", modes: { render: { floor: { finish: "chrome" } } } } }).display,
+    { mode: "solid" });
 });
 
 test("legacy grouped display settings are dropped whole without migration", () => {
@@ -73,8 +74,11 @@ test("display settings this build cannot read are the defaults, and the stored r
   const before = JSON.stringify(raw);
   assert.equal(readFileView(raw).display.mode, "solid");
   assert.equal(JSON.stringify(raw), before);
+  // Render is no display mode: a record left in it is one this build cannot read.
+  assert.deepEqual(readFileView({ version: FILE_VIEW_VERSION, display: { mode: "render", modes: { solid: { flat: true } } } }).display,
+    { mode: "solid" });
   // A tool's group is read as strictly: a clip key this build does not know is not a clip.
-  assert.deepEqual(readFileView({ version: FILE_VIEW_VERSION, display: { mode: "render", clip: { enabled: true, offset: 0.3 } } }).display,
+  assert.deepEqual(readFileView({ version: FILE_VIEW_VERSION, display: { mode: "xray", clip: { enabled: true, offset: 0.3 } } }).display,
     readFileView(undefined).display);
 });
 

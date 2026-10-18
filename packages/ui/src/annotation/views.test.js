@@ -15,7 +15,7 @@ const turned = degrees => {
 
 test("a view is the viewer's camera at the prompt's size, with what places or hides the parts and nothing of how it looks", () => {
   const made = promptView({ camera: camera(), width: 800, height: 600 }, {
-    display: { mode: 'render', clip: { enabled: true, axis: 'x', at: 2, invert: false }, exploded: { enabled: false, amount: 0.5 } },
+    display: { mode: 'xray', clip: { enabled: true, axis: 'x', at: 2, invert: false }, exploded: { enabled: false, amount: 0.5 } },
     state: { kinematics: { elbow: 30 }, jointValues: {}, hide: ['o1.2'], focus: [] },
   });
   assert.deepEqual(made, {

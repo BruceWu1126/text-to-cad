@@ -1137,12 +1137,10 @@ def normalize_common_job(
     # Every mode shares its preset defaults with the Viewer; only appearance is
     # fixed to Light for deterministic CLI output.
     display = {"mode": "solid", "appearance": "light", **job.get("display", {})}
-    # Render is its own request, drawn over the same display settings: the page draws Render
-    # where its display says so, with Render's own settings (`display.modes.render`).
+    # Render is its own request, drawn over the same display settings with Render's own
+    # (`display.modes.render`): the page takes it as `render`, never as a display mode.
     if "render" in job:
         _render_boolean(job["render"], "render")
-        if job["render"]:
-            display["mode"] = "render"
 
     if "timeoutSeconds" in job:
         job["timeoutSeconds"] = validate_timeout_seconds(job["timeoutSeconds"])
@@ -1235,9 +1233,10 @@ def normalize_common_job(
             normalized_output["camera"] = parse_camera_option(explicit_camera)
         normalized_outputs.append(normalized_output)
 
-    # `render` is said by the display from here on (its mode, above): the page draws a display.
     return {
         **{key: value for key, value in job.items() if key != "render"},
+        # Render, the page's own flag beside the display; absent, the display's mode.
+        **({"render": True} if job.get("render") is True else {}),
         "mode": mode,
         "output": output_settings,
         "quality": quality,

@@ -252,7 +252,7 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(gridded.displaySettings.guides.grid.density, 2, "twice as fine");
   assert.equal(gridded.displaySettings.guides.axis.enabled, true, "with the axes");
 
-  const rendered = renderJobContext(twoPartMeshData(), { display: { mode: "render" } });
+  const rendered = renderJobContext(twoPartMeshData(), { render: true });
   assert.equal(rendered.sceneSettings.render.enabled, true);
   assert.equal(rendered.quality.id, "high");
   assert.equal(rendered.projection, "perspective");
@@ -260,7 +260,8 @@ test("snapshot scene policy composes display Render quality with technical quali
   assert.equal(rendered.sharedRenderOptions.renderScale, 2);
 
   const explicitScale = renderJobContext(twoPartMeshData(), {
-    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } } },
+    render: true,
+    display: { modes: { render: { lighting: { quality: "preview" } } } },
     output: { renderScale: 3 }
   });
   assert.equal(explicitScale.quality.id, "standard");
@@ -281,7 +282,7 @@ test("render display retains CAD runtimes and animation", () => {
   const stepAnimation = resolveAnimationFrame(SLIDE_CLIPS, { clip: "slide", time: 1.5 });
   const job = {
     kind: "step",
-    display: { mode: "render" },
+    render: true,
     selectorRuntime: {},
     displayEdgeRuntime: {},
     stepAnimation
@@ -302,10 +303,12 @@ test("render display retains CAD runtimes and animation", () => {
   model.dispose();
 });
 
-test("photographic Render rejects list mode", () => {
+test("photographic Render is its own request, never a display mode, and rejects list mode", () => {
   for (const mode of ["list"]) {
-    assert.throws(() => renderJobContext(twoPartMeshData(), { mode, display: { mode: "render" } }), /Render display supports only view mode/);
+    assert.throws(() => renderJobContext(twoPartMeshData(), { mode, render: true }), /Render supports only view mode/);
   }
+  assert.throws(() => renderJobContext(twoPartMeshData(), { display: { mode: "render" } }), /display\.mode must be one of/);
+  assert.throws(() => renderJobContext(twoPartMeshData(), { render: "true" }), /render must be a boolean/);
 });
 
 test("snapshot scene disposal releases owned stage resources without touching model resources", () => {
@@ -412,7 +415,7 @@ test("the still frame rides the effects-pass channel the viewer and docs hero us
     null
   );
   assert.equal(options.receiveShadows, false, "normal CAD snapshots keep the inspection shadow policy");
-  const renderJob = { display: { mode: "render" }, outputs: [{ path: "render.png" }] };
+  const renderJob = { render: true, outputs: [{ path: "render.png" }] };
   assert.equal(
     modelOptionsForRenderJob(renderJobContext(twoPartMeshData(), renderJob), renderJob).receiveShadows,
     true,
@@ -475,7 +478,7 @@ test("photographic Render applies a non-rest kinematics transform", () => {
   const job = {
     mode: "view",
     kind: "step",
-    display: { mode: "render" },
+    render: true,
     outputs: [{ path: "render-pose.png" }],
     stepParameters
   };
@@ -493,8 +496,8 @@ test("render display accepts common camera, selection, clipping, and quality con
   const context = renderJobContext(twoPartMeshData(), {
     kind: "step",
     camera: { preset: "front" },
+    render: true,
     display: {
-      mode: "render",
       camera: { projection: "orthographic" },
       clip: { enabled: true, axis: "x", at: 0.5 },
       exploded: { enabled: true, amount: 0.5 },
@@ -645,7 +648,7 @@ test("a snapshot fits its camera's depth range in every preset, as the viewer fi
 
 test("an exploded Render snapshot keeps its floor and floor shadow on the rest placement, as the viewer does", async () => {
   const job = { mode: "view", kind: "step",
-    display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } }, exploded: { enabled: true, amount: 1 } },
+    render: true, display: { modes: { render: { lighting: { quality: "preview" } } }, exploded: { enabled: true, amount: 1 } },
     outputs: [{ path: "exploded.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);
@@ -682,7 +685,7 @@ test("an exploded Render snapshot keeps its floor and floor shadow on the rest p
 test("a snapshot drawn at a render scale above 1 spreads its floor's dither by it", async () => {
   // Final draws twice the pixels it keeps: each kept pixel averages four, and the dither
   // must be drawn twice as wide to survive that, or the dark floor's bands come back.
-  const job = { mode: "view", kind: "step", display: { mode: "render", modes: { render: { lighting: { quality: "final" } } } },
+  const job = { mode: "view", kind: "step", render: true, display: { modes: { render: { lighting: { quality: "final" } } } },
     outputs: [{ path: "final.png", width: 64, height: 64, camera: "iso" }] };
   const meshData = wideTwoPartMeshData();
   const context = renderJobContext(meshData, job);

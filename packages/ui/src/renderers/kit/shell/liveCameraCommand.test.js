@@ -52,11 +52,11 @@ test('setCamera saves shared projection and lens and applies them before reporti
 });
 
 test('a pose-only setCamera inherits the configured projection and lens, and writes no display override', () => {
-  const current = { mode: 'render' };
+  const current = { mode: 'xray', camera: { projection: 'perspective', focalLength: 35 } };
   const view = harness(current);
   view.apply(pose);
   assert.deepEqual(view.result.display, current);
-  assert.deepEqual(view.result.applied, { ...pose, projection: 'perspective', focalLength: 50 });
+  assert.deepEqual(view.result.applied, { ...pose, projection: 'perspective', focalLength: 35 });
 });
 
 test('an invalid camera is refused before the viewport or the stored display is touched', () => {

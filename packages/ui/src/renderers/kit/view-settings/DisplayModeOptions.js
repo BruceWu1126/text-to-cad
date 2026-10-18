@@ -1,6 +1,6 @@
 // The display modes' icons, one family: the same sphere, drawn as each mode draws a model — shaded
 // (Solid), see-through with its hidden lines (X-ray), its visible lines alone (Hidden line), every
-// line (Wireframe). Render is no display mode: it is Preview's (`RendererShell.jsx`).
+// line (Wireframe).
 const SPHERE = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.7", strokeLinecap: "round", strokeLinejoin: "round" };
 // Solid's shading, a hard-edged unlit side: the outline's right half, back up a terminator that
 // bulges a little to the right — a drawing's shading.

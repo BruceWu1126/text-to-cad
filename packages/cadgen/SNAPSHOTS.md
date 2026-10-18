@@ -41,7 +41,7 @@ transparent PNG backgrounds.
 `edges`, `clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes
 describe a CAD model: its topology edges, its parts and its solids. They apply
 to STEP/STP inputs only. A mesh or a robot description (STL, 3MF, GLB, URDF,
-SRDF, SDF) takes `solid` or `render` with their other settings, and refuses
+SRDF, SDF) takes `solid` with its other settings, or `--render`, and refuses
 unsupported settings by name before anything is rendered.
 
 ## Meshes and robot descriptions
@@ -55,13 +55,13 @@ snapshot's own.
 
 - A GLB is its own glTF scene: nodes, skins, morph targets and authored
   materials, drawn where its skins and morph weights put them. `solid` wears the
-  viewer's surface over its colours, maps and opacity; `render` shows the finish
+  viewer's surface over its colours, maps and opacity; `--render` shows the finish
   the file authored. Its clips play in the viewer's preview: a snapshot draws the file
   at rest, lights and grounds it on the box its clips sweep, as the viewer does,
   and refuses `--animation` and `--video`.
 - An STL is one object and a 3MF one per object (and per material within one),
   each in its colour. They author no finish: `solid` wears the viewer's surface and
-  `render` the studio's.
+  `--render` the studio's.
 - A robot is drawn where the viewer opens it: every joint at its default, then an
   SRDF's `home` group state, with the joints `--joint-values` names on top. A
   colour the description gives a visual wins over the colours its link mesh

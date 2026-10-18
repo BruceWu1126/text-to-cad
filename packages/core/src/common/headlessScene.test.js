@@ -47,14 +47,15 @@ function stlBytes() {
   }
   return buffer;
 }
-const settingsFor = (display, kind = "stl") => renderJobContext({ bounds: { min: [0, 0, 0], max: [1, 1, 1] } }, job(kind, { display })).sceneSettings;
+// What a job asks for: a display, and Render (`render`) or not.
+const settingsFor = (look, kind = "stl") => renderJobContext({ bounds: { min: [0, 0, 0], max: [1, 1, 1] } }, job(kind, look)).sceneSettings;
 const DISPLAYS = {
-  "solid light": { mode: "solid", appearance: "light" },
-  "solid dark": { mode: "solid", appearance: "dark" },
-  render: { mode: "render" },
-  "by part": { mode: "solid", modes: { solid: { parts: { colorMode: "by-part" } } } },
-  single: { mode: "render", modes: { render: { parts: { colorMode: "single", color: "#ff8800" } } } },
-  "flat": { mode: "solid", modes: { solid: { flat: true } } }
+  "solid light": { display: { mode: "solid", appearance: "light" } },
+  "solid dark": { display: { mode: "solid", appearance: "dark" } },
+  render: { render: true },
+  "by part": { display: { mode: "solid", modes: { solid: { parts: { colorMode: "by-part" } } } } },
+  single: { render: true, display: { modes: { render: { parts: { colorMode: "single", color: "#ff8800" } } } } },
+  "flat": { display: { mode: "solid", modes: { solid: { flat: true } } } }
 };
 function materialState(object3D) {
   const rows = [];
@@ -88,8 +89,8 @@ test("every file family the snapshot CLI draws reaches its viewer builder; a STE
 test("a family scene on the headless stage wears exactly the look the viewer's viewport puts on it", async () => {
   const meshData = await buildMeshDataFromStlBuffer(stlBytes());
   const family = headlessSceneFamily(job("stl"));
-  for (const [name, display] of Object.entries(DISPLAYS)) {
-    const sceneSettings = settingsFor(display);
+  for (const [name, look] of Object.entries(DISPLAYS)) {
+    const sceneSettings = settingsFor(look);
     const headless = headlessSceneModel(THREE, family.build(THREE, meshData, job("stl")), headlessSceneDress(sceneSettings));
     // The viewport's own dressing (ShellViewport): the look it resolves, then every mesh takes shadows or none.
     const viewer = family.build(THREE, meshData, job("stl"));

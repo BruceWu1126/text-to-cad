@@ -123,17 +123,18 @@ test("snapshot tessellation is explicit, finite and restricted to exact surfaces
 
 test("snapshot quality selects bounded shared tessellation policy", () => {
   assert.deepEqual(tessellationForSnapshotQuality({}), {});
-  assert.deepEqual(tessellationForSnapshotQuality({ display: { mode: "render", modes: { render: { lighting: { quality: "preview" } } } } }), {});
+  assert.deepEqual(tessellationForSnapshotQuality({ render: true, display: { modes: { render: { lighting: { quality: "preview" } } } } }), {});
   assert.deepEqual(
-    tessellationForSnapshotQuality({ display: { mode: "render", modes: { render: { lighting: { quality: "final" } } } } }),
+    tessellationForSnapshotQuality({ render: true, display: { modes: { render: { lighting: { quality: "final" } } } } }),
     { chordTolerance: 0.00015, angleTolerance: 0.35 }
   );
   assert.deepEqual(tessellationForSnapshotQuality({
-    display: { mode: "render", modes: { render: { lighting: { quality: "final" } } } },
+    render: true,
+    display: { modes: { render: { lighting: { quality: "final" } } } },
     quality: { tessellation: { chordTolerance: 0.001 } }
   }), { chordTolerance: 0.001 });
   assert.throws(() => tessellationForSnapshotQuality({
-    display: { mode: "render", modes: { render: { lighting: { quality: "ultra" } } } }
+    render: true, display: { modes: { render: { lighting: { quality: "ultra" } } } }
   }), /quality/i);
 });
 
@@ -588,7 +589,7 @@ test("render display source loading keeps kinematics and supplied CAD runtimes",
   const source = await loadSource({
     kind: "step",
     meshData: meshData(),
-    display: { mode: "render" },
+    render: true,
     cadPath: "hinge.step",
     glbUrl: "/unused-topology.glb",
     sourceSidecar: HINGE_SIDECAR,
@@ -612,7 +613,7 @@ test("render-only source loading leaves STEP topology lazy", async (t) => {
   const source = await loadSource({
     kind: "step",
     meshData: meshData(),
-    display: { mode: "render" },
+    render: true,
     glbUrl: "/unused-topology.glb"
   });
 
@@ -637,13 +638,13 @@ test("loadSource composes STEP documents and refuses every other file family by 
   assert.equal(fetches, 0);
 });
 
-test("retired render snapshot field is rejected before loading a source", async (t) => {
+test("a snapshot's render is a yes or a no, refused otherwise before loading a source", async (t) => {
   const originalFetch = globalThis.fetch;
   let fetches = 0;
   globalThis.fetch = async () => { fetches += 1; throw new Error("unexpected fetch"); };
   t.after(() => { globalThis.fetch = originalFetch; });
-  for (const render of [null, false, "dark", { unknown: true }]) {
-    await assert.rejects(() => loadSource({ kind: "step", url: "/never.step", render }), /Unsupported snapshot field: render/);
+  for (const render of [null, "dark", { unknown: true }]) {
+    await assert.rejects(() => loadSource({ kind: "step", url: "/never.step", render }), /render must be a boolean/);
   }
   assert.equal(fetches, 0);
 });

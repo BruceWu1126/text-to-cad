@@ -14,7 +14,7 @@ test('the viewer offers the working display modes in their intended order: Rende
 });
 
 test('live patches merge only supplied mode settings and preserve the shared camera and tools', () => {
-  const current = { mode: 'render', camera: { focalLength: 80 }, modes: { render: { lighting: { exposure: 1, size: 2 } } },
+  const current = { mode: 'solid', camera: { focalLength: 80 }, modes: { render: { lighting: { exposure: 1, size: 2 } } },
     clip: { enabled: true, axis: 'y', at: 0.35 } };
   const next = mergeViewerDisplaySettings(current, { modes: { render: { lighting: { exposure: 2 } } } });
   assert.deepEqual(next, { ...current, modes: { render: { lighting: { exposure: 2, size: 2 } } } });
@@ -25,21 +25,21 @@ test('live patches merge only supplied mode settings and preserve the shared cam
 test('preset camera changes retain the actual camera position, target and zoom', () => {
   const camera = { position: [30, 40, 50], target: [3, 4, 5], up: [0, 0, 1], zoom: 1.4,
     projection: 'orthographic', focalLength: 120, orthographicHalfHeight: 24 };
-  for (const mode of ['solid', 'render', 'xray', 'hidden-line', 'wireframe']) {
+  for (const mode of ['solid', 'xray', 'hidden-line', 'wireframe']) {
     const next = cameraForViewSettings(camera, { mode });
     const expected = resolveViewSettings({ mode }).camera;
     assert.deepEqual(next, { ...camera, projection: expected.projection, focalLength: expected.focalLength });
   }
-  assert.equal(cameraForViewSettings(null, { mode: 'render' }), null);
+  assert.equal(cameraForViewSettings(null, { mode: 'solid' }), null);
 });
 
 test('the viewer Preview baseline is inherited without an override or Custom state', async () => {
   const { resolveViewSceneSettings } = await import('@text-to-cad/core/common/sceneSettings.js');
   const options = { lightingQuality: 'preview' };
-  const scene = resolveViewSceneSettings({ display: { mode: 'render' }, ...options });
+  const scene = resolveViewSceneSettings({ display: {}, render: true, ...options });
   assert.equal(scene.view.lighting.quality, 'preview');
   assert.equal(scene.quality.id, 'standard');
-  assert.equal(viewModeChanged({ mode: 'render' }, 'render', options), false);
+  assert.equal(viewModeChanged({}, 'render', options), false);
   assert.equal(viewModeChanged({ modes: { render: { lighting: { quality: 'preview' } } } }, 'render', options), false);
   assert.equal(viewModeChanged({ modes: { render: { lighting: { quality: 'final' } } } }, 'render', options), true);
 });
@@ -69,12 +69,12 @@ test('live clip patches place the plane in millimetres; a new axis without a pla
 });
 
 test('presentation suspends model effects without mutating the saved settings', () => {
-  const display = { mode: 'render', clip: { enabled: true, axis: 'y', at: 4 }, exploded: { enabled: true, amount: .7 } };
+  const display = { mode: 'xray', clip: { enabled: true, axis: 'y', at: 4 }, exploded: { enabled: true, amount: .7 } };
   const before = structuredClone(display);
   const preview = previewDisplaySettings(display);
   assert.equal(preview.clip.enabled, false);
   assert.equal(preview.exploded.enabled, false);
   assert.equal(preview.exploded.amount, 0);
-  assert.equal(preview.mode, 'render');
+  assert.equal(preview.mode, 'xray');
   assert.deepEqual(display, before);
 });

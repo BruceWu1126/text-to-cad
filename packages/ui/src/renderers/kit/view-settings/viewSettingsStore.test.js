@@ -11,7 +11,7 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   const before = store.getSnapshot();
   assert.equal(before.display.mode, "solid");
   assert.equal(before.scene.view.lighting.exposure, 0);
-  assert.equal(store.sceneFor("render").view.lighting.exposure, 1);
+  assert.equal(store.renderScene().view.lighting.exposure, 1);
   store.selectMode("xray");
   store.selectMode("solid");
   assert.deepEqual(store.getSnapshot(), before);
@@ -21,14 +21,17 @@ test("per-mode edits compose, survive mode switches and reset without changing s
   assert.deepEqual(createViewSettingsStore(before.display).getSnapshot(), before);
 });
 
-test("Render is Preview's: a file left in Render is drawn in Solid, its mode its own, and Preview resolves Render from the same settings", () => {
-  const store = createViewSettingsStore({ mode: "render" });
+test("Render is no display mode: a file is never in it, and Preview resolves Render from the same settings", () => {
+  assert.throws(() => createViewSettingsStore({ mode: "render" }), /display\.mode must be one of: solid, xray, hidden-line, wireframe/);
+  const store = createViewSettingsStore({ mode: "xray" });
+  assert.throws(() => store.selectMode("render"), /display\.mode must be one of/);
+  assert.throws(() => store.patch({ mode: "render" }), /display\.mode must be one of/);
   store.patchMode("render", { lighting: { exposure: 1 } });
   const { display, scene } = store.getSnapshot();
-  assert.deepEqual([display.mode, scene.view.mode, scene.render.enabled], ["render", "solid", false]);
-  const drawn = store.sceneFor("render");
+  assert.deepEqual([display.mode, scene.view.mode, scene.render.enabled], ["xray", "xray", false]);
+  const drawn = store.renderScene();
   assert.deepEqual([drawn.view.mode, drawn.view.lighting.exposure, drawn.render.enabled], ["render", 1, true]);
-  assert.equal(store.getSnapshot().display, display);
+  assert.equal(store.getSnapshot().display, display, "asking for Render commits nothing");
 });
 
 test("inactive mode edits preserve the scene and no-op mode/reset actions publish nothing", () => {
@@ -45,7 +48,7 @@ test("inactive mode edits preserve the scene and no-op mode/reset actions publis
 });
 
 test("Clip edits preserve all unrelated renderer inputs through both resolution stages", () => {
-  for (const mode of ["solid", "render"]) {
+  for (const mode of ["solid", "xray"]) {
     const store = createViewSettingsStore({ mode });
     const resolve = createViewerRenderStateResolver();
     const before = store.getSnapshot();
@@ -61,13 +64,13 @@ test("Clip edits preserve all unrelated renderer inputs through both resolution 
   }
 });
 
-test("lighting and floor edits do not invalidate geometry settings, and no-op edits publish nothing", () => {
-  const store = createViewSettingsStore({ mode: "render" });
+test("Render's lighting and floor edits leave the file's scene as it is, and no-op edits publish nothing", () => {
+  const store = createViewSettingsStore();
   const before = store.getSnapshot();
   store.patchMode("render", { lighting: { exposure: 0.7 }, floor: { opacity: 0.8 } });
   const after = store.getSnapshot();
-  assert.equal(after.scene.display, before.scene.display);
-  assert.equal(after.scene.camera, before.scene.camera);
+  assert.equal(after.scene, before.scene);
+  assert.deepEqual([store.renderScene().view.lighting.exposure, store.renderScene().view.floor.opacity], [0.7, 0.8]);
   let updates = 0;
   store.subscribe(() => updates++);
   store.patchMode("render", { lighting: { exposure: 0.7 } });

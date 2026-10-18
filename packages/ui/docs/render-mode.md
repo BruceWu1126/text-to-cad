@@ -1,17 +1,21 @@
 # Per-mode display settings
 
 The Viewer and snapshots share one strict sparse contract. Core's `common/viewSettings.js`
-validates it and resolves the active mode into renderer groups. `common/sceneSettings.js`
+validates it and resolves the active mode, or Render, into renderer groups. `common/sceneSettings.js`
 translates those groups into the scene recipe; renderer code never reads saved mode settings.
 The binding controls are in [settings-ui.md](settings-ui.md#display-settings-and-section-primitives).
+
+A file's display mode is Solid, X-ray, Hidden line or Wireframe. Render is no display mode: it
+is the photographic look Preview and a snapshot's `--render` ask for on their own, over the
+same settings, with settings of its own beside the modes'.
 
 | Mode | Settings | Surface / edge recipe |
 | --- | --- | --- |
 | Solid | parts, flat, edges, grid, axes | Shaded (or flat), visible edges enabled by default |
-| Render | parts, lighting, background, floor | Shaded, no edges, photographic studio |
 | X-ray | parts, opacity, edges, grid, axes | 22% opacity, all edges |
 | Hidden line | edges, grid, axes | Depth-only surfaces, visible edges |
 | Wireframe | edges, grid, axes | No fill, all edges |
+| Render (asked for on its own) | parts, lighting, background, floor | Shaded, no edges, photographic studio |
 
 Grid and axes start off and are independent. Solid alone can disable its edges; other edge
 modes always draw them. Render's floor starts enabled at the lowest point. Appearance,
@@ -22,7 +26,7 @@ Render resolves to perspective without overwriting that shared camera choice.
 
 ```json
 {
-  "mode": "render",
+  "mode": "solid",
   "appearance": "light",
   "camera": { "projection": "orthographic" },
   "modes": {
@@ -33,7 +37,7 @@ Render resolves to perspective without overwriting that shared camera choice.
 }
 ```
 
-Omitted mode is Solid. Each mode object overrides only supplied values. `parts` contains
+Omitted mode is Solid, and `mode` is one of the four. Each mode object, and Render's, overrides only supplied values. `parts` contains
 `colorMode` (`original`, `single`, `by-part`), `color` and `colors`. `edges` contains `color`
 and, for Solid only, `enabled`. `grid` contains `enabled`, `color`, `opacity`, `density`;
 `axes` omits density. Render's `lighting` contains `quality`, `exposure`, `rotation`, `size`,
@@ -44,9 +48,10 @@ Viewer appearance inherits the host; snapshots default to light. Lighting qualit
 Preview in a viewer and Final in a snapshot. Disabled guides, edges and floor retain their
 chosen appearance for re-enabling. There is no Custom state, Grid mode, legacy alias or
 migration. Old-shaped saved display state is discarded at the file-session read boundary.
-The same shape powers live `setDisplaySettings` and snapshot `--display`. A snapshot asks for
-Render with `--render` (a job's `"render": true`), beside a display that never names it as its
-mode; Render's own settings stay `display.modes.render`. `--camera` holds pose/framing only.
+The same shape powers live `setDisplaySettings` and snapshot `--display`; either refuses
+`mode: "render"` as it refuses any mode it does not know. A snapshot asks for Render with
+`--render` (a job's `"render": true`, the page's own flag); Render's own settings stay
+`display.modes.render`. `--camera` holds pose/framing only.
 
 ## State and updates
 
@@ -62,10 +67,10 @@ equal JSON branches; editing an inactive mode leaves the scene identity unchange
 edits do not invalidate materials, lighting, geometry or camera. No-op actions publish nothing.
 Do not merge captured props, persist resolved defaults or keep a second display state.
 
-The view injects offered `modes` and `settings`. Mesh views offer Solid and Render and no
-edges, Clip or Explode. In the viewer Render is Preview's alone: Display
-offers the other modes, and Preview draws Render whatever the file's mode. Unsupported saved modes resolve to Solid without rewriting storage;
-unoffered settings do not affect the scene. The shared UI discovers no host APIs.
+The view injects offered `modes` and `settings`. Mesh views offer Solid and no edges, Clip or
+Explode; Preview draws Render over any of them. Unsupported saved modes resolve to Solid
+without rewriting storage, and a saved file view that cannot be read (one left in Render, say)
+is read as the defaults (`fileView.js`); unoffered settings do not affect the scene. The shared UI discovers no host APIs.
 
 ## Rendering costs and camera behavior
 
@@ -158,10 +163,9 @@ unchanged after a runtime replacement does not.
 
 Display settings are a dropdown from the Display button at the navbar's right end
 (the current mode's sphere, before Preview: `kit/shell/DisplayPopover.jsx`), which opens down from it, present for every 3D file. Its
-modes are every offered mode but Render (`DisplayModeOptions.js`). Preview, a view of its own
-over the editor's, draws the model in Render whatever the file's mode (the store's
-`sceneFor("render")`, as `kit/viewport/previewViewScene.js` draws it), and the tools
-view never does: a file whose mode is Render is drawn there in Solid. Render's settings page is
+modes are the offered modes (`DisplayModeOptions.js`). Preview, a view of its own over the
+editor's, draws the model in Render whatever the file's mode (the store's `renderScene()`, as
+`kit/viewport/previewViewScene.js` draws it), and the tools view never does. Render's settings page is
 Preview's settings panel (`kit/shell/PreviewSettings.jsx`, under Orbit), its edits the file's
 Render settings. A file's model tree and Position are
 sections of the file sidebar (see

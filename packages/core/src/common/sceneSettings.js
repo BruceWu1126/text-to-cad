@@ -537,13 +537,16 @@ export function resolveSceneSettings({
   };
 }
 
-/** Public grouped preset policy; historical display modes are draw details. */
+/**
+ * Public grouped preset policy; historical display modes are draw details. `render` asks for
+ * Render over the same settings (Preview's scene, a snapshot's `render`): no file is in Render.
+ */
 export function resolveViewSceneSettings({
   display = {}, appearance = "light", prefersDark = false, camera = null, quality = null,
-  lightingQuality = "final", features = undefined
+  lightingQuality = "final", features = undefined, render = false
 } = {}) {
   const view = resolveViewSettings(display ?? {}, {
-    appearance: normalizeSceneAppearance(appearance, { prefersDark }), lightingQuality, features
+    appearance: normalizeSceneAppearance(appearance, { prefersDark }), lightingQuality, features, render
   });
   const surface = view.surfaces;
   const mode = surface.style === "off" ? CAD_DISPLAY_MODE.WIREFRAME

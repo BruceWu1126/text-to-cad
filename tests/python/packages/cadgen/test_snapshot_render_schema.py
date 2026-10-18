@@ -113,9 +113,12 @@ class RenderDisplaySchemaTest(unittest.TestCase):
 
     def test_default_job_is_light_solid_without_overriding_groups(self):
         self.assertEqual({"mode": "solid", "appearance": "light"}, normalize()["display"])
-        # Render is drawn over the same display settings, with Render's own.
-        self.assertEqual({"mode": "render", "appearance": "light"}, normalize(render=True)["display"])
-        self.assertEqual({"mode": "solid", "appearance": "light"}, normalize(render=False)["display"])
+        # Render is drawn over the same display settings, with Render's own: the page's own
+        # flag, never a display mode.
+        rendered = normalize(render=True)
+        self.assertEqual(({"mode": "solid", "appearance": "light"}, True), (rendered["display"], rendered["render"]))
+        self.assertNotIn("render", normalize(render=False))
+        self.assertNotIn("render", normalize())
         self.assertEqual({"mode": "solid", "appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}},
                          normalize(display={"appearance": "dark", "modes": {"render": {"background": {"opacity": 0.3}}}})["display"])
 
@@ -126,7 +129,7 @@ class RenderDisplaySchemaTest(unittest.TestCase):
             output={"sizeProfile": "diagnostic", "viewLabels": True},
         )
         self.assertEqual(job["camera"], {"preset": "front"})
-        self.assertEqual(job["display"]["mode"], "render")
+        self.assertEqual((job["display"]["mode"], job["render"]), ("solid", True))
         self.assertEqual(job["animation"], {"clip": "spin", "time": 0.5})
         self.assertEqual(job["output"], {"sizeProfile": "diagnostic", "viewLabels": True})
 

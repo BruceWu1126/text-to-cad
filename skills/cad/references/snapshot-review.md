@@ -119,7 +119,7 @@ framing (`preset`, `position`, `target`, `up`, `direction`, `zoom`,
 `orthographicHalfHeight`); projection and focal length belong in
 `display.camera`. `clip` and `exploded` are shared `display` tools. `edges`,
 `clip`, `exploded`, and the `xray`, `hidden-line` and `wireframe` modes are
-STEP-only; meshes and robot descriptions take `solid` or `render`. DXF uses
+STEP-only; meshes and robot descriptions take `solid`, or `--render`. DXF uses
 `--appearance` and has no scene display modes. Retired top-level style groups
 and the old `grid` mode are refused.
 

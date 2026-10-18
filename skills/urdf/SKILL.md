@@ -113,7 +113,7 @@ Render offers `parts`, `lighting`, `background` and `floor`; Solid offers `parts
 `flat`, `grid` and `axes`. `appearance` is `light` (default) or `dark`.
 Projection and focal length belong in `display.camera`; Render uses perspective.
 Top-level `--camera` and `--joint-values` remain active in every display mode.
-The supported modes are `solid` and `render`: `edges`, `clip`, `exploded`, and
+The display mode is `solid`, and `--render` draws Render: `edges`, `clip`, `exploded`, and
 `xray`, `hidden-line` and `wireframe` describe a STEP model's CAD edges, parts
 and solids, and are refused by name here.
 

@@ -443,6 +443,8 @@ export function renderJobContext(meshData, job = {}) {
     appearance: "light",
     camera: job.camera || null,
     display: job.display ?? {},
+    // Render is the job's own request (`render: true`), over the same display settings.
+    render: job.render === true,
     // The viewer's rule: only a CAD model has edges to draw, parts to explode or solids to section.
     features: stepDisplayEnabled ? ALL_VIEW_FEATURES : EDGELESS_VIEW_FEATURES
   });

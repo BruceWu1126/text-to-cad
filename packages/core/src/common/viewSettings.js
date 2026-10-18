@@ -1,13 +1,15 @@
 import { DEFAULT_PART_COLOR_SETTINGS, normalizeExplodedViewSettings, validateDisplaySettings } from "./displaySettings.js";
 import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/viewer/clipPlane.js";
 
-/** @typedef {"solid" | "render" | "xray" | "hidden-line" | "wireframe"} ViewMode */
+/** @typedef {"solid" | "xray" | "hidden-line" | "wireframe"} ViewMode */
+/** @typedef {ViewMode | "render"} ViewLook */
 /** @typedef {{colorMode?: "original" | "single" | "by-part", color?: string, colors?: string[]}} ViewParts */
 /** @typedef {{enabled?: boolean, color?: string, opacity?: number, density?: number}} ViewGrid */
 /** @typedef {{enabled?: boolean, color?: string, opacity?: number}} ViewAxes */
 /**
  * A mode's own settings, sparse: only what the person changed. Each mode has its own list
- * (`VIEW_MODE_SETTING_KEYS`); a setting outside it is refused.
+ * (`VIEW_MODE_SETTING_KEYS`); a setting outside it is refused. Render's are kept here too, though
+ * Render is no mode: it is asked for on its own (`resolveViewSettings`' `render`).
  * @typedef {{
  *   solid?: {parts?: ViewParts, flat?: boolean, edges?: {enabled?: boolean, color?: string}, grid?: ViewGrid, axes?: ViewAxes},
  *   render?: {parts?: ViewParts, lighting?: {quality?: "preview" | "final", exposure?: number, rotation?: number, size?: number, fill?: number},
@@ -21,8 +23,8 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 /** @typedef {{enabled?: boolean, axis?: "x" | "y" | "z", at?: number, invert?: boolean}} ViewClip */
 /** @typedef {{enabled?: boolean, amount?: number}} ViewExploded */
 /**
- * The public Viewer / snapshot vocabulary: the mode on screen, what every mode shares (appearance,
- * camera, clip, exploded) and each mode's own settings under `modes`.
+ * The public Viewer / snapshot vocabulary: the file's mode, what every mode shares (appearance,
+ * camera, clip, exploded) and each mode's own settings, and Render's, under `modes`.
  * @typedef {Object} ViewSettings
  * @property {ViewMode} [mode]
  * @property {"light" | "dark"} [appearance]
@@ -38,9 +40,9 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 /** @typedef {{enabled: boolean, color: string, opacity: number}} ViewPaint */
 /** @typedef {ViewPaint & {placement: "origin" | "lowest", finish: "matte" | "glossy"}} ViewFloor */
 /**
- * What the renderer draws: the mode on screen's settings mapped onto the scene's groups.
+ * What the renderer draws: the look on screen's settings mapped onto the scene's groups.
  * @typedef {Object} ResolvedViewSettings
- * @property {ViewMode} mode
+ * @property {ViewLook} mode
  * @property {"light" | "dark"} appearance
  * @property {ViewCamera} camera
  * @property {ViewSurfaces} surfaces
@@ -55,17 +57,20 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
  */
 /** @typedef {{appearance?: "light" | "dark", lightingQuality?: "preview" | "final"}} ViewDefaults */
 
-export const VIEW_MODE_VALUES = Object.freeze(["solid", "render", "xray", "hidden-line", "wireframe"]);
+// A file's display modes. Render is none of them: it is the photographic look Preview and a
+// snapshot's `render` ask for on their own, drawn with its own settings (`modes.render`).
+export const VIEW_MODE_VALUES = Object.freeze(["solid", "xray", "hidden-line", "wireframe"]);
+// Whose settings `modes` keeps: each display mode's, and Render's.
+export const VIEW_LOOK_VALUES = Object.freeze([...VIEW_MODE_VALUES, "render"]);
 export const VIEW_MODES = Object.freeze([
   Object.freeze({ id: "solid", label: "Solid" }),
-  Object.freeze({ id: "render", label: "Render" }),
   Object.freeze({ id: "xray", label: "X-ray" }),
   Object.freeze({ id: "hidden-line", label: "Hidden line" }),
   Object.freeze({ id: "wireframe", label: "Wireframe" })
 ]);
 export const VIEW_SETTINGS_KEYS = Object.freeze(["mode", "appearance", "camera", "clip", "exploded", "modes"]);
 export const VIEW_CAMERA_KEYS = Object.freeze(["projection", "focalLength"]);
-// Each mode's settings, in the order its menu lists them.
+// Each look's settings, in the order its menu lists them.
 export const VIEW_MODE_SETTING_KEYS = Object.freeze({
   solid: Object.freeze(["parts", "flat", "edges", "grid", "axes"]),
   render: Object.freeze(["parts", "lighting", "background", "floor"]),
@@ -170,9 +175,9 @@ export function normalizeViewSettings(input = {}) {
     }
   }
   if (Object.hasOwn(input, "modes")) {
-    keys(input.modes, VIEW_MODE_VALUES, "display.modes");
+    keys(input.modes, VIEW_LOOK_VALUES, "display.modes");
     const modes = {};
-    for (const mode of VIEW_MODE_VALUES) {
+    for (const mode of VIEW_LOOK_VALUES) {
       if (Object.hasOwn(input.modes, mode)) modes[mode] = normalizeMode(mode, input.modes[mode]);
     }
     result.modes = modes;
@@ -192,12 +197,13 @@ function lineDrawingEdgeColor(appearance) {
 }
 
 /**
- * Every setting of `mode`, at its defaults, in `appearance`. A grid turned on is a measuring
- * grid, plain to see without competing with the model's edges; the axes are their own toggle.
- * @param {ViewMode} mode @param {ViewDefaults} options
+ * Every setting of `mode` (a display mode, or Render), at its defaults, in `appearance`. A grid
+ * turned on is a measuring grid, plain to see without competing with the model's edges; the axes
+ * are their own toggle.
+ * @param {ViewLook} mode @param {ViewDefaults} options
  */
 export function viewModeDefaults(mode, { appearance = "light", lightingQuality = "final" } = {}) {
-  choice(mode, VIEW_MODE_VALUES, "mode");
+  choice(mode, VIEW_LOOK_VALUES, "mode");
   const dark = appearance === "dark";
   const all = {
     parts: { colorMode: "original", color: DEFAULT_PART_COLOR_SETTINGS.color, colors: [...DEFAULT_PART_COLOR_SETTINGS.colors] },
@@ -232,7 +238,7 @@ export const ALL_VIEW_FEATURES = Object.freeze({ modes: VIEW_MODE_VALUES, settin
 // parts, which such a view does not have either.
 /** @type {ViewFeatures} */
 export const EDGELESS_VIEW_FEATURES = Object.freeze({
-  modes: Object.freeze(["solid", "render"]),
+  modes: Object.freeze(["solid"]),
   settings: Object.freeze(VIEW_SETTING_IDS.filter(id => !["edges", "clip", "exploded"].includes(id)))
 });
 
@@ -247,7 +253,7 @@ export function normalizeViewFeatures(features = null) {
 /**
  * Every setting of `mode` as it stands: its defaults under what the person changed, without the
  * settings `features` does not offer.
- * @param {unknown} input @param {ViewMode} mode @param {ViewDefaults & { features?: ViewFeatures }} options
+ * @param {unknown} input @param {ViewLook} mode @param {ViewDefaults & { features?: ViewFeatures }} options
  */
 export function resolveViewModeSettings(input, mode, { appearance = "light", lightingQuality = "final", features = ALL_VIEW_FEATURES } = {}) {
   const saved = normalizeViewSettings(input);
@@ -262,7 +268,7 @@ export function resolveViewModeSettings(input, mode, { appearance = "light", lig
   return result;
 }
 
-/** Whether `mode`'s settings differ from its defaults: what Reset <Mode> takes away. @param {unknown} input @param {ViewMode} mode */
+/** Whether `mode`'s settings differ from its defaults: what Reset <Mode> takes away. @param {unknown} input @param {ViewLook} mode */
 export function viewModeChanged(input, mode, options = {}) {
   const { appearance } = normalizeViewSettings(input);
   return JSON.stringify(resolveViewModeSettings(input, mode, options)) !==
@@ -272,7 +278,7 @@ export function viewModeChanged(input, mode, options = {}) {
 /** `mode`'s settings back at its defaults; every other mode's, and what modes share, kept. @returns {ViewSettings & {mode: ViewMode}} */
 export function resetViewMode(input, mode) {
   const source = normalizeViewSettings(input);
-  choice(mode, VIEW_MODE_VALUES, "mode");
+  choice(mode, VIEW_LOOK_VALUES, "mode");
   if (!source.modes?.[mode]) return source;
   const { [mode]: _reset, ...modes } = source.modes;
   const { modes: _all, ...rest } = source;
@@ -280,18 +286,19 @@ export function resetViewMode(input, mode) {
 }
 
 /**
- * The mode on screen's settings, mapped onto the scene's groups. `features` resolves a view that
+ * The look on screen's settings, mapped onto the scene's groups: the file's mode, or with `render`
+ * Render, whatever the mode (Preview's, a snapshot's `render`). `features` resolves a view that
  * did not opt into everything: a saved mode it does not list resolves as Solid, and a setting it
  * does not show is its default (a group off). The saved settings are left alone, so they still
  * mean X-ray, or edges, in the next view that offers them. Render is always in perspective.
  *
- * @param {unknown} input @param {ViewDefaults & { features?: ViewFeatures }} options @returns {ResolvedViewSettings}
+ * @param {unknown} input @param {ViewDefaults & { features?: ViewFeatures, render?: boolean }} options @returns {ResolvedViewSettings}
  */
-export function resolveViewSettings(input = {}, { appearance = "light", lightingQuality = "final", features = ALL_VIEW_FEATURES } = {}) {
+export function resolveViewSettings(input = {}, { appearance = "light", lightingQuality = "final", features = ALL_VIEW_FEATURES, render: rendered = false } = {}) {
   const offered = normalizeViewFeatures(features);
   const offers = id => offered.settings.includes(id);
   const saved = normalizeViewSettings(input);
-  const mode = offered.modes.includes(saved.mode) ? saved.mode : "solid";
+  const mode = rendered ? "render" : offered.modes.includes(saved.mode) ? saved.mode : "solid";
   const resolvedAppearance = saved.appearance ?? (appearance === "dark" ? "dark" : "light");
   const options = { appearance: resolvedAppearance, lightingQuality, features };
   const own = resolveViewModeSettings(saved, mode, options);

@@ -54,9 +54,10 @@ def python_accepts(values, validator):
 class SharedDisplayContractParityTests(unittest.TestCase):
     def test_exported_closed_key_sets_and_enums_match(self):
         expected = {
-            # The shared core draws Render as a mode (Preview's, and a snapshot's `render`);
-            # the snapshot's display vocabulary is the working modes, Render its own request.
-            "VIEW_MODE_VALUES": DISPLAY_MODES | {"render"},
+            # A file's modes are the snapshot's display modes; Render is asked for on its own
+            # (Preview's, a snapshot's `render`), its settings kept beside the modes'.
+            "VIEW_MODE_VALUES": DISPLAY_MODES,
+            "VIEW_LOOK_VALUES": DISPLAY_MODES | {"render"},
             "VIEW_SETTINGS_KEYS": DISPLAY_OPTION_KEYS,
             "VIEW_COLOR_MODE_VALUES": PART_COLOR_MODES,
             **{f"VIEW_{name.upper()}_KEYS": keys for name, keys in DISPLAY_GROUP_KEYS.items()
@@ -122,22 +123,19 @@ class SharedDisplayContractParityTests(unittest.TestCase):
                 self.assertEqual(python[index], shared[index])
 
     def test_python_packets_resolve_to_the_same_mode_and_overrides(self):
+        # A display, and whether the job asks for Render (`render`, never a display mode).
         cases = [
-            {}, {"mode": "render"}, {"mode": "xray"}, {"mode": "hidden-line"}, {"mode": "wireframe"},
-            {"mode": "solid", "modes": {"render": {"lighting": {"exposure": 1}}}},
-            {"mode": "render", "modes": {"render": {"floor": {"enabled": False}, "background": {"opacity": 0.35}}}},
-            {"mode": "solid", "camera": {"projection": "perspective"}, "modes": {"solid": {"grid": {"enabled": True, "color": "#abc"}}}},
-            {"mode": "render", "modes": {"render": {"floor": {"finish": "glossy", "placement": "origin"}}}},
+            ({}, False), ({}, True), ({"mode": "xray"}, False), ({"mode": "hidden-line"}, False), ({"mode": "wireframe"}, False),
+            ({"mode": "solid", "modes": {"render": {"lighting": {"exposure": 1}}}}, False),
+            ({"modes": {"render": {"floor": {"enabled": False}, "background": {"opacity": 0.35}}}}, True),
+            ({"mode": "solid", "camera": {"projection": "perspective"}, "modes": {"solid": {"grid": {"enabled": True, "color": "#abc"}}}}, False),
+            ({"modes": {"render": {"floor": {"finish": "glossy", "placement": "origin"}}}}, True),
         ]
-        # A snapshot asks for Render with `render`, beside a display without it.
-        def job(value):
-            if value.get("mode") != "render":
-                return {"display": value}
-            return {"render": True, "display": {key: entry for key, entry in value.items() if key != "mode"}}
-        packets = [normalize_common_job({"input": "part.step", "outputs": [{"path": "out.png"}], **job(value)},
-                                      mode="view", resolved_cwd=Path("."), timestamp="parity")["display"] for value in cases]
-        expected = javascript("cases.map(value => view.resolveViewSettings(value))", cases)
-        actual = javascript("cases.map(value => view.resolveViewSettings(value))", packets)
+        packets = [normalize_common_job({"input": "part.step", "outputs": [{"path": "out.png"}], "display": display, "render": render},
+                                      mode="view", resolved_cwd=Path("."), timestamp="parity") for display, render in cases]
+        self.assertEqual([render for _, render in cases], [packet.get("render", False) for packet in packets])
+        expected = javascript("cases.map(([display, render]) => view.resolveViewSettings(display, { render }))", cases)
+        actual = javascript("cases.map(packet => view.resolveViewSettings(packet.display, { render: packet.render === true }))", packets)
         self.assertEqual(expected, actual)
         self.assertEqual("perspective", actual[1]["camera"]["projection"])
         self.assertEqual("orthographic", actual[0]["camera"]["projection"])
@@ -149,7 +147,7 @@ class SharedDisplayContractParityTests(unittest.TestCase):
         self.assertEqual("lowest", actual[1]["floor"]["placement"])
         self.assertEqual("glossy", actual[8]["floor"]["finish"])
         self.assertEqual("origin", actual[8]["floor"]["placement"])
-        placements = javascript("cases.map(value => scene.resolveViewSceneSettings({display:value}).render.configuration.backdrop.groundPlacement)", [packets[1], packets[8]])
+        placements = javascript("cases.map(packet => scene.resolveViewSceneSettings({display: packet.display, render: packet.render === true}).render.configuration.backdrop.groundPlacement)", [packets[1], packets[8]])
         self.assertEqual(["lowest", "origin"], placements)
 
     def test_public_camera_keys_match_the_shared_pose_fields(self):

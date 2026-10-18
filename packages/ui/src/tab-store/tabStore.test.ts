@@ -137,10 +137,10 @@ test('FileViewer\'s state comes from the tab: its file views, kept across a relo
 test("a file view's slices drop by signature while its camera and display are kept, whatever store it came through", () => {
   const store = createTabStore(memoryTabRecord());
   const camera = { position: [1, 2, 3], target: [0, 0, 0], up: [0, 0, 1] };
-  store.files.write('/models/a.step', 'step', writeFileView({ camera, display: { mode: 'render' }, renderer: { tree: { open: ['o1'] } }, signatures: { tree: 'geo:1' } }) as never);
+  store.files.write('/models/a.step', 'step', writeFileView({ camera, display: { mode: 'xray' }, renderer: { tree: { open: ['o1'] } }, signatures: { tree: 'geo:1' } }) as never);
   const reopened = createTabStore(memoryTabRecord(JSON.parse(JSON.stringify(store.getSnapshot()))));
   const same = readFileView(reopened.files.read('/models/a.step', 'step'), { tree: 'geo:1' });
-  expect([same.camera, same.display.mode, same.renderer]).toEqual([camera, 'render', { tree: { open: ['o1'] } }]);
+  expect([same.camera, same.display.mode, same.renderer]).toEqual([camera, 'xray', { tree: { open: ['o1'] } }]);
   const rebuilt = readFileView(reopened.files.read('/models/a.step', 'step'), { tree: 'geo:2' });
-  expect([rebuilt.camera, rebuilt.display.mode, rebuilt.renderer]).toEqual([camera, 'render', {}]);
+  expect([rebuilt.camera, rebuilt.display.mode, rebuilt.renderer]).toEqual([camera, 'xray', {}]);
 });

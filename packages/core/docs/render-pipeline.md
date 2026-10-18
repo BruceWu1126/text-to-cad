@@ -45,15 +45,17 @@ resolution, Playwright routing, and writing returned outputs to disk.
 
 `normalizeViewSettings(display)` is the strict public schema shared with the
 snapshot CLI. It preserves omitted groups and inherited appearance, defaulting
-only `mode` to `solid`. The modes, in order, are `solid`, `render`, `xray`,
-`hidden-line`, and `wireframe`. Legacy public display fields are rejected.
+only `mode` to `solid`. A file's modes, in order, are `solid`, `xray`, `hidden-line`,
+and `wireframe` (`VIEW_MODE_VALUES`). Render is no mode: it is the photographic look asked
+for on its own, by the viewer's Preview and a snapshot's `render`, over the same settings.
+Legacy public display fields are rejected.
 
-Each mode has its own sparse settings under `modes`; appearance, camera, clip and exploded
-are shared:
+Each mode has its own sparse settings under `modes`, and so does Render (`VIEW_LOOK_VALUES`:
+the modes and `render`); appearance, camera, clip and exploded are shared:
 
 ```js
 {
-  mode: "render",
+  mode: "solid",
   camera: { projection: "orthographic", focalLength: 50 },
   modes: {
     solid: { parts: { colorMode: "single", color: "#abcdef" }, grid: { enabled: true } },
@@ -72,12 +74,13 @@ lists; unsupported saved values are ignored at resolve time without rewriting st
 `resolveViewSettings` returns the established renderer groups. Solid is shaded with
 visible edges, or flat when enabled. X-ray uses 0.22 surface opacity and all edges;
 Hidden line uses depth-only surfaces and visible edges; Wireframe has no fill and all
-edges. Render resolves perspective, no edges and the photographic studio; other modes
-use the shared camera, orthographic by default. Grid and axes default off independently.
+edges. With `render: true` it resolves Render whatever the mode: perspective, no edges and
+the photographic studio, from `modes.render`. The modes use the shared camera, orthographic
+by default. Grid and axes default off independently.
 A group's toggle retains its appearance values for re-enabling.
 
-`resolveViewModeSettings` resolves one mode for its menu; `viewModeChanged` compares it
-with defaults. `resetViewMode` removes only that mode's overrides. Selecting a mode
+`resolveViewModeSettings` resolves one mode's settings, or Render's, for its menu;
+`viewModeChanged` compares them with defaults. `resetViewMode` removes only those overrides. Selecting a mode
 keeps every mode's settings and all shared fields. There is no Custom state or migration
 of saved legacy shapes. Surface opacity multiplies authored opacity; colours remain
 presentation settings, never model material edits.
@@ -86,8 +89,8 @@ Clip keeps coordinates below its plane by default (`invert: false`); Flip keeps
 coordinates above it. `clip.at` is the plane's coordinate on its axis in millimetres;
 omitting it cuts through the middle of the authored bounds. A disabled clip cuts nothing.
 
-`resolveViewSceneSettings({display, camera, appearance, quality})` is the public
-Viewer/snapshot scene-policy boundary. Its `view` is the full grouped state;
+`resolveViewSceneSettings({display, render, camera, appearance, quality})` is the public
+Viewer/snapshot scene-policy boundary (`render`: Render over the display, as above). Its `view` is the full grouped state;
 `display` is the historical internal draw policy, including `surfaces` and
 edge color/visibility. `camera` combines the top-level pose with the grouped
 lens. Public top-level and per-output cameras contain pose/framing only;

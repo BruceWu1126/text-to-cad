@@ -483,8 +483,8 @@ the popover. Opening it leaves the active tool and its controls in place. A 2D v
 Display or Preview button.
 
 The modes are Solid, X-ray, Hidden line and Wireframe, filtered by the view's injected
-capabilities (`DisplayModeOptions.js`). Render is no display mode: it is Preview's, which
-draws the model in Render whatever the file's mode, and Render's settings page is Preview's
+capabilities (`DisplayModeOptions.js`). Render is no display mode: Preview draws the model in
+Render whatever the file's mode, and Render's settings page is Preview's
 settings (see [Preview](#camera-animation-and-preview)). Each row has a choice with the mode's sphere and name. A single settings
 button (`Settings2`) sits at the top right, inline with the Display Mode label, and edits
 the currently selected mode. It has an accessible name and no tooltip. Clicking a mode
@@ -789,8 +789,9 @@ Clip are the tools view's alone. Nothing sits under the model, nor at the bottom
 
 **Preview is drawn in Render**, whatever the file's display mode: it is a view of its own
 over the tools view, drawing the file's Render settings, and the file's own mode and its
-settings are left as they are. The tools view never draws Render: a file whose stored or sent mode is Render is
-drawn there in Solid. Render settings edited in Preview are the file's Render settings;
+settings are left as they are. The tools view never draws Render: no file's mode is Render,
+a live `setDisplaySettings` refuses it as it refuses any mode it does not know, and a saved view
+left in it reads as the defaults. Render settings edited in Preview are the file's Render settings;
 leaving returns the tools view to the file's mode.
 
 **Routines** play from the file sidebar's **Animation** section, in the tools view and the

@@ -65,8 +65,9 @@ test("Inspect edge visibility does not revive legacy custom outline styling", ()
 
 test("grouped View passes independent surface and edge choices through to the renderer", async () => {
   const { resolveViewSceneSettings } = await import('@text-to-cad/core/common/sceneSettings.js');
-  for (const mode of ['solid', 'render', 'xray', 'hidden-line', 'wireframe']) {
-    const resolved = resolveViewSceneSettings({ display: { mode,
+  // Each mode, and Render over the file's settings (`render`).
+  for (const [mode, render] of [['solid'], ['xray'], ['hidden-line'], ['wireframe'], ['solid', true]]) {
+    const resolved = resolveViewSceneSettings({ render, display: { mode,
       modes: { solid: { edges: { enabled: false, color: '#bada55' } }, xray: { opacity: 0.4 } } } });
     const normalized = normalizeViewerRenderState({ themeSettings: resolved.theme, displaySettings: resolved.display });
     assert.deepEqual(normalized.displaySettings.surfaces, resolved.view.surfaces);
@@ -84,15 +85,17 @@ test("the viewport and the snapshot CLI resolve one surface look from one settin
   const { resolveSceneSurfaceLook, resolveViewSceneSettings } = await import('@text-to-cad/core/common/sceneSettings.js');
   const { headlessSceneDress } = await import('@text-to-cad/core/common/headlessScene.js');
   const { EDGELESS_VIEW_FEATURES } = await import('@text-to-cad/core/common/viewSettings.js');
-  const displays = [];
-  for (const mode of ['solid', 'render']) for (const appearance of ['light', 'dark']) {
+  // Solid, or Render (asked for on its own, `render`), each with its own parts.
+  const looks = [];
+  for (const render of [false, true]) for (const appearance of ['light', 'dark']) {
     for (const parts of [undefined, { colorMode: 'by-part' }, { colorMode: 'single', color: '#ff8800' }]) {
-      displays.push({ mode, appearance, ...(parts ? { modes: { [mode]: { parts } } } : {}) });
+      looks.push({ render, display: { appearance, ...(parts ? { modes: { [render ? 'render' : 'solid']: { parts } } } : {}) } });
     }
   }
-  displays.push({ mode: 'solid', modes: { solid: { flat: true } } }, { mode: 'render', modes: { render: { floor: { enabled: false } } } });
-  for (const display of displays) {
-    const scene = resolveViewSceneSettings({ display, features: EDGELESS_VIEW_FEATURES });
+  looks.push({ render: false, display: { mode: 'solid', modes: { solid: { flat: true } } } },
+    { render: true, display: { modes: { render: { floor: { enabled: false } } } } });
+  for (const { render, display } of looks) {
+    const scene = resolveViewSceneSettings({ display, render, features: EDGELESS_VIEW_FEATURES });
     const viewport = normalizeViewerRenderState({ themeSettings: scene.theme, displaySettings: scene.display });
     const look = resolveSceneSurfaceLook({ themeSettings: viewport.themeSettings, displaySettings: viewport.displaySettings,
       renderMode: scene.render.enabled, renderConfiguration: scene.render.configuration });

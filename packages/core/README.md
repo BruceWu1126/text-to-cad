@@ -65,11 +65,12 @@ protocol relationship never imports Python or discovers an interpreter.
   reports a typed miss before tessellation starts rather than turning a cheap
   decoded-mesh request into unbudgeted surface tessellation. Mechanism:
   [docs/resource-ownership.md](docs/resource-ownership.md) §5.
-- **One per-mode view state**: `common/viewSettings.js` validates Solid, Render,
-  X-ray, Hidden line and Wireframe and each mode's own settings. Appearance,
+- **One per-mode view state**: `common/viewSettings.js` validates Solid, X-ray,
+  Hidden line and Wireframe and each mode's own settings, and Render's, which is
+  no mode but the photographic look asked for on its own (`render`). Appearance,
   camera, clipping and explode are shared; selecting or resetting a mode keeps
   them and the other modes' settings. `resolveViewSceneSettings()` maps the active
-  mode into renderer groups, preserving the Viewer/snapshot policy boundary.
+  mode, or Render, into renderer groups, preserving the Viewer/snapshot policy boundary.
   Format capabilities are injected. There are no legacy display aliases or
   saved-shape migrations. The contract and rendering mechanism:
   [docs/render-pipeline.md](docs/render-pipeline.md).
