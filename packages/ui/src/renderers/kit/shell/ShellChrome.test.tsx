@@ -534,29 +534,47 @@ it("Preview is covered from the press until its picture has converged, then show
   }
 });
 
-it("Preview opens still: Orbit, in its settings, turns the camera, and Orbit's speed is the file's, kept between visits and in its view, another file at the default", async () => {
-  const user = userEvent.setup();
-  const states: any[] = [];
-  const enter = async () => { await enterPreview(user); await user.click(screen.getByRole('button', { name: 'Preview settings' })); };
+// Preview's Orbit, in its settings: off at every entry, its speed a row of Orbit's there while it is on.
+function previewOrbit(user: ReturnType<typeof userEvent.setup>) {
   const orbit = () => within(previewSettings()!).getByRole('checkbox', { name: 'Orbit' });
   const speed = () => within(previewSettings()!).getByRole('combobox', { name: 'Orbit speed' }).textContent;
-  // Its speed is a row of Orbit's, there while Orbit is on.
-  const speedOnceOn = async () => { if (orbit().getAttribute('aria-checked') !== 'true') await user.click(orbit()); return speed(); };
-  const first = frame({ onStateChange: state => states.push(state) });
+  return {
+    orbit,
+    enter: async () => { await enterPreview(user); await user.click(screen.getByRole('button', { name: 'Preview settings' })); },
+    speedOnceOn: async () => { if (orbit().getAttribute('aria-checked') !== 'true') await user.click(orbit()); return speed(); },
+    async choose(value: string) {
+      await user.click(within(previewSettings()!).getByRole('combobox', { name: 'Orbit speed' }));
+      await user.click(screen.getByRole('option', { name: value }));
+    }
+  };
+}
+
+it("Preview opens still: Orbit, in its settings, turns the camera, and a speed chosen is kept between visits", async () => {
+  const user = userEvent.setup();
+  const { orbit, enter, speedOnceOn, choose } = previewOrbit(user);
+  frame();
   await enter();
   expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, within(previewSettings()!).queryByRole('combobox', { name: 'Orbit speed' })]).toEqual(['false', false, null]);
   await user.click(orbit());
   expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit]).toEqual(['true', true]);
   // A fresh file orbits at 1×; 2× chosen.
-  expect(speed()).toBe('1×');
-  await user.click(within(previewSettings()!).getByRole('combobox', { name: 'Orbit speed' }));
-  await user.click(screen.getByRole('option', { name: '2×' }));
+  expect(await speedOnceOn()).toBe('1×');
+  await choose('2×');
   expect(previewProps.current.orbitSpeed).toBe(2);
   // Leaving and coming back: still again, at 2×.
   await user.click(screen.getByRole('button', { name: 'Exit preview' }));
   await enter();
   expect([orbit().getAttribute('aria-checked'), previewProps.current.orbit, await speedOnceOn()]).toEqual(['false', false, '2×']);
-  // The file's view holds the speed, and no Orbit on or off.
+});
+
+it("Orbit's speed is the file's: its view holds it and no Orbit on or off, it comes back with the view, and another file is at the default", async () => {
+  const user = userEvent.setup();
+  const { enter, speedOnceOn, choose } = previewOrbit(user);
+  const states: any[] = [];
+  const first = frame({ onStateChange: state => states.push(state) });
+  await enter();
+  await speedOnceOn();
+  await choose('2×');
   first.unmount();
   const saved = states.at(-1);
   expect(saved.playback).toEqual({ orbitSpeed: 2, autoplay: false });
