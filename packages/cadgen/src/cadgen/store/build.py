@@ -28,10 +28,11 @@ construction key and lineage -- in place of naming, serializing and hashing it
 again, and only while all it stood on is as it was: the construction key the run
 names it by, the rows the memo's ledger holds on each of its sub-shapes
 (``kernel_memo.ledger_snapshot``: every change the memo made to one since its maker
-returned it, flags included), and what naming it reads of the run
-(``kernel_trace.account_basis``: the features it descends from, by their histories,
-and the labels and names they have). Anything else prepares it as a fresh worker
-does, so a remembered component never changes an output.
+returned it, flags included) with no change the memo could not replay met since,
+and what naming it reads of the run (``kernel_trace.account_basis``: the features it
+descends from, by their histories, and the labels and names they have). Anything
+else prepares it as a fresh worker does, so a remembered component never changes
+an output.
 
 A model's result is this tree, whether it declares STEP or only meshes: its STEP is
 written from the published tree afterwards, by the build pool (``store/exports.py``),
@@ -158,6 +159,7 @@ class _Walk:
     pending: list[tuple[tuple, "_Remembered"]] = field(default_factory=list)
     ledger: dict[int, tuple] | None = None
     ledger_keys: set[int] | None = None
+    unreplayed: int | None = None
     places: dict[int, int] | None = None
     bases: dict[Any, Any] = field(default_factory=dict)
     # Per closure this walk restated (by identity): the remembered one found equal to it,
@@ -920,7 +922,8 @@ _STATS = {"recalled": 0, "remembered": 0, "errors": 0, "bytes": 0}
 class _Remembered:
     """A component this worker published, as its publication prepared it -- the entry,
     its BREP payload, an eager-only component's topology facts and its lineage object's
-    bytes -- with all it stood on: the construction key the run named it by; the ledger
+    bytes -- with all it stood on: the construction key the run named it by; how many
+    changes the memo could not replay it had seen (``unreplayed``); the ledger
     as it stood (``ledger``: the publication's snapshot), which the first recall reads the
     pairs on the body's sub-shapes from -- the hash of each at the identity placement
     (``subshapes``), and the snapshot's ``(TShape, rows)`` pairs on those (``rows``),
@@ -930,6 +933,7 @@ class _Remembered:
     feature it stood for."""
 
     construction: str | None
+    unreplayed: int
     ledger: tuple[dict[int, tuple], set[int]] | None
     subshapes: Any
     rows: dict[int, tuple] | None
@@ -959,8 +963,9 @@ def prepared_stats() -> dict[str, int]:
 def _recall(walk: _Walk, node: Any, key: tuple, namer: Namer) -> tuple[dict[str, Any], dict[str, int]] | None:
     """The prepared component and the feature each name of its lineage stands for in this
     run, of a leaf this worker published before -- while the run names it by the same
-    construction key, the memo holds the same rows on its sub-shapes, and the run's naming
-    of it is the same -- else None, and the leaf is prepared again."""
+    construction key, the memo has met no change it could not replay since (one it notes
+    no row for, wherever it was), it holds the same rows on the leaf's sub-shapes, and the
+    run's naming of it is the same -- else None, and the leaf is prepared again."""
     with _REMEMBERED_LOCK:
         remembered = _REMEMBERED.get(key)
     if remembered is None:
@@ -968,6 +973,8 @@ def _recall(walk: _Walk, node: Any, key: tuple, namer: Namer) -> tuple[dict[str,
     try:
         from cadgen._internal import kernel_memo
 
+        if _unreplayed(walk) != remembered.unreplayed:
+            return None
         if kernel_memo.construction_key_in(namer, node) != remembered.construction:
             return None
         subshapes, rows = _pairs_then(remembered, key, node)
@@ -1018,8 +1025,8 @@ def _remember(walk: _Walk, node: Any, key: tuple, namer: Namer, construction: st
         kept = {"entry": copy.deepcopy(prepared["entry"]), "payload": prepared["payload"],
                 "topology": prepared["topology"], "lineage": prepared["lineage"]}
         size = len(kept["payload"]) + len(kept["topology"] or b"") + len(kept["lineage"] or b"") + 1024
-        walk.pending.append((key, _Remembered(construction, _ledger(walk), None, None, part, closure,
-                                              histories, kept, by_history, size)))
+        walk.pending.append((key, _Remembered(construction, _unreplayed(walk), _ledger(walk), None, None, part,
+                                              closure, histories, kept, by_history, size)))
     except Exception:  # noqa: BLE001 - remembering is an optimization: this leaf is simply prepared next time
         with _REMEMBERED_LOCK:
             _STATS["errors"] += 1
@@ -1080,6 +1087,19 @@ def _ledger(walk: _Walk) -> tuple[dict[int, tuple], set[int]]:
         walk.ledger = kernel_memo.ledger_snapshot()
         walk.ledger_keys = set(walk.ledger)
     return walk.ledger, walk.ledger_keys
+
+
+def _unreplayed(walk: _Walk) -> int:
+    """How many changes the memo could not replay, or could not capture, this worker has met
+    (``kernel_memo.stats``): each leaves a state its ledger holds no row for, on whatever
+    shapes share the sub-shape it was on, so a component published before one may not be
+    what it was."""
+    if walk.unreplayed is None:
+        from cadgen._internal import kernel_memo
+
+        counts = kernel_memo.stats()
+        walk.unreplayed = counts["unreplayable"] + counts["errors"]
+    return walk.unreplayed
 
 
 def _rows_on(walk: _Walk, subshapes: Any) -> dict[int, tuple]:

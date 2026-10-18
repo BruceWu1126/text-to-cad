@@ -208,6 +208,19 @@ class PublicationCache(PublicationCacheCase):
         self.assertEqual(len(prepared), 6, "a fresh memo hands back no shape a component was remembered by")
         self.assertEqual(build.prepared_stats()["entries"], 6, "what the memo forgot is forgotten")
 
+    def test_a_change_the_memo_could_not_replay_recalls_nothing_published_before_it(self) -> None:
+        """A change the memo cannot replay leaves a state its ledger notes no row for, on
+        whatever shapes share the sub-shape it was on: after one, every component is
+        prepared again (here the memo's count of them is moved, as the change would)."""
+        self.cold()
+        self.store()
+        self.build()
+        kernel_memo._STATS["unreplayable"] += 1
+        _record, _provenance, prepared = self.build("--force")
+        self.assertEqual(len(prepared), 6)
+        _record, _provenance, prepared = self.build("--force")
+        self.assertEqual(prepared, [], "what was prepared after it is recalled")
+
 
 if __name__ == "__main__":
     unittest.main()
