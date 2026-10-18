@@ -106,12 +106,14 @@ _MODEL = textwrap.dedent(
 
 class DirectRunEngagesThePoolTest(unittest.TestCase):
     def test_a_direct_run_with_a_full_pool_builds_clean(self) -> None:
+        from cadgen.daemon.client import watch_jobs
+
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(
             [str(CADGEN_SRC), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
         )
-        # In process, so the eviction and the pool share one interpreter — the
-        # daemon path has its own __main__ and never reproduced this.
+        # Exercise the ordinary direct-script handoff: the daemon worker owns
+        # the build and finishes its display data and files after answering.
         env.pop("CADGEN_COMPONENT_WORKERS", None)
 
         with tempfile.TemporaryDirectory(prefix="cadgen-pool-probe-") as tmp:
@@ -132,12 +134,31 @@ class DirectRunEngagesThePoolTest(unittest.TestCase):
                 [sys.executable, str(script)],
                 cwd=str(root), env=env, capture_output=True, text=True, timeout=900,
             )
+            # Keep the private store until this request, including its exports,
+            # has finished. The script's early answer owns no finishing work.
+            output = root / "pool_probe.step"
+            scope = {"output": str(output), "store_root": env["CADGEN_CACHE_DIR"]}
+            update = watch_jobs(**scope)
+            self.assertIsNotNone(update, "the build daemon did not answer its job watch")
+            self.assertEqual(len(update["jobs"]), 1, update)
+            job = update["jobs"][0]
+            self.assertEqual(job["subject"], os.path.realpath(script))
+            job_id = job["id"]
+            while job["finishedAt"] is None:
+                update = watch_jobs(update["jobsCursor"], **scope)
+                self.assertIsNotNone(update, "the build daemon disconnected before finishing the request")
+                jobs = [row for row in update["jobs"] if row["id"] == job_id]
+                self.assertEqual(len(jobs), 1, update)
+                job = jobs[0]
 
-        self.assertEqual(
-            proc.returncode, 0,
-            f"direct run failed:\n{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}",
-        )
-        self.assertNotIn("KeyError: '__main__'", proc.stderr)
+            self.assertEqual(
+                proc.returncode, 0,
+                f"direct run failed:\n{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}",
+            )
+            self.assertNotIn("KeyError: '__main__'", proc.stderr)
+            self.assertEqual((job["state"], job["exit"]), ("done", 0), job)
+            self.assertTrue(output.is_file(), job)
+            self.assertTrue(output.read_bytes().rstrip().endswith(b"END-ISO-10303-21;"))
 
 
 if __name__ == "__main__":

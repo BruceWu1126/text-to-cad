@@ -10,6 +10,7 @@ from unittest import mock
 from cadgen._internal import generation as cad_generation
 from cadgen import catalog as cad_catalog
 from cadgen._internal import source_hash as cad_source_hash
+from cadgen.authoring import build_run
 from tests.python.support.cad_test_roots import IsolatedCadRoots
 
 
@@ -879,7 +880,7 @@ class CadGenerationTests(unittest.TestCase):
         scene = self._fake_scene(step_path)
         package_patch, package_calls = self._patch_package_build()
 
-        with mock.patch.object(cad_generation, "load_step_scene_cached", return_value=scene) as load_scene, package_patch:
+        with mock.patch.object(cad_generation, "load_step_scene_cached", return_value=scene) as load_scene, package_patch, build_run():
             cad_generation._generate_part_outputs(spec)
 
         load_scene.assert_called_once_with(step_path)
@@ -899,7 +900,7 @@ class CadGenerationTests(unittest.TestCase):
         scene = self._fake_scene(step_path)
 
         package_patch, package_calls = self._patch_package_build()
-        with mock.patch.object(cad_generation, "load_step_scene_cached") as load_scene, package_patch:
+        with mock.patch.object(cad_generation, "load_step_scene_cached") as load_scene, package_patch, build_run():
             cad_generation._generate_part_outputs(spec, preloaded_scene=scene)
 
         load_scene.assert_not_called()

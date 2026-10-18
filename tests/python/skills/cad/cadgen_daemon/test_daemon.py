@@ -259,12 +259,23 @@ class CadgenDaemonTests(unittest.TestCase):
                 code = daemon_client.run_via_daemon(
                     "step-compile", [str(bad)], cwd=str(self.model_dir), prog="cadgen step compile",
                 )
-            status = daemon_client.status() or {}
+            update = daemon_client.watch_jobs()
+            self.assertIsNotNone(update, "the daemon did not answer its job watch")
+            jobs = [j for j in update["jobs"] if j.get("subject") == os.path.realpath(bad)
+                    and j.get("tool") == "step-compile"
+                    and j.get("storeRoot") == os.path.realpath(os.environ["CADGEN_CACHE_DIR"])]
+            self.assertEqual(len(jobs), 1, update)
+            job = jobs[0]
+            job_id = job["id"]
+            while job["finishedAt"] is None:
+                update = daemon_client.watch_jobs(update["jobsCursor"])
+                self.assertIsNotNone(update, "the daemon disconnected before the compile finished")
+                jobs = [row for row in update["jobs"] if row["id"] == job_id]
+                self.assertEqual(len(jobs), 1, update)
+                job = jobs[0]
         self.assertNotEqual(code, 0, out.getvalue() + err.getvalue())
-        jobs = [j for j in status.get("jobs") or [] if j.get("subject") == os.path.realpath(str(bad))]
-        self.assertTrue(jobs, status)
-        job = jobs[-1]
         self.assertEqual("failed", job["state"], job)
+        self.assertEqual(code, job["exit"], job)
         reason = str(job.get("error") or "")
         self.assertTrue(reason, job)
         self.assertNotIn("re-run with --verbose", reason)
