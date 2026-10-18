@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -41,8 +42,7 @@ class ExportTest(unittest.TestCase):
         return path, export_step(self.tree, path)
 
     def test_an_export_writes_the_stored_tree_with_its_names(self) -> None:
-        from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen.store.parts import producer_identity
+        from cadgen.store.parts import part_key, producer_identity
 
         path, result = self.export("rig.step")
         self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), result["sha256"])
@@ -50,8 +50,11 @@ class ExportTest(unittest.TestCase):
         spans = [label for label, _seconds in result["spans"]]
         self.assertIn("materialize", spans)
         self.assertIn("write STEP file rig.step", spans)
-        names = load_step_scene(path).prototype_step_names.values()
-        self.assertTrue(names and all(component.part for component in names), "every part carries its key")
+        expected = {occurrence["name"]: part_key(self.result["components"][occurrence["component"]], result["producer"])
+                    for occurrence in self.result["occurrences"]}
+        products = re.findall(rb"\bPRODUCT\(\s*'[^']*'\s*,\s*'([^']*)'\s*,\s*'([^']*)'", path.read_bytes())
+        self.assertEqual(expected, {name.decode(): key.decode() for name, key in products if key},
+                         "each product carries the key of the stored part it represents")
 
     def test_an_export_captures_no_evidence_for_model_code(self) -> None:
         """What an export materializes is written, never handed to model code: it is not

@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from cadgen._internal.glb_topology import STEP_EDGE_DEFAULT_RENDER_VISIBILITY_CLASSES
-from cadgen._internal.step_names import ComponentNames
 
 ColorRGBA = tuple[float, float, float, float]
 
@@ -47,9 +46,6 @@ class LoadedStepScene:
     # lineage (``component_package.read_lineage``), either None. A tree built from
     # the scene names the prototype the same (``store.build``).
     prototype_identity: dict[int, tuple[str | None, dict[str, Any] | None]] = field(default_factory=dict)
-    # Prototype key -> what the file names it by, where it names it: its product's part key
-    # and its faces' and edges' names, by the prototype's own ordinals (``step_names``).
-    prototype_step_names: dict[int, ComponentNames] = field(default_factory=dict)
     load_elapsed: float = 0.0
     step_hash: str | None = None
     source_kind: str = "step"

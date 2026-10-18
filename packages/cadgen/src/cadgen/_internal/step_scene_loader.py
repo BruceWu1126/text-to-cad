@@ -35,7 +35,6 @@ from OCP.XCAFDoc import XCAFDoc_ColorTool
 from OCP.XCAFDoc import XCAFDoc_DocumentTool
 from OCP.XCAFDoc import XCAFDoc_ShapeTool
 
-from cadgen._internal.step_names import ComponentNames, FileNames, read_component_names, read_file_names
 from cadgen._internal.step_scene_types import ColorRGBA, LoadedStepScene, OccurrenceNode, _identity_transform_matrix
 
 
@@ -339,7 +338,6 @@ def _load_occurrence_tree(
     dict[int, str | None],
     dict[int, ColorRGBA],
     dict[int, dict[int, ColorRGBA]],
-    dict[int, ComponentNames],
     Any | None,
 ]:
     app = XCAFApp_Application.GetApplication_s()
@@ -354,17 +352,13 @@ def _load_occurrence_tree(
         mode = getattr(reader, mode_name, None)
         if callable(mode):
             mode(True)
-    # What a file names its parts by (``step_names``): each product's description, read
-    # into its label's properties. A file that names nothing reads as it would without.
-    reader.SetProductMetaMode(True)
     with kernel_messages_on_stderr():
         read_status = reader.ReadFile(str(step_path))
         transferred = int(read_status) == int(IFSelect_RetDone) and reader.Transfer(doc)
     if not transferred:
         return (*_load_fallback_occurrence_tree(step_path, named=named), None)
 
-    # And each face and edge it names, through the transfer's own map from entities to shapes.
-    loaded = _load_occurrence_tree_from_xcaf_doc(step_path, doc, file_names=read_file_names(reader))
+    loaded = _load_occurrence_tree_from_xcaf_doc(step_path, doc)
     if loaded is None:
         return (*_load_fallback_occurrence_tree(step_path, named=named), None)
     return (*loaded, doc)
@@ -373,15 +367,12 @@ def _load_occurrence_tree(
 def _load_occurrence_tree_from_xcaf_doc(
     step_path: Path,
     doc: Any,
-    *,
-    file_names: FileNames | None = None,
 ) -> tuple[
     list[OccurrenceNode],
     dict[int, Any],
     dict[int, str | None],
     dict[int, ColorRGBA],
     dict[int, dict[int, ColorRGBA]],
-    dict[int, ComponentNames],
 ] | None:
 
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
@@ -395,8 +386,6 @@ def _load_occurrence_tree_from_xcaf_doc(
     prototype_names: dict[int, str | None] = {}
     prototype_colors: dict[int, ColorRGBA] = {}
     prototype_face_colors: dict[int, dict[int, ColorRGBA]] = {}
-    prototype_step_names: dict[int, ComponentNames] = {}
-    named_prototypes: set[int] = set()
 
     def collect(label: object, *, path: tuple[int, ...], parent_location: object | None = None) -> OccurrenceNode | None:
         resolved_label = _resolve_referred_label(shape_tool, label)
@@ -421,20 +410,13 @@ def _load_occurrence_tree_from_xcaf_doc(
         )
         prototype_key: int | None = None
         if not children and not resolved_shape.IsNull():
-            defined_by = (resolved_label, resolved_shape)
             prototype_shape = _unlocated_shape(resolved_shape)
             prototype_key = _shape_hash(prototype_shape)
             prototypes.setdefault(prototype_key, prototype_shape)
         elif not children and not base_shape.IsNull():
-            defined_by = (label, base_shape)
             prototype_shape = _unlocated_shape(base_shape)
             prototype_key = _shape_hash(prototype_shape)
             prototypes.setdefault(prototype_key, prototype_shape)
-        if prototype_key is not None and prototype_key not in named_prototypes:
-            named_prototypes.add(prototype_key)
-            step_names = read_component_names(shape_tool, *defined_by, file_names=file_names)
-            if step_names is not None:
-                prototype_step_names[prototype_key] = step_names
         if prototype_key is not None:
             prototype_names.setdefault(prototype_key, source_name or name)
             prototype_color = _color_from_label(color_tool, resolved_label) or _color_from_shape(color_tool, resolved_shape)
@@ -475,7 +457,7 @@ def _load_occurrence_tree_from_xcaf_doc(
     if not roots:
         return None
     _withhold_borrowed_product_names(usages)
-    return roots, prototypes, prototype_names, prototype_colors, prototype_face_colors, prototype_step_names
+    return roots, prototypes, prototype_names, prototype_colors, prototype_face_colors
 
 
 def _label_entry(label: object) -> str:
@@ -533,8 +515,7 @@ def _load_fallback_occurrence_tree(
     step_path: Path,
     *,
     named: Path | None = None,
-) -> tuple[list[OccurrenceNode], dict[int, Any], dict[int, str | None], dict[int, ColorRGBA], dict[int, dict[int, ColorRGBA]],
-           dict[int, ComponentNames]]:
+) -> tuple[list[OccurrenceNode], dict[int, Any], dict[int, str | None], dict[int, ColorRGBA], dict[int, dict[int, ColorRGBA]]]:
     # ``named`` is the document the USER gave when ``step_path`` is cadgen's
     # private snapshot of its bytes: an error names their file, never ours.
     named = step_path if named is None else named
@@ -573,7 +554,6 @@ def _load_fallback_occurrence_tree(
         {prototype_key: "model"},
         {},
         {},
-        {},
     )
 
 
@@ -590,7 +570,6 @@ def load_step_scene(step_path: Path, *, named: Path | None = None) -> LoadedStep
         prototype_names,
         prototype_colors,
         prototype_face_colors,
-        prototype_step_names,
         doc,
     ) = _load_occurrence_tree(resolved_step_path, named=named)
     return LoadedStepScene(
@@ -600,7 +579,6 @@ def load_step_scene(step_path: Path, *, named: Path | None = None) -> LoadedStep
         prototype_names=prototype_names,
         prototype_colors=prototype_colors,
         prototype_face_colors=prototype_face_colors,
-        prototype_step_names=prototype_step_names,
         load_elapsed=time.perf_counter() - load_started,
         doc=doc,
     )

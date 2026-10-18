@@ -1,11 +1,6 @@
-"""A STEP file names what it holds: each part by its key, on its product, and each face
-and edge by its name, on the entity written for it (``step_names``).
-
-Any reader of the file gets those names from the file alone, on the elements they were
-written on; a cold parse walked as a compile walks it names every occurrence by the token
-the result names it by, and a document of one shape is that one product; and a file written
-without names is the file the writer wrote before names existed, which a named file whose
-plain twin is already read as its result is too, byte for byte, but for its names.
+"""The STEP writer carries each part's key on its product and each face's and edge's
+name on the entity written for it. Native STEP entities, and the geometry OCCT transfers
+from them, verify what the file carries without adding names to cadgen's parsed scene.
 """
 
 from __future__ import annotations
@@ -36,6 +31,51 @@ def _elements(shape, kind):
     found = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, TopAbs_FACE if kind == "face" else TopAbs_EDGE, found)
     return [found.FindKey(ordinal) for ordinal in range(1, found.Extent() + 1)]
+
+
+def _written_entities(path):
+    """Product descriptions and named face/edge entities in the written file, with the
+    shapes OCCT transfers from those entities. This checks the writer through OCCT's
+    native file model, independently of cadgen's scene loader."""
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPConstruct import STEPConstruct
+    from OCP.STEPControl import STEPControl_Reader
+    from OCP.StepBasic import StepBasic_Product
+    from OCP.StepShape import StepShape_EdgeCurve, StepShape_FaceSurface, StepShape_GeometricCurveSet
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+
+    reader = STEPControl_Reader()
+    assert reader.ReadFile(str(path)) == IFSelect_RetDone
+    reader.TransferRoots()
+    process = reader.WS().TransferReader().TransientProcess()
+    model = reader.Model()
+    products, named = {}, {}
+    for entity_type, kind, shape_kind in ((StepBasic_Product, None, None),
+                                          (StepShape_FaceSurface, "face", TopAbs_FACE),
+                                          (StepShape_EdgeCurve, "edge", TopAbs_EDGE),
+                                          (StepShape_GeometricCurveSet, "edge", TopAbs_EDGE)):
+        entities = model.Entities()
+        entities.SelectType(entity_type.get_type_descriptor_s(), True)
+        entities.Start()
+        while entities.More():
+            entity = entities.Value()
+            entities.Next()
+            text = entity.Name()
+            name = text.ToCString() if text is not None else ""
+            if kind is None:
+                products[name] = entity.Description().ToCString()
+                continue
+            if not name.startswith("f:" if kind == "face" else "e:"):
+                continue
+            shape = STEPConstruct.FindShape_s(process, entity)
+            assert shape is not None and not shape.IsNull(), name
+            if shape.ShapeType() != shape_kind:
+                elements = _elements(shape, kind)
+                assert len(elements) == 1, name
+                shape = elements[0]
+            assert name not in named, name
+            named[name] = shape
+    return products, named
 
 
 def _derived(kind, label, ordinal):
@@ -109,7 +149,7 @@ def _strip_names(data: bytes) -> bytes:
     return re.sub(rb"\r?\n\s*", b"", data)
 
 
-class StepNamesRoundTripTest(unittest.TestCase):
+class StepNamesWriterTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         from cadgen.step_export import export_build123d_step_file
@@ -127,37 +167,27 @@ class StepNamesRoundTripTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls._tmp.cleanup()
 
-    def test_each_part_reads_back_with_its_key_and_its_elements_named_where_they_were(self) -> None:
-        from OCP.BRep import BRep_Tool
-        from OCP.TopoDS import TopoDS
+    def test_each_part_and_element_is_named_on_the_entity_written_for_it(self) -> None:
+        from cadgen._internal.step_names import unnameable
 
-        from cadgen._internal.step_scene_loader import load_step_scene
-
-        scene = load_step_scene(self.named)
-        by_part = {names.part: (key, names) for key, names in scene.prototype_step_names.items()}
-        self.assertEqual(set(by_part), set(_KEYS.values()), "one product per part, each carrying its key")
+        products, named = _written_entities(self.named)
+        self.assertEqual({"rig": "", "twin": _KEYS["bracket"], "mirrored": _KEYS["mirrored"],
+                          "nest": "", "ball": _KEYS["ball"]}, products)
+        expected = {}
         for label, shape in self.shapes.items():
-            with self.subTest(part=label):
-                key, read = by_part[_KEYS[label]]
-                written = self.names[label]
-                source = _unlocated(shape)
-                prototype = scene.prototype_shapes[key]
-                self.assertEqual(sorted(filter(None, read.faces)), sorted(written.faces))
-                source_faces = dict(zip(written.faces, _elements(source, "face")))
-                for name, face in zip(read.faces, _elements(prototype, "face")):
-                    for read_bound, source_bound in zip(_box(face), _box(source_faces[name])):
-                        self.assertAlmostEqual(read_bound, source_bound, places=6, msg=f"{name} is read elsewhere")
-                # Every edge the file has an entity for is read named; a sphere's seam
-                # and poles have none, and are read as new and unnamed.
-                source_edges = dict(zip(written.edges, _elements(source, "edge")))
-                carried = {name for name, edge in source_edges.items()
-                           if not BRep_Tool.Degenerated_s(TopoDS.Edge_s(edge)) and label != "ball"}
-                self.assertEqual(set(filter(None, read.edges)), carried)
-                for name, edge in zip(read.edges, _elements(prototype, "edge")):
-                    if name is not None:
-                        for read_bound, source_bound in zip(_box(edge), _box(source_edges[name])):
-                            self.assertAlmostEqual(read_bound, source_bound, places=6,
-                                                   msg=f"{name} is read elsewhere")
+            source = _unlocated(shape)
+            _faces, unnamed_edges = unnameable(source)
+            names = self.names[label]
+            expected.update(zip(names.faces, _elements(source, "face")))
+            expected.update((name, edge) for ordinal, (name, edge) in
+                            enumerate(zip(names.edges, _elements(source, "edge")), start=1)
+                            if ordinal not in unnamed_edges)
+        self.assertEqual(set(expected), set(named), "every entity the file can name carries its name")
+        for name, element in named.items():
+            with self.subTest(element=name):
+                for written_bound, source_bound in zip(_box(element), _box(expected[name])):
+                    self.assertAlmostEqual(written_bound, source_bound, places=6,
+                                           msg="the name is on another element")
 
     def test_names_change_no_byte_of_the_file_but_the_names(self) -> None:
         from cadgen.step_export import export_build123d_step_file
@@ -211,9 +241,9 @@ class StepNamesRoundTripTest(unittest.TestCase):
         export_build123d_step_file(root, path, names=lambda leaf: self.names["mirrored"] if leaf is root else None)
         scene = load_step_scene(path)
         self.assertEqual([(node.name, node.children) for node in scene.roots], [("bracket_only", [])])
-        names = scene.prototype_step_names[scene.roots[0].prototype_key]
-        self.assertEqual((names.part, sorted(filter(None, names.faces))),
-                         (_KEYS["mirrored"], sorted(self.names["mirrored"].faces)))
+        products, named = _written_entities(path)
+        self.assertEqual({"bracket_only": _KEYS["mirrored"]}, products)
+        self.assertEqual(set(self.names["mirrored"].faces), {name for name in named if name.startswith("f:")})
         # Named or not is the file's mode, not what it names: a root it names nothing of
         # is one product too.
         export_build123d_step_file(root, path, names=lambda leaf: None)
@@ -239,9 +269,12 @@ class StepNamesRoundTripTest(unittest.TestCase):
                 scene = load_step_scene(path)
                 ((key, shape),) = scene.prototype_shapes.items()
                 colours = _face_colors_by_ordinal(shape, scene.prototype_face_colors[key])
-                read_names = scene.prototype_step_names[key].faces
-                self.assertEqual({read_names[read - 1]: colour for read, colour in colours.items()},
-                                 {names.faces[ordinal - 1]: (1.0, 0.0, 0.0, 1.0)})
+                self.assertEqual([(1.0, 0.0, 0.0, 1.0)], list(colours.values()))
+                (read_ordinal,) = colours
+                read_face = _elements(shape, "face")[read_ordinal - 1]
+                source_face = _elements(_unlocated(mirrored), "face")[ordinal - 1]
+                for read_bound, source_bound in zip(_box(read_face), _box(source_face)):
+                    self.assertAlmostEqual(read_bound, source_bound, places=6)
 
     def test_the_writer_refuses_names_that_do_not_fit_and_writes_nothing(self) -> None:
         import dataclasses
@@ -289,68 +322,60 @@ def _named_parts(*shapes):
 
 class ComponentKindsTest(unittest.TestCase):
     """Every component a stored result can hold is named as far as a file can carry it:
-    named export never fails where plain export succeeds, and a reader takes back every name
-    the file carries, through the transfer's own map from entities to shapes."""
+    named export never fails where plain export succeeds, and native STEP entities carry
+    each name on the geometry it names."""
 
     def write(self, root, names):
-        from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen.step_export import export_build123d_step_file
 
         tmp = tempfile.TemporaryDirectory(prefix="step-kinds-")
         self.addCleanup(tmp.cleanup)
         path = Path(tmp.name) / "kinds.step"
         export_build123d_step_file(root, path, names=names)
-        return load_step_scene(path)
-
-    def read_by_part(self, scene):
-        return {names.part: (key, names) for key, names in scene.prototype_step_names.items()}
+        return _written_entities(path)
 
     def test_a_component_that_is_one_face_is_named_on_that_face(self) -> None:
         import build123d as bd
 
         root, leaves, by_leaf = _named_parts(("body", bd.Box(4, 4, 4)), ("plate", bd.Face.make_rect(10, 20)))
-        read = self.read_by_part(self.write(root, lambda leaf: by_leaf.get(id(leaf))))
+        products, named = self.write(root, lambda leaf: by_leaf.get(id(leaf)))
         plate = by_leaf[id(leaves[1])]
-        self.assertEqual(read[plate.part][1].faces, plate.faces)
-        self.assertEqual(sorted(filter(None, read[plate.part][1].edges)), sorted(plate.edges))
+        self.assertEqual(plate.part, products["plate"])
+        self.assertEqual(set(plate.faces + plate.edges), {name for name in named if ":plate." in name})
 
         face = bd.Face.make_rect(3, 3)
         face.label = "sheet"
-        names = by_leaf[id(leaves[1])]
-        only = self.write(face, lambda leaf: names if leaf is face else None)
-        ((key, read_names),) = only.prototype_step_names.items()
-        self.assertEqual((read_names.part, read_names.faces), (names.part, names.faces))
+        products, named = self.write(face, lambda leaf: plate if leaf is face else None)
+        self.assertEqual({"sheet": plate.part}, products)
+        self.assertEqual(set(plate.faces + plate.edges), set(named))
 
     def test_a_component_with_nothing_in_it_carries_its_key(self) -> None:
         import build123d as bd
 
         root, leaves, by_leaf = _named_parts(("body", bd.Box(4, 4, 4)), ("nothing", bd.Compound([])))
-        read = self.read_by_part(self.write(root, lambda leaf: by_leaf.get(id(leaf))))
-        self.assertEqual(set(read), {names.part for names in by_leaf.values()})
+        products, _named = self.write(root, lambda leaf: by_leaf.get(id(leaf)))
+        self.assertEqual({"kinds": "", **{leaf.label: by_leaf[id(leaf)].part for leaf in leaves}}, products)
 
-    def test_every_name_the_file_carries_reads_back_on_its_element(self) -> None:
-        """Faces of an internal void, and free edges a file writes on curve sets, which a
-        reader's sub-shape expansion does not reach."""
+    def test_internal_faces_and_free_edges_are_named_on_their_entities(self) -> None:
         import build123d as bd
 
         hollow = bd.Box(10, 10, 10) - bd.Box(4, 4, 4)
         axis = bd.Compound([bd.Solid.make_box(1, 1, 1), bd.Edge.make_line((3, 0, 0), (6, 0, 0)),
                             bd.Edge.make_circle(1, bd.Plane.XY.offset(4))])
         root, leaves, by_leaf = _named_parts(("hollow", hollow), ("axis", axis))
-        scene = self.write(root, lambda leaf: by_leaf.get(id(leaf)))
-        read = self.read_by_part(scene)
+        products, named = self.write(root, lambda leaf: by_leaf.get(id(leaf)))
+        expected = {}
         for leaf in leaves:
             written = by_leaf[id(leaf)]
-            with self.subTest(part=leaf.label):
-                key, names = read[written.part]
-                self.assertEqual(sorted(filter(None, names.faces)), sorted(written.faces))
-                self.assertEqual(sorted(filter(None, names.edges)), sorted(written.edges))
-                source = _unlocated(leaf)
-                for kind, given, got in (("face", written.faces, names.faces), ("edge", written.edges, names.edges)):
-                    where = dict(zip(given, _elements(source, kind)))
-                    for name, element in zip(got, _elements(scene.prototype_shapes[key], kind)):
-                        for read_bound, source_bound in zip(_box(element), _box(where[name])):
-                            self.assertAlmostEqual(read_bound, source_bound, places=6, msg=name)
+            self.assertEqual(written.part, products[leaf.label])
+            source = _unlocated(leaf)
+            expected.update(zip(written.faces, _elements(source, "face")))
+            expected.update(zip(written.edges, _elements(source, "edge")))
+        self.assertEqual(set(expected), set(named))
+        for name, element in named.items():
+            with self.subTest(element=name):
+                for written_bound, source_bound in zip(_box(element), _box(expected[name])):
+                    self.assertAlmostEqual(written_bound, source_bound, places=6)
 
     def test_names_change_no_byte_of_a_file_of_every_kind_but_the_names(self) -> None:
         import build123d as bd
@@ -390,7 +415,7 @@ class ComponentKindsTest(unittest.TestCase):
             "wired": bd.Compound([bd.Solid.make_box(1, 1, 1), bd.Wire.make_polygon([(3, 0, 0), (5, 0, 0), (5, 2, 0)])]),
         }
         root, leaves, by_leaf = _named_parts(*shapes.items())
-        read = self.read_by_part(self.write(root, lambda leaf: by_leaf.get(id(leaf))))
+        _products, named = self.write(root, lambda leaf: by_leaf.get(id(leaf)))
         expected_unnamed = {"sphere": {1, 2, 3}, "hemisphere": "degenerate", "cylinder": set(), "cone": "degenerate",
                             "torus": set(), "wired": {13, 14, 15}}
         for leaf in leaves:
@@ -404,40 +429,9 @@ class ComponentKindsTest(unittest.TestCase):
                               if BRep_Tool.Degenerated_s(TopoDS.Edge_s(edge))}
                     self.assertTrue(wanted)
                 self.assertEqual((faces, edges), (frozenset(), frozenset(wanted)))
-                _key, names = read[written.part]
-                carried = [name for ordinal, name in enumerate(written.edges, start=1) if ordinal not in edges]
-                self.assertEqual(sorted(filter(None, names.edges)), sorted(carried))
-                self.assertEqual(sorted(filter(None, names.faces)), sorted(written.faces))
-
-
-class ForeignNamesTest(unittest.TestCase):
-    def test_names_another_writer_gave_are_not_read_as_names(self) -> None:
-        """A face named ``Face1`` or a product described in words is some other writer's
-        naming: the file names nothing the reader takes for an element name or a part key."""
-        import build123d as bd
-        from OCP.TCollection import TCollection_ExtendedString
-        from OCP.TDataStd import TDataStd_Name
-        from OCP.XCAFDoc import XCAFDoc_DocumentTool
-
-        from cadgen._internal.step_scene_loader import load_step_scene
-        from cadgen.step_export import create_bin_xcaf_doc, write_xcaf_doc_step_file
-
-        doc = create_bin_xcaf_doc()
-        tool = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
-        shape = bd.Solid.make_box(1, 2, 3).wrapped
-        label = tool.AddShape(shape, False)
-        TDataStd_Name.Set_s(label, TCollection_ExtendedString("block"))
-        for ordinal, face in enumerate(_elements(shape, "face"), start=1):
-            TDataStd_Name.Set_s(tool.AddSubShape(label, face), TCollection_ExtendedString(f"Face{ordinal}"))
-        tool.GetNamedProperties(label, True).SetString(TCollection_ExtendedString("Description"),
-                                                       TCollection_ExtendedString("a block"))
-        with tempfile.TemporaryDirectory(prefix="step-foreign-names-") as tmp:
-            path = Path(tmp) / "foreign.step"
-            write_xcaf_doc_step_file(doc, path)
-            text = path.read_text(encoding="utf-8")
-            self.assertIn("'Face1'", text)
-            self.assertIn("'a block'", text)
-            self.assertEqual(load_step_scene(path).prototype_step_names, {})
+                carried = {name for ordinal, name in enumerate(written.edges, start=1) if ordinal not in edges}
+                self.assertEqual(carried, {name for name in named if name.startswith(f"e:{leaf.label}.")})
+                self.assertEqual(set(written.faces), {name for name in named if name.startswith(f"f:{leaf.label}.")})
 
 
 if __name__ == "__main__":

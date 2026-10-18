@@ -616,7 +616,7 @@ src/cadgen/
                          #   place in the tree),
                          #   step_names (the names a STEP carries, law 4:
                          #   each part's key and each face's and edge's
-                         #   name, written and read from the file),
+                         #   name, written into the file),
                          #   step_placements (a placement a reader rebuilds
                          #   as the result places it),
                          #   step_reals (how a real reads in a STEP file),

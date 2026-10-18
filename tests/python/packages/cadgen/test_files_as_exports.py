@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import io
 import json
+import re
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -42,8 +43,8 @@ if __name__ == "__main__":
 class FilesAsExportsTest(unittest.TestCase):
     def setUp(self) -> None:
         roots = IsolatedCadRoots(self, prefix="files-as-exports-")
-        # The export and the verify run where they are submitted: what they write and
-        # answer is the subject, and the build hears the verify before it returns.
+        # Artifact jobs run where they are submitted: this checks what the export
+        # writes, and the in-process build finishes its files before it returns.
         self.enterContext(inline_artifacts())
         self.root = roots.cad_root
         self.script = self.root / "rig.py"
@@ -74,8 +75,9 @@ class FilesAsExportsTest(unittest.TestCase):
         return document_entry_for_hash(hashlib.sha256(self.step.read_bytes()).hexdigest())
 
     def test_the_file_is_the_result_the_moment_it_is_published(self) -> None:
-        from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen.step_export import STEP_WRITER_SCHEME
+        from cadgen.store.parts import part_key
+        from cadgen.store.trees import capture_tree
 
         self.build()
         record, entry = self.record(), self.entry()
@@ -83,9 +85,15 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertEqual({"schemaVersion", "tree", "kind", "producer"}, set(entry), "the entry is final as written")
         digest = hashlib.sha256(self.step.read_bytes()).hexdigest()
         self.assertEqual({"sha256": digest, "writer": STEP_WRITER_SCHEME}, record["outputs"][str(self.step.resolve())])
-        names = load_step_scene(self.step).prototype_step_names.values()
-        self.assertTrue(names and all(component.part and component.faces for component in names),
-                        "the file names its parts and their elements")
+        descriptor, _payloads = capture_tree(record["tree"])
+        expected = {occurrence["name"]: part_key(descriptor["components"][occurrence["component"]], entry["producer"])
+                    for occurrence in descriptor["occurrences"]}
+        written = self.step.read_bytes()
+        products = re.findall(rb"\bPRODUCT\(\s*'[^']*'\s*,\s*'([^']*)'\s*,\s*'([^']*)'", written)
+        self.assertEqual(expected, {name.decode(): key.decode() for name, key in products if key},
+                         "each product carries the key of the result's corresponding part")
+        self.assertRegex(written, rb"\bADVANCED_FACE\(\s*'f:", "the file carries its faces' names")
+        self.assertRegex(written, rb"\bEDGE_CURVE\(\s*'e:", "the file carries its edges' names")
 
     def test_the_preview_precedes_the_one_document_the_export_assembles(self) -> None:
         """The build assembles no XCAF document of its result before its preview is
@@ -146,7 +154,6 @@ class FilesAsExportsTest(unittest.TestCase):
         """A part key names its producer, so a runtime that cannot name its own writes its
         elements' names and no part key; the file maps to its result like any other, and the
         next run keeps it."""
-        from cadgen._internal.step_scene_loader import load_step_scene
         from cadgen.step_export import STEP_WRITER_SCHEME
 
         with mock.patch("cadgen.store.parts.producer_identity", side_effect=ValueError("no kernel version")):
@@ -156,9 +163,12 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertEqual({"sha256": digest, "writer": STEP_WRITER_SCHEME},
                          self.record()["outputs"][str(self.step.resolve())])
         self.assertEqual(self.record()["tree"], self.entry()["tree"])
-        names = load_step_scene(self.step).prototype_step_names.values()
-        self.assertTrue(names and all(not component.part and component.faces for component in names))
         written = self.step.read_bytes()
+        products = re.findall(rb"\bPRODUCT\(\s*'[^']*'\s*,\s*'[^']*'\s*,\s*'([^']*)'", written)
+        self.assertTrue(products)
+        self.assertEqual({b""}, set(products), "no product claims a part key without its producer")
+        self.assertRegex(written, rb"\bADVANCED_FACE\(\s*'f:")
+        self.assertRegex(written, rb"\bEDGE_CURVE\(\s*'e:")
         self.assertEqual("current", self.build()[0])
         self.assertEqual(written, self.step.read_bytes())
 
