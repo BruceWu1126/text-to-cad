@@ -3,8 +3,9 @@
 A model's children are no jobs: a child a parent's body calls is decoded or built
 serially in the parent's own process (``cadgen.authoring``, STORE.md §9a). What a
 build still hands to the pool is a document compile (:func:`submit_compile`), and
-what it waits on is a :class:`Job`: the compile's exit, or, for the top-level call
-of a model, the source result its own pipeline announces (:func:`capture_source_result`).
+what it waits on is a :class:`Job`: the compile's native answer or terminal exit,
+or, for the top-level call of a model, the source result its own pipeline
+announces (:func:`capture_source_result`).
 A compile is a request to the warm daemon, streamed on a background thread. Inside a
 daemon worker this is the same client call back to the daemon the worker belongs to;
 a daemon that cannot take it fails the job, its output saying why.
@@ -29,7 +30,7 @@ from typing import Any, Callable
 
 
 class Job:
-    """One job's eventual exit, and the source result a model's build announces."""
+    """One job's command answer, terminal exit, and announced source result."""
 
     def __init__(self, model: Path | str) -> None:
         from cadgen.store.index import split_model_ref
@@ -40,9 +41,11 @@ class Job:
         self.model = resolve_model_ref(model)
         self.script, self.function = split_model_ref(self.model)
         self._done = threading.Event()
+        self._terminal = threading.Event()
         self._result_ready = threading.Event()
         self._tree: str | None = None
         self._code: int | None = None
+        self._terminal_code: int | None = None
         self._chunks: list[str] = []
         self._lock = threading.Lock()
 
@@ -51,9 +54,15 @@ class Job:
             with self._lock:
                 self._chunks.append(text)
 
-    def _finish(self, code: int) -> None:
+    def _release(self, code: int) -> None:
         self._code = int(code)
         self._done.set()
+
+    def _finish(self, code: int) -> None:
+        self._terminal_code = int(code)
+        if not self.done:
+            self._release(code)
+        self._terminal.set()
         # A failed/superseded worker may never have produced geometry.
         self._result_ready.set()
 
@@ -87,6 +96,12 @@ class Job:
         if not self._done.wait(timeout):
             raise TimeoutError(f"build of {self.script.name} did not finish in {timeout}s")
         return int(self._code or 0)
+
+    def wait_terminal(self, timeout: float | None = None) -> int:
+        """Wait for this owner's actual exit, after its coalescing entry retires."""
+        if not self._terminal.wait(timeout):
+            raise TimeoutError(f"build of {self.script.name} did not finish in {timeout}s")
+        return int(self._terminal_code or 0)
 
     @property
     def done(self) -> bool:
@@ -229,15 +244,8 @@ def submit_compile(
     job = Job(document)
     emit_event(model_event(document, "submitted", parent=str(parent) if parent else None))
     tool_argv = [str(document)] + (["--force"] if force else [])
-    _submit_daemon(job, root, closure=closure, tool="step-compile", argv=tool_argv, prog="cadgen step compile")
     emit_event(model_event(document, "building", phase="compile"))
-
-    def finish() -> None:
-        # The compile narrates on stderr, not in tree events; the tree still needs its line closed.
-        if job.wait() == 0:
-            emit_event(model_event(document, "done"))
-
-    threading.Thread(target=finish, name=f"cadgen-compile-{document.stem}", daemon=True).start()
+    _submit_daemon(job, root, closure=closure, tool="step-compile", argv=tool_argv, prog="cadgen step compile")
     return job
 
 
@@ -251,23 +259,45 @@ def _submit_daemon(
     prog: str,
 ) -> None:
     """Run the daemon tool ``tool`` with ``argv`` as a job the daemon coalesces by
-    ``closure`` (a compile: the document's bytes), and finish ``job`` with its exit;
-    a daemon that cannot take it fails the job, its output saying why."""
+    ``closure`` (a compile: the document's bytes). Release ``job`` at its native
+    answer, retain the terminal exit, and fail a refused job with its reason."""
     from cadgen.daemon import client
 
     def run() -> None:
-        code = client.run_nested(
-            tool,
-            argv,
-            str(job.script.parent),
-            prog=prog,
-            store_root=str(store_root),
-            closure=closure,
-            on_stream=job._say,
-            on_event=emit_event,
-        )
-        if code != 0:
-            emit_event(model_event(job.model, "failed", exit=code))
-        job._finish(code)
+        def answer(code: int) -> None:
+            if not job.done:
+                # Close this compile's tree line before its caller can advance
+                # to another build and replace the process's reporting sink.
+                emit_event(model_event(job.model, "done" if code == 0 else "failed",
+                                       exit=code if code != 0 else None))
+                job._release(code)
+
+        def observe(event: dict) -> None:
+            # The caller may begin another build once its answer is released,
+            # replacing the process's reporting sink. Late finishing events
+            # belong only to the daemon's ledger, never that unrelated build.
+            if not job.done:
+                emit_event(event)
+
+        code = 1
+        try:
+            code = client.run_nested(
+                tool,
+                argv,
+                str(job.script.parent),
+                prog=prog,
+                store_root=str(store_root),
+                closure=closure,
+                on_stream=job._say,
+                on_event=observe,
+                on_release=answer,
+            )
+        except Exception:  # noqa: BLE001 - a transport fault must settle this job's waiters
+            import traceback
+
+            job._say(traceback.format_exc())
+        finally:
+            answer(code)
+            job._finish(code)
 
     threading.Thread(target=run, name=f"cadgen-job-{job.script.stem}", daemon=True).start()

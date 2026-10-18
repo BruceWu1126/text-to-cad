@@ -2111,7 +2111,12 @@ CPU scheduling and reuse remain independent of memory admission:
    Coalesced compile callers receive the owner's `released` frame when its
    native answer is ready, including callers attaching while its display jobs
    finish. Owner and follower ledger rows stay open until the owner exits and
-   receive its final completion status and error.
+   receive its final completion status and error. A compile's job handle keeps
+   that terminal exit separately from its early answer. If a native reader
+   cannot read the geometry after the answer, it waits for that exact owner to
+   exit before selecting the current bytes again and asking for a fresh repair;
+   it reports a terminal failure rather than resubmitting it. Readable geometry
+   returns immediately, without waiting for display data.
 3. **Idle unbind — 10 minutes** (`CADGEN_DAEMON_IDLE_UNBIND`). A bound worker
    idle that long returns to the spare set (spares beyond K exit); its model's
    next build rebinds a spare — no import repaid.

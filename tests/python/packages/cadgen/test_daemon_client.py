@@ -154,6 +154,85 @@ class DeadWorkerMessage(unittest.TestCase):
         outcome, out, _err = self._run([{"stream": "stdout", "data": "current part.step\n"}, {"released": 0}])
         self.assertEqual((outcome, out), (0, "current part.step\n"))
 
+    def test_a_nested_compile_keeps_its_terminal_failure_after_releasing_the_answer(self):
+        released, said = [], []
+        channel = _ScriptedChannel([
+            {"released": 0},
+            {"stream": "stderr", "data": "finishing failed\n"},
+            {"exit": 1},
+        ])
+        code = client._run_request(channel, PAYLOAD, on_release=released.append, on_stream=said.append)
+        self.assertEqual((released, code, said), ([0], 1, ["finishing failed\n"]))
+
+    def test_a_restart_after_release_fails_terminally_without_replaying_the_request(self):
+        released, said = [], []
+        channel = _ScriptedChannel([{"released": 0}, {"restart": True}])
+        with mock.patch.object(client, "_connect_or_spawn", return_value=channel) as connected:
+            code = client._run_with_retry(PAYLOAD, on_release=released.append, on_stream=said.append)
+        self.assertEqual((released, code), ([0], 1))
+        connected.assert_called_once()
+        self.assertIn("restarted before confirming the completed request", "".join(said))
+        self.assertIn("NOT retried", "".join(said))
+
+    def test_a_compile_job_keeps_late_events_and_failure_out_of_a_later_build_sink(self):
+        from cadgen.daemon import executors
+
+        finish = threading.Event()
+        events = []
+
+        def run(*args, on_release, on_event, on_stream, **kwargs):
+            on_release(0)
+            if not finish.wait(5):
+                raise AssertionError("test did not finish the released compile")
+            on_event({"state": "failed", "phase": "late compile event"})
+            on_stream("terminal compile failure\n")
+            return 1
+
+        with tempfile.TemporaryDirectory(prefix="compile-terminal-") as temporary:
+            document = pathlib.Path(temporary) / "part.step"
+            document.write_bytes(b"selected document bytes")
+            with mock.patch.object(client, "run_nested", side_effect=run), \
+                    mock.patch.object(executors, "emit_event", side_effect=events.append):
+                job = executors.submit_compile(document)
+                try:
+                    self.assertEqual(job.wait(5), 0)
+                    self.assertEqual(sum(event["state"] == "done" for event in events), 1)
+                    with self.assertRaises(TimeoutError):
+                        job.wait_terminal(0)
+                finally:
+                    finish.set()
+                self.assertEqual(job.wait_terminal(5), 1)
+                self.assertEqual(job.wait(), 0, "a terminal failure cannot rewrite the native answer")
+                self.assertEqual(job.output(), "terminal compile failure\n")
+        self.assertFalse(any(event["state"] == "failed" for event in events), events)
+
+    def test_a_compile_transport_outcome_settles_its_job_and_narrates_only_its_answer(self):
+        from cadgen.daemon import executors
+
+        with tempfile.TemporaryDirectory(prefix="compile-terminal-") as temporary:
+            document = pathlib.Path(temporary) / "part.step"
+            document.write_bytes(b"selected document bytes")
+            for release, fail in ((False, False), (False, True), (True, True)):
+                with self.subTest(release=release, fail=fail):
+                    events = []
+
+                    def run(*args, on_release, **kwargs):
+                        if release:
+                            on_release(0)
+                        if fail:
+                            raise RuntimeError("unexpected transport fault")
+                        return 0
+
+                    with mock.patch.object(client, "run_nested", side_effect=run), \
+                            mock.patch.object(executors, "emit_event", side_effect=events.append):
+                        job = executors.submit_compile(document)
+                        self.assertEqual(job.wait_terminal(5), int(fail))
+                        self.assertEqual(job.wait(), int(fail and not release))
+                    final = [event["state"] for event in events if event["state"] in {"done", "failed"}]
+                    self.assertEqual(final, ["failed" if fail and not release else "done"])
+                    if fail:
+                        self.assertIn("RuntimeError: unexpected transport fault", job.output())
+
 
 class ResidentProcessLifecycle(unittest.TestCase):
     def test_the_daemon_starts_outside_the_callers_project_directory(self):

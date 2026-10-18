@@ -308,6 +308,7 @@ def run_nested(
     closure: str | None = None,
     on_stream: Callable[[str], None] | None = None,
     on_event: Callable[[dict], None] | None = None,
+    on_release: Callable[[int], None] | None = None,
 ) -> int:
     """A job submitted from INSIDE a build or a door (a worker or a client): a
     document's compile, coalesced by ``closure`` (the document's bytes).
@@ -315,14 +316,16 @@ def run_nested(
     Unlike :func:`run_via_daemon` this ignores ``CADGEN_DAEMON_CHILD``: a worker
     submitting a compile is the pool's nesting, not recursion into itself. Stream
     frames go to ``on_stream`` (captured for the error path), events to
-    ``on_event``. A daemon that cannot take the job fails it (exit 1), saying why
+    ``on_event``. With ``on_release``, announce the command's early answer there
+    and keep the connection until the owner's terminal exit; otherwise return on
+    that answer. A daemon that cannot take the job fails it (exit 1), saying why
     on ``on_stream``.
     """
     payload = _request_payload(
         tool, argv, cwd, prog, store_root=store_root, closure=closure, coalesce=True, dependency=True,
     )
     try:
-        return _run_with_retry(payload, on_stream=on_stream, on_event=on_event)
+        return _run_with_retry(payload, on_stream=on_stream, on_event=on_event, on_release=on_release)
     except DaemonUnavailable as error:
         _say(f"cadgen-daemon: {error}\n", on_stream)
         return 1
@@ -376,7 +379,8 @@ def run_artifact(payload: dict, *, subscriber=None):
 
 
 def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
-                    on_artifact_result=None, strict: bool = False, on_connection=None, cancelled=None) -> int:
+                    on_artifact_result=None, strict: bool = False, on_connection=None, cancelled=None,
+                    on_release=None) -> int:
     """Send ``payload`` to this installation's daemon, starting it when none answers, and
     return the job's exit code. Raises :class:`DaemonUnavailable` when no daemon takes it:
     none could start, or one updating while its builds finish did not hand over in time."""
@@ -393,6 +397,8 @@ def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
             if on_connection is not None:
                 on_connection(conn)
             kwargs = {"on_stream": on_stream, "on_event": on_event}
+            if on_release is not None:
+                kwargs["on_release"] = on_release
             if strict or on_artifact_result is not None:
                 kwargs.update(on_artifact_result=on_artifact_result, strict=strict, cancelled=cancelled)
             outcome = _run_request(conn, payload, **kwargs)
@@ -683,7 +689,7 @@ def daemon_lost_message(payload: dict, reason: str) -> str:
 
 def _run_request(
     channel: transport.Channel, payload: dict, *, on_stream=None, on_event=None,
-    on_artifact_result=None, strict: bool = False, cancelled=None,
+    on_artifact_result=None, strict: bool = False, cancelled=None, on_release=None,
 ) -> int | object:
     """Send one request and stream the response: the job's exit code, or ``_RESTART``.
     A request the daemon lost -- a protocol fault, a silence past ``request_timeout``, a
@@ -709,6 +715,7 @@ def _run_request(
     timeout = request_timeout() or None
     streams = {"stdout": sys.stdout, "stderr": sys.stderr}
     observed_work = False
+    answer_released = False
     deadline = time.monotonic() + timeout if timeout else None
     while True:
         if cancelled is not None and cancelled():
@@ -722,17 +729,22 @@ def _run_request(
             return protocol_failure("closed the connection before the request finished")
         deadline = time.monotonic() + timeout if timeout else None
         if message.get("restart"):
-            if strict and observed_work:
+            if (strict and observed_work) or answer_released:
                 # An uncertain completed/partial operation cannot replay.
                 return protocol_failure("restarted before confirming the completed request")
             return _RESTART
         if "exit" in message:
             return int(message["exit"])
         if "released" in message:
-            # The command's answer is complete: the worker writes the files
-            # after this, and the exit frame it sends then reaches nobody.
+            # The command's answer is complete. Most callers leave now; a
+            # nested compile keeps its terminal exit on its job handle while
+            # releasing the native reader through this callback.
             if strict:
                 return protocol_failure("released a geometry request")
+            if on_release is not None:
+                on_release(int(message["released"]))
+                answer_released = True
+                continue
             return int(message["released"])
         if "artifactResult" in message:
             if on_artifact_result is None:

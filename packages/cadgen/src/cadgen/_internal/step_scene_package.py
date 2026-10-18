@@ -379,6 +379,16 @@ def load_step_scene_cached(step_path: Path, *, lazy: bool = False) -> LoadedStep
         job = submit_compile(resolved_step_path, force=damaged_document)
         with broker.yielded():
             code = job.wait()
+        if code == 0:
+            from_package, _ = lookup_document_scene(resolved_step_path, step_hash=step_hash, lazy=lazy)
+            if from_package is not None:
+                return from_package
+            # The geometry may have been damaged after this compile answered.
+            # A coalesced request can receive that same answer while its owner
+            # finishes display work. Wait for this owner's terminal exit before
+            # selecting the bytes again, so a fresh repair cannot rejoin it.
+            with broker.yielded():
+                code = job.wait_terminal()
         if code != 0:
             detail = job.output().rstrip()
             if detail:
@@ -392,9 +402,6 @@ def load_step_scene_cached(step_path: Path, *, lazy: bool = False) -> LoadedStep
             reason, _error_type = failure_message(detail)
             suffix = f": {reason}" if reason else ""
             raise RuntimeError(f"Could not compile STEP cache for {resolved_step_path}{suffix}")
-        from_package, _ = lookup_document_scene(resolved_step_path, step_hash=step_hash, lazy=lazy)
-        if from_package is not None:
-            return from_package
         # A replacement raced the submit: the worker correctly published the
         # bytes it snapshotted. A concurrent deletion of derived geometry can
         # also race publication; retry boundedly while these bytes stay current.
