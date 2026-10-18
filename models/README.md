@@ -86,6 +86,10 @@ For manual edge-case checks and debugging, use [tests/](tests/README.md). Automa
 - [electronics/usb_uart/](electronics/usb_uart/usb_uart.py): a USB-C to UART
   adapter on a CH343P with USBLC6 ESD and an FTDI-order header; D+/D- routed as a
   coupled pair held by `diff_pair_gap`, uncoupled-length and skew rules.
+- [electronics/pi_servo_hat/](electronics/pi_servo_hat/pi_servo_hat.py): a Raspberry
+  Pi HAT for serial bus servos: the Pi's UART made one half-duplex DATA line
+  (74LVC1G126/125 and a PNP), four servo ports on a 5 A VIN bus from a screw
+  terminal with TVS and bulk capacitance, on KiCad's HAT outline.
 
 Automated suites own their own fixtures and never read this tree — the viewer
 launch and browser gates, for instance, generate or commit their STEP fixture
