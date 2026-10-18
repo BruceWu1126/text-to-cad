@@ -91,6 +91,29 @@ def _progress_payload(job: dict) -> dict:
     }
 
 
+def _failure_for_output(job: dict, output: str) -> dict | None:
+    """A failed row's failure of this file. Recorded, unsaved results fail at save;
+    provisional previews alone say nothing about validation. A file that landed before
+    another output's save failed is successful, whatever the request's exit code."""
+    if job.get("state") != "failed":
+        return None
+    if output in (job.get("supersededOutputs") or []):
+        return None
+    failures = job.get("saveFailures") or {}
+    failed = failures.get(output)
+    if isinstance(failed, dict) and failed.get("superseded"):
+        return None
+    if failed is None and failures and output in (job.get("savedResults") or {}):
+        return None
+    result = {
+        "runId": job.get("id"), "exit": job.get("exit"), "tool": job.get("tool"),
+        "error": str(job.get("error") or ""),
+    }
+    if isinstance(failed, dict) and failed.get("tree"):
+        result.update(stage="save", output=output, tree=str(failed["tree"]))
+    return result
+
+
 def build_progress_snapshot(entry_path, *, jobs: list[dict] | None = None) -> dict | None:
     """The build view for one document, from the daemon's ledger.
 
@@ -104,16 +127,11 @@ def build_progress_snapshot(entry_path, *, jobs: list[dict] | None = None) -> di
     if running:
         job = running[-1]
         return {"writing": True, "busy": False, "runId": job.get("id"), "progress": _progress_payload(job)}
-    if matching and matching[-1].get("state") == "failed":
-        job = matching[-1]
+    failed = _failure_for_output(matching[-1], _real(entry_path)) if matching else None
+    if failed is not None:
         return {
             "writing": False,
             "busy": False,
-            "failed": {
-                "runId": job.get("id"),
-                "exit": job.get("exit"),
-                "tool": job.get("tool"),
-                "error": str(job.get("error") or ""),
-            },
+            "failed": failed,
         }
     return None

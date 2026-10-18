@@ -122,6 +122,105 @@ class BuildStatusTests(unittest.TestCase):
         ])
         self.assertEqual(result["state"], "disconnected")
 
+    def test_save_failure_is_a_recorded_result_for_this_output_not_merely_a_preview(self):
+        from cadgen.daemon.jobs import JobLedger
+
+        script = str(self.root / "source.py")
+        tree = "a" * 64
+        for preview in (None, {"tree": tree, "parts": {"c1": "part"}, "complete": False}):
+            with self.subTest(preview=bool(preview)):
+                ledger = JobLedger()
+                request = ledger.start(tool="run", subject=script, store_root=self.store)
+                def event(sequence, **extra):
+                    ledger.observe({"event": {"job": request["id"], "model": script,
+                                               "sequence": sequence, "state": "building", **extra}})
+                if preview:
+                    event(1, preview={"output": self.output, **preview})
+                    ledger.finish(request, 1, error="invalid animation declaration")
+                    invalid = preview_status(self.output, jobs=ledger.snapshot())
+                    self.assertEqual(invalid["failureStage"], "build")
+                    self.assertNotIn("saveFailure", invalid)
+                    self.assertEqual(invalid["preview"]["parts"], {"c1": "part"})
+                    request = ledger.start(tool="run", subject=script, store_root=self.store)
+                    event(1, preview={"output": self.output, **preview})
+                event(2, saving={"output": self.output, "tree": tree})
+                pending = preview_status(self.output, jobs=ledger.snapshot())
+                self.assertEqual(pending["saving"], {"tree": tree})
+                ledger.finish(request, 1, error="disk full")
+                failed = preview_status(self.output, jobs=ledger.snapshot())
+                self.assertEqual((failed["state"], failed["failureStage"], failed["error"]),
+                                 ("failed", "save", "disk full"))
+                self.assertEqual(failed["saveFailure"], {"output": self.output, "tree": tree})
+                self.assertNotIn("saving", failed)
+                self.assertEqual(failed["preview"] is not None, preview is not None)
+
+    def test_a_failed_mesh_save_does_not_fail_the_step_that_landed_in_the_same_run(self):
+        from cadgen.catalog import artifact_file_hash
+
+        mesh = str(self.root / "new.stl")
+        Path(self.output).write_bytes(b"saved STEP")
+        failed = self.job(state="failed", error="mesh write refused", finishedAt=2000.0,
+                          savedResults={self.output: {"tree": "a" * 64, "documentHash": artifact_file_hash(Path(self.output))}},
+                          saveFailures={mesh: {"tree": "a" * 64}})
+        step = preview_status(self.output, jobs=[failed])
+        self.assertEqual((step["state"], step["error"]), ("done", None))
+        self.assertNotIn("failureStage", step)
+        self.assertNotIn("saveFailure", step)
+
+    def test_parent_and_children_report_their_own_failed_outputs_after_the_request_ends(self):
+        from cadgen.catalog import artifact_file_hash
+        from cadgen.daemon.jobs import JobLedger
+
+        now = 1000.0
+        ledger = JobLedger(clock=lambda: now)
+        parent = str(self.root / "assembly.py")
+        child = str(self.root / "child.py")
+        child_step = str(self.root / "child.step")
+        child_mesh = str(self.root / "child.stl")
+        child_failed_step = str(self.root / "other.step")
+        request = ledger.start(tool="run", subject=parent, store_root=self.store)
+        def event(model, sequence, state="building", **extra):
+            ledger.observe({"event": {"job": request["id"], "model": model, "sequence": sequence,
+                                       "state": state, **extra}})
+        event(parent, 1, saving={"output": self.output, "tree": "parent"})
+        event(child, 1, saving={"output": child_step, "tree": "child"})
+        event(child, 2, saving={"output": child_mesh, "tree": "child"})
+        event(child, 3, saving={"output": child_failed_step, "tree": "child"})
+        event(child, 4, state="done")
+        # A child closes at result. An intervening write its save refuses is older than
+        # the save failure, so it must not hide that failure as though it happened later.
+        Path(child_failed_step).write_bytes(b"edited while exporting")
+        os.utime(child_failed_step, (1001.0, 1001.0))
+        Path(child_step).write_bytes(b"saved child")
+        event(child, 5, saved={"output": child_step, "tree": "child", "documentHash": artifact_file_hash(Path(child_step))})
+        now = 1002.0
+        ledger.finish(request, 1, error="destination changed")
+        jobs = ledger.snapshot()
+        root = preview_status(self.output, jobs=jobs)
+        unsaved_child = preview_status(child_failed_step, jobs=jobs)
+        self.assertEqual(root["saveFailure"], {"output": self.output, "tree": "parent"})
+        self.assertEqual(unsaved_child["saveFailure"], {"output": child_failed_step, "tree": "child"})
+        self.assertNotIn("superseded", unsaved_child)
+        self.assertEqual(preview_status(child_step, jobs=jobs)["state"], "done")
+        os.utime(child_failed_step, (1003.0, 1003.0))
+        self.assertTrue(preview_status(child_failed_step, jobs=jobs)["superseded"])
+
+    def test_a_superseding_result_and_later_file_replacement_clear_a_save_failure(self):
+        failed = self.job(state="failed", error="disk full", finishedAt=2000.0,
+                          previews={self.output: {"tree": "a" * 64}},
+                          saveFailures={self.output: {"tree": "a" * 64}})
+        self.assertEqual(preview_status(self.output, jobs=[failed])["failureStage"], "save")
+        superseded = preview_status(self.output, jobs=[{**failed, "supersededOutputs": [self.output]}])
+        Path(self.output).write_bytes(b"replaced")
+        os.utime(self.output, (3000.0, 3000.0))
+        replaced = preview_status(self.output, jobs=[failed])
+        for result in (superseded, replaced):
+            self.assertTrue(result["superseded"])
+            self.assertIsNone(result["preview"])
+            self.assertIsNone(result["error"])
+            self.assertNotIn("failureStage", result)
+            self.assertNotIn("saveFailure", result)
+
     # The file moved on after the build: another installation's build, a checkout, a STEP written
     # by hand. The build's failure is no longer the news.
     def test_a_build_that_saved_is_moved_past_when_the_file_is_no_longer_its_bytes(self):

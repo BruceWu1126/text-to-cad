@@ -32,7 +32,7 @@ export function usePreviewRevision(editing, { client, file, inHand, meshState })
   // the catalog's revision then, which the save moves.
   const adoptedRef = useRef({ build: "", shown: false, catalogHash: "" });
   if (build && adoptedRef.current.build !== build) {
-    adoptedRef.current = { build, shown: editing.state !== "done", catalogHash };
+    adoptedRef.current = { build, shown: editing.state !== "done" || Boolean(editing.saving), catalogHash };
   }
   const adopted = adoptedRef.current.build === build && adoptedRef.current.shown;
   // The save landed: the catalog named a revision past the one the build began over. Its hash is

@@ -29,6 +29,7 @@ export function FileViewer({ file, host, renderers, state, onStateChange, displa
   const { loaded, key, path, reload } = useFileDocument(file, source, renderers);
   const currentKey = useRef(key);
   currentKey.current = key;
+  const reloadCurrent = useCallback(() => { if (currentKey.current === key) reload(); }, [key, reload]);
   const latest = useRef({ state, onStateChange, sourceId: source.id });
   latest.current = { state, onStateChange, sourceId: source.id };
   const changeState = useCallback((update: (previous: FileViewerState) => FileViewerState) => {
@@ -81,7 +82,7 @@ export function FileViewer({ file, host, renderers, state, onStateChange, displa
   let body: ReactNode;
   if (loaded.status === "empty") body = presentation?.home ?? null;
   else if (loaded.status === "loading") body = presentation?.loading ?? <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground" role="status"><Spinner className="size-3.5" />Opening…</div>;
-  else if (loaded.status === "error") body = presentation?.error?.({ message: loaded.message, missing: loaded.missing }) ?? <EmptyState icon={FileText} title="Could not open that file" description={loaded.message} tone="warn" />;
+  else if (loaded.status === "error") body = presentation?.error?.({ message: loaded.message, missing: loaded.missing, reload: reloadCurrent }) ?? <EmptyState icon={FileText} title="Could not open that file" description={loaded.message} tone="warn" />;
   else body = rendererBody;
   const shownActions = navActions?.key === key && ready ? navActions.actions : [];
   const trailing = shownActions.length ? <>

@@ -137,3 +137,22 @@ it('a build that could not name its parts has no gate: the view keys them as for
   expect(hook.result.current.gate).toBeNull();
   expect(service.requests[0]).not.toContain('producer=');
 });
+
+it('a child already done but still saving has a preview, retained through save failure and a retry of that same tree', async () => {
+  const service = client();
+  const child = building({ state: 'done', saving: { tree: TREE }, preview: named() });
+  const hook = mount(service, { editing: feed([child]), inHand: A });
+  await waitFor(() => expect(hook.result.current.entry?.preview).toBe(true));
+  const failed = building({ state: 'failed', failureStage: 'save', saveFailure: { output: FILE, tree: TREE } });
+  hook.rerender({ editing: feed([child, failed]), inHand: A, meshState: null });
+  expect(hook.result.current.entry?.hash).toBe(TREE);
+  expect(hook.result.current.gate?.complete).toBe(false, 'the partial preview remains partial');
+  const retry = building({ revision: 4, saving: { tree: TREE } });
+  hook.rerender({ editing: feed([child, failed, retry]), inHand: A, meshState: null });
+  await waitFor(() => expect(hook.result.current.entry?.hash).toBe(TREE));
+  hook.rerender({ editing: feed([child, failed, retry, { ...failed, revision: 4 }]), inHand: A, meshState: null });
+  expect(hook.result.current.entry?.preview).toBe(true);
+  // A successful retry replaces it with the saved file; no previous failure/preview leaks on.
+  hook.rerender({ editing: feed([child, failed, retry, building({ revision: 4, state: 'done', saved: { tree: TREE, documentHash: 'saved' } })]), inHand: B, meshState: null });
+  expect(hook.result.current.entry).toBeNull();
+});

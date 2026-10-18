@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { FileWarning, FileX } from 'lucide-react';
+import { FileWarning } from 'lucide-react';
 import type { CadWorkspaceService } from '@text-to-cad/core/client';
 import { FileViewer } from '../file-viewer/FileViewer.js';
 import { ViewerLoadingOverlay } from '../file-viewer/presentation.js';
@@ -15,6 +15,7 @@ import type { LibraryLayout } from '../tab-store/tabRecord.js';
 import type { TabStore } from '../tab-store/tabStore.js';
 import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
+import { MissingCadFile } from './MissingCadFile.js';
 
 export interface CadViewerProps<Model extends LibraryModel = LibraryModel> {
   /** The CAD client: the catalog of the files on screen, and every document's resources. */
@@ -171,10 +172,10 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
       links={host.links} update={update} fullSize={fullSize} onError={onError} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
-    error: ({ message, missing }: { message: string; missing: boolean }) => missing
-      ? <EmptyState icon={FileX} title="File does not exist" description={path} tone="warn" action={goHome} />
+    error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
+      ? <MissingCadFile file={path} client={client} entry={entry} reload={reload} action={goHome} />
       : <EmptyState icon={FileWarning} title="Could not open that file" description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, onError, goHome]);
+  }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, onError, goHome, client, entry]);
   return <>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       displayActions={displayActions} appSettings={appSettings} update={update} fullSize={fullSize} history={history} features={features} notice={notice} onError={onError} presentation={presentation} />

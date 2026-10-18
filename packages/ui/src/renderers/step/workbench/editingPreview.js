@@ -14,8 +14,12 @@ export function initialEditingPreview() {
     detail: "",
     updatedAt: 0,
     error: "",
+    failureStage: undefined,
+    saveFailure: null,
+    saving: null,
     preview: null,
     saved: null,
+    retainedPreview: null,
   };
 }
 
@@ -65,7 +69,8 @@ export function reduceEditingPreview(current, next) {
     // preview. A poll that failed says nothing of the build, so the preview in hand stays.
     const listed = next.state === "disconnected";
     return { ...current, state: "disconnected", phase: "", detail: "", updatedAt: 0, error: next.error || "",
-      preview: listed ? null : current.preview };
+      failureStage: undefined, saveFailure: null, saving: null,
+      preview: listed ? null : current.preview, retainedPreview: listed ? null : current.retainedPreview };
   }
   const previous = current.epoch && current.epoch !== next.epoch ? initialEditingPreview() : current;
   const revision = Number(next.revision) || 0;
@@ -75,6 +80,18 @@ export function reduceEditingPreview(current, next) {
   const active = BUILDING_STATES.includes(state);
   // A build the file moved past (the server's `superseded`): its failure is no longer the news.
   const superseded = next.superseded === true;
+  const saved = savedFile(next.saved);
+  const saving = next.saving?.tree ? { tree: String(next.saving.tree) } : null;
+  const saveFailure = next.saveFailure?.tree && next.saveFailure?.output
+    ? { tree: String(next.saveFailure.tree), output: String(next.saveFailure.output) } : null;
+  const named = previewRevision(next.preview);
+  // A save retry may name only the recorded tree, with no new preview event. Keep the last
+  // unsaved revision privately until an artifact milestone confirms that exact tree again.
+  // A new model build with no result never adopts it just because it was visible before.
+  const resultTree = saving?.tree || saveFailure?.tree || saved?.tree || named?.tree || "";
+  const candidate = named || previous.retainedPreview || (!previous.saved ? previous.preview : null);
+  const retained = !superseded && !saved && candidate && (!resultTree || resultTree === candidate.tree)
+    ? candidate : null;
   return {
     epoch: next.epoch,
     revision,
@@ -84,10 +101,14 @@ export function reduceEditingPreview(current, next) {
     detail: active ? String(next.detail || (same ? previous.detail : "") || "").trim() : "",
     updatedAt: active ? Number(next.updatedAt) || (same ? previous.updatedAt : 0) || 0 : 0,
     error: superseded ? "" : next.error || "",
+    failureStage: state === "failed" && !superseded ? next.failureStage === "save" && saveFailure ? "save" : "build" : undefined,
+    saveFailure: superseded ? null : saveFailure,
+    saving: superseded ? null : saving,
     output: next.output,
     file: next.file || next.output,
     // Named from the moment the result exists; a build the file moved past has none to show.
-    preview: superseded ? null : previewRevision(next.preview),
-    saved: savedFile(next.saved),
+    preview: superseded ? null : named || (retained?.tree === resultTree ? retained : null),
+    saved,
+    retainedPreview: retained,
   };
 }

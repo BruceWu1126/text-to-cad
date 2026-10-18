@@ -33,6 +33,14 @@ mounted renderers own scenes, document controllers and temporary resource leases
 Unmounting one view releases its work without disposing another view's services
 or admitted cache writes. Hosts dispose a service when its workspace closes.
 
+`FileViewer`'s optional `presentation.error` receives `message`, `missing`, and
+`reload`, which rereads only the file that produced the error; a callback from a
+departed file cannot reload its replacement. `CadViewer` uses the artifact-only
+build feed for a missing STEP too, so a failed first save shows **Save failed**
+without inventing a saved document. It reopens automatically only after a saved
+event and a catalog entry agree on that file's document hash. Without a matching
+job, and for other file types, the ordinary missing-file page remains.
+
 ## Interface map and implementations
 
 The linked TypeScript definitions are the authoritative signatures. Import

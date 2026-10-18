@@ -237,8 +237,10 @@ def artifact_status(file_ref, *, snapshot=None, verdict=None) -> dict:
         # generic sentence is only for a ledger that has none.
         return {
             "state": ARTIFACT_STATE.FAILED,
-            "reason": "build_failed",
-            "error": str(failed.get("error") or "").strip() or "The last compile of this document failed.",
+            "reason": "save_failed" if failed.get("stage") == "save" else "build_failed",
+            "error": str(failed.get("error") or "").strip() or (
+                "The result could not be saved to this file." if failed.get("stage") == "save"
+                else "The last compile of this document failed."),
             "failed": failed,
         }
     if code in BUILDABLE_CODES:

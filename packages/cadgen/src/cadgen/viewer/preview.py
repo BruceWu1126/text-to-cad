@@ -24,7 +24,7 @@ from pathlib import Path
 from cadgen.store.paths import store_root
 
 from .backend import absolute_path
-from .build_progress import _daemon_jobs
+from .build_progress import _daemon_jobs, _failure_for_output
 from .scanner import to_posix_path
 
 LOG = logging.getLogger("cadgen.viewer.preview")
@@ -108,6 +108,20 @@ def preview_status(file_ref: str, *, jobs: list[dict] | None = None,
         result["preview"] = None
     else:
         result["preview"] = _preview_revision(latest, target)
+        failed = _failure_for_output(latest, target)
+        if failed is not None:
+            result["failureStage"] = failed.get("stage", "build")
+            if failed.get("stage") == "save":
+                result["saveFailure"] = {"output": target, "tree": failed["tree"]}
+        elif latest.get("state") == "failed":
+            # This output landed before a different file's save failed.
+            result.update(state="done", error=None)
+        saving = (latest.get("saving") or {}).get(target)
+        saved = (latest.get("savedResults") or {}).get(target)
+        if (isinstance(saving, dict) and not saving.get("superseded")
+                and (not isinstance(saved, dict)
+                     or int(saved.get("sequence") or 0) < int(saving.get("sequence") or 0))):
+            result["saving"] = {"tree": str(saving["tree"])}
     result["saved"] = _saved_file(latest, target)
     return result
 
@@ -148,6 +162,8 @@ def _superseded(job: dict, target: str) -> bool:
     file is no longer the one it wrote. One that saved nothing (it failed, or it changed nothing)
     by time: the file was written after the build ended. A file that is not there was not -- a
     failed first build never wrote one -- and that build's failure is still the news."""
+    if target in (job.get("supersededOutputs") or []):
+        return True
     finished = job.get("finishedAt")
     if job.get("state") not in ("done", "failed") or finished is None:
         return False

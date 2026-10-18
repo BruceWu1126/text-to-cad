@@ -684,7 +684,7 @@ function StepSurfaceBody({ view, data }) {
   const presentationRevisionKey = `${selectedMeshData ? meshState?.meshHash || selectedMeshHash : selectedMeshHash}:${selectedMeshPartial ? "partial" : "complete"}`;
 
   const viewerAlert = useMemo(() => {
-    const editFailure = buildViewerEditAlert(editingPreview.state, Boolean(selectedMeshData && !selectedMeshPartial), { previewShown: currentPreview });
+    const editFailure = buildViewerEditAlert(editingPreview.state, Boolean(selectedMeshData && (!selectedMeshPartial || currentPreview)), { previewShown: currentPreview });
     if (editFailure) return editFailure;
     if (catalogError && !selectedMeshData) return {
       severity: "error", kind: "status", title: "Couldn’t open the model",

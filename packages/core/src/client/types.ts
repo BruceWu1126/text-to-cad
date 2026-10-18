@@ -180,6 +180,12 @@ export interface CadEditingPreview {
   error?: string;
   output?: string;
   file?: string;
+  /** A failure after the result was recorded is a save failure, per output; a provisional preview cannot establish this. */
+  failureStage?: 'build' | 'save';
+  /** The recorded result this file could not be saved from. Other outputs may have saved successfully. */
+  saveFailure?: { output: string; tree: string } | null;
+  /** This file is still owed by a recorded result, until its saved event or request completion. */
+  saving?: { tree: string } | null;
   /** The file changed after this build finished: its failure and its preview are no longer the news. */
   superseded?: boolean;
   /** The preview revision: null before the build's result exists and for a superseded build. */

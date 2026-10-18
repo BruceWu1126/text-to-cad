@@ -2257,12 +2257,18 @@ of results across rows). A child's row is `done` from its own done event,
 before its file is saved; the request's row, the root's, is `done` when the
 request ends, after the run's exports (`daemon/jobs.py`). The request's end
 settles what its rows owed: a row that owed a file the failed request never
-saved fails with the request's reason. Kinematics, appearance and animation
+saved fails with the request's reason. The ledger retains those unmatched,
+unsuperseded obligations as `saveFailures`, per output, after removing live
+`saving` entries. The feed reports `failureStage: "save"` and
+`saveFailure: {output, tree}` for that file; an already-saved STEP remains
+successful when a sibling mesh fails. A provisional preview alone proves no
+successful result: a body or annotation-validation failure stays a build
+failure. Kinematics, appearance and animation
 travel in the sidecar for every durable reader, and in the preview's
 annotations object for the viewer alone.
 
-Only model runs advance editing order: a compile of saved bytes is listed
-against the document but never hides a run's preview. A child built inside a
+Model runs and explicit export retries advance editing order: a compile of saved
+bytes is listed against the document but never hides a run's preview. A child built inside a
 request (§9a) has a row of its own under it in the ledger -- a child in the
 request model's own file too, since rows are keyed by model, not by script --
 listed from its first event with its declared outputs, closed by its own done
@@ -2298,7 +2304,11 @@ that fails to resolve is the build's failure, and the preview stays up without
 it, under the failure. A preview is never shown as the file: nothing binds the
 file's sidecar to it, it is not the catalog's entry, no snapshot, export or
 `read_scene` reads it, and a save that fails leaves the preview labelled as
-what it is, under the failure. An answer carries no geometry of its own; the
+what it is, under a **Save failed** alert. Usable partial previews stay visible
+too. A retry may carry only a `saving` or `saveFailure` tree; the viewer retains
+the prior unsaved preview only when that tree matches exactly. A new request
+with no recorded result cannot adopt an old preview as its own. An answer carries
+no geometry of its own; the
 server does no kernel work and exposes no source, closure or model record. A
 finished build whose output is no longer the file on disk -- the bytes it saved
 replaced or, if it saved nothing, the file written after it ended -- is

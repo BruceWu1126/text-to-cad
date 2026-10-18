@@ -179,7 +179,7 @@ export interface FileViewerProps {
     /** The host's home, shown with no file: a page of its own, with no navbar over it (it holds the host's links itself). */
     home?: ReactNode;
     loading?: ReactNode;
-    /** A file that will not open: `missing` when it does not exist. */
-    error?: (failure: { message: string; missing: boolean }) => ReactNode;
+    /** A file that will not open: `missing` when it does not exist; `reload` rereads only this file. */
+    error?: (failure: { message: string; missing: boolean; reload?: () => void }) => ReactNode;
   };
 }

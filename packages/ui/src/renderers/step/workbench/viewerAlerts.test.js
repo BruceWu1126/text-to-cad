@@ -173,6 +173,26 @@ test("a build that failed with its own preview on screen says the preview is wha
   assert.equal(buildViewerEditAlert(failed, false, { previewShown: true }).summary, "Open failed");
 });
 
+test("a recorded result that could not be saved says Save failed with a partial preview, a saved predecessor, or no geometry", () => {
+  const failed = { state: "failed", failureStage: "save", saveFailure: { output: "/part.step", tree: "result" }, error: "disk full" };
+  // Visible geometry can be only part of a preview: its failure must leave it inspectable.
+  const partial = buildViewerEditAlert(failed, true, { previewShown: true });
+  assert.equal(partial.summary, "Save failed");
+  assert.equal(partial.blocking, false);
+  assert.match(partial.message, /unsaved preview/);
+  assert.equal(partial.reason, "disk full");
+  const previous = buildViewerEditAlert(failed, true);
+  assert.equal(previous.summary, "Save failed");
+  assert.match(previous.message, /previous saved version/);
+  assert.equal(previous.blocking, false);
+  const empty = buildViewerEditAlert(failed, false, { previewShown: true });
+  assert.equal(empty.summary, "Save failed");
+  assert.notEqual(empty.blocking, false);
+  assert.doesNotMatch(empty.message, /viewing/);
+  // A worker failure after recording the result is still a failure to save this output.
+  assert.equal(buildViewerEditAlert({ ...failed, error: "model worker unavailable" }, true).summary, "Save failed");
+});
+
 test("edit worker failures are distinct from invalid-model failures", () => {
   const worker = buildViewerEditAlert({
     state: "failed",

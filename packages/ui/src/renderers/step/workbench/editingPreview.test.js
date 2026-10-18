@@ -89,3 +89,40 @@ test("annotations bind only when they were resolved against the preview's tree",
   assert.equal(previewAnnotationsFor(preview, null), null);
   assert.equal(previewAnnotationsFor(null, object), null);
 });
+
+test("save failure requires the feed's recorded-result milestone, never a provisional preview", () => {
+  const provisional = reduceEditingPreview(initialEditingPreview(), update(1, { preview: named() }));
+  const invalid = reduceEditingPreview(provisional, update(1, { state: "failed", error: "invalid mate", preview: named() }));
+  assert.equal(invalid.failureStage, "build");
+  assert.equal(invalid.preview.tree, TREE);
+  const failed = reduceEditingPreview(provisional, update(1, {
+    state: "failed", failureStage: "save", saveFailure: { output: "/part.step", tree: TREE }, error: "disk full",
+  }));
+  assert.equal(failed.failureStage, "save");
+  assert.deepEqual(failed.saveFailure, { output: "/part.step", tree: TREE });
+  assert.equal(failed.preview.tree, TREE, "an exact tree milestone can latch the preview without reannouncing it");
+});
+
+test("a retry reuses an unsaved preview only when it names the same recorded tree, and success clears the failure", () => {
+  const failed = reduceEditingPreview(initialEditingPreview(), update(1, {
+    state: "failed", preview: named(), failureStage: "save", saveFailure: { output: "/part.step", tree: TREE },
+  }));
+  const retry = reduceEditingPreview(failed, update(2));
+  assert.equal(retry.preview, null, "an ordinary new build has not established a result");
+  const owing = reduceEditingPreview(retry, update(2, { saving: { tree: TREE } }));
+  assert.equal(owing.preview.tree, TREE);
+  const again = reduceEditingPreview(owing, update(2, {
+    state: "failed", failureStage: "save", saveFailure: { output: "/part.step", tree: TREE },
+  }));
+  assert.equal(again.preview.tree, TREE, "a failed export retry keeps the usable unsaved preview");
+  const done = reduceEditingPreview(again, update(3, { state: "done", saved: { tree: TREE, documentHash: "d".repeat(64) } }));
+  assert.equal(done.failureStage, undefined);
+  assert.equal(done.saveFailure, null);
+  assert.equal(done.retainedPreview, null);
+  const different = reduceEditingPreview(retry, update(2, { saving: { tree: "other" } }));
+  assert.equal(different.preview, null);
+  assert.equal(different.retainedPreview, null, "another tree cannot inherit the preview");
+  for (const next of [{ state: "disconnected" }, update(1, { state: "failed", superseded: true }), { ...update(1), epoch: "new" }]) {
+    assert.equal(reduceEditingPreview(failed, next).retainedPreview, null, JSON.stringify(next));
+  }
+});

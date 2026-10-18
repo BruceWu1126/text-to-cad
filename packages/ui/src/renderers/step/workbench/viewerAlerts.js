@@ -69,14 +69,15 @@ export function buildViewerEditAlert(editingState, hasGeometry = false, { previe
 
   const usableModelVisible = Boolean(hasGeometry);
   const shown = previewShown && usableModelVisible;
+  const saveFailed = editingState.failureStage === "save";
   const actualDetail = String(editingState.error || "").trim()
-    || "The viewer returned no diagnostic for the failed update.";
+    || (saveFailed ? "The result could not be saved to this file." : "The viewer returned no diagnostic for the failed update.");
   const details = [
     editingState.file || editingState.output
       ? `File: ${editingState.file || editingState.output}`
       : "",
     editingState.revision ? `Revision: ${editingState.revision}` : "",
-    "Operation: updating the model",
+    saveFailed ? "Operation: saving the model" : "Operation: updating the model",
     actualDetail
   ].filter(Boolean).join("\n");
   const common = {
@@ -85,6 +86,21 @@ export function buildViewerEditAlert(editingState, hasGeometry = false, { previe
     reload: true,
     ...(usableModelVisible ? { blocking: false } : {})
   };
+
+  if (saveFailed) {
+    return {
+      ...common,
+      summary: "Save failed",
+      title: "Couldn’t save the model",
+      message: shown
+        ? "The result was built, but the file could not be saved. You’re viewing its unsaved preview."
+        : usableModelVisible
+          ? "The result was built, but the file could not be saved. You’re still viewing the previous saved version."
+          : "The result was built, but the file could not be saved.",
+      reason: actualDetail,
+      recovery: "Fix the save problem in Details, then run cadgen export on this file."
+    };
+  }
 
   if (isViewerServiceFailure(editingState.failure, actualDetail)) {
     return {

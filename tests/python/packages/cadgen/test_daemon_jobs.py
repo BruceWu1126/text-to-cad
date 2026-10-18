@@ -412,6 +412,48 @@ class Lifecycle(unittest.TestCase):
         self.ledger.finish(request, 0)
         self.assertFalse(being_written(self.ledger.snapshot(), output))
 
+    def test_save_failures_are_recorded_per_unsaved_output_never_from_a_provisional_preview(self):
+        output = str(Path(self.model).with_suffix(".step"))
+        early = self.ledger.start(tool="run", subject=self.model)
+        self.ledger.observe(self._event(self.model, "building", job=early["id"], sequence=1,
+                                       preview={"output": output, "tree": "provisional"}))
+        self.ledger.finish(early, 1, error="invalid mate declaration")
+        self.assertNotIn("saveFailures", early, "a preview can exist before publication checks pass")
+
+        request = self.ledger.start(tool="run", subject=self.model)
+        mesh = str(Path(output).with_suffix(".stl"))
+        self._owing(request, self.model, 1, output, "recorded")
+        self._owing(request, self.model, 2, mesh, "recorded")
+        self._saved(request, self.model, 3, output, "recorded")
+        self.ledger.finish(request, 1, error="mesh destination is read-only")
+        self.assertNotIn("saving", request, "the request no longer writes anything")
+        self.assertEqual(set(request["saveFailures"]), {mesh})
+        self.assertEqual(request["saveFailures"][mesh]["tree"], "recorded")
+        self.assertEqual(request["savedResults"][output]["tree"], "recorded")
+
+    def test_newer_results_supersede_retained_save_failures_only_in_their_store(self):
+        output = str(Path(self.model).with_suffix(".step"))
+        older = self.ledger.start(tool="run", subject=self.model, store_root="/one")
+        self._owing(older, self.model, 1, output, "old")
+        self.ledger.finish(older, 1, error="disk full")
+        other = self.ledger.start(tool="run", subject=self.model, store_root="/two")
+        self._owing(other, self.model, 1, output, "other store")
+        self.assertNotIn("supersededOutputs", older)
+        newer = self.ledger.start(tool="run", subject=self.model, store_root="/one")
+        self._owing(newer, self.model, 1, output, "new")
+        self.assertEqual(older["supersededOutputs"], [output])
+        self.assertTrue(older["saveFailures"][output]["superseded"])
+        self._saved(newer, self.model, 2, output, "new")
+        self.ledger.finish(newer, 0)
+        self.assertNotIn("saveFailures", newer, "a successful retry carries no old failure")
+
+    def test_a_cancelled_request_does_not_turn_a_recorded_result_into_a_save_failure(self):
+        request = self.ledger.start(tool="run", subject=self.model)
+        self._owing(request, self.model, 1, str(Path(self.model).with_suffix(".step")), "recorded")
+        self.ledger.finish(request, 1, error="client left", cancelled=True)
+        self.assertEqual(request["state"], "cancelled")
+        self.assertNotIn("saveFailures", request)
+
     def test_a_failed_request_fails_the_closed_row_that_owed_a_file(self):
         # A child's row closes at its own done, before its file is written; its export failing
         # after is the request's failure, and the file's reader sees it on the child's row.
@@ -430,6 +472,8 @@ class Lifecycle(unittest.TestCase):
                          (rows[self.model]["state"], rows[self.model]["error"]))
         self.assertEqual(("done", None), (rows[sibling]["state"], rows[sibling]["error"]),
                          "a row whose file landed stays done")
+        self.assertEqual(rows[self.model]["saveFailures"][output]["tree"], "t" * 64)
+        self.assertNotIn("saveFailures", rows[sibling])
         self.assertEqual("failed", rows[parent]["state"])
 
     def test_a_row_still_owing_a_file_is_kept_until_its_request_ends(self):

@@ -134,6 +134,22 @@ class ProgressFeed(unittest.TestCase):
         ]
         self.assertEqual({"state": "compiled"}, self.status())
 
+    def test_save_failures_name_only_the_output_that_was_not_saved(self):
+        mesh = str(self.document.with_suffix(".stl"))
+        failed = job(self.script, [str(self.document), mesh], "failed", exit=1)
+        failed.update(error="disk full", saveFailures={str(self.document): {"tree": "a" * 64}, mesh: {"tree": "a" * 64}})
+        self.jobs = [failed]
+        status = self.status()
+        self.assertEqual(status["reason"], "save_failed")
+        self.assertEqual({key: status["failed"][key] for key in ("stage", "output", "tree")},
+                         {"stage": "save", "output": str(self.document), "tree": "a" * 64})
+        # A STEP saved before its mesh failed: neither status route reports a failed STEP.
+        failed["saveFailures"].pop(str(self.document))
+        failed["savedResults"] = {str(self.document): {"tree": "a" * 64, "documentHash": "d" * 64}}
+        self.assertNotIn("failed", self.status())
+        failed["supersededOutputs"] = [mesh]
+        self.assertIsNone(build_progress.build_progress_snapshot(mesh, jobs=[failed]))
+
     def test_a_job_for_another_document_is_not_this_documents_build(self):
         self.jobs = [job(str(self.root / "src" / "other.py"), [str(self.root / "STEP" / "other.step")], "building")]
         self.assertEqual("not-compiled", self.status()["state"])

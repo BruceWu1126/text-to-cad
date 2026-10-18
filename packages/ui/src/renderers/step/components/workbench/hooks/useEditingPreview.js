@@ -7,6 +7,7 @@ import { observeEditingPreview } from "../../../workbench/editingPreviewFeed.js"
 // build writes the file (`saved`, the feed's own event: a build records its result and writes the
 // file after), when it finishes, or when the file moves past one, the catalog is read at once, so
 // the saved file replaces the one on screen without waiting for the catalog's next poll.
+/** @returns {{ state: import("@text-to-cad/core/client").CadEditingPreview }} */
 export function useEditingPreview(file, { enabled, client } = {}) {
   const [snapshot, setSnapshot] = useState(() => ({ file: "", state: initialEditingPreview() }));
   useEffect(() => {

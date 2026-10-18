@@ -223,7 +223,11 @@ a scoped `resources` provider. The build feed it observes names a build's
 the tree, whose view is read at `storeTreeUrl` exactly as a saved file's is, the
 part key of each component the store holds so far, and its annotations object,
 read with `previewAnnotations` — what the sidecar will carry, keyed by the tree's
-tokens. Nothing here aliases that tree to saved STEP bytes. Its HTTP adapter owns the protocol; renderers
+tokens. `failureStage` distinguishes a build failure from a failed save of a
+recorded result. `saveFailure` names that output and tree; live `saving` names
+the tree still owed. These facts are per output, so a failed mesh does not mark
+an already-saved STEP as failed. Nothing here aliases that tree to saved STEP
+bytes. Its HTTP adapter owns the protocol; renderers
 consume domain results and resource tickets. See [workspace services and resource
 transport](docs/workspace-resources.md) for worker transfer, nested dependencies,
 cache generations and the standalone static-HTTP default. No client reads model

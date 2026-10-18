@@ -332,10 +332,13 @@ class JobLedger:
                         for older in self._jobs.values():
                             if older is job or older.get("storeRoot") != job.get("storeRoot"):
                                 continue
-                            superseded = (older.get("saving") or {}).get(output)
-                            if isinstance(superseded, dict) and not superseded.get("superseded"):
-                                superseded["superseded"] = True
-                                self._notify(older)
+                            for bucket in ("saving", "saveFailures"):
+                                superseded = (older.get(bucket) or {}).get(output)
+                                if isinstance(superseded, dict) and not superseded.get("superseded"):
+                                    superseded["superseded"] = True
+                                    if output not in older.setdefault("supersededOutputs", []):
+                                        older["supersededOutputs"].append(output)
+                                    self._notify(older)
                     updates[output] = {**{key: copy.deepcopy(payload[key]) for key in kept
                                           if payload.get(key) is not None},
                                        "output": output, "sequence": ordinal, "revision": self._revision + 1}
@@ -384,15 +387,24 @@ class JobLedger:
                            and (row["state"] in _RUNNING or "saving" in row))]
             for row in rows:
                 closing = row is job or row["state"] in _RUNNING
+                # Only a recorded result owes a save. A provisional preview can precede
+                # validation, so it cannot distinguish a model failure from a failed save.
+                # Keep that distinction after the live obligations are removed below, per
+                # output: a failed mesh must not make its already-saved STEP fail too.
+                if exit_code != 0 and not cancelled:
+                    failures = {output: copy.deepcopy(owed) for output, owed in (row.get("saving") or {}).items()
+                                if _owes(row, output)}
+                    if failures:
+                        row["saveFailures"] = failures
                 unsaved = not closing and exit_code != 0 and not cancelled and any(
-                    _owes(row, output) for output in row["saving"])
+                    not failure.get("superseded") for failure in (row.get("saveFailures") or {}).values())
                 if closing or unsaved:
                     if row["state"] in _RUNNING or unsaved:
                         row["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
                     row["exit"] = int(exit_code)
                     if exit_code != 0 and error and not cancelled:
                         row["error"] = str(error)
-                    row["finishedAt"] = row["finishedAt"] or now
+                    row["finishedAt"] = now if unsaved else row["finishedAt"] or now
                 row.pop("saving", None)
                 row["updatedAt"] = now
             self._sweep(now)
