@@ -3,7 +3,7 @@
 Law 5: same inputs, same bytes. Every mesh is OCCT's, derived once per component
 and tolerance into the store's content-addressed mesh entries, and three paths
 reach them: a build exporting its own declared mesh, which derives them in its
-own process (no build-pool job: its kernel and shapes are already loaded); a
+worker from its already loaded kernel and shapes; a
 door's export, which derives them in build-pool jobs; and a snapshot, which
 derives the meshes it draws. They share a key, so whichever arrives first
 decides what every later export of that document reads -- and the bytes must
@@ -22,12 +22,14 @@ what carries a seam, and a box-only model would pass either way.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.python.support.mesh_geometry import binary_stl_triangles, mesh_deviation, tolerance_of
 from tests.python.support.paths import add_repo_path
@@ -64,48 +66,45 @@ MODEL = textwrap.dedent("""\
 
 DOOR_MODULES = {"glb": "glb_build", "3mf": "threemf_build", "stl": "stl_build"}
 
-# The model script's run, with every build-pool dispatch refused: the build's own
-# export must derive its surfaces and meshes in the build's process.
-BUILD_IN_PROCESS = textwrap.dedent("""\
-    import runpy
-    import sys
-
-    from cadgen.daemon import artifacts
-
-
-    def refuse(request, root):
-        raise AssertionError(f"the build's own export submitted a {request['kind']} job to the build pool")
-
-
-    artifacts._dispatch = refuse
-    sys.argv = ["fixture.py"]
-    runpy.run_path("fixture.py", run_name="__main__")
-    """)
-
-
 class MeshExportEngineDeterminismTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory(prefix="mesh-engine-determinism-")
-        self.addCleanup(self._tmp.cleanup)
-        self.root = Path(self._tmp.name).resolve()
+        self.root = Path(tempfile.mkdtemp(prefix="mesh-engine-determinism-")).resolve()
+        self.stores: set[str] = set()
+        self.addCleanup(self._cleanup)
         self.base_env = dict(os.environ)
         self.base_env.update({
             "CADGEN_COMPONENT_WORKERS": "1",
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })
 
-    def _run(self, argv: list[str], *, cwd: Path, store: Path) -> None:
+    def _cleanup(self) -> None:
+        from cadgen.daemon.client import watch_jobs
+
+        # A script may answer before its exports finish. Even a failed
+        # assertion keeps every private store until its owned requests end.
+        # If the ledger disconnects, retain the directory rather than race it.
+        if self.stores:
+            with mock.patch.dict(os.environ, self.base_env):
+                update = watch_jobs()
+                self.assertIsNotNone(update, "the build daemon did not answer the fixture's cleanup watch")
+                while any(os.path.realpath(job.get("storeRoot", "")) in self.stores and job["finishedAt"] is None
+                          for job in update["jobs"]):
+                    update = watch_jobs(update["jobsCursor"])
+                    self.assertIsNotNone(update, "the build daemon disconnected before the fixture finished")
+        shutil.rmtree(self.root)
+
+    def _run(self, argv: list[str], *, cwd: Path, store: Path, await_output: str = "fixture.step") -> None:
         env = dict(self.base_env, CADGEN_CACHE_DIR=str(store))
+        self.stores.add(os.path.realpath(store))
         proc = subprocess.run(
             [PYTHON, *argv], cwd=str(cwd), env=env,
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         from cadgen._internal.doors import await_writes
-        from unittest import mock
 
         with mock.patch.dict(os.environ, env):
-            await_writes(cwd / "fixture.step")
+            await_writes(cwd / await_output)
 
     def _cli(self, module: str, *args: str, cwd: Path, store: Path) -> None:
         self._run(["-c", f"from cadgen.cli.{module} import main; raise SystemExit(main())", *args],
@@ -136,7 +135,9 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
         build.mkdir()
         self.source = build / "fixture.py"
         self.source.write_text(MODEL, encoding="utf-8")
-        self._run(["-c", BUILD_IN_PROCESS], cwd=build, store=self.root / "build-store")
+        # The ordinary client hands the build to a daemon worker. STEP may
+        # already be saved while that worker still owes the declared STL.
+        self._run([str(self.source)], cwd=build, store=self.root / "build-store", await_output="fixture.stl")
         self.assertTrue((build / "fixture.step").is_file(), "the model script writes its STEP")
         built = (build / "fixture.stl").read_bytes()
 
