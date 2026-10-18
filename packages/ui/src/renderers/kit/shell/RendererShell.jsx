@@ -25,6 +25,7 @@ import QuickEdit from "../tools/quick-edit/QuickEdit.jsx";
 import { ViewportTopRight } from "./ViewportTopRight.jsx";
 import ShellViewport from "./ShellViewport.jsx";
 import StudioView from "./StudioView.jsx";
+import { detailStillComing, studioCoverStep } from "./studioCover.js";
 import ViewportContextMenu from "./ViewportContextMenu.jsx";
 import AnnotationSelectionBar from "../tools/annotate/AnnotationSelectionBar.jsx";
 
@@ -49,7 +50,10 @@ const CORNER_BOXES = "[data-viewport-top-right] :is([data-viewport-notice], [dat
 const STUDIO_SECTIONS = Object.freeze(["position", "animation"]);
 // Preview's cover: at least this long, then until detail has been quiet this long, and never longer than the last.
 // Once quiet, the picture is checked this often until it has converged.
-const PREVIEW_COVER_MIN_MS = 700, PREVIEW_COVER_QUIET_MS = 400, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_CONVERGE_MS = 50;
+// The cover waits at least MIN; at MAX it stops waiting for finer detail, and lets the picture on
+// screen finish converging for at most FINISH more.
+const PREVIEW_COVER_MIN_MS = 700, PREVIEW_COVER_QUIET_MS = 400, PREVIEW_COVER_MAX_MS = 5000, PREVIEW_COVER_FINISH_MS = 1000,
+  PREVIEW_COVER_CONVERGE_MS = 50;
 const SIDEBAR_POSITION = Object.freeze({ top: `var(--cad-sidebar-top, ${INSET})`, left: INSET, bottom: INSET });
 // On a phone the sidebar is one tile at the top-left, on the strip's line, and its panel (the open
 // section, under tabs) runs down from under it to the view's bottom inset, clear of Quick Edit's
@@ -194,29 +198,35 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
     if (previewing) { setCoverRequested(false); setStudioPanelOpen(false); }
   }
   const previewCovered = coverRequested || (previewing && !previewSettled);
+  // What moves the Studio's picture on purpose: its Orbit, or its routine playing (`studioCover.js`).
+  const studioMovingRef = useRef(false);
+  studioMovingRef.current = shell.orbiting || studio?.animation?.playing === true;
   useEffect(() => {
     if (!previewing) return undefined;
-    let refining = false, quiet = 0, done = false, lastSample = -1;
+    let refining = typeof window !== "undefined" && detailStillComing(window.__cadViewerQuality?.state);
+    let quiet = 0, done = false, capped = false;
     const finish = () => { if (done) return; done = true; setPreviewSettled(true); };
-    const cap = setTimeout(finish, PREVIEW_COVER_MAX_MS);
+    // Detail still streaming (a model opened cold) is waited for this long, no longer; then the
+    // picture on screen converges, and the cover lifts on it, or at the last at FINISH more.
+    const cap = setTimeout(() => { capped = true; settle(0); }, PREVIEW_COVER_MAX_MS);
+    const last = setTimeout(finish, PREVIEW_COVER_MAX_MS + PREVIEW_COVER_FINISH_MS);
     const settle = (delay = PREVIEW_COVER_QUIET_MS) => {
       clearTimeout(quiet);
       quiet = setTimeout(() => {
-        if (refining || !studioPresentedRef.current) { settle(); return; }
-        const progress = studioViewRef.current?.pictureProgress?.();
-        const moving = progress && progress.sample < lastSample;
-        lastSample = progress?.sample ?? -1;
-        if (progress && progress.sample < progress.samples && !moving) settle(PREVIEW_COVER_CONVERGE_MS);
+        const step = studioCoverStep({ presented: studioPresentedRef.current, refining: refining && !capped, moving: studioMovingRef.current,
+          progress: studioViewRef.current?.pictureProgress?.() ?? null });
+        if (step === "wait") settle();
+        else if (step === "converge") settle(PREVIEW_COVER_CONVERGE_MS);
         else finish();
       }, delay);
     };
     const onQuality = event => {
-      refining = event.detail?.state === "refining";
-      if (refining) clearTimeout(quiet); else settle();
+      refining = detailStillComing(event.detail?.state);
+      if (refining && !capped) clearTimeout(quiet); else settle();
     };
     window.addEventListener("cad:quality-status", onQuality);
     settle(PREVIEW_COVER_MIN_MS);
-    return () => { done = true; clearTimeout(cap); clearTimeout(quiet); window.removeEventListener("cad:quality-status", onQuality); };
+    return () => { done = true; clearTimeout(cap); clearTimeout(last); clearTimeout(quiet); window.removeEventListener("cad:quality-status", onQuality); };
   }, [previewing]);
   // The routine the Animation section plays: the tools view's, or in the Studio the Studio's own.
   const animation = previewing ? studio?.animation ?? null : frame.animation;

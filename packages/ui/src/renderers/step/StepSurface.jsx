@@ -38,6 +38,7 @@ import { useModelTools } from "./components/workbench/ModelTools.jsx";
 import { useStepPanels, useStepSelectionChips } from "./components/workbench/StepPanels.js";
 import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
 import { useStepStudioMotion } from "./workbench/useStepStudioMotion.js";
+import { useSettledValue } from "./workbench/settledValue.js";
 import { animationControlsHaveContent } from "../kit/tools/playbar/AnimationTimeControl.js";
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
@@ -3444,6 +3445,9 @@ function StepSurfaceBody({ view, data }) {
   const studioSceneView = useMemo(() => (studioStepScene ? stepSceneView(studioStepScene, keepsAuthoredFinish) : null),
     [studioStepScene, keepsAuthoredFinish]);
   const studioAnimation = animationControlsHaveContent(studioMotion.animationControls) ? studioMotion.animationControls : null;
+  // Finer detail reaches the Studio's scene in a few grouped steps (`settledValue.js`): each one
+  // starts its converging picture again, and a large model's detail arrives as a burst of batches.
+  const studioMeshData = useSettledValue(selectedDisplayMeshData, { grouped: previewing });
   // The Studio's runtime going away takes its scene's build with it, and says nothing to the
   // detail loader: the editor's scene is the one that adopted the detail.
   const studioRuntimeLifecycle = useMemo(() => ({
@@ -3454,7 +3458,7 @@ function StepSurfaceBody({ view, data }) {
     overlay: (viewport, drawn) => {
       studioRuntimeRefRef.current = viewport.runtimeRef;
       return studioStepScene ? <StepStudioLayers viewport={viewport} drawn={drawn} studioStepScene={studioStepScene}
-        meshData={selectedDisplayMeshData} modelKey={selectedKey} isLoading={viewportIsLoading}
+        meshData={studioMeshData} modelKey={selectedKey} isLoading={viewportIsLoading}
         selectorRuntime={layerProps.selectorRuntime} stepParameterRuntime={selectedStepParameterRuntime} motion={studioMotion}
         renderPartsIndividually={Boolean(selectedStepParameterRuntime) || Boolean(Object.keys(selectedDisplayMeshData?.appearance?.materials || {}).length)}
         hoverStore={hoverStore} onLodCameraChange={onLodCameraMoved} /> : null;

@@ -763,10 +763,15 @@ hosts neither start nor observe it. Its button is a play triangle ("Present"), a
 right end after Display (the renderer's `navbarSlot`; a host with no navbar has both end the
 strip). A press covers the view at once
 ("Preparing studio…", in the scene's backdrop colour) and enters the Studio under the cover,
-which lifts once the Studio's view has presented its first frame, detail has stopped refining for a moment and the studio
-frame's picture has converged (every sample drawn: the viewport's `pictureProgress`; a view
-that is moving, a routine playing, has nothing to wait for) — at least 700ms, at most five
-seconds — fading from the finished picture. The navbar stays, so its menu and the explorer
+which lifts once the Studio's view has presented its first frame, no finer detail is on its way
+(the quality is neither preview nor refining) and the studio frame's picture has converged
+(every sample drawn: the viewport's `pictureProgress`) — at least 700ms; at five seconds it stops
+waiting for detail and lifts on the picture converged, a second later at the latest — fading from
+the finished picture (`kit/shell/studioCover.js`). A view the shell set moving, Orbit
+on or a routine playing, has nothing to wait for; detail that lands starts the picture again and
+is waited for, never read as motion. The Studio's scene takes finer detail in grouped steps,
+after a quiet moment or every second while it streams (`step/workbench/settledValue.js`), so a
+burst of batches restarts the picture once or twice, not per batch. The navbar stays, so its menu and the explorer
 still lead to other files; the tool strip, its sub-toolbar, the tool stack and their resize grips, Quick
 Edit, joint handles, cube and context menu are gone (`PreviewChrome`, hidden and inert).
 
