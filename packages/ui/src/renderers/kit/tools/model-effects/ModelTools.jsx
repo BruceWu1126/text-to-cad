@@ -25,7 +25,7 @@ function ClipIcon(props) {
  * it starts neutral. Its Reset removes the effect, idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
  *
  * Each is offered where the view's features list it (`ViewFeatures`): a renderer decides which of its
- * files have them, and a file whose view lists Explode has it even where it separates nothing.
+ * files have them, and lists Explode only where there are parts to separate.
  */
 export function useModelTools({ view, features, store, mesh, disabled, selectedTool, onSelect }) {
   const applied = [

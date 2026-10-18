@@ -31,7 +31,7 @@ import { viewportMenuEntries } from "./components/workbench/AssemblyContextMenuI
 import { useViewportLod } from "./render/useViewportLod.js";
 import { lodSceneMayMove, sampleLodCamera } from "./render/lodCameraSample.js";
 import { registerLodDisplaySource } from "./render/lodSceneAdoption.js";
-import { ALL_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
+import { ALL_VIEW_FEATURES, STEP_PART_VIEW_FEATURES } from "@text-to-cad/core/common/viewSettings.js";
 import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useStepPanels, useStepSelectionChips } from "./components/workbench/StepPanels.js";
 import { stepMotionSources, useStepMotion } from "./workbench/useStepMotion.js";
@@ -386,9 +386,6 @@ function StepSurfaceBody({ view, data }) {
   // the format again.
   // The URL's path IS the directory, so there is nothing to select and no state to
   // reconcile — the Viewer always has exactly one directory, the one it was opened at.
-  // What this file's view opts into: a B-rep model takes every Display section, preset and
-  // surface style. The shell configures the store with it (`features`).
-  const viewFeatures = ALL_VIEW_FEATURES;
   // Where this entry's motion comes from; the motion itself is `useStepMotion`'s, below.
   const {
     moduleUrl: selectedStepModuleUrl, sourceAnimation: selectedSourceAnimation, animationKey: selectedAnimationSourceKey
@@ -423,6 +420,10 @@ function StepSurfaceBody({ view, data }) {
   // the model it shows -- its kind, its tree, its parts (`meshState`) -- never the listing of a
   // revision that has none, which left the tree one row under a model that had not changed.
   const isAssemblyView = (retainingPreviousStepMesh ? meshState?.kind : selectedEntry?.kind) === "assembly";
+  // What this file's view opts into: a B-rep model takes every Display section, preset and surface
+  // style, and an assembly Explode too. A part file has none, as it has no Model tree: one part
+  // separates nothing. The shell configures the store with it (`features`).
+  const viewFeatures = isAssemblyView ? ALL_VIEW_FEATURES : STEP_PART_VIEW_FEATURES;
   const shownMeshCurrent = selectedMeshMatches || retainingPreviousStepMesh;
   // A rebuild still running holds the view: what is picked now would not outlive its revision. One
   // that failed leaves the previous revision on screen for good, with nothing coming to replace it:

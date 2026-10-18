@@ -244,6 +244,11 @@ export const EDGELESS_VIEW_FEATURES = Object.freeze({
 
 // A triangle mesh, a robot and a GLB have no edges either, but Clip cuts whatever a scene drew
 // (`lib/viewer/sceneClip.js`), and a GLB of several parts moves them apart (`sceneExplode.js`).
+/** A STEP part file: everything but Explode, which separates nothing in one part. @type {ViewFeatures} */
+export const STEP_PART_VIEW_FEATURES = Object.freeze({
+  modes: VIEW_MODE_VALUES,
+  settings: Object.freeze(VIEW_SETTING_IDS.filter(id => id !== "exploded"))
+});
 /** STL, 3MF, URDF, SRDF, SDF and a GLB of one part: Solid, cut by Clip. @type {ViewFeatures} */
 export const MESH_VIEW_FEATURES = Object.freeze({
   modes: EDGELESS_VIEW_FEATURES.modes,

@@ -323,8 +323,9 @@ effect reappears on the model. Clip's slider, left to right, cuts deeper through
 bounding box; pose, animation and Explode never redefine the range. It shows the share cut
 away, while the view stores where the plane stands (`clip.at`, in millimetres), so a model
 edit leaves the plane where it was and the slider reads 0% or 100% if the plane ends up
-outside the new box. Every STEP has Explode, a single part too, where it separates nothing:
-the strip is the same for every STEP file.
+outside the new box. Explode is offered only where there are parts to separate: a STEP
+assembly and a GLB of several rigid nodes. A STEP part file has no Explode tile, as it has no
+Model tree (`STEP_PART_VIEW_FEATURES`).
 
 ## The file sidebar and the tool stack
 

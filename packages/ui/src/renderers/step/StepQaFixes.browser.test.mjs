@@ -68,8 +68,9 @@ test('a single-part STEP names a picked face after its part, by the name the vie
   };
   // Main's fixture has an XCAF label entry; the viewer names the part from its file.
   assert.equal(lone.fixture.view.occurrences[0].name, '=>[0:1:1:2]');
-  // A single part keeps the strip every STEP has: Explode is there, and separates nothing.
-  assert.equal(await view.tool('Explode').count(), 1, 'a single part has Explode too');
+  // A single part has no Explode, as it has no tree: one part separates nothing.
+  assert.equal(await view.tool('Explode').count(), 0, 'no Explode for a part file');
+  assert.equal(await view.tool('Clip').count(), 1, 'Clip stays');
   // A single part has no tree under Select (its one row would be all of it), and no panel in its
   // place: Select's selection filter is the chevron after its button on the strip, everything
   // ticked, with no Parts (a part is one thing) and no Position (nothing moves).
