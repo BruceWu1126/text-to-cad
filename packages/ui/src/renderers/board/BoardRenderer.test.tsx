@@ -244,6 +244,11 @@ it("a layer's eye hides it: the Display contract's layers, which reads as Custom
   expect([...layers.querySelectorAll('[data-layer-group]')].map(group => group.getAttribute('data-layer-group'))).toEqual(['front', 'back', 'other']);
   expect([...layers.querySelectorAll('[data-layer-row]')].map(row => row.getAttribute('data-layer-row')))
     .toEqual(['F.CrtYd', 'F.Fab', 'F.SilkS', 'F.Paste', 'F.Mask', 'F.Cu', 'B.Cu', 'B.Mask', 'Edge.Cuts', 'vias', 'ratsnest', 'drills']);
+  // One glyph a row: a layer has nothing under it, so its glyph is its colour, and nothing stands before it.
+  for (const row of layers.querySelectorAll('[data-layer-row]')) {
+    expect([...row.querySelectorAll('[data-layer-glyph]')].map(glyph => glyph.getAttribute('data-layer-glyph'))).toEqual(['swatch']);
+    expect(row.firstElementChild!.getAttribute('data-layer-glyph')).toBe('swatch');
+  }
   fireEvent.click(layers.querySelector('[data-layer-visibility="F.Cu"]')!);
   await waitFor(() => expect(drawn.at(-1)!.layers).not.toContain('F.Cu'));
   expect(within(strip(pane)).getByRole('button', { name: 'Display mode: Custom' })).toBeTruthy();

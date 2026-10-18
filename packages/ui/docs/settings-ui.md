@@ -339,8 +339,9 @@ whatever tool is in hand — the strip is for using tools, the sidebar for readi
 assembly's **Model tree** (a part file, whose tree would be its one row, has none), then
 **Position**, where the file has joints to move; a robot's **Links**, an `.sdf`'s **SDF**, then
 **Position**, where a joint can be driven; a drawing's **Layers**, where it has four or more
-layers or any block reference (a flat pattern's CUT and BEND has none): each layer's pen, name,
-entity count and eye, its block references under it; a board's **Board**, its parts by kind and
+layers or any block reference (a flat pattern's CUT and BEND has none): each layer's pen (or, for a
+layer with block references, its chevron), name, entity count and eye, its block references under
+it; a board's **Board**, its parts by kind and
 then its nets, each with its pads, headed by its filter (a row selects; a part's or a net's eye
 isolates it, the rest stepping back), and its **Layers**, grouped Front, Inner, Back and Other
 as KiCad stacks them, each layer's colour, name, count and eye (the eyes are the board's
@@ -460,7 +461,11 @@ column starts 5px in from the row's left end (`TREE_ROW_INSET_PX`), centred unde
 field's search icon and as far in as the icons of a row's actions sit from its right end, in the
 STEP tree and the explorer alike; each level adds
 the explorer's compact indent, 10px (`TREE_INDENT_PX`), its rows hung from a faint line under
-their owner's glyph (`TreeRowGuides`), as the explorer's are; its search box is its section's head. An assembly row's
+their owner's glyph (`TreeRowGuides`), as the explorer's are; its search box is its section's head.
+A Layers section (a drawing's, a board's) is a tree under a title: each row's one glyph is its
+layer's colour box, or, for a layer with block references under it, its disclosure chevron in
+the box's place, and the glyph column starts on the title's edge, a board's group labels with it
+(`kit/inspector/layerRows.jsx`); the names stand on one line after it, the count after the name. An assembly row's
 actions, shown on hover and kept while they are on, are **Isolate** then the **Hide/Reveal** eye; a part file has no
 Isolate. A Links row that draws something — a link with visuals, or one visual —
 has the eye alone, in its search hit too: a link's hides its own visuals, never its

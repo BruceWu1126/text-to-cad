@@ -327,7 +327,9 @@ it, the file sidebar, Quick Edit at the top-right.
 - **Layers**, a file-sidebar section, only where the drawing has the structure to read
   (`layersSectionShown`): four or more layers drawn on, or any block reference. Each
   layer's pen, name, entity count and eye (hidden: not drawn, picked or snapped to), and
-  under it the block references placed on it, a click picking one.
+  under it the block references placed on it, a click picking one. A row has one glyph, on the
+  section title's edge (`kit/inspector/layerRows.jsx`): the pen, or, for a layer with block
+  references under it, the chevron that folds them.
 - **Quick Edit** carries the picks, the ink and the measurements; its views are the
   window on screen as a plan-view camera (`planCamera`: looking straight down, `up`
   +Y, `orthographicHalfHeight` the window's half height), which `cadgen dxf snapshot
