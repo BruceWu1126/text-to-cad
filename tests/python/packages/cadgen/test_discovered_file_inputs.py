@@ -95,6 +95,11 @@ class DiscoveredFileInputTests(unittest.TestCase):
             timeout=600,
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.environment):
+            await_writes((self.project / model).with_suffix(".step"))
         return completed.stdout + completed.stderr
 
     def _write_model(self, name: str, source: str) -> str:
@@ -153,6 +158,14 @@ class DiscoveredFileInputTests(unittest.TestCase):
             env=self.environment, capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.environment):
+            await_writes((self.project / model).with_suffix(".step"))
+        from cadgen.store.records import read_record
+        with mock.patch.dict(os.environ, self.environment):
+            self.assertTrue((self.project / model).with_suffix(".step").is_file(), read_record(self.project / model))
         return json.loads(completed.stdout.strip().splitlines()[-1])["outcome"]
 
     def test_a_file_the_model_reads_without_declaring_it_is_an_input(self) -> None:
@@ -256,10 +269,17 @@ class OwnOutputAsInputTests(unittest.TestCase):
         })
 
     def _run(self, name: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
+        completed = subprocess.run(
             [sys.executable, str(self.project / name)], cwd=str(self.project),
             env=self.environment, capture_output=True, text=True, timeout=600,
         )
+        if completed.returncode == 0:
+            from cadgen._internal.doors import await_writes
+            from unittest import mock
+
+            with mock.patch.dict(os.environ, self.environment):
+                await_writes((self.project / name).with_suffix(".step"))
+        return completed
 
     def test_read_step_of_the_models_own_step_is_refused(self) -> None:
         (self.project / "ouro.py").write_text(textwrap.dedent('''

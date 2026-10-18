@@ -86,10 +86,12 @@ class LayeringCase(unittest.TestCase):
         if completed.returncode != 0:
             raise AssertionError(completed.stderr[-2000:])
         cls.document = root / "hinge.step"
-        cls.sidecar = json.loads((root / "hinge.step.json").read_text(encoding="utf-8"))
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": cls._store.name}):
             from cadgen.catalog import result_view_dir
+            from cadgen._internal.doors import await_writes
 
+            await_writes(cls.document)
+            cls.sidecar = json.loads((root / "hinge.step.json").read_text(encoding="utf-8"))
             view = result_view_dir(cls.document)
         cls.descriptor = json.loads((view / "assembly.json").read_text(encoding="utf-8"))
 

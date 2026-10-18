@@ -53,6 +53,14 @@ def _run(argv: list[str], cwd: pathlib.Path) -> tuple[int, str]:
     env["CADGEN_MEMORY_MB"] = "8192"
     proc = subprocess.run([sys.executable, *argv], cwd=str(cwd), env=env, capture_output=True, text=True,
                           timeout=600)
+    if proc.returncode == 0:
+        from cadgen._internal.doors import await_writes
+        from cadgen.metadata import declared_output_paths
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env):
+            for output in declared_output_paths(cwd / argv[0]):
+                await_writes(output)
     return proc.returncode, proc.stdout + proc.stderr
 
 

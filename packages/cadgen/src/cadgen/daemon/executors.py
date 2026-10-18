@@ -100,7 +100,6 @@ class Job:
 # --- events -------------------------------------------------------------------------
 
 _EVENT_SINK: Callable[[dict], None] | None = None
-_RELEASE_SINK: Callable[[int], None] | None = None
 _EVENT_LOCK = threading.Lock()
 _EVENT_SEQUENCE = itertools.count(1)
 _RESULT_CAPTURE = threading.local()
@@ -139,26 +138,6 @@ def set_event_sink(sink: Callable[[dict], None] | None) -> None:
 def sink_installed() -> bool:
     with _EVENT_LOCK:
         return _EVENT_SINK is not None
-
-
-def set_release_sink(sink: Callable[[int], None] | None) -> None:
-    """Where a command's release of its caller goes in this process: a daemon worker's
-    frame to its client (``worker.serve``); nowhere in a process of the caller's own."""
-    global _RELEASE_SINK
-    with _EVENT_LOCK:
-        _RELEASE_SINK = sink
-
-
-def release_caller(code: int) -> None:
-    """The command's answer is complete, with exit ``code`` so far: whoever asked may
-    return (``--no-wait``), the files the run still owes finishing after. In a daemon
-    worker the client gets the ``released`` frame and returns, the worker finishes the
-    exports before its next job; in a process of the caller's own the answer is on its
-    stdout already, so this is nothing."""
-    with _EVENT_LOCK:
-        sink = _RELEASE_SINK
-    if sink is not None:
-        sink(int(code))
 
 
 def emit_event(event: dict) -> None:

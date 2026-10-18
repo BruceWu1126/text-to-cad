@@ -19,6 +19,13 @@ tree's own transitions: submitted → queued → building [phase, done/total] �
 done | failed) and from the request's exit code; a job whose requester left ends
 cancelled. Stdlib only; nothing here
 imports the kernel — a job's outputs come from ``cadgen.metadata``'s AST parse.
+
+A row also says which files its build still owes: a ``saving`` result names each file a
+model's result owes the moment it is recorded, and the file's ``saved`` result follows when
+it lands. A door given a path asks this (:func:`being_written`) and waits while a request
+is still writing the file (STORE.md §3, *Exports*). The request's end settles what it owed:
+its rows owe nothing more, and a row that owed a file the failed request never saved fails
+with the request's reason.
 """
 
 from __future__ import annotations
@@ -34,20 +41,55 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-__all__ = ["JobLedger", "RETAIN_SECONDS", "declared_outputs", "failure_message"]
+__all__ = ["JobLedger", "RETAIN_SECONDS", "being_written", "declared_outputs", "failure_message"]
 
 RETAIN_SECONDS = 120.0
 _RUNNING = ("submitted", "queued", "building")
 # What a job keeps of a build's results, by output (``viewer.preview`` reads them): of the
 # preview revision its tree, the producer its parts are keyed under, the part key of each
 # component the store holds and whether that is all of them; of the preview's annotations
-# the one object's hash; of the saved document its tree and digest, which tell whether the
-# file moved on. A status names objects and carries no geometry or annotation content.
+# the one object's hash; of a file the build owes the tree it is written from; of the saved
+# document its tree and digest, which tell whether the file moved on. A status names objects
+# and carries no geometry or annotation content. Each is kept with the ledger's revision when
+# it landed, the order of results across rows.
 _KEPT_RESULT_FIELDS = {
     "preview": ("previews", ("tree", "producer", "parts", "complete")),
     "annotations": ("annotations", ("tree", "object")),
+    "saving": ("saving", ("tree",)),
     "saved": ("savedResults", ("tree", "documentHash")),
 }
+
+
+def _owes(job: dict[str, Any], output: str) -> bool:
+    """Whether ``job``'s build still owes ``output``: it named the file as owed (``saving``)
+    and has saved nothing there since."""
+    owed = (job.get("saving") or {}).get(output)
+    if not isinstance(owed, dict) or owed.get("superseded"):
+        return False
+    saved = (job.get("savedResults") or {}).get(output)
+    return not isinstance(saved, dict) or int(saved.get("sequence") or 0) < int(owed.get("sequence") or 0)
+
+
+def being_written(jobs: list[dict[str, Any]], output: str, *, own: str | None = None) -> bool:
+    """Whether a request in ``jobs`` (the ledger's rows for ``output``) is still writing it.
+
+    The newest result that owes the file is the one it will hold: an older build's export is
+    skipped or refused once a newer result of the model is recorded (STORE.md §3, *Exports*),
+    so only the newest owed result is waited for, until it saves the file or its request
+    ends. ``own`` is the asking request's id (``CADGEN_JOB_ID``): a file its own run owes is
+    written after its bodies return, so nothing in it waits for that."""
+    newest: tuple[dict[str, Any], dict[str, Any]] | None = None
+    for job in jobs:
+        owed = (job.get("saving") or {}).get(output)
+        if isinstance(owed, dict) and (newest is None or int(owed.get("revision") or 0)
+                                       > int(newest[0].get("revision") or 0)):
+            newest = (owed, job)
+    if newest is None:
+        return False
+    job = newest[1]
+    if own and own in (job.get("id"), job.get("request")):
+        return False
+    return _owes(job, output)
 
 # The two shapes a failed job's stderr ends in: the CLI's own failure line
 # (``[cadgen step compile] FAILED: RuntimeError: ...``) or, under --verbose, a raw
@@ -283,9 +325,20 @@ class JobLedger:
                 updates = job.setdefault(bucket, {})
                 previous = updates.get(output)
                 if previous is None or ordinal > int(previous.get("sequence") or 0):
+                    if field == "saving":
+                        # A newer result takes over this file even after its row expires.
+                        # Remember that on each older obligation, so finishing or sweeping
+                        # the newer request cannot make a door wait on it again.
+                        for older in self._jobs.values():
+                            if older is job or older.get("storeRoot") != job.get("storeRoot"):
+                                continue
+                            superseded = (older.get("saving") or {}).get(output)
+                            if isinstance(superseded, dict) and not superseded.get("superseded"):
+                                superseded["superseded"] = True
+                                self._notify(older)
                     updates[output] = {**{key: copy.deepcopy(payload[key]) for key in kept
                                           if payload.get(key) is not None},
-                                       "output": output, "sequence": ordinal}
+                                       "output": output, "sequence": ordinal, "revision": self._revision + 1}
                 if output not in job["outputs"]:
                     job["outputs"].append(output)
             job["updatedAt"] = now
@@ -317,20 +370,30 @@ class JobLedger:
         nothing about the source, so it ends ``cancelled``, never ``failed``: a reader
         showing the document builds it again rather than reporting a failure that was
         only a closed connection.
+
+        The request's end settles the files its rows owed (``saving``): none is written
+        after it. A row that owed a file the request never saved -- a child whose own done
+        closed its row before its file was written -- fails with the request's reason when
+        the request failed, so the file's reader sees why, under the row's preview.
         """
         now = self._clock()
         with self._guard:
             # A child row the request leaves running -- its worker died, its caller left --
-            # ends as the request does.
-            rows = [job, *(row for row in self._jobs.values()
-                           if row.get("request") == job["id"] and row["state"] in _RUNNING)]
+            # ends as the request does; one already closed settles what it owed.
+            rows = [job, *(row for row in self._jobs.values() if row.get("request") == job["id"]
+                           and (row["state"] in _RUNNING or "saving" in row))]
             for row in rows:
-                if row["state"] in _RUNNING:
-                    row["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
-                row["exit"] = int(exit_code)
-                if exit_code != 0 and error and not cancelled:
-                    row["error"] = str(error)
-                row["finishedAt"] = row["finishedAt"] or now
+                closing = row is job or row["state"] in _RUNNING
+                unsaved = not closing and exit_code != 0 and not cancelled and any(
+                    _owes(row, output) for output in row["saving"])
+                if closing or unsaved:
+                    if row["state"] in _RUNNING or unsaved:
+                        row["state"] = "cancelled" if cancelled else "done" if exit_code == 0 else "failed"
+                    row["exit"] = int(exit_code)
+                    if exit_code != 0 and error and not cancelled:
+                        row["error"] = str(error)
+                    row["finishedAt"] = row["finishedAt"] or now
+                row.pop("saving", None)
                 row["updatedAt"] = now
             self._sweep(now)
             for row in rows:
@@ -409,8 +472,10 @@ class JobLedger:
         return None
 
     def _sweep(self, now: float) -> None:
+        # A row whose request is still writing a file it owes stays: a door reads it until the
+        # file is saved or the request ends (``finish``).
         for key, job in list(self._jobs.items()):
             finished = job.get("finishedAt")
-            if finished is not None and now - finished > self._retain:
+            if finished is not None and now - finished > self._retain and "saving" not in job:
                 self._jobs.pop(key, None)
                 self._notify()

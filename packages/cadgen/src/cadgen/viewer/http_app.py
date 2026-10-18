@@ -343,7 +343,13 @@ class CadApp:
     def read_catalog(self, file=None) -> dict:
         """The catalog of ``file``, an absolute path: its row, or none when it has none (or no file
         is named), and its revision -- a digest of the entries, which a client that only watches for
-        change compares instead of reading the catalog again."""
+        change compares instead of reading the catalog again. A file a build is still writing is
+        read once it is written (``doors.await_writes``); the view draws the build's preview
+        meanwhile, from the build feed."""
+        if file:
+            from cadgen._internal.doors import await_writes
+
+            await_writes(absolute_path(file))
         entry = catalog_entry(absolute_path(file)) if file else None
         entries = [entry] if entry else []
         return {"schemaVersion": CAD_CATALOG_SCHEMA_VERSION, "entries": entries, "revision": catalog_revision(entries)}

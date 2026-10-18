@@ -120,6 +120,12 @@ class MeshExportManifoldTest(unittest.TestCase):
             [PYTHON, script.name], cwd=str(cls.project), env=env,
             capture_output=True, text=True, timeout=600,
         )
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env):
+            for name in PARTS:
+                await_writes(cls.project / "STL" / f"{name}.stl")
         if proc.returncode != 0:
             cls._tmp.cleanup()
             raise RuntimeError(f"the parts did not build:\n{proc.stdout}{proc.stderr}")

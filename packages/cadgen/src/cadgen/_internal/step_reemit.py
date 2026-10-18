@@ -271,7 +271,7 @@ def reemit_step_document(
             "sidecarOnly": True,
         }
 
-    _emit(
+    generated, saving = _emit(
         document,
         out,
         input_hash=input_hash,
@@ -283,9 +283,10 @@ def reemit_step_document(
         logger=logger,
     )
     return {
-        "ok": out.is_file(),
+        "ok": True,
         "document": out,
-        "tree": result_tree_for(out),
+        "tree": generated.tree,
+        "saving": saving,
         "skipped": False,
         "sidecarOnly": False,
     }
@@ -302,7 +303,7 @@ def _emit(
     appearance: object = None,
     force: bool,
     logger: CliLogger,
-) -> None:
+) -> tuple[Any, tuple[Path, ...]]:
     """Read IN, re-path the scene to OUT, and run the ONE build pipeline."""
     from cadgen._internal.generation import _generate_part_outputs
     from cadgen.authoring import build_run
@@ -355,7 +356,7 @@ def _emit(
     # store write is atomic and idempotent, so neither can tear the other.
     # The run that owns the command: the document's export is queued by the pipeline
     # and finished as the run ends (cadgen.authoring.build_run).
-    with build_run(logger), cli_progress_line(
+    with build_run(logger) as run, cli_progress_line(
         spec.source_ref, logger=logger, fallback="Building..."
     ) as progress_sink, artifact_build(
         STEP_PACKAGE,
@@ -363,10 +364,12 @@ def _emit(
         force=True,
         sink=progress_sink,
     ):
-        _generate_part_outputs(
+        generated = _generate_part_outputs(
             spec,
             preloaded_scene=scene,
             require_step_file=False,
             force=force,
             logger=logger,
         )
+
+    return generated, tuple(run.owed())

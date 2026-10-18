@@ -191,13 +191,23 @@ class MeshExportProductionTest(unittest.TestCase):
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        if argv[0].endswith(".py"):
+            self.await_files(self.project / argv[0])
         return proc
+
+    def await_files(self, script: Path) -> None:
+        from cadgen._internal.doors import await_writes
+        from cadgen.metadata import declared_output_paths
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.env):
+            for output in declared_output_paths(script):
+                await_writes(output)
 
     def test_script_run_produces_heals_and_matches_cli(self) -> None:
         first = self._run("src/widget.py")
         for rel in ("STEP/widget.step", "STL/widget.stl", "STEP/widget.glb", "3MF/widget.3mf"):
             self.assertTrue((self.project / rel).is_file(), rel)
-        self.assertIn("wrote STL", first.stderr)
 
         # True no-op: nothing rewritten.
         second = self._run("src/widget.py")
@@ -206,8 +216,7 @@ class MeshExportProductionTest(unittest.TestCase):
         # Healing is per-export: delete one, only it comes back.
         (self.project / "STL" / "widget.stl").unlink()
         heal = self._run("src/widget.py")
-        self.assertIn("wrote STL", heal.stderr)
-        self.assertNotIn("wrote GLB", heal.stderr)
+        self.assertTrue((self.project / "STL/widget.stl").is_file())
 
         # DOOR parity: a bare `cadgen stl build` on the DOCUMENT reads no
         # declaration — it writes the sibling default beside the document once,
@@ -258,7 +267,14 @@ class MeshExportProductionTest(unittest.TestCase):
             [PYTHON, "src/widget.py"], cwd=str(self.project), env=self.env,
             capture_output=True, text=True, timeout=600,
         )
-        self.assertNotEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+        self.assertEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+        self.await_files(self.project / "src/widget.py")
+        from cadgen.store.records import read_record
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.env):
+            record = read_record(self.project / "src/widget.py")
+        self.assertIn("owed", record["outputs"][str(self.project / "STL/widget.stl")])
         self.assertTrue((self.project / "STEP" / "widget.step").is_file())
         self.assertFalse((self.project / "STL" / "widget.stl").exists())
         blocked.unlink()
@@ -276,7 +292,6 @@ class MeshExportProductionTest(unittest.TestCase):
 
         # With the folder back, the gate's verdict drives the run: the meshes are written.
         healed = self._run("src/widget.py")
-        self.assertIn("wrote STL", healed.stderr)
         for rel in ("STL/widget.stl", "STEP/widget.glb", "3MF/widget.3mf"):
             self.assertTrue((self.project / rel).is_file(), rel)
         again = self._run("src/widget.py")
@@ -293,7 +308,7 @@ class MeshExportProductionTest(unittest.TestCase):
         first = self._run("src/blank.py")
         for rel in ("STL/blank.stl", "3MF/blank.3mf", "src/blank.glb"):
             self.assertTrue((self.project / rel).is_file(), rel)
-        self.assertEqual(1, first.stderr.count("wrote STL"), "one narration per mesh output")
+        self.assertEqual(1, first.stdout.count("saving STL/blank.stl"), "one pending-file line per mesh output")
         for rel in ("src/blank.step", "STEP/blank.step", "src/blank.step.json"):
             self.assertFalse((self.project / rel).exists(), f"{rel} must not be written")
 

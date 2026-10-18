@@ -148,7 +148,7 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertEqual(err, "hello\n")
 
     def test_a_released_frame_ends_the_request_with_its_code_before_the_exit(self):
-        """``--no-wait``: the worker releases its client once the command's answer is
+        """the worker releases its client once the command's answer is
         complete and writes the files after; the client returns on the frame and reads
         nothing more (the exit frame reaches nobody)."""
         outcome, out, _err = self._run([{"stream": "stdout", "data": "current part.step\n"}, {"released": 0}])
@@ -467,7 +467,7 @@ class ServerRelaysTheDeath(unittest.TestCase):
                 self.assertEqual(next(frame["workerDied"]["exitStatus"] for frame in conn.frames if "workerDied" in frame), status)
 
     def test_a_job_that_released_its_client_finishes_after_the_client_left(self):
-        """``--no-wait``: a worker that released its client goes on writing the files; the
+        """a worker that released its client goes on writing the files; the
         client leaving after that is no loss -- the worker is not killed, its job ends with
         its exit frame as done, not cancelled, and the ledger closes it then."""
         class Releasing:
@@ -511,7 +511,7 @@ class ServerRelaysTheDeath(unittest.TestCase):
         jobs = JobLedger()
         with mock.patch.object(server, "_JOBS", jobs), mock.patch.object(server, "_POOL", pool), \
                 mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0):
-            server._handle_request(conn, {"tool": "run", "argv": ["/w/part.py", "--no-wait"], "cwd": "/w",
+            server._handle_request(conn, {"tool": "run", "argv": ["/w/part.py"], "cwd": "/w",
                                           "prog": "python part.py"})
         self.assertEqual([next(iter(frame)) for frame in conn.frames if frame != {"stream": "stdout", "data": ""}],
                          ["stream", "released"], "the client heard its release and nothing after")

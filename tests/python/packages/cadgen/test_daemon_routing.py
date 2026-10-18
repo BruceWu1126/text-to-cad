@@ -220,9 +220,19 @@ class DaemonRouting(unittest.TestCase):
             os.environ, {"CADGEN_CACHE_DIR": str(self.stores[store])}
         )
         with cache:
-            return daemon_client.run_via_daemon(
+            code = daemon_client.run_via_daemon(
                 "run", [str(self.src / script), *extra], cwd=str(self.src), prog=f"python {script}"
             )
+            # These routing checks compare idle bindings, after the worker has finished
+            # the files it writes after answering the client.
+            update = daemon_client.watch_jobs(output=str(self.src / script.replace(".py", ".step")),
+                                              store_root=str(self.stores[store]))
+            while update is not None and any(row["state"] in ("submitted", "queued", "building")
+                                            for row in update["jobs"]):
+                update = daemon_client.watch_jobs(update["jobsCursor"],
+                                                 output=str(self.src / script.replace(".py", ".step")),
+                                                 store_root=str(self.stores[store]))
+            return code
 
     def _build(self, script: str, *extra: str, store: str = "a") -> tuple[int | None, str, list[dict]]:
         out, err = io.StringIO(), io.StringIO()

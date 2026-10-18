@@ -101,6 +101,11 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env):
+            await_writes(cwd / "fixture.step")
 
     def _cli(self, module: str, *args: str, cwd: Path, store: Path) -> None:
         self._run(["-c", f"from cadgen.cli.{module} import main; raise SystemExit(main())", *args],

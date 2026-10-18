@@ -120,6 +120,11 @@ def _vendor_step() -> Path:
             timeout=600,
         )
         _VENDOR_STEP = workspace / "sg90_servo.step"
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, _environment(workspace / "store")):
+            await_writes(_VENDOR_STEP)
     return _VENDOR_STEP
 
 
@@ -223,6 +228,16 @@ class DocumentedModelsBuild(unittest.TestCase):
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
             first_runs = dict(zip((relative for _, relative, _ in blocks.models),
                                   pool.map(self.run_script, (relative for _, relative, _ in blocks.models))))
+            from cadgen._internal.doors import await_writes
+            from cadgen.metadata import declared_output_paths
+            from unittest import mock
+
+            # All calls have answered: wait in this thread before the no-op pass,
+            # avoiding process-environment patches in the concurrent build helpers.
+            with mock.patch.dict(os.environ, self.environment):
+                for _, relative, _ in blocks.models:
+                    for output in declared_output_paths(self.project / relative):
+                        await_writes(output)
             second_runs = dict(zip((relative for _, relative, _ in blocks.models),
                                    pool.map(self.run_script, (relative for _, relative, _ in blocks.models))))
         for document, relative, source in blocks.models:

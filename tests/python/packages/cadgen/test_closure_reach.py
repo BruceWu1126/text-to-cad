@@ -1053,8 +1053,14 @@ class ReachEndToEnd(unittest.TestCase):
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+        from cadgen._internal.doors import await_writes
+
+        from cadgen.metadata import declared_output_paths
+        for output in declared_output_paths(self.model):
+            await_writes(output)
         self.output = completed.stdout + completed.stderr
-        return completed.stdout.strip().splitlines()[-1].split(" ", 1)[0]
+        return next(line.split(" ", 1)[0] for line in reversed(completed.stdout.splitlines())
+                    if line.startswith(("built ", "current ", "skipped-peer ")))
 
     def edit(self, old, new):
         text = self.geo.read_text(encoding="utf-8")

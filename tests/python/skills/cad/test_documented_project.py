@@ -56,6 +56,13 @@ class TheTemplateBuilds(unittest.TestCase):
             timeout=900,
         )
         self.assertEqual(completed.returncode, 0, f"{' '.join(argv)} failed:\n{completed.stdout}\n{completed.stderr}")
+        from cadgen._internal.doors import await_writes
+        from cadgen.metadata import declared_output_paths
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.environment):
+            for output in declared_output_paths(self.project / argv[0]):
+                await_writes(output)
         return completed
 
     def test_the_root_builds_everything_beneath_it(self) -> None:

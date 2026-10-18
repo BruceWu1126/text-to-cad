@@ -21,8 +21,10 @@ Semantics:
   composed freely.
 - **A top-level call builds.** Calling the decorated name when no build is in
   progress (``__main__``, a REPL, a test) runs the full pipeline — freshness
-  gate, progress, incremental package build, ``.step``/``.dxf`` output —
-  via the warm daemon when available, in-process otherwise. A real-file
+  gate, progress, incremental package build, ``.step``/``.dxf`` output — on the
+  warm daemon, and returns once every model's result is recorded (a drawing's
+  ``.dxf`` written): the daemon writes the STEP and mesh files after it
+  (STORE.md §3, *Exports*), and every command that reads one waits for it. A real-file
   ``__main__`` bare call whose result is immediately discarded returns
   ``None`` without loading the shape back into the initiator. Callers that use
   the result, and interactive or instrumented callers, receive the materialized
@@ -34,9 +36,9 @@ Semantics:
   store holds one for its inputs as they are, else run -- serially, in this
   process, as its own build with its own record -- and the shape handed back is
   its stored result, decoded (STORE.md §9a). The files a call owes (its STEP,
-  its meshes) are queued and finished when the run that owns the command ends,
-  children first (``build_run``). A drawing's body runs inline. The root model
-  is only the first call.
+  its meshes) are queued as its result is recorded and written once the command
+  has answered, children first (``build_run``). A drawing's body runs inline.
+  The root model is only the first call.
 - **A model is ``script::function``.** A file may hold several models; each is
   its own record, output and job (``cadgen.store.index.model_ref``), and they
   share the file's closure. ``__main__`` builds the ones it calls -- there is no
@@ -161,20 +163,32 @@ class BuildFrame:
 class BuildRun:
     """One top-level build in this process, shared by every frame nested in it:
     the models decoded or run so far, each once per run (``results``: model ->
-    (key, tree)), the files those calls owe (``exports``: each a
-    ``generation._Export``, queued as its model's result is recorded and finished
-    when the run ends, in that order) and what the root command owns for the run
-    (its logger)."""
+    (key, tree)), what those calls still owe once their results are recorded -- the
+    display data the build pool derives for each result (``displays``) and the files
+    (``exports``: each a ``generation._Export``, queued as its model's result is
+    recorded) -- finished after the command has answered, in that order, and what the
+    root command owns for the run (its logger)."""
 
     def __init__(self, logger: Any = None) -> None:
         self.logger = logger
         self.results: dict[str, tuple[str, str]] = {}
+        self.displays: list[Any] = []
         self.exports: list[Any] = []
 
+    def owed(self) -> list[Path]:
+        """The files this run still writes: every queued export's, in the order queued."""
+        return [path for export in self.exports for path in export.owed()]
+
     def finish(self) -> None:
-        """Finish every export queued in this run, in the order queued -- children before
-        the parent that called them -- each writing the files its model owes. Every export
-        has its turn; the first failure is raised after the last one, the others printed."""
+        """Finish what the run owes: the display data its builds asked the pool for, then
+        every export queued, in the order queued -- children before the parent that called
+        them -- each writing the files its model owes. Every export has its turn; the first
+        failure is raised after the last one, the others printed."""
+        from cadgen._internal.generation import _await_display
+
+        for display, name in self.displays:
+            _await_display(display, name=name)
+        self.displays.clear()
         failure: Exception | None = None
         for export in self.exports:
             try:
@@ -189,8 +203,11 @@ class BuildRun:
             raise failure
 
     def abandon(self) -> None:
-        """Leave every queued export unfinished: its file stays as it was, and the next
-        run exports again what is owed."""
+        """Leave what the run owes: the pool's display jobs stop once no one wants them,
+        every file stays as it was, and the next run exports again what is owed."""
+        for display, _name in self.displays:
+            display.abandon()
+        self.displays.clear()
         for export in self.exports:
             export.abandon()
         self.exports.clear()
@@ -201,14 +218,39 @@ def current_run() -> BuildRun | None:
 
 
 @contextlib.contextmanager
+def finished_after_answer() -> Iterator[list[BuildRun]]:
+    """Hold the runs the command this thread runs leaves owing, for the daemon worker to
+    finish once the command has answered (``daemon.worker``): a build answers the moment
+    every model's result is recorded, and its display data and files follow."""
+    previous = getattr(_BUILD_STATE, "held", None)
+    held: list[BuildRun] = []
+    _BUILD_STATE.held = held
+    try:
+        yield held
+    finally:
+        _BUILD_STATE.held = previous
+
+
+def _finish(run: BuildRun) -> None:
+    """Finish ``run`` now, or hold it for the worker to finish after the command answers."""
+    held = getattr(_BUILD_STATE, "held", None)
+    if held is None:
+        run.finish()
+    else:
+        held.append(run)
+
+
+@contextlib.contextmanager
 def build_run(logger: Any = None) -> Iterator[BuildRun]:
     """The run a top-level command owns (``generation``): every decorated call made
-    inside it, at any depth, belongs to this run, and the run finishes the exports
-    those calls queued as it ends -- after the command's own body, before it reports
-    its result. A run that failed still finishes them (the children built before the
-    failure owe their files, and the pool is writing them), its own failure the one
-    reported; an interrupted one abandons them. Nests for a build started inside a
-    build (a test's), each its own."""
+    inside it, at any depth, belongs to this run, and what those calls owe once their
+    results are recorded -- display data, then files -- is finished after the command's
+    bodies have returned: by the daemon worker once the command has answered
+    (:func:`finished_after_answer`), or, in a process with no worker to finish it, as the
+    block ends, before the command answers. A run that failed still finishes them (the
+    children built before the failure owe their files, and the pool is writing them), its
+    own failure the one reported; an interrupted one abandons them. Nests for a build
+    started inside a build (a test's), each its own."""
     previous = current_run()
     run = _BUILD_STATE.run = BuildRun(logger)
     try:
@@ -216,14 +258,14 @@ def build_run(logger: Any = None) -> Iterator[BuildRun]:
             yield run
         except Exception:
             try:
-                run.finish()
+                _finish(run)
             except Exception as error:  # noqa: BLE001 - the run's own failure is the one reported
                 print(f"[cadgen] {type(error).__name__}: {error}", file=sys.stderr)
             raise
         except BaseException:
             run.abandon()
             raise
-        run.finish()
+        _finish(run)
     finally:
         _BUILD_STATE.run = previous
 

@@ -31,7 +31,8 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         prog=prog,
         description=(
             "Build this CAD model: gate, build, and write every output its decorators "
-            "declare. Reached by calling the decorated function in __main__."
+            "declare. It answers once every model's result is recorded, and the files "
+            "follow. Reached by calling the decorated function in __main__."
         ),
         allow_abbrev=False,
     )
@@ -52,14 +53,6 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--json", action="store_true", help="One JSON result line on stdout.")
-    parser.add_argument(
-        "--no-wait",
-        action="store_true",
-        help=(
-            "Return once every model's result is recorded (its preview is on screen), before its "
-            "files are written: the build service writes them after it has answered."
-        ),
-    )
     return parser
 
 
@@ -145,7 +138,6 @@ def _run(args: argparse.Namespace, script: Path, prog: str) -> int:
                 verbose=bool(args.verbose),
                 json_output=bool(args.json),
                 profile=bool(args.profile),
-                wait=not args.no_wait,
             )
 
         from cadgen.generation import generate_step_targets
@@ -160,7 +152,6 @@ def _run(args: argparse.Namespace, script: Path, prog: str) -> int:
             verbose=bool(args.verbose),
             json_output=bool(args.json),
             profile=bool(args.profile),
-            wait=not args.no_wait,
         )
     except Exception as exc:  # noqa: BLE001 — the CLI boundary: report, do not traceback
         # The ONE failure envelope, shared with every generated door: under

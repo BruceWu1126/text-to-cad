@@ -396,17 +396,22 @@ def record_mesh_export(
     mesh_angular_tolerance: float | None,
     animation_key: str | None = None,
     appearance_key: str | None = None,
+    expected_result: tuple[str | None, str] | None = None,
+    expected_hash: str | None = None,
 ) -> None:
     """Record a written mesh as one of the MODEL's outputs (STORE.md: mesh
-    exports live in the model record, gated by clause 5). Best-effort."""
+    exports live in the model record, gated by clause 5). Best-effort. A declared
+    export binds its receipt to the result and bytes it published; a replaced
+    result or changed file gets no receipt for those bytes."""
     try:
         from cadgen.store.records import read_record, write_record
 
         record = read_record(model)
-        if record is None:
+        if record is None or (expected_result is not None and
+                              (record.get("key"), record.get("tree")) != expected_result):
             return
         digest = _sha256_of(Path(output_path))
-        if digest is None:
+        if digest is None or (expected_hash is not None and digest != expected_hash):
             return
         outputs = dict(record.get("outputs") or {})
         output_entry = {
@@ -423,6 +428,10 @@ def record_mesh_export(
             output_entry["serializer"] = serialization_version
         outputs[str(Path(output_path).expanduser().resolve())] = output_entry
         record["outputs"] = outputs
+        current = read_record(model)
+        if expected_result is not None and (current is None or
+                (current.get("key"), current.get("tree")) != expected_result):
+            return
         write_record(model, record)
     except Exception:  # noqa: BLE001 - a failed record only costs a re-export
         pass

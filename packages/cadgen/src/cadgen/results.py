@@ -67,11 +67,12 @@ class BuildResult:
     ``cadgen step build IN OUT`` re-emits an existing document in cadgen's own
     dialect (OCCT read -> tree in the store -> the canonical XCAF writer),
     optionally annotating it with kinematics and animation. Unlike ``compile``,
-    something new lands on disk — which is what earns the name.
+    its stored result declares a new document. The daemon finishes writing it
+    after the answer; ``saving`` names the files still owed.
     """
 
     ok: bool
-    #: The document this build WROTE.
+    #: The document this build writes.
     document: Path | None
     #: The hash of the tree the written document's geometry came from.
     tree: str | None
@@ -80,12 +81,17 @@ class BuildResult:
     #: True when the bytes were already current and only the sidecar (the
     #: kinematics/animation annotation) was refreshed.
     sidecar_only: bool = False
+    #: Files the daemon is still writing after this result.
+    saving: tuple[Path, ...] = ()
 
     def human_lines(self) -> list[str]:
         if self.sidecar_only:
             return [f"annotated {_display(self.document)} (bytes unchanged)"]
         head = "current" if self.skipped else "built"
-        return [f"{head} {_display(self.document) if self.document else (self.tree or '')}"]
+        lines = [f"{head} {_display(self.document) if self.document else (self.tree or '')}"]
+        lines.extend(f"saving {_display(path)} (cadgen export {_display(path)} waits for it)"
+                     for path in self.saving)
+        return lines
 
 
 def _animation_summary(animation: dict | None) -> str:

@@ -118,6 +118,11 @@ def _vendor_step() -> Path:
             timeout=600,
         )
         _VENDOR_STEP = workspace / "vendor_panel.step"
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(workspace / "store")}):
+            await_writes(_VENDOR_STEP)
     return _VENDOR_STEP
 
 

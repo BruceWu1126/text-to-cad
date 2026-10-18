@@ -71,6 +71,11 @@ class MeshExportStoreReuseTest(unittest.TestCase):
             [PYTHON, entry.name], cwd=str(cls._seed_root), env=env,
             capture_output=True, text=True, timeout=600,
         )
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env):
+            await_writes(cls._seed_root / "block.step")
         if build.returncode != 0 or not (cls._seed_root / "block.step").is_file():
             raise RuntimeError(f"the seed build failed:\n{build.stdout}{build.stderr}")
 

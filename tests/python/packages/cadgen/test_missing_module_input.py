@@ -70,6 +70,11 @@ class MissingModuleInput(unittest.TestCase):
     def _build(self) -> str:
         completed = self._run("assembly.py", "--json")
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.environment):
+            await_writes(self.project / "assembly.step")
         return json.loads(completed.stdout.strip().splitlines()[-1])["outcome"]
 
     def test_a_skipped_module_that_appears_makes_the_model_stale(self) -> None:

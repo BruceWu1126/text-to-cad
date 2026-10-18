@@ -88,9 +88,16 @@ def _run(*argv: str, cwd: Path, cache: Path) -> subprocess.CompletedProcess:
     )
     env["CADGEN_CACHE_DIR"] = str(cache)
     env.pop("CADGEN_DAEMON_CHILD", None)
-    return subprocess.run(
+    completed = subprocess.run(
         [sys.executable, *argv], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=600
     )
+    if completed.returncode == 0 and argv[0].endswith(".py"):
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env):
+            await_writes((cwd / argv[0]).with_suffix(".step"))
+    return completed
 
 
 class LazySiblingImport(unittest.TestCase):

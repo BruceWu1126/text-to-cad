@@ -253,6 +253,11 @@ class AssemblyHelperBuildWarningTests(unittest.TestCase):
             first = run(str(script), "--json")
             self.assertEqual(json.loads(first.stdout)["outcome"], "built")
             self.assertIn("FutureWarning: AssemblyHelper is deprecated", first.stderr)
+            from cadgen._internal.doors import await_writes
+            from unittest import mock
+
+            with mock.patch.dict(os.environ, environment):
+                await_writes(script.with_suffix(".step"))
             original = script.with_suffix(".step").read_bytes()
 
             current = run(str(script), "--json")
@@ -262,6 +267,8 @@ class AssemblyHelperBuildWarningTests(unittest.TestCase):
             forced = run(str(script), "--force", "--json")
             self.assertEqual(json.loads(forced.stdout)["outcome"], "built")
             self.assertIn("FutureWarning: AssemblyHelper is deprecated", forced.stderr)
+            with mock.patch.dict(os.environ, environment):
+                await_writes(script.with_suffix(".step"))
             self.assertEqual(script.with_suffix(".step").read_bytes(), original)
 
 

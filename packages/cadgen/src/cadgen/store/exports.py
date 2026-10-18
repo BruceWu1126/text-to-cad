@@ -11,6 +11,10 @@ names writer (``step_export.export_build123d_step_file``): each component's part
 its product, and its faces' and edges' names, on the entities written for them
 (``step_names``). The file is a function of the tree and the writer
 (``step_export.STEP_WRITER_SCHEME``) alone.
+
+A build whose result a newer build of its model has replaced no longer wants its file
+(:func:`abandon`): an export that has not begun then writes nothing, and one already
+writing finishes, since an OCCT write is never cut off.
 """
 
 from __future__ import annotations
@@ -20,7 +24,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-__all__ = ["export_step"]
+__all__ = ["abandon", "export_step"]
+
+#: What a build leaves in the folder it staged an export into once it no longer wants the
+#: file. The folder is the build's own (``generation._stage``).
+ABANDONED = ".abandoned"
+
+
+def abandon(out: Path) -> None:
+    """Tell the export staged at ``out`` that its build no longer wants it."""
+    (Path(out).parent / ABANDONED).touch()
 
 
 class _Spans:
@@ -53,12 +66,15 @@ def export_step(tree_hash: str, out: Path, *, shapes: Mapping[str, Any] | None =
     ``warnings``. ``shapes`` gives the build's own live shapes by cid for components the
     store cannot decode (an eager-only component's), which only the build's own process
     holds (STORE.md §3). A part key names its producer: a runtime that cannot name its own
-    writes its elements' names and no part key, under no producer."""
+    writes its elements' names and no part key, under no producer. An export its build has
+    abandoned writes nothing and answers ``{"skipped": True}``."""
     from cadgen.store.parts import producer_identity
     from cadgen.store.trees import capture_tree
 
-    spans = _Spans()
     out = Path(out)
+    if (out.parent / ABANDONED).exists():
+        return {"skipped": True}
+    spans = _Spans()
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
         producer = producer_identity()

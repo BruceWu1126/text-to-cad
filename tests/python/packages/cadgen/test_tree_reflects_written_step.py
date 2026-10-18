@@ -97,6 +97,11 @@ class TreeReflectsWrittenStep(unittest.TestCase):
             timeout=600,
         )
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.environment):
+            await_writes((self.project / model).with_suffix(".step"))
         return completed.stdout + completed.stderr
 
     def _write(self, name: str, source: str) -> None:

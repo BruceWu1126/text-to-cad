@@ -729,7 +729,7 @@ def _run_request(
         if "exit" in message:
             return int(message["exit"])
         if "released" in message:
-            # The command's answer is complete (--no-wait): the worker writes the files
+            # The command's answer is complete: the worker writes the files
             # after this, and the exit frame it sends then reaches nobody.
             if strict:
                 return protocol_failure("released a geometry request")

@@ -309,6 +309,8 @@ class StepPublicationTests(unittest.TestCase):
 
                 def after_write(original, *args, **kwargs):
                     result = original(*args, **kwargs)
+                    if fired:
+                        return result
                     fired.append(boundary)
                     raise RuntimeError(f"injected failure after {boundary}")
 
@@ -584,7 +586,11 @@ class AssemblyJobReads(unittest.TestCase):
         done = subprocess.run([self.python, script.name, *flags], cwd=str(script.parent), env=env,
                               capture_output=True, text=True, timeout=600)
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-        return done.stdout.strip().splitlines()[-1].split(" ", 1)[0]
+        from cadgen._internal.doors import await_writes
+
+        with mock.patch.dict(os.environ, env):
+            await_writes(script.with_suffix(".step"))
+        return done.stdout.strip().splitlines()[0].split(" ", 1)[0]
 
     def closure(self, model: Path) -> dict[str, str]:
         """Every object of the model's result closure, which its saved document's is, by

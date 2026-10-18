@@ -54,10 +54,18 @@ class _ModelRunCase(unittest.TestCase):
             capture_output=True, text=True, timeout=600,
         )
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        if argv[0].endswith(".py"):
+            from cadgen._internal.doors import await_writes
+            from cadgen.metadata import declared_output_paths
+            from unittest import mock
+
+            with mock.patch.dict(os.environ, self.env):
+                for output in declared_output_paths(self.project / argv[0]):
+                    await_writes(output)
         return proc
 
     def _lines(self, proc: subprocess.CompletedProcess) -> list[str]:
-        return [line for line in proc.stdout.splitlines() if line.strip()]
+        return [line for line in proc.stdout.splitlines() if line.strip() and not line.startswith("saving ")]
 
 
 class ModelRunResultLineTest(_ModelRunCase):

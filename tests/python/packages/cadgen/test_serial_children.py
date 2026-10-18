@@ -394,7 +394,7 @@ class QueuedExports(SerialChildrenCase):
         code, err = self.build(self.parent)
         self.assertEqual(code, 0, err)
         self.assertEqual(self.done(), [], "nothing ran again")
-        self.assertIn("child.step was never written; writing it again", err)
+        self.assertIn("child.step is owed; writing it again", err)
         self.assertNotEqual((self.root / "child.step").read_bytes(), before["child"])
         self.assertEqual(self.record(self.child)["outputs"][str(self.root / "child.step")]["sha256"],
                          __import__("hashlib").sha256((self.root / "child.step").read_bytes()).hexdigest())

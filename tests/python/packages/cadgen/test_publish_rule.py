@@ -111,6 +111,9 @@ class PublishRuleTest(unittest.TestCase):
         out, err = proc.communicate(timeout=600)
         # Under --json the failure envelope is on STDOUT; stderr is only the build tree.
         self.assertEqual(proc.returncode, 0, out + err)
+        from cadgen._internal.doors import await_writes
+
+        await_writes(script.with_suffix(".step"))
         return json.loads(out.strip().splitlines()[-1]) | {"stderr": err}
 
     def test_two_builds_of_one_model_both_run_and_the_disk_ends_current(self):

@@ -21,7 +21,7 @@ right.
 | [8](#8-gc-eviction-and-the-cap) | The sweeper: retired kinds, eviction to the cap, unreachable objects, a store two cadgens share, and why a pass needs no lock | anything that deletes |
 | [9](#9-the-daemon) | The build pool, job ledger and slots | daemon, workers, jobs |
 | [9a](#9a-children) | Children: a child call decodes the stored result or builds the child, serially, in the caller's process; its own captures, once per run, failure, queued files | a decorated call's return, a child's build |
-| [9b](#9b-editing-previews-and-explicit-saves) | The preview revision, the build feed's two events (the result, then the file), explicit saves | what the viewer says while a build runs |
+| [9b](#9b-editing-previews-and-explicit-saves) | The preview revision, the build feed's events (the result, the files it owes, then each file), explicit saves | what the viewer says while a build runs, what a door waits for |
 | [10](#10-debugging) | `store why`, resolving a tree, resets smallest first | diagnosing staleness |
 | [11](#11-never) | The explicit prohibitions | before proposing any of them |
 
@@ -513,8 +513,9 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   its own components the store lacks (`parts.request_display`: one job, `kind:
   display`, or on the daemon's pool, for a batch past half a megabyte of BREP,
   one per such share, balanced by size, a pool slot each but the build's own)
-  and waits for them, as one,
-  before it reports done. A linked child's parts are its own build's, so a parent asks
+  and queues them on its run. The command answers once its result is recorded;
+  its worker awaits these jobs before finishing the files. A linked child's parts
+  are its own build's, so a parent asks
   only for its own. A compile of a document asks for every part of its tree
   before it reports done; a model whose result stands asks for those of the
   tree its file maps to (a mesh-only model's own), links expanded, when the run
@@ -522,12 +523,13 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   declared meshes, and the children healed under it ask for none (§4).
   Which parts lack display data is asked of the store alone (one probe per
   part, no kernel import), so a model whose display data is stored starts no
-  job. While the build waits, its progress shows `Meshing parts`, and the time
-  counts as cadgen's in the model's time line. A part that fails to derive is a
+  job. Display jobs finish after the result's `done` event, so their time is
+  outside the model's time line; a compile still reports `Meshing parts` while it
+  waits. A part that fails to derive is a
   warning on the build, never its failure: the geometry is published, and a
-  view goes on without that part, saying so (below). A build that fails after
-  its preview waits for the job before it reports the failure, so the preview
-  stands under it, drawn whole.
+  view goes on without that part, saying so (below). A run that fails after
+  publishing a result still finishes the display jobs and exports it queued;
+  its worker reports any finishing failure through the ledger.
   A build's kinematics read components only where a selector is named: a mate's
   parent and child resolve in the result tree's occurrences, group nodes and
   their labels, with no component read, and an `axis={"ref": ...}` reads the
@@ -697,52 +699,89 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   holding a component the store cannot decode (an eager-only one, above) is
   exported in the build's own process, from its live shape, by the same
   function. Publishing the file then takes, in order: the expected pair checked
-  (§7) and the publish rule asked again (§5); the staged copy and its sidecar
-  moved into place, each atomically; the bytes mapped to the tree in
-  `index/document` with the producer the export wrote with (never an older
-  entry's hint), at once and finally; the record's output entry filled
+  (§7) and the publish rule asked again (§5); the model's record read again,
+  right before the write, to see that it still names this result; the staged
+  copy and its sidecar moved into place, each atomically; the bytes mapped to
+  the tree in `index/document` with the producer the export wrote with (never
+  an older entry's hint), at once and finally; the record's output entry filled
   (`{sha256, writer}`, empty until then, which the gate reads as never
-  written); and the `STEP saved` event. `--verbose` relays the job's steps.
+  written), the record read again first; and the `STEP saved` event.
+  `--verbose` relays the job's steps.
+
+  **A newer result supersedes an older export.** An export writes only while
+  the model's record names its result -- its key and its tree -- and reads the
+  record again before it takes the export job's answer, before the file
+  replaces the saved one, before it writes the record and before it cuts the
+  meshes. Once a newer build of the model has recorded its result, the older
+  run's files are that build's to write: the older export says so in one line
+  (`<file> not written: a newer build of <model> replaced this result, and
+  writes it`) and writes nothing. An export job that has not begun is told so
+  (`store/exports.py`, `abandon`: a marker in the build's staging folder) and
+  writes nothing; one already writing finishes into its staging folder, since
+  an OCCT write is never cut off, and the folder goes with it. A record gone
+  with the store is no newer result. A child's export under its parent is
+  superseded the same way, by the child's own record.
   Nothing waits on anything after the write: every door given the file -- the
-  CAD Viewer, `read_step` and `read_scene`, a snapshot, the mesh doors,
-  `step compile`'s current check -- reads that entry and uses its tree. When
+  CAD Viewer's catalog read, `read_step` and `read_scene`, a snapshot, the mesh
+  doors, `step compile`'s current check -- reads that entry and uses its tree.
+  A door given a file a build is still writing waits for that write first
+  (`doors.await_writes`), bounded by it: it asks the daemon's job ledger --
+  process state, never a model record -- which lists each file a result owes
+  the moment it is recorded (`saving`) and the moment the file lands (`saved`,
+  §9b), and waits while the newest result that owes the file has not saved it
+  and its request runs. A newer result permanently supersedes older obligations
+  in that ledger, even once its request finishes or its row expires; an older
+  result's export is no wait. With no request writing the file, or no
+  daemon, it reads at once; inside a build, a file the build's own request owes
+  is written after its bodies return, so nothing there waits for it, and a
+  wait on another request's write gives up the job slot meanwhile. The viewer
+  draws the build's preview while its catalog read waits. When
   two models write equal bytes, the last export's entry stands. The model's
   declared meshes (`@stl`/`@glb`/`@threemf`) are then cut from the tree the
   file's bytes map to, keyed on those bytes as the record names them -- never a
-  door's lookup of the file.
+  door's lookup of the file. Declared meshes are prepared in sibling staging
+  folders too. Before each file replaces its destination, the export rechecks
+  its result and the bytes it found before the body ran (or its own previous
+  export wrote meanwhile). It verifies the published bytes and binds the receipt
+  to that result before recording it. A newer result discards the staged mesh;
+  a foreign edit is refused, and neither changes the newer result's outputs.
 
-  **Exports are queued, and the run finishes them.** Every call of a model,
-  root or child, queues what the model owes the moment its result is recorded
-  (`generation._Export`): the export job is submitted then, so a child's STEP
-  is written on the build pool while its parent's body goes on. The run that
-  owns the command (`authoring.build_run`) finishes
-  every export it queued once the command's bodies have returned, in the order
-  queued -- children before the parent that called them -- each one publishing
-  its file, then cutting its meshes. A model's `done` event says its result is
-  recorded; its `STEP saved` event follows when its file lands, with the
-  `elapsed` of the clock the `done` event reads (the build tree
-  drops an event after its model's done, so `--verbose` says it too:
-  `STEP saved <file> completed in <elapsed>`). The command prints its result
-  once every export is finished -- or,
-  with `--no-wait`, once every model's result is recorded, the files written
-  after: a daemon worker releases its client (the `released` frame, §9) and
-  writes them before its next job, and
-  a failure of theirs is the worker's exit, the build feed's and the next run's,
-  not the released caller's. An export that fails fails the command; every
-  other export still gets its turn, the file on disk stays as it was, and the
-  record keeps owing it (its output entry pending, its sidecar's too), so the
-  model's next run exports it without running the body. A run that fails still
-  finishes what it queued (the models built before the failure owe their
-  files); one that is interrupted abandons it, for the next run. A model whose
-  result stands queues what its files owe the same way, without running its
-  body, and so does every child under it whose result stands (§4).
+  **Exports are queued, and the worker finishes them after the answer.** Every
+  call of a model, root or child, queues what it owes when its result is recorded
+  (`generation._Export`): its export job is submitted then, so a child's STEP
+  is written on the pool while its parent's body goes on. The command answers
+  once every model's result is recorded. Text results include a `saving <file>`
+  line for each file still owed; JSON results include `files`, mapping absolute
+  paths to `saving` or `saved`. A re-emitted document's `BuildResult` carries its
+  generated result tree and the paths still `saving`, even before the output exists.
+  Its daemon worker releases the caller (`released`, §9), awaits the display
+  jobs the run queued, and finishes every export in order, children first,
+  publishing each file then cutting its meshes. With no worker to finish the
+  run, an in-process command finishes it before answering, so no files are saving.
+
+  A model's `done` event says its result is recorded; its `saved` event follows
+  when each file lands, with the `elapsed` of that same build clock. A finishing
+  failure is the worker's exit and the ledger's reason, not the already released
+  caller's exit. Every other export still gets its turn. Files not published stay
+  as they were, and each output still owed keeps `{since, error}` as `owed` on
+  the record. The next run says `<file> owed since <time>: <error>` first and
+  exports that result again without running its body. A run that fails still
+  finishes what it queued; an interrupted one abandons it for the next run.
+  A current model queues what its files owe in the same way, and so does every
+  child under it whose result stands (§4).
 
   **The kept rule.** A rebuild keeps its STEP -- writes nothing -- when its
   record's last build had the same tree, wrote the file with this writer
   (`step_export.STEP_WRITER_SCHEME`, on the output entry), the file on disk
   when the build started still has the bytes recorded, and the store maps those
   bytes (their document entry); `--force` always writes
-  (`generation._export_plan`). The run says `kept STEP`. A rebuild that exports
+  (`generation._export_plan`). The run says `kept STEP`. The rule asks only that
+  the store maps the bytes, not that it maps them to this result: a compile of
+  the file (a door opened it after a document-schema change, before the model's
+  next run) or another model's export of equal bytes may stand for it, and refs
+  by lineage would then miss and parts key otherwise. So a kept STEP whose
+  document entry maps its bytes to another tree is mapped to this result: one
+  index write, nothing exported. A rebuild that exports
   the bytes the file already has leaves the file, and its stamp, in place. A
   model whose result stands has its file exported again by its next run, with
   no body run (`generation._hit`, which says why), where another writer wrote
@@ -1085,7 +1124,9 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   it and its sidecar's are pending -- an empty sha256, which clause 5 reads as
   never written -- from the record written at the result until the export lands
   (§3, *Exports*), and the STEP's sha256 lives there and nowhere else in the
-  record.
+  record. A failed export keeps an `owed` object on each unfinished output:
+  `{"since": <Unix seconds>, "error": "<type>: <message>"}`. This explains the
+  failed write on the next run; it does not stale or rebuild the stored geometry.
 
 ### Provenance
 
@@ -1557,7 +1598,9 @@ are not cancelled merely because a newer editing request exists.
 - **Same model twice.** Both builds run. Each publishes objects (idempotent)
   and then consults the publish rule: the one whose closure matches the
   sources as they are now wins the record; the other's result is left as
-  unreferenced objects for GC. A rejected explicit save reports failure.
+  unreferenced objects for GC. A rejected explicit save reports failure. The
+  files are written for the result the record names: an export whose result a
+  newer record replaced writes nothing (§3, *Exports*).
 - **Edit a child while its parent builds.** The parent composed the child's
   result when it called it, decoded or built in the parent's own process
   (§9a), and records the child by that result's key; a
@@ -1594,10 +1637,15 @@ digests (absence counts too). It publishes its result's complete immutable
 objects and its record, has the STEP exported to a private staging folder
 (§3, *Exports*), and checks source freshness and the expected output pair
 before it moves the file into place. A concurrently written byte-identical
-pair is idempotent; a different pair makes the save fail. After the final
-renames it checks the written digests before recording the output. A STEP
-re-emission has an explicit immutable input/annotation digest, not a Python
-closure; its output-pair check still applies.
+pair is idempotent, and so is the pair the same model's previous export saved
+while this build's body ran -- the pair the record this build replaced names,
+read again at publication from the result stored under that record's key,
+which that export's publication rewrote: two edits in a row overlap routinely,
+the first one's file landing during the second one's body, and it is the
+model's own. Any other pair (another model's, a person's edit) makes the save
+fail. After the final renames it checks the written digests before recording
+the output. A STEP re-emission has an explicit immutable input/annotation
+digest, not a Python closure; its output-pair check still applies.
 
 Each rename is atomic; the group is not a transaction or compare-and-swap.
 There is a check-to-rename race with independent CLI or external writers, and
@@ -1811,8 +1859,8 @@ viewer where none can start refuses to start, naming why.
 Inside a worker, a compile or an artifact job is the same client call back to
 the daemon; a parent's children build in the parent's worker, in the slot it
 holds (§9a). A worker answers its client when the command's answer is complete:
-after the run's exports, or, with `--no-wait`, once every model's result is
-recorded (the `released` frame, which the client returns on); the worker then
+once every model's result is recorded (the `released` frame, which the client
+returns on); the worker then
 finishes the files, its job open in the ledger until its exit frame, and a
 client that left after its release is no lost client.
 **A job runs in its caller's environment**: every request
@@ -1966,9 +2014,12 @@ state of its own beyond where each store's last housekeeping pass ended
 `--json` adds the **job ledger** (`cadgen.daemon.jobs`): every job the
 daemon ran in the last 120 s -- a row per request, and one per child a request
 built inside it (§9b) -- with its state (`submitted` → `queued` →
-`building` [phase, done/total] → `done` | `failed`) and the output paths it
-declared, parsed statically from the script it names. The ledger is the CAD
-Viewer's only progress source, and it is process state, never a file.
+`building` [phase, done/total] → `done` | `failed`), the output paths it
+declared, parsed statically from the script it names, and the files its
+results still owe (§9b); a row that still owes a file stays listed until its
+request ends. The ledger is the CAD Viewer's only progress source and what a
+door asks before it reads a file (§3, *Exports*), and it is process state,
+never a file.
 
 The CLI doors (`cadgen step build|compile`, `stl|3mf|glb build`)
 are themselves dispatched through the daemon, so they
@@ -2082,8 +2133,8 @@ ends with what it has derived, all of it in the store, and a later identical
 request starts its own job, which finds those there. Prevents: a job no one
 wants keeping its worker busy for the rest of a 64-component request while the
 next model's request waits for a kernel import. A build or a door whose caller
-leaves is stopped -- a build that released its caller (`--no-wait`, above)
-excepted.
+leaves before its answer is stopped. Once a build has answered, its worker
+finishes the display data and files it owes even after its caller has left.
 
 **Browser resources.** Disposable decoded meshes, selectors, BVHs, GPU buffers,
 textures and worker work may have byte budgets and be reclaimed when unused;
@@ -2139,8 +2190,8 @@ caller's own process, there and then:
 - **Files queued.** A child's files are its own build's: its STEP's export job
   is submitted as its result is recorded and runs on the build pool while the
   parent's body goes on (§3, *Exports*); the run
-  finishes every export it queued, children first, once the command's bodies
-  have returned. A child's `done` says its result is recorded and its parent
+  finishes its display jobs and every export it queued, children first, after
+  the command answers with its stored results. A child's `done` says its result is recorded and its parent
   may compose it; its file follows.
 - **Cycles.** A model called while it is itself being built is an error: a
   model may not depend on itself.
@@ -2161,17 +2212,18 @@ says `already stale: …; rerun` when a source it was built from, a child's
 among them, changed during the build.
 
 After a successful top-level build, the caller waits for the checked source
-result before returning. A proven discarded bare call in the actual real-file
+result before returning, while its worker finishes the files. A proven discarded bare call in the actual real-file
 `__main__` module then returns without materializing that tree into native
 geometry. Any caller that consumes the result, any interactive or instrumented
-execution, and any uncertain bytecode keeps the materialized return. This does
-not shorten source publication, declared-output completion or failure paths.
+execution, and any uncertain bytecode keeps the materialized return. The source result is published before the answer; declared-output completion and
+any finishing failures follow on the worker.
 
 ## 9b. Editing previews and explicit saves
 
 Running existing decorated code publishes each model's complete preview the
-moment its result exists, before any export, then continues the same run until
-every declared output is written. No model author imports a session, cache or
+moment its result exists, before any export, and answers then. Its daemon worker
+continues the same run until every declared output is written or its failure is
+recorded. No model author imports a session, cache or
 ownership helper. Source files remain the durable authored inputs. The preview
 is the result the record names: a worker crash fails that request, and a record
 it wrote owes its files, which the next run writes (§3, *Exports*); there is no
@@ -2191,12 +2243,19 @@ the store holds (the stored parts first, then all of them once the build
 pool's job for the rest is done) and whether that is all of them, with its
 annotations as the one object they are (below) -- and the **file**, `saved`,
 the file-written event: the tree the bytes were written from and their digest,
-the moment the file lands. The ledger keeps nothing else of either. A child's
-row is `done` from its own done event, before its file is saved; the
-request's row, the root's, is `done` when the request ends, after the run's
-exports (`daemon/jobs.py`). Kinematics, appearance and animation travel in the
-sidecar for every durable reader, and in the preview's annotations object for
-the viewer alone.
+the moment the file lands. Between them, each file the result owes -- its STEP,
+its declared meshes -- is named once, `saving`, with the tree it is written
+from, the moment the result is recorded; each declared mesh gets its own
+`saved` when it is cut or found current. That pair is what a door reads to
+know a file is still being written (§3, *Exports*). The ledger keeps nothing
+else of any of them, each with the ledger's revision when it landed (the order
+of results across rows). A child's row is `done` from its own done event,
+before its file is saved; the request's row, the root's, is `done` when the
+request ends, after the run's exports (`daemon/jobs.py`). The request's end
+settles what its rows owed: a row that owed a file the failed request never
+saved fails with the request's reason. Kinematics, appearance and animation
+travel in the sidecar for every durable reader, and in the preview's
+annotations object for the viewer alone.
 
 Only model runs advance editing order: a compile of saved bytes is listed
 against the document but never hides a run's preview. A child built inside a
@@ -2275,8 +2334,9 @@ STEP output pending until written, §3), and which a parent composes before the
 child's file is written. `record.tree` is never replaced by geometry
 translated from the STEP. The bytes an export writes from the result map to it
 once they exist (§3): no bytes are mapped to a tree before they are written
-from it. Successful explicit saves require all declared outputs; publishing a
-preview alone is not success.
+from it. The command's success reports the stored result; the ledger reports
+whether each declared file was saved. A successful explicit save requires every
+declared output, and a failure after the answer remains owed on the record.
 
 An interactive viewer can retain a complete displayed component across a
 replacement when its part and origin agree. Tree-specific placements and

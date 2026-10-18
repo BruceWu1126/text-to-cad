@@ -1180,7 +1180,13 @@ class ChildrenByKey(StoreCase):
             [PYTHON, script.name], cwd=str(script.parent), env=env, capture_output=True, text=True, timeout=600
         )
         self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
-        return completed.stdout.strip().splitlines()[-1].split(" ", 1)[0]
+        from cadgen._internal.doors import await_writes
+
+        from cadgen.metadata import declared_output_paths
+
+        for output in declared_output_paths(script):
+            await_writes(output)
+        return completed.stdout.strip().splitlines()[0].split(" ", 1)[0]
 
     def test_a_parent_follows_its_children_by_key(self) -> None:
         from cadgen.store.records import read_record

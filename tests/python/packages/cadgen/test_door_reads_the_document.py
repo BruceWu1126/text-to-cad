@@ -72,6 +72,9 @@ class DoorReadsTheDocumentTests(unittest.TestCase):
             timeout=600,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        from cadgen._internal.doors import await_writes
+
+        await_writes(self.document)
         self.assertTrue(self.document.is_file())
 
     def _validate(self) -> tuple[dict, str]:

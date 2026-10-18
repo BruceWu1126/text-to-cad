@@ -1,4 +1,4 @@
-"""A build has its parts' display data derived before it reports done; a view only reads.
+"""A build queues its parts' display data; its worker finishes it after the answer.
 
 A two-part model declaring an STL at the display tolerance, built in this process with the
 daemon off (STORE.md §3, a build's parts are the build pool's to derive). The build process

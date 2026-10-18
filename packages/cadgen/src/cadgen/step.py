@@ -140,6 +140,7 @@ def build(
         tree=payload.get("tree"),  # type: ignore[arg-type]
         skipped=bool(payload.get("skipped")),
         sidecar_only=bool(payload.get("sidecarOnly")),
+        saving=tuple(payload.get("saving") or ()),
     )
 
 

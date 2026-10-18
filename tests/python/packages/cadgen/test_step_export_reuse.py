@@ -57,8 +57,13 @@ def _run(entry: Path, args: list[str], store: Path) -> subprocess.CompletedProce
         ""
     )
     del code
-    return subprocess.run([VENV, entry.name, *args], cwd=str(entry.parent), env=env,
-                          capture_output=True, text=True, timeout=600)
+    completed = subprocess.run([VENV, entry.name, *args], cwd=str(entry.parent), env=env,
+                               capture_output=True, text=True, timeout=600)
+    from cadgen._internal.doors import await_writes
+
+    with unittest.mock.patch.dict(os.environ, env):
+        await_writes(entry.with_suffix(".step"))
+    return completed
 
 
 class StepExportReuseTest(unittest.TestCase):
@@ -106,15 +111,22 @@ class StepExportReuseTest(unittest.TestCase):
         edited = _run(self.entry, [], self.store)
         self.assertEqual(edited.returncode, 0, edited.stderr[-1500:])
         self.assertNotIn("step export is current", edited.stderr)
-        self.assertIn("wrote STEP: block.step", edited.stderr)
+        self.assertIn("saving block.step", edited.stdout)
         self.assertNotEqual(hashlib.sha256(step.read_bytes()).hexdigest(), original)
 
 
     def test_verbose_export_spans_fire_and_no_metadata_is_written(self) -> None:
-        run = _run(self.entry, ["--verbose"], self.store)
-        self.assertEqual(run.returncode, 0, run.stderr[-1500:])
+        import contextlib
+        import io
+        from cadgen.cli._run_model import run_model_argv
+
+        said = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}), \
+                contextlib.redirect_stderr(said), contextlib.redirect_stdout(said):
+            code = run_model_argv([str(self.entry), "--verbose"])
+        self.assertEqual(code, 0, said.getvalue())
         for span in ("transfer XCAF to STEP model", "write STEP file"):
-            self.assertIn(span, run.stderr,
+            self.assertIn(span, said.getvalue(),
                           f"orphaned --verbose span: {span!r}")
         # A written STEP is a plain artifact: no cadgen: properties, no link
         # back to source code, under any circumstances.

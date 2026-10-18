@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from tests.python.support.paths import REPO_ROOT, add_repo_path
@@ -66,6 +67,13 @@ class DecoratorArgumentsAreEvaluated(unittest.TestCase):
         completed = subprocess.run(
             [PYTHON, *argv], cwd=str(self.src), env=self.env, capture_output=True, text=True, timeout=600
         )
+        if completed.returncode == 0:
+            from cadgen._internal.doors import await_writes
+            from cadgen.metadata import declared_output_paths
+
+            with mock.patch.dict(os.environ, self.env):
+                for output in declared_output_paths(self.src / "plate.py"):
+                    await_writes(output)
         return completed
 
     def test_computed_arguments_land_and_tracked_constants_invalidate_them(self) -> None:

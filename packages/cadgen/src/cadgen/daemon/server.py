@@ -178,8 +178,8 @@ def _watch_client(
     request has attached, and stays warm.
 
     ``left`` is set before a kill: the job was stopped, not lost to a crash. ``released``
-    is set once the job answered its client before its files were written (``--no-wait``,
-    the ``released`` frame): the client leaving is then no loss, and the worker finishes.
+    is set once the job answered its client before its files were written
+    (the ``released`` frame): the client leaving is then no loss, and the worker finishes.
     """
     while not done.wait(CLIENT_LIVENESS_INTERVAL_SECONDS):
         if released is not None and released.is_set():
@@ -460,7 +460,7 @@ def _handle_request(conn: transport.Channel, request: dict) -> None:
     # derived, the derivation in hand finished and the worker warm. A model build or a
     # door whose caller left is still killed: there a cancel means stop.
     finishes_alone = is_artifact
-    # Set once the job released its client before its files were written (--no-wait):
+    # Set once the job released its client before its files were written:
     # the client is expected to leave, and the worker finishes the files.
     released = threading.Event()
     watchdog = threading.Thread(

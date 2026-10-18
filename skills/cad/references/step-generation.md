@@ -349,10 +349,13 @@ Every build runs on the warm daemon; `cadgen daemon status` shows running and
 queued work, and `cadgen doctor` says whether one can start here and why not.
 Results go to stdout, errors to stderr. Model runs
 accept `--json` (one result line; a failure is `{"ok": false, "error": "..."}`
-with exit status 1), `--verbose` (full tracebacks) and `--no-wait` (return once
-every model's result is recorded and its preview is on screen: the build service
-writes the STEP and mesh files after it has answered, and a failure of theirs
-reaches the next run and the viewer, not this command); `python part.py --help`
+with exit status 1) and `--verbose` (full tracebacks). Every build answers once
+its models' results are recorded. The build service finishes their display data,
+STEP and mesh files after the answer. Text results say `saving <file>` for files
+still owed, and JSON results include `files` mapping each path to `saving` or
+`saved`. A command reading one waits for the in-flight write. A failure after the
+answer reaches the ledger, the viewer and the next run; that next run first says
+which file is owed, since when and why. `python part.py --help`
 lists the flags. A script builds the models its `__main__` block calls; no flag
 selects one.
 
@@ -363,10 +366,9 @@ Every model a run builds, its children included, prints where its time went:
 ```
 
 Model code is the decorated function's call, less its waits for child builds;
-cadgen is loading the script, storing parts and meshing the parts every view
-draws (`Meshing parts n/total`), which a build finishes before it reports done.
-Its STEP and meshes are written after that, by the time the command returns (a
-child's while its parent's body runs), so the line does not count them. A `--json`
+cadgen is loading the script and storing the result. Display data, STEP and
+meshes finish after the answer on the daemon worker, so the line does not count
+them. A child's export can run while its parent's body runs. A `--json`
 result carries the same numbers in `timings` (`null` for a current model). A
 model whose code took more than twice its last build's, and 30 s more, gets a
 warning. `python part.py --profile` rebuilds that model with its own code under

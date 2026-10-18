@@ -94,6 +94,15 @@ class ModelsPerFile(unittest.TestCase):
             [PYTHON, *argv], cwd=str(cwd or self.src), env=self.env, capture_output=True, text=True, timeout=600
         )
         self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
+        from cadgen._internal.doors import await_writes
+        from cadgen.metadata import declared_output_paths
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, self.env):
+            script = Path(argv[0])
+            if script.suffix == ".py":
+                for output in declared_output_paths((cwd or self.src) / script):
+                    await_writes(output)
         return completed
 
     def cli(self, *argv: str, cwd: Path | None = None) -> str:

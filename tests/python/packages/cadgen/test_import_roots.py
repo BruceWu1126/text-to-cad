@@ -114,7 +114,13 @@ class SharedRoot(unittest.TestCase):
             built = _run(script, env)
             self.assertEqual(built.returncode, 0, built.stderr)
             self.assertIn('"outcome":"built"', built.stdout)
-            self.assertTrue((work / "proj" / "src" / "parts" / "plate.step").is_file())
+            from cadgen._internal.doors import await_writes
+            from unittest import mock
+
+            document = work / "proj" / "src" / "parts" / "plate.step"
+            with mock.patch.dict(os.environ, env):
+                await_writes(document)
+            self.assertTrue(document.is_file())
 
 
 class DaemonExecutor(unittest.TestCase):

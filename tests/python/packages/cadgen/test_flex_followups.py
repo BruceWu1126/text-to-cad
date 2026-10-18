@@ -103,6 +103,13 @@ class FollowUps(unittest.TestCase):
             [PYTHON, *argv], cwd=str(cwd), env=env or self.env, capture_output=True, text=True, timeout=600
         )
 
+    def await_saved(self, path: Path, *, env: dict | None = None) -> None:
+        from cadgen._internal.doors import await_writes
+        from unittest import mock
+
+        with mock.patch.dict(os.environ, env or self.env):
+            await_writes(path)
+
     # ---- item 4: models inside packages -------------------------------------------------
 
     def _package(self) -> Path:
@@ -128,6 +135,7 @@ class FollowUps(unittest.TestCase):
         )
         completed = self.run_in(pkg.parent, "top.py")
         self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
+        self.await_saved(pkg.parent / "top.step")
         self.assertTrue((pkg.parent / "top.step").is_file())
         self.assertTrue((pkg / "stack_rel.step").is_file(), "the child inside the package built in its worker")
         self.assertTrue((pkg / "parts" / "washer.step").is_file(), "and its relative import resolved")
@@ -136,6 +144,7 @@ class FollowUps(unittest.TestCase):
         pkg = self._package()
         completed = self.run_in(pkg.parent, "-m", "pkg.stack_rel")
         self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
+        self.await_saved(pkg / "stack_rel.step")
         self.assertTrue((pkg / "stack_rel.step").is_file())
 
     # ---- item 6: import-time validation errors read like build errors -------------------
@@ -177,6 +186,7 @@ class FollowUps(unittest.TestCase):
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         self.assertTrue((self.root / "relative-store" / "index" / "model").is_dir())
         env["CADGEN_CACHE_DIR"] = str(self.root / "relative-store")
+        self.await_saved(src / "washer.step", env=env)
         elsewhere = self.root / "elsewhere"
         elsewhere.mkdir()
         why = self.run_in(elsewhere, "-m", "cadgen.cli", "store", "why", str(src / "washer.py"), env=env)
@@ -241,6 +251,8 @@ class FollowUps(unittest.TestCase):
 
         for kind in INDEX_KINDS:
             self.assertIn(f"index/{kind}", info.stdout, info.stdout)
+        self.await_saved(src / "washer.step")
+        info = self.run_in(src, "-m", "cadgen.cli", "store", "info")
         self.assertRegex(info.stdout, r"index/document\s+1 ")
         self.assertRegex(info.stdout, r"index/output\s+1 ")
         self.assertRegex(info.stdout, r"index/part\s+1 ", "the build derived its one part")
