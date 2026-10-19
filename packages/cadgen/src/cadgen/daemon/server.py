@@ -807,13 +807,15 @@ def _bind(address: str, *, wait: float = 0.0) -> transport.Server | None:
     try:
         # A socket moved out of a deep state directory needs a folder no one else owns.
         transport.claim_folder(address, create=True)
+        if transport.address_is_stale(address):
+            # A dead socket file goes; anything else standing there (a folder, a file this
+            # user cannot remove) is no address to bind, and the start fails saying so.
+            transport.clear_address(address)
     except transport.AddressUnusable as exc:
         _log(f"cannot bind {address}: {exc}")
         lock.release()
         _DAEMON_LOCK = None
-        return None
-    if transport.address_is_stale(address):
-        transport.clear_address(address)
+        raise
     while True:
         try:
             authkey = transport.ensure_authkey(address)
@@ -833,14 +835,21 @@ def _bind(address: str, *, wait: float = 0.0) -> transport.Server | None:
             _log(f"cannot bind {address}: {exc}")
             lock.release()
             _DAEMON_LOCK = None
-            return None
+            raise transport.AddressUnusable(f"The build daemon cannot bind its address {address} "
+                                            f"({exc.strerror or exc}).") from exc
 
 
 def serve() -> int:
     os.environ["CADGEN_DAEMON_CHILD"] = "1"
     address = daemon_address()
     token = compute_version_token()
-    server = _bind(address, wait=LOCK_HANDOVER_SECONDS)
+    try:
+        server = _bind(address, wait=LOCK_HANDOVER_SECONDS)
+    except transport.AddressUnusable as exc:
+        # Not standing down for another daemon: this address cannot be bound by anyone,
+        # and the start fails saying so (its client reads the status and names the log).
+        _log(f"{exc} Exiting.")
+        return 1
     if server is None:
         return 0
     release_guard = threading.Lock()

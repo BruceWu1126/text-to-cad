@@ -520,13 +520,14 @@ class ArtifactStartup(unittest.TestCase):
                  mock.patch.object(artifacts, "execute", side_effect=AssertionError("native work in caller")):
                 future = artifacts.submit_artifact({"kind": "producer"}, store_root=self.root / "store")
                 with self.assertRaisesRegex(artifacts.ArtifactJobError,
-                                            r"exited \(status 0\) before it answered.*its log says why"):
+                                            r"exited \(status 1\) before it answered.*its log says why"):
                     future.result(timeout=10)
                 self.assertTrue(future.done())
                 self.assertEqual(launched.call_count, 1)
                 self.assertEqual(len(processes), 1)
-                # The server also uses exit 0 when it stands down before bind;
-                # only a successful connection/result can satisfy the client.
+                # A daemon that cannot bind its address fails its start (exit 1, its log
+                # saying why); only standing down for another daemon exits 0. Either way only
+                # a successful connection/result can satisfy the client.
                 processes[0].wait(timeout=5)
                 self.assertIsNotNone(processes[0].poll())
                 self.assertIn("AF_UNIX path too long", client.log_path(address).read_text(encoding="utf-8"))

@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -165,10 +166,13 @@ def unavailable() -> str | None:
     if not transport.supported():
         return ("This Python offers no local IPC family for the build daemon (AF_UNIX on POSIX, "
                 "AF_PIPE on Windows), so cadgen cannot build with it; use an interpreter that has one.")
+    address = daemon_address()
     try:
-        transport.claim_folder(daemon_address(), create=False)
+        transport.claim_folder(address, create=False)
     except transport.AddressUnusable as error:
         return str(error)
+    if os.name != "nt" and os.path.lexists(address) and not stat.S_ISSOCK(os.lstat(address).st_mode):
+        return transport.not_a_socket(address)  # a folder, or a plain file, where the socket belongs
     folder = transport.state_dir()
     existing = folder
     while not existing.exists() and existing.parent != existing:

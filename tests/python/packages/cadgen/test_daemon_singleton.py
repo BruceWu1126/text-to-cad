@@ -281,6 +281,34 @@ class OneTokenForOneCodeTest(unittest.TestCase):
         self.assertEqual(declared_version(self._tree(checkout=False)), "4.5.6")
 
 
+@unittest.skipIf(os.name == "nt", "a folder cannot stand at a pipe name")
+class AddressTakenByAFolderTest(unittest.TestCase):
+    """A folder at the socket path: the client used to say the daemon exited with status 0
+    and its log said "Address already in use"; the start now fails non-zero naming the
+    folder, and every door says so before any start."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="cgf-", dir="/tmp"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.address = self.tmp / "d.sock"
+        self.address.mkdir()
+        self.enterContext(mock.patch.dict(os.environ, {"CADGEN_DAEMON_SOCKET": str(self.address),
+                                                       "CADGEN_DAEMON_STATE_DIR": str(self.tmp / "state")}))
+
+    def test_every_door_says_a_folder_stands_at_the_address_and_starts_nothing(self):
+        self.assertRegex(client.unavailable() or "", rf"cannot use its address {self.address}: a folder stands there")
+        with mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("spawned")):
+            with self.assertRaisesRegex(client.DaemonUnavailable, "a folder stands there"):
+                client._connect_or_spawn(str(self.address))
+
+    def test_the_start_fails_non_zero_naming_the_folder(self):
+        logged = []
+        with mock.patch.object(server, "_DAEMON_LOCK", None), mock.patch.object(server, "_log", logged.append):
+            self.assertEqual(server.serve(), 1)
+        self.assertTrue(any("a folder stands there" in line for line in logged), logged)
+        self.assertTrue(self.address.is_dir(), "the start removed the folder")
+
+
 @unittest.skipIf(os.name == "nt", "a pipe name has no path to outgrow")
 class DeepStateDirTest(unittest.TestCase):
     """A state directory too deep for a Unix socket (``CADGEN_DAEMON_STATE_DIR``, a deep

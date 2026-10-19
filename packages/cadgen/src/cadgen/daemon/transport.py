@@ -381,14 +381,28 @@ def address_is_stale(address: str) -> bool:
 
 
 def clear_address(address: str) -> None:
+    """Remove a dead socket file at ``address`` (POSIX), so the daemon can bind it. What
+    stands there and cannot be removed -- a folder, a file of another user's -- is no
+    address to bind: :class:`AddressUnusable`, naming it and the remedy."""
     if os.name == "nt":
         return
+    path = Path(address)
     try:
-        Path(address).unlink()
+        if path.is_dir() and not path.is_symlink():
+            raise IsADirectoryError(f"{address} is a folder")
+        path.unlink()
     except FileNotFoundError:
         pass
-    except OSError:
-        pass
+    except OSError as error:
+        raise AddressUnusable(not_a_socket(address, error)) from error
+
+
+def not_a_socket(address: str, error: OSError | None = None) -> str:
+    """The one sentence for an address something other than the daemon's socket stands at."""
+    what = "a folder" if Path(address).is_dir() else "a file that is not a socket"
+    detail = f" ({error.strerror or error})" if error is not None and not Path(address).is_dir() else ""
+    return (f"The build daemon cannot use its address {address}: {what} stands there{detail}; "
+            "remove it, or set CADGEN_DAEMON_STATE_DIR to another folder.")
 
 
 class Channel:
@@ -1002,6 +1016,7 @@ __all__ = [
     "claim_folder",
     "clear_address",
     "connect",
+    "not_a_socket",
     "ensure_authkey",
     "identity_digest",
     "keys_match",
