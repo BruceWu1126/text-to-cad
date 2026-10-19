@@ -229,7 +229,7 @@ IMPORTING = """\
 from pathlib import Path
 
 from cadgen import build123d as bd
-from cadgen import read_step, step
+from cadgen import compound_from_instances, read_step, step
 
 PIN = 1.0
 
@@ -240,14 +240,17 @@ def rig():
     bored = vendor.cut(bd.Solid.make_cylinder(1, 30))
     assert bored.is_valid
     bored.label = "bored"
+    pair = compound_from_instances("pair", [(bored, bd.Location((0, 0, 0)), "left"),
+                                            (vendor, bd.Location((20, 0, 0)), "right")])
     peg = bd.Solid.make_cylinder(PIN, 5)
     peg.label = "peg"
-    return bd.Compound(children=[bored, bd.Pos(20, 0, 0) * vendor, bd.Pos(0, 30, 0) * peg], label="rig")
+    return bd.Compound(children=[pair, bd.Pos(0, 30, 0) * peg], label="rig")
 """
 
 
 class ImportedPublication(PublicationCacheCase):
-    """A model reading a STEP file: an edit elsewhere prepares nothing made of the read, a
+    """A model reading a STEP file and placing what it makes of it with
+    ``compound_from_instances``: an edit elsewhere prepares nothing made of the read, a
     file with other bytes prepares what is made of it again, and each rebuild writes what a
     cold build writes. Each store holds the file's compile before a build reads it, so what
     a build prepares is its own."""

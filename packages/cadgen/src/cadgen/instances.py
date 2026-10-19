@@ -41,24 +41,34 @@ def compound_from_instances(
     """
     if not instances:
         raise RuntimeError(f"assembly {name!r} has no instances")
-    from build123d import Compound
-    from OCP.TopoDS import TopoDS_Builder, TopoDS_Compound
+    from cadgen._internal.kernel_memo import composed
 
-    builder = TopoDS_Builder()
-    occt_compound = TopoDS_Compound()
-    builder.MakeCompound(occt_compound)
-    occurrence_children: list[dict[str, Any]] = []
-    for index, (prototype, location, instance_name) in enumerate(instances, start=1):
-        builder.Add(occt_compound, prototype.wrapped.Moved(location.wrapped))
-        occurrence_children.append(
+    instances = list(instances)
+
+    def compose() -> Compound:
+        from build123d import Compound
+        from OCP.TopoDS import TopoDS_Builder, TopoDS_Compound
+
+        builder = TopoDS_Builder()
+        occt_compound = TopoDS_Compound()
+        builder.MakeCompound(occt_compound)
+        for prototype, location, _instance_name in instances:
+            builder.Add(occt_compound, prototype.wrapped.Moved(location.wrapped))
+        return Compound(occt_compound, label=name)
+
+    def tree() -> dict[str, Any]:
+        # Occurrence-metadata tree consumed by the tree writer (see
+        # cadgen.store.build.build_tree_from_compound); a plain
+        # build123d compound has no such attribute and falls back to the child walk.
+        return {"id": "o1", "name": name, "children": [
             _occurrence_subtree(prototype, location, f"o1.{index}", str(instance_name))
-        )
-    compound = Compound(occt_compound, label=name)
-    # Occurrence-metadata tree consumed by the tree writer (see
-    # cadgen.store.build.build_tree_from_compound); a plain
-    # build123d compound has no such attribute and falls back to the child walk.
-    compound._occurrence_tree = {"id": "o1", "name": name, "children": occurrence_children}
-    return compound
+            for index, (prototype, location, instance_name) in enumerate(instances, start=1)
+        ]}
+
+    # Inside a model run the composition is a kernel-memo operation: a later run's call
+    # with the same prototypes, placements and names is handed the compound the earlier
+    # one made, and its tree is built again from this call's instances.
+    return composed(name, instances, compose, tree)
 
 
 def _occurrence_subtree(node: Any, parent_world_loc: Location, path: str, name: str) -> dict[str, Any]:

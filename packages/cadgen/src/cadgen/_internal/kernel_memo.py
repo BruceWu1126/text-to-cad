@@ -173,8 +173,8 @@ from OCP.TopTools import TopTools_IndexedMapOfShape
 from cadgen._internal import kernel_history
 from cadgen._internal.kernel_trace import Trace
 
-__all__ = ["CAPACITY", "clear", "construction_key", "decoded", "enabled", "imported", "install", "run", "stats",
-           "uninstall"]
+__all__ = ["CAPACITY", "clear", "composed", "construction_key", "decoded", "enabled", "imported", "install", "run",
+           "stats", "uninstall"]
 
 # Entries of live results: a model's intermediate geometry for a few models at
 # once, so an edit loop over a large model keeps every unchanged step.
@@ -199,6 +199,9 @@ _UNSTABLE: set[int] = set()
 # ``imported``): no method is named so.
 _CHILD = "<child>"
 _IMPORT = "<import>"
+# ``compound_from_instances`` as a run sees it (``composed``): a model's call, as a
+# compound's constructor is.
+_INSTANCES = "compound_from_instances"
 # The effects by id, while anything holds them: a key names an input's effects by id.
 _EFFECTS: "weakref.WeakValueDictionary[int, _Effect]" = weakref.WeakValueDictionary()
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
@@ -620,7 +623,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             state.tally["hits"] += 1
             return None if kind == "constructor" else result
         try:
-            captured = _capture(shapes, top=kind == "constructor" and label == "Compound")
+            captured = _capture(shapes, top=_composes(label, kind))
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=False)
@@ -666,7 +669,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                        history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
-        if kind == "constructor" and label == "Compound":
+        if _composes(label, kind):
             for made in entry.made:
                 made.container = True  # the children it was given are their makers'
         _keep(entry)
@@ -703,7 +706,7 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     inputs = state.trace.given(shapes, state.feature_of)
     verified = capture
     try:
-        top = kind == "constructor" and op == "Compound"
+        top = _composes(op, kind)
         captured = _capture(shapes, embedded=True, top=top) if capture else []
     except Exception:  # noqa: BLE001
         _STATS["errors"] += 1
@@ -920,6 +923,36 @@ def _decode_keep(key: tuple[int, int], result: Any, state: _Run) -> Any:
         made.container = made.tshape in groups
     _keep(entry)
     return result
+
+
+def composed(name: str, instances: list, compose: Callable[[], Any], tree: Callable[[], dict]) -> Any:
+    """``cadgen.compound_from_instances`` as a run sees it: a model's call, keyed and kept as
+    a compound's constructor is (``_call``). ``compose()`` -- one compound placing each
+    instance's prototype at its location, sharing its geometry -- is the operation, its
+    shape inputs the prototypes (``TopoDS_Builder::Add`` changes nothing of one but its own
+    ``Free`` flag, so each is captured as its own TShape alone), its parameters the name and
+    each instance's location and name; its compound is a container (``_Made.container``).
+    ``tree()`` -- the occurrence tree the compound carries -- is attached fresh on every
+    call, hit or miss, from the instances this call was given, so its leaves are the
+    model's prototypes of this run: so attached, the tree is a function of the compound's
+    key, and the one tree a shape is keyed with (``_shape_key``). A prototype no key names
+    makes the call run plain, its compound this run's alone."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth:
+        result = compose()
+    else:
+        result = _wrap(_INSTANCES, lambda _name, _instances: compose(), "function")(name, instances)
+    result.__dict__["_occurrence_tree"] = attached = tree()
+    made = _made_of(_wrapped(result).TShape(), state)
+    if made is not None:
+        made.tree = attached
+    return result
+
+
+def _composes(label: str, kind: str) -> bool:
+    """Whether a call makes a container of the shapes it is given and changes nothing of
+    one but its own ``Free`` flag: a compound's constructor, ``compound_from_instances``."""
+    return label == _INSTANCES or (kind == "constructor" and label == "Compound")
 
 
 def _constructs(label: str, args: tuple, kwargs: dict) -> bool:
@@ -1141,8 +1174,13 @@ def _shape_key(shape: Any, state: _Run) -> int:
     state_dict = shape.__dict__
     if state_dict.get("joints"):
         raise _Unkeyable("a shape with joints")
-    if "_occurrence_tree" in state_dict:
-        raise _Unkeyable("a shape carrying a spliced occurrence tree")
+    tree = state_dict.get("_occurrence_tree")
+    if tree is not None:
+        # A composition's tree is a function of its key (``composed``); any other
+        # tree is the model's own, and nothing keys it.
+        made = _made_of(_wrapped(shape).TShape(), state)
+        if made is None or made.tree is not tree:
+            raise _Unkeyable("an occurrence tree no keyed composition attached")
     label = state_dict.get("label")
     if not isinstance(label, str):
         raise _Unkeyable("a label that is not a string")
@@ -1448,7 +1486,7 @@ class _Made:
     registered sub-shapes. Runs bind their own features to this shared record."""
 
     __slots__ = ("tshape", "key", "position", "feature", "run", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born", "origin", "tainted", "container")
+                 "subs", "born", "origin", "tainted", "container", "tree")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
@@ -1474,6 +1512,9 @@ class _Made:
         # A compound whose native shape is its children and nothing more: a
         # compound's constructor's, or a group of a decoded tree (``_reset``).
         self.container = False
+        # The occurrence tree the keyed composition that made this TShape attached
+        # to its result (``composed``): the one tree a shape is keyed with.
+        self.tree = None
 
     def root(self) -> "_Made":
         made = self
@@ -1854,9 +1895,10 @@ def _capture(shapes: list, *, embedded: bool = False, top: bool = False) -> list
     its old registration without blaming the unchanged roots it contains. A
     foreign input that embeds none is noted for the run (``_Run.foreign``) and
     passed over without a walk while its children are as many as when noted.
-    With ``top`` (a compound's constructor, which changes nothing of an input but
-    its own ``Free`` flag), each memoized input is captured as its own TShape
-    alone, and nothing else is: no input's structure or embedded root can change."""
+    With ``top`` (a call that composes its inputs, ``_composes``, which changes
+    nothing of one but its own ``Free`` flag), each memoized input is captured as
+    its own TShape alone, and nothing else is: no input's structure or embedded
+    root can change."""
     state = getattr(_LOCAL, "run", None)
     distinct: list[_Captured] = []
     protected: dict[Any, _Captured] = {}

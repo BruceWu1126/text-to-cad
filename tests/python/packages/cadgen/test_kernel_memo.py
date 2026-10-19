@@ -587,10 +587,11 @@ def _vendor(path: Path, height: float) -> None:
 
 class ImportedFileTest(KernelMemoCase):
     """A STEP file's read (``cadgen.read_step``) is a decode of the tree its bytes map to,
-    keyed by its hash (``kernel_memo.imported``); cut, checked and filleted, a second run
-    after an edit elsewhere is handed the same objects and hits on every call downstream of
-    the read, with nothing decoded again; a file with other bytes misses, and the geometry
-    is plain build123d's."""
+    keyed by its hash (``kernel_memo.imported``); placed twice by ``compound_from_instances``
+    (``kernel_memo.composed``), cut, checked and filleted, a second run after an edit
+    elsewhere is handed the same objects and hits on every call downstream of the read,
+    with nothing decoded or composed again; a file with other bytes misses, and the
+    geometry is plain build123d's."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -605,37 +606,62 @@ class ImportedFileTest(KernelMemoCase):
         _vendor(self.vendor, 4)
 
     def _model(self, pin):
-        from build123d import Axis, Solid
+        from build123d import Axis, Location, Solid
 
-        from cadgen import read_step
+        from cadgen import compound_from_instances, read_step
 
         vendor = read_step(self.vendor)
+        pair = compound_from_instances("pair", [(vendor, Location((0, 0, 0)), "left"),
+                                                (vendor, Location((20, 0, 0)), "right")])
         bored = vendor.cut(Solid.make_cylinder(1, 30))
         valid = bored.is_valid
         rounded = bored.fillet(0.5, bored.edges().filter_by(Axis.Z).sort_by(Axis.X)[:1])
-        return vendor, bored, valid, rounded, Solid.make_cylinder(pin, 5)
+        return vendor, pair, bored, valid, rounded, Solid.make_cylinder(pin, 5)
 
     def test_what_is_made_of_a_read_hits_until_its_bytes_change(self) -> None:
         plain = self._model(1.0)  # no run: plain build123d
-        (vendor, bored, valid, rounded, _peg), cold, cold_run = _run(self._model, 1.0)
+        (vendor, pair, bored, valid, rounded, _peg), cold, cold_run = _run(self._model, 1.0)
         self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
         self.assertEqual(cold_run.tally["uncached"], 0)
         self.assertTrue(valid)
+        tree = pair._occurrence_tree
+        self.assertIs(tree["children"][0]["shape"], vendor, "the tree's leaves are the call's prototypes")
         with mock.patch.object(kernel_memo, "_decoding", wraps=kernel_memo._decoding) as made:
-            (vendor2, bored2, valid2, rounded2, _peg), edited, edited_run = _run(self._model, 1.5)
-        made.assert_not_called()  # nothing read again
+            (vendor2, pair2, bored2, valid2, rounded2, _peg), edited, edited_run = _run(self._model, 1.5)
+        made.assert_not_called()  # nothing read or composed again
         self.assertEqual((edited["misses"], edited["unkeyable"]), (1, 0), "the peg alone")
         self.assertEqual(edited["hits"], cold["misses"] - 1)
         self.assertEqual(edited_run.tally, {"hits": edited["hits"], "misses": 1, "uncached": 0})
-        self.assertEqual([vendor2 is vendor, bored2 is bored, rounded2 is rounded], [True] * 3)
+        self.assertEqual([vendor2 is vendor, pair2 is pair, bored2 is bored, rounded2 is rounded], [True] * 4)
         self.assertTrue(valid2)
-        self.assertEqual(_bytes(rounded2.wrapped), _bytes(plain[3].wrapped))
+        self.assertIsNot(pair2._occurrence_tree, tree, "a hit's tree is built from its own call")
+        placed = [(leaf["name"], tuple(leaf["world_loc"].position)) for leaf in tree["children"]]
+        self.assertEqual([(leaf["name"], tuple(leaf["world_loc"].position))
+                          for leaf in pair2._occurrence_tree["children"]], placed)
+        self.assertEqual(_bytes(rounded2.wrapped), _bytes(plain[4].wrapped))
         _vendor(self.vendor, 5)
-        (vendor3, bored3, _valid, rounded3, _peg), changed, _ = _run(self._model, 1.5)
+        (vendor3, pair3, bored3, _valid, rounded3, _peg), changed, _ = _run(self._model, 1.5)
         self.assertIsNot(vendor3, vendor, "another file's bytes are another tree")
         self.assertEqual((changed["hits"], changed["unkeyable"]), (2, 0), "the tool and the peg")
-        self.assertFalse(any(new.wrapped.IsPartner(old.wrapped) for new, old in ((bored3, bored), (rounded3, rounded))))
+        self.assertFalse(any(new.wrapped.IsPartner(old.wrapped) for new, old in
+                             ((pair3, pair), (bored3, bored), (rounded3, rounded))))
         self.assertAlmostEqual(vendor3.volume, 8 * 6 * 5)
+
+    def test_an_occurrence_tree_keys_only_as_its_composition_attached_it(self) -> None:
+        from build123d import Compound, Location, Solid
+
+        from cadgen import compound_from_instances
+
+        def model(renamed):
+            box = Solid.make_box(1, 1, 1)
+            pair = compound_from_instances("pair", [(box, Location((0, 0, 0)), "a"), (box, Location((3, 0, 0)), "b")])
+            if renamed:
+                pair._occurrence_tree = dict(pair._occurrence_tree, name="renamed")
+            return Compound(children=[pair])
+
+        _, kept, _ = _run(model, False)
+        _, replaced, _ = _run(model, True)
+        self.assertEqual((kept["unkeyable"], replaced["unkeyable"]), (0, 1), "a tree the model attached keys nothing")
 
 
 class CopyIdentityTest(KernelMemoCase):
