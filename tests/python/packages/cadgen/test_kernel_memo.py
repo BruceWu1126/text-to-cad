@@ -222,6 +222,38 @@ class HitTest(KernelMemoCase):
         self.assertEqual((hot["misses"], hot["unkeyable"]), (0, 0))
         self.assertEqual(hot["hits"], cold["misses"])
 
+    def test_an_in_place_clean_that_changes_its_input_is_named_as_cold_on_a_hit(self) -> None:
+        """``clean()`` may write into the shape it was given: merging two coaxial cones into
+        one face, it writes the curves of the edges it keeps on the merged face into those
+        edges, which the cleaned shape shares with its input. A hit notes that change on the
+        input as given, as the miss did, never on the cleaned shape the input object wraps
+        once the hit has run: else every hot run names the change in the cleaned shape's key,
+        everything made of it misses, and its construction key is not the cold run's."""
+        from build123d import Axis, Compound, Location, Plane, Polyline, Solid, make_face
+
+        def cones():
+            # Two collinear slopes revolve into two coaxial cones, which build123d's revolve
+            # (and loft) clean in place, as below.
+            profile = Plane.XZ * make_face(Polyline((0, 0), (10, 0), (8, 5), (6, 10), (0, 10), close=True))
+            return Compound([Solid.revolve(face, 360, Axis.Z) for face in profile.faces()])
+
+        pristine = _bytes(cones().wrapped)
+
+        def model():
+            turned = cones()
+            given = turned.wrapped
+            turned.clean()
+            return given, turned, turned.moved(Location((0, 0, 20)))
+
+        (given, turned, moved), cold, run1 = _run(model)
+        self.assertNotEqual(_bytes(given), pristine, "the clean wrote into the shape it was given")
+        cold_names = [run1.identify(shape) for shape in (turned, moved)]
+        (_given, turned2, moved2), hot, run2 = _run(model)
+        self.assertEqual((hot["misses"], hot["unkeyable"], hot["errors"]), (0, 0, 0))
+        self.assertEqual(hot["hits"], cold["misses"])
+        self.assertIs(moved2, moved, "what is made of the cleaned shape hits")
+        self.assertEqual([run2.identify(shape) for shape in (turned2, moved2)], cold_names)
+
     def test_split_results_are_sequences_of_the_same_objects(self) -> None:
         from build123d import Keep, Plane, Solid
 
