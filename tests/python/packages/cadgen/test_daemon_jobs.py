@@ -588,7 +588,7 @@ class WaitingForAWorker(unittest.TestCase):
             def alive(self):
                 return True
 
-        def acquire(model, *, dependency, on_start):
+        def acquire(model, *, dependency, on_start, **_kwargs):
             on_start()  # no warm worker: the pool starts one for this request
             seen["starting"] = ledger.snapshot()[0]
             return Worker()

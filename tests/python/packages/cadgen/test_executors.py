@@ -220,6 +220,12 @@ class DaemonCompile(unittest.TestCase):
         self.assertIn("broken.step", job.output())
         self.assertTrue(self.closed.wait(30), "the document's line never closed")
         self.assertEqual((self.events[-1]["model"], self.events[-1]["state"]), (str(document), "failed"))
+        # The failed event carries the job's one-line reason: the ledger row a compile makes
+        # under its build says why it failed, never only that.
+        from cadgen.daemon.jobs import failure_message
+
+        self.assertTrue(self.events[-1].get("error"), self.events[-1])
+        self.assertEqual(self.events[-1]["error"], failure_message(job.output())[0])
 
 
 if __name__ == "__main__":

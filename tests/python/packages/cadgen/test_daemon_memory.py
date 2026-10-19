@@ -79,7 +79,10 @@ class Admission(unittest.TestCase):
         parent = self.pool.acquire("parent")
         child = self.pool.acquire("child", dependency=True)
         grandchild = self.pool.acquire("grandchild", dependency=True)
-        with self.assertRaisesRegex(pool.MemoryAdmissionError, "active builds retain their geometry"):
+        # One true sentence: what the request needs, what holds the budget, and that nothing
+        # idle or in flight can free it (no "idle workers were reclaimed" when none were).
+        with self.assertRaisesRegex(pool.MemoryAdmissionError, r"needs 16 MiB against a 12 MiB budget, of which 12 MiB "
+                                    r"is held by 3 busy workers, no worker is idle to reclaim"):
             self.pool.acquire("too-deep", dependency=True)
         self.assertTrue(all(w.busy and not w.killed for w in (parent, child, grandchild)))
 
@@ -91,6 +94,43 @@ class Admission(unittest.TestCase):
         self.assertTrue(old.killed)
         self.assertTrue(fresh.alive())
         self.assertEqual(self.pool.snapshot()["memoryReclaims"], 1)
+
+    def test_pressure_reclaims_spares_before_bound_workers_and_never_the_owners_own(self):
+        # A model's bound worker holds the memo its next edit hits: under pressure the idle
+        # spare goes first, and a job the model's own result owes (its display data, its
+        # export) never evicts that worker to seat itself.
+        bound = self.pool.acquire("model")
+        self.pool.release(bound)
+        spare = self.pool.acquire("")
+        self.pool.release(spare)
+        self.resident[bound.pid] = self.resident[spare.pid] = 5 * MIB
+        child = self.pool.acquire("child", dependency=True, owner="model")
+        self.assertTrue(spare.killed, "the spare was kept while the model's worker was reclaimed")
+        self.assertFalse(bound.killed)
+        self.assertTrue(child.busy)
+        with self.pool._cv:
+            self.assertEqual(self.pool._reclaimable_locked(keep="model"), [])
+            self.assertEqual(self.pool._reclaimable_locked(), [bound])
+
+    def test_a_request_waiting_for_memory_says_so(self):
+        running = [1]
+        told = []
+        waiting = pool.Pool(policy=memory.MemoryPolicy(8 * MIB, 4 * MIB),
+                            memory_reader=lambda pids: {pid: 2 * MIB for pid in pids},
+                            in_flight=lambda: running[0])
+        self.addCleanup(waiting.shutdown)
+        first = waiting.acquire("first")
+        second = waiting.acquire("second", dependency=True)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            third = executor.submit(waiting.acquire, "third", dependency=True, on_wait=told.append)
+            deadline = threading.Event()
+            while not told and not deadline.wait(0.01):
+                pass
+            self.assertEqual(told, ["Waiting for memory: 8 MiB of 8 MiB in use"])
+            self.assertFalse(third.done())
+            waiting.release(first)
+            self.assertTrue(third.result(timeout=5).busy)
+        self.assertTrue(second.busy)
 
     def test_dependency_pressure_reclaims_only_idle_state_and_keeps_the_parent(self):
         parent = self.pool.acquire("parent")
@@ -149,7 +189,7 @@ class Admission(unittest.TestCase):
         )
         self.addCleanup(isolated.shutdown)
         parent = isolated.acquire("parent")
-        with self.assertRaisesRegex(pool.MemoryAdmissionError, "sole charge"):
+        with self.assertRaisesRegex(pool.MemoryAdmissionError, "needs 8 MiB against a 6 MiB budget"):
             isolated.acquire("child", dependency=True)
         self.assertTrue(parent.busy and parent.alive() and not parent.killed)
 
@@ -160,16 +200,47 @@ class Admission(unittest.TestCase):
         )
         self.addCleanup(impossible.shutdown)
         before = _StubWorker._next_pid
-        with self.assertRaisesRegex(pool.MemoryAdmissionError, "3 MiB total"):
+        with self.assertRaisesRegex(pool.MemoryAdmissionError, "against a 3 MiB budget"):
             impossible.acquire("cannot-fit")
         self.assertEqual(before, _StubWorker._next_pid)
 
-    def test_finished_oversized_worker_is_reclaimed_without_another_request(self):
+    def test_a_finished_oversized_worker_stays_until_a_request_needs_its_memory(self):
+        # A bound worker is reclaimed last: its model's next edit hits the memo it holds, so
+        # its release trims nothing but spares, and the admission of a request that needs
+        # the memory takes it (test_oversized_idle_cache_can_be_replaced_with_a_fresh_worker).
         worker = self.pool.acquire("large")
         self.resident[worker.pid] = 10 * MIB
         self.pool.release(worker)
-        self.assertNotIn(worker.pid, [entry["pid"] for entry in self.pool.snapshot()["workers"]])
+        self.assertIn(worker.pid, [entry["pid"] for entry in self.pool.snapshot()["workers"]])
+        self.assertEqual(self.pool.snapshot()["memoryReclaims"], 0)
+        fresh = self.pool.acquire("other")
+        self.assertTrue(worker.killed and fresh.busy)
         self.assertEqual(self.pool.snapshot()["memoryReclaims"], 1)
+
+    def test_a_models_owed_jobs_share_a_worker_rather_than_evicting_its_own(self):
+        # The tight-budget scenario: a budget of two workers, the model's own idle worker and
+        # the two jobs its result owes. The first owed job spawns, the second waits on it and
+        # takes its worker back as it returns -- the model's worker, with its memo, is never
+        # reclaimed by either, and its next edit finds it.
+        running = [1]
+        tight = pool.Pool(policy=memory.MemoryPolicy(11 * MIB, 5 * MIB),
+                          memory_reader=lambda pids: {pid: 5 * MIB for pid in pids},
+                          in_flight=lambda: running[0])
+        self.addCleanup(tight.shutdown)
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SPARES": "1"}):  # a returning worker has a set to join
+            own = tight.acquire("model")
+            tight.release(own)
+            first = tight.acquire("", dependency=True, owner="model")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                second = executor.submit(tight.acquire, "", dependency=True, owner="model")
+                self.assertFalse(second.done())
+                tight.release(first)
+                worker = second.result(timeout=5)
+            self.assertIs(worker, first, "the second owed job spawned instead of taking the returning worker")
+            tight.release(worker)
+            self.assertFalse(own.killed, "the model's worker was reclaimed by its own owed jobs")
+            self.assertIs(tight.acquire("model"), own)
+        self.assertEqual(tight.snapshot()["imports"], 2)
 
     def test_a_pending_spawn_keeps_its_reservation(self):
         entered, finish = threading.Event(), threading.Event()
@@ -380,13 +451,71 @@ class DependencyRequest(unittest.TestCase):
              mock.patch.object(server, "_BROKER", broker), \
              mock.patch.object(server, "_log"):
             server._handle_request(conn, request)
-        worker_pool.acquire.assert_called_once_with(os.path.realpath("/work/child.py"), dependency=True, on_start=mock.ANY)
+        worker_pool.acquire.assert_called_once_with(os.path.realpath("/work/child.py"), dependency=True, on_start=mock.ANY, on_wait=mock.ANY, owner="", cancelled=mock.ANY)
         worker_pool.release.assert_not_called()
         ledger.finish.assert_called_once_with(job, 1, error=reason)
         broker.finish_entry.assert_called_once_with(entry, 1, error=reason)
         self.assertEqual(frames[-1], {"exit": 1})
         self.assertIn(reason, frames[0]["data"])
         self.assertFalse(any("workerDied" in frame or "restart" in frame for frame in frames))
+
+
+    def test_a_spawn_the_system_refuses_fails_the_job_with_the_reason(self):
+        # Any failure to seat the job ends its row and its in-flight entry with the reason:
+        # one that escaped used to leave the row building forever, with every later request
+        # for the same work waiting behind it.
+        from cadgen.daemon import server
+
+        frames = []
+        conn = mock.Mock()
+        conn.send.side_effect = lambda data: frames.append(json.loads(data))
+        worker_pool = mock.Mock()
+        worker_pool.acquire.side_effect = OSError(24, "Too many open files")
+        ledger, broker = mock.Mock(), mock.Mock()
+        job = {"id": "refused"}
+        ledger.start.return_value = job
+        entry = {"token": "refused"}
+        broker.claim_entry.return_value = (True, entry)
+        request = {"tool": "run", "argv": ["child.py"], "cwd": "/work",
+                   "dependency": True, "closure": "abc", "coalesce": True}
+        with mock.patch.object(server, "_POOL", worker_pool), mock.patch.object(server, "_JOBS", ledger), \
+             mock.patch.object(server, "_BROKER", broker), mock.patch.object(server, "_log"):
+            server._handle_request(conn, request)
+        ledger.finish.assert_called_once_with(job, 1, error="[Errno 24] Too many open files")
+        broker.finish_entry.assert_called_once_with(entry, 1, error="[Errno 24] Too many open files")
+        self.assertEqual(frames[-1], {"exit": 1})
+        self.assertIn("Too many open files", frames[0]["data"])
+
+    def test_a_client_that_leaves_while_waiting_withdraws_its_request(self):
+        # Watched from the start: a client gone while its request waits for memory or a
+        # kernel costs no import, and the row ends cancelled, never building forever.
+        from cadgen.daemon import server
+        from cadgen.daemon.jobs import JobLedger
+
+        class Gone:
+            def __init__(self):
+                self.sent = 0
+
+            def send(self, raw):
+                self.sent += 1
+                if self.sent > 1:
+                    raise BrokenPipeError("the client left")
+
+        def acquire(model, *, cancelled, **_kwargs):
+            deadline = threading.Event()
+            while not cancelled() and not deadline.wait(0.01):
+                pass
+            raise pool.RequestCancelled("withdrawn")
+
+        worker_pool = mock.Mock()
+        worker_pool.acquire.side_effect = acquire
+        ledger = JobLedger()
+        with mock.patch.object(server, "_POOL", worker_pool), mock.patch.object(server, "_JOBS", ledger), \
+             mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 0.01):
+            server._handle_request(Gone(), {"tool": "run", "argv": ["model.py"], "cwd": "/work"})
+        (row,) = ledger.snapshot()
+        self.assertEqual(row["state"], "cancelled")
+        worker_pool.release.assert_not_called()
 
 
 class InflightOwnership(unittest.TestCase):

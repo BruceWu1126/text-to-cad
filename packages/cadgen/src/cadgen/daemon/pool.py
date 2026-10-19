@@ -110,6 +110,16 @@ class MemoryAdmissionError(RuntimeError):
     """A worker reservation could not fit after idle resources were reclaimed."""
 
 
+class RequestCancelled(Exception):
+    """The request a worker was being found for was withdrawn while it waited (its client
+    left): no worker is seated and no kernel is started for it."""
+
+
+class _WorkerFreed(Exception):
+    """A worker came free while a request waited for the memory to spawn one
+    (``Pool._admit_locked``): the request takes it instead (``Pool.acquire``)."""
+
+
 _NTSTATUS_NAMES = {
     0xC0000005: "STATUS_ACCESS_VIOLATION",
     0xC00000FD: "STATUS_STACK_OVERFLOW",
@@ -327,6 +337,9 @@ class Worker:
         self.use_seq = next(_USE_SEQUENCE)
         # The MODEL this worker is bound to (its script path), "" while a spare.
         self.model = ""
+        # The model it was last bound to: a spare that held a model's memo is the spare
+        # that model's next build takes (``Pool._take_spare_locked``).
+        self.last_model = ""
         self._frames: queue.Queue = queue.Queue()
         self._reader = threading.Thread(target=self._pump, name="cadgen-worker-frames", daemon=True)
         self._reader.start()
@@ -505,6 +518,12 @@ class Pool:
         self._retiring: list[Worker] = []
         self._active_pending = 0
         self._spares_pending = 0
+        # Requests waiting for a spare that is still importing rather than spawning one
+        # more (``acquire``): each pending spare is waited for by at most one of them.
+        self._spare_waiters = 0
+        # Requests waiting in memory admission (``_admit_locked``): while one waits, a
+        # worker a job returns is its to take, and a release trims no spare.
+        self._admission_waiters = 0
         self._policy = policy if policy is not None else MemoryPolicy.from_environment()
         # What one worker is estimated to cost. The seed until a never-used idle
         # worker has been measured; recalibrated by every _memory_locked.
@@ -520,7 +539,17 @@ class Pool:
     # --- spares -------------------------------------------------------------------
 
     def _spawn(self) -> Worker:
-        worker = Worker()
+        """A fresh worker, or :class:`WorkerGone` saying why none could start: one that
+        died or stayed silent before announcing itself (``Worker._announced``), or a
+        process the system refused to start at all (too many open files, no memory for
+        a fork) -- which is as much a failed start as the other, and ends the request
+        that needed it the same way, never a thread left holding the pool's bookkeeping."""
+        try:
+            worker = Worker()
+        except WorkerGone:
+            raise
+        except OSError as exc:
+            raise WorkerGone(f"a worker could not be started: {exc.strerror or exc}") from exc
         with self._cv:
             self._stats["imports"] += 1
         return worker
@@ -549,68 +578,135 @@ class Pool:
 
         def fill(count: int) -> None:
             for _ in range(count):
+                worker = None
                 try:
                     worker = self._spawn()
-                except WorkerGone:
-                    worker = None
-                with self._cv:
-                    self._spares_pending -= 1
-                    if worker is not None:
-                        if self._closed:
-                            worker.kill()
-                        else:
-                            self._workers.append(worker)
-                    self._cv.notify_all()
+                except Exception:  # noqa: BLE001 - a spare that fails to start is simply not there
+                    pass
+                finally:
+                    # Whatever became of the start, its reservation is released: a spare
+                    # still counted as pending would hold memory for a worker that never comes.
+                    with self._cv:
+                        self._spares_pending -= 1
+                        if worker is not None:
+                            if self._closed:
+                                worker.kill()
+                            else:
+                                self._workers.append(worker)
+                        self._cv.notify_all()
 
         threading.Thread(target=fill, args=(want,), name="cadgen-spares", daemon=True).start()
 
-    def _take_spare_locked(self) -> Worker | None:
+    def _take_spare_locked(self, model: str = "") -> Worker | None:
+        """An idle spare: the one last bound to ``model`` (its memo still in that process,
+        README law 18) when there is one, else the first."""
         spares = self._spares_locked()
+        if model:
+            for spare in spares:
+                if spare.last_model == model:
+                    return spare
         return spares[0] if spares else None
+
+    def _wait_for_spare_locked(self, model: str, cancelled, on_start) -> Worker | None:
+        """A worker for ``model`` once a spare still importing announces itself, rather than
+        one more kernel import beside it: each pending spare is waited for by one request
+        (``_spare_waiters``); the next spawns. None when there is no spare to wait for, or
+        the one waited for failed to start and no other is pending; the worker found when
+        one arrived, or ``model``'s own worker turned idle meanwhile."""
+        told = False
+        while not self._closed and self._spares_pending > self._spare_waiters:
+            if cancelled is not None and cancelled():
+                raise RequestCancelled("the request was withdrawn while a worker was starting for it")
+            if not told and on_start is not None:
+                on_start()
+                told = True
+            self._spare_waiters += 1
+            try:
+                self._cv.wait(timeout=0.05)
+            finally:
+                self._spare_waiters -= 1
+            self._reap_dead_locked()
+            if model:
+                idle = [w for w in self._workers if w.model == model and not w.extra and not w.busy]
+                if idle:
+                    return idle[0]
+            spare = self._take_spare_locked(model)
+            if spare is not None:
+                return spare
+        return None
 
     # --- acquire / release -------------------------------------------------------
 
-    def acquire(self, model: str = "", *, dependency: bool = False, on_start=None) -> Worker:
+    def acquire(self, model: str = "", *, dependency: bool = False, on_start=None, on_wait=None,
+                owner: str = "", cancelled=None) -> Worker:
         """A worker for ``model``, or an explicit memory-admission failure.
 
         ``model`` is the script path (the routing key); "" means a request with
         no model subject, which borrows a spare without binding it. ``on_start``
         is called when no warm worker can take the request and one is started for
-        it, before that wait.
+        it -- or one already importing is waited for -- before that wait; ``on_wait``
+        with one sentence when memory admission makes it wait. ``owner`` is the model
+        whose build this request serves (a job its result owes): that model's idle
+        worker is never reclaimed to seat it. ``cancelled`` says whether the request
+        was withdrawn meanwhile (its client left): the wait ends in
+        :class:`RequestCancelled`, no kernel is started for it, and one that was already
+        importing joins the spare set instead.
         """
         with self._cv:
             if self._closed:
                 raise WorkerGone("worker pool is closed")
-            self._reap_dead_locked()
-            bound = []
-            worker = None
-            if model:
-                bound = [w for w in self._workers if w.model == model and not w.extra]
-                idle = [w for w in bound if not w.busy]
-                if idle:
-                    worker = idle[0]
-            if worker is None:
-                worker = self._take_spare_locked()
-            if worker is not None:
-                worker.busy = True  # reserve before releasing the bookkeeping lock
-            try:
-                self._admit_locked(
-                    spawning=worker is None,
-                    dependency=dependency,
-                    isolated_worker=worker,
-                )
-            except MemoryAdmissionError:
+            while True:
+                self._reap_dead_locked()
+                bound = []
+                worker = None
+                if model:
+                    bound = [w for w in self._workers if w.model == model and not w.extra]
+                    idle = [w for w in bound if not w.busy]
+                    if idle:
+                        worker = idle[0]
+                if worker is None:
+                    worker = self._take_spare_locked(model)
+                if worker is None:
+                    # A spare still importing is this request's worker, not one more import.
+                    worker = self._wait_for_spare_locked(model, cancelled, on_start)
+                    if worker is not None and model and worker.model == model:
+                        bound = [w for w in self._workers if w.model == model and not w.extra]
                 if worker is not None:
-                    worker.busy = False
-                    # Its retained cache may itself be the pressure. This was
-                    # idle before our reservation, so retry with a fresh worker.
-                    self._stats["memoryReclaims"] += 1
-                    self._drop_locked(worker)
-                    worker = None
-                    self._admit_locked(spawning=True, dependency=dependency)
-                else:
+                    worker.busy = True  # reserve before releasing the bookkeeping lock
+                try:
+                    try:
+                        self._admit_locked(
+                            spawning=worker is None,
+                            dependency=dependency,
+                            isolated_worker=worker,
+                            owner=owner,
+                            on_wait=on_wait,
+                            cancelled=cancelled,
+                            model=model,
+                        )
+                    except MemoryAdmissionError:
+                        if worker is None:
+                            raise
+                        worker.busy = False
+                        # Its retained cache may itself be the pressure. This was
+                        # idle before our reservation, so retry with a fresh worker.
+                        self._stats["memoryReclaims"] += 1
+                        self._drop_locked(worker)
+                        worker = None
+                        self._admit_locked(spawning=True, dependency=dependency, owner=owner, on_wait=on_wait,
+                                           cancelled=cancelled, model=model)
+                except _WorkerFreed:
+                    # A worker came free while this request waited to spawn one (a job a
+                    # build owed returned its spare): it takes that one instead.
+                    continue
+                except RequestCancelled:
+                    if worker is not None:
+                        worker.busy = False
                     raise
+                break
             if worker is None:
+                if cancelled is not None and cancelled():
+                    raise RequestCancelled("the request was withdrawn before a worker was started for it")
                 self._active_pending += 1
         if worker is None:
             try:
@@ -627,6 +723,11 @@ class Pool:
                 if self._closed:
                     worker.kill()
                     raise WorkerGone("worker pool closed while starting a worker")
+                if cancelled is not None and cancelled():
+                    # Nobody is left to use it, and its import is paid: a spare from now on.
+                    self._workers.append(worker)
+                    self._cv.notify_all()
+                    raise RequestCancelled("the request was withdrawn while its worker started")
                 worker.busy = True
                 self._workers.append(worker)
         with self._cv:
@@ -634,6 +735,7 @@ class Pool:
             if model:
                 was_bound = worker in bound
                 worker.model = model
+                worker.last_model = model
                 # An extra when a primary already exists; a primary otherwise.
                 worker.extra = not was_bound and any(
                     w is not worker and w.model == model and not w.extra for w in self._workers
@@ -673,16 +775,34 @@ class Pool:
                 "pendingWorkers": pending, "retiringWorkers": len(self._retiring),
                 "retiringBytes": retiring_bytes}
 
+    def _free_locked(self, model: str) -> bool:
+        """Whether a request for ``model`` has a warm worker to take now: its own, idle, or
+        a spare."""
+        return any(not w.busy and (not w.model or (model and w.model == model and not w.extra))
+                   for w in self._workers)
+
+    def _reclaimable_locked(self, *, keep: str = "") -> list[Worker]:
+        """The idle workers memory pressure may reclaim, in the order it takes them: spares
+        first (a bound worker holds its model's memo and is reclaimed last, each set least
+        recently used first), and never the idle worker bound to ``keep`` -- the model whose
+        own owed jobs are being seated (README law 18: its next edit's hits are in it)."""
+        idle = [w for w in self._workers if not w.busy and not (keep and w.model == keep)]
+        return sorted(idle, key=lambda w: (bool(w.model), w.use_seq))
+
     def _reclaim_pressure_locked(self) -> None:
-        """Trim newly idle retained caches without waiting for active work."""
-        if not self._policy.limit_bytes:
-            return
+        """Trim the spares a pool over its budget keeps, as a job ends, without waiting for
+        active work. Bound workers are not trimmed here: a model's worker is reclaimed last,
+        by the admission of a request that needs its memory (``_admit_locked``), never by the
+        jobs its own build hands over as it ends -- whose spawns are what is pending at the
+        moment its worker is released."""
+        if not self._policy.limit_bytes or self._admission_waiters:
+            return  # a request waiting for memory takes what returns, or reclaims it in order
         snapshot = self._memory_locked()
         # Already-retiring workers are charged for admission until they exit,
         # but must not cause us to schedule the same reclamation twice.
         planned = snapshot["chargedBytes"] - snapshot["retiringBytes"]
         ceiling = self._policy.limit_bytes - snapshot["dependencyReserveBytes"]
-        idle = sorted((w for w in self._workers if not w.busy), key=lambda w: w.use_seq)
+        idle = [w for w in self._reclaimable_locked() if not w.model]
         measured = self._memory_reader([w.pid for w in idle])
         for worker in idle:
             if planned <= ceiling:
@@ -691,18 +811,52 @@ class Pool:
             self._stats["memoryReclaims"] += 1
             self._drop_locked(worker)
 
+    def _refusal_locked(self, snapshot: dict, *, usage: int, additional: int, dependency: bool) -> str:
+        """One true sentence for a request memory admission refuses, from what is the case
+        at that moment: nothing idle to reclaim, nothing in flight that could release any."""
+        busy = sum(1 for w in self._workers if w.busy)
+        wanted = usage + additional
+        return (f"The build service has no memory for another geometry worker: this request needs "
+                f"{wanted / MIB:.0f} MiB against a {self._policy.limit_bytes / MIB:.0f} MiB budget, of which "
+                f"{usage / MIB:.0f} MiB is held by {busy} busy worker{'s' if busy != 1 else ''}"
+                f"{'' if dependency else f' and {snapshot['dependencyReserveBytes'] / MIB:.0f} MiB is kept for the jobs builds owe'}, "
+                "no worker is idle to reclaim, and nothing in flight will release any; raise CADGEN_MEMORY_MB.")
+
     def _admit_locked(
         self,
         *,
         spawning: bool,
         dependency: bool,
         isolated_worker: Worker | None = None,
+        owner: str = "",
+        on_wait=None,
+        cancelled=None,
+        model: str = "",
     ) -> None:
         if not self._policy.limit_bytes:
             return
         deadline = time.monotonic() + 5.0  # wait only for idle-process teardown
         stalled_since = None
+        told = False
+
+        def wait() -> None:
+            nonlocal told
+            if cancelled is not None and cancelled():
+                raise RequestCancelled("the request was withdrawn while it waited for memory")
+            if not told and on_wait is not None:
+                on_wait(f"Waiting for memory: {usage / MIB:.0f} MiB of {self._policy.limit_bytes / MIB:.0f} MiB in use")
+                told = True
+            self._admission_waiters += 1
+            try:
+                self._cv.wait(timeout=0.05)
+            finally:
+                self._admission_waiters -= 1
+
         while True:
+            if spawning and self._free_locked(model):
+                # A worker came free while this request waited to spawn one: take it,
+                # before pressure here could reclaim the very spare that just returned.
+                raise _WorkerFreed
             # Each pass recalibrates, so a reservation and the headroom derived
             # from it track what the workers now resident actually cost.
             snapshot = self._memory_locked()
@@ -711,13 +865,13 @@ class Pool:
             ceiling = self._policy.limit_bytes - (0 if dependency else snapshot["dependencyReserveBytes"])
             if usage + additional <= ceiling:
                 return
-            idle = sorted((w for w in self._workers if not w.busy), key=lambda w: w.use_seq)
+            idle = self._reclaimable_locked(keep=owner)
             if idle:
                 self._stats["memoryReclaims"] += 1
                 self._drop_locked(idle[0])
                 continue
             if self._retiring and time.monotonic() < deadline:
-                self._cv.wait(timeout=0.05)
+                wait()
                 continue
             # The measured retained cache of the selected worker can be larger
             # than the normal build allowance.
@@ -743,24 +897,16 @@ class Pool:
             # alive by the geometry it retains for its children.
             if self._in_flight() or self._active_pending or self._spares_pending:
                 stalled_since = None
-                self._cv.wait(timeout=0.05)
+                wait()
                 continue
             now = time.monotonic()
             stalled_since = stalled_since or now
             if now - stalled_since < 2.0:  # a freshly spawned worker takes a moment to claim its slot
-                self._cv.wait(timeout=0.05)
+                wait()
                 continue
             self._stats["memoryRefusals"] += 1
-            raise MemoryAdmissionError(
-                f"cadgen memory admission: {usage / MIB:.0f} MiB charged plus "
-                f"{additional / MIB:.0f} MiB requested exceeds the "
-                f"{ceiling / MIB:.0f} MiB {'dependency' if dependency else 'build'} allowance "
-                f"({self._policy.limit_bytes / MIB:.0f} MiB total). "
-                "Idle workers were reclaimed; active builds retain their geometry and nothing "
-                "is running that could release memory. "
-                "An oversized reservation may use the total allowance only while it is the sole charge. "
-                "Increase CADGEN_MEMORY_MB or reduce the workload."
-            )
+            raise MemoryAdmissionError(self._refusal_locked(snapshot, usage=usage, additional=additional,
+                                                            dependency=dependency))
 
     def _used_locked(self, worker: Worker) -> Worker:
         worker.last_used = self._clock()
@@ -786,10 +932,16 @@ class Pool:
                 if now - worker.last_used < limit:
                     continue
                 self._stats["unbinds"] += 1
-                if len(self._spares_locked()) + self._spares_pending >= spare_count():
-                    self._drop_locked(worker)
-                else:
-                    worker.model = ""
+                # Back to the spare set, its model's memo with it (``_take_spare_locked``);
+                # a spare the set has no room for goes instead, the least recently used
+                # first: a bound worker is reclaimed last.
+                worker.model = ""
+                spares = sorted(self._spares_locked(), key=lambda spare: spare.last_used)
+                for spare in spares:
+                    if len(self._spares_locked()) + self._spares_pending <= spare_count():
+                        break
+                    if spare is not worker:
+                        self._drop_locked(spare)
             # Keep the K most recently used spares. Any additional unbound
             # workers came from a subject-less burst: model-bound extras and
             # idle unbinding still enforce K at release/unbind time. A brief
@@ -894,6 +1046,7 @@ class Pool:
                 "workers": workers,
                 "spares": len(self._spares_locked()),
                 "sparesPending": self._spares_pending,
+                "sparesAwaited": self._spare_waiters,
                 "sparesWanted": spare_count(),
                 "memory": self._memory_locked(),
                 **self._stats,

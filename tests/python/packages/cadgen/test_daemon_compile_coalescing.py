@@ -124,7 +124,7 @@ class CoalescedCompiles(unittest.TestCase):
             finally:
                 worker.allow_exit.set()
         # A document binds no worker: the compile borrows a spare, once for both requests.
-        worker_pool.acquire.assert_called_once_with("", dependency=True, on_start=mock.ANY)
+        worker_pool.acquire.assert_called_once_with("", dependency=True, on_start=mock.ANY, on_wait=mock.ANY, owner="", cancelled=mock.ANY)
         self.assertEqual(producer_conn.frames[-1], {"exit": exit_code})
         self.assertEqual(follower_conn.frames, [{"exit": exit_code}])
         owner, follower = self.ledger.snapshot()

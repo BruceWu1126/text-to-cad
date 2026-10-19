@@ -51,7 +51,7 @@ import traceback
 
 from cadgen.daemon import telemetry, transport
 from cadgen.daemon.housekeeping import Housekeeper
-from cadgen.daemon.jobs import JobLedger, failure_message
+from cadgen.daemon.jobs import JobLedger, _model_subject, failure_message
 from cadgen.daemon.client import (
     compute_version_token,
     daemon_address,
@@ -164,29 +164,44 @@ def _watch_client(
     send_lock: threading.Lock,
     done: threading.Event,
     tool: str,
-    worker,
+    seat: dict,
     preserve_work=None,
     *,
     finishes_alone: bool = False,
     left: threading.Event | None = None,
 ) -> None:
-    """Kill the WORKER when the requesting client vanishes mid-job.
+    """Kill the WORKER when the requesting client vanishes mid-job, and withdraw the
+    request when it vanishes before one is seated.
 
     A client sends one request frame and then only reads, so having nothing to read from
     it is the normal state rather than a symptom. The reliable death signal is a FAILED
     SEND: the channel raises as soon as the peer is gone. An empty stdout chunk is a no-op
     for every client, so it doubles as the liveness probe.
 
-    Killing the one worker leaves the supervisor and every other job alone; the pool
-    binds a fresh worker to that model on its next request. What the job handed the
-    supervisor before (``_start_owed``) is the supervisor's, and goes on.
+    Watched from the moment the request is taken: ``seat["worker"]`` is the job's worker
+    once the pool has found one, and until then a client that leaves costs no kernel
+    import -- ``left`` is set, which the pool's wait reads (``Pool.acquire``), and the
+    request ends cancelled. Killing the one worker leaves the supervisor and every other
+    job alone; the pool binds a fresh worker to that model on its next request. What the
+    job handed the supervisor before (``_start_owed``) is the supervisor's, and goes on.
 
     A job that ``finishes_alone`` (an artifact job, ``_handle_request``) is never killed
     for its client: the worker stops it before its next derivation unless an identical
     request has attached, and stays warm.
 
-    ``left`` is set before a kill: the job was stopped, not lost to a crash.
+    ``left`` is set before a kill: the job was stopped, not lost to a crash. The log says
+    so once; the relay, finding the client gone after, says nothing more.
     """
+    def stop(why: str) -> None:
+        worker = seat.get("worker")
+        if left is not None:
+            left.set()
+        if worker is None:
+            _log(f"{tool}: {why} before its job had a worker; no kernel is started for it")
+            return
+        _log(f"{tool}: {why}; stopping worker {worker.pid}")
+        worker.kill()
+
     while not done.wait(CLIENT_LIVENESS_INTERVAL_SECONDS):
         try:
             with send_lock:
@@ -195,22 +210,19 @@ def _watch_client(
             if done.is_set():
                 return
             if finishes_alone:
-                _log(f"{tool}: client left; worker {worker.pid} stops before its next derivation")
+                if seat.get("worker") is None:
+                    stop("client left")
+                else:
+                    _log(f"{tool}: client left; worker {seat['worker'].pid} stops before its next derivation")
                 return
             if preserve_work is not None and preserve_work():
                 _log(f"{tool}: producer disconnected; continuing for coalesced consumers")
                 while not done.wait(CLIENT_LIVENESS_INTERVAL_SECONDS):
                     if not preserve_work():
-                        _log(f"{tool}: last coalesced consumer disconnected; killing worker {worker.pid}")
-                        if left is not None:
-                            left.set()
-                        worker.kill()
+                        stop("last coalesced consumer disconnected")
                         return
                 return
-            _log(f"{tool}: client disconnected mid-request; killing worker {worker.pid}")
-            if left is not None:
-                left.set()
-            worker.kill()
+            stop("client disconnected mid-request")
             return
 
 
@@ -425,28 +437,9 @@ def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None 
         # nothing the job runs can report, since its worker does not exist yet.
         _JOBS.waiting(job, "Starting a geometry kernel")
 
-    try:
-        worker = _POOL.acquire(model, dependency=bool(request.get("dependency")), on_start=starting_worker)
-    except (pool_mod.WorkerGone, pool_mod.MemoryAdmissionError) as exc:
-        # Failed spawn or memory admission: the request fails, saying why.
-        _JOBS.waiting(job, None)
-        _log(f"{tool}: could not start a worker: {exc}")
-        if isinstance(exc, pool_mod.WorkerGone) and pool_mod.installation_gone():
-            # Not a worker's crash: this daemon's installation was removed under it. It takes no
-            # more builds, so the next starts a daemon from its client's installation, and it lets
-            # go of the files the removal could not take (``serve``).
-            _log("this daemon's installation is gone; it stops taking builds")
-            _INSTALLATION_GONE.set()
-        elif isinstance(exc, pool_mod.WorkerGone) and not pool_mod.stopped(exc.exit_status):
-            telemetry.worker_died(exc.exit_status)  # a worker that could not start
-        _JOBS.finish(job, 1, error=str(exc))
-        if inflight is not None:
-            _BROKER.finish_entry(inflight, 1, error=str(exc))
-        with contextlib.suppress(OSError), send_lock:
-            _send(conn, {"stream": "stderr", "data": f"cadgen-daemon: could not start a worker: {exc}\n"})
-            _send(conn, {"exit": 1})
-        return
-    _JOBS.waiting(job, None)  # it has a worker now; the job reports its own progress
+    def waiting_for_memory(detail: str) -> None:
+        # Memory admission holds the request: queued, with the wait as its detail.
+        _JOBS.waiting(job, detail)
 
     exit_code, healthy = 1, True
     # The tail of the job's stderr: on failure its last FAILED/exception line is the
@@ -455,6 +448,8 @@ def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None 
     watchdog_done = threading.Event()
     left = threading.Event()  # the watchdog stopped the job: its client had left
     ended = None  # how a job ended that its exit code cannot say: crashed, or cancelled
+    seat: dict = {"worker": None}  # the job's worker, once the pool has found one
+
     def preserve_coalesced_work() -> bool:
         return bool(inflight is not None and _BROKER.abandon(inflight))
 
@@ -470,13 +465,67 @@ def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None 
     # derived, the derivation in hand finished and the worker warm. A model build or a
     # door whose caller left is still killed: there a cancel means stop.
     finishes_alone = is_artifact
+    # Watched from now, before a worker is found: a client that leaves while its request
+    # waits for memory or a kernel withdraws it (``Pool.acquire``'s ``cancelled``), and no
+    # import is paid for nobody. Attached consumers keep a coalesced job going.
     watchdog = threading.Thread(
         target=_watch_client,
-        args=(conn, send_lock, watchdog_done, tool, worker, preserve_coalesced_work),
+        args=(conn, send_lock, watchdog_done, tool, seat, preserve_coalesced_work),
         kwargs={"finishes_alone": finishes_alone, "left": left},
         daemon=True,
     )
     watchdog.start()
+
+    def withdrawn() -> bool:
+        # The client left; a coalesced job with consumers still attached is theirs.
+        return left.is_set() and not (inflight is not None and _BROKER.abandon(inflight))
+
+    try:
+        worker = _POOL.acquire(model, dependency=bool(request.get("dependency")), on_start=starting_worker,
+                               on_wait=waiting_for_memory, owner=str(request.get("owner") or ""),
+                               cancelled=withdrawn)
+    except pool_mod.RequestCancelled:
+        # Its client left before it had a worker: cancelled, as a job whose caller leaves is.
+        watchdog_done.set()
+        watchdog.join(timeout=CLIENT_LIVENESS_INTERVAL_SECONDS + 1.0)
+        _JOBS.finish(job, 1, cancelled=True)
+        if inflight is not None:
+            _BROKER.finish_entry(inflight, 1, error="the request was withdrawn before it had a worker")
+        return
+    except Exception as exc:  # noqa: BLE001 - whatever kept the job from a worker ends the job, never the daemon
+        # Failed spawn or memory admission: the request fails, saying why.
+        watchdog_done.set()
+        watchdog.join(timeout=CLIENT_LIVENESS_INTERVAL_SECONDS + 1.0)
+        _JOBS.waiting(job, None)
+        _log(f"{tool}: could not seat the job on a worker: {exc}")
+        if isinstance(exc, pool_mod.WorkerGone) and pool_mod.installation_gone():
+            # Not a worker's crash: this daemon's installation was removed under it. It takes no
+            # more builds, so the next starts a daemon from its client's installation, and it lets
+            # go of the files the removal could not take (``serve``).
+            _log("this daemon's installation is gone; it stops taking builds")
+            _INSTALLATION_GONE.set()
+        elif isinstance(exc, pool_mod.WorkerGone) and not pool_mod.stopped(exc.exit_status):
+            telemetry.worker_died(exc.exit_status)  # a worker that could not start
+        elif not isinstance(exc, (pool_mod.WorkerGone, pool_mod.MemoryAdmissionError)):
+            _log(traceback.format_exc())
+        _JOBS.finish(job, 1, error=str(exc))
+        if inflight is not None:
+            _BROKER.finish_entry(inflight, 1, error=str(exc))
+        with contextlib.suppress(OSError), send_lock:
+            _send(conn, {"stream": "stderr", "data": f"cadgen-daemon: {exc}\n"})
+            _send(conn, {"exit": 1})
+        return
+    seat["worker"] = worker
+    _JOBS.waiting(job, None)  # it has a worker now; the job reports its own progress
+    if left.is_set() and not finishes_alone and not preserve_coalesced_work():
+        # The client left as its worker was found: nothing to run it for.
+        watchdog_done.set()
+        watchdog.join(timeout=CLIENT_LIVENESS_INTERVAL_SECONDS + 1.0)
+        _POOL.release(worker, healthy=worker.alive(), cancelled=True)
+        _JOBS.finish(job, 1, cancelled=True)
+        if inflight is not None:
+            _BROKER.finish_entry(inflight, 1, error="the request was withdrawn before it ran")
+        return
     relay_connected = True
     owner_left = False
 
@@ -669,8 +718,11 @@ def _start_owed(owner: dict, owes: object, owner_request: dict) -> dict:
         raise ValueError(f"a build owes no {artifact['kind']} job")
     root = store_path(owner_request.get("store_root"))
     job = _JOBS.owe(owner, owes["model"], artifact, store_root=root)
+    # ``owner``: the model whose result owes this job -- the pool never reclaims that
+    # model's idle worker to seat it (its next edit's memo hits are in it).
     payload = {"tool": "artifact", "argv": [], "artifact": artifact, "store_root": root,
-               "env": owner_request.get("env"), "dependency": True, "cwd": None, "prog": None}
+               "env": owner_request.get("env"), "dependency": True, "cwd": None, "prog": None,
+               "owner": _model_subject(owes["model"])}
     thread = threading.Thread(target=_serve_connection, args=(_Ledger(), payload), kwargs={"job": job},
                               name="cadgen-owed", daemon=True)
     _INFLIGHT.add(thread)

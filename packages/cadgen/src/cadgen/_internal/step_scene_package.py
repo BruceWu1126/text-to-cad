@@ -397,15 +397,17 @@ def load_step_scene_cached(step_path: Path, *, lazy: bool = False) -> LoadedStep
             # entry ended with its answer, so nothing rejoins it).
         if code != 0:
             detail = job.output().rstrip()
-            if detail:
-                # The compile worker captures the CAD kernel's C-level output so
-                # it cannot corrupt a caller's structured stdout.  Preserve that
-                # diagnostic stream for people and put only the worker's concise
-                # failure reason in the caller's exception/JSON result.
-                print(detail, file=sys.stderr)
             from cadgen.daemon.jobs import failure_message
 
             reason, _error_type = failure_message(detail)
+            if detail and detail.strip() != reason:
+                # The compile worker captures the CAD kernel's C-level output so
+                # it cannot corrupt a caller's structured stdout.  Preserve that
+                # diagnostic stream for people and put only the worker's concise
+                # failure reason in the caller's exception/JSON result. Output that IS
+                # the one reason (a daemon refusing the job in a sentence) is said once,
+                # in the exception.
+                print(detail, file=sys.stderr)
             suffix = f": {reason}" if reason else ""
             raise RuntimeError(f"Could not compile STEP cache for {resolved_step_path}{suffix}")
         # A replacement raced the submit: the worker correctly published the

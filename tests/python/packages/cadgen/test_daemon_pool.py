@@ -16,6 +16,7 @@ import pathlib
 import queue
 import subprocess
 import sys
+import threading
 import time
 import unittest
 from unittest import mock
@@ -41,6 +42,7 @@ class _StubWorker:
         self.busy = False
         self.extra = False
         self.model = ""
+        self.last_model = ""
         self.jobs_served = 0
         self.last_used = 0.0
         self.use_seq = next(pool_mod._USE_SEQUENCE)
@@ -224,6 +226,84 @@ class Spares(_PoolFixture):
             self.assertEqual(snapshot["spares"], 2, snapshot)
             retained = {worker["pid"] for worker in snapshot["workers"]}
             self.assertEqual(len(first_pids - retained), 6)
+
+    def test_a_spare_whose_start_fails_releases_its_reservation(self):
+        # A start the system refuses (too many open files) is not a worker that died: the
+        # pending count it held went nowhere before, a permanent memory reservation.
+        class Refused(_StubWorker):
+            def __init__(self):
+                raise OSError(24, "Too many open files")
+
+        with self._spares(1), mock.patch.object(pool_mod, "Worker", Refused):
+            self.pool.ensure_spares()
+            _settle(self.pool)
+        snapshot = self.pool.snapshot()
+        self.assertEqual((snapshot["spares"], snapshot["sparesPending"], snapshot["memory"]["pendingWorkers"]),
+                         (0, 0, 0), snapshot)
+
+    def test_a_spawn_the_system_refuses_fails_the_request_and_leaves_nothing_pending(self):
+        class Refused(_StubWorker):
+            def __init__(self):
+                raise OSError(24, "Too many open files")
+
+        with self._spares(0), mock.patch.object(pool_mod, "Worker", Refused):
+            with self.assertRaisesRegex(pool_mod.WorkerGone, "could not be started: Too many open files"):
+                self.pool.acquire("/m/a.py")
+        self.assertEqual(self.pool.snapshot()["memory"]["pendingWorkers"], 0)
+
+    def test_a_request_waits_for_a_spare_already_importing_rather_than_spawning(self):
+        # A fresh daemon's spares are importing when its first builds arrive: each build
+        # takes one as it announces itself instead of starting a kernel import beside it.
+        starts, entered, finish = [], threading.Event(), threading.Event()
+
+        class Starting(_StubWorker):
+            def __init__(self):
+                starts.append(1)
+                entered.set()
+                if not finish.wait(5):
+                    raise AssertionError("the pending spare was never released")
+                super().__init__()
+
+        with self._spares(1), mock.patch.object(pool_mod, "Worker", Starting), \
+                concurrent.futures.ThreadPoolExecutor(2) as executor:
+            self.pool.ensure_spares()
+            self.assertTrue(entered.wait(2))
+            waiting = executor.submit(self.pool.acquire, "/m/a.py")
+            deadline = time.monotonic() + 2
+            while self.pool.snapshot()["sparesAwaited"] == 0 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(self.pool.snapshot()["sparesAwaited"], 1, "the request did not wait for the spare")
+            self.assertFalse(waiting.done())
+            self.assertEqual(len(starts), 1, "a second kernel import was started beside the spare's")
+            finish.set()
+            worker = waiting.result(timeout=5)
+        self.assertEqual(worker.model, "/m/a.py")
+        self.pool.release(worker)
+
+    def test_a_request_withdrawn_while_its_worker_starts_seats_nothing_and_keeps_the_import(self):
+        starts, entered, finish, gone = [], threading.Event(), threading.Event(), threading.Event()
+
+        class Starting(_StubWorker):
+            def __init__(self):
+                starts.append(1)
+                entered.set()
+                finish.wait(5)
+                super().__init__()
+
+        with self._spares(0), mock.patch.object(pool_mod, "Worker", Starting), \
+                concurrent.futures.ThreadPoolExecutor(1) as executor:
+            # Withdrawn before any start: no kernel is started for it.
+            with self.assertRaises(pool_mod.RequestCancelled):
+                self.pool.acquire("/m/b.py", cancelled=lambda: True)
+            self.assertEqual(starts, [], "a withdrawn request started a kernel")
+            waiting = executor.submit(self.pool.acquire, "/m/a.py", cancelled=gone.is_set)
+            self.assertTrue(entered.wait(2))
+            gone.set()  # the client left while the kernel was importing
+            finish.set()
+            with self.assertRaises(pool_mod.RequestCancelled):
+                waiting.result(timeout=5)
+            # The import is paid: the worker is a spare rather than being thrown away.
+            self.assertEqual(self.pool.snapshot()["spares"], 1)
 
     def test_a_new_model_can_bind_a_transient_borrowed_spare(self):
         with self._spares(1):
@@ -432,6 +512,22 @@ class IdleUnbind(unittest.TestCase):
         # The spare set already held K=1, so this one exits rather than growing it.
         self.assertTrue(worker.killed or worker.model == "")
         self.assertEqual(self.pool.snapshot()["unbinds"], 1)
+
+    def test_an_unbound_worker_keeps_its_memo_for_its_model_and_a_spare_goes_instead(self):
+        # A bound worker is reclaimed last: past the timer it joins the spare set with its
+        # model's memo, the least recently used spare leaves to make room, and the model's
+        # next build takes that very worker back.
+        with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SPARES": "1", "CADGEN_DAEMON_IDLE_UNBIND": "600"}):
+            worker = self.pool.acquire("/m/a.py")
+            self.pool.release(worker)
+            _settle(self.pool)
+            spare = next(w for w in self.pool._workers if w is not worker)
+            self.now[0] += 601.0
+            self.pool.unbind_idle()
+            self.assertEqual((worker.model, worker.killed, spare.killed), ("", False, True))
+            again = self.pool.acquire("/m/a.py")
+            self.assertIs(again, worker, "the model's next build did not take the worker holding its memo")
+            self.pool.release(again)
 
     def test_an_unbound_worker_is_rebound_without_a_spawn(self):
         with mock.patch.dict(os.environ, {"CADGEN_DAEMON_SPARES": "1", "CADGEN_DAEMON_IDLE_UNBIND": "600"}):

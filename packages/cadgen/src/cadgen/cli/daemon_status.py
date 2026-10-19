@@ -54,9 +54,44 @@ def _render(status: dict) -> str:
     jobs = status.get("jobsRunning") or {}
     if jobs:
         lines.append(
-            f"  jobs     running {jobs.get('running', 0)}/{jobs.get('limit', '?')}, "
+            f"  slots    running {jobs.get('running', 0)}/{jobs.get('limit', '?')}, "
             f"queued {jobs.get('queued', 0)}, coalesced {jobs.get('coalesced', 0)}"
         )
+    # The ledger's work in flight, which a slot count cannot show: a build whose worker has
+    # answered still owes the jobs the supervisor runs for it (its display data, its
+    # files), and a request waiting for memory or a kernel holds no slot yet.
+    ledger = [job for job in (status.get("jobs") or []) if isinstance(job, dict)]
+    active = [job for job in ledger if job.get("state") in ("submitted", "queued", "building")]
+    if active:
+        builds = [job for job in active if job.get("tool") != "artifact"]
+        owed = [job for job in active if job.get("tool") == "artifact"]
+        waiting = [job for job in active if job.get("state") in ("submitted", "queued")]
+        saving = sum(len(job.get("saving") or {}) for job in active)
+        parts = [f"{len(builds)} build{'s' if len(builds) != 1 else ''}"]
+        if owed:
+            kinds = sorted({str((job.get("artifact") or {}).get("kind") or "artifact") for job in owed})
+            parts.append(f"{len(owed)} owed job{'s' if len(owed) != 1 else ''} ({', '.join(kinds)})")
+        if saving:
+            parts.append(f"{saving} file{'s' if saving != 1 else ''} saving")
+        if waiting:
+            detail = next((job.get("detail") for job in waiting if job.get("detail")), "")
+            parts.append(f"{len(waiting)} waiting" + (f": {detail}" if detail else ""))
+        lines.append("  jobs     " + ", ".join(parts))
+    memory = status.get("memory") or {}
+    if memory:
+        limit = int(memory.get("limitBytes") or 0)
+        mib = 1024 * 1024
+        if limit:
+            reclaimed = (f"; reclaims {status.get('memoryReclaims', 0)}, refusals {status.get('memoryRefusals', 0)}, "
+                         f"unbinds {status.get('unbinds', 0)}")
+            lines.append(
+                f"  memory   {int(memory.get('chargedBytes') or 0) // mib} MiB of {limit // mib} MiB budget charged "
+                f"({int(memory.get('residentBytes') or 0) // mib} MiB resident, "
+                f"{int(memory.get('workerReservationBytes') or 0) // mib} MiB per worker reserved, "
+                f"{int(memory.get('dependencyReserveBytes') or 0) // mib} MiB kept for owed jobs){reclaimed}"
+            )
+        else:
+            lines.append(f"  memory   no budget; unbinds {status.get('unbinds', 0)}")
     for worker in bound:
         state = "busy" if worker.get("busy") else "idle"
         # A worker is bound to ONE model, so which model it holds is the first thing

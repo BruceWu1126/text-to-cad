@@ -275,11 +275,21 @@ def _submit_daemon(
             job._say(traceback.format_exc())
         finally:
             # Close this compile's tree line before its caller can advance to another build
-            # and replace the process's reporting sink.
-            emit_event(model_event(job.model, "done" if code == 0 else "failed", exit=code if code != 0 else None))
+            # and replace the process's reporting sink. A failure carries its one-line
+            # reason (the job's last FAILED or exception line), so the ledger row the event
+            # makes under the build says why, never only that.
+            emit_event(model_event(job.model, "done" if code == 0 else "failed", exit=code if code != 0 else None,
+                                   error=_reason(job) if code != 0 else None))
             job._finish(code)
 
     threading.Thread(target=run, name=f"cadgen-job-{job.script.stem}", daemon=True).start()
+
+
+def _reason(job: Job) -> str | None:
+    """The one line a failed job's output says it failed for (``jobs.failure_message``)."""
+    from cadgen.daemon.jobs import failure_message
+
+    return failure_message(job.output())[0] or None
 
 
 def _run_here(job: Job, store_root: Path, *, tool: str, argv: list[str], prog: str) -> None:
@@ -318,5 +328,6 @@ def _run_here(job: Job, store_root: Path, *, tool: str, argv: list[str], prog: s
         with contextlib.suppress(OSError):
             os.chdir(cwd)
         job._say(said.getvalue())
-        emit_event(model_event(job.model, "done" if code == 0 else "failed", exit=code if code != 0 else None))
+        emit_event(model_event(job.model, "done" if code == 0 else "failed", exit=code if code != 0 else None,
+                               error=_reason(job) if code != 0 else None))
         job._finish(code)

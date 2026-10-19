@@ -68,6 +68,31 @@ class StatusRendering(unittest.TestCase):
         self.assertEqual(2, text.count("  busy  "), "two bound rows, and only two, say busy")
         self.assertEqual(3, text.count("  idle  "))
 
+    def test_owed_jobs_and_the_memory_budget_are_shown(self) -> None:
+        # Right after a build answers, its worker is idle and no slot is held, yet its
+        # export is still queued and its STEP is saving: the status says so, and what the
+        # memory budget holds, reclaimed and refused.
+        text = daemon_status._render({
+            "pid": 1, "startedAt": 0, "socket": "/tmp/cadgen.sock",
+            "workers": [{"pid": 7, "model": "/m/a.py", "busy": False, "extra": False, "jobs": 1}],
+            "spares": 1, "jobsRunning": {"running": 0, "limit": 10, "queued": 0, "coalesced": 0},
+            "jobs": [
+                {"id": "e:job-1", "tool": "run", "state": "building", "subject": "/m/a.py",
+                 "saving": {"/m/a.step": {"output": "/m/a.step"}}},
+                {"id": "e:job-2", "tool": "artifact", "state": "queued", "detail": "Starting a geometry kernel",
+                 "artifact": {"kind": "export"}},
+                {"id": "e:job-0", "tool": "run", "state": "done", "subject": "/m/b.py"},
+            ],
+            "memory": {"limitBytes": 1100 * 1024 * 1024, "chargedBytes": 1024 * 1024 * 1024,
+                       "residentBytes": 900 * 1024 * 1024, "workerReservationBytes": 512 * 1024 * 1024,
+                       "dependencyReserveBytes": 512 * 1024 * 1024},
+            "memoryReclaims": 3, "memoryRefusals": 1, "unbinds": 2,
+        })
+        self.assertIn("slots    running 0/10", text)
+        self.assertIn("jobs     1 build, 1 owed job (export), 1 file saving, 1 waiting: Starting a geometry kernel", text)
+        self.assertIn("memory   1024 MiB of 1100 MiB budget charged (900 MiB resident, 512 MiB per worker reserved, "
+                      "512 MiB kept for owed jobs); reclaims 3, refusals 1, unbinds 2", text)
+
     def test_an_all_bound_pool_says_nothing_about_unbound_workers(self) -> None:
         text = daemon_status._render({
             "pid": 1,
