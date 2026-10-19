@@ -163,6 +163,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
+from OCP.BRep import BRep_TEdge, BRep_TFace, BRep_TVertex
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
 from OCP.TopExp import TopExp
 from OCP.TopTools import TopTools_IndexedMapOfShape
@@ -947,9 +948,7 @@ def _settings() -> tuple:
     """What every operation runs under besides its arguments: build123d's
     class-wide ``SkipClean``, which a boolean and a sweep read to decide whether
     to unify what they made."""
-    from build123d.topology.shape_core import SkipClean
-
-    return ("clean", bool(SkipClean.clean))
+    return ("clean", bool(_build123d().SkipClean.clean))
 
 
 def _font_key(font: Any, font_path: Any, style: Any) -> tuple:
@@ -984,8 +983,22 @@ def _file_key(source: Any) -> tuple:
         raise _Unkeyable(str(exc)) from exc
 
 
+_DOUBLE = struct.Struct("<d")
+
+
 def _normalize(value: Any, state: _Run) -> Any:
-    """One parameter as a hashable, deterministic key part."""
+    """One parameter as a hashable, deterministic key part. The kinds nearly every
+    parameter is -- a float, an int, a string, a tuple or list of them -- are told by
+    their exact type first; anything else, a subclass of one included, as below."""
+    kind = type(value)
+    if kind is float:
+        return ("n", _DOUBLE.pack(value))
+    if kind is tuple or kind is list:
+        return ("seq", tuple([_normalize(item, state) for item in value]))
+    if kind is int:
+        return ("n", _DOUBLE.pack(float(value)))
+    if kind is str or value is None or kind is bool:
+        return value
     if value is None or isinstance(value, (bool, str, bytes)):
         return value
     if isinstance(value, numbers.Real):
@@ -1000,9 +1013,7 @@ def _normalize(value: Any, state: _Run) -> Any:
         return ("seq", tuple(_normalize(item, state) for item in value))
     if isinstance(value, dict):
         return ("map", tuple(sorted((str(key), _normalize(item, state)) for key, item in value.items())))
-    from build123d.topology import Shape
-
-    if isinstance(value, Shape):
+    if isinstance(value, _build123d().Shape):
         return ("shape", _shape_key(value, state))
     type_name = type(value).__name__
     if type_name.startswith("BRepAlgoAPI"):
@@ -1046,29 +1057,55 @@ def _operation_settings(operation: Any) -> tuple:
     return tuple(found)
 
 
+@functools.cache
+def _build123d() -> Any:
+    """The build123d names every call reads, imported once, on first use: importing this
+    module imports no build123d."""
+    import types
+
+    from build123d.topology import Shape
+    from build123d.topology.shape_core import SkipClean, downcast
+
+    return types.SimpleNamespace(Shape=Shape, SkipClean=SkipClean, downcast=downcast)
+
+
 def _shape_args(args: tuple, kwargs: dict) -> list:
     """The shapes a call was given, in call order, lists and tuples opened."""
-    from build123d.topology import Shape
-
+    shape = _build123d().Shape
     found: list = []
-
-    def walk(value: Any) -> None:
-        if isinstance(value, Shape):
+    pending = [value for _name, value in sorted(kwargs.items(), reverse=True)] if kwargs else []
+    pending.extend(reversed(args))
+    while pending:
+        value = pending.pop()
+        if isinstance(value, shape):
             found.append(value)
         elif isinstance(value, (list, tuple)):
-            for item in value:
-                walk(item)
-
-    for value in args:
-        walk(value)
-    for _name, value in sorted(kwargs.items()):
-        walk(value)
+            pending.extend(reversed(value))
     return found
 
 
+_TRANSFORM = struct.Struct("<12d")
+
+
 def _location_key(wrapped: Any) -> bytes:
-    transform = wrapped.Location().Transformation()
-    return b"".join(struct.pack("<d", transform.Value(row, column)) for row in (1, 2, 3) for column in (1, 2, 3, 4))
+    """A location's transformation, its twelve values packed in row order; most shapes
+    are where their maker put them, at the identity, whose packing is computed once."""
+    location = wrapped.Location()
+    if location.IsIdentity():
+        return _IDENTITY_KEY
+    value = location.Transformation().Value
+    return _TRANSFORM.pack(value(1, 1), value(1, 2), value(1, 3), value(1, 4), value(2, 1), value(2, 2),
+                           value(2, 3), value(2, 4), value(3, 1), value(3, 2), value(3, 3), value(3, 4))
+
+
+def _identity_key() -> bytes:
+    from OCP.TopLoc import TopLoc_Location
+
+    value = TopLoc_Location().Transformation().Value
+    return _TRANSFORM.pack(*(value(row, column) for row in (1, 2, 3) for column in (1, 2, 3, 4)))
+
+
+_IDENTITY_KEY = _identity_key()
 
 
 def _shape_key(shape: Any, state: _Run) -> int:
@@ -1327,11 +1364,12 @@ def _dependencies(key: tuple) -> list[int]:
 
     def value(item: Any) -> None:
         if type(item) is tuple:
-            if len(item) == 2 and item[0] == "shape" and type(item[1]) is int:
-                found.append(item[1])
-            else:
-                for member in item:
-                    value(member)
+            if len(item) == 2 and type(item[0]) is not tuple and type(item[1]) is not tuple:
+                if item[0] == "shape" and type(item[1]) is int:
+                    found.append(item[1])
+                return  # a number, a name: no id below it
+            for member in item:
+                value(member)
 
     def placed(item: tuple) -> None:
         base = item[1]
@@ -1358,8 +1396,11 @@ def _dependencies(key: tuple) -> list[int]:
 
 def _stable_value(item: Any) -> Any:
     if type(item) is tuple:
-        if len(item) == 2 and item[0] == "shape" and type(item[1]) is int:
-            return ("shape", _STABLE[item[1]])
+        if len(item) == 2 and type(item[1]) is not tuple:
+            if item[0] == "shape" and type(item[1]) is int:
+                return ("shape", _STABLE[item[1]])
+            if type(item[0]) is not tuple:
+                return item  # a number, a name: nothing below it to restate
         return tuple(_stable_value(member) for member in item)
     return item
 
@@ -1561,8 +1602,7 @@ def _taint(made: _Made | None, state: _Run) -> None:
 def _returned_shapes(result: Any) -> list:
     """The shape objects a call returned itself: the result, or the members of a list or
     tuple it returned -- not the children they hold."""
-    from build123d.topology import Shape
-
+    Shape = _build123d().Shape
     found: list = []
     pending = [result]
     while pending:
@@ -1577,8 +1617,7 @@ def _returned_shapes(result: Any) -> list:
 def _result_shapes(result: Any) -> list:
     """Every shape object a result holds: itself, the members of a list or
     tuple, and anytree children, read off the node state."""
-    from build123d.topology import Shape
-
+    Shape = _build123d().Shape
     found: list = []
     pending = [result]
     while pending:
@@ -1652,8 +1691,7 @@ class _ShapeState:
     __slots__ = ("obj", "attrs", "wrapped", "children")
 
     def __init__(self, obj: Any) -> None:
-        from build123d.topology import Shape
-
+        Shape = _build123d().Shape
         attrs = dict(obj.__dict__)
         wrapped = attrs.pop("_wrapped", None)
         if wrapped is None:
@@ -1670,14 +1708,12 @@ class _ShapeState:
         self.attrs = _owned(attrs)
 
     def restore(self) -> Any:
-        from build123d.topology.shape_core import downcast
-
         attrs = _owned(self.attrs)
         if self.children is not None:
             attrs["_NodeMixin__children"] = [state.obj for state in self.children]
         obj = self.obj
         obj.__dict__.clear()
-        obj.__dict__["_wrapped"] = downcast(self.wrapped.Located(self.wrapped.Location()))
+        obj.__dict__["_wrapped"] = _build123d().downcast(self.wrapped.Located(self.wrapped.Location()))
         obj.__dict__.update(attrs)
         if self.children is not None:
             for state in self.children:
@@ -1723,9 +1759,7 @@ class _Adopt:
 
 
 def _snapshot(value: Any) -> Any:
-    from build123d.topology import Shape
-
-    if isinstance(value, Shape):
+    if isinstance(value, _build123d().Shape):
         return _ShapeState(value)
     if isinstance(value, (list, tuple)):
         return _Sequence(type(value), [_snapshot(item) for item in value])
@@ -1753,7 +1787,7 @@ class _Captured:
     constructor (``top``), its own TShape and state alone. A transient-only input
     keeps no scalar states: its topology alone guards its lineage registration."""
 
-    __slots__ = ("index", "handle", "mapped", "tshapes", "rows", "embedded", "known", "top")
+    __slots__ = ("index", "handle", "mapped", "tshapes", "rows", "embedded", "known", "top", "_held")
 
     def __init__(self, index: int, handle: Any, embedded: list[_Made], known: bool, *,
                  topology: tuple[Any, list] | None = None, structural_only: bool = False,
@@ -1768,18 +1802,26 @@ class _Captured:
         # Roots reached through uncontrolled wrappers are read fresh and kept nowhere.
         self.known = known
         self.mapped, self.tshapes = _mapped(handle) if topology is None else topology
+        self._held = None
         if structural_only:
             self.rows = None
         elif known:
             rows = []
+            kept = _STATE.get
             for tshape in self.tshapes:
-                state = _STATE.get(tshape)
+                state = kept(tshape)
                 if state is None:
                     state = _STATE[tshape] = _state(tshape)
                 rows.append(state)
             self.rows = rows
         else:
             self.rows = [_state(tshape) for tshape in self.tshapes]
+
+    def held(self) -> set:
+        """The TShapes of its sub-shapes, as a set (``_covered``)."""
+        if self._held is None:
+            self._held = set(self.tshapes)
+        return self._held
 
 
 def _capture(shapes: list, *, embedded: bool = False, top: bool = False) -> list[_Captured]:
@@ -1836,8 +1878,22 @@ def _capture(shapes: list, *, embedded: bool = False, top: bool = False) -> list
     # of other roots that share or contain some of its native sub-shapes.
     distinct = [item for item in distinct if item.rows is None or item.handle.TShape() not in protected]
     return [item for item in distinct
-            if item.rows is None or not any(other is not item and other.rows is not None
-                                            and other.mapped.Contains(item.handle) for other in distinct)] + list(protected.values())
+            if item.rows is None or not _covered(item, distinct)] + list(protected.values())
+
+
+# Past this many inputs, which input may hold which is told by their sub-shapes first.
+_COVER_SCAN = 4
+
+
+def _covered(item: _Captured, distinct: list[_Captured]) -> bool:
+    """Whether another captured input's map holds ``item``: its ancestor's delta covers it.
+    Only an input holding item's TShape can; with many inputs (a wire's edges), those are
+    found by their sub-shapes first, and only they are asked."""
+    others = [other for other in distinct if other is not item and other.rows is not None]
+    if len(others) > _COVER_SCAN:
+        tshape = item.handle.TShape()
+        others = [other for other in others if tshape in other.held()]
+    return any(other.mapped.Contains(item.handle) for other in others)
 
 
 def _embedded(wrapped: Any, state: _Run | None, *, tshapes: list | None = None) -> list[_Made]:
@@ -1894,23 +1950,26 @@ def _mapped(handle: Any) -> tuple[Any, list]:
     """A shape's full ``TopExp`` map, and the TShape of each sub-shape by ordinal."""
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(handle, mapped)
-    return mapped, [mapped.FindKey(ordinal).TShape() for ordinal in range(1, mapped.Extent() + 1)]
+    find = mapped.FindKey
+    return mapped, [find(ordinal).TShape() for ordinal in range(1, mapped.Extent() + 1)]
 
 
 def _state(tshape: Any) -> tuple:
     """One sub-shape's cheap state: kind, tolerance, the seven flags, how many
-    representations it holds, and an edge's parametric flags."""
-    kind = tshape.ShapeType()
+    representations it holds, and an edge's parametric flags. The kernel hands a
+    TShape back as its own class, which says its kind: an edge, a vertex or a face
+    is told by it without the kind being asked; any other by its kind."""
     flags = (tshape.Free(), tshape.Modified(), tshape.Checked(), tshape.Orientable(), tshape.Closed(),
              tshape.Infinite(), tshape.Convex())
-    if kind == TopAbs_EDGE:
+    cls = type(tshape)
+    if cls is BRep_TEdge:
         return (_EDGE, tshape.Tolerance(), flags, tshape.Curves().Extent(),
                 (tshape.SameParameter(), tshape.SameRange(), tshape.Degenerated()))
-    if kind == TopAbs_VERTEX:
+    if cls is BRep_TVertex:
         return (_VERTEX, tshape.Tolerance(), flags, tshape.Points().Extent(), None)
-    if kind == TopAbs_FACE:
+    if cls is BRep_TFace:
         return (_FACE, tshape.Tolerance(), flags, None, None)
-    return (int(kind), None, flags, None, None)
+    return (int(tshape.ShapeType()), None, flags, None, None)
 
 
 def _forget_states(tshape: Any) -> None:
@@ -2039,10 +2098,11 @@ class _Row:
 class _Effect:
     """One operation's change to one input, as sparse rows, replayable."""
 
-    __slots__ = ("rows", "id", "origin", "__weakref__")
+    __slots__ = ("rows", "id", "origin", "_geometric", "__weakref__")
 
     def __init__(self, rows: list[_Row]) -> None:
         self.rows = rows
+        self._geometric: bool | None = None
         self.id = next(_EFFECT_IDS)
         # ``(key id, n, input index)`` of the memoized call that had this effect;
         # None for a call that ran plain, which no construction key can name.
@@ -2051,9 +2111,12 @@ class _Effect:
 
     def geometric(self) -> bool:
         """Whether the change reaches past the shapes' flags: a tolerance, a
-        representation, an edge's parametric flags (``_effects_named``)."""
-        return any(row.before[1] != row.after[1] or row.before[3] != row.after[3] or row.appended
-                   or row.before[4] != row.after[4] for row in self.rows)
+        representation, an edge's parametric flags (``_effects_named``). Asked of
+        every key that names the effect, and its rows never change: read once."""
+        if self._geometric is None:
+            self._geometric = any(row.before[1] != row.after[1] or row.before[3] != row.after[3] or row.appended
+                                  or row.before[4] != row.after[4] for row in self.rows)
+        return self._geometric
 
     def note(self, run_id: int) -> None:
         """Into the ledger as applied by ``run_id``, the shapes already as the
