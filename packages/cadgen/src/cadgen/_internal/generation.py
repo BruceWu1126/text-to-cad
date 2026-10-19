@@ -1782,7 +1782,16 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
     _current_source_result(spec, tree)
     record = read_record(model) or {}
     _heal_documents(spec, record)
-    if _record_mesh_recipes(spec, record):
+    # The gate re-sliced a sliced file whose whole-file hash moved (an edit outside the
+    # names the model reaches) and found the slice standing: the record keeps the
+    # whole-file hash the file has now, so the next gate takes the recorded slice
+    # unanalysed, as a cold build's record would.
+    from cadgen.store.closure import refreshed_wholes
+
+    moved = refreshed_wholes(spec.script_path, record.get("closure") or {}) if spec.script_path is not None else {}
+    if moved:
+        record.setdefault("closure", {}).setdefault("wholes", {}).update(moved)
+    if _record_mesh_recipes(spec, record) or moved:
         from cadgen.store.records import note_output, write_record
 
         write_record(model, record)

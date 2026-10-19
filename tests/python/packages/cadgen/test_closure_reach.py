@@ -1094,6 +1094,23 @@ class ReachEndToEnd(unittest.TestCase):
         self.assertEqual(self.run_model(), "built", "a reached constant edit")
         self.assertFalse(stale(self.model).stale, stale(self.model).reason())
 
+    def test_a_run_that_finds_its_model_current_records_the_helpers_whole_file_hash_as_it_is(self):
+        """An edit outside the slice moves the helper's whole-file hash: the gate re-slices
+        by the recorded names and finds the model current, and left the record's
+        ``wholes`` at the old hash, so every later gate re-sliced again where a cold
+        build's record had the new one. The run takes the hash the file has now."""
+        from cadgen._internal.source_hash import _semantic_source_hash
+        from cadgen.store.records import read_record
+
+        self.assertEqual(self.run_model(), "built")
+        before = read_record(self.model)["closure"]["wholes"]["lib/geo.py"]
+        self.edit("return 1", "return 2")
+        self.assertEqual(self.run_model(), "current")
+        after = read_record(self.model)["closure"]
+        self.assertNotEqual(after["wholes"]["lib/geo.py"], before)
+        self.assertEqual(after["wholes"]["lib/geo.py"], _semantic_source_hash(self.geo))
+        self.assertTrue(after["shas"]["lib/geo.py"].startswith("slice4:"), "the slice stands")
+
     def test_a_model_that_lists_its_own_folder_is_current_after_its_first_build(self):
         """Issue #564: the folder is listed before the build publishes the STEP,
         its sidecar and its mesh there. Those are the model's own outputs, never
