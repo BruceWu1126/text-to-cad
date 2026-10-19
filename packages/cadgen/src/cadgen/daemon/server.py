@@ -117,7 +117,8 @@ def _send(conn: transport.Channel, frame: dict) -> None:
 
 
 def _log(message: str) -> None:
-    print(f"[cadgen-daemon] {message}", file=sys.__stderr__, flush=True)
+    """One line of the daemon's log, stamped with the local time it was written."""
+    print(f"[cadgen-daemon] {time.strftime('%Y-%m-%d %H:%M:%S')} {message}", file=sys.__stderr__, flush=True)
 
 
 def _idle_timeout() -> float:
@@ -628,9 +629,12 @@ def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None 
         ended = "cancelled" if left.is_set() or pool_mod.stopped(exc.exit_status) else "crashed"
         if ended == "crashed":
             telemetry.worker_died(exc.exit_status)
-        # Record the same death evidence in the ledger without relaying a stderr chunk.
-        stderr_tail.append(f"\n{exc}\n")
-        _log(f"{tool}: worker {worker.pid} died mid-job: {exc}")
+            _log(f"{tool}: worker {worker.pid} died mid-job: {exc}")
+        elif not left.is_set():
+            _log(f"{tool}: worker {worker.pid} was stopped mid-job: {exc}")
+        # The same evidence in the ledger, in a reader's words (no pid: the CAD Viewer
+        # shows this line), without relaying a stderr chunk.
+        stderr_tail.append(f"\nthe build's worker {exc.what}\n")
         with contextlib.suppress(OSError), send_lock:
             _send(conn, {"workerDied": {"pid": worker.pid, "detail": str(exc),
                                         "exitStatus": exc.exit_status}})
@@ -650,9 +654,10 @@ def _handle_request(conn: transport.Channel, request: dict, *, job: dict | None 
         # The CLIENT went away mid-job: a relay send failed before the watchdog's probe
         # did. Same answer as the watchdog's -- the orphaned job's worker is killed, never
         # released back to the pool mid-job (it would take the next request on a stdin
-        # that is still inside this one).
+        # that is still inside this one) -- said once: not again after the watchdog.
         if worker.alive():
-            _log(f"{tool}: client disconnected mid-request; killing worker {worker.pid}")
+            if not left.is_set():
+                _log(f"{tool}: client disconnected mid-request; stopping worker {worker.pid}")
             worker.kill()
         healthy = False
         ended = "cancelled"

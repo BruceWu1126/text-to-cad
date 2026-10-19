@@ -449,7 +449,8 @@ class ServerRelaysTheDeath(unittest.TestCase):
         kinds = [next(iter(frame)) for frame in conn.frames if frame != {"stream": "stdout", "data": ""}]
         self.assertEqual(kinds, ["stream", "workerDied", "exit"])
         died = next(frame["workerDied"] for frame in conn.frames if "workerDied" in frame)
-        self.assertEqual(jobs.snapshot()[0]["error"], died["detail"])
+        # The ledger's reason is what a viewer's user reads: how the worker ended, never its pid.
+        self.assertEqual(jobs.snapshot()[0]["error"], f"the build's worker {pool_mod.describe_exit(-9)}")
         self.assertEqual(died["pid"], 777)
         self.assertEqual(died["exitStatus"], -9)
         self.assertIn(pool_mod.describe_exit(-9), died["detail"])  # the worker's own words, as this platform names the signal
@@ -562,11 +563,25 @@ class ServerRelaysTheDeath(unittest.TestCase):
         pool = mock.Mock()
         worker = self._DyingWorker()
         pool.acquire.return_value = worker
+        logged: list[str] = []
         with mock.patch.object(server, "_JOBS", JobLedger()), mock.patch.object(server, "_POOL", pool), \
-                mock.patch.object(server, "_log"), mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0):
+                mock.patch.object(server, "_log", logged.append), \
+                mock.patch.object(server, "CLIENT_LIVENESS_INTERVAL_SECONDS", 60.0):
             server._handle_request(Gone(), {"tool": "step-compile", "argv": ["x.step"], "cwd": "/w",
                                             "prog": "cadgen step compile"})
         pool.release.assert_called_once_with(worker, healthy=False, cancelled=True)
+        # A cancel is logged as the stop it is (at most once), never as a worker that died mid-job.
+        self.assertEqual([line for line in logged if "died mid-job" in line], [], logged)
+        self.assertLessEqual(sum("stopping worker" in line for line in logged), 1, logged)
+
+    def test_log_lines_carry_the_time_they_were_written(self):
+        import io
+        import re
+
+        sink = io.StringIO()
+        with mock.patch.object(server.sys, "__stderr__", sink):
+            server._log("hello")
+        self.assertRegex(sink.getvalue(), r"^\[cadgen-daemon\] \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} hello\n$")
 
 
 class AWorkerThatCouldNotStart(unittest.TestCase):

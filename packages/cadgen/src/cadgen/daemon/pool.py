@@ -44,6 +44,7 @@ import itertools
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -99,11 +100,18 @@ def idle_unbind_seconds() -> float:
 
 class WorkerGone(RuntimeError):
     """The worker process ended, or its pipe closed, before the job produced its
-    terminal frame. Carries the wait status when the process has been reaped."""
+    terminal frame. Carries the wait status when the process has been reaped, and
+    ``what`` became of it in words a reader of the job ledger sees: the message without
+    the pid the daemon's log names (``worker 23953 was killed by SIGKILL`` -> ``was killed
+    by SIGKILL``)."""
 
     def __init__(self, message: str, *, exit_status: int | None = None) -> None:
         super().__init__(message)
         self.exit_status = exit_status
+        self.what = _PID_PREFIX.sub("", message)
+
+
+_PID_PREFIX = re.compile(r"^worker \d+ ")
 
 
 class MemoryAdmissionError(RuntimeError):
