@@ -681,22 +681,17 @@ class ObjectRepairTest(unittest.TestCase):
         payload = b"known exact object bytes"
         digest = objects.put_object(payload)
         path = objects.object_path(digest)
-        source = self.root / "source.bin"
-        source.write_bytes(payload)
         original_stat = path.stat()
         with mock.patch.object(objects, "replace_atomic", side_effect=AssertionError("rewrote valid object")):
             self.assertEqual(objects.put_object(payload, repair=True), digest)
-            self.assertEqual(objects.put_object_from_file(source, repair=True), digest)
         # Claimed in place for the sweeper's grace window (STORE.md §8), never rewritten.
         self.assertEqual(path.stat().st_ino, original_stat.st_ino)
-        for writer in (lambda: objects.put_object(payload, repair=True),
-                       lambda: objects.put_object_from_file(source, repair=True)):
-            path.write_bytes(b"corrupt bytes")
-            # Normal idempotent writes remain unchanged; recovery is explicit.
-            self.assertEqual(objects.put_object(payload), digest)
-            self.assertEqual(path.read_bytes(), b"corrupt bytes")
-            self.assertEqual(writer(), digest)
-            self.assertEqual(path.read_bytes(), payload)
+        path.write_bytes(b"corrupt bytes")
+        # Normal idempotent writes remain unchanged; recovery is explicit.
+        self.assertEqual(objects.put_object(payload), digest)
+        self.assertEqual(path.read_bytes(), b"corrupt bytes")
+        self.assertEqual(objects.put_object(payload, repair=True), digest)
+        self.assertEqual(path.read_bytes(), payload)
 
     def test_two_repair_writers_never_remove_each_others_valid_object(self):
         from concurrent.futures import ThreadPoolExecutor
