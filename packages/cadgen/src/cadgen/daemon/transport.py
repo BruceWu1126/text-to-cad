@@ -492,24 +492,63 @@ class AuthenticationError(OSError):
     """A live peer rejected the key; never spawn another daemon over it."""
 
 
-def connect(address: str, authkey: bytes) -> Channel:
+class Unresponsive(OSError):
+    """A daemon accepted the connection and then did not answer the handshake within
+    :data:`CONNECT_TIMEOUT_SECONDS`: stopped (``kill -STOP``) or wedged. Never spawn another
+    daemon over it -- it holds the address's lock -- and never wait on it longer."""
+
+
+# How long a connecting client waits for the daemon's side of the authkey handshake. A
+# live daemon answers in microseconds, on a thread of its own per peer; one that sends
+# nothing in this long is stopped or wedged, and every request, status read and job watch
+# would otherwise hang on it with no message.
+CONNECT_TIMEOUT_SECONDS = 10.0
+
+
+def connect(address: str, authkey: bytes, *, timeout: float = CONNECT_TIMEOUT_SECONDS) -> Channel:
     """Open a channel to a listening daemon. Raises OSError when there is none -- including one
     that closes the connection while it is being opened, as a daemon on its way out does (its
     version changed, or it idled out): the caller then spawns or waits for its successor.
-    :class:`AddressUnusable` when no daemon could ever listen there (``claim_folder``)."""
+    :class:`AddressUnusable` when no daemon could ever listen there (``claim_folder``);
+    :class:`Unresponsive` when one accepted the connection and did not finish the handshake
+    within ``timeout``.
+
+    The stdlib's ``Client`` runs the same handshake with no deadline; here each read of it
+    is bounded (``_Deadline``), so a stopped daemon fails the connect instead of holding the
+    caller forever."""
     claim_folder(address, create=False)
     try:
-        return Channel(mpc.Client(address, family=_family(), authkey=authkey))
+        raw = mpc.PipeClient(address) if _family() == "AF_PIPE" else mpc.SocketClient(address)
     except EOFError as exc:
         raise OSError("the geometry service closed the connection while it was opening") from exc
+    except ValueError as exc:
+        raise OSError(str(exc)) from exc
+    try:
+        peer = _Deadline(raw, timeout, lambda: False)
+        mpc.answer_challenge(peer, authkey)
+        mpc.deliver_challenge(peer, authkey)
+    except TimeoutError as exc:
+        with contextlib.suppress(OSError):
+            raw.close()
+        raise Unresponsive(f"the build daemon at {address} accepted the connection but did not answer "
+                           f"within {timeout:.0f} s") from exc
+    except EOFError as exc:
+        with contextlib.suppress(OSError):
+            raw.close()
+        raise OSError("the geometry service closed the connection while it was opening") from exc
     except mpc.AuthenticationError as exc:
+        with contextlib.suppress(OSError):
+            raw.close()
         raise AuthenticationError(
             "The geometry service rejected its local connection key. Its running "
             "process and saved key no longer match; restart the geometry service "
             "after active builds finish."
         ) from exc
-    except ValueError as exc:
-        raise OSError(str(exc)) from exc
+    except OSError:
+        with contextlib.suppress(OSError):
+            raw.close()
+        raise
+    return Channel(raw)
 
 
 class _Wakeup:
@@ -954,6 +993,8 @@ __all__ = [
     "AddressUnusable",
     "Channel",
     "AuthenticationError",
+    "CONNECT_TIMEOUT_SECONDS",
+    "Unresponsive",
     "Server",
     "address_for",
     "address_is_stale",

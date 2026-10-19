@@ -276,6 +276,24 @@ class ConnectTest(unittest.TestCase):
                 transport.connect("cadgen-test.sock", b"key")
 
 
+    @unittest.skipIf(os.name == "nt", "a raw AF_UNIX listener stands in for the stopped daemon")
+    def test_a_daemon_that_accepts_but_never_answers_fails_the_connect_within_its_bound(self):
+        # A stopped daemon (kill -STOP) still has its listener: the kernel accepts the
+        # connection and the handshake then hears nothing. The stdlib's Client waited on it
+        # forever, and with it every request, status read and job watch.
+        folder = tempfile.mkdtemp(prefix="cgu-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        address = str(Path(folder) / "d.sock")
+        stopped = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stopped.bind(address)
+        stopped.listen(1)
+        self.addCleanup(stopped.close)
+        started = time.monotonic()
+        with self.assertRaisesRegex(transport.Unresponsive, "did not answer within 0 s"):
+            transport.connect(address, b"key", timeout=0.3)
+        self.assertLess(time.monotonic() - started, 5.0)
+
+
 class ServerShutdownTest(unittest.TestCase):
     def accept_in_thread(self, listener):
         results, errors = [], []

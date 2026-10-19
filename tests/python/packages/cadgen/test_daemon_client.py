@@ -386,6 +386,21 @@ class ADaemonThatCannotTakeTheRequest(unittest.TestCase):
             self.assertIs(client._connect_or_spawn("test-address"), channel)
         self.assertEqual(spawned, ["test-address", "test-address"])
 
+    def test_a_daemon_that_answers_nothing_is_named_with_its_log_and_none_is_started(self):
+        # Stopped or wedged, the daemon holds the address's lock and accepts connections it
+        # never answers: the request fails in one sentence, and no second daemon is started.
+        unresponsive = client.transport.Unresponsive("the build daemon at test-address accepted the connection "
+                                                     "but did not answer within 10 s")
+        with mock.patch.object(client, "_connect", side_effect=unresponsive), \
+                mock.patch.object(client, "_spawn_daemon", side_effect=AssertionError("a daemon was started")):
+            code, err = self._command()
+            with self.assertRaises(client.DaemonUnavailable):
+                client.status()
+        self.assertEqual(code, 1)
+        self.assertEqual(err.count("\n"), 1, err)
+        self.assertIn("did not answer within 10 s (it is stopped or wedged)", err)
+        self.assertIn(str(self.log), err)
+
     def test_a_nested_job_fails_with_the_reason_on_its_own_stream(self):
         said = []
         with mock.patch.object(client, "unavailable", return_value="the state directory is not writable"):

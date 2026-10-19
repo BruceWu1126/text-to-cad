@@ -398,6 +398,8 @@ def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
             return 1  # whoever asked has left: no one waits for this answer
         try:
             conn = _connect_or_spawn(address)
+        except transport.Unresponsive as error:
+            raise _unresponsive(address, error) from error
         except (transport.AuthenticationError, transport.AddressUnusable) as error:
             raise DaemonUnavailable(str(error)) from error
         try:
@@ -460,9 +462,17 @@ def _connect(address: str) -> transport.Channel:
         raise
 
 
-# Connect failures no spawn can fix: a live peer that rejects the key, or an address no
-# daemon could listen at. The rest mean "nothing is listening yet".
-_FINAL = (transport.AuthenticationError, transport.AddressUnusable)
+# Connect failures no spawn can fix: a live peer that rejects the key, an address no
+# daemon could listen at, or a daemon that holds the address and answers nothing (stopped
+# or wedged). The rest mean "nothing is listening yet".
+_FINAL = (transport.AuthenticationError, transport.AddressUnusable, transport.Unresponsive)
+
+
+def _unresponsive(address: str, error: transport.Unresponsive) -> DaemonUnavailable:
+    """One sentence naming the daemon that did not answer and its log."""
+    return DaemonUnavailable(f"The build daemon at {address} accepted the connection but did not answer within "
+                             f"{transport.CONNECT_TIMEOUT_SECONDS:.0f} s (it is stopped or wedged); stop it, or "
+                             f"read its log: {log_path(address)}")
 
 
 def _connect_or_spawn(address: str) -> transport.Channel:
@@ -822,6 +832,8 @@ def prewarm() -> bool:
         return False
     try:
         channel = _connect_or_spawn(daemon_address())
+    except transport.Unresponsive as error:
+        raise _unresponsive(daemon_address(), error) from error
     except (transport.AuthenticationError, transport.AddressUnusable) as error:
         raise DaemonUnavailable(str(error)) from error
     return _ask_status(channel) is not None
@@ -869,10 +881,14 @@ def status() -> dict | None:
     """The running daemon's state, or None if there is none.
 
     Deliberately does NOT spawn one: "is anything warm?" must be answerable without
-    changing the answer.
+    changing the answer. A daemon that holds the address and answers nothing (stopped or
+    wedged) is not none: :class:`DaemonUnavailable`, naming it and its log, within the
+    connect's bound.
     """
     try:
         channel = _connect(daemon_address())
+    except transport.Unresponsive as error:
+        raise _unresponsive(daemon_address(), error) from error
     except OSError:
         return None
     return _ask_status(channel)

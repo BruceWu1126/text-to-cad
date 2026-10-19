@@ -118,7 +118,12 @@ def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
     parser.add_argument("--json", action="store_true", dest="json_result")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
-    status = daemon_client.status()
+    try:
+        status = daemon_client.status()
+    except daemon_client.DaemonUnavailable as error:
+        # A daemon that holds the address and answers nothing: said in its one sentence.
+        sys.stderr.write(f"{prog}: {error}\n")
+        return 1
     if args.json_result:
         sys.stdout.write(json.dumps(status or {}, separators=(",", ":")) + "\n")
         return 0
