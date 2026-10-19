@@ -1649,9 +1649,25 @@ def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, An
     Kept only while one feature's structure is computed, shared by all its results.
     ``index.FindIndex(element)`` is the element's place among the inputs' elements, in
     input order (0 where none holds it), and ``owners[place - 1]`` its input and its
-    ordinal there: both one ``_FirstOwners``, which asks each input's own map in turn."""
-    owners = _FirstOwners([(j, held[kind]) for j, held in given])
-    return owners, owners
+    ordinal there. A few inputs (a boolean's) are asked in turn (``_FirstOwners``), which
+    costs a result's element a lookup or two; more (a compound of many) are made one map
+    of every element of every input, which costs each of them one step."""
+    if len(given) <= _SCANNED_INPUTS:
+        owners = _FirstOwners([(j, held[kind]) for j, held in given])
+        return owners, owners
+    elements = TopTools_IndexedMapOfShape()
+    union: list[tuple[int, int]] = []
+    for j, held in given:
+        source = held[kind]
+        for ordinal in range(1, source.Extent() + 1):
+            at = elements.Add(source.FindKey(ordinal))
+            if at > len(union):
+                union.append((j, ordinal))
+    return elements, union
+
+
+# Up to this many inputs, an element's owner is asked of each input in turn.
+_SCANNED_INPUTS = 3
 
 
 class _FirstOwners:
