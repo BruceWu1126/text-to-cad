@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import sys
 import time
@@ -1597,14 +1598,18 @@ def build_model(
         return None if force else _checked_source_tree(peer_spec, verdict())
 
     def build(tracked_spec: EntrySpec, reporter: object) -> object:
-        return _generate_step_outputs(
-            tracked_spec,
-            generator=generator,
-            logger=logger if logger.verbose else None,
-            force=force,
-            progress=reporter,
-            verdict=None if force else verdict(),
-        )
+        try:
+            return _generate_step_outputs(
+                tracked_spec,
+                generator=generator,
+                logger=logger if logger.verbose else None,
+                force=force,
+                progress=reporter,
+                verdict=None if force else verdict(),
+            )
+        except Exception as error:
+            _name_model_site(error, tracked_spec)
+            raise
 
     from cadgen.daemon.executors import capture_source_result
 
@@ -1626,6 +1631,27 @@ def build_model(
         if spec.source == "generated":
             result.tree = captured.wait_result()
     return _Built(result.tree, "built", timings=timed.get("timings"), key=result.key)
+
+
+def _name_model_site(error: BaseException, spec: EntrySpec) -> None:
+    """A failure of a model's build that none of the model's code is on the way of --
+    what cadgen refused of its result after the body returned (a face colour's
+    ordinal, a kinematics label, the return itself) -- is reported at the model's own
+    line: its function (``__cadgen_site__``, ``cli_errors.report_cli_error``), never
+    at the line of cadgen's that raised."""
+    from cadgen._internal.cli_errors import _model_frames
+
+    if getattr(error, "__cadgen_site__", None) is not None or spec.script_path is None or _model_frames(error):
+        return
+    from cadgen.authoring import registered_model
+
+    function = getattr(spec.generator_metadata, "entry_function", None)
+    defn = registered_model(spec.script_path, function)
+    if defn is None:
+        return
+    code = getattr(inspect.unwrap(defn.func), "__code__", None)
+    if code is not None:
+        error.__cadgen_site__ = (str(spec.script_path), code.co_firstlineno, defn.name)  # type: ignore[attr-defined]
 
 
 def _say_owed(spec: EntrySpec, logger: CliLogger) -> None:

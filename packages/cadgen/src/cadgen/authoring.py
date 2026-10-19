@@ -507,8 +507,12 @@ class _Declaring:
             # hook below prints it as that script's one-line failure.
             exc.__cadgen_declaration__ = True  # type: ignore[attr-defined]
             return False
+        from cadgen._internal.cli_errors import model_site
         from cadgen._internal.cli_from_function import report_failure
 
+        # The exception's traceback stops here, where the decorator was applied; the
+        # model's own line -- the decorator's -- is the frame this runs under.
+        exc.__cadgen_site__ = model_site()  # type: ignore[attr-defined]
         report_failure(
             exc, prog=f"python {self.script.name}",
             as_json="--json" in sys.argv[1:], verbose="--verbose" in sys.argv[1:],
@@ -595,6 +599,11 @@ def _decorator(
         materials_def = normalize_materials(materials, where=f"@{fmt} materials=")
         animation_def = normalize_clips(animation, where=f"@{fmt} animation=")
         out = _checked_out(out, where=f"@{fmt}")
+        suffixes = (".step", ".stp") if fmt == "step" else (".dxf",)
+        if out is not None and step_output and not out.lower().endswith(suffixes):
+            # The declaration names the file the model writes, in its own format: a
+            # mesh is @stl/@glb/@threemf's to declare, a drawing @dxf's.
+            raise ValueError(f"@{fmt} out= must end with {' or '.join(repr(s) for s in suffixes)}: {out!r}")
 
     def apply(func: Callable[..., Any]) -> Callable[..., Any]:
         with _declaring(func):

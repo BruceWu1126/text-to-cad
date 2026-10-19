@@ -108,6 +108,24 @@ class ReportCliErrorTest(unittest.TestCase):
         text = self._report(ValueError("no traceback here"))
         self.assertIn("FAILED: ValueError: no traceback here", text)
 
+    def test_a_failure_the_model_s_code_is_not_on_the_way_of_is_reported_at_its_site(self):
+        """What cadgen refuses of a model after its body returned, or of its declaration
+        where the decorator was applied, has no model frame in its traceback: the report
+        names the model's own line (``__cadgen_site__``) instead of cadgen's."""
+        import cadgen._internal.cli_errors as cli_errors
+
+        original = cli_errors.__dict__.get("_model_frames")
+        self.addCleanup(lambda: cli_errors.__dict__.__setitem__("_model_frames", original))
+        cli_errors._model_frames = lambda exc: []  # raised in cadgen: nothing of the model's on the way
+        try:
+            raise ValueError("cad_face_ordinal_colors on 'free': no face 99")
+        except ValueError as exc:
+            exc.__cadgen_site__ = (str(self.model), 5, "model")
+            text = self._report(exc)
+        self.assertIn("widget.py:5 in model", text)
+        self.assertIn("def model():", text)
+        self.assertNotIn("raised in", text)
+
     def test_a_failure_with_no_message_is_named_by_its_type_and_where_it_was_raised(self):
         """A bare ``assert`` in the kernel says nothing: the one-line text a ``--json``
         envelope carries names the type and the raiser instead of an empty string."""

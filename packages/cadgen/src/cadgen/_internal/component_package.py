@@ -64,11 +64,17 @@ def _normalized_face_colors(value: object) -> dict[int, tuple[float, float, floa
         try:
             ordinal = int(raw_ordinal)
         except (TypeError, ValueError, OverflowError) as error:
-            raise ValueError(f"invalid face color ordinal {raw_ordinal!r}") from error
+            raise ValueError(
+                f"cad_face_ordinal_colors: a face is named by its ordinal, a whole number from 1 "
+                f"(got {raw_ordinal!r})"
+            ) from error
         if ordinal <= 0 or isinstance(raw_ordinal, bool) or (
             not isinstance(raw_ordinal, str) and raw_ordinal != ordinal
         ):
-            raise ValueError(f"invalid face color ordinal {raw_ordinal!r}")
+            raise ValueError(
+                f"cad_face_ordinal_colors: a face is named by its ordinal, a whole number from 1 "
+                f"(got {raw_ordinal!r})"
+            )
         try:
             channels = tuple(float(channel) for channel in raw_color)
         except (TypeError, ValueError) as error:
@@ -501,17 +507,22 @@ def read_lineage(payload: bytes) -> dict[str, Any]:
         raise ValueError("a lineage's table spells atoms no name reaches")
     return lineage
 
-def effective_face_colors(shape: Any, colors: Any) -> dict:
+def _face_count(shape: Any) -> int:
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(getattr(shape, "wrapped", shape), TopAbs_FACE, faces)
+    return faces.Extent()
+
+
+def effective_face_colors(shape: Any, colors: Any) -> dict:
     normalized = _normalized_face_colors(colors)
     if not normalized:
         return {}
-    faces = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(getattr(shape, "wrapped", shape), TopAbs_FACE, faces)
-    return {ordinal: color for ordinal, color in normalized.items() if ordinal <= faces.Extent()}
+    count = _face_count(shape)
+    return {ordinal: color for ordinal, color in normalized.items() if ordinal <= count}
 
 def _point_signature(shape: Any) -> tuple:
     """Exact native vertex records and referenced placements, scoped locally.
@@ -676,10 +687,17 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None,
                    "private_decoded_shape": None}
         kind = "eager-only"
     private = encoded["private_decoded_shape"]
-    colors = effective_face_colors(
-        private if private is not None else shape,
-        getattr(shape, "cad_face_ordinal_colors", None) if face_colors is None else face_colors,
-    )
+    declared = getattr(shape, "cad_face_ordinal_colors", None) if face_colors is None else face_colors
+    colors = effective_face_colors(private if private is not None else shape, declared)
+    beyond = sorted(set(_normalized_face_colors(declared)) - set(colors))
+    if beyond:
+        # A colour for a face the part does not have is a mistake, not a colour to drop
+        # (README law 10): the ordinal counts the part's faces, 1 to their number.
+        label = getattr(shape, "label", "") or "the part"
+        raise ValueError(
+            f"cad_face_ordinal_colors on {label!r}: no face {', '.join(map(str, beyond))}; its faces "
+            f"are numbered 1 to {_face_count(private if private is not None else shape)}"
+        )
     payload = encoded["bytes"]
     entry = {"kind": kind, "codec": encoded["codec"],
              "brep": hashlib.sha256(payload).hexdigest(), "faceColors": colors}

@@ -163,6 +163,26 @@ class SourceJobResults(unittest.TestCase):
         self.assertEqual(seen, [old])
         self.assertFalse(Path(mesh).exists(), "a newer result's file is its own build's to write")
 
+    def test_a_failure_after_the_body_is_reported_at_the_model_s_own_line(self):
+        """What cadgen refuses of the result once the body returned (a face colour's
+        ordinal) has no model frame on its way: the report names the model's function
+        and its line, not the line of cadgen's that raised."""
+        plate = self.root / "plate.py"
+        plate.write_text(
+            "from cadgen import step, build123d as bd\n\n\n@step\ndef plate():\n    box = bd.Box(4, 3, 2)\n"
+            "    box.cad_face_ordinal_colors = {0: (1.0, 0.0, 0.0, 1.0)}\n    return box\n",
+            encoding="utf-8",
+        )
+        from cadgen.cli._run_model import run_model_argv
+
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            self.assertEqual(run_model_argv([str(plate)]), 1)
+        report = err.getvalue()
+        self.assertIn("a face is named by its ordinal, a whole number from 1 (got 0)", report)
+        self.assertRegex(report, r"plate\.py:4 in plate\n.*@step\n")
+        self.assertNotIn("raised in", report)
+
     def _nested(self, *, discard: bool, child_fails: bool) -> tuple[int, str]:
         child = self.root / "child.py"
         parent = self.root / "parent.py"

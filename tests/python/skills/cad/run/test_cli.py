@@ -233,6 +233,13 @@ class TheUsersFlagsEndInTheirOwnProcess(unittest.TestCase):
         self.assertEqual({"ok", "error"}, set(payload))
         self.assertFalse(payload["ok"])
         self.assertIn("out= must be a non-empty path string", payload["error"])
+        # The text report names the model's own line, the decorator's -- where the
+        # exception was caught -- not the line of cadgen's that raised.
+        proc = self._run(script)
+        self.assertEqual(1, proc.returncode, proc.stdout + proc.stderr)
+        self.assertIn("bad.py:2 in <module>", proc.stderr)
+        self.assertIn("@step(out=5)", proc.stderr)
+        self.assertNotIn("raised in", proc.stderr)
 
 
 class TheFailureEnvelope(unittest.TestCase):

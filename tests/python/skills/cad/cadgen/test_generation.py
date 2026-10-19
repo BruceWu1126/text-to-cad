@@ -506,7 +506,7 @@ class CadGenerationTests(unittest.TestCase):
             refusal = error
         else:
             self.fail("an empty shape built")
-        self.assertRegex(str(refusal), r"empty_part\.py @step returned an empty shape: it holds no geometry")
+        self.assertRegex(str(refusal), r"empty_part\.py \w+\(\) returned an empty shape: a @step returns the shape the model built, with geometry in it")
         self.assertEqual("refused", analytics.build_failure(refusal))
         self.assertIsNone(analytics.signature(refusal, "build", bugs_only=True))
 
@@ -839,7 +839,7 @@ class CadGenerationTests(unittest.TestCase):
             + "\n", encoding="utf-8"
         )
 
-        with self.assertRaisesRegex(ValueError, "must return a build123d shape"):
+        with self.assertRaisesRegex(ValueError, r"\.py:\d+ \w+\(\) must return a build123d Shape \(got None\)"):
             self._spec(script_path)
 
     def test_decorated_dxf_scripts_are_first_class_entries(self) -> None:

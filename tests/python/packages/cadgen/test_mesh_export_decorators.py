@@ -189,6 +189,16 @@ class MeshExportMetadataTest(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "@step got an unexpected keyword argument: colour, size"):
             step(size=1, colour="red")
 
+    def test_step_and_dxf_declare_a_file_of_their_own_format(self) -> None:
+        """``@step(out="x.stl")`` was accepted and failed at build as "x.stl is not a CAD
+        STEP source", from cadgen's catalog: refused at the declaration instead."""
+        from cadgen.authoring import dxf, step
+
+        with self.assertRaisesRegex(ValueError, r"@step out= must end with '\.step' or '\.stp': 'x\.stl'"):
+            step(out="x.stl")
+        with self.assertRaisesRegex(ValueError, r"@dxf out= must end with '\.dxf': 'x\.step'"):
+            dxf(out="x.step")
+
     def test_runtime_decorators_converge_both_orders(self) -> None:
         from cadgen.authoring import step as step_deco, stl as stl_deco
 
