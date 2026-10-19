@@ -47,3 +47,26 @@ test("Clip's `at` is in the file's unit: a GLB's metres are its scene's millimet
   clip.dispose();
   scene.dispose();
 });
+
+test('scene caps use normal look colors under highlights and update with a new look', () => {
+  const scene = twoBoxes();
+  const stage = new THREE.Scene(); stage.add(scene.object3D);
+  const clip = createSceneClip(THREE,{stage});
+  const settings={enabled:true,axis:'x',at:5};
+  const look={materialSettings:{defaultColor:'#336699',fillColors:['#336699'],overrideSourceColors:true},authored:false,surface:{style:'flat',opacity:.2}};
+  scene.setSurfaceLook(look);
+  clip.sync(scene,settings);
+  const cap=stage.getObjectByName('Section fill');
+  assert.equal(cap.material.color.getHexString(),'336699');
+  scene.setHighlight({selected:['o1']});
+  clip.sync(scene,settings);
+  assert.equal(cap.material.color.getHexString(),'336699','selection tint is excluded');
+  assert.equal(cap.material.opacity,1);
+  const nextLook={...look,materialSettings:{...look.materialSettings,defaultColor:'#aa4433',fillColors:['#aa4433']}};
+  scene.setSurfaceLook(nextLook);
+  clip.sync(scene,settings);
+  assert.equal(cap.material.color.getHexString(),'aa4433');
+  clip.sync(scene,{...settings,partColors:false});
+  assert.equal(cap.material.color.getHex(),0xe9a451);
+  clip.dispose(); scene.dispose();
+});

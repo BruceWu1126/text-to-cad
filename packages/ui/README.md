@@ -295,11 +295,12 @@ app's views), Back and Forward follow, disabled where they have nowhere to go. I
 file — the name opens the explorer — and offers its ⋯ menu (Copy path, Reveal). They share one look: transparent until the
 pointer is on them or their menu is open, with no tooltip. At the right is only what a host
 or a file adds: the host's update button, a dismissed alert's icon, the host's Full size
-and, last, the host's colour scheme control (`colorSchemeControl`, the web viewer's System,
-Light and Dark), where it has one. A 3D view's Display and Preview are its tool strip's.
-With no file a view shows the host's home, the model library: the models opened before,
-pinned first, with their pictures, and Open where the host has a file chooser, under its
-wordmark and GitHub, Discord and X. A file that
+and, last, the view's own controls (a 3D view's Display and Preview). With no file a view
+shows the host's home, the model library, under the same navbar (its logo and menu, without
+Back to files, Back and Forward where the host keeps the view's history, and the host's
+update and Full size): its wordmark, byline and GitHub,
+Discord and X, then the models opened before, pinned first, with their pictures, and Open
+where the host has a file chooser. A file that
 does not exist shows "File does not exist" and its path, and any other failure to open
 "Could not open that file" and why, each with Go home where the host has a home. A
 renderer's loading and update status is its own, in its viewport. An error appears as a

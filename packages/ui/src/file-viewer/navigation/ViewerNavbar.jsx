@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import { cn } from "@text-to-cad/ui/utils";
 
 import logo from "../../assets/logo-c.svg";
@@ -15,8 +16,9 @@ import { entryMenu } from "./entry-menu.js";
 import { FolderExplorer } from "./FolderExplorer.jsx";
 
 /**
- * The row above a file: ONE navbar, the same in every app, so a person finds each control in the
- * same place whatever is open. A host's home has none; it holds its menu itself.
+ * The row above a file and above the host's home: ONE navbar, the same in every app, so a person
+ * finds each control in the same place whatever is open. Over the home it has only the logo (its
+ * menu without Back to files), Back and Forward, the host's update and Full size.
  *
  * Left, in this order: the text-to-cad logo, which opens the app's menu (`AppMenu`: Back to files
  * where the host has a home, then the person's settings, feedback and links); Back and Forward,
@@ -44,7 +46,8 @@ const NAV_ITEM_CLASS = "flex h-6 shrink-0 cursor-pointer items-center rounded-md
 
 /** The text-to-cad logo, the size of the row's other icon buttons: the app's menu. */
 function LogoMenu({ onHome, menu }) {
-  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label="Menu" className={cn(NAV_ITEM_CLASS, "w-6 justify-center")} data-navbar-menu="">
+  const { t } = useI18n();
+  return <AppMenu onHome={onHome} {...menu} trigger={<button type="button" aria-label={t("navbar.menu")} className={cn(NAV_ITEM_CLASS, "w-6 justify-center")} data-navbar-menu="">
     <img src={logo} alt="" className="size-4" draggable={false} />
   </button>} />;
 }
@@ -57,11 +60,12 @@ const HISTORY_CLASS = cn(NAV_ITEM_CLASS, "w-5 justify-center text-muted-foregrou
  * nowhere to go. The history is the host's (`viewHistory`), never the page's.
  */
 function HistoryButtons({ viewHistory }) {
+  const { t } = useI18n();
   return <span className="flex shrink-0 items-center" data-navbar-history="">
-    <button type="button" aria-label="Back" disabled={!viewHistory.canGoBack} onClick={() => viewHistory.back()} className={HISTORY_CLASS}>
+    <button type="button" aria-label={t("navbar.back")} disabled={!viewHistory.canGoBack} onClick={() => viewHistory.back()} className={HISTORY_CLASS}>
       <ArrowLeft className="size-3.5" aria-hidden="true" />
     </button>
-    <button type="button" aria-label="Forward" disabled={!viewHistory.canGoForward} onClick={() => viewHistory.forward()} className={HISTORY_CLASS}>
+    <button type="button" aria-label={t("navbar.forward")} disabled={!viewHistory.canGoForward} onClick={() => viewHistory.forward()} className={HISTORY_CLASS}>
       <ArrowRight className="size-3.5" aria-hidden="true" />
     </button>
   </span>;
@@ -69,10 +73,11 @@ function HistoryButtons({ viewHistory }) {
 
 /** The ⋯ after the file's name: what the host can do with the file. A host that can do nothing has none. */
 function FileMenu({ path, platform, capabilities, onAction }) {
-  const items = entryMenu(platform, capabilities);
+  const { t } = useI18n();
+  const items = entryMenu(platform, capabilities, t);
   if (!items.length) return null;
   return <DropdownMenu modal={false}>
-    <DropdownMenuTrigger asChild><button aria-label="File actions" data-testid="file-actions" type="button"
+    <DropdownMenuTrigger asChild><button aria-label={t("navbar.fileActions")} data-testid="file-actions" type="button"
       className={cn(NAV_ITEM_CLASS, "w-5 justify-center text-muted-foreground")}>
       <Ellipsis className="size-3.5" />
     </button></DropdownMenuTrigger>
@@ -133,9 +138,10 @@ function FileName({ path, explorer }) {
  * @param {string} [props.className]
  */
 export function ViewerNavbar({ onHome, menu = null, history = null, file = null, explorer = null, fileMenu = null, trailing = null, update = null, fullSize = null, controlsRef, className }) {
+  const { t } = useI18n();
   return (
     <header className={cn(NAVBAR_ROW_CLASS, "border-border bg-background text-foreground", className)} data-viewer-navbar="">
-      <nav aria-label="Viewer" className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
+      <nav aria-label={t("navbar.viewer")} className="flex min-w-0 flex-1 items-center overflow-hidden text-sm">
         {onHome || menu ? <LogoMenu onHome={onHome} menu={menu} /> : null}
         {history ? <HistoryButtons viewHistory={history} /> : null}
         {file ? <span className="flex min-w-0 items-center">

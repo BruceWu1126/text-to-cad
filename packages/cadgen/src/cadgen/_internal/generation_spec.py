@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +11,7 @@ from cadgen._internal.step_scene import SelectorOptions
 from cadgen.catalog import CadSource
 from cadgen.cli_logging import CliLogger
 from cadgen.cli_progress import cli_progress_line
+from cadgen.coordination import ProgressEvent
 from cadgen.metadata import GeneratorMetadata
 from cadgen.render import relative_to_cwd
 

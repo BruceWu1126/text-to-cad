@@ -194,20 +194,25 @@ it('Explode and Clip open neutral, each one row under the strip with its amount 
   // Only the tool in hand is lit, and has its row: the applied Explode stays on the model.
   expect([pressed(), subRows(), viewSettings.exploded.enabled]).toEqual([['Clip'], ['Clip controls'], true]);
   const clip = row('Clip controls')!;
-  expect([viewSettings.clip.enabled, reads('Clip controls'), resettable('Clip controls', 'clip')]).toEqual([false, ['Clip axis: X', '0%', 'Flip clip', 'Reset clip'], false]);
+  expect([viewSettings.clip.enabled, reads('Clip controls'), resettable('Clip controls', 'clip')]).toEqual([false, ['Clip axis: X', '0%', 'Reset clip'], false]);
   expect(clip.querySelector('[role=separator]')).toBeNull();
-  // Its axis, a dropdown, ONE slider (no typed value), its value, and Flip, idle with no cut to flip.
+  // Its axis, a dropdown that holds its settings too, ONE slider (no typed value) and its value.
   // Changing the axis stays neutral.
   expect(within(clip).queryByLabelText('Clip amount value')).toBeNull();
-  const flip = () => within(row('Clip controls')!).getByRole('button', { name: 'Flip clip' });
-  expect([flip().hasAttribute('disabled'), flip().getAttribute('aria-pressed')]).toEqual([true, 'false']);
+  const reverse = async () => {
+    await user.click(row('Clip controls')!.querySelector<HTMLElement>('[data-clip-axis]')!);
+    await user.click(screen.getByRole('menuitemcheckbox', { name: 'Reverse' }));
+    await user.keyboard('{Escape}');
+  };
+  // An axis chosen keeps the menu open.
+  await user.click(clip.querySelector<HTMLElement>('[data-clip-axis]')!);
   for (const axis of ['Y', 'Z', 'X']) {
-    await user.click(clip.querySelector<HTMLElement>('[data-clip-axis]')!);
     await user.click(screen.getByRole('menuitemradio', { name: axis }));
     expect(within(clip).getByRole('button', { name: `Clip axis: ${axis}` }).textContent).toBe(axis);
     expect(['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map(name => slider('Clip amount').getAttribute(name))).toEqual(['0', '100', '0']);
     expect(viewSettings.clip.enabled).toBe(false);
   }
+  await user.keyboard('{Escape}');
   fireEvent.keyDown(slider('Clip amount'), { key: 'ArrowRight' });
   expect(viewSettings.clip.enabled).toBe(true);
   fireEvent.keyDown(slider('Clip amount'), { key: 'Home' });
@@ -215,11 +220,11 @@ it('Explode and Clip open neutral, each one row under the strip with its amount 
   fireEvent.keyDown(slider('Clip amount'), { key: 'PageUp' });
   const share = clip.querySelector('[data-model-tool-amount]')!.textContent;
   expect([viewSettings.clip.enabled, share, resettable('Clip controls', 'clip')]).toEqual([true, expect.stringMatching(/^\d+%$/), true]);
-  // Flip turns the cut round, the same share of the model cut away, and is lit while flipped.
-  await user.click(flip());
-  expect([viewSettings.clip.invert, flip().getAttribute('aria-pressed'), clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([true, 'true', share]);
-  await user.click(flip());
-  expect([viewSettings.clip.invert, flip().getAttribute('aria-pressed'), clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([false, 'false', share]);
+  // Reverse (the axis dropdown's) turns the cut round, the same share of the model cut away.
+  await reverse();
+  expect([viewSettings.clip.invert, clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([true, share]);
+  await reverse();
+  expect([viewSettings.clip.invert, clip.querySelector('[data-model-tool-amount]')!.textContent]).toEqual([false, share]);
   // A second press on the tool in hand does nothing.
   await user.click(tool('Clip'));
   expect([pressed(), subRows()]).toEqual([['Clip'], ['Clip controls']]);

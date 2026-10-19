@@ -1182,11 +1182,12 @@ Explode and Clip follow Measure on the strip; Explode only with two or more part
 (hidden, never disabled, once the mesh is known; idle until it is). Their sub-toolbars
 (`components/workbench/ModelTools.jsx`'s `useModelTools`, handed to the shell as
 `subToolbar`) are the tool in hand's alone, with no enable checkbox: Explode's slider, its
-amount and Reset explode; Clip's axis (`ClipAxisSelect`, "X ⌄"), its slider, its amount, Flip
-clip and Reset clip (`ModelViewControls.js`). A press on one unset starts it neutral; one with
+amount and Reset explode; Clip's axis (`ClipAxisSelect`, "X ⌄", whose dropdown holds the
+axes as one row of radio items, then Part colors and Reverse, drawn as Display's menu), its slider, its amount and Reset clip
+(`ModelViewControls.js`). A press on one unset starts it neutral; one with
 its effect set takes it up as it is; the one in hand does nothing. An edit applies the effect
-and the slider at zero removes it; Reset removes it and leaves the tool up, disabled while
-nothing is set. The effect stays on the model under every other tool, with nothing of it on
+and the slider at zero removes it; Reset puts the amount back at zero — Clip's axis and settings
+stay — and leaves the tool up, disabled while nothing is set. The effect stays on the model under every other tool, with nothing of it on
 screen. Clip's plane and slider range share the original bounds, unaffected by pose or
 Explode. The lifecycle is [the design system's](settings-ui.md#tools-and-lifecycle).
 

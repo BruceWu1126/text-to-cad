@@ -11,6 +11,9 @@ The host contains `files`, optional native `fileActions`, `clipboard`,
 `home()`), the optional `links` (the app menu's), the optional `usage`
 (`used(feature)`: what the person used, for the host's telemetry to count, never what
 they made; absent, nothing is counted) and `environment`. `environment` carries the resolved `colorScheme`,
+the resolved `locale` (the language the view reads in: the person's choice, else what the
+context infers, as `@text-to-cad/ui/i18n`'s `useLanguage` resolves it; none, or one the viewer
+does not speak, reads English),
 the keyboard `platform` (`darwin` shows ⌘, anything else Ctrl), the app's own
 `reducedMotion`, honoured beside the system's `prefers-reduced-motion`, and
 `compact`: a view drawn as a picture (the home draws its thumbnails this way, out
@@ -63,7 +66,7 @@ are for reading and maintaining the contracts.
 | `RobotRendererOptions` (URDF, SRDF, SDF), `RobotLiveController`, `RobotLiveState` (`selectedLinks`, `selectedPartIds`) | [Robot registration](../src/renderers/robot/index.ts) | `@text-to-cad/ui/renderers/robot` |
 | `ViewerCommands`, `ViewerCommandSource` (the host requests every viewer renderer takes) | [Viewer commands](../src/renderers/workspace/commands.ts) | `@text-to-cad/ui/renderers/workspace` |
 | `createLiveRegistry`, `LiveRegistry` (the host's handle on the mounted view: its renderers' `live`) | [Live registry](../src/host/liveRegistry.ts) | `@text-to-cad/ui/host` |
-| `ModelLibrary`, `ModelLibrarySource`, `useModelThumbnail` (a host's home: the CAD title over the host's links (GitHub, Discord, X), then the models opened before, pinned first, as cards or rows, and with none, where the host has a chooser, an "Open File" card that opens it; placeholder cards or rows while the list is read (again every two seconds while the home is up, so a model rebuilt meanwhile is pictured again), and a spinner over the model being opened, which takes no second press until `open` settles; `pick` only where the host has a file chooser) | [Model library](../src/library/ModelLibrary.tsx), [thumbnails](../src/library/thumbnails.ts) | `@text-to-cad/ui/library` |
+| `ModelLibrary`, `ModelLibrarySource`, `useModelThumbnail` (a host's home, under the navbar: the CAD title and byline over the host's links (GitHub, Discord, X), then the models opened before, pinned first, as cards or rows, and with none, where the host has a chooser, an "Open File" card that opens it; placeholder cards or rows while the list is read (again every two seconds while the home is up, so a model rebuilt meanwhile is pictured again), and a spinner over the model being opened, which takes no second press until `open` settles; `pick` only where the host has a file chooser) | [Model library](../src/library/ModelLibrary.tsx), [thumbnails](../src/library/thumbnails.ts) | `@text-to-cad/ui/library` |
 | `CadViewer` (FileViewer over a CAD client, one file by absolute path or the home: the five CAD renderers, catalog following, the home, the "File does not exist" and "Could not open that file" pages, the library's pictures) | [CAD viewer](../src/cad-viewer/CadViewer.tsx) | `@text-to-cad/ui/cad-viewer` |
 | `createCadFileSource` (a CAD client as a read-only `FileSource`: `stat` through the client's `resolveEntry`, `list` through `folder`, `search` through `search`), `createCadFileActions` (the file menu's Copy path, the absolute path, and Reveal), `normalizePath`, `baseName`, `joinPath`, `contentRevision` | [Catalog](../src/cad-viewer/catalog.ts) | `@text-to-cad/ui/catalog` |
 | `ViewerLinks`, `viewerLinks` (the version, GitHub, Discord, where a new issue opens, the newest release and how to update, and how a link is followed), `issueUrl` (a new issue filled in — its title, labels and body — its address kept under `ISSUE_URL_MAX`) | [Host types](../src/host/types.ts), [links](../src/file-viewer/navigation/links.js) | `@text-to-cad/ui/links` |
@@ -139,7 +142,8 @@ the selection through `promptContext.deliver`. Neither route detects the platfor
 `navigation.openFile(path)` shows a file, by its absolute path, in this view: a pick
 in the explorer, a renderer's link. `navigation.home()`, where the host has a home,
 shows it in this view: from a file, the app menu's Back to files (the menu the navbar's
-logo opens) leads to it, and the home itself has no navbar. `CadViewer` implements both
+logo opens) leads to it; over the home the same navbar has the logo and its menu, with no
+Back to files. `CadViewer` implements both
 over the host's `onShow(path)` (`''` is the home), and gives a host a home only with a
 `library`: a host whose own navigation shows one file (Codex's file handler) passes none,
 and its view shows that file and nothing else — no home, its menu no Back to files, no
@@ -147,9 +151,10 @@ explorer, and no `openFile`, so a renderer's link to another file (a robot's mes
 text there. A host that keeps a view's own history,
 where no browser does (the CAD app's views), hands it as `history` (`ViewerHistory`:
 `canGoBack`, `canGoForward`, `back()`, `forward()`; `CadViewerProps.history`): the navbar
-draws Back and Forward over it. What the history holds is the host's (the CAD app's: every file
-the view showed, the agent's shows and the person's moves alike, the home being no step); the
-web hands none, its page having the browser's. `onShown(path | null)` says which file the catalog
+draws Back and Forward over it, over a file and over the home alike. What the history holds is
+the host's (the CAD app's: every file the view showed and the home, a step like a file, the
+agent's shows and the person's moves alike); the web hands none, its page having the
+browser's, where the home is a step too. `onShown(path | null)` says which file the catalog
 has on screen (null for the home, or a file still resolving or missing), for a host that
 names its page after it or records it. The host decides what showing a file means,
 because only the host knows which view shows it: the web viewer is one page per machine
@@ -414,8 +419,11 @@ keyboard `platform` (`environment.platform`) for its undo and redo keys.
 
 ## Host chrome slots
 
-FileViewer draws ONE navbar, the same in every app and over every file; a host's home
-has none (it holds the links itself, under its title). Left: the text-to-cad "C" logo,
+FileViewer draws ONE navbar, the same in every app, over every file and over a host's home.
+Over the home it has only the logo and its menu (no Back to files), Back and Forward where
+the host hands a `history`, and the host's update and Full size, each where it stands over
+a file; the home's search, layout switch and Open stay
+in its Recent Files row, and its links under its title. Left: the text-to-cad "C" logo,
 which opens the app menu (`AppMenu`, `file-viewer/navigation/AppMenu.jsx`), then Back and
 Forward where the host hands a `history`, then the open file's name and its ⋯ menu. The
 logo, Back and Forward, the name and the ⋯ share one style (`NAV_ITEM_CLASS`):
@@ -427,13 +435,12 @@ manager, each where `fileActions` can do it, and is absent where it can do none 
 right-click on the name). Right, only what a host or a file adds: the host's update button
 first (`update`, while its install is behind), the renderer's navigation actions, the
 host's Full size where it shows the view small
-(`fullSize`, the inline card's way to full size, in the home's row too), and last the host's
-colour scheme control (`colorSchemeControl`), where it has one. The navbar holds no
-settings and no view controls.
+(`fullSize`, the inline card's way to full size, over the home too), and last the box the
+renderer draws its own controls into (over a file only). The navbar holds no settings.
 
 The app menu is FileViewer's, built from the host's `navigation.home`, `links` and
 `environment.platform` and the person's `FileViewerProps.appSettings` (which `CadViewer`
-passes on); the home has none. It is a dropdown on the floating surface.
+passes on), the same over a file and over the home. It is a dropdown on the floating surface.
 First **Back to files**, where the host has a home; then
 the host's on/off settings (`appSettings`, below) as checkbox items, checked at the right,
 which a press turns without closing the menu; then, where the host has a tracker
@@ -446,9 +453,8 @@ gray, "v<version> · Made by @<handle>": the version links its release notes
 as it is (`v0.7.15`), and any other build's with its id (`v0.7.15-dev.b80844940`, the commit
 it was built from, `-dirty` with uncommitted changes): `viewerLinks({ version, build })`,
 where each app's Vite config names the build through `@text-to-cad/ui/build-id`, and a new
-issue names it the same way. The home has GitHub, which says the
-project is open source, Discord and X as icon links under its wordmark (`HomeLinks`), in
-that order.
+issue names it the same way. The home also has GitHub, which says the project is open
+source, Discord and X as icon links under its wordmark (`HomeLinks`), in that order.
 
 An alert card's Report Issue opens a new issue too,
 titled "Issue: " and labelled `bug`, filled in from the card (`kit/status/reportIssue.js`): its
@@ -459,12 +465,12 @@ directory in anything else is `~/`. A label is a suggestion: GitHub applies a UR
 for someone with triage access to the repository and drops them for everyone else. A link opens
 the ordinary way unless the host supplies
 `links.open` (a page in a sandboxed frame hands it to its host), which every link of the
-menu follows. `colorSchemeControl` (a `CadViewer` prop, a React node) is the host's own
-light/dark control, where it has one: `CadViewer` passes it to FileViewer, whose navbar
-draws it last, after `fullSize`, in the page's top-right corner, and to the home
-(`ModelLibrary`), last in its links row. The web viewer passes `ViewerAppearance` (System,
-Light, Dark); the CAD app passes none, since it takes its host's theme. Display holds no
-appearance control. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
+menu follows. The colour scheme is the menu's Theme row (`colorScheme`, a `CadViewer`
+prop), over a file and on the home alike; no host has a light/dark button of its own, and
+Display holds no appearance control. `language` (`{ locale, inferred, choice, onChoiceChange }`, a `CadViewer` prop) is the person's
+language for the app menu's Language row: `choice` null is Automatic, `inferred` what Automatic
+means; both apps keep the choice in the person's settings (`/__cad/language`, the `language`
+section of `settings.json`), so it holds for every CAD view. `appSettings` (`{ id, section, label, checked, disabled?, onCheckedChange }[]`,
 a `CadViewer` prop) are the host's own on/off settings: checkbox items of the app menu, in the
 order they come (Share anonymous usage data, in both apps), the same in the
 logo's menu and the home's; nothing of them reaches a renderer, and Display holds none. The
@@ -475,8 +481,7 @@ host owns what each one does and where it is kept.
 has said so. The host supplies the call and where the answer is kept.
 `@text-to-cad/ui/update` is the update button both apps share, from cadgen's version check:
 `UpdateButton`, the blue button a host hands the viewer as its `update` (`CadViewerProps.update`,
-first among the navbar's right-hand controls over every file, an icon, and on the home a row of its own,
-labeled Update), which opens its card in a popover, and `useUpdateNotice(call, initial)`, which
+first among the navbar's right-hand controls, an icon, over every file and over the home), which opens its card in a popover, and `useUpdateNotice(call, initial)`, which
 starts on the notice the host already has (a CAD app's launch carries it; the web page reads it with
 its server's description), so the button draws with the page, and reads the host's call again when
 the page regains focus. Nothing it does is an answer the server keeps: the button stays while the

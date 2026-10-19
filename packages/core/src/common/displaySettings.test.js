@@ -37,6 +37,7 @@ test("display settings own CAD presentation fields while camera owns projection"
       enabled: true,
       axis: "z",
       invert: true,
+      partColors: true,
       at: 12.5
     },
     exploded: DEFAULT_EXPLODED_VIEW_SETTINGS,

@@ -25,6 +25,11 @@ cadgen step snapshot part.step review.png --preview
 cadgen step snapshot part.step review.png --display '{"mode":"parts","appearance":"dark"}' --camera front
 ```
 
+`clip.partColors` defaults to true: caps take normal part base colors, excluding
+hover/selection tints, and stay opaque even for transparent parts. False restores
+uniform amber caps. Textures and vertex-color variation are not sampled; a mesh
+with several materials uses its first material color.
+
 A clip keeps the part of a model on the lower side of a plane across
 `axis` (`x`, `y` or `z`), or the upper side with `invert`, and fills the cut
 faces. The plane stands at `at`, its coordinate on the axis in the FILE's unit in

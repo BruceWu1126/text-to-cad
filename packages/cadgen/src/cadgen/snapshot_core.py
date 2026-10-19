@@ -149,7 +149,7 @@ DISPLAY_OPTION_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip",
 # no display mode: it is its own request (`--preview`, a job's `"preview": true`).
 DISPLAY_MODES = frozenset({"solid", "shaded", "parts", "xray", "hidden-line", "wireframe"})
 DISPLAY_CAMERA_KEYS = frozenset({"projection", "focalLength"})
-DISPLAY_CLIP_KEYS = frozenset({"enabled", "axis", "at", "invert"})
+DISPLAY_CLIP_KEYS = frozenset({"enabled", "axis", "at", "invert", "partColors"})
 DISPLAY_EXPLODED_KEYS = frozenset({"enabled", "amount"})
 DISPLAY_GROUP_KEYS = {
     "camera": DISPLAY_CAMERA_KEYS, "clip": DISPLAY_CLIP_KEYS, "exploded": DISPLAY_EXPLODED_KEYS,
@@ -458,7 +458,7 @@ def _validate_display_group(value: object, keys: frozenset[str], path: str) -> N
     _display_object(value, keys, path)
     for key, entry in value.items():
         field = f"{path}.{key}"
-        if key in {"enabled", "invert"}:
+        if key in {"enabled", "invert", "partColors"}:
             _render_boolean(entry, field)
         elif key == "color":
             _render_color(entry, field)

@@ -4,7 +4,7 @@ import { DEFAULT_STEP_CLIP_SETTINGS, normalizeStepClipSettings } from "../lib/vi
 /** @typedef {"solid" | "shaded" | "parts" | "xray" | "hidden-line" | "wireframe"} ViewMode */
 /** @typedef {ViewMode | "render"} ViewLook */
 /** @typedef {{colorMode?: "original" | "single" | "by-part", color?: string, colors?: string[]}} ViewParts */
-/** @typedef {{enabled?: boolean, axis?: "x" | "y" | "z", at?: number, invert?: boolean}} ViewClip */
+/** @typedef {{enabled?: boolean, axis?: "x" | "y" | "z", at?: number, invert?: boolean, partColors?: boolean}} ViewClip */
 /** @typedef {{enabled?: boolean, amount?: number}} ViewExploded */
 /**
  * The public Viewer / snapshot vocabulary: the file's display mode, whether the grid is on, and

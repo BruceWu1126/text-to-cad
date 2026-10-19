@@ -269,6 +269,12 @@ never moves a cid.
 - Bump `GEOMETRY_SCHEME` only when the same inputs must map to a different
   tree: a codec or interpretation change. It re-keys every user's store, so
   it is rare and deliberate, and the reason goes in the commit and here.
+- Bump `DOCUMENT_SCHEMA_VERSION` (`store/records.py`) when a document's same
+  bytes must read back as a different tree over the same components: the
+  names, hierarchy or placements the scene loader reads. Every document entry
+  misses once and the next read compiles those bytes again; components and
+  meshes are reused by their own keys, and records stay valid. Each bump's
+  reason is recorded beside the number.
 - Bump the derived artifact's own version for an extractor, selector-table,
   mesher, verifier or mesh-payload fix (`store/parts.PART_VERSION`). Never
   reach for geometry identity to invalidate a derived layer.

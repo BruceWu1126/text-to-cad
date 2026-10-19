@@ -71,10 +71,10 @@ describe('live CAD viewer binding', () => {
     const view = harness();
     view.update({ ...state(), display: { mode: 'solid', clip: { axis: 'x', at: 2 } } });
     view.commands.setDisplaySettings.mockImplementation(() => view.update({ ...state(), display: {
-      mode: 'solid', clip: { enabled: true, axis: 'y', invert: false }
+      mode: 'solid', clip: { enabled: true, axis: 'y', invert: false, partColors: true }
     } }));
     const result = await view.controller.setDisplaySettings({ clip: { axis: 'y' } });
-    expect(result.display.clip).toEqual({ enabled: true, axis: 'y', invert: false });
+    expect(result.display.clip).toEqual({ enabled: true, axis: 'y', invert: false, partColors: true });
   });
   it('bounds a display command that never commits', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_001);

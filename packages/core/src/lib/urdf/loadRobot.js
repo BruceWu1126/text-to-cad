@@ -27,6 +27,26 @@ export function peekRobotMeshes(urls, { resources } = {}) {
   return meshes.every(Boolean) ? meshes : null;
 }
 
+/** The first visual that names `url`, as its description wrote it: `link “base” mesh “meshes/base.stl”`. */
+function meshNamedBy(description, url) {
+  for (const link of Array.isArray(description?.links) ? description.links : []) {
+    for (const visual of Array.isArray(link?.visuals) ? link.visuals : []) {
+      if (String(visual?.meshUrl || "").trim() === url) {
+        return `Link “${link.name}” mesh “${visual.filename || url}”`;
+      }
+    }
+  }
+  return `Mesh ${url}`;
+}
+
+/** A mesh's failure, saying which link's mesh it is: the server's reason alone ("No file at …")
+ * did not say which `<mesh>` to fix. Cancellation passes through as it came. */
+function meshFailure(error, description, url, signal) {
+  if (signal?.aborted || isAbortError(error)) return error;
+  return Object.assign(new Error(`${meshNamedBy(description, url)}: ${error?.message || error}`, { cause: error }),
+    { status: error?.status, url: error?.url || url, alert: error?.alert });
+}
+
 /**
  * Every mesh, in `urls` order. A mesh that fails to load fails the robot: a robot drawn
  * without one of its links is a plausible wrong picture, in the viewer and in a snapshot alike.

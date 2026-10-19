@@ -67,16 +67,18 @@ while it reports `onReady(false)`; `appearance`; and `onOpenFile(path)`, which s
 its absolute path, in this view (a robot's mesh), absent where the view shows its file alone. Its loading and update status are its
 own to show: a CAD renderer shows them in its viewport. Host-specific pages are supplied through `presentation`,
 without duplicating the view's placement: `home` is a host's own page for a view with
-no file (every CAD host's model library), with no navbar over it; `loading`; and
+no file (every CAD host's model library), under the navbar; `loading`; and
 `error({ message, missing })` for a file that will not open, `missing` when it does
 not exist. Per-file renderer state is also accepted during a departing renderer's
 cleanup, while it still belongs to the same source.
 
 ## The navbar and the explorer
 
-The navbar is drawn over every file from the moment one is asked for, and never over
-the home or for a `compact` view (a picture: the home's thumbnails); the CAD viewer's
-Preview keeps it. Left to right:
+The navbar is drawn over every file from the moment one is asked for, and over the
+host's home — only its logo and menu, without Back to files, Back and Forward where the
+host keeps the view's history, and the host's update and Full size, where they stand over
+a file — never for a `compact` view (a
+picture: the home's thumbnails); the CAD viewer's Preview keeps it. Over a file, left to right:
 
 - the text-to-cad "C" logo (named Menu, with no chevron), which opens the app menu
   (`navigation/AppMenu.jsx`): Back to files where the host has a home
@@ -98,9 +100,7 @@ at rest, the same accent background while the pointer is on it and while its men
 pointer cursor, and no tooltip.
 
 At the right, only what a host or a file adds: the host's update button, a renderer's
-actions, the host's Full size, where the host shows the view small, and last, in the page's
-top-right corner, the host's colour scheme control (`colorSchemeControl`, which `CadViewer`
-passes on to FileViewer and `ViewerNavbar`), where it has one. A renderer's
+actions and the host's Full size, where the host shows the view small. A renderer's
 own view controls (a 3D view's Display and Preview, or Preview's settings and Exit preview)
 go last, in the box FileViewer hands it (`navbarSlot`, `data-view-controls`).
 

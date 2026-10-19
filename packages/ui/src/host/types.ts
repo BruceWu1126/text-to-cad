@@ -88,7 +88,9 @@ export interface ViewerHost {
    * the app's own motion setting, honoured beside the system's `prefers-reduced-motion`. `compact`
    * is a view drawn with no chrome (the library's picture of a model, drawn out of sight): a
    * renderer draws the model alone — not its tools, its view's controls, its cube or its Quick
-   * Edit — and the view has no navbar.
+   * Edit — and the view has no navbar. `locale` is the language the view reads in, as the host
+   * resolved it (`@text-to-cad/ui/i18n`'s `useLanguage`: the person's choice, else what the context
+   * infers); one it does not speak, or none, reads English.
    */
-  environment: { colorScheme: 'light' | 'dark'; platform?: string; reducedMotion?: boolean; compact?: boolean };
+  environment: { colorScheme: 'light' | 'dark'; locale?: string; platform?: string; reducedMotion?: boolean; compact?: boolean };
 }

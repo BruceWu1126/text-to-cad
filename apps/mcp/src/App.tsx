@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { Maximize } from 'lucide-react';
 import { useAnalyticsConsent } from '@text-to-cad/ui/consent';
+import { useLanguage } from '@text-to-cad/ui/i18n';
 import { UpdateButton, useUpdateNotice } from '@text-to-cad/ui/update';
 import { viewerLinks } from '@text-to-cad/ui/links';
 import { Button } from '@text-to-cad/ui/primitives/button';
@@ -201,7 +202,12 @@ export default function App({ bridge, server, launch: initial, presentation = 't
 
   // The usage stats cadgen sends (its telemetry), the same as the browser viewer's: nothing asks here (a
   // cadgen command says it once), and the app menu's switch changes it.
-  const { appSettings } = useAnalyticsConsent(client.consent);
+  // The person's language: inferred from the host's locale (its context's `locale`), else the frame's
+  // browser languages, until they choose one in the app menu, which their settings keep for every CAD
+  // view (`useLanguage`, the same as the browser viewer's).
+  const { locale, language } = useLanguage(client.language, { preferred: [context.locale, ...(navigator.languages ?? [navigator.language])] });
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+  const { appSettings } = useAnalyticsConsent(client.consent, locale);
   // A newer text-to-cad (`cadgen/updates.py`): the blue update button, first in the navbar and a row of
   // its own on the home while this install is behind, from the launch's notice at once. Its prompt goes
   // to the chat where the host takes messages, so the agent updates CAD; elsewhere it is copied.
@@ -225,6 +231,6 @@ export default function App({ bridge, server, launch: initial, presentation = 't
       update={updateNotice ? <UpdateButton notice={updateNotice} send={sendPrompt} copy={prompt => frameClipboard.writeText(prompt)}
         onLink={openLink} /> : null}
       fullSize={inline && context.availableDisplayModes?.includes('fullscreen') !== false ? <FullSizeButton bridge={bridge} /> : null}
-      colorScheme={colorScheme} theme={theme} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
+      colorScheme={colorScheme} theme={theme} locale={locale} language={language} platform={initial.platform || 'darwin'} reporter={reporter} sync={sync} chat={chat} />
   </Frame>;
 }

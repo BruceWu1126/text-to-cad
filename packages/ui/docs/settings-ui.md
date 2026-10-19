@@ -27,7 +27,7 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 | The host (web, desktop) supplies | The shared UI decides |
 | --- | --- |
 | Where the tab record lives (`TabRecordStorage`: the web's sessionStorage, the CAD app's memory) | The record: its settings (the file sidebar's and tool stack's layout, the appearance, the home's layout) and the view of the file on screen (its camera, Display settings, its playback settings, and renderer slices), what is written when, and what is never stored (`@text-to-cad/ui/tab-store`, `kit/shell/fileView.js`) |
-| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) and `colorSchemeControl` (the home's light/dark button, where it has one) | The navbar's order and look, the app menu (one menu in the viewer and on the home) and what a new issue says |
+| `navigation.home`, `links` (its version, GitHub, Discord, where a new issue opens, how a link opens), `appSettings` (the person's own settings), `colorScheme` (the person's theme and how it changes) | The navbar's order and look, over a file and over the home, the app menu (one menu in the viewer and on the home) and what a new issue says |
 | `host.files`, `fileActions`, `navigation`, `clipboard`, `promptContext`, `promptFiles` | When a copy, capture or open happens and what it carries |
 | `host.environment`: color scheme, keyboard `platform`, `reducedMotion` | How the chrome honours them |
 | `onError`, for errors the viewer hands up | Preview, tooltips, keyboard scope, the tool strip and sidebar, the camera |
@@ -35,12 +35,12 @@ inspects a format's parts, joints or topology. No pick or tool opens or closes t
 Hosts pass no Preview, chrome-visibility or notification props; there are
 none.
 
-- **Navbar.** One row, the same in every app, over every file. Left: the text-to-cad "C"
+- **Navbar.** One row, the same in every app, over every file and over the home. Left: the text-to-cad "C"
   logo, named Menu, the size of the row's icon buttons, with no chevron, which opens the
   **app menu** (see [Settings](#settings)) — a host with no home has it too — then, where the
   host keeps the view's own history (`history`: the CAD app's views, which no browser holds),
-  **Back** and **Forward**, two arrows walking it as a browser's do, from file to file (the home
-  is no step: it is a way to pick a recent file), each there always and disabled where it has
+  **Back** and **Forward**, two arrows walking it as a browser's do, from file to file and to
+  and from the home (a step like a file), each there always and disabled where it has
   nowhere to go; then the open file's name and its ⋯. Each of these that
   is a control (`NAV_ITEM_CLASS`) is transparent at rest, takes the same accent background
   while the pointer is on it and while its menu is open, has a pointer cursor and no tooltip:
@@ -71,12 +71,15 @@ none.
   Preview's pair in the view's top-right corner. A new per-file button that is no tool goes
   with them.
 
-  A host's home has no navbar: under its TEXTTOCAD wordmark and byline, its update, when there is
-  one, is a row of its own (the blue button, labeled **Update**, its card centred under it), then
-  GitHub (its mark, a link to the project: it is open source), Discord and X, as icon links, and,
-  where the host shows the view small, **Full size**, then the host's colour scheme control,
-  where it has one, last in that row, above its Recent Files: the models opened before,
-  pinned first, as cards or rows, with Open where the host has a file chooser.
+  A host's home has the same navbar, with only the logo and its app menu (without Back to
+  files) and, where the host keeps the view's history, **Back** and **Forward** at the left
+  and, at the right end, the host's update, when there is one, and **Full size**, where the
+  host shows the view small — the same buttons, sizes and places as over a file. Under it,
+  the page: the TEXTTOCAD wordmark and byline, then GitHub (its mark, a link to the project:
+  it is open source), Discord and X, as icon links (GitHub and Discord are the app menu's
+  too, X its footer's "Made by"; no light/dark button: Theme is the menu's), then Recent Files with its search, grid/list switch
+  and Open where the host has a file chooser: the models opened before, pinned first, as cards
+  or rows.
   The update shows only for a release
   later than the version the page names, whatever the host says. A file that will not open
   shows a page under the navbar: "File does not exist" and the file's path, or "Could not
@@ -200,7 +203,7 @@ Explode or Clip with its effect set takes it up again, as it is; unset, it start
 | Select | The default tool of every 3D file but an STL; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
 | Annotate | Draws on the view | Its tools, what is drawn next, Undo, Redo and Clear annotations (on a phone, the menu of a chevron after its tile instead) | The annotations stay in the model, their chip in Quick Edit; the tool in hand stays, the strip's Annotate showing its icon |
 | Measure | Arms picking between points on the model (a STEP's exact vertices, edges and faces; a mesh's triangles, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"); each result a chip in Quick Edit, in its colour | None | Unfinished picks are cancelled; completed measurements stay, Quick Edit's chips |
-| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, and Flip clip before Reset) | The effect stays on the model |
+| Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, whose dropdown holds its settings) | The effect stays on the model |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
 measurements, the annotations, Clip — except the two that move the parts: **Explode** and
@@ -220,7 +223,8 @@ before it acts.
 
 **Removing an effect.** Explode's and Clip's sub-toolbars end in
 Reset ("Reset explode", "Reset clip"): always there, disabled while there
-is nothing to take away, it removes the effect and leaves the tool up. Position's way back is its Pose row's Default. A
+is nothing to take away, it removes the effect — the amount back at zero, nothing else (Clip's
+axis and its settings stay as set) — and leaves the tool up. Position's way back is its Pose row's Default. A
 measurement's chip X deletes it; the Annotation chip's X clears the annotations.
 
 **Select is the one tool with a menu on the strip**: the chevron right after its button
@@ -230,8 +234,8 @@ open, never with the tool. A press on any other tool is its only action. Whateve
 be set to while it is up is its sub-toolbar. A dropdown is ordinary — under its own button,
 free to overlap the view — and closes with no exit animation, so a quick second tap (touch
 included) always reaches its trigger. Choosing a value closes it; ticking an option leaves
-it open. Menu checks sit on the right. The other dropdowns over the viewport are Display,
-the sub-toolbars' (Clip's axis, Annotate's colour, weight, line style and placement), its
+it open, as do Clip's axes and the app menu's Theme. Menu checks sit on the right. The other dropdowns over the viewport are Display,
+the sub-toolbars' (Clip's axis and settings, Annotate's colour, weight, line style and placement), its
 context menu, and the Animation section's routine and Playback settings (`PlaybackMenu.jsx`, on
 `ToolPopover`). Preview's settings are a panel, not a dropdown (see [Preview](#camera-animation-and-preview)).
 
@@ -276,8 +280,11 @@ under the strip, centred, 8px below it, on the strip's surface, its buttons the 
 thin rule. It stays up for as long as its tool does, and has no heading: the tool's lit
 button above names it. Explode's and Clip's are one shape — what leads
 the slider, the slider, its value right beside it and only as wide as
-its text, the tool's actions, then Reset, last, at the same spot in both, with no rules —
-and one width (`SLIDER_SUB_TOOLBAR_CLASS`, `w-56`). The slider takes the rest of the row.
+its text, the tool's actions (neither has any), then Reset, last, at the same spot in both,
+with no rules — and one width (`SLIDER_SUB_TOOLBAR_CLASS`, 202px; a phone's 320px). The slider
+takes the rest of the row. A tool's options never sit in the row as checkboxes, labels or
+buttons of their own, which would squeeze the slider: they are the dropdown of what leads it
+(Clip's axis).
 
 **Annotate.** Its sub-toolbar, "Annotation controls", while Annotate is up
 (`annotation/toolbar.jsx`'s `AnnotationToolbar`): **Annotation tools**, a button each — Pen,
@@ -318,9 +325,19 @@ every other tool; a press on Measure while it is up does nothing.
 
 **Explode and Clip** have no enabled checkbox, and their sub-toolbars are drawn alike.
 Explode's: its slider, the amount (a percentage), **Reset explode**. Clip's: its axis — a
-borderless button reading the axis in hand, "X ⌄", whose dropdown lists X, Y and Z — its
-slider, the amount, **Flip clip** (which side of the plane is cut away, the cut keeping its
-share; disabled while nothing is cut), **Reset clip**. Explode opens at 0%, Clip at no
+borderless button reading the axis in hand, "X ⌄", lit while its menu is open — its slider, the
+amount, **Reset clip**. The axis's dropdown holds all of Clip's settings, on Display's surface
+and in its type, as narrow as its content, with no heading and no glyphs: first X, Y and Z, a
+compact group of the app menu's Theme buttons (24px squares, its radius, no track) in a row as
+tall as an item (a phone's 40px, as Theme's row), the axis in hand in the accent a highlighted
+item wears; a rule; then two of Display's `DropdownMenuCheckboxItem`s, plain text with the check
+at the right: **Part colors** (ticked by default: each section cap in its
+part's normal colour, without hover or selection tints; unticked, every cap one amber) and
+**Reverse** (unticked by default: which side of the plane is kept). Caps stay opaque, a
+transparent part's too. A press on any of them leaves the menu open, and none of them applies a
+cut; on a cut, a new axis or Reverse turns it keeping its share. They are settings of the
+file's view (`clip.axis`, `clip.partColors`, `clip.invert`, stored and restored with its
+display), kept across tools, by Reset clip and by taking up an unset Clip. Explode opens at 0%, Clip at no
 cut; an edit applies the effect, and the slider back at zero removes it. An axis alone is not
 an effect. The view settings own both effects, so a mode reset preserves them and a restored
 effect reappears on the model. Clip's slider, left to right, cuts deeper through the original
@@ -556,30 +573,48 @@ icon is unambiguous, and always keep the accessible name.
 ## Settings
 
 Settings are the person's, never a file's, and live in the app menu: one dropdown
-(`file-viewer/navigation/AppMenu.jsx`) on the floating surface, 15rem wide, from the
-navbar's logo over every file (FileViewer builds it from the host's `links`, the
+(`file-viewer/navigation/AppMenu.jsx`) on the floating surface, 12rem wide, from the
+navbar's logo over every file and over the home (FileViewer builds it from the host's `links`, the
 `appSettings` `CadViewer` hands it and `environment.platform`, while a model loads and after
-it failed to as well); the home has no menu. Its rows, a rule between each group, are only
-what the host supplies:
+it failed to as well). Its rows, a rule between each group, are only
+what the host supplies, the person's settings in the order Language, Telemetry, Theme:
 
 - **Back to files**, where the host has a home
   (`navigation.home`): it shows the home in this view. The home's own menu has none.
+- **Language**, where the host hands the person's language (`language`, both apps): one row,
+  its name and then the language in force, whose submenu offers **Automatic (<the inferred
+  language>)** and then each language under its own name — English, 简体中文, 繁體中文, 日本語,
+  한국어 — whatever the menu is reading in; a press changes it without closing the menu. The
+  row is a setting row like Theme: its name, then the language in force, muted, right-aligned
+  before the chevron, centred on the column Theme's last segment and the checkboxes share. A
+  phone has no room beside the menu for a submenu: there a press of the same row opens the
+  choices under it, in the menu itself (closed each time the menu opens, the chevron turning
+  down while they show), and a choice closes them again.
+  Automatic is the default: the web infers the language from the browser's languages, the CAD
+  app from its host's locale (then the frame's browser languages); Simplified script or
+  mainland China and Singapore read 简体中文, Traditional script or Taiwan, Hong Kong and Macau
+  繁體中文, any Japanese 日本語, any Korean 한국어, anything else English. A language chosen
+  overrides the inference until Automatic clears it. The host resolves the language and hands
+  it down as `environment.locale` (`@text-to-cad/ui/i18n`'s `useLanguage`); the shared UI holds
+  no locale of its own.
+- The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
+  come, checked at the right; a press turns one without closing the menu. An info icon after
+  a setting's name, where the host gives its meaning (`info`), shows it as a hint to the
+  menu's right. **Telemetry**, in both apps: anonymous usage data and crash reports, never
+  prompts, models or files.
 - **Theme**, where the host hands the person's colour scheme (`colorScheme`, both apps): one
   row, its name and then **System**, **Light** and **Dark** as a segmented control of their
   glyphs (each a radio item, named), the one in force lit; a press changes it without closing
   the menu. The web's System follows the OS and is
   the tab's; the CAD app's follows its host's theme, Light or Dark overriding it for as long as
-  the view is open. The web's home, which has no menu, keeps its light/dark button
-  (`colorSchemeControl`) last in its row.
-- The host's own on/off settings (`appSettings`), a checkbox item each, in the order they
-  come, checked at the right; a press turns one without closing the menu. **Share
-  usage stats**, in both apps.
+  the view is open. Neither app has a light/dark button of its own: Theme is the one
+  control, the same on the home.
 - **Send feedback**, where the host has a tracker (`links.issues`): a link to a new issue
   titled "Feedback: " for the person to finish, naming the version and the platform, with
   no label (what is said may be a bug, a request or a question). Then **GitHub** and
   **Discord**.
-- Last, in gray, a footer: "v<version> · Made by @<handle>" — the version a link to its
-  release notes, the handle one to the host's X account. A build that is not the release's
+- Last, in gray, a footer of two rows: "v<version>", a link to its release notes, and under
+  it "Made by @<handle>", the handle a link to the host's X account. A build that is not the release's
   own adds its id to the version: `v0.7.15-dev.b80844940`, the commit it was built from.
 
 Nothing of a file is in it: a file's view is
@@ -587,6 +622,13 @@ Nothing of a file is in it: a file's view is
 view's or a tab's: the host keeps it where every view of theirs reads it (both apps: their
 settings, `settings.json` in cadgen's state directory), and a view reads it again whenever
 the person comes back to the page.
+
+Every string of the chrome reads through `@text-to-cad/ui/i18n` (`useI18n().t`), English
+first: `en.js` holds every key, each other locale the same keys (a parity test), and a key a
+locale misses reads English. What a file or cadgen says (an alert's own title and message,
+a part's name) stays as it was written. The loading and view-update lines are a closed
+vocabulary (`kit/status/loadingState.js`), English in the code and said in the view's language
+on screen (`kit/status/statusLabels.js`).
 
 ## Position and references
 

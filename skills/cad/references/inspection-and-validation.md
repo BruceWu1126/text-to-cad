@@ -17,7 +17,7 @@ print(scene.document_hash)
 for occurrence in scene.leaves():
     print(occurrence.ref, occurrence.label, occurrence.prototype_id)
 
-housing = scene.resolve("#housing")
+(housing,) = scene.resolve("#housing")
 print(housing.ref, housing.kind)
 solid_or_compound = housing.shape()
 for face in housing.entities("face"):

@@ -45,7 +45,7 @@ describe('the shell live binding', () => {
       readState: () => ({ ...state(), display }),
       setDisplaySettings: vi.fn((patch: Record<string, unknown>) => { display = { ...display, ...patch, exploded: { enabled: false, amount: 0 } }; }),
     });
-    const settled = await view.controller.setDisplaySettings({ clip: { enabled: true, axis: 'z', invert: false } });
+    const settled = await view.controller.setDisplaySettings({ clip: { enabled: true, axis: 'z', invert: false, partColors: true } });
     expect(settled.display).toMatchObject({ clip: { enabled: true, axis: 'z' }, exploded: { enabled: false } });
   });
   it('fails loudly when a declared command is missing from the mounted view', async () => {

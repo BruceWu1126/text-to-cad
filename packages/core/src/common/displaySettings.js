@@ -120,7 +120,7 @@ export const DISPLAY_GRID_GUIDE_SETTINGS_KEYS = Object.freeze(["enabled", "color
 export const DISPLAY_AXIS_GUIDE_SETTINGS_KEYS = Object.freeze(["enabled", "color", "opacity"]);
 export const DISPLAY_PART_COLOR_SETTINGS_KEYS = Object.freeze(["mode", "color", "colors"]);
 export const DISPLAY_EXPLODED_SETTINGS_KEYS = Object.freeze(["enabled", "amount"]);
-export const DISPLAY_CLIP_SETTINGS_KEYS = Object.freeze(["enabled", "axis", "at", "invert"]);
+export const DISPLAY_CLIP_SETTINGS_KEYS = Object.freeze(["enabled", "axis", "at", "invert", "partColors"]);
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -243,7 +243,7 @@ export function validateDisplaySettings(value) {
   if (Object.prototype.hasOwnProperty.call(source, "clip")) {
     const clip = validateStrictObject(source.clip, "display.clip");
     validateObjectKeys(clip, DISPLAY_CLIP_SETTINGS_KEYS, "display.clip");
-    validatePresent(clip, ["enabled", "invert"], validateStrictBoolean, "display.clip");
+    validatePresent(clip, ["enabled", "invert", "partColors"], validateStrictBoolean, "display.clip");
     if (Object.prototype.hasOwnProperty.call(clip, "axis") && !["x", "y", "z"].includes(clip.axis)) {
       throw new Error("display.clip.axis must be 'x', 'y', or 'z'");
     }

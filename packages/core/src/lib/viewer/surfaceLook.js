@@ -140,6 +140,8 @@ export function createSurfaceLook(THREE, root) {
       const programChanged = ["map", "vertexColors", "side", "transparent"].some((key) => target[key] !== next[key]);
       Object.assign(target, next);
       target.color.copy(color);
+      // Clip takes the normal base hue, before selection/hover ink is applied.
+      if (entry.slot === 0) entry.mesh.userData.cadBaseColor = color.clone();
       if (programChanged) target.needsUpdate = true;
       syncMaterialClipPlanes(target, clipPlanes);
       assign(entry, target);

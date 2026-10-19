@@ -1,7 +1,7 @@
 import { RotateCcw } from "lucide-react";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import SubToolbar, { SLIDER_SUB_TOOLBAR_CLASS, SUB_TOOLBAR_SLIDER_CLASS, SubToolbarValue } from "../SubToolbar.jsx";
-import { ClipFlipButton, CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
+import { CrossSectionControls, ExplodeControls, clipSummary } from "./ModelViewControls.js";
 
 /** Separated assembly layers, distinct from an expand affordance. */
 function ExplodeIcon(props) {
@@ -22,7 +22,8 @@ function ClipIcon(props) {
  * Explode and Clip: tools whose effects stay on the model once the tool is put down; the
  * sub-toolbar is the tool's while it is in hand, and nothing of either is on screen after. A press on one in
  * hand does nothing; on one whose effect is set it takes it up again, as it is, and on one unset
- * it starts neutral. Its Reset removes the effect, idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
+ * it starts neutral. Its Reset removes the effect (the amount back at zero, Clip's axis and
+ * settings kept), idle while none is set; the tool stays up. (Measure's results are Quick Edit's chips.)
  *
  * Each is offered where the view's features list it (`ViewFeatures`): a renderer decides which of its
  * files have them, and lists Explode only where there are parts to separate.
@@ -44,10 +45,10 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
       controls: <ExplodeControls viewSettings={view} onViewSettingsPatch={store.patch} className={SUB_TOOLBAR_SLIDER_CLASS} /> },
     { id: "clip", label: "Clip", Icon: ClipIcon, summary: clipSummary(view, clipBounds),
       controls: <CrossSectionControls viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds}
-        className="flex min-w-0 flex-1 items-center gap-1" sliderClassName={SUB_TOOLBAR_SLIDER_CLASS} />,
-      actions: <ClipFlipButton viewSettings={view} onViewSettingsPatch={store.patch} bounds={clipBounds} /> }
+        className="flex min-w-0 flex-1 items-center gap-1" sliderClassName={SUB_TOOLBAR_SLIDER_CLASS} /> }
   ].filter(tool => features.settings.includes(tool.id));
-  const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false, axis: "x", invert: false } };
+  // Neutral is the amount at zero, nothing else: Clip's axis and its settings (Part colors, Reverse) stay as set.
+  const neutral = id => id === "exploded" ? { exploded: { enabled: false, amount: 0 } } : { clip: { enabled: false } };
   const tool = definitions.find(value => value.id === selectedTool);
   return {
     tools: definitions.map(({ id, label, Icon }) => ({
@@ -61,8 +62,8 @@ export function useModelTools({ view, features, store, mesh, disabled, selectedT
       }
     })),
     // The tool in hand's sub-toolbar (`kit/tools/SubToolbar.jsx`), unnamed — its button is lit on the
-    // strip above it: what leads it (Explode's name; Clip's axis), its slider, the amount beside the slider,
-    // then its actions (Clip's Flip) and Reset, which takes the effect away (the tool stays up) —
+    // strip above it: what leads it (Explode's name; Clip's axis, whose dropdown holds its settings too),
+    // its slider, the amount beside the slider, then any actions of its own and Reset, which takes the effect away (the tool stays up) —
     // always there, idle while there is nothing to take away.
     subToolbar: tool ? <SubToolbar key={tool.id} label={`${tool.label} controls`} className={SLIDER_SUB_TOOLBAR_CLASS} data-model-tool={tool.id}>
       {tool.lead || null}

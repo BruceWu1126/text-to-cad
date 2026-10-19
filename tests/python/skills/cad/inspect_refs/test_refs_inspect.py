@@ -50,12 +50,12 @@ class StepSceneTests(unittest.TestCase):
         scene = read_scene(self.path)
         self.assertEqual(len(scene.roots), 1)
         self.assertEqual(len(list(scene.leaves())), 3)
-        group = scene.resolve("#housing")
+        (group,) = scene.resolve("#housing")
         self.assertEqual(group.kind, "occurrence")
         self.assertIsNone(group.prototype_id)
         self.assertEqual(len(group.children), 2)
-        self.assertEqual(scene.resolve(group.ref).ref, group.ref)
-        self.assertEqual(scene.resolve(self.path.name + group.ref).ref, group.ref)
+        self.assertEqual(scene.resolve(group.ref)[0].ref, group.ref)
+        self.assertEqual(scene.resolve(self.path.name + group.ref)[0].ref, group.ref)
         with self.assertRaisesRegex(ValueError, "matches 2"):
             scene.resolve("#pin")
         self.assertNotEqual(scene.resolve("#pin_1").ref, scene.resolve("#pin_2").ref)
@@ -73,29 +73,29 @@ class StepSceneTests(unittest.TestCase):
 
     def test_geometry_is_world_placed_including_nested_rotation(self):
         scene = read_scene(self.path)
-        pin = scene.resolve("#pin_1")
+        (pin,) = scene.resolve("#pin_1")
         solid = pin.shape().solids()[0]
         self.assertLess((solid.center() - Vector(105, 50, 7)).length, 1e-6)
-        self.assertLess((scene.resolve("#pin_2").shape().center() - Vector(125, 50, 7)).length, 1e-6)
+        self.assertLess((scene.resolve("#pin_2")[0].shape().center() - Vector(125, 50, 7)).length, 1e-6)
         circle = next(e.shape() for e in pin.entities("edge") if e.shape().geom_type.name == "CIRCLE")
         self.assertAlmostEqual(circle.radius, 3)
         self.assertAlmostEqual(circle.arc_center.Y, 50)
         self.assertAlmostEqual(circle.arc_center.Z, 7)
-        self.assertAlmostEqual(scene.resolve("#housing").shape().volume, 2 * solid.volume)
+        self.assertAlmostEqual(scene.resolve("#housing")[0].shape().volume, 2 * solid.volume)
         self.assertAlmostEqual(read_step(self.path).volume, scene.roots[0].shape().volume)
 
     def test_enumeration_preserves_occurrences_and_parent_ordinals(self):
         scene = read_scene(self.path)
-        group = scene.resolve("#housing")
+        (group,) = scene.resolve("#housing")
         faces = list(group.entities("face"))
         self.assertEqual(len(faces), 6)
         self.assertEqual(len({f.ref for f in faces}), 6)
         for selection in faces:
-            self.assertEqual(scene.resolve(selection.ref).ref, selection.ref)
+            self.assertEqual(scene.resolve(selection.ref)[0].ref, selection.ref)
             for edge in selection.entities("edge"):
-                self.assertEqual(scene.resolve(edge.ref).ref, edge.ref)
-                self.assertAlmostEqual(edge.shape().length, scene.resolve(edge.ref).shape().length)
-        base = scene.resolve("#base")
+                self.assertEqual(scene.resolve(edge.ref)[0].ref, edge.ref)
+                self.assertAlmostEqual(edge.shape().length, scene.resolve(edge.ref)[0].shape().length)
+        (base,) = scene.resolve("#base")
         self.assertEqual(len(list(base.entities("vertex"))), 8)
         # A body has no ref of its own: the occurrence names it.
         for kind in ("shape", "planes"):
@@ -108,7 +108,7 @@ class StepSceneTests(unittest.TestCase):
         from OCP.TopExp import TopExp_Explorer
         from OCP.TopAbs import TopAbs_VERTEX
         scene = read_scene(self.path)
-        a, b = scene.resolve("#pin_1"), scene.resolve("#pin_2")
+        a, b = scene.resolve("#pin_1,pin_2")
         first, second = a.shape(), a.shape()
         self.assertFalse(first.wrapped.IsPartner(second.wrapped))
         self.assertFalse(first.wrapped.IsPartner(b.shape().wrapped))
@@ -131,7 +131,7 @@ class StepSceneTests(unittest.TestCase):
             scene.resolve("#housing")
             list(scene.leaves())
             decoded.assert_not_called()
-            scene.resolve("#pin_1").shape()
+            scene.resolve("#pin_1")[0].shape()
             self.assertEqual(decoded.call_count, 1)
             scene.resolve("#pin_2").shape()
             next(scene.resolve("#pin_1").entities("face")).shape()
@@ -148,8 +148,8 @@ class StepSceneTests(unittest.TestCase):
             from cadgen import read_scene
             scene = read_scene(sys.argv[1])
             assert len(list(scene.leaves())) == 3
-            assert len(scene.resolve('#housing').children) == 2
-            assert scene.resolve('#pin_1').prototype_id == scene.resolve('#pin_2').prototype_id
+            assert len(scene.resolve('#housing')[0].children) == 2
+            assert scene.resolve('#pin_1')[0].prototype_id == scene.resolve('#pin_2')[0].prototype_id
         """)
         result = subprocess.run([sys.executable, "-c", code, str(self.path)],
                                 capture_output=True, text=True, timeout=30)
@@ -165,8 +165,8 @@ class StepSceneTests(unittest.TestCase):
         self.assertEqual(len(list(scene.leaves())), 2)
         faces = list(scene.roots[0].entities("face"))
         self.assertEqual(len({f.ref for f in faces}), 12)
-        self.assertAlmostEqual(scene.resolve("#a").shape().volume, 24)
-        self.assertAlmostEqual(scene.resolve("#b").shape().volume, 24)
+        self.assertAlmostEqual(scene.resolve("#a")[0].shape().volume, 24)
+        self.assertAlmostEqual(scene.resolve("#b")[0].shape().volume, 24)
 
     def test_scene_keeps_captured_revision_after_replacement_and_cache_deletion(self):
         from cadgen.step_export import export_build123d_step_file
@@ -208,7 +208,7 @@ class StepSceneTests(unittest.TestCase):
         # entities come in the table's ordinal order, each under its name -- for a file no
         # model run named, the token the body's geometry gives that ordinal.
         scene = read_scene(self.path)
-        selection = scene.resolve("#pin_1")
+        (selection,) = scene.resolve("#pin_1")
         raw = scene._loaded.prototype_shapes[selection._node.prototype_key]
         facts = extract_topology_facts(raw)
         faces = component_metrics(raw)["faces"]

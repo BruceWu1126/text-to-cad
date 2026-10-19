@@ -1,6 +1,9 @@
 import type { ComponentType, ElementType, ReactNode } from "react";
 import type { EntryAction, Platform } from "./navigation/index.js";
 import type { ViewerHost } from "../host/types.js";
+import type { LanguageSetting } from "../i18n/index.js";
+
+export type { LanguageSetting };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export interface FileEntry { path: string; name: string; kind: "file" | "directory" }
@@ -67,6 +70,8 @@ export interface AppSetting {
   id: string;
   label: string;
   checked: boolean;
+  /** What the setting means, in a hint beside its name (an info icon). */
+  info?: string;
   /** Shown, not changeable: something outside the app decided it (the label says what). */
   disabled?: boolean;
   onCheckedChange: (checked: boolean) => void;
@@ -144,6 +149,8 @@ export interface FileViewerProps {
   onStateChange: (next: FileViewerState) => void;
   /** The person's colour scheme, its rows in the app menu the navbar's logo opens over every file. */
   colorScheme?: ColorSchemeSetting;
+  /** The person's language, its row in the app menu over every file (Automatic, or one they chose). */
+  language?: LanguageSetting;
   /**
    * The person's on/off settings, in the app menu the navbar's logo opens over every file, with
    * the host's links (`host.links`).
@@ -159,13 +166,13 @@ export interface FileViewerProps {
    * last at the navbar's right end.
    */
   fullSize?: ReactNode;
-  /** The view's own history, where the host keeps one: Back and Forward, between the navbar's logo and the file's name. */
+  /** The view's own history, where the host keeps one: Back and Forward after the navbar's logo, over a file and on the home. */
   history?: ViewerHistory;
   /** The host's notice, shown at the viewport's top-right once the file is on screen (`RendererViewProps.notice`). */
   notice?: ReactNode;
   onError?: (error: Error) => void;
   presentation?: {
-    /** The host's home, shown with no file: a page of its own, with no navbar over it (it holds the host's links itself). */
+    /** The host's home, shown with no file: a page of its own under the navbar, which has only its logo's menu, Back and Forward, update and Full size there. */
     home?: ReactNode;
     loading?: ReactNode;
     /** A file that will not open: `missing` when it does not exist; `reload` rereads only this file. */

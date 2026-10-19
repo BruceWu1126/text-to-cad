@@ -118,5 +118,19 @@ class DeliberateDifferencesSurvive(unittest.TestCase):
         )
 
 
+class InvalidRobotFileText(unittest.TestCase):
+    def test_invalid_utf8_is_a_validation_result(self):
+        from cadgen import sdf, srdf, urdf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for extension, validate in (("urdf", urdf.validate), ("srdf", srdf.validate), ("sdf", sdf.validate)):
+                with self.subTest(extension=extension):
+                    path = pathlib.Path(tmp) / f"invalid.{extension}"
+                    path.write_bytes(b"<robot name='sample'>\xff</robot>")
+                    result = validate(path)
+                    self.assertFalse(result.ok)
+                    self.assertEqual([issue.code for issue in result.issues], ["unreadable_file"])
+
+
 if __name__ == "__main__":
     unittest.main()

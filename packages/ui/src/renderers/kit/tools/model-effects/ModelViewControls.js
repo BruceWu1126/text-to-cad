@@ -1,9 +1,10 @@
 import { normalizeExplodedViewSettings } from "@text-to-cad/core/lib/displaySettings.js";
 import { clipAmount, clipAtForAmount, clipAxisBounds, normalizeStepClipSettings } from "@text-to-cad/core/lib/viewer/clipPlane.js";
-import { ArrowLeftRight, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuTrigger
 } from "@text-to-cad/ui/primitives/dropdown-menu";
+import { DropdownMenu as MenuPrimitive } from "radix-ui";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
 import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { cn } from "@text-to-cad/ui/utils";
@@ -21,7 +22,7 @@ function formatNumber(value, digits = 2) {
 // validation belongs to the settings store; resolved scene groups are not a saved display.
 // Persistent model effects are separate from Display and its presets. Clip and Explode are drawn
 // alike: the amount in the panel's heading, one row for a body — Explode's a slider, Clip's the
-// axis it cuts along and then its slider.
+// axis it cuts along (whose dropdown holds Clip's settings too) and then its slider.
 //
 // Clip's view holds where its plane stands (`at`, millimetres); the panel shows the share of the
 // model it cuts away, measured on `bounds` — the model at rest, the box the plane is placed in.
@@ -38,8 +39,19 @@ export function clipSummary(viewSettings, bounds) {
 
 const AXIS_OPTIONS = Object.freeze(AXES.map(value => ({ value, label: value.toUpperCase() })));
 
-/** Clip's axis, left of its slider: a borderless button reading the axis in hand, as the row's other
- *  buttons are, whose dropdown lists X, Y and Z. */
+// An axis's button: the app menu's Theme buttons (24px square, its radius, the menu's type), the axis in
+// hand in the accent a highlighted item wears, the others in the item's own colour.
+const AXIS_ITEM_CLASS = "grid size-6 cursor-default place-items-center rounded-sm text-tiny leading-4 text-foreground outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[state=checked]:bg-accent data-[state=checked]:text-accent-foreground";
+
+// A press in this menu keeps it open: an axis as each setting does, so several change in one go.
+const keepOpen = event => event.preventDefault();
+
+/** Clip's axis and settings, left of its slider: a borderless button reading the axis in hand, as the
+ *  row's other buttons are, whose dropdown holds all of Clip but the cut, as narrow as they are —
+ *  first X, Y and Z, the Theme row's buttons (the axis in hand lit), a rule, then **Part colors** (each
+ *  part's cap in its own colour; off, every cap one amber) and **Reverse** (which side of the plane
+ *  is kept). None of them applies a cut; an axis or Reverse turns a cut keeping its share. They are
+ *  settings, so Reset, which takes the cut away, leaves them be. */
 function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
   const { clip, amount } = clipState(viewSettings, bounds);
   const choose = nextAxis => {
@@ -50,30 +62,40 @@ function ClipAxisSelect({ viewSettings, onViewSettingsPatch, bounds }) {
       const at = clip.enabled && max > min ? clipAtForAmount({ ...clip, axis: nextAxis }, bounds, amount / 100) : undefined;
       onViewSettingsPatch({ clip: { axis: nextAxis, ...(at !== undefined ? { at } : {}) } });
   };
+  const reverse = invert => {
+    // A cut turns round keeping its share; with no cut only the side changes (placing the plane would cut).
+    const flipped = { ...clip, invert };
+    onViewSettingsPatch({ clip: clip.enabled ? { invert, at: clipAtForAmount(flipped, bounds, amount / 100) } : { invert } });
+  };
   return <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>
       <ToolbarButton tooltip={false} label={`Clip axis: ${clip.axis.toUpperCase()}`} data-clip-axis={clip.axis}
-        className="w-auto shrink-0 gap-0.5 px-1 text-tiny">
+        className="w-auto shrink-0 gap-0.5 px-1 text-tiny aria-expanded:bg-sidebar-accent aria-expanded:text-sidebar-accent-foreground">
         {clip.axis.toUpperCase()}<ChevronDown className="size-2.5 opacity-60" aria-hidden="true" />
       </ToolbarButton>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label="Clip axis"
-      className={cn(FLOATING_SURFACE_CLASS, "min-w-16 data-[state=closed]:animate-none!")}>
-      <DropdownMenuRadioGroup value={clip.axis} onValueChange={choose}>
-        {AXIS_OPTIONS.map(option => <DropdownMenuRadioItem key={option.value} value={option.value}>{option.label}</DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>
+    {/* Closes with no exit animation, so a quick second press always reaches the button. */}
+    <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8}
+      className={cn(FLOATING_SURFACE_CLASS, "w-max min-w-0 data-[state=closed]:animate-none!")}>
+      {/* As narrow as its settings: first the axes, a compact group of the Theme row's buttons in a row
+          as tall as an item; a rule; then the settings, Display's checkbox items, with no glyphs. */}
+      <div className="flex min-h-7 items-center px-1 py-0.5" data-clip-axis-row="">
+        <MenuPrimitive.RadioGroup value={clip.axis} onValueChange={choose} aria-label="Clip axis" className="flex items-center gap-0.5">
+          {AXIS_OPTIONS.map(option => <MenuPrimitive.RadioItem key={option.value} value={option.value} onSelect={keepOpen}
+            className={AXIS_ITEM_CLASS} data-clip-axis-option={option.value}>{option.label}</MenuPrimitive.RadioItem>)}
+        </MenuPrimitive.RadioGroup>
+      </div>
+      <DropdownMenuSeparator />
+      <DropdownMenuCheckboxItem checked={clip.partColors} onSelect={keepOpen} data-clip-part-colors=""
+        onCheckedChange={checked => onViewSettingsPatch({ clip: { partColors: checked === true } })}>
+        Part colors
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem checked={clip.invert} onSelect={keepOpen} data-clip-reverse=""
+        onCheckedChange={checked => reverse(checked === true)}>
+        Reverse
+      </DropdownMenuCheckboxItem>
     </DropdownMenuContent>
   </DropdownMenu>;
-}
-
-/** Flip: which side of the plane is cut away, the cut keeping its share; idle while nothing is cut. */
-export function ClipFlipButton({ viewSettings, onViewSettingsPatch, bounds }) {
-  const { clip, amount } = clipState(viewSettings, bounds);
-  const flipped = { ...clip, invert: !clip.invert };
-  return <ToolbarButton label="Flip clip" disabled={!clip.enabled} active={clip.enabled && clip.invert} aria-pressed={clip.invert}
-    onClick={() => onViewSettingsPatch({ clip: { invert: flipped.invert, at: clipAtForAmount(flipped, bounds, amount / 100) } })}>
-    <ArrowLeftRight className="size-3" strokeWidth={2} aria-hidden="true" />
-  </ToolbarButton>;
 }
 
 // Clip's controls: its axis, then one slider, which applies the cut as it leaves zero and removes it

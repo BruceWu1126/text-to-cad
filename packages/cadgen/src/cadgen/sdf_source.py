@@ -244,7 +244,7 @@ def _required_child_text(
     label: str,
 ) -> str:
     element = next(iter(children(parent, tag_name)), None)
-    value = str(element.text if element is not None else "").strip()
+    value = (element.text or "").strip() if element is not None else ""
     if not value:
         raise SdfSourceError(f"{display_path(source_path)} {label} is required")
     return value

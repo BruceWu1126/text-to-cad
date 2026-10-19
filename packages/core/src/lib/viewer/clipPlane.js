@@ -3,7 +3,8 @@ export const STEP_CLIP_AXES = Object.freeze(["x", "y", "z"]);
 export const DEFAULT_STEP_CLIP_SETTINGS = Object.freeze({
   enabled: false,
   axis: "x",
-  invert: false
+  invert: false,
+  partColors: true
 });
 
 const AXIS_INDEX = Object.freeze({
@@ -40,6 +41,7 @@ export function normalizeStepClipSettings(value = null) {
     enabled: value.enabled !== false,
     axis: normalizeAxis(value.axis),
     invert: value.invert === true,
+    partColors: value.partColors !== false,
     ...(at !== null ? { at } : {})
   };
 }
@@ -51,6 +53,7 @@ export function stepClipSettingsEqual(left, right) {
     a.enabled === b.enabled &&
     a.axis === b.axis &&
     a.invert === b.invert &&
+    a.partColors === b.partColors &&
     (a.at ?? null) === (b.at ?? null)
   );
 }

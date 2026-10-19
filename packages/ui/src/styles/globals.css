@@ -30,7 +30,7 @@
   --cad-text-ui: 15px;
 }
 :root:has([data-viewer-layout="mobile"]) :is([data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"],
-  [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"], [data-menu-theme]) {
+  [data-slot="dropdown-menu-radio-item"], [data-slot="dropdown-menu-sub-trigger"], [data-slot="select-item"], [data-slot="context-menu-item"], [data-menu-theme], [data-clip-axis-row], [data-menu-language]) {
   min-height: 40px;
 }
 /* The navbar a 48px row of 36px controls; a section's heading in the file sidebar 36px, its buttons 32px. */
@@ -125,7 +125,6 @@
 .cad-library-byline > span { color: #258cc5; }
 .dark .cad-library-byline { color: #fff; }
 .dark .cad-library-byline > span { color: #94d9fa; }
-.cad-library-update { display: flex; justify-content: center; margin: 14px 0 0; }
 .cad-library-links { display: flex; align-items: center; justify-content: center; gap: 2px; margin: 12px 0 40px; }
 .cad-library-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
 .cad-library-heading { margin: 0; font-size: calc(min(360px, 100cqw) / 20.8); line-height: 28px; font-weight: 600; color: var(--foreground); }

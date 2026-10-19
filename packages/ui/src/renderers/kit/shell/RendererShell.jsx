@@ -7,6 +7,7 @@ import { ToolbarButton } from "@text-to-cad/ui/primitives/toolbar-button";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
 import { NAVBAR_CONTROL_CLASS } from "../../../lib/navbarRow.js";
 import { cn } from "@text-to-cad/ui/utils";
+import { useI18n } from "@text-to-cad/ui/i18n";
 import PreviewChrome from "../tools/PreviewChrome.jsx";
 import { useViewerMobile } from "../../../file-viewer/responsive.js";
 import ViewerAlertCard, { alertDismissible, useAlertDismissal } from "../status/ViewerAlertCard.jsx";
@@ -168,6 +169,7 @@ function ViewControl({ label, disabled = false, tooltipSide = "top", onClick, ch
 export default function RendererShell({ shell, tools, toolPanels = null, subToolbar = null, sidebar = null, references = null, referenceChips = null, nameReference = null, onClearReferences = null, copySelection = null, contextMenuItems = null,
   onContextMenuOpenChange = null, viewportOverlay = null, previewView = null,
   frameProvider = null, onCanvasPointerDown = null, onSelectPress = null, onSelectHover = null, selectsAnnotations = true }) {
+  const { t } = useI18n();
   const frame = shell.frame;
   const mobile = useViewerMobile();
   const { view, resolvedScene, viewerLoading, scene } = frame;
@@ -542,17 +544,17 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                   the panel docked at the view's top-right) and the way out. The strip is hidden in Preview,
                   so they stand there; a host with no navbar has them in Preview's top-right corner. */}
               {inNavbar && shell.previewable && previewing ? createPortal(<>
-                <NavbarControl label="Preview settings" active={previewPanelOpen} disabled={shell.idle}
+                <NavbarControl label={t("preview.settings")} active={previewPanelOpen} disabled={shell.idle}
                   onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings=""><SlidersHorizontal className="size-3.5" aria-hidden="true" /></NavbarControl>
-                <NavbarControl label="Exit preview" onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
+                <NavbarControl label={t("preview.exit")} onClick={leavePreview}><X className="size-3.5" aria-hidden="true" /></NavbarControl>
               </>, view.navbarSlot) : null}
               <PreviewChrome active={previewing}
                 end={inNavbar ? null : <>
-                  <ToolbarButton label="Preview settings" tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
+                  <ToolbarButton label={t("preview.settings")} tooltipSide="bottom" active={previewPanelOpen} aria-pressed={previewPanelOpen}
                     disabled={shell.idle} className={stripButtonClass} onClick={() => setPreviewPanelOpen(open => !open)} data-preview-settings="">
                     <SlidersHorizontal aria-hidden="true" />
                   </ToolbarButton>
-                  <ViewControl label="Exit preview" tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
+                  <ViewControl label={t("preview.exit")} tooltipSide="bottom" onClick={leavePreview}><X aria-hidden="true" /></ViewControl>
                 </>}
                 panel={previewPanelOpen ? <PreviewSettings orbit={orbitPlaying} onOrbitChange={shell.setOrbiting}
                   speed={frame.previewOrbitSpeed || 1} onSpeedChange={frame.setPreviewOrbitSpeed}
@@ -565,19 +567,19 @@ export default function RendererShell({ shell, tools, toolPanels = null, subTool
                     phone, always in its More menu). */}
                 <div ref={topControls} className="relative flex max-w-full shrink-0 flex-col items-center gap-2" data-cad-top-controls="">
                   <FloatingToolBar tools={stripTools} touch={mobile} views={shell.previewable && !previewing ? [
-                    { id: "projection", label: "Projection", icon: <ProjectionIcon value={frame.projection.value} />, disabled: shell.idle,
+                    { id: "projection", label: t("projection.label"), icon: <ProjectionIcon value={frame.projection.value} />, disabled: shell.idle,
                       tile: <ProjectionPopover disabled={shell.idle} boundary={frame.hostElement} projection={frame.projection} />,
                       // In a phone's More, a standard nested submenu of the two choices.
                       submenu: () => <DropdownMenuRadioGroup value={frame.projection.value} onValueChange={frame.projection.onChange}>
-                        <DropdownMenuRadioItem value="orthographic"><OrthographicProjectionIcon className="size-4" />Orthographic</DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="perspective"><PerspectiveProjectionIcon className="size-4" />Perspective</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="orthographic"><OrthographicProjectionIcon className="size-4" />{t("projection.orthographic")}</DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="perspective"><PerspectiveProjectionIcon className="size-4" />{t("projection.perspective")}</DropdownMenuRadioItem>
                       </DropdownMenuRadioGroup> },
-                    { id: "display", label: "Display", icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
+                    { id: "display", label: t("display.label"), icon: DisplayIcon ? <DisplayIcon /> : null, disabled: shell.idle,
                       tile: <DisplayPopover disabled={shell.idle} boundary={frame.hostElement} mode={frame.displayMode} grid={frame.grid} />,
                       // In a phone's More, a standard nested submenu of the same list: the modes, then Grid.
                       submenu: () => <DisplayMenuItems mode={frame.displayMode} grid={frame.grid} /> },
-                    { id: "preview", label: "Preview", icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
-                      tile: <ViewControl label="Preview" disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
+                    { id: "preview", label: t("preview.label"), icon: <Play aria-hidden="true" />, disabled: shell.idle, onSelect: enterPreview,
+                      tile: <ViewControl label={t("preview.label")} disabled={shell.idle} onClick={enterPreview}><Play aria-hidden="true" /></ViewControl> }
                   ] : []} />
                   {/* The tool in hand's own row, then the view catching up, under the strip. */}
                   {previewing ? null : toolRow}
