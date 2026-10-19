@@ -1643,7 +1643,7 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     current one, exporting what the files owe. None when there is none to restore,
     or its tree is gone; the verdict then names the restored key."""
     candidate = getattr(verdict, "candidate", None)
-    if spec.source != "generated" or spec.step_path is None or not candidate or verdict.stored is not None:
+    if spec.source not in ("generated", "imported") or spec.step_path is None or not candidate or verdict.stored is not None:
         # A record whose stored result stands is the candidate itself: what it owes
         # beyond an export (a drawing) is a run's, not a restore's.
         return None
@@ -1666,6 +1666,34 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     verdict.tree = tree
     logger.info(f"{spec.cad_ref}: an earlier build's result answers for the source as it is now; restored")
     return tree
+
+
+def restore_document_record(step_path: Path, tree: str) -> None:
+    """A document read whose bytes the store maps to ``tree`` (a warm read, nothing
+    compiled) has its path's record name that tree. The compile of those bytes wrote the
+    record and stored it under its key (``store.results``); a file changed and changed
+    back reads warm from the first compile's tree while its record still names the
+    other's, so ``cadgen store why <file>`` said STALE of a file whose result stands.
+    Restored as a model's source brought back to a state already built is
+    (:func:`_restore_result`), from the record the path holds: a path with no record
+    (bytes compiled under another path) restores nothing."""
+    from cadgen.authoring import current_run
+    from cadgen.store.gate import stale
+    from cadgen.store.records import read_record
+
+    model = str(step_path)
+    record = read_record(model)
+    if record is None or str(record.get("tree") or "") == tree:
+        return
+    verdict = stale(model)
+    if verdict.key is not None or verdict.stored is not None:
+        return
+    source = source_from_path(step_path)
+    if source is None:
+        return
+    run = current_run()
+    logger = run.logger if run is not None and run.logger is not None else CliLogger("cadgen")
+    _restore_result(_entry_spec_from_source(source), verdict, logger=logger)
 
 
 def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,

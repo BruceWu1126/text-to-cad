@@ -116,6 +116,35 @@ class ImportedStepCacheTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         return json.loads(completed.stdout)
 
+    def test_a_document_changed_and_changed_back_reads_warm_and_its_record_says_so(self) -> None:
+        """The bytes map to the first compile's tree, so nothing compiles; the path's record
+        still named the second compile's tree, and ``cadgen store why`` said STALE of a
+        document whose result stands. The warm read restores the record for the bytes as
+        they are (the compile stored it under its key), as a source brought back is."""
+        from cadgen._internal import kernel_memo
+        from cadgen.step_scene import read_step
+        from cadgen.store.gate import stale
+        from cadgen.store.records import read_record
+
+        kernel_memo.install()
+        self.addCleanup(kernel_memo.clear)
+
+        def read() -> str:
+            # As a model's body reads it: inside a run, where a read with a tree held is
+            # a hit that compiles nothing (``kernel_memo.imported``).
+            with kernel_memo.run(None):
+                read_step(self.step_path)
+            return read_record(str(self.step_path))["tree"]
+
+        self._write_fixture(offset=0.0)
+        first = read()
+        self._write_fixture(offset=1.0)
+        self.assertNotEqual(read(), first)
+        self._write_fixture(offset=0.0)
+        self.assertEqual(read(), first)
+        verdict = stale(str(self.step_path))
+        self.assertIsNotNone(verdict.key, verdict.reason())
+
     def test_fresh_process_hit_skips_text_parse_and_preserves_the_authored_pair(self) -> None:
         from cadgen.store.index import entry_path
         from cadgen.store.records import record_key
