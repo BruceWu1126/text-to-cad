@@ -1434,6 +1434,35 @@ class EffectTest(KernelMemoCase):
         self.assertEqual(run.identify(alias), (None, None))
 
 
+    def test_an_uncached_change_through_a_wrapper_holding_a_root_s_sub_shape_taints_the_root(self) -> None:
+        """A wrapper no operation of the memo made (a face plain OCCT built from a memoized
+        disc's edge) holds the disc's edge, not the disc: the uncached extrude of it appends
+        representations to that edge in place. Unseen, every warm run's hit handed the edge
+        back with the last run's additions kept, and the solid's bytes drifted run by run;
+        the disc's maker is forgotten instead, as for a root the wrapper holds whole."""
+        from build123d import Face, Solid, Vector, Wire
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeWire
+        from OCP.TopoDS import TopoDS
+
+        def model():
+            disc = Face(Wire.make_circle(1))
+            rim = BRepBuilderAPI_MakeWire(TopoDS.Edge_s(disc.edges()[0].wrapped)).Wire()
+            profile = Face(BRepBuilderAPI_MakeFace(rim, True).Face())
+            return disc, Solid.extrude(profile, Vector(0, 0, 1))
+
+        def representations(disc):
+            return disc.edges()[0].wrapped.TShape().Curves().Extent()
+
+        (disc, cold), cold_stats, _ = _run(model)
+        self.assertEqual(cold_stats["tainted"], 1)
+        self.assertEqual(representations(disc), 3)
+        for _again in range(2):
+            (disc, warm), warm_stats, _ = _run(model)
+            self.assertEqual(warm_stats["tainted"], 1)
+            self.assertEqual(representations(disc), 3)
+            self.assertEqual(_bytes(warm.wrapped), _bytes(cold.wrapped))
+
+
 class CapacityTest(KernelMemoCase):
     def test_the_memo_is_bounded_and_a_rerun_past_the_bound_is_still_right(self) -> None:
         from build123d import Solid

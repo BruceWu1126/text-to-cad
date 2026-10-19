@@ -670,6 +670,7 @@ def clear() -> None:
         _UNSTABLE.clear()
         _MAPS.clear()
         _STATE.clear()
+        _SUBS.clear()
 
 
 # --- the call -----------------------------------------------------------------------------
@@ -2038,6 +2039,11 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int | None, sta
                 _REGISTRY[tshape] = made
                 state.registered[tshape] = made
                 created.append(made)
+                # Every sub-shape below it names this root, the first to hold it (a
+                # result made from it shares them): what a foreign or transient wrapper
+                # that holds one of them embeds (``_embedded``).
+                for sub in _mapped(wrapped)[1]:
+                    _SUBS.setdefault(sub, made)
             if feature is not None:
                 state.owners[made] = feature
     return created
@@ -2056,7 +2062,7 @@ def _drop(entry: "_Entry") -> None:
         for effect in made.effects:
             effect.forget()
         if made.parent is None:
-            _forget_states(made.tshape)
+            _forget_states(made)
         pending.extend(made.subs)
     entry.made = []
 
@@ -2273,6 +2279,10 @@ def _snapshot(value: Any) -> Any:
 # already holds.
 
 _STATE: dict[Any, tuple] = {}
+# Every sub-shape of every persistent root, by TShape, to the first root registered
+# holding it (``_register``): what a foreign or transient wrapper embeds when it holds
+# one of them (``_embedded``). Forgotten with the root (``_forget_states``).
+_SUBS: dict[Any, "_Made"] = {}
 
 
 class _Captured:
@@ -2392,12 +2402,19 @@ def _covered(item: _Captured, distinct: list[_Captured]) -> bool:
 
 
 def _embedded(wrapped: Any, state: _Run | None, *, tshapes: list | None = None) -> list[_Made]:
-    """The persistent memoized roots a foreign or transient shape holds."""
+    """The persistent memoized roots a foreign or transient shape holds: by a root's own
+    TShape or an extracted sub-shape's (registered), or by any sub-shape of a root
+    (``_SUBS``) -- a boolean's result shares its inputs' faces and edges, and an
+    operation on it changes them in place."""
     if tshapes is None:
         _map, tshapes = _mapped(wrapped)
     found: list[_Made] = []
     for tshape in tshapes:
         made = _made_of(tshape, state)
+        if made is None:
+            made = _SUBS.get(tshape)
+            if made is not None and made.tainted:
+                made = None
         if made is not None and made.persistent() and made.root() not in found:
             found.append(made.root())
     return found
@@ -2467,13 +2484,15 @@ def _state(tshape: Any) -> tuple:
     return (int(tshape.ShapeType()), None, flags, None, None)
 
 
-def _forget_states(tshape: Any) -> None:
-    """Drop the states kept of a TShape's sub-shapes: the memo no longer holds it.
-    A sub-shape another entry's result shares is read again when next captured."""
-    mapped = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(_handle_of(tshape), mapped)
-    for ordinal in range(1, mapped.Extent() + 1):
-        _STATE.pop(mapped.FindKey(ordinal).TShape(), None)
+def _forget_states(made: _Made) -> None:
+    """Drop the states kept of a root's sub-shapes, and that they name it (``_SUBS``):
+    the memo no longer holds it. A sub-shape another entry's result shares is read
+    again when next captured, and names a root again when a result holding it
+    registers -- that entry misses next, its input gone, and registers its own."""
+    for tshape in _mapped(made.handle())[1]:
+        _STATE.pop(tshape, None)
+        if _SUBS.get(tshape) is made:
+            del _SUBS[tshape]
 
 
 def _representations(tshape: Any, kind: int) -> Any:
