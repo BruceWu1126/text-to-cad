@@ -734,6 +734,29 @@ class DaemonStopsTest(unittest.TestCase):
         # Keep the lease open: ownership loss, not completion or idleness, ends the daemon.
         self.assertEqual(self._await_exit(daemon, address), 0, self._log(address))
 
+    def test_a_client_that_sends_no_request_holds_up_no_one(self):
+        # A client that connects, proves the key and then sends nothing used to hold the
+        # accept loop for the request read's whole timeout: no status, no slot, no compile
+        # for anyone. Requests are read off the accept thread now.
+        _, address, _daemon, _ = self._start_daemon(idle_timeout=600)
+        silent = transport.connect(address, transport.read_authkey(address))
+        self.addCleanup(silent.close)
+        started = time.monotonic()
+        self.assertIsNotNone(client.status(), "the daemon did not answer behind a silent client")
+        self.assertLess(time.monotonic() - started, 5.0, "a status read waited behind a silent client")
+
+    def test_status_polls_are_not_activity(self):
+        # An open viewer polls the ledger forever; a poll kept the daemon and its warm
+        # workers resident past the idle timeout. Builds and jobs are activity; polls are not.
+        _, address, daemon, _ = self._start_daemon(idle_timeout=2)
+        deadline = time.monotonic() + 20
+        while daemon.poll() is None and time.monotonic() < deadline:
+            client.watch_jobs()
+            client.status()
+            time.sleep(0.2)
+        self.assertEqual(daemon.poll(), 0, "the daemon stayed up while it was only polled:\n" + self._log(address))
+        self.assertIn("idle timeout", self._log(address))
+
     def _start_daemon(self, *, idle_timeout: int = 4) -> tuple[Path, str, subprocess.Popen, dict]:
         """A daemon of this test's own on a private address: its state directory, address,
         process and status."""

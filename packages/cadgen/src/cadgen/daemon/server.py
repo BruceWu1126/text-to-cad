@@ -843,6 +843,7 @@ def serve() -> int:
     server = _bind(address, wait=LOCK_HANDOVER_SECONDS)
     if server is None:
         return 0
+    release_guard = threading.Lock()
 
     def _release_address() -> None:
         """Stop serving the address: the listener and its socket file, then the lock.
@@ -851,9 +852,11 @@ def serve() -> int:
         before any teardown, so a client told to restart finds the lock free. The
         listener removes the file only while it is the one it bound: a successor that
         took a fresh lock, this daemon's state directory removed under it, bound its own.
+        Once, whichever thread asks first (a request's, the accept loop's).
         """
-        server.close()
-        _release_lock()
+        with release_guard:
+            server.close()
+            _release_lock()
 
     def _shutdown_handler(*_args) -> None:
         raise _DaemonShutdown
@@ -902,6 +905,87 @@ def serve() -> int:
 
     threading.Thread(target=_watch_for_idle, daemon=True).start()
 
+    def _dispatch(conn: transport.Channel, request: dict) -> bool:
+        """Answer or hand on one client's request; True when another thread now owns
+        ``conn``. Builds and jobs are the daemon's activity, which its idle timeout
+        counts; a status read, a job watch or a command's counts are not, so an open
+        viewer polling the ledger keeps no daemon and no warm worker resident."""
+        if request.get("kind") == "count":
+            # A command's counts (client.hand_over): noted here, never answered, and
+            # before the token check, as status is.
+            telemetry.counted(request)
+            return False
+        if request.get("kind") == "status":
+            # Answered BEFORE the token check: asking what is warm must never
+            # make the daemon exit, whichever cadgen the asker is running.
+            if request.get("jobsOnly") is True:
+                return _start_job_watch(conn, request)  # the bounded watcher owns it
+            with contextlib.suppress(OSError):
+                _send(conn, {"status": _status_payload(token)})
+            return False
+        # A daemon whose installation is gone retires as a stale one does: its clients
+        # start the next from their own installation.
+        gone = _INSTALLATION_GONE.is_set()
+        why = "installation gone" if gone else "version token changed"
+        token_changed = request.get("token") != token or gone
+        # A dependency, and a worker's slot for the job it runs, are work already
+        # under way: a drain finishes them.
+        dependency = bool(request.get("dependency") or request.get("kind") == "slot")
+        dependency_finishing_old_work = dependency and bool(state["draining"] or _active_requests())
+        if state["draining"] and not dependency:
+            with contextlib.suppress(OSError):
+                _send(conn, {"restart": True})
+            return False
+        if token_changed and not dependency_finishing_old_work:
+            active = _active_requests()
+            if active:
+                # Keep the old address and singleton lock together while its
+                # jobs finish. Their workers can still submit compile and artifact
+                # dependencies; fresh top-level calls are told to restart until
+                # the drain completes (they ask again until the successor binds).
+                # Closing the listener here deadlocked a long job against its own
+                # final artifact request.
+                state["draining"] = True
+                _log(f"{why}; finishing {len(active)} job(s) in flight before exiting")
+                with contextlib.suppress(OSError):
+                    _send(conn, {"restart": True})
+                return False
+            # With no work to preserve, release the address and the lock before
+            # replying, so the client's respawn binds at once. Holding the lock
+            # through the pool shutdown below made that respawn stand down,
+            # leaving the address with no daemon. The accept loop sees the listener
+            # closed and exits.
+            state["retired"] = why
+            _release_address()
+            with contextlib.suppress(OSError):
+                _send(conn, {"restart": True})
+            return False
+        if token_changed:
+            state["draining"] = True
+        state["last_activity"] = time.monotonic()  # a job: the daemon is in use
+        # One thread per job so a second client is served rather than queued.
+        worker_thread = threading.Thread(target=_serve_connection, args=(conn, request), daemon=True)
+        _INFLIGHT.add(worker_thread)
+        worker_thread.start()
+        return True
+
+    def _take(conn: transport.Channel) -> None:
+        """One accepted client, on a thread of its own: its request read (bounded by
+        REQUEST_READ_TIMEOUT_SECONDS) and dispatched. Off the accept loop, so a client
+        that connects and sends nothing holds up no one -- not a status read, not the
+        slot or compile a running build asks for."""
+        owned = True
+        try:
+            request = _read_request(conn)
+            if request is not None:
+                owned = not _dispatch(conn, request)
+        except OSError:
+            pass  # the client vanished mid-request; keep serving
+        finally:
+            if owned:
+                with contextlib.suppress(OSError):
+                    conn.close()
+
     try:
         while True:
             conn = server.accept()
@@ -910,84 +994,12 @@ def serve() -> int:
                     _log("address no longer names this daemon's socket; exiting")
                 elif state["idle_exit"]:
                     _log("idle timeout; exiting")
+                elif state.get("retired"):
+                    _log(f"{state['retired']}; exiting")
                 elif state["draining"]:
                     _log("version token changed; exiting")
                 return 0
-            previous, state["last_activity"] = state["last_activity"], time.monotonic()
-            try:
-                request = _read_request(conn)
-                if request is None:
-                    continue
-                if request.get("kind") == "count":
-                    # A command's counts (client.hand_over): noted here, never answered, and
-                    # before the token check, as status is. Not a use of the daemon either:
-                    # a count keeps no daemon alive.
-                    state["last_activity"] = previous
-                    telemetry.counted(request)
-                    continue
-                if request.get("kind") == "status":
-                    # Answered BEFORE the token check: asking what is warm must never
-                    # make the daemon exit, whichever cadgen the asker is running.
-                    if request.get("jobsOnly") is True:
-                        if _start_job_watch(conn, request):
-                            conn = None  # the bounded watcher owns it
-                    else:
-                        with contextlib.suppress(OSError):
-                            _send(conn, {"status": _status_payload(token)})
-                    continue
-                # A daemon whose installation is gone retires as a stale one does: its clients
-                # start the next from their own installation.
-                gone = _INSTALLATION_GONE.is_set()
-                why = "installation gone" if gone else "version token changed"
-                token_changed = request.get("token") != token or gone
-                # A dependency, and a worker's slot for the job it runs, are work already
-                # under way: a drain finishes them.
-                dependency = bool(request.get("dependency") or request.get("kind") == "slot")
-                dependency_finishing_old_work = dependency and bool(state["draining"] or _active_requests())
-                if state["draining"] and not dependency:
-                    with contextlib.suppress(OSError):
-                        _send(conn, {"restart": True})
-                    continue
-                if token_changed and not dependency_finishing_old_work:
-                    active = _active_requests()
-                    if active:
-                        # Keep the old address and singleton lock together while its
-                        # jobs finish. Their workers can still submit compile and artifact
-                        # dependencies; fresh top-level calls are told to restart until
-                        # the drain completes (they ask again until the successor binds).
-                        # Closing the listener here deadlocked a long job against its own
-                        # final artifact request.
-                        state["draining"] = True
-                        _log(f"{why}; finishing {len(active)} job(s) in flight before exiting")
-                        with contextlib.suppress(OSError):
-                            _send(conn, {"restart": True})
-                        continue
-                    # With no work to preserve, release the address and the lock before
-                    # replying, so the client's respawn binds at once. Holding the lock
-                    # through the pool shutdown below made that respawn stand down,
-                    # leaving the address with no daemon.
-                    _release_address()
-                    with contextlib.suppress(OSError):
-                        _send(conn, {"restart": True})
-                    conn.close()
-                    conn = None
-                    _log(f"{why}; exiting")
-                    return 0
-                if token_changed:
-                    state["draining"] = True
-                # One thread per job so a second client is served rather than queued.
-                worker_thread = threading.Thread(
-                    target=_serve_connection, args=(conn, request), daemon=True
-                )
-                _INFLIGHT.add(worker_thread)
-                worker_thread.start()
-                conn = None  # the thread owns it now
-            except OSError:
-                continue  # client vanished mid-request; keep serving
-            finally:
-                if conn is not None:
-                    with contextlib.suppress(OSError):
-                        conn.close()
+            threading.Thread(target=_take, args=(conn,), name="cadgen-request", daemon=True).start()
             _POOL.reap_dead()
     except _DaemonShutdown:
         _log("signal received; exiting")

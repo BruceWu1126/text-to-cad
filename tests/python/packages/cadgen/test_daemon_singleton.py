@@ -194,6 +194,9 @@ class RestartHandoverTest(unittest.TestCase):
             def unbind_idle(self):
                 pass
 
+            def reap_dead(self):
+                pass
+
             def shutdown(self):
                 teardown.wait(30)
 
@@ -369,6 +372,9 @@ class DeepStateDirTest(unittest.TestCase):
                 listening.set()
 
             def unbind_idle(self):
+                pass
+
+            def reap_dead(self):
                 pass
 
             def snapshot(self):
