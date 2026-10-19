@@ -103,6 +103,7 @@ with those names (``cadgen.store.provenance``).
 from __future__ import annotations
 
 import bisect
+import functools
 import hashlib
 import re
 import sys
@@ -121,6 +122,7 @@ from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_Ind
 
 from cadgen._internal.kernel_history import listed
 from cadgen._internal.source_hash import is_first_party_source_file
+from cadgen._internal.tree_tokens import is_occurrence_token
 from cadgen.cad_ref_syntax import folded_atoms
 
 __all__ = ["FOLD_LENGTH", "Feature", "Trace", "identifier", "operation_name"]
@@ -154,6 +156,10 @@ _FRAME_WORDS = frozenset(_FRAMES.values())
 # the places of one shape in another apart.
 _POSITION_QUANTUM = 1e-6
 _DIRECTION_QUANTUM = 1e-9
+# An object's identity, unique among live objects as id() is, without the audit event
+# id() raises: inside a build every audit hook (the file trace's, the execution hashes')
+# sees each one, which made an identity lookup cost ten times its own work.
+_object_key = object.__hash__
 
 
 def identifier(text: str) -> str:
@@ -164,8 +170,13 @@ def identifier(text: str) -> str:
     of anything but ASCII letters, digits and underscores one underscore, trimmed)
     and the first eight hex digits of its sha256 (``корпус`` is ``_9f1c0b2e``,
     ``mounting_eye:lower`` is ``mounting_eye_lower_`` and its digest), so it is never
-    a name another text is written as."""
-    text = str(text)
+    a name another text is written as. Every feature's function and every label is
+    written through it, so a text is written once (``_identifier``)."""
+    return _identifier(str(text))
+
+
+@functools.lru_cache(maxsize=16384)
+def _identifier(text: str) -> str:
     word = _FRAMES.get(text)
     if word is not None:
         return word
@@ -178,6 +189,7 @@ def identifier(text: str) -> str:
     return f"{'_' if form[0].isdigit() else ''}{form}_{digest}"
 
 
+@functools.lru_cache(maxsize=4096)
 def operation_name(op: str) -> str:
     """A feature's operation as its name spells it: the method without its class
     (``Solid.extrude`` is ``extrude``), a constructor's class in lower case."""
@@ -262,7 +274,7 @@ class _IdentityInputs:
     """A feature's first geometric owners, shared by requested and full results.
 
     Native indexes stay in this Trace only. Build one kind at a time, keeping
-    its union and owner ordinals but discarding the redundant input maps.
+    the inputs' maps of it and their owner ordinals (``_input_index``).
     """
 
     def __init__(self, handles: list[Any]) -> None:
@@ -335,8 +347,8 @@ class Trace:
         self.features: list[Feature] = []
         self._first_party: dict[str, str] = {}
         self._display: dict[str, str] = {}
-        # id(shape) -> (weakref, feature index): the feature that returned each
-        # live result object. A dead reference, or a recycled id, answers nothing.
+        # _object_key(shape) -> (weakref, feature index): the feature that returned each
+        # live result object. A dead reference, or a recycled key, answers nothing.
         self._by_object: dict[int, tuple[weakref.ref, int]] = {}
         # The same for the call that made each live object: the first feature that
         # returned it itself, never one that only held it (a compound it was attached to).
@@ -399,7 +411,7 @@ class Trace:
 
     def feature_of(self, shape: Any) -> int | None:
         """The feature that returned this very object, or None."""
-        found = self._by_object.get(id(shape))
+        found = self._by_object.get(_object_key(shape))
         if found is None:
             return None
         reference, index = found
@@ -408,7 +420,7 @@ class Trace:
     def made(self, shape: Any) -> int | None:
         """The feature whose call made this very object -- the first that returned it
         itself -- or None."""
-        found = self._made_object.get(id(shape))
+        found = self._made_object.get(_object_key(shape))
         if found is None:
             return None
         reference, index = found
@@ -442,9 +454,10 @@ class Trace:
         self.features.append(feature)
         ancestors = 1 << feature.index
         copied_inputs = 0
-        for _shape, given, handle in inputs:
+        contexts = [None if given is None or handle is None else self._copy_of(handle, self._made_by)
+                    for _shape, given, handle in inputs]
+        for (_shape, given, handle), context in zip(inputs, contexts):
             if given is not None:
-                context = None if handle is None else self._copy_of(handle, self._made_by)
                 if context is not None:
                     ancestors |= (1 << given) | (1 << context.owner[0])
                     if context.names is not None:
@@ -457,28 +470,25 @@ class Trace:
         self._ancestors.append(ancestors)
         self._copy_ancestors.append(copied_inputs)
         self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
-        for shape, index, handle in inputs:
+        for (shape, index, _handle), context in zip(inputs, contexts):
             if index is not None:
                 label = getattr(shape, "__dict__", {}).get("label")
-                context = None if handle is None else self._copy_of(handle, self._made_by)
                 if context is None:
                     self._pin(index, label, at=feature.index)
                 elif context.label is None:
-                    from cadgen._internal.tree_tokens import is_occurrence_token
-
                     if isinstance(label, str) and label and not is_occurrence_token(label):
                         context.label, context.pinned_at = identifier(label), feature.index
                         self._copy_labels[context.label] = self._copy_labels.get(context.label, 0) | (1 << context.identity)
         for shape in results:
             try:
-                self._by_object[id(shape)] = (weakref.ref(shape), feature.index)
+                self._by_object[_object_key(shape)] = (weakref.ref(shape), feature.index)
             except TypeError:
                 pass
         for shape in made:
             try:
-                found = self._made_object.get(id(shape))
+                found = self._made_object.get(_object_key(shape))
                 if found is None or found[0]() is not shape:
-                    self._made_object[id(shape)] = (weakref.ref(shape), feature.index)
+                    self._made_object[_object_key(shape)] = (weakref.ref(shape), feature.index)
             except TypeError:
                 pass
         return feature
@@ -489,8 +499,6 @@ class Trace:
         it made from that call on (:meth:`_names`); a label that is an occurrence token
         (a tree's, not an author's) pins nothing. Of a part's features, the first to
         claim a label keeps it."""
-        from cadgen._internal.tree_tokens import is_occurrence_token
-
         if not isinstance(label, str) or not label or is_occurrence_token(label):
             return
         feature = self.features[self.unwrapped(index)]
@@ -799,6 +807,8 @@ class Trace:
             if not found:
                 continue
             elements = self._local_map(index, position, topabs)
+            if len(found) == 1:
+                return position, elements.FindKey(found[0]).Location()
             relative = _transform(result.Location().Inverted().Multiplied(shape.Location()))
             ordinal = next((at for at in found if _transform(elements.FindKey(at).Location()) == relative), found[0])
             return position, elements.FindKey(ordinal).Location()
@@ -1013,6 +1023,9 @@ class Trace:
         """What a feature's structure was computed from, beside its own history and shapes:
         for each input, the same of the feature that made it, or that none of this run did.
         The same in every run of the same code, so a hit's structure is its miss's."""
+        found = self._skeys.get(index)
+        if found is not None:
+            return found
         stack = [(index, False)]
         while stack:
             current, ready = stack.pop()
@@ -1110,8 +1123,12 @@ class Trace:
             table: list[list[tuple | None]] = [[None] * maps[kind].Extent() for kind in range(3)]
             for kind in range(3):
                 by_history = False
-                for ordinal in range(1, maps[kind].Extent() + 1):
-                    element = maps[kind].FindKey(ordinal)
+                held = table[kind]
+                if not held:
+                    continue
+                find = maps[kind].FindKey
+                for ordinal in range(1, len(held) + 1):
+                    element = find(ordinal)
                     rule = None
                     owner = identity.owner(kind, element)
                     if owner is not None:
@@ -1119,17 +1136,18 @@ class Trace:
                         rule = same(j, kind, source_ordinal)
                     if rule is None and partners:
                         rule = same(partners[0], kind, ordinal)
-                    if rule is None:
+                    if rule is None and origins:
                         rule = self._history_rule(origins.get((position, kind, ordinal)), kind, same)
                         by_history = by_history or rule is not None
-                    table[kind][ordinal - 1] = rule
+                    held[ordinal - 1] = rule
                 if by_history:
-                    _ranked(table[kind])
+                    _ranked(held)
             _passes(result, maps, table)
             for kind in range(3):
-                for ordinal, rule in enumerate(table[kind], 1):
+                held, find, add = table[kind], maps[kind].FindKey, made[kind].Add
+                for ordinal, rule in enumerate(held, 1):
                     if rule is None:
-                        table[kind][ordinal - 1] = ("m", made[kind].Add(maps[kind].FindKey(ordinal)))
+                        held[ordinal - 1] = ("m", add(find(ordinal)))
             rules.append(table)
         self._identity_inputs.pop(index, None)
         return _Structure(rules)
@@ -1523,8 +1541,10 @@ def _passes(result: Any, maps: list[Any], table: list[list[tuple | None]]) -> No
     among that parent's unnamed elements of its kind; then an edge whose vertices are all
     named, and a face whose outer wire's edges are, from those (``l``). Only the unnamed
     are visited: a parent is found from its child, through the result's map of ancestors."""
-    if all(rule is not None for rules in table for rule in rules):
+    if all(None not in rules for rules in table):
         return
+    if not any(rule is not None and rule[0] != "x" for rules in table for rule in rules):
+        return  # nothing named: each pass names only from what is
 
     def named(kind: int, ordinal: int) -> bool:
         rule = table[kind][ordinal - 1]
@@ -1623,19 +1643,58 @@ def _map(shape: Any, kind: Any) -> Any:
     return found
 
 
-def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, list[tuple[int, int]]]:
+def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, Any]:
     """An element's first input and ordinal, under the input maps' ``IsSame`` equality.
     A first input with no name still owns the element; later inputs never replace it.
-    Kept only while one feature's structure is computed, shared by all its results."""
+    Kept only while one feature's structure is computed, shared by all its results.
+    ``index.FindIndex(element)`` is the element's place among the inputs' elements, in
+    input order (0 where none holds it), and ``owners[place - 1]`` its input and its
+    ordinal there. A few inputs (a boolean's) are asked in turn (``_FirstOwners``), which
+    costs a result's element a lookup or two; more (a compound of many) are made one map
+    of every element of every input, which costs each of them one step."""
+    if len(given) <= _SCANNED_INPUTS:
+        owners = _FirstOwners([(j, held[kind]) for j, held in given])
+        return owners, owners
     elements = TopTools_IndexedMapOfShape()
-    owners: list[tuple[int, int]] = []
+    union: list[tuple[int, int]] = []
     for j, held in given:
         source = held[kind]
         for ordinal in range(1, source.Extent() + 1):
             at = elements.Add(source.FindKey(ordinal))
-            if at > len(owners):
-                owners.append((j, ordinal))
-    return elements, owners
+            if at > len(union):
+                union.append((j, ordinal))
+    return elements, union
+
+
+# Up to this many inputs, an element's owner is asked of each input in turn.
+_SCANNED_INPUTS = 3
+
+
+class _FirstOwners:
+    """The first input whose map holds an element, asked of each map in turn: a result's
+    element costs a lookup or two, where a union of the inputs' maps would cost every
+    element of every input a step to build (``_input_index``)."""
+
+    __slots__ = ("maps", "starts")
+
+    def __init__(self, maps: list[tuple[int, Any]]) -> None:
+        self.maps = maps
+        self.starts: list[int] = []
+        offset = 0
+        for _j, elements in maps:
+            self.starts.append(offset)
+            offset += elements.Extent()
+
+    def FindIndex(self, element: Any) -> int:  # noqa: N802 - the map interface it stands in for
+        for (_j, elements), start in zip(self.maps, self.starts):
+            ordinal = elements.FindIndex(element)
+            if ordinal:
+                return start + ordinal
+        return 0
+
+    def __getitem__(self, place: int) -> tuple[int, int]:
+        at = bisect.bisect_right(self.starts, place) - 1
+        return self.maps[at][0], place - self.starts[at] + 1
 
 
 def _relative(element: Any, shape: Any) -> Any:
