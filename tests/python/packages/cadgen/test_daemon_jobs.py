@@ -481,6 +481,30 @@ class Lifecycle(unittest.TestCase):
         self.assertNotIn("saveFailures", request)
         self.assertIn(output, request["savedResults"])
 
+    def test_a_child_row_closes_with_the_exit_a_finished_model_has(self):
+        parent = str((Path(self.tmp.name) / "rig.py").resolve())
+        request = self.ledger.start(tool="run", subject=parent)
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, parent=parent))
+        self.ledger.observe(self._event(self.model, "done", job=request["id"], sequence=2, parent=parent))
+        child = next(job for job in self.ledger.snapshot() if job["subject"] == self.model)
+        self.assertEqual(("done", 0), (child["state"], child["exit"]))
+
+    def test_a_request_cancelled_after_its_result_was_recorded_is_done_once_its_export_lands(self):
+        # Its caller left between the hand-off and the exit frame: the work is done and only
+        # the exit was lost, so the row ends as one that exited -- done when its file lands
+        # -- rather than reading cancelled beside a saved file.
+        request = self.ledger.start(tool="run", subject=self.model)
+        output = str(Path(self.model).with_suffix(".step"))
+        self.ledger.observe(self._event(self.model, "building", job=request["id"], sequence=1, phase="Saving STEP"))
+        self.ledger.observe(self._event(self.model, "done", job=request["id"], sequence=2))
+        job = self._owe(request, self.model, self._export(self.model, [output]))
+        self.ledger.finish(request, 1, cancelled=True)
+        self.assertEqual("building", request["state"], "open while its export writes")
+        self._saved(job, output)
+        self.ledger.finish(job, 0)
+        self.assertEqual(("done", 0, None), (request["state"], request["exit"], request["error"]))
+        self.assertIn(output, request["savedResults"])
+
     def test_a_failed_job_fails_the_closed_child_row_that_owed_its_file(self):
         # A child's row closes at its own done, before its file is written; its job failing
         # after is its failure, and the file's reader sees it on the child's row. A sibling

@@ -525,10 +525,15 @@ class JobLedger:
                     job["total"] = event.get("total")
                 elif state in ("done", "current"):
                     # A request may run several decorated models, so only its process's
-                    # completion closes it (``finish``); a child's own done closes the child.
+                    # completion closes it (``finish``); a child's own done closes the child,
+                    # with the exit a finished model has. The request notes that its own
+                    # model's result is recorded: a cancel after that lost only the exit frame.
                     if not producer or job is not request:
                         job["state"] = "done"
+                        job["exit"] = 0
                         job["finishedAt"] = now
+                    else:
+                        job["recorded"] = True
                 elif state == "failed":
                     job["state"] = "failed"
                     job["exit"] = event.get("exit", job["exit"])
@@ -600,6 +605,12 @@ class JobLedger:
                 self._owed_job_ended(job, int(exit_code), error, now)
             rows = [job, *(row for row in self._jobs.values() if row.get("request") == job["id"]
                            and row["state"] in _RUNNING)]
+            if cancelled and job.get("recorded") and len(rows) == 1 and job["tool"] != "artifact":
+                # Its caller left after every model it ran had recorded its result: the
+                # work is done and only the exit frame was lost. It ends as one that exited,
+                # open until the jobs it handed over land, done when they have.
+                cancelled, exit_code, error = False, 0, None
+            job.pop("recorded", None)
             for row in rows:
                 if row is job and exit_code == 0 and not cancelled and job["tool"] != "artifact" \
                         and any(owing.get("owing") for owing in self._rows_of(job)):
