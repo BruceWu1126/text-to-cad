@@ -138,10 +138,13 @@ class PreviewRevision(unittest.TestCase):
         previews, annotations, saved = (self._of(events, field) for field in ("preview", "annotations", "saved"))
         self.assertTrue(previews and annotations and saved, events)
         # The tree first; its annotations, and its parts once the pool's job is done, whichever
-        # is first; then the save: no STEP on disk before it.
+        # is first; then the save. The tree and its annotations go out before the result is
+        # recorded, so before its export job exists: no STEP on disk then. The parts' event is
+        # this process hearing the display job end, which the export waits for in the pool, not
+        # for that event: where the file is by then is the pool's timing, not the contract.
         self.assertLess(events.index(previews[0]), events.index(annotations[0]))
         self.assertLess(max(events.index(previews[-1]), events.index(annotations[0])), events.index(saved[0]))
-        self.assertFalse(any(event["stepOnDisk"] for event in previews + annotations))
+        self.assertFalse(any(event["stepOnDisk"] for event in [previews[0], *annotations]))
         self.assertTrue(saved[0]["stepOnDisk"])
         tree = previews[0]["preview"]["tree"]
         self.assertTrue(all(event["preview"]["tree"] == tree for event in previews), "one result tree")
