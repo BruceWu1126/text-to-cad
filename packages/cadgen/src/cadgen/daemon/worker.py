@@ -360,13 +360,6 @@ def _wanted() -> bool:
         return False
 
 
-# The refusals an artifact job answers with (``store.parts``, ``store.exports``): reported by
-# their message alone.
-_REFUSALS = frozenset({("cadgen._internal.tessellate", "MeshProductionError"),
-                       ("cadgen.store.parts", "ProducerUnavailable"),
-                       ("cadgen.store.exports", "PublicationRefused")})
-
-
 def _run_artifact(request: dict) -> int:
     """A typed operation has no parser, script path, declared outputs or hygiene scan. It
     asks its supervisor before each derivation whether anyone still wants it (``_wanted``),
@@ -393,9 +386,7 @@ def _run_artifact(request: dict) -> int:
     except BaseException as error:  # the worker stays reusable, but no success is emitted
         # A part the geometry refused, or a producer this worker cannot implement, is an
         # answer, not a crash: its message is what the caller reports, without a traceback.
-        # Told by name: a job that failed before loading those modules must not load them now.
-        expected = (type(error).__module__, type(error).__name__) in _REFUSALS
-        err.write(f"{type(error).__name__}: {error}\n" if expected else traceback.format_exc())
+        err.write(artifacts.failure_text(error))
         _report(error, bugs_only=True)  # a derivation the geometry refused is no bug; a mistake in cadgen's code is
         return 1
 

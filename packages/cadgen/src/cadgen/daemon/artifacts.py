@@ -317,6 +317,24 @@ class ArtifactFuture(Future):
             return copy.deepcopy(super().result(timeout))
 
 
+# The refusals an artifact job answers with (``store.parts``, ``store.exports``): reported by
+# their message alone.
+_REFUSALS = frozenset({("cadgen._internal.tessellate", "MeshProductionError"),
+                       ("cadgen.store.parts", "ProducerUnavailable"),
+                       ("cadgen.store.exports", "PublicationRefused")})
+
+
+def failure_text(error):
+    """What a failed artifact job says: a refusal by its message alone -- a part the geometry
+    refused, a producer this runtime cannot implement -- anything else by its traceback. Told by
+    name: a job that failed before loading those modules must not load them now."""
+    if (type(error).__module__, type(error).__name__) in _REFUSALS:
+        return f"{type(error).__name__}: {error}\n"
+    import traceback
+
+    return "".join(traceback.format_exception(type(error), error, error.__traceback__))
+
+
 def submit_artifact(request, *, store_root=None):
     """Start a typed artifact operation as ONE build-pool job, a daemon worker's, against
     the store it names, from a thread of its own: the caller's thread never imports the
