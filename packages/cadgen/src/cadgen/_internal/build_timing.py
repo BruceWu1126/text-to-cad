@@ -102,10 +102,12 @@ class BuildTimings:
         }
 
 
-def time_line(document: str, timings: dict[str, Any]) -> str:
+def time_line(document: str, timings: dict[str, Any], *, daemonless: bool = False) -> str:
     """``built STEP/robot.step in 9m42s: model code 8m20s, cadgen 1m22s, memo 4,210
-    hits, 51 misses, 0 uncached``."""
-    parts = [
+    hits, 51 misses, 0 uncached``; one built without the daemon (``--no-daemon``) says so
+    first: ``built a.step in 2.1s: daemonless, model code ...``."""
+    parts = ["daemonless"] if daemonless else []
+    parts += [
         f"model code {format_duration(timings.get('modelSeconds') or 0.0)}",
         f"cadgen {format_duration(timings.get('cadgenSeconds') or 0.0)}",
     ]

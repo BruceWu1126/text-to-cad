@@ -242,12 +242,14 @@ class BuildTree:
         node.timed = True
         from cadgen._internal.build_timing import slowdown_warning, started_warning, time_line
         from cadgen._internal.doors import display_path
+        from cadgen.daemon.client import no_daemon_active  # this process built it: no daemon relayed it
 
         lines = []
         if node.timings is not None:
             timings = node.timings
             document = timings.get("document")
-            lines.append(f"[cadgen] {time_line(display_path(document) if document else node.name, timings)}")
+            shown = display_path(document) if document else node.name
+            lines.append(f"[cadgen] {time_line(shown, timings, daemonless=no_daemon_active())}")
             last = timings.get("lastModelSeconds")
             warning = slowdown_warning(
                 node.name, float(timings.get("modelSeconds") or 0.0),
