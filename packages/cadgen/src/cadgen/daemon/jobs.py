@@ -160,7 +160,7 @@ def _same_model(ref: str, subject: str) -> bool:
     return script == subject_script and (not function or not subject_function or function == subject_function)
 
 
-def declared_outputs(subject: str, tool: str) -> list[str]:
+def declared_outputs(subject: str) -> list[str]:
     """The output paths a job will write, from its declarations alone.
 
     A compile (``step-compile``) writes the tree for the document it names — the
@@ -199,12 +199,12 @@ class JobLedger:
         self._last_declared: dict[str, list[str]] = {}
         self._last_declared_guard = threading.Lock()
 
-    def _declared_outputs(self, subject: str, tool: str) -> list[str]:
+    def _declared_outputs(self, subject: str) -> list[str]:
         """:func:`declared_outputs`, or, when the script no longer imports (an edit broke a
         helper), what it declared the last time it did: the job is still listed against the
         documents its script writes, so its failure reaches whoever shows them. Never a
         guess at the source: only what the script itself declared, in this process."""
-        outputs = declared_outputs(subject, tool)
+        outputs = declared_outputs(subject)
         if not subject:
             return outputs
         with self._last_declared_guard:
@@ -216,8 +216,6 @@ class JobLedger:
     # --- lifecycle -------------------------------------------------------------
 
     def start(self, *, tool: str, subject: str, argv: list[str] | None = None, store_root: str = "") -> dict[str, Any]:
-        if tool == "artifact":
-            subject = ""
         subject = _model_subject(subject)
         now = self._clock()
         sequence = next(self._ids)
@@ -228,7 +226,7 @@ class JobLedger:
             "storeRoot": _real(store_root) if store_root else "",
             "tool": str(tool),
             "subject": subject,
-            "outputs": [] if tool == "artifact" else self._declared_outputs(subject, str(tool)),
+            "outputs": [] if tool == "artifact" else self._declared_outputs(subject),
             "argv": [str(a) for a in (argv or [])],
             "state": "submitted",
             "phase": None,
@@ -546,7 +544,7 @@ class JobLedger:
         job: dict[str, Any] = {
             "id": f"{self.epoch}:job-{sequence}", "epoch": self.epoch, "sequence": sequence,
             "storeRoot": request["storeRoot"], "tool": "run", "subject": model, "request": request["id"],
-            "outputs": self._declared_outputs(model, "run"), "argv": [], "state": "submitted",
+            "outputs": self._declared_outputs(model), "argv": [], "state": "submitted",
             "phase": None, "detail": "", "done": None, "total": None, "startedAt": now,
             "updatedAt": now, "finishedAt": None, "exit": None, "error": None,
         }
@@ -583,16 +581,15 @@ class JobLedger:
                     job["exited"] = 0
                     job["updatedAt"] = now
                     continue
-                if row["state"] in _RUNNING or row is job:
-                    failed = exit_code != 0 or bool(row.get("saveError"))
-                    row["state"] = "cancelled" if cancelled else "failed" if failed else "done"
-                    row["exit"] = int(exit_code) if exit_code != 0 or not row.get("saveError") else 1
-                    if exit_code != 0 and error and not cancelled:
-                        row["error"] = str(error)
-                    elif row.get("saveError") and not cancelled:
-                        row["error"] = row["saveError"]
-                    row.pop("saveError", None)
-                    row["finishedAt"] = row["finishedAt"] or now
+                failed = exit_code != 0 or bool(row.get("saveError"))
+                row["state"] = "cancelled" if cancelled else "failed" if failed else "done"
+                row["exit"] = int(exit_code) if exit_code != 0 or not row.get("saveError") else 1
+                if exit_code != 0 and error and not cancelled:
+                    row["error"] = str(error)
+                elif row.get("saveError") and not cancelled:
+                    row["error"] = row["saveError"]
+                row.pop("saveError", None)
+                row["finishedAt"] = row["finishedAt"] or now
                 row["updatedAt"] = now
             self._sweep(now)
             for row in rows:

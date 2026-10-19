@@ -158,7 +158,7 @@ class Slots(PrivateBrokerFixture):
 
     def test_a_queued_requester_that_leaves_never_takes_a_slot(self):
         held = [broker.acquire_slot(f"h{i}") for i in range(2)]
-        conn = broker._open({"kind": "slot", "op": "acquire", "label": "leaver"})
+        conn = broker._open({"kind": "slot", "label": "leaver"})
         self._settle(lambda s: s["queued"] == 1)
         conn.close()
         for lease in held:

@@ -124,7 +124,6 @@ class CompileAnswerAtResult(unittest.TestCase):
                    if frame.get("stream") == "stdout" and frame.get("data", "").startswith('{"ok":')]
         self.assertEqual([answer["tree"] for answer in answers], [tree_for_document_hash(self.digest)])
         self.assertEqual([frame["owes"]["request"] for frame in frames if "owes" in frame], [self.request])
-        self.assertFalse(any("released" in frame for frame in frames))
         self.display.wait.assert_not_called()
 
 

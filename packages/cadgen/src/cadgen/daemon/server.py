@@ -26,7 +26,8 @@ Routing: a request that names a model script goes to THAT model's worker
 (STORE.md §9), which builds the model and, inside its body, every child it
 calls. A busy worker means an extra, never a wait; a model with no worker binds
 a spare; no spare means a spawn. Requests that name no script borrow a spare
-for one job. Nothing here caps, counts memory or queues.
+for one job. Memory admission is the pool's (``pool``), job slots the broker's
+(``broker``).
 
 What a build's results owe once they are recorded -- their display data, their
 files -- the build hands here (the ``owes`` frame, ``worker._hand_off``): the

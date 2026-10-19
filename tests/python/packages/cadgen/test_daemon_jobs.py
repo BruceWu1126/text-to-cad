@@ -49,15 +49,15 @@ class DeclaredOutputs(unittest.TestCase):
                 "from cadgen import step\n@step\ndef first(): pass\n@step(out='second.step')\ndef second(): pass\n",
                 encoding="utf-8",
             )
-            self.assertEqual(declared_outputs(f"{script}::first", "run"), [str((Path(tmp) / "first.step").resolve())])
-            self.assertEqual(declared_outputs(str(script), "run"), [str((Path(tmp) / "first.step").resolve()), str((Path(tmp) / "second.step").resolve())])
+            self.assertEqual(declared_outputs(f"{script}::first"), [str((Path(tmp) / "first.step").resolve())])
+            self.assertEqual(declared_outputs(str(script)), [str((Path(tmp) / "first.step").resolve()), str((Path(tmp) / "second.step").resolve())])
 
     def test_a_model_scripts_outputs_are_its_declared_document_and_meshes(self):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "src" / "widget.py"
             script.parent.mkdir()
             script.write_text(textwrap.dedent(MODEL), encoding="utf-8")
-            outputs = declared_outputs(str(script), "run")
+            outputs = declared_outputs(str(script))
         self.assertEqual(
             [str((Path(tmp) / "STEP" / "widget.step").resolve()), str((Path(tmp) / "MESH" / "widget.stl").resolve())],
             [str(Path(p)) for p in outputs],
@@ -67,15 +67,15 @@ class DeclaredOutputs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "plain.py"
             script.write_text("from cadgen import step\nfrom cadgen import build123d as bd\n\n@step\ndef plain():\n    return bd.Box(1, 1, 1)\n", encoding="utf-8")
-            self.assertEqual([str(script.with_suffix(".step").resolve())], [str(Path(p)) for p in declared_outputs(str(script), "run")])
+            self.assertEqual([str(script.with_suffix(".step").resolve())], [str(Path(p)) for p in declared_outputs(str(script))])
             document = Path(tmp) / "vendor.step"
-            self.assertEqual([str(document.resolve())], [str(Path(p)) for p in declared_outputs(str(document), "step-compile")])
+            self.assertEqual([str(document.resolve())], [str(Path(p)) for p in declared_outputs(str(document))])
 
     def test_an_unparseable_script_declares_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "broken.py"
             script.write_text("def (\n", encoding="utf-8")
-            self.assertEqual([], declared_outputs(str(script), "run"))
+            self.assertEqual([], declared_outputs(str(script)))
 
     def test_a_project_read_again_after_another_reads_its_own_lib(self):
         # The daemon reads every project's declarations in one process, and each
@@ -96,7 +96,7 @@ class DeclaredOutputs(unittest.TestCase):
                 )
 
             def declared(name):
-                return [Path(path).name for path in declared_outputs(str(root / name / "src" / f"{name}.py"), "run")]
+                return [Path(path).name for path in declared_outputs(str(root / name / "src" / f"{name}.py"))]
 
             self.assertEqual(["a_a1.step"], declared("a"))
             self.assertEqual(["b_b1.step"], declared("b"))
