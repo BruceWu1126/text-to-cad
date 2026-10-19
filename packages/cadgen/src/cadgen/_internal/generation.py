@@ -1696,6 +1696,25 @@ def restore_document_record(step_path: Path, tree: str) -> None:
     _restore_result(_entry_spec_from_source(source), verdict, logger=logger)
 
 
+def _heal_documents(spec: EntrySpec, record: Mapping[str, object]) -> None:
+    """The documents a current model's body read (``read_step``: in its closure, by the
+    bytes the gate just verified) have their records name the tree those bytes map to
+    (:func:`restore_document_record`): the model taken as current or restored read
+    them, so a document changed and changed back reads as its model does."""
+    if spec.source != "generated" or spec.script_path is None:
+        return
+    from cadgen.store.records import document_entry_for_hash
+
+    shas = (record.get("closure") or {}).get("shas") or {}
+    for rel, sha in shas.items():
+        if Path(rel).suffix.lower() not in (".step", ".stp") or not sha:
+            continue
+        entry = document_entry_for_hash(str(sha))
+        tree = str((entry or {}).get("tree") or "")
+        if tree:
+            restore_document_record(Path(spec.script_path).parent / rel, tree)
+
+
 def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,
          healed: set[str] | None = None, display: bool = True) -> None:
     """A model whose stored result ``tree`` is current: its source result announced, what
@@ -1729,6 +1748,7 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
     healed.add(model)
     _current_source_result(spec, tree)
     record = read_record(model) or {}
+    _heal_documents(spec, record)
     if _record_mesh_recipes(spec, record):
         from cadgen.store.records import note_output, write_record
 
