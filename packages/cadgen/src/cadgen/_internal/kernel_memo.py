@@ -1968,7 +1968,17 @@ class _Made:
         parent = shape.__dict__.get("topo_parent")
         if parent is None:
             raise _Unkeyable("a sub-shape that lost its topo_parent")
-        return ("sub", _placed_key(parent, state), self.kind, self.index, applied)
+        index = self.index
+        parent_wrapped = _wrapped(parent)
+        if parent_wrapped is not None and parent_wrapped.TShape() != self.parent.tshape:
+            # Extracted now from another shape that holds this TShape -- a boolean's result
+            # shares what it left alone with its input, and with an earlier result of other
+            # inputs, whose extraction registered it first: its place is in THIS parent's map,
+            # as a run that extracted it from this parent alone would register it.
+            index = _sub_map(parent_wrapped, self.kind).FindIndex(_wrapped(shape))
+            if index == 0:
+                raise _Unkeyable("not a sub-shape of its topo_parent")
+        return ("sub", _placed_key(parent, state), self.kind, index, applied)
 
     def handle(self) -> Any:
         return _handle_of(self.tshape)

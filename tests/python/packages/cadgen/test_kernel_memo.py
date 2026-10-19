@@ -2149,6 +2149,30 @@ class ConstructionKeyTest(KernelMemoCase):
         kernel_memo.clear()
         self.assertEqual([kernel_memo.construction_key(screw) for screw in _run(screws, True)[0]], [key, key])
 
+    def test_a_sub_shape_extracted_from_another_result_is_keyed_by_its_place_there(self) -> None:
+        """A non-destructive boolean shares the edges it leaves alone with its input and
+        with an earlier result of other inputs. An edge the model extracts from the new
+        result was registered under the old one (an entry still in the memo), at its index
+        there; as an input it is keyed by its index in the shape it was extracted from now,
+        so an edit's warm key is the cold key."""
+        from build123d import Axis, Box, Cylinder, Pos, Rot, chamfer
+
+        def model(radius):
+            plate = Pos(2.0, 26.0, -22.0) * Box(44.0, 8.0, 44.0)
+            lobe = Pos(0, 26.0, 0) * Rot(-90, 0, 0) * Cylinder(radius=radius, height=8.0)
+            cheek = plate + lobe
+            return chamfer([edge for face in cheek.faces().filter_by(Axis.Y) for edge in face.edges()], 1.2)
+
+        first, _, run1 = _run(model, 24.0)
+        first_key = run1.identify(first)[0]
+        edited, stats, run2 = _run(model, 25.0)
+        self.assertGreater(stats["hits"], 0, "the plate hits; the lobe and what is made of it miss")
+        warm_key = run2.identify(edited)[0]
+        kernel_memo.clear()
+        cold, _, run3 = _run(model, 25.0)
+        self.assertEqual(warm_key, run3.identify(cold)[0])
+        self.assertNotEqual(warm_key, first_key)
+
     def test_a_construction_key_is_the_same_in_another_process(self) -> None:
         import subprocess
         import sys
