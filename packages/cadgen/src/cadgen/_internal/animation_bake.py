@@ -75,12 +75,13 @@ from __future__ import annotations
 import bisect
 import contextlib
 import hashlib
+import itertools
 import json
 import math
 import struct
 import threading
 from collections import OrderedDict
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 CHANNELS = ("transform", "opacity", "visible", "tube")
 
@@ -811,50 +812,58 @@ def _signature(channel: str, value: Any) -> Any:
     return value
 
 
-def _interned(transforms: dict[str, tuple], poses: dict[bytes, tuple]) -> dict[str, tuple]:
+_PACK_TRANSFORM = struct.Struct("<12d").pack
+
+
+def _interned(transforms: dict[str, tuple], poses: dict[bytes, tuple], labels: dict[bytes, int],
+              numbering: Iterator[int]) -> tuple[dict[str, tuple], list[int]]:
     """``transforms`` with each value the first of the same bits the bake has seen
-    (``poses``), in the leaves' order: each distinct object is packed once, since the
-    leaves one ``m.get`` moved hold the one value it computed."""
+    (``poses``), in the leaves' order, and each value's label: one integer per bit pattern
+    (``labels``, numbered by ``numbering``). Packed and looked up at the kernel of the
+    interpreter, and no value's identity asked of it: a build's worker audits every ``id``."""
     values = list(transforms.values())
-    distinct = dict(zip(map(id, values), values))
-    first = {key: poses.setdefault(struct.pack(f"<{len(value)}d", *value), value) for key, value in distinct.items()}
-    return dict(zip(transforms, map(first.__getitem__, map(id, values))))
+    try:
+        packed = list(itertools.starmap(_PACK_TRANSFORM, values))
+    except struct.error:
+        packed = [struct.pack(f"<{len(value)}d", *value) for value in values]
+    return (dict(zip(transforms, map(poses.setdefault, packed, values))),
+            list(map(labels.setdefault, packed, numbering)))
 
 
-def _transform_sequences(frames: list[_Frame], leaves: list[str], rest: tuple) -> dict[tuple, list[str]]:
+def _transform_sequences(frames: list[_Frame], leaves: list[str], rest: tuple,
+                         labels: list[list[int]]) -> dict[tuple, list[str]]:
     """Each leaf's whole sequence of transforms (``rest`` where a sample left it alone),
     and the leaves that share it, in the leaves' order: what grouping the leaves by their
-    sequences gives, keyed by the first leaf's. Interned values (``_interned``) are one
-    object for one bit pattern, so the leaves are grouped first by their values'
-    identities, read sample by sample at the kernel of the interpreter; groups whose
-    sequences are equal by value -- a zero and a negative zero -- are then one."""
+    sequences gives, keyed by the first leaf's. Each sample's values carry the label of
+    their bits (``_interned``: ``labels``, in each sample's leaf order), so the leaves are
+    grouped first by their rows of labels, read sample by sample at the kernel of the
+    interpreter; groups whose sequences are equal by value -- a zero and a negative zero,
+    or a value set to the rest it would have had -- are then one."""
     import numpy as np
 
     if not leaves:
         return {}
-    # Sample by sample, the identity of each leaf's value -- ``rest``'s where the sample left
-    # it alone -- then, leaf by leaf, its row of them.
+    # Sample by sample, each leaf's label -- none (-1) where the sample left it alone --
+    # then, leaf by leaf, its row of them.
     position = {leaf: index for index, leaf in enumerate(leaves)}
-    identities = np.full((len(frames), len(leaves)), id(rest), dtype=np.uint64)
-    for index, frame in enumerate(frames):
+    rows = np.full((len(frames), len(leaves)), -1, dtype=np.int64)
+    for index, (frame, labelled) in enumerate(zip(frames, labels)):
         transforms = frame.transform
         if transforms:
-            count = len(transforms)
-            identities[index, np.fromiter(map(position.__getitem__, transforms), dtype=np.intp, count=count)] = \
-                np.fromiter(map(id, transforms.values()), dtype=np.uint64, count=count)
-    rows = np.ascontiguousarray(identities.T)
-    del identities
-    labels: dict[bytes, int] = {}
-    leaf_labels = [labels.setdefault(row.tobytes(), len(labels)) for row in rows]
+            rows[index, np.fromiter(map(position.__getitem__, transforms), dtype=np.intp, count=len(transforms))] = \
+                labelled
+    rows = np.ascontiguousarray(rows.T)
+    kinds: dict[bytes, int] = {}
+    leaf_kinds = [kinds.setdefault(row.tobytes(), len(kinds)) for row in rows]
     del rows
     groups: dict[int, list[str]] = {}
     exact: dict[tuple, list[str]] = {}
-    for leaf, label in zip(leaves, leaf_labels):
-        members = groups.get(label)
+    for leaf, kind in zip(leaves, leaf_kinds):
+        members = groups.get(kind)
         if members is None:
-            # A sequence is read and looked up once per identity row: its first leaf's.
+            # A sequence is read and looked up once per row of labels: its first leaf's.
             sequence = tuple(frame.transform.get(leaf, rest) for frame in frames)
-            members = groups[label] = exact.setdefault(sequence, [])
+            members = groups[kind] = exact.setdefault(sequence, [])
         members.append(leaf)
     return exact
 
@@ -915,6 +924,9 @@ def bake_clip(
     # is the same at every sample, and the samples are held whole until every track is
     # reduced -- a large assembly's parent build held a gigabyte of copies.
     poses: dict[bytes, tuple] = {}
+    labels: dict[bytes, int] = {}
+    numbering = itertools.count()
+    sample_labels: list[list[int]] = []
     centerlines: dict[bytes, dict[str, Any]] = {}
 
     def centerline(path: dict[str, Any]) -> dict[str, Any]:
@@ -934,7 +946,8 @@ def bake_clip(
             raise AnimationError(f"animation clip {clip_id!r} at t={t:g} s: {exc}") from None
         except Exception as exc:
             raise AnimationError(f"animation clip {clip_id!r} at t={t:g} s: {type(exc).__name__}: {exc}") from exc
-        frame.transform = _interned(frame.transform, poses)
+        frame.transform, labelled = _interned(frame.transform, poses, labels, numbering)
+        sample_labels.append(labelled)
         if frame.tube:
             frame.tube = shared_tubes(frame.tube)
         frames.append(frame)
@@ -953,19 +966,19 @@ def bake_clip(
         alike (``_signature``) share a track. A leaf no sample touched is left out."""
         leaves = dict.fromkeys(leaf for frame in frames for leaf in getattr(frame, name))
         if name == "transform":
-            exact = _transform_sequences(frames, list(leaves), rest)
+            exact = _transform_sequences(frames, list(leaves), rest, sample_labels)
         else:
             exact = {}
             for leaf in leaves:
                 exact.setdefault(tuple(getattr(frame, name).get(leaf, rest) for frame in frames), []).append(leaf)
         # Rounding is the costly part, so only one sequence of each exact group is rounded, and
-        # each value it holds once: the frames hold each value they share as one object.
-        signatures: dict[int, Any] = {}
+        # each distinct value once: values equal sign the same.
+        signatures: dict[Any, tuple] = {}
 
         def signature(value: Any) -> Any:
-            found = signatures.get(id(value))
+            found = signatures.get(value)
             if found is None:
-                found = signatures[id(value)] = (_signature(name, value),)
+                found = signatures[value] = (_signature(name, value),)
             return found[0]
 
         groups: dict[tuple, tuple[tuple, list[str]]] = {}
