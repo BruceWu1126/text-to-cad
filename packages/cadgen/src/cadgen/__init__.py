@@ -143,30 +143,12 @@ if TYPE_CHECKING:
 
 @_cache
 def _resolve_version() -> str:
-    """The installed distribution version, falling back to pyproject in a source tree.
-
-    Installed metadata is the authority: it is what a consumer actually has, and it is
-    what `cadgen doctor` compares a skill's pinned requirement against. A bare source checkout
-    has no metadata, so fall back to the pyproject this file ships beside — release
-    tooling stamps it from the canonical VERSION, so the two never disagree.
-
-    Resolved once per process. The lookup lists every folder on ``sys.path``, and a
-    build puts the model's own folder there, which every save changes; the code that
-    answers cannot change under a running process anyway.
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("cadgen")
-    except PackageNotFoundError:
-        pass
-
+    """The version declared beside this very package (``_internal.version.declared_version``):
+    the source tree's pyproject for a checkout, the dist-info beside it for an install.
+    Never the first ``cadgen`` metadata on ``sys.path``, which can be another install's.
+    Resolved once per process: the code that answers cannot change under a running one."""
     import pathlib
-    import tomllib
 
-    pyproject = pathlib.Path(__file__).resolve().parents[2] / "pyproject.toml"
-    try:
-        with pyproject.open("rb") as handle:
-            return str(tomllib.load(handle)["project"]["version"])
-    except (OSError, KeyError, tomllib.TOMLDecodeError):
-        return "0+unknown"
+    from cadgen._internal.version import declared_version
+
+    return declared_version(pathlib.Path(__file__).resolve().parent)

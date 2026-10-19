@@ -259,6 +259,25 @@ class OneTokenForOneCodeTest(unittest.TestCase):
         self.assertTrue(client.compute_version_token(installed).startswith("4.5.6:"))
 
 
+    def test_the_package_reports_the_version_declared_beside_it_never_another_installs(self):
+        # importlib.metadata finds whichever install sorts first on sys.path (a stale
+        # editable install's 0.7.x beside a 0.8.0 checkout on PYTHONPATH): the package,
+        # the daemon's status and every record's producer.cadgen reported that one. One
+        # source: the version declared beside the code that is running.
+        import importlib.metadata
+
+        import cadgen
+        from cadgen._internal.version import declared_version
+        from tests.python.support.paths import REPO_ROOT
+
+        declared = declared_version(Path(cadgen.__file__).resolve().parent)
+        self.assertEqual(declared, (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip())
+        with mock.patch.object(importlib.metadata, "version", return_value="0.0.1"):
+            self.assertEqual(cadgen._resolve_version(), declared)
+        self.assertEqual(declared_version(self._tree(checkout=True)), "1.2.3")
+        self.assertEqual(declared_version(self._tree(checkout=False)), "4.5.6")
+
+
 @unittest.skipIf(os.name == "nt", "a pipe name has no path to outgrow")
 class DeepStateDirTest(unittest.TestCase):
     """A state directory too deep for a Unix socket (``CADGEN_DAEMON_STATE_DIR``, a deep

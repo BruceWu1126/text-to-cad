@@ -216,33 +216,11 @@ def request_timeout() -> float:
 
 
 def _declared_version(base: Path) -> str:
-    """The version declared beside the code under ``base``: its source tree's pyproject,
-    else the metadata installed with it. Never the first ``cadgen`` metadata on
-    ``sys.path``: a checkout can carry several (a stale editable install's, a wheel
-    build's egg-info under ``src``), the daemon and its clients put ``src`` at different
-    places on their paths, and two answers for the same files would retire every daemon
-    the moment a client spoke to it."""
-    import tomllib
+    """The version declared beside the code under ``base`` (``_internal.version``): the one
+    ``cadgen.__version__`` answers for the running package, computed for any package dir."""
+    from cadgen._internal.version import declared_version
 
-    pyproject = base.parent.parent / "pyproject.toml"
-    try:
-        with pyproject.open("rb") as handle:
-            project = tomllib.load(handle).get("project") or {}
-        if project.get("name") == "cadgen" and project.get("version"):
-            return str(project["version"])
-    except (OSError, ValueError):
-        pass
-    # More than one only after an install that failed midway: the last one written is
-    # the install that put these files here.
-    found = []
-    for metadata in base.parent.glob("cadgen-*.dist-info"):
-        try:
-            found.append((metadata.stat().st_mtime_ns, metadata.name))
-        except OSError:
-            continue
-    if found:
-        return max(found)[1][len("cadgen-"):-len(".dist-info")]
-    return "0+unknown"
+    return declared_version(base)
 
 
 def compute_version_token(root: Path | None = None) -> str:
