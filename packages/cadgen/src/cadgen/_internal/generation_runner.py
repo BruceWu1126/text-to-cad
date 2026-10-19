@@ -520,8 +520,10 @@ def _run_script_generator_body(
         evict_first_party_modules(only=executed_hashes.ran_first())
     if frame.failed:
         # A child's build failed inside the body, which went on without it: the run
-        # fails with the child, whatever the body made of the exception (STORE.md §9a).
-        raise RuntimeError(f"{spec.source_ref}: a child model failed to build: {frame.failed[0]}") from frame.failed[0]
+        # fails with the child, whatever the body made of the exception (STORE.md §9a)
+        # -- the child's own exception, naming its error and its line, as the body
+        # letting it through would have.
+        raise frame.failed[0]
 
     # A model's own outputs are never its inputs: reading one back reads the
     # previous run, so a read the trace saw is dropped here, and a folder its

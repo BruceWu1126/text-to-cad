@@ -204,8 +204,10 @@ class SourceJobResults(unittest.TestCase):
 
         code, err = self._nested(discard=True, child_fails=True)
         self.assertNotEqual(code, 0)
-        self.assertIn("a child model failed to build", err)
-        self.assertIn("the child is wrong on purpose", err)
+        # The child's own exception, naming its error and its line: no wrapper.
+        self.assertIn("FAILED: RuntimeError: the child is wrong on purpose", err)
+        self.assertRegex(err, r"child\.py:4 in child")
+        self.assertNotIn("a child model failed to build", err)
         self.assertEqual((self.root / "parent.step").read_bytes(), b"previous parent document")
         self.assertIsNone(read_record(self.root / "parent.py"))
         self.assertIsNone(read_record(self.root / "child.py"))
