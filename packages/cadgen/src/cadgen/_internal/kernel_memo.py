@@ -93,8 +93,11 @@ being its own maker's to reset (``_reset``), as a decoded tree's hit resets its
 groups -- so an assembly's compound costs its children's count, not their
 sub-shapes'. A change is a sparse delta
 per sub-shape (the scalars, and the representations appended, by count), noted
-in a ledger by sub-shape. A hit replays the delta, so a hot run leaves every
-input as a cold run would; a hit of a shape's maker undoes, through the ledger,
+in a ledger by sub-shape. A hit replays the delta and notes it, as the miss did,
+on the input as it was given -- not on what an in-place operation (``clean``)
+leaves the input object wrapping, its result, whose key would then name the
+change -- so a hot run leaves every input, and names every shape, as a cold run
+would; a hit of a shape's maker undoes, through the ledger,
 every delta applied to any sub-shape of it since it returned, so an operation
 edited out of the model leaves no trace. A change no delta expresses -- a
 sub-shape added or removed, representations taken away -- is not replayed: the
@@ -897,7 +900,9 @@ def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kw
     _reset(entry.made, state.id)
     for index, effect in entry.effects:
         effect.apply(state.id)
-        made = _made_of(_wrapped(shapes[index]).TShape(), state)
+        # On the input as given, where the miss noted it: an in-place operation's hit has
+        # just made the input object wrap the result.
+        made = _made_of(entry.inputs[index], state)
         if made is not None:
             made.effects.append(effect)
     for made in entry.made:
