@@ -239,8 +239,10 @@ it("a view keeps its own history of files, as a browser's tab does: the agent's 
   await agentShows('/work/d.step', 2);
   expect(at()).toEqual(['/work/d.step', true, false]);
   cleanup();
-  // A view opened on the home: its first file is its first step, with nothing behind it.
+  // A view opened on the home: the home is its first step, so Back from the first file returns
+  // there, and Forward to the file.
   render(<App bridge={bridge as any} server={server as any} launch={{ protocol: 7, page: 'home', model: null, surface: 'tab', pick: false }} />);
+  expect(at()).toEqual(['', false, false]);
   act(() => viewer.props!.onShow('/work/a.step'));
   expect(at()).toEqual(['/work/a.step', true, false]);
   act(() => viewer.props!.history!.back());
