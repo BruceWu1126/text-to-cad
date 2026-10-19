@@ -678,6 +678,40 @@ class ImportedFileTest(KernelMemoCase):
         _, replaced, _ = _run(model, True)
         self.assertEqual((kept["unkeyable"], replaced["unkeyable"]), (0, 1), "a tree the model attached keys nothing")
 
+    def test_a_composition_placed_or_copied_carries_its_own_tree_and_a_boolean_of_it_none(self) -> None:
+        """build123d copies a shape's attributes to what it makes of it, the occurrence tree
+        deep: a moved composition carried a copy whose leaves were copies of the prototypes
+        no operation keyed, so nothing given it was keyed and the packager named its parts
+        by their geometry. Placed or copied, it carries the composition's tree -- this run's,
+        on a hit too; a boolean of it carries none and walks as its geometry is."""
+        import copy
+
+        from build123d import Compound, Location, Solid
+
+        from cadgen import compound_from_instances
+
+        def model():
+            box = Solid.make_box(1, 1, 1)
+            pair = compound_from_instances("pair", [(box, Location((0, 0, 0)), "a"), (box, Location((3, 0, 0)), "b")])
+            moved = pair.moved(Location((0, 10, 0)))
+            copied = copy.deepcopy(pair)
+            cut = pair - Solid.make_box(0.5, 0.5, 0.5)
+            return pair, moved, copied, cut, Compound(children=[pair, moved, copied, cut])
+
+        for hot in (False, True):
+            (pair, moved, copied, cut, rack), stats, run = _run(model)
+            tree = pair.__dict__["_occurrence_tree"]
+            self.assertEqual(stats["unkeyable"], 0, f"hot={hot}: everything given the placed composition keys")
+            self.assertIs(moved.__dict__["_occurrence_tree"], tree, "placed: the composition's own tree")
+            # A copy keeps the tree it inherited when it was made: its leaves are the same
+            # prototypes as the composition's (a hit hands back the same objects).
+            self.assertTrue(all(mine["shape"] is theirs["shape"] for mine, theirs in
+                                zip(copied.__dict__["_occurrence_tree"]["children"], tree["children"], strict=True)))
+            self.assertNotIn("_occurrence_tree", cut.__dict__)
+            self.assertIsNotNone(run.identify(rack)[0], "the compound of them has a construction key")
+            if hot:
+                self.assertEqual(stats["misses"], 0)
+
 
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""

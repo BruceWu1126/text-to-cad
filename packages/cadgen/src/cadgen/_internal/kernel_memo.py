@@ -744,6 +744,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         copied = _copy_origins(feature, state)
         del makers
         snapshot = None
+        inherited: dict[int, dict] = {}
         try:
             effects, sound = _effects(captured, state)
             if not sound or any(effect.geometric() for _index, effect in effects):
@@ -751,6 +752,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                 # cannot certify whether a nested copy preceded that change.
                 copied = _reject_copies(feature, copied, state)
             if sound:
+                inherited = _inherit_trees(result, feature, state)
                 if kind == "constructor":
                     snapshot = _Adopt(_wrapped(result), dict(_CONSTRUCTOR_TARGETS)[label])
                 else:
@@ -774,6 +776,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                        handles=feature.handles)
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
+        _attach_trees(result, inherited, state)
         if _composes(label, kind):
             for made in entry.made:
                 made.container = True  # the children it was given are their makers'
@@ -834,7 +837,9 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             copied = _reject_copies(feature, copied, state)
+    inherited = _inherit_trees(result, feature, state)
     _register(result, None, feature.index, state, None, copied)
+    _attach_trees(result, inherited, state)
     return function_result
 
 
@@ -875,6 +880,53 @@ def _copy_origins(feature: Any, state: _Run) -> dict[int, tuple | None]:
     return materials
 
 
+def _inherit_trees(result: Any, feature: Any, state: _Run) -> dict[int, dict]:
+    """The occurrence tree a result made of a keyed composition (``composed``) carries.
+    build123d copies a shape's attributes to what it makes of it, the tree among them,
+    deep: a ``moved`` composition carried a copy of its tree whose leaves were copies of
+    the prototypes no operation keyed, so the packager named them by their geometry and
+    the memo keyed nothing given the shape. A result that is the composition placed
+    (``moved``, ``located``: the same TShape) carries the composition's own tree; one
+    that is a certified whole-body copy of it carries its source's -- the same tree,
+    placing the same prototypes, which the result's own placement then places
+    (``store.build``); any other result (a boolean's) carries none, and walks as its
+    geometry is. Set on the result's objects now, before the snapshot; bound to a
+    registration by :func:`_attach_trees`. By position among the result's shapes."""
+    copies = feature.history.copies if feature.history is not None else {}
+    inherited: dict[int, dict] = {}
+    for position, shape in enumerate(_result_shapes(result)):
+        attributes = shape.__dict__
+        held = attributes.get("_occurrence_tree")
+        if held is None:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        tree = made.tree if made is not None else None
+        if tree is None and position in copies:
+            source = _made_of(copies[position].source.TShape(), state)
+            tree = source.tree if source is not None else None
+        if tree is None:
+            del attributes["_occurrence_tree"]
+            continue
+        attributes["_occurrence_tree"] = inherited[position] = tree
+    return inherited
+
+
+def _attach_trees(result: Any, inherited: dict[int, dict], state: _Run) -> None:
+    """Bind each inherited tree (:func:`_inherit_trees`) to its result's registration:
+    the one tree the shape is keyed with (``_shape_key``)."""
+    if not inherited:
+        return
+    for position, shape in enumerate(_result_shapes(result)):
+        tree = inherited.get(position)
+        if tree is None:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        if made is not None:
+            made.tree = tree
+
+
 def _reject_copies(feature: Any, copied: dict[int, tuple | None], state: _Run) -> dict[int, None]:
     """Withdraw both kinds of inheritance, including what a later hit could use."""
     if not copied:
@@ -911,7 +963,23 @@ def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kw
             made.effects.append(effect)
     for made in entry.made:
         made.born = next(_SEQUENCE)
+    _restore_trees(result, state)
     return result
+
+
+def _restore_trees(result: Any, state: _Run) -> None:
+    """A hit's result that carries an occurrence tree (:func:`_inherit_trees`) carries
+    the one its registration holds now -- a composition attaches its tree afresh on
+    every call, and the snapshot restored a copy of the miss's -- so the shape is keyed
+    by the tree it carries (``_shape_key``) and the packager places this run's leaves."""
+    for shape in _result_shapes(result):
+        attributes = shape.__dict__
+        if "_occurrence_tree" not in attributes:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        if made is not None and made.tree is not None:
+            attributes["_occurrence_tree"] = made.tree
 
 
 def decoded(tree: str, label: str | None, decode: Callable[[], Any]) -> Any:
