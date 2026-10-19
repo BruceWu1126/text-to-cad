@@ -103,6 +103,29 @@ class CompoundFromInstancesTests(unittest.TestCase):
         tree_names = {c["name"] for c in descriptor["assembly"]["root"]["children"]}
         self.assertEqual({"e1", "e2"}, tree_names)
 
+    def test_a_composition_used_as_a_prototype_keeps_its_occurrences(self) -> None:
+        """A prototype that is itself a composition contributes its own occurrences -- names,
+        colours, one shared component each -- placed by the instance's placement, as the
+        packager splices it; it was one leaf part holding every solid, nameless and uncoloured."""
+        bolt = _labeled(build123d.Cylinder(1, 8), "bolt")
+        nut = _labeled(build123d.Box(3, 3, 1.5), "nut")
+        nut.color = build123d.Color(0.8, 0.2, 0.2)
+        row = compound_from_instances("row", [
+            (bolt, Location((0, 0, 0)), "bolt_0"), (nut, Location((0, 0, 4)), "nut_0"),
+            (bolt, Location((4, 0, 0)), "bolt_1"), (nut, Location((4, 0, 4)), "nut_1"),
+        ])
+        outer = compound_from_instances("outer", [(row, Location((0, 20, 0)), "front"), (row, Location((0, 40, 0)), "back")])
+        with tempfile.TemporaryDirectory() as tmp:
+            descriptor = self._build(outer, Path(tmp), "nested.py")
+        names, cids, count = _descriptor_summary(descriptor)
+        self.assertEqual(count, 8)
+        self.assertEqual(names, {"bolt_0", "nut_0", "bolt_1", "nut_1"})
+        self.assertEqual(len(cids), 2, "one bolt and one nut component, shared by every placement")
+        self.assertEqual({c["name"] for c in descriptor["assembly"]["root"]["children"]}, {"front", "back"})
+        nuts = sorted(o["transform"][7] for o in descriptor["occurrences"] if o["name"] == "nut_1")
+        self.assertEqual([round(y) for y in nuts], [20, 40], "placed by the instance's placement")
+        self.assertTrue(all(o.get("color") for o in descriptor["occurrences"] if o["name"].startswith("nut")))
+
     def test_empty_instances_raise(self) -> None:
         with self.assertRaises(RuntimeError):
             compound_from_instances("empty", [])
