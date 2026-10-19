@@ -374,7 +374,8 @@ the model's own kernel calls (booleans, fillets, placements, its calls on the
 children it composes): hits were handed back from an earlier build in the same
 build-service worker, misses ran, and uncached calls run on every build, since an argument or
 input could not be keyed (a generator, a shape built outside build123d's
-operations). A `--json`
+operations; the OCCT shape fixes, unifies, fillet makers and transforms a model
+runs itself are keyed as operations). A `--json`
 result carries the same numbers in `timings` (`null` for a current model). A
 model whose code took more than twice its last build's, and 30 s more, gets a
 warning. `python part.py --profile` rebuilds that model with its own code under

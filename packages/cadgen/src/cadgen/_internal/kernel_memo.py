@@ -11,7 +11,10 @@ shell and a compound from shapes, and the file importers -- so that every
 call made from a model's own code inside a run (``run()``) is seen once, at
 the boundary. Builder-mode wrappers are not patched: their inner topology
 calls are the ones seen. Each call seen is a **feature** for provenance
-(``kernel_trace``), whatever the memo does with it.
+(``kernel_trace``), whatever the memo does with it. The OCCT makers a model may
+run itself past build123d -- a shape fix, a unify, a fillet, a transform
+(``_MAKER_TARGETS``) -- are handed to it as this layer's subclasses, each run of
+one an operation that is no feature (``_maker_class``).
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are
@@ -155,6 +158,7 @@ import contextlib
 import enum
 import functools
 import hashlib
+import importlib
 import inspect
 import itertools
 import numbers
@@ -227,11 +231,13 @@ def enabled() -> bool:
 #
 # (class, attribute, op label), enumerated from build123d 0.11.1's topology modules.
 # A classmethod's label is prefixed with the class it is called on; ``_bool_op``'s
-# label is the boolean it runs (cut, fuse, common, section, split); a constructor's
-# is its class.
+# label is the boolean it runs (cut, fuse, common, section, split), as is that of
+# ``_bool_op_list``, the boolean an intersection runs, which hands back its pieces; a
+# constructor's is its class.
 
 _INSTANCE_TARGETS = (
     ("Shape", "_bool_op", "bool_op"),
+    ("Shape", "_bool_op_list", "bool_op_list"),
     ("Shape", "clean", "clean"),
     ("Shape", "located", "located"),
     ("Shape", "moved", "moved"),
@@ -306,8 +312,21 @@ _HELPER_TARGETS = (
 )
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
 _IMPORTER_TARGETS = ("import_step", "import_brep")
+_BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
+# OCCT makers a model may run itself, past build123d (``_maker_class``): (module, class,
+# the method that runs it -- None where its constructor does --, the constructor
+# arguments that make one that has not run, by position, where its constructor runs it,
+# whether ``Shape()`` runs it when it has not run, and the setters whose arguments its
+# key names).
+_MAKER_TARGETS = (
+    ("OCP.ShapeFix", "ShapeFix_Shape", "Perform", (), False, ("SetPrecision", "SetMinTolerance", "SetMaxTolerance")),
+    ("OCP.ShapeUpgrade", "ShapeUpgrade_UnifySameDomain", "Build", (), False,
+     ("SetLinearTolerance", "SetAngularTolerance", "AllowInternalEdges", "SetSafeInputMode", "KeepShape")),
+    ("OCP.BRepFilletAPI", "BRepFilletAPI_MakeFillet", "Build", (), True, ("Add", "SetParams", "SetContinuity")),
+    ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Transform", None, (1,), True, ()),
+)
 
 
 def install() -> bool:
@@ -348,6 +367,13 @@ def install() -> bool:
             if getattr(build123d, name, None) is original:
                 setattr(build123d, name, wrapped)
         kernel_history.install()
+        # After the history's patches, which read these modules' classes: build123d keeps
+        # the classes it imported, and a model importing one now is handed its subclass.
+        for module_name, class_name, perform, idle, builds, setters in _MAKER_TARGETS:
+            module = importlib.import_module(module_name)
+            original = getattr(module, class_name)
+            if not getattr(original, "__kernel_memo__", False):
+                setattr(module, class_name, _maker_class(original, perform, idle, builds, setters))
         _installed = True
         return True
 
@@ -388,6 +414,11 @@ def uninstall() -> bool:
                 setattr(importers, name, wrapped.__wrapped__)
                 if getattr(build123d, name, None) is wrapped:
                     setattr(build123d, name, wrapped.__wrapped__)
+        for module_name, class_name, *_spec in _MAKER_TARGETS:
+            module = importlib.import_module(module_name)
+            maker = getattr(module, class_name)
+            if getattr(maker, "__kernel_memo__", False):
+                setattr(module, class_name, maker.__kernel_memo_class__)
         kernel_history.uninstall()
         _installed = False
         return True
@@ -416,7 +447,7 @@ def _patch(cls: type, attr: str, label: str, kind: str) -> None:
 def _wrap(label: str, function: Any, kind: str) -> Any:
     @functools.wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        if label == "bool_op":
+        if label in _BOOLEAN_LABELS:
             _non_destructive(args, kwargs)
         state = getattr(_LOCAL, "run", None)
         if state is None or state.depth:
@@ -955,6 +986,297 @@ def _composes(label: str, kind: str) -> bool:
     return label == _INSTANCES or (kind == "constructor" and label == "Compound")
 
 
+# --- makers a model runs itself ----------------------------------------------------------------
+#
+# A model that reaches past build123d for an OCCT maker (``_MAKER_TARGETS``) is handed this
+# layer's subclass of it once the layer is installed (build123d keeps the classes it
+# imported). One constructed from a model's code inside a run is one operation, as a
+# build123d call is: keyed by its class, its constructor's arguments and the setters called
+# on it before it runs, in order -- a shape it is given by the key of the operation that
+# made its TShape, an edge or a face by its kind and index in the maker's own shape -- and
+# what it made is registered as that operation's result, so what the model makes of it is
+# keyed too. A hit runs nothing: ``Shape()`` hands back the TShape the earlier run's maker
+# made, the effects that run had on its input are replayed, and every other method answers
+# from that earlier maker, which made it. A call its key cannot name -- another method
+# before it runs, an argument no key names, a shape no operation made -- makes it run plain,
+# as does a run that is not the model's; once it ran, a setter is OCCT's own on it, and
+# running it again runs OCCT's own, forgetting what its own run kept. A maker's run is no
+# feature, as a decode is not.
+
+
+def _maker_class(cls: type, perform: str | None, idle: tuple[int, ...], builds: bool,
+                 setters: tuple[str, ...]) -> type:
+    """``cls`` as a model's code meets it: a subclass whose instances are ``cls``'s own
+    outside a model's run, and one operation inside it (``_Maker``)."""
+    own = frozenset((*setters, perform, "Shape"))
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        maker = _Maker.open(cls, args, kwargs)
+        self.__dict__["_kernel_maker"] = maker
+        if maker is not None and perform is None:
+            maker.run(self, lambda: cls.__init__(self, *args),
+                      idle=lambda: cls.__init__(self, *(args[i] for i in idle)))
+        else:
+            cls.__init__(self, *args, **kwargs)
+
+    def running(self: Any, *args: Any, **kwargs: Any) -> Any:
+        maker = self.__dict__.get("_kernel_maker")
+        if maker is None:
+            return getattr(cls, perform)(self, *args, **kwargs)
+        if args or kwargs:
+            maker.refuse()
+        return maker.run(self, lambda: getattr(cls, perform)(self, *args, **kwargs))
+
+    def Shape(self: Any) -> Any:  # noqa: N802 - OCCT's name
+        maker = self.__dict__.get("_kernel_maker")
+        if maker is not None:
+            if maker.pending and builds and perform is not None:
+                getattr(self, perform)()
+            if maker.served is not None:
+                return maker.served.restore()
+        return cls.Shape(self)
+
+    def setter(name: str) -> Any:
+        def call(self: Any, *args: Any, **kwargs: Any) -> Any:
+            maker = self.__dict__.get("_kernel_maker")
+            if maker is not None:
+                maker.note(name, args, kwargs)
+            return getattr(cls, name)(self, *args, **kwargs)
+
+        call.__name__ = name
+        return call
+
+    def __getattribute__(self: Any, name: str) -> Any:
+        if name not in own and not name.startswith("_"):
+            maker = object.__getattribute__(self, "__dict__").get("_kernel_maker")
+            if maker is not None:
+                if maker.served is not None:
+                    return getattr(maker.served.maker, name)
+                maker.refuse()
+        return object.__getattribute__(self, name)
+
+    namespace: dict[str, Any] = {name: setter(name) for name in setters if hasattr(cls, name)}
+    namespace.update(__init__=__init__, Shape=Shape, __getattribute__=__getattribute__, __kernel_memo__=True,
+                     __kernel_memo_class__=cls, __doc__=cls.__doc__, __module__=cls.__module__,
+                     __qualname__=cls.__qualname__)
+    if perform is not None:
+        namespace[perform] = running
+    return type(cls.__name__, (cls,), namespace)
+
+
+class _Maker:
+    """One maker a model's code constructed inside a run: its class, its constructor's
+    arguments and the setters called on it while it has not run; once it ran, the entry
+    its run is (a miss's or a hit's) and, on a hit, the earlier run that serves it."""
+
+    __slots__ = ("cls", "args", "calls", "state", "pending", "plain", "served", "entry")
+
+    def __init__(self, cls: type, args: tuple, state: "_Run | None") -> None:
+        self.cls = cls
+        self.args = args
+        self.calls: list[tuple[str, tuple]] = []
+        self.state = state
+        self.pending = True
+        self.plain = False
+        self.served: _MakerRun | None = None
+        self.entry: _Entry | None = None
+
+    @staticmethod
+    def open(cls: type, args: tuple, kwargs: dict) -> "_Maker | None":
+        """A maker to key, or None: not a model's run, or constructed by name."""
+        state = getattr(_LOCAL, "run", None)
+        if state is None or state.depth or kwargs or state.trace.frame() is None:
+            return None
+        return _Maker(cls, args, state)
+
+    def refuse(self) -> None:
+        """A call no key names before the maker ran: it runs plain."""
+        self.plain = self.plain or self.pending
+
+    def note(self, name: str, args: tuple, kwargs: dict) -> None:
+        """A setter called: named by the key while the maker has not run; once it ran, OCCT's
+        own on this maker, as its next run is."""
+        if self.pending:
+            self.plain = self.plain or bool(kwargs)
+            self.calls.append((name, args))
+
+    def forget(self) -> None:
+        """It runs again, on itself: what served it serves no more, and an entry its own run
+        kept holds a maker no longer as that run left it."""
+        entry, served = self.entry, self.served
+        self.entry = self.served = None
+        if entry is not None and served is None:
+            with _LOCK:
+                if _MEMO.get(entry.key) is entry:
+                    _MEMO.pop(entry.key)
+                    _drop(entry)
+
+    def run(self, instance: Any, real: Callable[[], Any], idle: Callable[[], Any] | None = None) -> Any:
+        """The maker's run: a hit, or ``real()`` keyed and kept; ``idle()`` constructs one
+        that has not run, for a hit where the constructor runs it."""
+        if not self.pending:
+            self.forget()
+            return real()
+        state = self.state
+        key_id = None
+        if not self.plain and getattr(_LOCAL, "run", None) is state and not state.depth:
+            try:
+                key_id, inputs = self.key()
+            except _Unkeyable:
+                pass
+            except Exception:  # noqa: BLE001
+                _STATS["errors"] += 1
+        # Run once: a maker an entry keeps holds no run, argument or call of its own.
+        self.pending, self.state, self.args, self.calls = False, None, (), []
+        if key_id is None:
+            return real()
+        n = state.count(key_id)
+        entry = None
+        if enabled():
+            with _LOCK:
+                entry = _MEMO.get((key_id, n))
+                if entry is not None and type(entry.snapshot) is _MakerRun and entry.matches(inputs):
+                    _MEMO.move_to_end((key_id, n))
+                else:
+                    entry = None
+        if entry is not None:
+            if idle is not None:
+                idle()
+            _reset(entry.made, state.id)
+            for index, effect in entry.effects:
+                effect.apply(state.id)
+                made = _made_of(_wrapped(inputs[index]).TShape(), state)
+                if made is not None:
+                    made.effects.append(effect)
+            for made in entry.made:
+                made.born = next(_SEQUENCE)
+            entry.refresh(None, state, {})
+            self.served, self.entry = entry.snapshot, entry
+            return entry.snapshot.answer
+        try:
+            captured = _capture(inputs)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            return real()
+        given = [_wrapped(item).TShape() for item in inputs]
+        answer = _decoding(real, state)
+        try:
+            effects, sound = _effects(captured, state)
+        except Exception:  # noqa: BLE001
+            _STATS["errors"] += 1
+            for item in captured:
+                _taint(_made_of(item.handle.TShape(), state), state)
+            return answer
+        try:
+            result = self.cls.Shape(instance)
+        except Exception:  # noqa: BLE001 - it made nothing: nothing to keep
+            return answer
+        if not sound or result is None or result.IsNull():
+            return answer
+        for index, effect in effects:
+            effect.origin = (key_id, n, index)
+        entry = _Entry(key=(key_id, n), inputs=given, snapshot=_MakerRun(result, answer, instance), effects=effects)
+        _replace(entry.key)
+        entry.made = _register_handle(result, entry.key, state, entry)
+        _keep(entry)
+        self.entry = entry
+        return answer
+
+    def key(self) -> tuple[int, list]:
+        """The maker's key, as an operation's: its class, the constructor's arguments and
+        the setters called, in order; and the shapes it was given, as inputs."""
+        from OCP.TopoDS import TopoDS_Shape
+
+        state = self.state
+        base = next((value for value in self.args if isinstance(value, TopoDS_Shape)), None)
+        inputs = [_Given(value) for value in self.args if isinstance(value, TopoDS_Shape)]
+        parts = tuple(_maker_value(value, state, None) for value in self.args)
+        calls = tuple((name, tuple(_maker_value(value, state, base) for value in args)) for name, args in self.calls)
+        return _intern((self.cls.__name__, (parts, calls), (), ())), inputs
+
+
+class _Given:
+    """A ``TopoDS_Shape`` a maker was given, read as a shape input is: by ``_wrapped``."""
+
+    def __init__(self, handle: Any) -> None:
+        self.__dict__["_wrapped"] = handle
+
+
+class _MakerRun:
+    """A maker's run as its entry keeps it: what it made, what running it answered, and the
+    maker, which answers whatever else a later run asks of the one it serves."""
+
+    __slots__ = ("wrapped", "answer", "maker")
+
+    def __init__(self, wrapped: Any, answer: Any, maker: Any) -> None:
+        self.wrapped = wrapped.Located(wrapped.Location())
+        self.answer = answer
+        self.maker = maker
+
+    def restore(self) -> Any:
+        return self.wrapped.Located(self.wrapped.Location())
+
+
+def _maker_value(value: Any, state: _Run, base: Any) -> Any:
+    """One argument a maker was given, as a key part: a shape by :func:`_raw_key`, a
+    transformation by its matrix, an OCCT enumeration by its value."""
+    from OCP.TopoDS import TopoDS_Shape
+    from OCP.gp import gp_Trsf
+
+    if isinstance(value, TopoDS_Shape):
+        return ("shape", _raw_key(value, state, base))
+    if isinstance(value, gp_Trsf):
+        return ("trsf", tuple(("n", struct.pack("<d", value.Value(row, column)))
+                              for row in (1, 2, 3) for column in (1, 2, 3, 4)))
+    if value is None or isinstance(value, (bool, str, numbers.Real)):
+        return _normalize(value, state)
+    if hasattr(type(value), "__members__") and (type(value).__module__ or "").startswith("OCP"):
+        return ("enum", type(value).__name__, int(value))
+    raise _Unkeyable(f"unkeyable maker argument: {type(value).__name__}")
+
+
+def _raw_key(handle: Any, state: _Run, base: Any = None) -> int:
+    """The interned key of a ``TopoDS_Shape`` a maker was given, as a shape input's
+    (:func:`_shape_key`) with no attributes: a TShape a memoized operation made, by that
+    operation's key, or else a sub-shape of the maker's own shape ``base``, by its kind and
+    index there; with its location and orientation."""
+    if handle.IsNull():
+        raise _Unkeyable("an empty shape")
+    made = _made_of(handle.TShape(), state)
+    if made is not None and made.parent is None:
+        head = made.base(None, state)
+    elif base is not None and handle is not base:
+        kind = int(handle.ShapeType())
+        index = _sub_map(base, kind).FindIndex(handle)
+        if index == 0:
+            raise _Unkeyable("not a sub-shape of the maker's shape")
+        head = ("sub", _raw_placed(base, state), kind, index, ())
+    else:
+        raise _Unkeyable("a shape no operation of this process made")
+    return _intern((("shape", head, _location_key(handle), int(handle.Orientation())), ("raw",), ()))
+
+
+def _raw_placed(handle: Any, state: _Run) -> tuple:
+    made = _made_of(handle.TShape(), state)
+    if made is None or made.parent is not None:
+        raise _Unkeyable("a shape no operation of this process made")
+    return ("shape", made.base(None, state), _location_key(handle), int(handle.Orientation()))
+
+
+def _register_handle(handle: Any, key: tuple[int, int], state: _Run, entry: "_Entry") -> list["_Made"]:
+    """Register a maker's result under the entry that made it, as :func:`_register` does a
+    result's shapes; one already registered (the maker handed back its input) keeps its
+    first maker."""
+    tshape = handle.TShape()
+    if _made_of(tshape, state) is not None:
+        return []
+    made = _Made(tshape, key=key, feature=None, run=state.id, entry=entry)
+    with _LOCK:
+        _REGISTRY[tshape] = made
+        state.registered[tshape] = made
+    return [made]
+
+
 def _constructs(label: str, args: tuple, kwargs: dict) -> bool:
     """Whether a constructor call builds a shape, rather than wrapping a
     ``TopoDS`` the kernel already holds or making an empty one."""
@@ -971,7 +1293,7 @@ def _constructs(label: str, args: tuple, kwargs: dict) -> bool:
 
 
 def _op_name(label: str, kind: str, args: tuple, kwargs: dict) -> str:
-    if label == "bool_op":
+    if label in _BOOLEAN_LABELS:
         operation = args[3] if len(args) > 3 else kwargs.get("operation")
         name = type(operation).__name__
         return _BOOLEANS.get(name, name.removeprefix("BRepAlgoAPI_").lower())

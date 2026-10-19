@@ -234,12 +234,25 @@ from cadgen import compound_from_instances, read_step, step
 PIN = 1.0
 
 
+def unified(shape):
+    from OCP.ShapeFix import ShapeFix_Shape
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+
+    fix = ShapeFix_Shape(shape.wrapped)
+    fix.SetPrecision(1e-6)
+    fix.Perform()
+    unify = ShapeUpgrade_UnifySameDomain(fix.Shape(), True, True, False)
+    unify.Build()
+    result = bd.Solid(unify.Shape())
+    assert result.is_valid
+    result.label = "bored"
+    return result
+
+
 @step
 def rig():
     vendor = read_step(Path(__file__).parent / "vendor.step")
-    bored = vendor.cut(bd.Solid.make_cylinder(1, 30))
-    assert bored.is_valid
-    bored.label = "bored"
+    bored = unified(vendor.cut(bd.Solid.make_cylinder(1, 30)))
     pair = compound_from_instances("pair", [(bored, bd.Location((0, 0, 0)), "left"),
                                             (vendor, bd.Location((20, 0, 0)), "right")])
     peg = bd.Solid.make_cylinder(PIN, 5)
@@ -249,11 +262,11 @@ def rig():
 
 
 class ImportedPublication(PublicationCacheCase):
-    """A model reading a STEP file and placing what it makes of it with
-    ``compound_from_instances``: an edit elsewhere prepares nothing made of the read, a
-    file with other bytes prepares what is made of it again, and each rebuild writes what a
-    cold build writes. Each store holds the file's compile before a build reads it, so what
-    a build prepares is its own."""
+    """A model reading a STEP file, placing what it makes of it with
+    ``compound_from_instances`` and fixing it with OCCT makers of its own: an edit elsewhere
+    prepares nothing made of the read, a file with other bytes prepares what is made of it
+    again, and each rebuild writes what a cold build writes. Each store holds the file's
+    compile before a build reads it, so what a build prepares is its own."""
 
     def setUp(self) -> None:
         super().setUp()

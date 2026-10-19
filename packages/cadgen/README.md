@@ -391,9 +391,12 @@ an operation returned, and what build123d's `==` and `is_same` answer is what
 they would answer in a run that happened to make those objects -- pointer
 identity is preserved along every chain of hits, a hit needs the very input
 objects the first run was given (a shape no operation of this process made
-runs its call uncached; `compound_from_instances` is an operation of its
-prototypes, placements and names, the occurrence tree it carries built again
-from each call), and every miss makes its downstream miss, which is
+runs its call uncached, so the OCCT makers a model may run itself -- a shape
+fix, a unify, a fillet, a transform -- are operations too, keyed by their
+constructor's arguments and the setters called before they run;
+`compound_from_instances` is an operation of its prototypes, placements and
+names, the occurrence tree it carries built again from each call), and every
+miss makes its downstream miss, which is
 why the memo is correct where the operation cache cadgen once kept
 (`index/op`, retired, `STORE.md` §8) was not: that one replayed bytes into
 fresh shapes, and model code that held an edge across an operation found
