@@ -6,6 +6,7 @@
 // through these, so they draw the same payload, fetch the same meshes and fail on the
 // same missing one. The page reads no description: URDF, SRDF and SDF are one payload.
 
+import { isAbortError } from "../renderAssetClient.js";
 import { loadRenderMeshByUrl, peekRenderMeshByUrl } from "../render/meshLoaders.js";
 import { buildRobotParts } from "./robotParts.js";
 
@@ -27,13 +28,17 @@ export function peekRobotMeshes(urls, { resources } = {}) {
   return meshes.every(Boolean) ? meshes : null;
 }
 
-/** The first visual that names `url`, as its description wrote it: `link “base” mesh “meshes/base.stl”`. */
-function meshNamedBy(description, url) {
-  for (const link of Array.isArray(description?.links) ? description.links : []) {
-    for (const visual of Array.isArray(link?.visuals) ? link.visuals : []) {
-      if (String(visual?.meshUrl || "").trim() === url) {
-        return `Link “${link.name}” mesh “${visual.filename || url}”`;
-      }
+/** The first visual that names `url`, as its description wrote it: `Link “base” mesh “meshes/base.stl”`.
+ * A link's facts list its drawn visuals in the payload's order, so the n-th visual of a link
+ * has the n-th facts, and with them the filename as written. */
+function meshNamedBy(robot, url) {
+  const facts = new Map((Array.isArray(robot?.links) ? robot.links : []).map(link => [link?.name, Array.isArray(link?.visuals) ? link.visuals : []]));
+  const seen = new Map();
+  for (const visual of Array.isArray(robot?.visuals) ? robot.visuals : []) {
+    const index = seen.get(visual?.link) ?? 0;
+    seen.set(visual?.link, index + 1);
+    if (String(visual?.mesh?.url || "").trim() === url) {
+      return `Link “${visual.link}” mesh “${facts.get(visual.link)?.[index]?.filename || visual.label || url}”`;
     }
   }
   return `Mesh ${url}`;
@@ -41,20 +46,21 @@ function meshNamedBy(description, url) {
 
 /** A mesh's failure, saying which link's mesh it is: the server's reason alone ("No file at …")
  * did not say which `<mesh>` to fix. Cancellation passes through as it came. */
-function meshFailure(error, description, url, signal) {
+function meshFailure(error, robot, url, signal) {
   if (signal?.aborted || isAbortError(error)) return error;
-  return Object.assign(new Error(`${meshNamedBy(description, url)}: ${error?.message || error}`, { cause: error }),
+  return Object.assign(new Error(`${meshNamedBy(robot, url)}: ${error?.message || error}`, { cause: error }),
     { status: error?.status, url: error?.url || url, alert: error?.alert });
 }
 
 /**
  * Every mesh, in `urls` order. A mesh that fails to load fails the robot: a robot drawn
  * without one of its links is a plausible wrong picture, in the viewer and in a snapshot alike.
+ * Its error names the link and the mesh as the description wrote it.
  *
  * @param {Map<string, string>} urls  `robotMeshUrls(robot)`.
- * @param {{ resources?: object, signal?: AbortSignal, concurrency?: number, onMeshLoaded?: (done: number) => void }} [options]
+ * @param {{ robot?: object, resources?: object, signal?: AbortSignal, concurrency?: number, onMeshLoaded?: (done: number) => void }} [options]
  */
-export async function loadRobotMeshes(urls, { resources, signal, concurrency = DEFAULT_MESH_CONCURRENCY, onMeshLoaded } = {}) {
+export async function loadRobotMeshes(urls, { robot, resources, signal, concurrency = DEFAULT_MESH_CONCURRENCY, onMeshLoaded } = {}) {
   const entries = [...urls];
   const meshes = new Array(entries.length);
   let next = 0;
@@ -65,7 +71,11 @@ export async function loadRobotMeshes(urls, { resources, signal, concurrency = D
       next += 1;
       signal?.throwIfAborted();
       const [url, format] = entries[index];
-      meshes[index] = await loadRenderMeshByUrl(url, { signal, resources, fallback: format });
+      try {
+        meshes[index] = await loadRenderMeshByUrl(url, { signal, resources, fallback: format });
+      } catch (error) {
+        throw meshFailure(error, robot, url, signal);
+      }
       done += 1;
       onMeshLoaded?.(done);
     }
@@ -95,5 +105,5 @@ export async function loadRobot({ robot, resources, signal, concurrency } = {}) 
     throw new Error("a robot is drawn from the payload cadgen resolved (resolved.robot): none was given");
   }
   const urls = robotMeshUrls(robot);
-  return robotModel(robot, urls, await loadRobotMeshes(urls, { resources, signal, concurrency }));
+  return robotModel(robot, urls, await loadRobotMeshes(urls, { robot, resources, signal, concurrency }));
 }
