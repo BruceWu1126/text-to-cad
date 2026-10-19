@@ -18,6 +18,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from tests.python.support.fixture_requests import cleanup_after_requests
 from tests.python.support.paths import REPO_ROOT
 
 CADGEN_SRC = REPO_ROOT / "packages" / "cadgen" / "src"
@@ -37,9 +38,9 @@ class KernelImportHintTest(unittest.TestCase):
         self.project = Path(self._tmp.name)
         (self.project / "lib").mkdir()
         (self.project / "lib" / "__init__.py").write_text("", encoding="utf-8")
-
-    def tearDown(self) -> None:
-        self._tmp.cleanup()
+        # A build answers before the jobs it owes (its STEP, its display data) have written
+        # the store: the folder goes once they have ended.
+        self.addCleanup(cleanup_after_requests, self._tmp, [self.project / "cache"], environment=dict(os.environ))
 
     def _run(self, name: str) -> str:
         env = dict(os.environ)
