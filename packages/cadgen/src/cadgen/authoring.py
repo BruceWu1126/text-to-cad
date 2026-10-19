@@ -693,11 +693,6 @@ def dxf(
     **unsupported: Any,
 ):
     """Declare a DXF drawing. Usable bare (``@dxf``) or configured (``@dxf(...)``)."""
-    if "kinematics" in unsupported:
-        raise TypeError(
-            "@dxf takes no kinematics=: a drawing is 2D geometry — kinematics "
-            "lives on @step and the mesh decorators"
-        )
     with _declaring_here():
         _reject_unknown_kwargs("dxf", unsupported)
     decorator = _decorator("dxf", out=out)
@@ -737,7 +732,6 @@ def _mesh_export_decorator(deco_name: str, fmt: str):
         out: str | None = None,
         mesh_tolerance: float | None = None,
         mesh_angular_tolerance: float | None = None,
-        kinematics: object = None,
         **unsupported: Any,
     ):
         with _declaring_here():
@@ -749,17 +743,11 @@ def _mesh_export_decorator(deco_name: str, fmt: str):
             )
             if out is not None and not out.lower().endswith(suffix):
                 raise ValueError(f"@{deco_name} out= must end with '{suffix}': {out!r}")
-            kinematics_def = (
-                normalize_kinematics(kinematics, where=f"@{deco_name}")
-                if kinematics is not None
-                else None
-            )
         decl = MeshExportDecl(
             fmt=fmt,
             out=out,
             mesh_tolerance=mesh_tolerance,
             mesh_angular_tolerance=mesh_angular_tolerance,
-            kinematics=kinematics_def,
         )
 
         def attach(target: Callable[..., Any]) -> Callable[..., Any]:

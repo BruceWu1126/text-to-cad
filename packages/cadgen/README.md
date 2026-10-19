@@ -176,7 +176,7 @@ sync-tested.
 
 *Pressure-test*: for any option, "what is this called on the other two
 surfaces?" must answer with the same name and a role-determined payload —
-`kinematics` everywhere: on DECLARING surfaces (decorators, `step build`)
+`kinematics` everywhere: on DECLARING surfaces (`@step`, `step build`)
 it is the space (`{mates, couplings, poses}`); on the CONSUMING surface
 (snapshot) it is a point in that space (a preset name or `{dof: value}`).
 The mesh `build` doors take no `kinematics`: a mesh is the document's tree,
