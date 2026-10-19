@@ -263,7 +263,8 @@ class StepPublicationTests(unittest.TestCase):
         self.assertIn("changed during the build", self.output)
         # The record names the new result from its source result on, its STEP never written.
         self.assertNotEqual(read_record(f"{self.model}::part")["tree"], record["tree"])
-        self.assertEqual("never written", stale(f"{self.model}::part").reason().split(":")[0])
+        # The file on disk is the earlier bytes, not this result's: the gate says what it holds.
+        self.assertEqual("holds an earlier result", stale(f"{self.model}::part").reason().split(":")[0])
 
     def test_incomplete_saved_tree_keeps_last_document(self) -> None:
         from cadgen.store import build as store_build

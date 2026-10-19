@@ -103,7 +103,9 @@ class Verdict:
         ``closure changed: <file> appeared``, ``environment variable <NAME> changed``,
         ``constant changed: <NAME> in <file>``, ``child stale: <child.py>``,
         ``child rebuilt: <child.py>``, ``tree or components missing``,
-        ``never written: <path>`` / ``output missing: <path>`` / ``output changed: <path>``,
+        ``never written: <path>`` / ``holds an earlier result: <path>`` (its result's export never
+        landed, and the file is what stood there before) / ``output missing: <path>`` /
+        ``output changed: <path>``,
         ``producer changed: <name> <recorded> -> <now>``."""
         for clause in self.clauses:
             if not clause.get("stale"):
@@ -326,7 +328,9 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         expected = str((meta or {}).get("sha256") or "")
         actual = _sha256_file(Path(path))
         ok = bool(expected) and actual == expected
-        why = None if ok else "never written" if not expected else "missing" if actual is None else "changed"
+        why = (None if ok
+               else ("never written" if actual is None else "holds an earlier result") if not expected
+               else "missing" if actual is None else "changed")
         output_clauses.append({"path": path, "stale": not ok, "why": why})
         if not ok:
             verdict.stale = True

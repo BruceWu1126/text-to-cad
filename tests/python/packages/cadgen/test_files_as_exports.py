@@ -172,6 +172,31 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertEqual("current", self.build()[0])
         self.assertEqual(written, self.step.read_bytes())
 
+    def test_a_rerun_during_an_export_in_flight_waits_for_it_rather_than_exporting_again(self) -> None:
+        # A run that finds its result current while a job of the previous run is still
+        # writing the file asks the ledger first, as a door does, and reads the record that
+        # write fills: never "was never written; writing it again" and a second export.
+        from cadgen.store.index import model_ref
+        from cadgen.store.records import write_record
+
+        self.build()
+        landed = self.record()
+        pending = json.loads(json.dumps(landed))
+        pending["outputs"][str(self.step.resolve())]["sha256"] = ""
+        write_record(model_ref(self.script, "rig"), pending)
+        asked = []
+
+        def await_writes(path):
+            asked.append(Path(path).resolve())
+            write_record(model_ref(self.script, "rig"), landed)  # the export lands while the run waits
+
+        with mock.patch("cadgen._internal.doors.await_writes", side_effect=await_writes):
+            outcome, said = self.build()
+        self.assertEqual("current", outcome)
+        self.assertIn(self.step.resolve(), asked, "the run judged the file without asking the ledger")
+        self.assertNotIn("writing it again", said)
+        self.assertNotIn("never written", said)
+
     def test_a_file_whose_entry_the_store_lost_is_mapped_again(self) -> None:
         """A current model's file the store has no entry for is exported again by its next
         run: the same bytes, which keep the file and its stamp, mapped to the result --
@@ -214,14 +239,16 @@ class KeptRuleTest(unittest.TestCase):
         # The file's bytes map to the tree they were written from.
         note_document_tree(self.DIGEST, self.TREE)
 
-    def plan(self, *, output: dict | None = None, tree: str | None = None, on_disk: str | None = None,
+    _ON_DISK = object()
+
+    def plan(self, *, output: dict | None = None, tree: str | None = None, on_disk: object = _ON_DISK,
              force: bool = False):
         from cadgen._internal.generation import _export_plan
         from cadgen.step_export import STEP_WRITER_SCHEME
 
         output = {"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME} if output is None else output
         return _export_plan({"tree": self.TREE, "outputs": {self.STEP: output}}, self.STEP, tree or self.TREE,
-                            force=force, on_disk=on_disk or self.DIGEST)
+                            force=force, on_disk=self.DIGEST if on_disk is self._ON_DISK else on_disk)
 
     def test_a_file_is_kept_while_its_tree_writer_and_bytes_agree(self) -> None:
         from cadgen.step_export import STEP_WRITER_SCHEME
@@ -231,8 +258,11 @@ class KeptRuleTest(unittest.TestCase):
         self.assertEqual({"sha256": self.DIGEST, "writer": STEP_WRITER_SCHEME}, kept.output())
         for why, plan, said in (("another result", self.plan(tree="c" * 64), ""),
                                 ("other bytes on disk", self.plan(on_disk="f" * 64), "is not the file the record names"),
-                                ("never written", self.plan(output={"sha256": "", "writer": STEP_WRITER_SCHEME}),
-                                 "was never written"),
+                                ("never written", self.plan(output={"sha256": "", "writer": STEP_WRITER_SCHEME},
+                                                            on_disk=None), "was never written"),
+                                ("an export that never finished, the earlier file still there",
+                                 self.plan(output={"sha256": "", "writer": STEP_WRITER_SCHEME}),
+                                 "holds an earlier result; its export never finished"),
                                 ("forced", self.plan(force=True), ""),
                                 ("another writer", self.plan(output={"sha256": self.DIGEST, "writer": "cadgen-step-writer-3"}),
                                  "was written by another writer")):

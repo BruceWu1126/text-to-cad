@@ -101,7 +101,11 @@ def _export_plan(previous: Mapping[str, object], step_key: str, tree: str, *, fo
     if not force and same and sha and on_disk == sha:
         why = "was written by another writer" if not this_writer else "has no entry in the store"
     elif not force and same:
-        why = ("is owed" if prior.get("owed") else "was never written" if not sha
+        # No digest recorded: the result's export never landed. The file on disk, when there
+        # is one, is what stood there before -- an earlier result's -- not this result's.
+        why = ("is owed" if prior.get("owed")
+               else ("was never written" if on_disk is None else "holds an earlier result; its export never finished")
+               if not sha
                else "is missing" if on_disk is None else "is not the file the record names")
     return _ExportPlan(kept=None, why=why)
 
@@ -1742,8 +1746,15 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
         _tree_event(child_spec, "current", outputs=_declared_outputs(child_spec))
     step = None
     if spec.source == "generated" and spec.step_output and spec.step_path is not None:
+        from cadgen._internal.doors import await_writes
         from cadgen._internal.source_sidecar import source_sidecar_path
 
+        # A job of an earlier run may still be writing this file (STORE.md §3, *Exports*): the
+        # ledger says so, and this run waits for it as a door does, then reads the record
+        # that write fills -- rather than reading a pending digest as "never written" and
+        # queueing a second export of the same result.
+        await_writes(spec.step_path)
+        record = read_record(model) or record
         pair = document_pair_state(spec.step_path)
         plan = _export_plan(record, str(spec.step_path.expanduser().resolve()), tree, force=False, on_disk=pair[0])
         recorded = (record.get("outputs") or {}).get(str(source_sidecar_path(spec.entry_path).resolve())) or {}
