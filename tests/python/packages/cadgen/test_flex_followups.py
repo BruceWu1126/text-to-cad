@@ -135,10 +135,13 @@ class FollowUps(unittest.TestCase):
         )
         completed = self.run_in(pkg.parent, "top.py")
         self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
-        self.await_saved(pkg.parent / "top.step")
-        self.assertTrue((pkg.parent / "top.step").is_file())
-        self.assertTrue((pkg / "stack_rel.step").is_file(), "the child inside the package built in its worker")
-        self.assertTrue((pkg / "parts" / "washer.step").is_file(), "and its relative import resolved")
+        # Each model's file is its own owed job (STORE.md §3, *Exports*): the parent's landing
+        # says nothing of a child's, so each is awaited as a reader awaits it.
+        for path, said in ((pkg.parent / "top.step", "the parent built"),
+                           (pkg / "stack_rel.step", "the child inside the package built in its worker"),
+                           (pkg / "parts" / "washer.step", "and its relative import resolved")):
+            self.await_saved(path)
+            self.assertTrue(path.is_file(), said)
 
     def test_a_relative_import_inside_a_package_builds_under_dash_m(self) -> None:
         pkg = self._package()
