@@ -675,7 +675,11 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   byte length, the mesh's decoded-bytes estimate and counts (and
   `unmeshedFaceCount` when a face could not be meshed), the table's counts. One
   probe answers whether a part's display data is stored: the entry is valid and
-  both objects are present at their sizes. Derivation (`parts._derive`) decodes
+  both objects are present at their sizes. A worker keeps each entry it read and
+  found valid under the entry file's settled fingerprint (§10) and parses it
+  again while the file keeps that fingerprint -- an entry is written by
+  replacing it -- still finding both objects at their sizes on every probe.
+  Derivation (`parts._derive`) decodes
   the component's BREP once, extracts its **topology facts** in memory
   (`_internal/topology_extract.py`: ordinal tables of its solids, faces and
   edges holding exactly what the mesher and the selector table read and no
@@ -959,7 +963,13 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   composed placement, an assembly child's group by its name,
   `_internal/tree_tokens.py`), composes transforms, and merges components. `cadgen.store.view` lays that
   out as a temporary directory or serves it virtually; nothing of the sort is
-  ever written INTO the store.
+  ever written INTO the store. A link's expansion -- the child's nodes and
+  occurrences re-rooted, placed and coloured, its components and its
+  appearance -- is a function of the linked tree and of the link (its token,
+  name, placement and colour), so a worker keeps each it made, in compact JSON
+  and bounded by bytes (`trees._expansion`), and takes it again while every
+  tree object it read still has the settled identity this process verified it
+  under (§10); a parent flattened again expands only the links that changed.
 
 ### Record
 
@@ -1063,7 +1073,12 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   changed value is `environment variable NAME changed`, and a change to a
   variable the model never read changes nothing. The clips declared by `@step(animation=...)` are code,
   in the closure like the rest of the model's reach; the build bakes them to
-  keyframes in the unified sidecar, and they never enter geometry identity. The
+  keyframes in the unified sidecar, and they never enter geometry identity. A
+  build whose result -- its key and its tree -- a stored result holds already
+  takes that result's keyframes instead of baking the clips again
+  (`generation._stored_animation`: a result is a function of its key, §4), and
+  a bake reduces again only the tracks whose samples, parts' extents and
+  tolerance this worker has not reduced before (`animation_bake`). The
   boundary is decided statically by what the importer TAKES from a model
   file: only model functions (`from arm import arm`) → a result edge, file
   excluded, the child tracked by its key (also when that file declares several
@@ -1675,6 +1690,15 @@ Decided mechanically from the returned geometry and occurrence metadata.
   Native identity alone is insufficient: OCCT can mutate an existing TShape,
   and a nested label, color or placement can change independently. Verification
   reads private topology without altering caller geometry or meshing flags.
+  Inside a model run a decoded child's leaves are the kernel memo's (§9a), and
+  a check takes the digest an earlier check took of a leaf the memo holds while
+  everything the memo knows of it is as it was then -- the same ledger rows on
+  each of its sub-shapes, no change since that the memo could not replay
+  (`materialize.HeldDigests`) -- so an unchanged child's geometry is digested
+  once per worker, not at every publication that links it. A change the memo
+  does not see (a raw OCCT edit of a leaf a check has digested) is seen by
+  neither, as for a remembered component (§3, *Tree*); outside a run, and for
+  geometry the memo does not hold, every check reads every leaf.
   Copying a modified child cannot establish a clean baseline for the old tree.
   Root placement, label and color remain link overrides. A part's root color
   replaces its previous color; an assembly's root color inherits into otherwise
@@ -1720,8 +1744,12 @@ Decided mechanically from the returned geometry and occurrence metadata.
   for it at the kernel's own placement of each leaf (`bounds.composed_bounds`),
   else decoded from the store -- so no child is assembled for its parent's
   bounds, and the box is the same function of the tree whichever way it is
-  found. The animation bake's leaf boxes find for a result what its
-  publication measured. A miss measures every native leaf with the same
+  found. The box of the occurrences one link places, every one of them a box
+  the store remembers, is kept per worker by the linked tree and the link's
+  placement (`bounds.remembered_link_box`): the bounds of a run of boxes are
+  the box of their bounds, taken in order, so a parent published again
+  measures only its changed links. The animation bake's leaf boxes find for a
+  result what its publication measured. A miss measures every native leaf with the same
   optimal extrema operation; it never transforms a component AABB. A
   component that cannot be measured so (an eager-only child's) falls back to
   the whole composed native shape, after the same component validation and

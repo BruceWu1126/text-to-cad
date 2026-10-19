@@ -132,6 +132,7 @@ def get_tree(tree_hash: str) -> dict[str, Any] | None:
     try:
         data = json.loads(read_verified_object(tree_hash))
         _validate_structure(data)
+        _note_links(tree_hash, data)
         return data
     except (OSError, ValueError, TypeError, KeyError, OverflowError):
         return None
@@ -295,6 +296,7 @@ def flatten_tree(
     tree_hash: str | None = None,
     memo: dict[str, dict[str, Any]] | None = None,
     origins: dict[str, tuple[str, str]] | None = None,
+    blocks: list[tuple[str, tuple[float, ...], int, int]] | None = None,
 ) -> dict[str, Any]:
     """:func:`flatten` of a tree held in memory — one not (yet) in the store.
 
@@ -303,13 +305,17 @@ def flatten_tree(
     resolve against the store as usual. ``tree_hash`` is recorded on the descriptor when known and
     memoizes the result.
 
-    A child's nodes are re-rooted under the link's token: expanded with
-    provisional ids, then every id of the flattened tree is minted again from
-    its structure, names and composed placements (``tree_tokens.assign_tokens``),
-    which gives the parent's own nodes the tokens they already had and the
-    child's the tokens the saved document gives them. ``origins``, when given, is
-    filled with where each node a link placed came from: its token here mapped to the
-    linked tree and the node's token in that tree flattened."""
+    A child's nodes are re-rooted under the link's token: every id of the flattened
+    tree is the one minted from its structure, names and composed placements
+    (``tree_tokens.assign_tokens``), which gives the parent's own nodes the tokens they
+    already had and the child's the tokens the saved document gives them -- each
+    link's from the link's own token down, so a link's expansion is a function of the
+    linked tree and of the link (its token, name, placement and colour) alone, and one
+    this process expanded before is taken as it was (:func:`_expansion`). ``origins``,
+    when given, is filled with where each node a link placed came from: its token here
+    mapped to the linked tree and the node's token in that tree flattened. ``blocks``,
+    when given, is told where each link's occurrences lie among the flattened ones, in
+    order: the linked tree, the link's placement and the run's start and end."""
     from cadgen._internal.tree_tokens import assign_tokens, retoken
 
     memo = memo if memo is not None else {}
@@ -318,9 +324,6 @@ def flatten_tree(
     occurrences: list[dict[str, Any]] = [dict(occ) for occ in tree.get("occurrences") or []]
     links = {str(link.get("id")): link for link in (tree.get("links") or []) if isinstance(link, dict)}
 
-    def provisional(link_id: str, child_id: str) -> str:
-        """A unique id for a child's node under a link, until the flattened tree is tokened."""
-        return f"{link_id}|{child_id}"
     # A published model tree carries its complete resolved intrinsic appearance.
     # An unpublished draft does not, so flattening it composes child libraries
     # and rebases their assignments before the parent declaration is resolved.
@@ -343,18 +346,15 @@ def flatten_tree(
             })
     appearance_materials = dict((own_appearance or {}).get("materials") or {})
     appearance_assignments = dict((own_appearance or {}).get("assignments") or {})
-    # A child's assignments, under provisional ids until the flattened tree is tokened; the
-    # tree's own are keyed by the flattened tokens already.
+    # A child's assignments, by the tokens of the flattened tree; the tree's own are keyed
+    # by them already.
     inherited_assignments: dict[str, str] = {}
 
-    def inherit_appearance(child: dict[str, Any], link_id: str) -> None:
-        if appearance_authoritative:
-            return
-        child_appearance = normalize_appearance(child.get("appearance"))
-        if child_appearance is None:
+    def inherit_appearance(child_appearance: dict[str, Any] | None, link_id: str) -> None:
+        if appearance_authoritative or child_appearance is None:
             return
         remapped: dict[str, str] = {}
-        for material_id, definition in child_appearance["materials"].items():
+        for material_id, definition in child_appearance["materials"]:
             if material_id not in appearance_materials or appearance_materials[material_id] == definition:
                 inherited_id = material_id
             else:
@@ -365,89 +365,10 @@ def flatten_tree(
                     suffix += 1
             appearance_materials.setdefault(inherited_id, dict(definition))
             remapped[material_id] = inherited_id
-        child_root = (child.get("assembly") or {}).get("root")
-        child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
-        for occurrence_id, material_id in child_appearance["assignments"].items():
-            # The child's root IS the link (a part child's one occurrence takes the link's
-            # id, as ``expand`` places it); every other node gets a provisional id.
-            key = link_id if occurrence_id == child_root_id else provisional(link_id, occurrence_id)
-            inherited_assignments[key] = remapped[material_id]
-
-    # Each node a link placed, under its provisional id (or the link's own): the linked
-    # tree and the node's token in it (``origins``).
-    placed_from: dict[str, tuple[str, str]] = {}
-
-    def expand(node: dict[str, Any]) -> dict[str, Any] | None:
-        node_type = str(node.get("nodeType") or "")
-        node_id = str(node.get("id") or "")
-        if node_type == "link" or node_id in links:
-            link = links.get(node_id) or {}
-            child_hash = str(link.get("tree") or "")
-            child = flatten(child_hash, memo=memo) if child_hash else None
-            if child is None:
-                raise FileNotFoundError(
-                    f"tree {tree_hash or '<unpublished>'}: linked tree object missing: "
-                    f"{child_hash or '<empty>'}"
-                )
-            inherit_appearance(child, node_id)
-            placement = _as16(link.get("transform"))
-            for cid, entry in (child.get("components") or {}).items():
-                components.setdefault(cid, dict(entry))
-            link_name = str(link.get("name") or node.get("name") or node_id)
-            link_color = link.get("color")
-            child_is_part = str(child.get("entryKind") or "") == "part"
-            child_root = (child.get("assembly") or {}).get("root")
-            child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
-            if child_root_id:
-                placed_from[node_id] = (child_hash, child_root_id)
-            for occ in child.get("occurrences") or []:
-                placed = dict(occ)
-                occ_id = str(occ.get("id") or "")
-                # The child's root IS the link: a part child's one occurrence takes the
-                # link's id and name (the label the parent gave the placement).
-                placed["id"] = node_id if occ_id == child_root_id else provisional(node_id, occ_id)
-                placed["transform"] = compose_transforms(placement, occ.get("transform"))
-                component = (child.get("components") or {}).get(str(occ.get("component") or "")) or {}
-                # A root color on a materialized Compound is inherited only by
-                # descendants with no explicit color of their own. Component
-                # color is the occurrence fallback used by materialize/render,
-                # so it is an authored color for the same purpose here.
-                if link_color is not None and (
-                    child_is_part or (occ.get("color") is None and component.get("color") is None)
-                ):
-                    placed["color"] = link_color
-                if occ_id == child_root_id:
-                    placed["name"] = link_name
-                occurrences.append(placed)
-
-            def rebase(sub: dict[str, Any]) -> dict[str, Any]:
-                out = dict(sub)
-                out["id"] = provisional(node_id, str(sub.get("id") or ""))
-                placed_from[out["id"]] = (child_hash, str(sub.get("id") or ""))
-                if sub.get("children"):
-                    out["children"] = [rebase(c) for c in sub["children"]]
-                    out["leafPartIds"] = [leaf for c in out["children"] for leaf in c.get("leafPartIds", [c["id"]])]
-                else:
-                    out["leafPartIds"] = [out["id"]]
-                return out
-
-            if isinstance(child_root, dict):
-                rebased = rebase(child_root)
-                rebased["name"] = str(link.get("name") or node.get("name") or rebased.get("name") or node_id)
-                rebased["nodeType"] = "subassembly" if rebased.get("children") else "part"
-                rebased["id"] = node_id
-                if not rebased.get("children"):
-                    rebased["leafPartIds"] = [node_id]
-                return rebased
-            # A part child: one leaf occurrence, rebased to the link id.
-            return {"id": node_id, "name": str(link.get("name") or node.get("name") or node_id), "nodeType": "part", "leafPartIds": [node_id], "children": []}
-        children = [expand(c) for c in node.get("children") or [] if isinstance(c, dict)]
-        children = [c for c in children if c is not None]
-        out = dict(node)
-        if children:
-            out["children"] = children
-            out["leafPartIds"] = [leaf for c in children for leaf in c.get("leafPartIds", [c["id"]])]
-        return out
+        for token, occurrence_id, material_id in child_appearance["assignments"]:
+            if token is None:
+                raise KeyError(occurrence_id)
+            inherited_assignments[token] = remapped[material_id]
 
     descriptor: dict[str, Any] = {
         key: value
@@ -460,19 +381,97 @@ def flatten_tree(
     descriptor["entryKind"] = tree_kind(tree)
     descriptor["components"] = components
     root = (tree.get("assembly") or {}).get("root")
-    expanded_root = expand(root) if isinstance(root, dict) else None
-    if expanded_root is not None and links:
-        # Re-root: every id of the flattened tree, minted from the flattened structure.
-        mapping = assign_tokens(expanded_root, occurrences, [], label=tree.get("label"))
-        retokened = retoken(
-            {"occurrences": occurrences, "links": [], "assembly": {"root": expanded_root},
-             "appearance": {"materials": {}, "assignments": inherited_assignments}},
-            mapping,
-        )
-        occurrences, expanded_root = retokened["occurrences"], retokened["assembly"]["root"]
-        inherited_assignments = retokened["appearance"]["assignments"]
-        if origins is not None:
-            origins.update({mapping[node]: source for node, source in placed_from.items() if node in mapping})
+    expanded_root = None
+    if isinstance(root, dict) and not links:
+        def expand(node: dict[str, Any]) -> dict[str, Any]:
+            if str(node.get("nodeType") or "") == "link":
+                raise FileNotFoundError(f"tree {tree_hash or '<unpublished>'}: linked tree object missing: <empty>")
+            children = [expand(c) for c in node.get("children") or [] if isinstance(c, dict)]
+            out = dict(node)
+            if children:
+                out["children"] = children
+                out["leafPartIds"] = [leaf for c in children for leaf in c.get("leafPartIds", [c["id"]])]
+            return out
+
+        expanded_root = expand(root)
+    elif isinstance(root, dict):
+        store = _store_key()
+
+        def is_link(node: dict[str, Any]) -> bool:
+            return str(node.get("nodeType") or "") == "link" or str(node.get("id") or "") in links
+
+        # Each link the structure places, in the order a walk of it meets them, expanded as
+        # if its token is its id -- as a tree this build tokened has it.
+        placed: list[tuple[dict[str, Any], dict[str, Any]]] = []
+
+        def gather(node: dict[str, Any]) -> None:
+            if is_link(node):
+                link_id = str(node.get("id") or "")
+                placed.append((node, _expansion(links.get(link_id) or {}, node, link_id, link_id, memo, store,
+                                                tree_hash)))
+                return
+            for child in node.get("children") or []:
+                if isinstance(child, dict):
+                    gather(child)
+
+        gather(root)
+        # The tree's own nodes, tokened from its structure as the flattened tree has it: a
+        # link is its expansion's root, named as that is, and placed as the one leaf a part
+        # child is once flattened.
+        rows = list(occurrences)
+        expansions = iter(placed)
+
+        def stub(node: dict[str, Any]) -> dict[str, Any]:
+            if is_link(node):
+                _node, expansion = next(expansions)
+                if expansion["leaf"] is not None:
+                    rows.append({"id": str(node.get("id") or ""), "transform": expansion["leaf"]})
+                return {"id": node.get("id"), "name": expansion["name"], "children": []}
+            return {"id": node.get("id"), "name": node.get("name"),
+                    "children": [stub(child) for child in node.get("children") or [] if isinstance(child, dict)]}
+
+        mapping = assign_tokens(stub(root), rows, [], label=tree.get("label"))
+        for index, (node, expansion) in enumerate(placed):
+            link_id = str(node.get("id") or "")
+            if mapping[link_id] != link_id:
+                placed[index] = (node, _expansion(links.get(link_id) or {}, node, link_id, mapping[link_id], memo,
+                                                  store, tree_hash))
+        expansions = iter(placed)
+
+        def node_retokened(value: dict[str, Any]) -> dict[str, Any]:
+            out = dict(value)
+            out["id"] = mapping[str(value["id"])]
+            if "children" in value:
+                out["children"] = [node_retokened(child) for child in value["children"]]
+            if "leafPartIds" in value:
+                out["leafPartIds"] = [mapping[str(leaf)] for leaf in value["leafPartIds"]]
+            return out
+
+        def assemble(node: dict[str, Any]) -> dict[str, Any]:
+            if is_link(node):
+                return next(expansions)[1]["node"]
+            children = [assemble(child) for child in node.get("children") or [] if isinstance(child, dict)]
+            if not children:
+                return node_retokened(node)
+            out = dict(node)
+            out["id"] = mapping[str(node["id"])]
+            out["children"] = children
+            out["leafPartIds"] = [leaf for c in children for leaf in c.get("leafPartIds", [c["id"]])]
+            return out
+
+        expanded_root = assemble(root)
+        occurrences = retoken({"occurrences": occurrences, "links": []}, mapping)["occurrences"]
+        for node, expansion in placed:
+            inherit_appearance(expansion["appearance"], str(node.get("id") or ""))
+            for cid, entry in expansion["components"]:
+                components.setdefault(cid, entry)
+            if blocks is not None:
+                link = links.get(str(node.get("id") or "")) or {}
+                blocks.append((str(link.get("tree") or ""), tuple(_as16(link.get("transform"))), len(occurrences),
+                               len(occurrences) + len(expansion["occurrences"])))
+            occurrences.extend(expansion["occurrences"])
+            if origins is not None:
+                origins.update({token: (child, child_id) for token, child, child_id in expansion["origins"]})
     for occurrence_id, material_id in inherited_assignments.items():
         appearance_assignments.setdefault(occurrence_id, material_id)
     descriptor["occurrences"] = occurrences
@@ -493,6 +492,209 @@ def flatten_tree(
     if tree_hash is not None:
         memo[tree_hash] = json.loads(json.dumps(descriptor))
     return descriptor
+
+
+# Every link a flatten expanded, as it expanded it, in compact JSON (``_expansion``): bounded
+# by bytes, and admitted only while every tree object it read -- the linked tree and those
+# it links, transitively -- still has the settled identity this process verified it under
+# (as the metadata capture's entries are), so a lost or damaged child is read, and fails, as
+# it always did. Keyed by the store root too: two stores may hold the same tree.
+_EXPANSION_CAPACITY = 64 * 1024 * 1024
+_EXPANSIONS: OrderedDict[tuple, tuple[bytes, tuple[str, ...]]] = OrderedDict()
+_EXPANSIONS_SIZE = 0
+_EXPANSIONS_LOCK = threading.Lock()
+_EXPANSION_STATS = {"expanded": 0, "reused": 0}
+
+
+def expansion_stats() -> dict[str, int]:
+    """Links this process expanded, and those it took as it expanded them before."""
+    with _EXPANSIONS_LOCK:
+        return dict(_EXPANSION_STATS)
+
+
+def _store_key() -> str:
+    from cadgen.store.paths import store_root
+
+    return str(store_root().resolve())
+
+
+def _expansion(link: dict[str, Any], node: dict[str, Any], link_id: str, token: str,
+               memo: dict[str, dict[str, Any]], store: str, tree_hash: str | None) -> dict[str, Any]:
+    """The flattened child a link places, re-rooted under ``token`` (the link's node's token
+    in the flattened tree): its root node and its occurrences, every id the token minted
+    from the link's down (``assign_tokens``), each placement composed with the link's and
+    its colour taken from it as :func:`flatten_tree` composes them; its components; its
+    appearance, materials as the child has them and each assignment by its leaf's token
+    here; ``origins``, each node's token here with the linked tree and its token there; and
+    what the tree's own tokening reads of it, its root's name and, for a part child, the
+    one leaf's placement (``leaf``). Taken from what this process expanded before for the
+    same link (``_EXPANSIONS``), freshly parsed, else expanded now."""
+    global _EXPANSIONS_SIZE
+    from cadgen._internal.source_sidecar import normalize_appearance
+    from cadgen._internal.tree_tokens import assign_tokens, retoken
+
+    child_hash = str(link.get("tree") or "")
+    placement = _as16(link.get("transform"))
+    link_color = link.get("color")
+    key = (store, child_hash, link_id, token, str(link.get("name") or ""), str(node.get("name") or ""),
+           tuple(placement), json.dumps(link_color))
+    if child_hash:
+        with _EXPANSIONS_LOCK:
+            cached = _EXPANSIONS.get(key)
+        if cached is not None and _stamps_hold(cached[1]):
+            with _EXPANSIONS_LOCK:
+                if _EXPANSIONS.get(key) is cached:
+                    _EXPANSIONS.move_to_end(key)
+                _EXPANSION_STATS["reused"] += 1
+            return json.loads(cached[0])
+    child = flatten(child_hash, memo=memo) if child_hash else None
+    if child is None:
+        raise FileNotFoundError(
+            f"tree {tree_hash or '<unpublished>'}: linked tree object missing: "
+            f"{child_hash or '<empty>'}"
+        )
+
+    with _EXPANSIONS_LOCK:
+        _EXPANSION_STATS["expanded"] += 1
+
+    def provisional(child_id: str) -> str:
+        """A unique id for a child's node under the link, until it is tokened."""
+        return f"{link_id}|{child_id}"
+
+    child_components = child.get("components") or {}
+    link_name = str(link.get("name") or node.get("name") or link_id)
+    child_is_part = str(child.get("entryKind") or "") == "part"
+    child_root = (child.get("assembly") or {}).get("root")
+    child_root_id = str(child_root.get("id") or "") if isinstance(child_root, dict) else ""
+    # Each node the link places, by its provisional id (the root by the link's own): the
+    # linked tree and the node's token in it.
+    placed_from: dict[str, tuple[str, str]] = {}
+    if child_root_id:
+        placed_from[link_id] = (child_hash, child_root_id)
+    rows: list[dict[str, Any]] = []
+    for occ in child.get("occurrences") or []:
+        placed = dict(occ)
+        occ_id = str(occ.get("id") or "")
+        # The child's root IS the link: a part child's one occurrence takes the
+        # link's id and name (the label the parent gave the placement).
+        placed["id"] = link_id if occ_id == child_root_id else provisional(occ_id)
+        placed["transform"] = compose_transforms(placement, occ.get("transform"))
+        component = child_components.get(str(occ.get("component") or "")) or {}
+        # A root color on a materialized Compound is inherited only by
+        # descendants with no explicit color of their own. Component
+        # color is the occurrence fallback used by materialize/render,
+        # so it is an authored color for the same purpose here.
+        if link_color is not None and (
+            child_is_part or (occ.get("color") is None and component.get("color") is None)
+        ):
+            placed["color"] = link_color
+        if occ_id == child_root_id:
+            placed["name"] = link_name
+        rows.append(placed)
+
+    def rebase(sub: dict[str, Any]) -> dict[str, Any]:
+        out = dict(sub)
+        out["id"] = provisional(str(sub.get("id") or ""))
+        placed_from[out["id"]] = (child_hash, str(sub.get("id") or ""))
+        if sub.get("children"):
+            out["children"] = [rebase(c) for c in sub["children"]]
+            out["leafPartIds"] = [leaf for c in out["children"] for leaf in c.get("leafPartIds", [c["id"]])]
+        else:
+            out["leafPartIds"] = [out["id"]]
+        return out
+
+    if isinstance(child_root, dict):
+        rebased = rebase(child_root)
+        rebased["name"] = str(link.get("name") or node.get("name") or rebased.get("name") or link_id)
+        rebased["nodeType"] = "subassembly" if rebased.get("children") else "part"
+        rebased["id"] = link_id
+        if not rebased.get("children"):
+            rebased["leafPartIds"] = [link_id]
+    else:
+        # A part child: one leaf occurrence, rebased to the link id.
+        rebased = {"id": link_id, "name": str(link.get("name") or node.get("name") or link_id), "nodeType": "part",
+                   "leafPartIds": [link_id], "children": []}
+    leaf = None
+    for row in rows:
+        if row["id"] == link_id:
+            leaf = row["transform"]
+    mapping = assign_tokens(rebased, rows, [], label=None, token=token)
+    tokened = retoken({"occurrences": rows, "links": [], "assembly": {"root": rebased}}, mapping)
+    child_appearance = normalize_appearance(child.get("appearance"))
+    appearance = None
+    if child_appearance is not None:
+        appearance = {
+            "materials": [[material_id, definition] for material_id, definition in child_appearance["materials"].items()],
+            # The child's root IS the link (a part child's one occurrence takes the link's
+            # id); every other node its provisional id, then its token here.
+            "assignments": [[mapping.get(link_id if occurrence_id == child_root_id else provisional(occurrence_id)),
+                             occurrence_id, material_id]
+                            for occurrence_id, material_id in child_appearance["assignments"].items()],
+        }
+    expansion = {
+        "node": tokened["assembly"]["root"],
+        "occurrences": tokened["occurrences"],
+        "components": [[cid, entry] for cid, entry in child_components.items()],
+        "appearance": appearance,
+        "origins": [[mapping[name], source, source_id] for name, (source, source_id) in placed_from.items()
+                    if name in mapping],
+        "name": rebased["name"],
+        "leaf": leaf,
+    }
+    paths = _link_closure(child_hash)
+    if paths is not None:
+        body = json.dumps(expansion, separators=(",", ":")).encode("utf-8")
+        weight = len(body) + len(paths) * _METADATA_CAPTURE_STAMP_BYTES
+        if weight <= _EXPANSION_CAPACITY:
+            with _EXPANSIONS_LOCK:
+                previous = _EXPANSIONS.pop(key, None)
+                if previous is not None:
+                    _EXPANSIONS_SIZE -= len(previous[0]) + len(previous[1]) * _METADATA_CAPTURE_STAMP_BYTES
+                _EXPANSIONS[key] = (body, paths)
+                _EXPANSIONS_SIZE += weight
+                while _EXPANSIONS_SIZE > _EXPANSION_CAPACITY:
+                    _old, (old_body, old_paths) = _EXPANSIONS.popitem(last=False)
+                    _EXPANSIONS_SIZE -= len(old_body) + len(old_paths) * _METADATA_CAPTURE_STAMP_BYTES
+    return expansion
+
+
+def _link_closure(tree_hash: str) -> tuple[str, ...] | None:
+    """The paths of every tree object ``tree_hash`` links to, transitively, itself
+    included, each still at the settled identity this process verified it under
+    (``objects.verified_stamp``), by the links this process read of each
+    (:func:`_note_links`); None where one is not -- never verified here, moved since, or
+    of links this process never read -- and nothing is read for it."""
+    paths: list[str] = []
+    pending, seen = [tree_hash], set()
+    while pending:
+        digest = pending.pop()
+        if digest in seen:
+            continue
+        seen.add(digest)
+        with _TREE_LINKS_LOCK:
+            linked = _TREE_LINKS.get(digest)
+        path = str(object_path(digest))
+        if linked is None or not _stamps_hold((path,)):
+            return None
+        paths.append(path)
+        pending.extend(linked)
+    return tuple(sorted(paths))
+
+
+# The trees each tree this process read links to, by its address: a tree is its content,
+# so what it links to never changes (``_link_closure``). Bounded, oldest first.
+_TREE_LINKS_CAPACITY = 1 << 16
+_TREE_LINKS: OrderedDict[str, tuple[str, ...]] = OrderedDict()
+_TREE_LINKS_LOCK = threading.Lock()
+
+
+def _note_links(tree_hash: str, tree: dict[str, Any]) -> None:
+    linked = tuple(str(link["tree"]) for link in tree.get("links") or ())
+    with _TREE_LINKS_LOCK:
+        _TREE_LINKS[str(tree_hash)] = linked
+        _TREE_LINKS.move_to_end(str(tree_hash))
+        while len(_TREE_LINKS) > _TREE_LINKS_CAPACITY:
+            _TREE_LINKS.popitem(last=False)
 
 
 def _finite_number(value: Any) -> bool:
@@ -646,12 +848,17 @@ def _reset_metadata_capture_cache() -> None:
     """Release process-owned verified metadata snapshots (tests and embedding)."""
     from cadgen.store.objects import _reset_verified
 
-    global _METADATA_CAPTURE_CACHE_SIZE
+    global _METADATA_CAPTURE_CACHE_SIZE, _EXPANSIONS_SIZE
     with _METADATA_CAPTURE_CACHE_LOCK:
         _METADATA_CAPTURE_CACHE.clear()
         _METADATA_CAPTURE_CACHE_SIZE = 0
         _VALIDATED_COMPONENTS.clear()
         _VALIDATED_OBJECTS.clear()
+    with _EXPANSIONS_LOCK:
+        _EXPANSIONS.clear()
+        _EXPANSIONS_SIZE = 0
+    with _TREE_LINKS_LOCK:
+        _TREE_LINKS.clear()
     _reset_verified()
 
 
@@ -824,6 +1031,7 @@ def _capture(
         paths.add(key)
         tree = json.loads(payload)
         _validate_structure(tree)
+        _note_links(digest, tree)
         if retain:
             captured[digest] = payload
         del payload

@@ -35,6 +35,7 @@ import json
 import os
 import re
 import threading
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Any, Callable
 
@@ -246,19 +247,44 @@ def _valid_record(record: Any) -> bool:
         return False
 
 
+# Each record a probe read and found valid, by its key, with the settled fingerprint of the
+# entry file it read it from (``objects._stamp``, ``objects._stamp_is_settled``): an entry is
+# written by replacing it, so a later probe that finds the file still at that fingerprint
+# takes the record without reading it again -- and still finds both objects it names at their
+# sizes. Bounded, oldest first.
+_PROBED_CAPACITY = 1 << 16
+_PROBED: "OrderedDict[str, tuple[tuple, bytes]]" = OrderedDict()
+_PROBED_LOCK = threading.Lock()
+
+
 def probe(key: str) -> dict | None:
     """The part's record, when it is valid and both objects it names are stored at their
     sizes; None otherwise. Bounded metadata only: no body, no kernel import."""
+    from cadgen.store.objects import _stamp, _stamp_is_settled
+
     if not valid_key(key):
         return None
     try:
-        with entry_path(INDEX_KIND, key).open("rb") as stream:
-            raw = stream.read(MAX_INDEX_BYTES + 1)
-        if len(raw) > MAX_INDEX_BYTES:
-            return None
-        record = json.loads(raw.decode("utf-8"))
-        if not _valid_record(record):
-            return None
+        path = entry_path(INDEX_KIND, key)
+        stamp = _stamp(str(path), path)
+        with _PROBED_LOCK:
+            known = _PROBED.get(key)
+        if known is not None and known[0] == stamp:
+            record = json.loads(known[1])
+        else:
+            with path.open("rb") as stream:
+                raw = stream.read(MAX_INDEX_BYTES + 1)
+            if len(raw) > MAX_INDEX_BYTES:
+                return None
+            record = json.loads(raw.decode("utf-8"))
+            if not _valid_record(record):
+                return None
+            if _stamp(str(path), path) == stamp and _stamp_is_settled(stamp):
+                with _PROBED_LOCK:
+                    _PROBED[key] = (stamp, raw)
+                    _PROBED.move_to_end(key)
+                    while len(_PROBED) > _PROBED_CAPACITY:
+                        _PROBED.popitem(last=False)
         if any(object_path(record[role]["object"]).stat().st_size != record[role]["byteLength"] for role in ROLES):
             return None
         return record

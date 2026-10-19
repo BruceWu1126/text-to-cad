@@ -167,9 +167,9 @@ def state_digest(record: Mapping[str, Any]) -> str:
     """The digest of a record's publication identity (``records.export_state``): its key and
     tree, its resolved annotations and its output recipes. What an export pins of the result
     it writes; receipts and owed notes, which change while one run saves, are not in it."""
-    from cadgen.store.records import export_state
+    from cadgen.store.records import export_identity
 
-    encoded = json.dumps(export_state(dict(record)), sort_keys=True, separators=(",", ":"), default=str)
+    encoded = json.dumps(export_identity(record), sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 

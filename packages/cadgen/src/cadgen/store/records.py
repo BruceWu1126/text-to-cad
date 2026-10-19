@@ -50,7 +50,7 @@ retires it once it is a week old (``gc``, STORE.md §8).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from cadgen.store.index import (
     iter_entries,
@@ -299,6 +299,13 @@ def export_state(record: dict[str, Any]) -> dict[str, Any]:
     """
     import copy
 
+    return copy.deepcopy(export_identity(record))
+
+
+def export_identity(record: Mapping[str, Any]) -> dict[str, Any]:
+    """:func:`export_state` sharing the record's own objects, for a reader that only
+    reads it -- a digest of it (``exports.state_digest``) -- and so copies none of its
+    annotations, which a result's keyframes make large."""
     recipes = {}
     for path, entry in (record.get("outputs") or {}).items():
         if not isinstance(entry, dict):
@@ -307,9 +314,8 @@ def export_state(record: dict[str, Any]) -> dict[str, Any]:
             recipes[path] = {field: entry.get(field) for field in ("declared", "chord", "angle", "name")}
         elif entry.get("writer"):
             recipes[path] = {"writer": entry["writer"]}
-    return copy.deepcopy({"key": record.get("key"), "tree": record.get("tree"), "recipes": recipes,
-                          "annotations": {field: record.get(field) for field in
-                                          ("kinematics", "appearance", "animation")}})
+    return {"key": record.get("key"), "tree": record.get("tree"), "recipes": recipes,
+            "annotations": {field: record.get(field) for field in ("kinematics", "appearance", "animation")}}
 
 
 def model_for_output(output_path: Path | str) -> str | None:

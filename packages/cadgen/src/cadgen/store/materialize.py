@@ -98,17 +98,26 @@ class _Partner:
         holder._owner = weakref.ref(node)
         return holder
 
-    def intact(self, node: Any) -> bool:
-        return self.verified_baseline(node) is not None
+    def intact(self, node: Any, *, held: "HeldDigests | None" = None) -> bool:
+        return self.verified_baseline(node, held=held) is not None
 
-    def verified_baseline(self, node: Any) -> "_MaterializedState | None":
-        """Return the immutable baseline only when ``node`` still matches it."""
+    def verified_baseline(self, node: Any, *, held: "HeldDigests | None" = None) -> "_MaterializedState | None":
+        """Return the immutable baseline only when ``node`` still matches it. ``held``, one
+        publication's reading of the kernel memo, lets a leaf the memo holds take the digest
+        an earlier check took of it (:class:`HeldDigests`); one is read for this check alone
+        when None."""
         try:
+            view = held if held is not None else HeldDigests()
+            view.cover(node)
             if node.wrapped.IsPartner(self.shape) and _same_materialized_state(
-                self.baseline, _capture_materialized_state(node)
+                self.baseline, _capture_materialized_state(node, held=view)
             ):
-                return self.baseline
-            return None
+                verified = self.baseline
+            else:
+                verified = None
+            if held is None:
+                view.keep()
+            return verified
         except Exception:  # an unverifiable shape becomes an own component
             return None
 
@@ -168,7 +177,7 @@ def _native_children(shape: Any) -> list[Any]:
     return children
 
 
-def _geometry_digest(shape: Any, memo: dict | None = None) -> str | tuple | None:
+def _geometry_digest(shape: Any, memo: dict | None = None, held: "HeldDigests | None" = None) -> str | tuple | None:
     """Read geometry through a private topology copy, never change caller flags.
 
     copyGeom=False shares only curves/surfaces, which this function only reads.
@@ -180,7 +189,9 @@ def _geometry_digest(shape: Any, memo: dict | None = None) -> str | tuple | None
     and local placement. This catches structural and aliasing edits without
     serializing all geometry again at every assembly depth. Its native leaves
     are checked even when Python child wrappers no longer share their TShapes.
-    The optional memo belongs to this read-only capture only.
+    The optional memo belongs to this read-only capture only. ``held`` (a partner
+    check's) gives a leaf the kernel memo holds the digest an earlier check took of it,
+    while nothing the memo can see has changed it (:class:`HeldDigests`).
     """
     from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
     from OCP.TopExp import TopExp
@@ -197,26 +208,190 @@ def _geometry_digest(shape: Any, memo: dict | None = None) -> str | tuple | None
     # Mark a native cycle unverifiable rather than recursing without a bound.
     memo[key] = None
     try:
+        trusted = held is not None and held.covers(key[0])
+        result = held.digest(key) if trusted else None
+        if result is not None:
+            memo[key] = result
+            return result
         if shape.ShapeType() == TopAbs_COMPOUND:
             children = tuple(
-                (_native_key(child), _geometry_digest(child, memo))
+                (_native_key(child), _geometry_digest(child, memo, held))
                 for child in _native_children(shape)
             )
             result = ("compound", int(shape.Orientation()), children) if all(
                 digest is not None for _, digest in children
             ) else None
-            memo[key] = result
-            return result
-        private = BRepBuilderAPI_Copy(shape.Located(TopLoc_Location()), False, False).Shape()
-        shapes = TopTools_IndexedMapOfShape()
-        TopExp.MapShapes_s(private, shapes)
-        for index in range(1, shapes.Extent() + 1):
-            shapes.FindKey(index).Checked(False)
-        result = hashlib.sha256(_shape_brep_bytes(private)).hexdigest()
+        else:
+            private = BRepBuilderAPI_Copy(shape.Located(TopLoc_Location()), False, False).Shape()
+            shapes = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(private, shapes)
+            for index in range(1, shapes.Extent() + 1):
+                shapes.FindKey(index).Checked(False)
+            result = hashlib.sha256(_shape_brep_bytes(private)).hexdigest()
+        if trusted and result is not None:
+            held.took(key, shape, result)
         memo[key] = result
         return result
     except Exception:
         return None
+
+
+# --- what a check of held geometry takes on trust -----------------------------------------
+#
+# Inside a model run a child's decode is a kernel-memo entry, and a later run's decode of the
+# tree hands back the very objects, restored (``kernel_memo.decoded``): each leaf it places is
+# a component's prototype, a TShape the memo holds. A partner check digests every leaf it
+# reads, serializing its geometry, at every publication that links the child. The digest one
+# check took of such a leaf stands for the next check of that leaf while everything the memo
+# knows of it is as it was then: the ledger holds the same rows on each of its sub-shapes
+# (``kernel_memo.ledger_snapshot``: every change the memo made to one since its maker returned
+# it, flags included, which the digest's serialization writes) and the memo has met no change
+# it could not replay, could not capture or made to memoized geometry under an uncached call
+# since (``kernel_memo.stats``: each leaves a state its ledger holds no row for). So a decode
+# hit that undoes what an earlier run did to the child (the ledger drops those rows), or an
+# operation of this run that changes the leaf (it notes rows), digests it again. A change the
+# memo does not see -- a raw OCCT edit of a held leaf's TShape after a check took its digest,
+# a representation rewritten in place -- is seen by neither the memo, whose next hit hands the
+# leaf back as it is, nor this. Only a check takes a digest here, never a baseline's capture,
+# so the first check of a leaf after its decode reads it in full; geometry outside a run, or
+# that the memo does not hold, is read in full every time, and so is every group (its digest
+# is its children's, by their native keys). In this worker's memory, never the store;
+# bounded, and what the memo lets go is forgotten at the next check that takes a digest.
+
+_HELD_DIGEST_ENTRIES = 1 << 16
+_HELD_DIGESTS: "OrderedDict[tuple, _HeldDigest]" = OrderedDict()
+_HELD_DIGESTS_LOCK = threading.Lock()
+_HELD_STATS = {"read": 0, "trusted": 0}
+
+
+@dataclass(frozen=True, eq=False)
+class _HeldDigest:
+    digest: str
+    subshapes: frozenset
+    rows: dict
+    unreplayed: int
+
+
+def clear_held_digests() -> None:
+    """Forget every digest a check took on trust: the next check reads every leaf in full."""
+    with _HELD_DIGESTS_LOCK:
+        _HELD_DIGESTS.clear()
+
+
+def held_digest_stats() -> dict[str, int]:
+    """Materialized leaves the memo holds that partner checks read in full, those they took
+    on trust (:class:`HeldDigests`), and how many digests are kept now."""
+    with _HELD_DIGESTS_LOCK:
+        return dict(_HELD_STATS, entries=len(_HELD_DIGESTS))
+
+
+class HeldDigests:
+    """One publication's partner checks' reading of the kernel memo, taken once and only if
+    a check asks: its ledger and its count of changes it could not replay (see above). A
+    check takes from it the digest an earlier one took of a leaf the memo holds, and notes
+    the digests it takes itself, kept once the publication's checks are done (:meth:`keep`).
+    The leaves are the materialized trees' own (:meth:`cover`): a component's prototype,
+    which a decode places and the memo registers, never a group."""
+
+    def __init__(self) -> None:
+        self._ledger: tuple[dict, set] | None = None
+        self._unreplayed: int | None = None
+        self._taken: list[tuple[tuple, _HeldDigest]] = []
+        self._leaves: set = set()
+
+    def cover(self, node: Any) -> None:
+        """Take the leaves of the materialized tree ``node`` holds as ones a check may
+        trust a held digest of: each placed leaf's TShape."""
+        pending = [node]
+        while pending:
+            current = pending.pop()
+            children = getattr(current, "children", ()) or ()
+            if children:
+                pending.extend(children)
+            elif getattr(current, "wrapped", None) is not None:
+                self._leaves.add(current.wrapped.TShape())
+
+    def covers(self, tshape: Any) -> bool:
+        return tshape in self._leaves
+
+    def _read(self) -> tuple[dict, set, int]:
+        if self._ledger is None:
+            from cadgen._internal import kernel_memo
+
+            counts = kernel_memo.stats()
+            snapshot = kernel_memo.ledger_snapshot()
+            self._ledger = (snapshot, set(snapshot))
+            self._unreplayed = counts["unreplayable"] + counts["errors"] + counts["tainted"]
+        snapshot, keys = self._ledger
+        return snapshot, keys, self._unreplayed
+
+    def digest(self, key: tuple) -> str | None:
+        """The digest an earlier check took of the leaf ``key`` names (its TShape and
+        orientation), while the memo holds it and its rows and count stand; else None."""
+        with _HELD_DIGESTS_LOCK:
+            entry = _HELD_DIGESTS.get(key)
+        if entry is None:
+            return None
+        from cadgen._internal import kernel_memo
+
+        snapshot, keys, unreplayed = self._read()
+        if entry.unreplayed != unreplayed or not kernel_memo.held((key[0],)):
+            return None
+        if {hashed: snapshot[hashed] for hashed in keys & entry.subshapes} != entry.rows:
+            return None
+        with _HELD_DIGESTS_LOCK:
+            if _HELD_DIGESTS.get(key) is entry:
+                _HELD_DIGESTS.move_to_end(key)
+            _HELD_STATS["trusted"] += 1
+        return entry.digest
+
+    def took(self, key: tuple, shape: Any, digest: str) -> None:
+        """Note the digest a check just took of a leaf, with what it stood on, when the memo
+        holds the leaf."""
+        from cadgen._internal import kernel_memo
+
+        if not kernel_memo.held((key[0],)):
+            return
+        with _HELD_DIGESTS_LOCK:
+            _HELD_STATS["read"] += 1
+        snapshot, keys, unreplayed = self._read()
+        subshapes = frozenset(subshape_hashes(shape))
+        rows = {hashed: snapshot[hashed] for hashed in keys & subshapes}
+        self._taken.append((key, _HeldDigest(digest, subshapes, rows, unreplayed)))
+
+    def keep(self) -> None:
+        """Keep the digests this publication's checks took, and forget those of leaves the
+        memo no longer holds -- no hit hands them back, and keeping them would keep their
+        geometry alive -- then, past the bound, the least recently used."""
+        if not self._taken:
+            return
+        from cadgen._internal import kernel_memo
+
+        with _HELD_DIGESTS_LOCK:
+            for key, entry in self._taken:
+                _HELD_DIGESTS[key] = entry
+                _HELD_DIGESTS.move_to_end(key)
+            kept = kernel_memo.held(key[0] for key in _HELD_DIGESTS)
+            for key in [key for key in _HELD_DIGESTS if key[0] not in kept]:
+                del _HELD_DIGESTS[key]
+            while len(_HELD_DIGESTS) > _HELD_DIGEST_ENTRIES:
+                _HELD_DIGESTS.popitem(last=False)
+        self._taken.clear()
+
+
+def subshape_hashes(shape: Any) -> Any:
+    """The hash of each of ``shape``'s sub-shapes (itself included) at the identity
+    placement: a function of its TShape alone, as the memo's ledger snapshot hashes them."""
+    from array import array
+
+    from OCP.TopExp import TopExp
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(getattr(shape, "wrapped", shape), mapped)
+    identity = TopLoc_Location()
+    return array("q", (hash(mapped.FindKey(ordinal).Located(identity)) for ordinal in range(1, mapped.Extent() + 1)))
 
 
 def _materialized_metadata(node: Any, *, root: bool) -> tuple:
@@ -272,7 +447,7 @@ def _materialized_metadata(node: Any, *, root: bool) -> tuple:
 
 
 def _capture_materialized_state(
-    node: Any, *, root: bool = True, geometry_memo: dict | None = None,
+    node: Any, *, root: bool = True, geometry_memo: dict | None = None, held: "HeldDigests | None" = None,
 ) -> _MaterializedState:
     if geometry_memo is None:
         geometry_memo = {}
@@ -280,10 +455,10 @@ def _capture_materialized_state(
     shape = node.wrapped
     return _MaterializedState(
         shape=shape,
-        geometry=_geometry_digest(shape, geometry_memo),
+        geometry=_geometry_digest(shape, geometry_memo, held),
         metadata=_materialized_metadata(node, root=root),
         children=tuple(
-            _capture_materialized_state(child, root=False, geometry_memo=geometry_memo)
+            _capture_materialized_state(child, root=False, geometry_memo=geometry_memo, held=held)
             for child in children
         ),
         native_children=tuple(_native_key(child) for child in _native_children(shape)),
