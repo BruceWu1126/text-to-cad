@@ -1291,7 +1291,7 @@ def _maker_value(value: Any, state: _Run, base: Any) -> Any:
     if isinstance(value, TopoDS_Shape):
         return ("shape", _raw_key(value, state, base))
     if isinstance(value, gp_Trsf):
-        return ("trsf", tuple(("n", struct.pack("<d", value.Value(row, column)))
+        return ("trsf", tuple(("n", _DOUBLE.pack(value.Value(row, column)))
                               for row in (1, 2, 3) for column in (1, 2, 3, 4)))
     if value is None or isinstance(value, (bool, str, numbers.Real)):
         return _normalize(value, state)
@@ -1300,7 +1300,7 @@ def _maker_value(value: Any, state: _Run, base: Any) -> Any:
     raise _Unkeyable(f"unkeyable maker argument: {type(value).__name__}")
 
 
-def _raw_key(handle: Any, state: _Run, base: Any = None) -> int:
+def _raw_key(handle: Any, state: _Run, base: Any) -> int:
     """The interned key of a ``TopoDS_Shape`` a maker was given, as a shape input's
     (:func:`_shape_key`) with no attributes: a TShape a memoized operation made, by that
     operation's key, or else a sub-shape of the maker's own shape ``base``, by its kind and
@@ -1335,7 +1335,7 @@ def _register_handle(handle: Any, key: tuple[int, int], state: _Run, entry: "_En
     tshape = handle.TShape()
     if _made_of(tshape, state) is not None:
         return []
-    made = _Made(tshape, key=key, feature=None, run=state.id, entry=entry)
+    made = _Made(tshape, key=key, entry=entry)
     with _LOCK:
         _REGISTRY[tshape] = made
         state.registered[tshape] = made
@@ -1481,12 +1481,12 @@ def _normalize(value: Any, state: _Run) -> Any:
         return ("n", _DOUBLE.pack(float(value)))
     if kind is str or value is None or kind is bool:
         return value
-    if value is None or isinstance(value, (bool, str, bytes)):
+    if isinstance(value, (str, bytes)):
         return value
     if isinstance(value, numbers.Real):
         # By value, as Python compares them: a radius of 3 and one of 3.0 are
         # one parameter, and the kernel takes a double either way.
-        return ("n", struct.pack("<d", float(value)))
+        return ("n", _DOUBLE.pack(float(value)))
     if isinstance(value, enum.Enum):
         return ("enum", type(value).__name__, value.name)
     if isinstance(value, Path):
@@ -1509,7 +1509,7 @@ def _normalize(value: Any, state: _Run) -> Any:
                     _normalize(tuple(value.z_dir), state))
         if type_name == "Matrix":
             transform = value.wrapped
-            return ("Matrix", tuple(("n", struct.pack("<d", transform.Value(row, column)))
+            return ("Matrix", tuple(("n", _DOUBLE.pack(transform.Value(row, column)))
                                     for row in (1, 2, 3) for column in (1, 2, 3, 4)))
         if type_name == "BoundBox":
             return ("BoundBox", _normalize(tuple(value.min), state), _normalize(tuple(value.max), state))
@@ -1533,7 +1533,7 @@ def _operation_settings(operation: Any) -> tuple:
         if isinstance(value, bool):
             found.append((name, value))
         elif isinstance(value, numbers.Real):
-            found.append((name, struct.pack("<d", float(value))))
+            found.append((name, _DOUBLE.pack(float(value))))
         else:
             found.append((name, type(value).__name__, int(value)))
     return tuple(found)
@@ -1677,7 +1677,7 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
     index = _sub_map(parent_wrapped, kind).FindIndex(wrapped)
     if index == 0:
         raise _Unkeyable("not a sub-shape of its topo_parent")
-    made = _Made(tshape, key=None, feature=None, run=state.id, entry=None, parent=parent_made, kind=kind, index=index)
+    made = _Made(tshape, key=None, entry=None, parent=parent_made, kind=kind, index=index)
     parent_made.subs.append(made)
     with _LOCK:
         if parent_made.persistent():
@@ -1692,8 +1692,6 @@ def _sub_map(parent_wrapped: Any, kind: int) -> Any:
     """``TopExp.MapShapes`` of a located shape for one kind, kept for the shapes
     a model keeps extracting from."""
     from OCP.TopAbs import TopAbs_ShapeEnum
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
 
     key = (hash(parent_wrapped), kind)
     with _LOCK:
@@ -1912,17 +1910,15 @@ class _Made:
     that names it), the effects operations have had on it since, and its own
     registered sub-shapes. Runs bind their own features to this shared record."""
 
-    __slots__ = ("tshape", "key", "position", "feature", "run", "entry", "parent", "kind", "index", "effects",
+    __slots__ = ("tshape", "key", "position", "entry", "parent", "kind", "index", "effects",
                  "subs", "born", "origin", "tainted", "container", "tree")
 
-    def __init__(self, tshape: Any, *, key: tuple[int, int] | None, feature: int | None, run: int,
+    def __init__(self, tshape: Any, *, key: tuple[int, int] | None,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
                  index: int | None = None, position: int = 0, origin: Any = _NO_COPY) -> None:
         self.tshape = tshape
         self.key = key
         self.position = position
-        self.feature = feature
-        self.run = run
         self.entry = entry
         self.parent = parent
         self.kind = kind
@@ -2000,7 +1996,6 @@ def _reset(makers: list[_Made], run_id: int) -> None:
         while pending:
             made = pending.pop()
             made.effects.clear()
-            made.run = run_id
             pending.extend(made.subs)
 
 
@@ -2027,7 +2022,7 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int | None, sta
         if _made_of(tshape, state) is not None:
             continue
         origin = copied.get(position, _NO_COPY) if copied else _NO_COPY
-        made = _Made(tshape, key=key, feature=feature, run=state.id, entry=entry, position=position, origin=origin)
+        made = _Made(tshape, key=key, entry=entry, position=position, origin=origin)
         with _LOCK:
             if key is None:
                 state.transient[tshape] = made
@@ -2154,8 +2149,6 @@ class _Entry:
         """Bind the entry's shapes to this run, and to the feature of it that hit
         (none for a child's decode)."""
         for made in self.made:
-            made.feature = feature
-            made.run = state.id
             if feature is not None:
                 state.owners[made] = feature
             pending = [made]
