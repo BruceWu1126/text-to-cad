@@ -166,6 +166,10 @@ def _closure_file_label(rel: str, names: dict, own: dict) -> str:
     if rel not in names:
         return rel
     reached = list(names[rel])
+    if not reached:
+        # A sliced file the model reaches no name of: a child model's script, whose
+        # model the boundary rule gives the child (STORE.md §3), imported for the call.
+        return f"{rel} (no names reached)"
     shown = ", ".join(reached[:6]) + (f", +{len(reached) - 6}" if len(reached) > 6 else "")
     return f"{rel}[{shown}]"
 
@@ -192,7 +196,9 @@ def _why_one(model: str, as_json: bool) -> int:
             print(f"  [{mark}] 3 children ({len(children)})")
             for child in children:
                 cmark = "x" if child.get("stale") else "ok"
-                print(f"        [{cmark}] {child.get('model')}  key {str(child.get('recorded'))[:12]}  now {str(child.get('current'))[:12]}  {child.get('why') or ''}")
+                current = child.get("current")
+                print(f"        [{cmark}] {child.get('model')}  key {str(child.get('recorded'))[:12]}  "
+                      f"now {str(current)[:12] if current else '-'}  {child.get('why') or ''}")
         elif number == 4:
             print(f"  [{mark}] 4 tree {str(clause.get('tree'))[:12]} {'complete' if not clause.get('stale') else clause.get('why')}")
         elif number == 5:
