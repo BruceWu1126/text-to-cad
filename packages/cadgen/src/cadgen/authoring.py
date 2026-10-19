@@ -916,9 +916,7 @@ def _build(defn: ModelDef) -> int:
     # stdlib -- no CAD import.
     from cadgen.cli._run_model import check_user_flags
 
-    argv = check_user_flags(
-        sys.argv[1:], prog=f"python {defn.script_path.name}", called=defn.name
-    )
+    argv = check_user_flags(sys.argv[1:], prog=f"python {defn.script_path.name}")
     _maybe_hint_eager_imports(defn)
 
     # This process is the ROOT of a build tree: it owns the terminal and renders the

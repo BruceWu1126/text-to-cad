@@ -197,15 +197,19 @@ class TheUsersFlagsEndInTheirOwnProcess(unittest.TestCase):
             line = next(line for line in text.splitlines() if line.strip().startswith(flag))
             self.assertGreater(len(line.split(None, 1)), 1, f"{flag} has no help text")
 
-    def test_naming_a_model_main_does_not_call_is_a_teaching_error_not_a_build(self) -> None:
+    def test_the_pipelines_routing_flag_is_an_unrecognized_argument_to_the_user(self) -> None:
+        """A script builds what its __main__ calls; --model routes a worker's job and is no
+        flag of the user's: typed, it is refused as a name that never existed, before any
+        work, whichever model it names (laws 7 and 8)."""
         script = self.root / "pair.py"
         script.write_text(TWO_MODELS, encoding="utf-8")
-        proc = self._run(script, "--model", "right")
-        self.assertEqual(2, proc.returncode, proc.stdout + proc.stderr)
-        self.assertNotIn("Traceback", proc.stderr)
-        self.assertIn("--model is cadgen's internal routing flag", proc.stderr)
-        self.assertIn("call right() in __main__", proc.stderr)
-        self.assertTrue(self._no_daemon_was_started(), "the wrong model was handed off to be built")
+        for named in ("right", "left", "gamma"):
+            proc = self._run(script, "--model", named)
+            self.assertEqual(2, proc.returncode, proc.stdout + proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+            self.assertIn(f"unrecognized arguments: --model {named}", proc.stderr)
+            self.assertNotIn("routing", proc.stderr)
+        self.assertTrue(self._no_daemon_was_started(), "the flag was handed off to be built")
         self.assertEqual([], sorted(path.name for path in self.root.glob("*.step")))
 
     def test_an_unknown_flag_is_a_usage_error_before_any_handoff(self) -> None:
