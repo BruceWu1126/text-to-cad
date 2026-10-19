@@ -193,10 +193,6 @@ class StepScene:
         """Resolve one ref: an occurrence token, an element ref, an exact label alias,
         or a file-prefixed ref (``cadgen.refs``, the one resolver every ref goes through).
 
-        A line holds one ref, or several comma-separated behind one file prefix
-        as the viewer copies a multi-selection (``part.step#o1.f1,o1.f2``). Each
-        ref is numeric or an exact label alias; a bare entity after an occurrence
-        or label belongs to it (``#o1.2.f3,f4`` is ``o1.2.f3`` and ``o1.2.f4``).
         A file prefix -- the path under the viewer's root, or an absolute path --
         must name this scene's document as a path does (links resolved, a relative
         one read from the working directory, else matched against the end of the
