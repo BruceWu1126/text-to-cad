@@ -617,6 +617,10 @@ def launch_detached(argv: list[str], *, as_json: bool, prog: str = DEFAULT_PROG)
 
 def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     _harden_streams()
+    from cadgen.daemon.client import refuse_no_daemon  # noqa: PLC0415 - kernel-free, needed only now
+
+    # Its compiles and parts are the build pool's jobs: it has no way to run without it.
+    refuse_no_daemon(argv, prog=prog, what="the CAD Viewer")
     # argparse answers --help on stdout with exit 0 and refuses an unknown
     # argument with exit 2, both before anything below runs. A launcher that
     # answered --help by starting a server read as broken.

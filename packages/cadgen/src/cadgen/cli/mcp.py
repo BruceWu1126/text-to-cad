@@ -26,6 +26,11 @@ def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
+    import sys
+
+    from cadgen.daemon.client import refuse_no_daemon
+
+    refuse_no_daemon(sys.argv[1:] if argv is None else argv, prog=prog, what="the CAD app")
     build_parser(prog).parse_args(argv)
     from cadgen.mcp.server import serve
 
