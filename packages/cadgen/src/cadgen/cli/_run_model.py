@@ -115,7 +115,13 @@ def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> i
     args = parser.parse_args(items[1:])
     script = Path(items[0]).expanduser().resolve()
     if not script.is_file():
-        parser.error(f"model script does not exist: {items[0]}")
+        # The script the client ran is gone by the time its worker looks (moved or deleted
+        # between the gate and the body): the job's failure, said in one line, not a usage
+        # error -- nobody typed this argument.
+        import sys
+
+        sys.stderr.write(f"{prog}: model script does not exist: {items[0]}\n")
+        return 1
 
     # Where this process's build-tree events go: a daemon worker already relays them
     # as frames; a root renders the tree itself.

@@ -90,6 +90,19 @@ class Dispatch(unittest.TestCase):
         self.assertEqual(seen["argv"], ["--port", "3245", "--", "-x"])
 
 
+class MissingScript(unittest.TestCase):
+    def test_a_model_script_that_vanished_is_one_line_not_a_usage_error(self):
+        # The worker looks for the script its client ran after a gate found it: one moved
+        # meanwhile is the job's failure in one line, never argparse's usage block (exit 2).
+        from cadgen.cli._run_model import run_model_argv
+
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = run_model_argv(["/nowhere/gone.py", "--json"], prog="python gone.py")
+        self.assertEqual(code, 1)
+        self.assertEqual(err.getvalue(), "python gone.py: model script does not exist: /nowhere/gone.py\n")
+
+
 class LazyImports(unittest.TestCase):
     """Help and error paths must stay cheap.
 
