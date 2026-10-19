@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { FileX } from 'lucide-react';
 import type { CadEntry, CadWorkspaceService } from '@text-to-cad/core/client';
 import { EmptyState } from '../file-viewer/navigation/index.js';
+import { useI18n } from '../i18n/index.js';
 import { ViewerLoadingOverlay } from '../file-viewer/presentation.js';
 import ViewerAlertCard from '../renderers/kit/status/ViewerAlertCard.jsx';
 import { useEditingPreview } from '../renderers/step/components/workbench/hooks/useEditingPreview.js';
@@ -9,10 +10,12 @@ import { editingBuildActive } from '../renderers/step/workbench/editingPreview.j
 import { buildViewerEditAlert } from '../renderers/step/workbench/viewerAlerts.js';
 
 /** A first save can fail before the requested file exists. Its status is still the output's
- * artifact-only build feed; no catalog entry or saved document is invented to show it. */
-export function MissingCadFile({ file, client, entry, reload, action }: {
-  file: string; client: CadWorkspaceService; entry: CadEntry | null; reload?: () => void; action?: ReactNode;
+ * artifact-only build feed; no catalog entry or saved document is invented to show it. `title`
+ * is the host's translation of "File does not exist", else the surrounding language's. */
+export function MissingCadFile({ file, client, entry, reload, action, title }: {
+  file: string; client: CadWorkspaceService; entry: CadEntry | null; reload?: () => void; action?: ReactNode; title?: string;
 }) {
+  const { t } = useI18n();
   const { state } = useEditingPreview(file, { client, enabled: /\.st(?:ep|p)$/i.test(file) });
   const active = editingBuildActive(state);
   const saved = !state.superseded && (active || state.state === 'done') ? state.saved?.documentHash || '' : '';
@@ -29,5 +32,5 @@ export function MissingCadFile({ file, client, entry, reload, action }: {
   const alert = buildViewerEditAlert(state, false);
   if (alert) return <div className="relative h-full"><ViewerAlertCard alert={{ ...alert, reload: Boolean(reload) }} hasContent={false} file={file} onReload={reload} /></div>;
   if (active || state.saving || saved) return <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>;
-  return <EmptyState icon={FileX} title="File does not exist" description={file} tone="warn" action={action} />;
+  return <EmptyState icon={FileX} title={title ?? t("file.missing")} description={file} tone="warn" action={action} />;
 }

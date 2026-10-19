@@ -180,9 +180,9 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
       links={host.links} onError={onError} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
-      ? <MissingCadFile file={path} client={client} entry={entry} reload={reload} action={goHome} />
+      ? <MissingCadFile file={path} client={client} entry={entry} reload={reload} action={goHome} title={t("file.missing")} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, update, fullSize, colorSchemeControl, onError, goHome, t]);
+  }), [library, layout, changeLayout, path, picture, host.links, client, entry, onError, goHome, t]);
   return <I18nProvider locale={locale}>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />
