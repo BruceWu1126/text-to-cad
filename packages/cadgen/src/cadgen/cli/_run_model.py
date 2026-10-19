@@ -17,6 +17,8 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
+from cadgen.cli import NO_DAEMON_FLAG
+
 
 def _build_parser(prog: str) -> argparse.ArgumentParser:
     """The per-run FLAGS of ``python <model>.py``.
@@ -53,6 +55,16 @@ def _build_parser(prog: str) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--json", action="store_true", help="One JSON result line on stdout.")
+    parser.add_argument(
+        NO_DAEMON_FLAG,
+        dest="no_daemon",
+        action="store_true",
+        help=(
+            "Build in this process, without the build daemon, for a place it cannot run "
+            "(a sandbox without local sockets, a CI runner): the same files, written "
+            "before the command answers, with no warm edits and its children one at a time."
+        ),
+    )
     return parser
 
 
@@ -109,6 +121,12 @@ def run_model_argv(argv: Sequence[str], *, prog: str = "python <model>.py") -> i
     # as frames; a root renders the tree itself.
     from cadgen.cli_tree import build_tree
 
+    if args.no_daemon:
+        # The one opt-in out of the daemon: every pool job the build owes runs here, inline,
+        # and this process asks no daemon anything.
+        from cadgen.daemon.client import no_daemon_from_now
+
+        no_daemon_from_now()
     with build_tree(json_lines=bool(args.json)):
         return _run(args, script, prog)
 

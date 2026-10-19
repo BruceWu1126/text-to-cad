@@ -335,14 +335,39 @@ def failure_text(error):
     return "".join(traceback.format_exception(type(error), error, error.__traceback__))
 
 
+def _execute_here(request, root, future):
+    """A job of a process built without the daemon (``client.NO_DAEMON_FLAG``): run now, on the
+    submitting thread, through the worker's own entry (:func:`execute`) and result binding,
+    against the store it names, what it says kept for its failure -- as a worker's job answers
+    its caller (``client.run_artifact``)."""
+    import io
+
+    said = io.StringIO()
+    try:
+        if store_path() != root:
+            raise RuntimeError("artifact job store does not match its request")
+        with contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
+            value = result_frame(request, execute(request))
+    except Exception as error:  # noqa: BLE001 - the future carries it, as a worker's exit does
+        said.write(failure_text(error))
+        future._complete(error=ArtifactJobError(f"artifact request failed: {said.getvalue().strip()}"))
+    else:
+        future._complete(validate_result(request, value))
+    return future
+
+
 def submit_artifact(request, *, store_root=None):
     """Start a typed artifact operation as ONE build-pool job, a daemon worker's, against
     the store it names, from a thread of its own: the caller's thread never imports the
-    CAD kernel. A caller that waits for it yields the slot it holds (``result``)."""
+    CAD kernel. A caller that waits for it yields the slot it holds (``result``). In a process
+    built without the daemon the job runs here, before this returns (:func:`_execute_here`)."""
     request = normalize_request(request)
     root = store_path(store_root)
     future = ArtifactFuture()
     from cadgen.daemon import client
+
+    if client.no_daemon_active():
+        return _execute_here(request, root, future)
 
     dependency = getattr(_WORKER, "root", None) is not None or broker.current_lease() is not None
     # Captured before the dispatch thread: every request's root/dependency/env is

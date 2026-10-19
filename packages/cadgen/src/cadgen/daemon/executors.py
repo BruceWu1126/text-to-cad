@@ -248,8 +248,13 @@ def _submit_daemon(
     """Run the daemon tool ``tool`` with ``argv`` as a job the daemon coalesces by
     ``closure`` (a compile: the document's bytes). Finish ``job`` with its exit -- the
     command's answer: what the compile's result owes (its display data) is the daemon's,
-    after it -- and fail a refused job with its reason."""
+    after it -- and fail a refused job with its reason. A process built without the daemon
+    runs it here instead (:func:`_run_here`)."""
     from cadgen.daemon import client
+
+    if client.no_daemon_active():
+        _run_here(job, store_root, tool=tool, argv=argv, prog=prog)
+        return
 
     def run() -> None:
         code = 1
@@ -275,3 +280,43 @@ def _submit_daemon(
             job._finish(code)
 
     threading.Thread(target=run, name=f"cadgen-job-{job.script.stem}", daemon=True).start()
+
+
+def _run_here(job: Job, store_root: Path, *, tool: str, argv: list[str], prog: str) -> None:
+    """The job of a process built without the daemon (``client.NO_DAEMON_FLAG``): the very
+    command a worker would run for it (``cli.daemon_tool_modules``), run now on this thread,
+    from the document's folder, what it says the job's output, unseen by the file trace of a
+    build whose body asked for it -- cadgen's reading, as a pool job's is -- and finished with
+    its exit before this returns."""
+    import importlib
+    import io
+    import traceback
+
+    from cadgen._internal.filetrace import paused
+    from cadgen.cli import daemon_tool_modules
+    from cadgen.store.paths import store_root as current_store_root
+
+    code = 1
+    said = io.StringIO()
+    cwd = os.getcwd()
+    try:
+        if Path(current_store_root()).resolve() != Path(store_root).resolve():
+            raise RuntimeError(f"a job of a process built without the daemon names another store: {store_root}")
+        main = importlib.import_module(daemon_tool_modules()[tool]).main
+        with paused(), contextlib.redirect_stdout(said), contextlib.redirect_stderr(said):
+            os.chdir(job.script.parent)
+            try:
+                code = int(main(argv, prog=prog) or 0)
+            except SystemExit as exit_:
+                if isinstance(exit_.code, str):
+                    said.write(exit_.code + "\n")
+                code = exit_.code if isinstance(exit_.code, int) else (1 if exit_.code else 0)
+    except Exception:  # noqa: BLE001 - a failed compile settles this job's waiters with its reason
+        said.write(traceback.format_exc())
+        code = 1
+    finally:
+        with contextlib.suppress(OSError):
+            os.chdir(cwd)
+        job._say(said.getvalue())
+        emit_event(model_event(job.model, "done" if code == 0 else "failed", exit=code if code != 0 else None))
+        job._finish(code)

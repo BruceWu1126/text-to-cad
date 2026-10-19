@@ -895,9 +895,18 @@ def _build(defn: ModelDef) -> int:
         target = [str(defn.script_path)]
         if len(registered_models_in(defn.script_path)) > 1:
             target += ["--model", defn.name]
-        if os.environ.get("CADGEN_DAEMON_CHILD"):
+        from cadgen.cli import NO_DAEMON_FLAG
+
+        if NO_DAEMON_FLAG in argv:
+            # The one opt-in out of the daemon: this process builds, every pool job its build
+            # owes runs here before the call returns, and it never asks a daemon anything.
+            from cadgen.daemon.client import no_daemon_from_now
+
+            no_daemon_from_now()
+        if os.environ.get("CADGEN_DAEMON_CHILD") or NO_DAEMON_FLAG in argv:
             # A process the daemon started (a worker, or a program its job started) is
-            # the daemon's own: it builds here and never recurses into the daemon.
+            # the daemon's own: it builds here and never recurses into the daemon. So does
+            # one given the opt-in, through the same runner.
             from cadgen.cli._run_model import run_model_argv
 
             return run_model_argv([*target, *argv], prog=f"python {defn.script_path.name}")

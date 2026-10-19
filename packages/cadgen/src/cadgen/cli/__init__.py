@@ -119,6 +119,9 @@ def read_skill_pin(skill_path) -> str | None:
 # (`daemon_tool_modules`), so a door cannot be warm on one side and unknown on the other.
 _WARM_COMMANDS = ("step build", "step compile", "stl build", "3mf build", "glb build", "export")
 _DAEMON_TOOLS = {command: command.replace(" ", "-") for command in _WARM_COMMANDS}
+# What each of those doors, and a model script, takes to build in its own process instead,
+# never asking the daemon anything (``daemon.client.no_daemon_from_now``).
+NO_DAEMON_FLAG = "--no-daemon"
 
 
 def daemon_tool_modules() -> dict[str, str]:
@@ -308,11 +311,22 @@ def _run(command: str, module_name: str, rest: list[str]) -> int:
     # the daemon started (CADGEN_DAEMON_CHILD: a worker, or a program its job started) runs
     # a door here, as the daemon's own work: it never recurses into the daemon.
     daemon_tool = _DAEMON_TOOLS.get(command)
+    if daemon_tool is not None and NO_DAEMON_FLAG in rest:
+        # The one opt-in out of the daemon (NO_DAEMON_FLAG): this door runs
+        # here, and every pool job it owes runs in this process before it answers. Never a
+        # fallback: without it, a daemon that cannot take the door fails it.
+        from cadgen.daemon.client import no_daemon_from_now
+
+        no_daemon_from_now()
+        return _run_module(command, module_name, [arg for arg in rest if arg != NO_DAEMON_FLAG])
     if daemon_tool is not None and not os.environ.get("CADGEN_DAEMON_CHILD"):
         from cadgen.daemon.client import run_via_daemon
 
         return run_via_daemon(daemon_tool, rest, os.getcwd(), prog=f"cadgen {command}")
+    return _run_module(command, module_name, rest)
 
+
+def _run_module(command: str, module_name: str, rest: list[str]) -> int:
     module = importlib.import_module(module_name)
 
     # Tell the parser which front door it was reached through, so

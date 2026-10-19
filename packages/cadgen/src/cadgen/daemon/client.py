@@ -4,7 +4,9 @@ The front door (``cadgen.cli``) and a model script's top-level call import this 
 BEFORE any heavy import, so it must stay dependency-free and cheap to import. The daemon
 is where every job runs: a build, a compile, a display derivation, an export. A daemon
 that cannot be reached or started is an error that names why (:class:`DaemonUnavailable`),
-never a slower path, and a request the daemon lost is reported, never replayed.
+never a slower path, and a request the daemon lost is reported, never replayed. Only a
+command its caller ran with ``--no-daemon`` (:data:`NO_DAEMON_FLAG`) builds without one:
+that process runs every job itself and never asks a daemon anything.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from cadgen.cli import NO_DAEMON_FLAG
 from cadgen.daemon import transport
 
 # The installed cadgen package directory. Everything the daemon holds resident lives under
@@ -48,6 +51,38 @@ _TIMED_OUT = object()
 
 class DaemonUnavailable(RuntimeError):
     """No build daemon could take a request. The message names why, and what to do."""
+
+
+# The one opt-in out of the daemon, for a place it cannot run (a sandbox without local
+# sockets, a CI runner): a command given it builds in its own process, and that process
+# never connects to, starts or asks a daemon. It is never a fallback: a command without it
+# whose daemon cannot take its request fails, saying why (``DaemonUnavailable``). Its doors:
+# a model script (``cli._run_model``), and every door the front door would hand over
+# (``cli._WARM_COMMANDS``); the CAD Viewer and the CAD app need the daemon and refuse it
+# (:func:`refuse_no_daemon`). The flag is spelled once, by the front door (``cli``). Set for
+# the rest of the process: nothing it does later -- another model, a drawing's counts, a
+# crash report -- asks a daemon either.
+_NO_DAEMON = [False]
+
+
+def no_daemon_active() -> bool:
+    """Whether this process builds without the daemon (:data:`NO_DAEMON_FLAG`): every pool job
+    it owes runs here, inline (``artifacts.submit_artifact``, ``executors.submit_compile``)."""
+    return _NO_DAEMON[0]
+
+
+def no_daemon_from_now() -> None:
+    """Build without the daemon for the rest of this process: a command run with
+    :data:`NO_DAEMON_FLAG`."""
+    _NO_DAEMON[0] = True
+
+
+def refuse_no_daemon(argv, *, prog: str, what: str) -> None:
+    """End a command that needs the daemon when it was given :data:`NO_DAEMON_FLAG`, in one
+    sentence (exit 2, as a refused argument)."""
+    if NO_DAEMON_FLAG in list(argv or ()):
+        sys.stderr.write(f"{prog}: {what} needs the build daemon, so it cannot run with {NO_DAEMON_FLAG}.\n")
+        raise SystemExit(2)
 
 
 # A job runs in its CALLER's environment, never the daemon's. A worker inherits the
@@ -422,6 +457,9 @@ def _run_with_retry(payload: dict, *, on_stream=None, on_event=None,
 
 
 def _connect(address: str) -> transport.Channel:
+    if _NO_DAEMON[0]:
+        # Nothing to ask: a reader of the ledger reads at once, counts are kept for the next sender.
+        raise ConnectionRefusedError(f"this process builds without the daemon ({NO_DAEMON_FLAG})")
     key = transport.read_authkey(address) or b""
     try:
         return transport.connect(address, key)
@@ -452,6 +490,10 @@ def _connect_or_spawn(address: str) -> transport.Channel:
     """A channel to the daemon at ``address``, started here when none answers. Raises
     :class:`DaemonUnavailable` naming why there is none: what :func:`unavailable` finds,
     a start that failed, or a daemon that exited or stayed silent instead of answering."""
+    if _NO_DAEMON[0]:
+        # Every job of such a process runs in it; a request reaching here is cadgen's bug.
+        raise DaemonUnavailable(f"a request for the build daemon was made by a process given {NO_DAEMON_FLAG}, "
+                                "which runs every job itself")
     try:
         return _connect(address)
     except _FINAL:
