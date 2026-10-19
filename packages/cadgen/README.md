@@ -396,8 +396,11 @@ why the memo is correct where the operation cache cadgen once kept
 fresh shapes, and model code that held an edge across an operation found
 nothing. Every boolean the layer sees runs non-destructive, so it leaves its
 inputs as it was given them and its result shares every sub-shape it did not
-change; what another operation does to its inputs (an extrusion clears its
-profile's `Free` flag and appends representations to the profile's edges) is
+change -- writing into the edges it made, and no others, the p-curves on
+planes a destructive boolean writes, so what follows (a fillet) reads them
+rather than projecting each again; what another operation does to its inputs
+(an extrusion clears its profile's `Free` flag and appends representations to
+the profile's edges) is
 captured as each sub-shape's state before and after -- tolerance, flags, how
 many representations it holds -- replayed on a hit and undone when a later
 run no longer runs the operation, so a cold run and a hot run write the same

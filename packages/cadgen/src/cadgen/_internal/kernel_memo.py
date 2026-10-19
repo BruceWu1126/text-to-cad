@@ -68,7 +68,12 @@ those bytes reach the components a model emits. A boolean does not: the layer
 sets every boolean it sees non-destructive (``BOPAlgo_Options``), so the kernel
 copies the sub-shapes it would change and shares the rest, a boolean's inputs
 are left as they were given, and what it left alone keeps its identity in the
-result. What an operation does is captured as each sub-shape's state -- kind,
+result. A destructive boolean writes into the edges it leaves on a plane their
+curve on that plane (a p-curve); a non-destructive one writes it into none, its
+own new edges included, and every later query (a fillet makes thousands)
+projects it again: so each boolean writes it into the edges it made, and no
+other (``_store_pcurves``), as it returns. What an operation does is captured
+as each sub-shape's state -- kind,
 tolerance, the seven flags, how many representations it holds, an edge's
 parametric flags -- read after the operation and compared with the state
 before it; the memo keeps the state it last read of every sub-shape of a
@@ -368,7 +373,7 @@ def uninstall() -> bool:
                 if getattr(static.fget, "__kernel_memo__", False):
                     setattr(cls, attr, property(static.fget.__wrapped__, static.fset, static.fdel))
             elif getattr(static, "__kernel_memo__", False):
-                setattr(cls, attr, static.__wrapped__)
+                setattr(cls, attr, _original(static.__wrapped__))
         for module_name, attr, _slot in _HELPER_TARGETS:
             module = {"two_d": two_d}[module_name]
             function = getattr(module, attr)
@@ -402,7 +407,7 @@ def _patch(cls: type, attr: str, label: str, kind: str) -> None:
         if not inspect.isfunction(static):
             raise TypeError(f"{cls.__name__}.{attr} is not a plain method")
         if not getattr(static, "__kernel_memo__", False):
-            setattr(cls, attr, _wrap(label, static, kind))
+            setattr(cls, attr, _wrap(label, _with_pcurves(static) if label == "bool_op" else static, kind))
 
 
 def _wrap(label: str, function: Any, kind: str) -> Any:
@@ -417,6 +422,65 @@ def _wrap(label: str, function: Any, kind: str) -> Any:
 
     wrapper.__kernel_memo__ = True
     return wrapper
+
+
+def _with_pcurves(function: Any) -> Any:
+    """build123d's boolean, and then the p-curves it left unwritten (``_store_pcurves``):
+    what runs on a miss, an uncached call and a boolean nested in another call, and never
+    on a hit, which hands back what the miss wrote."""
+    @functools.wraps(function)
+    def _bool_op(self: Any, args: Any, tools: Any, operation: Any) -> Any:
+        args, tools = list(args), list(tools)
+        result = function(self, args, tools, operation)
+        _store_pcurves(result, (self, *args, *tools))
+        return result
+
+    _bool_op.__kernel_pcurves__ = True
+    return _bool_op
+
+
+def _original(function: Any) -> Any:
+    """What ``install`` found, under the step ``_with_pcurves`` adds to a boolean."""
+    return function.__wrapped__ if getattr(function, "__kernel_pcurves__", False) else function
+
+
+def _store_pcurves(result: Any, given: tuple) -> None:
+    """A destructive boolean writes, into each edge it leaves on a plane, the edge's curve
+    on that plane (its p-curve); a non-destructive one (``_non_destructive``) may write into
+    no edge it was given, and leaves the edges it makes without one too, so every later
+    query of one -- a fillet asks thousands -- projects it again. So, as the boolean
+    returns, each edge of its result that is in none of its inputs -- an edge it made --
+    has its p-curve on each plane of the result written once (``BRepLib``, which writes one
+    only where the face is a plane and none is stored): the result's own edges, never an
+    input's, so the boolean still leaves its inputs as it was given them."""
+    from OCP.BRepLib import BRepLib
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    wrapped = _wrapped(result)
+    if wrapped is None:
+        return
+    inputs: set = set()
+    for shape in given:
+        handle = _wrapped(shape)
+        if handle is not None:
+            edges = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(handle, TopAbs_EDGE, edges)
+            find = edges.FindKey
+            inputs.update(find(ordinal).TShape() for ordinal in range(1, edges.Extent() + 1))
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(wrapped, TopAbs_FACE, faces)
+    for ordinal in range(1, faces.Extent() + 1):
+        face = TopoDS.Face_s(faces.FindKey(ordinal))
+        explorer = TopExp_Explorer(face, TopAbs_EDGE)
+        while explorer.More():
+            edge = TopoDS.Edge_s(explorer.Current())
+            if edge.TShape() not in inputs:
+                try:
+                    BRepLib.BuildPCurveForEdgeOnPlane_s(edge, face)
+                except Exception:  # noqa: BLE001 - an unwritten p-curve is projected when asked, as before
+                    pass
+            explorer.Next()
 
 
 def _non_destructive(args: tuple, kwargs: dict) -> None:
