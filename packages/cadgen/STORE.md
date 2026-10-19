@@ -611,11 +611,12 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   **A build has its parts' display data derived; views only read.** A build
   never measures or meshes geometry on its own thread: the moment its result
   exists -- a model's or a re-emit's -- it asks the build pool for the parts of
-  its own components the store lacks (`parts.request_display`: one job, `kind:
+  its own components the store lacks (`parts.display_requests`: one job, `kind:
   display`, or on the daemon's pool, for a batch past half a megabyte of BREP,
   one per such share, balanced by size, a pool slot each but the build's own)
-  and queues them on its run. The command answers once its result is recorded;
-  its worker awaits these jobs before finishing the files. A linked child's parts
+  and hands them to its daemon worker's supervisor, which runs them
+  (`authoring.supervised`, as its exports are: *Exports* below). The command answers once its result is recorded, and its
+  worker takes its next job at once. A linked child's parts
   are its own build's, so a parent asks
   only for its own. A document compile queues every part of its tree on the same
   run and answers once its complete geometry is published and mapped to the

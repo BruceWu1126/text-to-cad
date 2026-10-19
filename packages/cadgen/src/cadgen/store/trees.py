@@ -5,7 +5,7 @@ A tree holds the geometry a model made itself (``components``, placed by its
 child are two links to one tree. Nothing of a child is copied::
 
     {
-      "kind": "geometry-tree", "schemaVersion": 5,
+      "kind": "geometry-tree", "schemaVersion": 6,
       "label": "robot", "entryKind": "assembly",
       "components": {"<cid>": {"kind": "native", "codec": "bintools-v4", "brep": "<object>", "faceColors": {}, "contentHash": "…", "construction": "…", "lineage": "<object>"}},
       "occurrences": [{"id": "o:4b1f9e2a7c03", "name": "housing", "component": "<cid>", "transform": [16 floats]}],
@@ -44,13 +44,9 @@ import os
 import threading
 from typing import Any
 
-from cadgen.store.objects import (  # noqa: F401 - the stamp helpers stay importable from here
-    _STAMP_MTIME_NS,
-    _TIMESTAMP_FLOOR_NS,
-    _TIMESTAMP_TICKS_NS,
+from cadgen.store.objects import (
     _stamp,
     _stamp_is_settled,
-    _timestamp_resolution_ns,
     claim_object,
     forget_verified,
     object_path,

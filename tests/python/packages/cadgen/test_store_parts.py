@@ -88,13 +88,13 @@ class PartStoreTest(unittest.TestCase):
         # A build's job, asked for the part still missing, says the one failure as a line and
         # fails nothing (what the build then prints: test_build_derives_display).
         with inline_artifacts() as jobs, mock.patch.object(tessellate, "mesh_component", side_effect=mesher):
-            [_failure] = parts.request_display(tree).wait()
+            [_failure] = parts.submit_display(*parts.display_requests(tree)).wait()
         self.assertEqual([len(call.args[0]["cids"]) for call in jobs.call_args_list], [1], "one job, for the part missing")
         self.assertEqual(stored(), others)
         # An interrupt is not a part's failure.
         with inline_artifacts(), mock.patch.object(tessellate, "mesh_component", side_effect=KeyboardInterrupt), \
                 self.assertRaises(KeyboardInterrupt):
-            parts.request_display(tree).wait()
+            parts.submit_display(*parts.display_requests(tree)).wait()
 
     def test_a_large_batch_is_several_jobs_waited_for_as_one(self) -> None:
         """A batch of parts past ``_BATCH_BYTES`` goes to the daemon's pool as several jobs --
@@ -111,7 +111,7 @@ class PartStoreTest(unittest.TestCase):
                 remove_entry("part", key)
             with inline_artifacts() as jobs, mock.patch.object(parts, "_BATCH_BYTES", 1), \
                     mock.patch("cadgen.daemon.broker.job_limit", return_value=slots):
-                job = parts.request_display(tree)
+                job = parts.submit_display(*parts.display_requests(tree))
                 heard = []
                 job.when_done(heard.append)
                 self.assertEqual(job.wait(), [])
@@ -127,7 +127,7 @@ class PartStoreTest(unittest.TestCase):
         for key in keys.values():
             remove_entry("part", key)
         with inline_artifacts() as jobs:
-            self.assertEqual(parts.request_display(tree).wait(), [])
+            self.assertEqual(parts.submit_display(*parts.display_requests(tree)).wait(), [])
         self.assertEqual(len(jobs.call_args_list), 1, "four small parts are one job")
 
     def test_part_keys_carry_their_version_and_an_older_one_is_obsolete(self) -> None:

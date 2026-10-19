@@ -642,15 +642,6 @@ def submit_display(requests: list[dict], keys: dict[str, str], placed: dict) -> 
     return DisplayJob(jobs, keys, placed)
 
 
-def request_display(tree_hash: str, *, producer: dict | None = None,
-                    cids: list[str] | None = None) -> "DisplayJob | None":
-    """Have the build pool derive the display data of every part of ``tree_hash`` the store
-    lacks (:func:`display_requests`), the jobs running on daemon workers while the caller goes
-    on, and return them as one :class:`DisplayJob`; None when the store holds them all."""
-    asked = display_requests(tree_hash, producer=producer, cids=cids)
-    return submit_display(*asked) if asked is not None else None
-
-
 def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:
     """``missing``'s components as the batches the pool derives: one, or one per
     ``_BATCH_BYTES`` of their BREP up to one for each of the daemon's slots but the
@@ -677,7 +668,7 @@ def _batches(missing: dict[str, str], components: dict) -> list[list[str]]:
 
 class DisplayJob:
     """The build pool's work deriving the display data of the parts a tree's store lacked
-    (:func:`request_display`), one job or several, waited for as one: ``keys``,
+    (:func:`submit_display`), one job or several, waited for as one: ``keys``,
     ``{cid: part key}``, are those parts."""
 
     def __init__(self, jobs: list[tuple[Any, dict[str, str]]], keys: dict[str, str],
@@ -752,8 +743,8 @@ class DisplayJob:
 # (:func:`derive`).
 _FAILED_COMPONENT = re.compile(r"component ([0-9a-f]{16}): ")
 # What a pooled job's failure wraps its last line in (``daemon/artifacts.py``, ``daemon/client.py``).
-_JOB_FAILURE_PREFIXES = ("artifact request failed: ", "artifact worker failed or returned no result: ",
-                         "cadgen._internal.tessellate.MeshProductionError: ", "MeshProductionError: ")
+_JOB_FAILURE_PREFIXES = ("artifact request failed: ", "cadgen._internal.tessellate.MeshProductionError: ",
+                         "MeshProductionError: ")
 
 
 def failed_parts(keys: dict[str, str], error: Exception) -> dict[str, str]:
