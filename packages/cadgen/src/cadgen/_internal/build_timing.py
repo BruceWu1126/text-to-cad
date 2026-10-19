@@ -155,9 +155,8 @@ def started_warning(name: str, programs: list[str]) -> str | None:
 class BuildClock:
     """One build's measurements, owned by the thread that runs it."""
 
-    def __init__(self, *, model_ref: str | None, last_model_seconds: float | None, profile: bool) -> None:
+    def __init__(self, *, last_model_seconds: float | None, profile: bool) -> None:
         self.started = time.perf_counter()
-        self.model_ref = model_ref
         self.last_model_seconds = last_model_seconds
         self.profile = bool(profile)
         self.body_seconds = 0.0
@@ -239,12 +238,12 @@ def record_fields() -> dict[str, float]:
 
 
 @contextlib.contextmanager
-def measuring(*, model_ref: str | None, last_model_seconds: float | None, profile: bool = False) -> Iterator[BuildClock]:
+def measuring(*, last_model_seconds: float | None, profile: bool = False) -> Iterator[BuildClock]:
     """Measure the build that runs in the block, on this thread."""
     stack = getattr(_LOCAL, "clocks", None)
     if stack is None:
         stack = _LOCAL.clocks = []
-    clock = BuildClock(model_ref=model_ref, last_model_seconds=last_model_seconds, profile=profile)
+    clock = BuildClock(last_model_seconds=last_model_seconds, profile=profile)
     stack.append(clock)
     try:
         yield clock

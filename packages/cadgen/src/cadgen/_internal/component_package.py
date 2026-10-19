@@ -15,7 +15,6 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
-COMPONENT_DIRNAME = "components"
 DESCRIPTOR_NAME = "assembly.json"
 
 
@@ -328,51 +327,12 @@ def _occurrence_material(child: Any) -> dict[str, Any] | None:
     return resolved or None
 
 
-def _unlocated_shape(shape: Any) -> Any:
-    """A copy of ``shape`` moved to the identity location (its LOCAL frame), preserving the
-    ``label``/``color`` a clean component still carries. Mirrors ``_content_hash_shape``'s
-    location stripping so the emitted GLB is the exact local geometry the cid addresses.
-
-    Uses OCCT's ``TopoDS_Shape.Located`` (shares the underlying ``TShape``, O(1)) rather than
-    build123d's ``shape.located()``, which ``copy.deepcopy``s the whole shape graph on every
-    call (~5 s per component on tom — historically ~85% of the fresh-build time). The
-    geometry-only content hash is unaffected: it excludes triangulation, and distinct parts
-    keep distinct ``TShape``s, so meshing one component never perturbs another's digest.
-
-    Parametric build123d primitives (``Box``/``Cylinder``/...) reject a ``TopoDS`` constructor,
-    so for those the cheap OCCT wrap raises ``TypeError`` and we fall back to build123d's
-    ``located()`` (correct, and primitives are small so the deepcopy is negligible)."""
-    from OCP.TopLoc import TopLoc_Location
-
-    try:
-        local = type(shape)(shape.wrapped.Located(TopLoc_Location()))
-    except TypeError:
-        from build123d import Location
-
-        local = shape.located(Location())
-    label = getattr(shape, "label", "")
-    if label:
-        local.label = label
-    color = getattr(shape, "color", None)
-    if color is not None:
-        local.color = color
-    face_colors = _normalized_face_colors(getattr(shape, "cad_face_ordinal_colors", None))
-    if face_colors:
-        local.cad_face_ordinal_colors = face_colors
-    return local
-
-
 def _shape_brep_bytes(shape: Any) -> bytes:
-    """Location-stripped binary BREP of a shape (no triangulation/normals) — the
-    process-boundary payload for parallel component builds. Mirrors
-    ``_content_hash_shape``'s serialization so the worker rebuilds exactly the
-    geometry the cid addresses.
+    """Location-stripped binary BREP of a shape (no triangulation/normals).
 
     Takes a build123d shape or a bare ``TopoDS_Shape``: a document's
     prototypes (``store.build``) and a materialized child (``store.materialize``)
     come through here too, and they hold kernel shapes, not wrappers."""
-    import io
-
     from OCP.BinTools import BinTools, BinTools_FormatVersion
     from OCP.TopLoc import TopLoc_Location
 
@@ -702,7 +662,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None,
     and their own byte fixed point. Failure pins the live shape's topology
     facts explicitly (``topology``, the bytes an eager-only component's tree
     pins), never a falsely readable native entry. ``identity`` is what the run
-    that made the shape names it by (``kernel_memo._Run.identify``): its
+    that made the shape names it by (``kernel_memo._Run.account``): its
     construction key and its lineage, which the entry carries as
     ``construction`` and ``lineage`` (the lineage's object, whose bytes ride the
     prepared component as ``lineage`` until it is published). Nothing here

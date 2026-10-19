@@ -180,7 +180,7 @@ class ExportSupersession(unittest.TestCase):
         self.stores.add(os.path.realpath(self.root / "store"))
         logger = CliLogger("cadgen", verbose=False)
         with held_jobs() as jobs, build_run(logger):
-            _specs, (spec,) = _selected_specs_for_targets([str(script)])
+            (spec,) = _selected_specs_for_targets([str(script)])
             build_model(spec, generator=None, force=False, profile=False, logger=logger)
             try:
                 yield jobs
