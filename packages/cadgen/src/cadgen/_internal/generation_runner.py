@@ -301,7 +301,6 @@ def _write_shape_step_payload(
     # Stash the compound: the tree build introspects its located
     # children (occurrence transforms + dedup), and the STEP export serializes it.
     scene.source_compound = shape
-    logger.debug(f"built render scene (no STEP written): {_display_path(output_path)}")
     return scene
 
 
