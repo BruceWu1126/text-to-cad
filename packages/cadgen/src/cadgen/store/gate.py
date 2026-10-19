@@ -83,11 +83,11 @@ def _is_step(path: str) -> bool:
 def _live_shape_writes(tree: str) -> bool:
     """Whether the result's STEP is written from a live shape of the build's own process
     (STORE.md §3, *Exports*): a component the store cannot decode (an eager-only one)
-    reaches a file only that way, so a run owes the STEP, never the pool."""
-    from cadgen.store.trees import get_tree
+    reaches a file only that way, so a run owes the STEP, never the pool. Read off the
+    closure clause 4 verified: no object is read again."""
+    from cadgen.store.trees import component_kinds
 
-    components = ((get_tree(tree) if tree else None) or {}).get("components") or {}
-    return any((entry or {}).get("kind") == "eager-only" for entry in components.values())
+    return bool(tree) and "eager-only" in component_kinds(tree)
 
 
 @dataclass
