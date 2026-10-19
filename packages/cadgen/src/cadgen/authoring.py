@@ -424,7 +424,46 @@ def _validate_signature(func: Callable[..., Any], *, fmt: str) -> None:
 
 
 def _register(defn: ModelDef) -> None:
+    _refuse_shared_output(defn)
     _REGISTRY[defn.ref] = defn
+
+
+def _declared_outputs(defn: ModelDef) -> dict[Path, tuple[str, bool]]:
+    """Every file ``defn`` declares it writes, resolved as the build resolves them
+    (``metadata.declared_output_paths``), each with the declaration that names it and
+    whether that declaration spelled it (``out=``) rather than took the default."""
+    from cadgen.metadata import resolve_model_output_path
+
+    primary = resolve_model_output_path(defn.script_path, fmt=defn.fmt, explicit_out=defn.out, function=defn.name)
+    outputs: dict[Path, tuple[str, bool]] = {}
+    if defn.fmt == "dxf" or defn.step_output:
+        outputs[primary] = (f"@{defn.fmt}", defn.out is not None)
+    for decl in defn.mesh_exports:
+        target = (resolve_model_output_path(defn.script_path, fmt=decl.fmt, explicit_out=decl.out, function=defn.name)
+                  if decl.out is not None else primary.with_suffix(f".{decl.fmt}"))
+        outputs.setdefault(target, (f"@{_MESH_FMT_DECORATOR[decl.fmt]}", decl.out is not None))
+    return outputs
+
+
+def _refuse_shared_output(defn: ModelDef) -> None:
+    """Two models of one file may not declare one file: each run would rewrite it with
+    whichever export lands last, both reporting it current. The defaults never meet
+    (models sharing a file each write ``<function>.<fmt>``); an ``out=`` that names
+    another model's file is refused as it is declared, against the file's other models
+    as it reads now (``stamp``): a warm worker still holds the models an earlier
+    version of the file declared."""
+    mine = _declared_outputs(defn)
+    for other in registered_models_in(defn.script_path):
+        if other.ref == defn.ref or other.stamp != defn.stamp:
+            continue
+        theirs = _declared_outputs(other)
+        for path in mine.keys() & theirs.keys():
+            (declared, explicit), (declared_there, explicit_there) = mine[path], theirs[path]
+            if explicit or explicit_there:
+                raise ValueError(
+                    f"{defn.script_path.name}: {declared} on {defn.name}() declares {path.name}, which "
+                    f"{declared_there} on {other.name}() declares too; each model of a file writes files of its own"
+                )
 
 
 def _declaring(func: Callable[..., Any]) -> "_Declaring":
@@ -769,7 +808,7 @@ def _mesh_export_decorator(deco_name: str, fmt: str):
                 updated = _replace(
                     existing_model, mesh_exports=(decl, *existing_model.mesh_exports)
                 )
-                _REGISTRY[updated.ref] = updated
+                _register(updated)
                 target.__cadgen_model__ = updated  # type: ignore[attr-defined]
                 return target
             # No @step (yet): a mesh decorator alone declares a MODEL — the same
@@ -779,7 +818,7 @@ def _mesh_export_decorator(deco_name: str, fmt: str):
             wrapper = _decorator("step", out=None, step_output=False)(target)
             registered = _REGISTRY[model_ref(_script_path_of(target), target.__name__)]
             updated = _replace(registered, mesh_exports=(decl,))
-            _REGISTRY[updated.ref] = updated
+            _register(updated)
             wrapper.__cadgen_model__ = updated  # type: ignore[attr-defined]
             target.__cadgen_model__ = updated  # type: ignore[attr-defined]
             return wrapper

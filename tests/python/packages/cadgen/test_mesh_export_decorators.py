@@ -135,6 +135,54 @@ class MeshExportMetadataTest(unittest.TestCase):
                         "    return bd.Rectangle(10, 5)\n"
                     )
 
+    def test_two_models_of_one_file_may_not_declare_one_output(self) -> None:
+        """Each run rewrote the shared file with whichever export landed last, both
+        models reporting it current: the second declaration is refused, naming both,
+        whether the shared file is a STEP, a mesh, or one model's default."""
+        import runpy
+
+        header = "from cadgen import build123d as bd\nfrom cadgen import glb, step\n\n"
+
+        def declare(body: str) -> None:
+            with tempfile.TemporaryDirectory() as tmp:
+                script = Path(tmp) / "pair.py"
+                script.write_text(header + textwrap.dedent(body), encoding="utf-8")
+                runpy.run_path(str(script), run_name="pair")
+
+        with self.assertRaisesRegex(ValueError, r"pair\.py: @step on m2\(\) declares same\.step, which @step on m1\(\) declares too"):
+            declare("""\
+                @step(out="same.step")
+                def m1():
+                    return bd.Box(1, 1, 1)
+
+                @step(out="same.step")
+                def m2():
+                    return bd.Sphere(1)
+                """)
+        with self.assertRaisesRegex(ValueError, r"@glb on m2\(\) declares m1\.glb, which @glb on m1\(\) declares too"):
+            declare("""\
+                @step
+                @glb
+                def m1():
+                    return bd.Box(1, 1, 1)
+
+                @step
+                @glb(out="m1.glb")
+                def m2():
+                    return bd.Sphere(1)
+                """)
+        declare("""\
+            @step
+            @glb
+            def m1():
+                return bd.Box(1, 1, 1)
+
+            @step
+            @glb
+            def m2():
+                return bd.Sphere(1)
+            """)  # each model's default is its own name: no collision
+
     def test_step_refuses_a_keyword_it_does_not_take(self) -> None:
         from cadgen.authoring import step
 
