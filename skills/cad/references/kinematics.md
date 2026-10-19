@@ -19,9 +19,9 @@ Both live in the STEP's sidecar (`<name>.step.json`); neither changes STEP bytes
 
 ## Kinematics: typed mates
 
-One `kinematics=` dict, closed keys `mates` / `couplings` / `poses`, on any of
-`@step`/`@stl`/`@glb`/`@threemf`. Each decorator's declaration stands alone
-(share a module-level dict).
+One `kinematics=` dict, closed keys `mates` / `couplings` / `poses`, on `@step`
+(a mesh decorator takes no `kinematics=`; the STEP's sidecar carries it for
+every mesh cut from that model).
 
 ```python
 import cadgen

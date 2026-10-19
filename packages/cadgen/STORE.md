@@ -2176,7 +2176,11 @@ once starting twenty daemons that unlink each other's live sockets.
 
 **The address always binds.** On POSIX the address is a socket in the
 daemon's state directory (`CADGEN_DAEMON_STATE_DIR`, else `cadgen-daemon/` in
-the system temp folder), which holds its key, its locks and its log. A Unix
+the system temp folder), which holds its locks; its key (`<socket>.key`) and
+its log (`<socket>.log`) live beside the socket, wherever the address puts it
+(`transport.beside`): an address `CADGEN_DAEMON_SOCKET` names has them beside
+it, and a stopped daemon leaves them where they are, for the next one at that
+address. A Unix
 socket path has a ceiling (104 bytes on macOS), so when the state directory is
 too deep for it the socket alone goes in `/tmp/cadgen-<uid>/`, named by a hash
 of the path it would have had: every client of that state directory finds the
@@ -2184,7 +2188,8 @@ same one, whatever its own `TMPDIR`. Anyone can predict that folder's name in a
 `/tmp` every user shares, so the daemon makes it mode 0700 and uses it only
 while it is a folder of this user's own; one another user made first is never
 used, and every door says so and names the remedy (a shorter
-`CADGEN_DAEMON_STATE_DIR`). The key stays in the state directory, so a socket
+`CADGEN_DAEMON_STATE_DIR`). The key and the log of a socket there stay in the
+state directory, so a socket
 planted in the short folder could not answer the handshake either. On Windows
 the address is a pipe name, which has no path to outgrow.
 
