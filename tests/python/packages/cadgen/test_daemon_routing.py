@@ -303,6 +303,31 @@ class DaemonRouting(unittest.TestCase):
             self.assertEqual(first.result(timeout=300), 0)
             self.assertEqual(second.result(timeout=300), 0)
 
+    def test_the_supervisor_never_imports_a_model(self):
+        # A model's module top runs in its worker and nowhere else: a fault there (a
+        # native crash at import) must not be able to take the supervisor down, and a
+        # slow top must not stall unrelated builds behind the supervisor's load lock.
+        # The top writes down every process that imports it; the daemon's own argv names
+        # its __main__, a worker's job names `python <script>`.
+        tops = self.src / "tops.log"
+        tops.unlink(missing_ok=True)
+        (self.src / "top.py").write_text(
+            "import sys\nfrom pathlib import Path\n"
+            f"Path({str(tops)!r}).open('a').write(sys.argv[0] + '\\n')\n"
+            "from cadgen import step\nfrom cadgen import build123d as bd\n\n"
+            "@step(out='top-out.step')\ndef top():\n    return bd.Box(3.0, 4.0, 2.0)\n",
+            encoding="utf-8",
+        )
+        code, output, events = self._build("top.py", "--force")
+        self.assertEqual(code, 0, output)
+        importers = tops.read_text(encoding="utf-8").split()
+        self.assertTrue(importers, "the worker never imported the model")
+        self.assertEqual([], [arg for arg in importers if "daemon" in arg],
+                         f"the supervisor imported the model: {importers}")
+        # The ledger still listed the job against its declared output: the row named it
+        # from the script's text, and the build's first event confirmed it.
+        self.assertIn(str(self.src / "top-out.step"), next(e for e in events if e.get("outputs"))["outputs"])
+
     def test_a_parent_builds_its_children_in_its_own_worker(self):
         before = {name: len(self._workers_for(name)) for name in ("left.py", "right.py")}
         code, output, events = self._build("pair.py", "--force")

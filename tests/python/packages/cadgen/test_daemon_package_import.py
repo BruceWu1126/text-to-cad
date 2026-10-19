@@ -79,6 +79,34 @@ class DaemonPackageImportTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+    def test_the_supervisor_reads_a_jobs_outputs_without_the_loader_or_the_kernel(self) -> None:
+        """The ledger learns a job's outputs from the script's text (``static_output_paths``):
+        after it, neither the model, cadgen's module loader, the authoring registry nor the
+        kernel is in the supervisor's module table."""
+        script = textwrap.dedent(r"""
+            import sys, tempfile
+            from pathlib import Path
+            import cadgen.daemon.server
+            from cadgen.daemon.jobs import declared_outputs
+
+            with tempfile.TemporaryDirectory() as tmp:
+                model = Path(tmp) / "widget.py"
+                model.write_text("from cadgen import step\n@step(out='w.step')\ndef widget(): pass\n")
+                outputs = declared_outputs(str(model))
+            if [Path(p).name for p in outputs] != ["w.step"]:
+                raise AssertionError(outputs)
+            loaded = {name for name in sys.modules
+                      if name.startswith(("build123d", "OCP", "cadgen.authoring", "cadgen._internal.generation"))
+                      or "widget" in name}
+            if loaded:
+                raise AssertionError(f"the supervisor loaded {sorted(loaded)}")
+        """)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(REPO / "packages/cadgen/src")
+        result = subprocess.run([sys.executable, "-c", script], cwd=REPO, env=env, capture_output=True, text=True,
+                                timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

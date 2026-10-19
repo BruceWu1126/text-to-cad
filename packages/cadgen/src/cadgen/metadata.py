@@ -136,6 +136,81 @@ def declared_output_paths(script_path: Path | str, *, function: str | None = Non
         return []
 
 
+def static_output_paths(script_path: Path | str, *, function: str | None = None) -> list[Path]:
+    """The files the models in ``script_path`` declare, read off the source text ALONE.
+
+    What a process that must never run model code (the daemon's supervisor, ``daemon.jobs``)
+    knows of a job's outputs before its worker says: a string-literal ``out=`` resolved as the
+    build resolves it (:func:`resolve_model_output_path`), a mesh decorator's literal ``out=``,
+    or its sibling default beside a known primary. An ``out=`` computed at import
+    (``NAME + ".step"``) is unknown here and left out: the build names every output in its
+    first event. ``function`` narrows it to one model. Never raises and never imports: a
+    script that cannot be parsed declares nothing.
+    """
+    try:
+        script = Path(script_path).resolve()
+        tree = ast.parse(script.read_text(), filename=str(script))
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError, MemoryError, RecursionError):
+        return []
+    names, module_aliases = _cadgen_decorator_aliases(tree)
+    outputs: list[Path] = []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or (function and node.name != function):
+            continue
+        declared = _static_declarations(node, names, module_aliases)
+        models = [(kind, kwargs) for kind, kwargs in declared if kind in ("step", "dxf")]
+        meshes = [(kind, kwargs) for kind, kwargs in declared if kind in _MESH_DECORATOR_NAMES]
+        if not models and not meshes:
+            continue
+        fmt, kwargs = models[0] if models else ("step", {})
+        primary = _static_target(script, fmt=fmt, out=kwargs.get("out"), function=node.name)
+        if models and primary is not None:
+            outputs.append(primary)
+        for kind, mesh_kwargs in meshes:
+            mesh_fmt = "3mf" if kind == "threemf" else kind
+            if "out" not in mesh_kwargs:
+                if primary is not None:
+                    outputs.append(primary.with_suffix(_MESH_SUFFIX[mesh_fmt]))
+                continue
+            target = _static_target(script, fmt=mesh_fmt, out=mesh_kwargs["out"], function=node.name)
+            if target is not None:
+                outputs.append(target)
+    return list(dict.fromkeys(outputs))
+
+
+def _static_target(script: Path, *, fmt: str, out: ast.expr | None, function: str) -> Path | None:
+    """A declared output resolved from a literal ``out=`` (or none, the sibling default);
+    None for one only an import could evaluate."""
+    if out is None:
+        return resolve_model_output_path(script, fmt=fmt, explicit_out=None, function=function)
+    if isinstance(out, ast.Constant) and isinstance(out.value, str):
+        return resolve_model_output_path(script, fmt=fmt, explicit_out=out.value, function=function)
+    return None
+
+
+def _static_declarations(
+    function: ast.FunctionDef, names: dict[str, str], module_aliases: set[str],
+) -> list[tuple[str, dict[str, ast.expr]]]:
+    """Every cadgen decorator on ``function`` with its keyword arguments as syntax:
+    ``[("step", {"out": <expr>}), ("stl", {}), ...]`` in source order."""
+    declared: list[tuple[str, dict[str, ast.expr]]] = []
+    for decorator in function.decorator_list:
+        target = decorator
+        kwargs: dict[str, ast.expr] = {}
+        if isinstance(decorator, ast.Call):
+            target = decorator.func
+            kwargs = {keyword.arg: keyword.value for keyword in decorator.keywords if keyword.arg is not None}
+        kind: str | None = None
+        if isinstance(target, ast.Name):
+            kind = names.get(target.id)
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) \
+                and target.value.id in module_aliases:
+            kind = target.attr if target.attr in {"step", "dxf", *_MESH_DECORATOR_NAMES} else None
+        if kind is not None:
+            declared.append((kind, kwargs))
+    return declared
+
+
 def _cadgen_decorator_aliases(tree: ast.Module) -> tuple[dict[str, str], set[str]]:
     """Local names bound to cadgen's model/export decorators, and local
     names bound to the cadgen module itself (for ``@cadgen.step(...)``)."""

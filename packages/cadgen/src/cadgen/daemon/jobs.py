@@ -17,8 +17,13 @@ failed one, and nothing else
 State comes from the ``{"event": …}`` frames the worker streams (the build
 tree's own transitions: submitted → queued → building [phase, done/total] →
 done | failed) and from the request's exit code; a job whose requester left ends
-cancelled. Stdlib only; nothing here
-imports the kernel — a job's outputs come from ``cadgen.metadata``'s AST parse.
+cancelled. Stdlib only; nothing here imports the kernel, and nothing here runs or
+imports a model: a job's outputs come from ``cadgen.metadata``'s AST parse of its
+script (``static_output_paths``: a literal ``out=`` and the mesh beside it), and what
+the text alone cannot say (an ``out=`` computed at import) its worker names in the
+first event of each model it builds (``outputs``). The supervisor never imports model
+code, so no module top -- a fault, a sleep, an import only the caller's path finds --
+can reach it.
 
 A row also says what its build still owes once its results are recorded: build-pool jobs
 the build handed the supervisor (:meth:`JobLedger.owe`, ``server._start_owed``) -- the
@@ -161,13 +166,15 @@ def _same_model(ref: str, subject: str) -> bool:
 
 
 def declared_outputs(subject: str) -> list[str]:
-    """The output paths a job will write, from its declarations alone.
+    """The output paths a job will write, from its declarations' TEXT alone.
 
     A compile (``step-compile``) writes the tree for the document it names — the
-    document IS its output. A model script's outputs are its ``out=`` document
+    document IS its output. A model script's outputs are its literal ``out=`` document
     (else the sibling ``<stem>.step`` / ``.dxf``) and every declared mesh export,
-    resolved exactly as the build resolves them. Never raises: a script that
-    cannot be parsed simply declares nothing.
+    resolved exactly as the build resolves them (``cadgen.metadata.static_output_paths``).
+    The script is parsed, never imported: an output only an import could evaluate is
+    named by the worker's first event instead. Never raises: a script that cannot be
+    parsed simply declares nothing.
     """
     if not subject:
         return []
@@ -175,9 +182,9 @@ def declared_outputs(subject: str) -> list[str]:
     if not script_ref.endswith(".py"):
         return [_real(subject)]
     try:
-        from cadgen.metadata import declared_output_paths
+        from cadgen.metadata import static_output_paths
 
-        paths = declared_output_paths(Path(script_ref), function=function or None)
+        paths = static_output_paths(Path(script_ref), function=function or None)
         return list(dict.fromkeys(_real(path) for path in paths))
     except Exception:  # noqa: BLE001 - metadata is best-effort; a job still runs
         return []
@@ -200,18 +207,33 @@ class JobLedger:
         self._last_declared_guard = threading.Lock()
 
     def _declared_outputs(self, subject: str) -> list[str]:
-        """:func:`declared_outputs`, or, when the script no longer imports (an edit broke a
-        helper), what it declared the last time it did: the job is still listed against the
-        documents its script writes, so its failure reaches whoever shows them. Never a
-        guess at the source: only what the script itself declared, in this process."""
+        """:func:`declared_outputs`, plus what the subject's builds named the last time one
+        ran here (an ``out=`` the text cannot evaluate, :meth:`_name_outputs`), or, when the
+        script no longer parses (an edit broke it), what it declared the last time it did:
+        the job is still listed against the documents its script writes, so its failure
+        reaches whoever shows them. Never a guess at the source: only what the script itself
+        declared, in this process."""
         outputs = declared_outputs(subject)
         if not subject:
             return outputs
         with self._last_declared_guard:
             if outputs:
-                self._last_declared[subject] = list(outputs)
-                return outputs
-            return list(self._last_declared.get(subject, ()))
+                self._last_declared[subject] = list(dict.fromkeys([*outputs, *self._last_declared.get(subject, ())]))
+            return list(self._last_declared.get(subject, outputs))
+
+    def _name_outputs(self, job: dict[str, Any], outputs: object) -> None:
+        """The files a build names in a model's first event (``generation._declared_outputs``):
+        the row's outputs, and the subject's for its next run, from now on."""
+        if not isinstance(outputs, list):
+            return
+        named = [_real(str(path)) for path in outputs if isinstance(path, str) and path]
+        for output in named:
+            if output not in job["outputs"]:
+                job["outputs"].append(output)
+        if named and job.get("subject"):
+            with self._last_declared_guard:
+                self._last_declared[job["subject"]] = list(dict.fromkeys(
+                    [*named, *self._last_declared.get(job["subject"], ())]))
 
     # --- lifecycle -------------------------------------------------------------
 
@@ -513,6 +535,9 @@ class JobLedger:
                     if event.get("error"):
                         job["error"] = str(event["error"])
                     job["finishedAt"] = now
+            # The files the build names as it takes the model up: what the script's text
+            # could not say (an ``out=`` evaluated at import).
+            self._name_outputs(job, event.get("outputs"))
             # A build's results fold in whenever they land, a saved document after its
             # row closed included (a kept file published after a child's done): the names a
             # reader reads, never a state the row has left.

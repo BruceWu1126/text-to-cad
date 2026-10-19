@@ -1277,6 +1277,22 @@ def _tree_event(spec: EntrySpec, state: str, **extra: object) -> None:
     emit_event(model_event(model, state, parent=_event_parent(model), **extra))
 
 
+def _declared_outputs(spec: EntrySpec) -> list[str] | None:
+    """The files a generated model declares, as its first event names them for the daemon's
+    ledger (``daemon.jobs``): its STEP or drawing and its declared meshes, resolved as the
+    build resolves them -- what the supervisor, which never imports a model, could not read
+    off the script's text (an ``out=`` evaluated at import). None for an imported document."""
+    if spec.source != "generated":
+        return None
+    outputs: list[str] = []
+    if spec.dxf_path is not None:
+        outputs.append(str(spec.dxf_path.expanduser().resolve()))
+    elif spec.step_output and spec.step_path is not None:
+        outputs.append(str(spec.step_path.expanduser().resolve()))
+    outputs += [str(Path(item.path).expanduser().resolve()) for item in spec.mesh_exports]
+    return list(dict.fromkeys(outputs))
+
+
 def _event_parent(model: str) -> str | None:
     """The model whose body called ``model``, for its events: the body in flight on this
     thread (a child's build runs inside its caller's body), or, while ``model``'s own
@@ -1377,10 +1393,12 @@ def _run_with_spec_generation_status(
         profile=profile,
     ) as clock:
         clock.started = started
+        # The model's first event names the files it declares, for the daemon's ledger.
+        outputs = _declared_outputs(spec)
         if run.skipped:
             if model_format == "step":
                 _current_source_result(spec, checked_tree)
-            _tree_event(spec, "current")
+            _tree_event(spec, "current", outputs=outputs)
             return _SkippedGeneration(spec, checked_tree)
         from cadgen.daemon import broker
 
@@ -1388,14 +1406,14 @@ def _run_with_spec_generation_status(
         # child's build inside the body runs in the slot its parent holds. `queued`
         # shows in the tree only when the slot did not come at once.
         def queued() -> None:
-            _tree_event(spec, "queued")
+            _tree_event(spec, "queued", outputs=outputs)
             if on_queued is not None:
                 on_queued()
 
         waiting_from = time.perf_counter()
         with broker.held(spec.source_ref, on_queued=queued):
             clock.queued = time.perf_counter() - waiting_from
-            _tree_event(spec, "building", phase="generate")
+            _tree_event(spec, "building", phase="generate", outputs=outputs)
             try:
                 result = action(spec, run)
             except BaseException:
@@ -1580,7 +1598,7 @@ def build_model(
             tree = _restore_result(spec, verdict(), logger=logger)
         if tree is not None:
             _hit(spec, tree, logger=logger, verdict=verdict())
-            _tree_event(spec, "current")
+            _tree_event(spec, "current", outputs=_declared_outputs(spec))
             return _Built(tree, "current", key=verdict().key)
 
     # The same question, asked again when the run opens, so a run that started behind
@@ -1721,7 +1739,7 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
         if child_verdict.key is None and _restore_result(child_spec, child_verdict, logger=logger) is None:
             continue
         _hit(child_spec, child_verdict.tree, logger=logger, verdict=child_verdict, healed=healed, display=False)
-        _tree_event(child_spec, "current")
+        _tree_event(child_spec, "current", outputs=_declared_outputs(child_spec))
     step = None
     if spec.source == "generated" and spec.step_output and spec.step_path is not None:
         from cadgen._internal.source_sidecar import source_sidecar_path

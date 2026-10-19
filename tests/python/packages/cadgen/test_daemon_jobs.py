@@ -77,48 +77,61 @@ class DeclaredOutputs(unittest.TestCase):
             script.write_text("def (\n", encoding="utf-8")
             self.assertEqual([], declared_outputs(str(script)))
 
-    def test_a_project_read_again_after_another_reads_its_own_lib(self):
-        # The daemon reads every project's declarations in one process, and each
-        # project keeps its helpers in a package named `lib`: a, then b, then a again
-        # once its helper changed must evaluate a's `out=` from a's lib, not b's.
+    def test_outputs_come_from_the_text_and_the_build_never_from_an_import(self):
+        # The supervisor reads declarations in its own process, so a model's module top
+        # must never run there: a fault at the top would take the daemon and every build
+        # on it down (STORE.md §9, "importing the supervisor never loads the kernel").
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            self.addCleanup(_forget_project_modules, root)
-            for name in ("a", "b"):
-                src = root / name / "src"
-                (src / "lib").mkdir(parents=True)
-                (src / "lib" / "__init__.py").write_text("", encoding="utf-8")
-                (src / "lib" / "dims.py").write_text(f"SIZE = '{name}1'\n", encoding="utf-8")
-                (src / f"{name}.py").write_text(
-                    "from cadgen import step\nfrom cadgen import build123d as bd\nfrom lib.dims import SIZE\n\n"
-                    f"@step(out='{name}_' + SIZE + '.step')\ndef {name}():\n    return bd.Box(1, 1, 1)\n",
-                    encoding="utf-8",
-                )
+            marker = root / "imported.marker"
+            script = root / "part.py"
+            script.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('the module top ran')\n"
+                "from cadgen import step, stl\nfrom cadgen import build123d as bd\n\n"
+                "@stl\n@step(out='STEP/part.step')\ndef part():\n    return bd.Box(1, 1, 1)\n",
+                encoding="utf-8",
+            )
+            expected = [str((root / "STEP" / "part.step").resolve()), str((root / "STEP" / "part.stl").resolve())]
+            self.assertEqual(expected, [str(Path(p)) for p in declared_outputs(str(script))])
+            self.assertFalse(marker.exists(), "the supervisor's parse ran the module top")
 
-            def declared(name):
-                return [Path(path).name for path in declared_outputs(str(root / name / "src" / f"{name}.py"))]
+    def test_an_output_only_an_import_can_evaluate_is_named_by_the_build(self):
+        # `out=NAME + ".step"` is unknown to the text alone: the worker names it in the
+        # model's first event, the row lists it from then on, and the subject's next run
+        # is listed against it from the start -- without the supervisor ever importing
+        # the helper the script reaches through its caller's PYTHONPATH.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            script = root / "a.py"
+            script.write_text(
+                "from cadgen import step\nfrom cadgen import build123d as bd\nfrom extlib.names import NAME\n\n"
+                "@step(out=NAME + '.step')\ndef a():\n    return bd.Box(1, 1, 1)\n",
+                encoding="utf-8",
+            )
+            named = str((root / "out" / "a_named.step").resolve())
+            ledger = JobLedger(clock=Clock())
+            first = ledger.start(tool="run", subject=str(script))
+            self.assertEqual([], first["outputs"], "the text alone cannot evaluate NAME")
+            ledger.observe({"event": {"model": str(script), "state": "building", "phase": "generate",
+                                      "job": first["id"], "outputs": [named]}})
+            self.assertEqual([named], first["outputs"])
+            ledger.finish(first, 0)
+            second = ledger.start(tool="run", subject=str(script))
+            self.assertEqual([named], second["outputs"])
 
-            self.assertEqual(["a_a1.step"], declared("a"))
-            self.assertEqual(["b_b1.step"], declared("b"))
-            (root / "a" / "src" / "lib" / "dims.py").write_text("SIZE = 'a2'\n", encoding="utf-8")
-            self.assertEqual(["a_a2.step"], declared("a"))
-
-    def test_a_script_that_stops_importing_is_listed_against_what_it_declared_last(self):
-        # An edit that breaks a helper fails the build at import, which is also where its
-        # declarations are read: the job is still listed against the document the script
-        # writes, so the viewer showing that document gets the failure, not silence.
+    def test_a_script_that_stops_parsing_is_listed_against_what_it_declared_last(self):
+        # An edit that breaks the script fails the build at import, and its text no longer
+        # parses: the job is still listed against the document the script writes, so the
+        # viewer showing that document gets the failure, not silence.
         from cadgen.viewer.build_progress import build_progress_snapshot
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            self.addCleanup(_forget_project_modules, root)
-            (root / "lib").mkdir()
-            (root / "lib" / "__init__.py").write_text("", encoding="utf-8")
-            (root / "lib" / "dims.py").write_text("SIZE = 2\n", encoding="utf-8")
             script = root / "part.py"
             script.write_text(
-                "from cadgen import step\nfrom cadgen import build123d as bd\nfrom lib.dims import SIZE\n\n"
-                "@step\ndef part():\n    return bd.Box(SIZE, SIZE, SIZE)\n",
+                "from cadgen import step\nfrom cadgen import build123d as bd\n\n"
+                "@step\ndef part():\n    return bd.Box(2, 2, 2)\n",
                 encoding="utf-8",
             )
             output = str(script.with_suffix(".step").resolve())
@@ -128,28 +141,16 @@ class DeclaredOutputs(unittest.TestCase):
             self.assertEqual([output], built["outputs"])
             ledger.finish(built, 0)
 
-            (root / "lib" / "dims.py").write_text("SIZE = undefined_name\n", encoding="utf-8")
+            script.write_text("from cadgen import step\n\n@step\ndef part(:\n", encoding="utf-8")
             clock.now += 1
             broken = ledger.start(tool="run", subject=str(script))
             self.assertEqual([output], broken["outputs"])
-            ledger.finish(broken, 1, error="NameError: name 'undefined_name' is not defined")
+            ledger.finish(broken, 1, error="SyntaxError: invalid syntax")
             status = build_progress_snapshot(output, jobs=ledger.snapshot())
-            self.assertEqual("NameError: name 'undefined_name' is not defined", status["failed"]["error"])
+            self.assertEqual("SyntaxError: invalid syntax", status["failed"]["error"])
 
             # A daemon that never read the script has nothing to list it against.
             self.assertEqual([], JobLedger(clock=Clock()).start(tool="run", subject=str(script))["outputs"])
-
-
-def _forget_project_modules(root: Path) -> None:
-    """Drop what a test's projects left in this process: their modules, sys.path roots."""
-    import sys
-
-    prefix = str(root)
-    for name, module in list(sys.modules.items()):
-        paths = [getattr(module, "__file__", None), *[str(entry) for entry in getattr(module, "__path__", None) or ()]]
-        if any(path and str(path).startswith(prefix) for path in paths):
-            sys.modules.pop(name, None)
-    sys.path[:] = [entry for entry in sys.path if not entry.startswith(prefix)]
 
 
 class Lifecycle(unittest.TestCase):
