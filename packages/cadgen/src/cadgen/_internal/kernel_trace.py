@@ -267,39 +267,46 @@ _MISSING = object()
 
 
 class _IdentityInputs:
-    """A feature's first geometric owners, shared by requested and full results: an
-    element's owner is the first input whose map, of the element's kind, holds it (under
-    ``IsSame``), with its ordinal there -- asked of each input's map in turn, which costs
-    a result's elements a lookup or two, where a union of the inputs' maps would cost
-    every element of every input a step.
+    """A feature's first geometric owners, shared by requested and full results.
 
-    Native maps stay in this Trace only, one kind at a time."""
+    Native indexes stay in this Trace only. Build one kind at a time, keeping
+    the inputs' maps of it and their owner ordinals (``_input_index``).
+    """
 
     def __init__(self, handles: list[Any]) -> None:
         self.handles = [(j, handle) for j, handle in enumerate(handles) if handle is not None]
-        self.indexes: dict[int, list[tuple[int, Any]]] = {}
+        self.indexes: dict[int, tuple[Any, list[tuple[int, int]] | None]] = {}
         self.counts: dict[tuple[int, int], int] = {}
 
-    def inputs(self, kind: int) -> list[tuple[int, Any]]:
-        """Each input's map of ``kind``, ``(input, map)`` in input order."""
+    def _index(self, kind: int) -> tuple[Any, list[tuple[int, int]] | None]:
         found = self.indexes.get(kind)
         if found is None:
-            found = self.indexes[kind] = []
-            for j, handle in self.handles:
+            if len(self.handles) == 1:
+                j, handle = self.handles[0]
                 elements = _map(handle, _TOPABS[kind])
                 self.counts[(j, kind)] = elements.Extent()
-                found.append((j, elements))
+                found = self.indexes[kind] = (elements, None)
+                return found
+            given = []
+            for j, handle in self.handles:
+                maps = [None, None, None]
+                maps[kind] = _map(handle, _TOPABS[kind])
+                self.counts[(j, kind)] = maps[kind].Extent()
+                given.append((j, maps))
+            found = self.indexes[kind] = _input_index(given, kind)
         return found
 
     def owner(self, kind: int, element: Any) -> tuple[int, int] | None:
-        for j, elements in self.inputs(kind):
-            at = elements.FindIndex(element)
-            if at:
-                return j, at
-        return None
+        if not self.handles:
+            return None
+        elements, owners = self._index(kind)
+        at = elements.FindIndex(element)
+        if not at:
+            return None
+        return (self.handles[0][0], at) if owners is None else owners[at - 1]
 
     def count(self, j: int, kind: int) -> int:
-        self.inputs(kind)
+        self._index(kind)
         return self.counts[(j, kind)]
 
 
@@ -1116,16 +1123,13 @@ class Trace:
                 if not held:
                     continue
                 find = maps[kind].FindKey
-                inputs = identity.inputs(kind)
                 for ordinal in range(1, len(held) + 1):
                     element = find(ordinal)
                     rule = None
-                    # The element's owner (``_IdentityInputs.owner``): the first input holding it.
-                    for j, given in inputs:
-                        at = given.FindIndex(element)
-                        if at:
-                            rule = same(j, kind, at)
-                            break
+                    owner = identity.owner(kind, element)
+                    if owner is not None:
+                        j, source_ordinal = owner
+                        rule = same(j, kind, source_ordinal)
                     if rule is None and partners:
                         rule = same(partners[0], kind, ordinal)
                     if rule is None and origins:
@@ -1633,6 +1637,44 @@ def _map(shape: Any, kind: Any) -> Any:
     found = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape, kind, found)
     return found
+
+
+def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, Any]:
+    """An element's first input and ordinal, under the input maps' ``IsSame`` equality.
+    A first input with no name still owns the element; later inputs never replace it.
+    Kept only while one feature's structure is computed, shared by all its results.
+    ``index.FindIndex(element)`` is the element's place among the inputs' elements, in
+    input order (0 where none holds it), and ``owners[place - 1]`` its input and its
+    ordinal there: both one ``_FirstOwners``, which asks each input's own map in turn."""
+    owners = _FirstOwners([(j, held[kind]) for j, held in given])
+    return owners, owners
+
+
+class _FirstOwners:
+    """The first input whose map holds an element, asked of each map in turn: a result's
+    element costs a lookup or two, where a union of the inputs' maps would cost every
+    element of every input a step to build (``_input_index``)."""
+
+    __slots__ = ("maps", "starts")
+
+    def __init__(self, maps: list[tuple[int, Any]]) -> None:
+        self.maps = maps
+        self.starts: list[int] = []
+        offset = 0
+        for _j, elements in maps:
+            self.starts.append(offset)
+            offset += elements.Extent()
+
+    def FindIndex(self, element: Any) -> int:  # noqa: N802 - the map interface it stands in for
+        for (_j, elements), start in zip(self.maps, self.starts):
+            ordinal = elements.FindIndex(element)
+            if ordinal:
+                return start + ordinal
+        return 0
+
+    def __getitem__(self, place: int) -> tuple[int, int]:
+        at = bisect.bisect_right(self.starts, place) - 1
+        return self.maps[at][0], place - self.starts[at] + 1
 
 
 def _relative(element: Any, shape: Any) -> Any:
