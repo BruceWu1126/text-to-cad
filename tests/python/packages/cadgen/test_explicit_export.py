@@ -88,6 +88,25 @@ class ExplicitExport(unittest.TestCase):
             self.assertNotEqual(done.returncode, 0, done.stdout + done.stderr)
         return done
 
+    def test_a_deleted_drawing_names_the_run_that_writes_it(self):
+        """A drawing (@dxf) has no stored result: its file is its model's run's to write.
+        ``cadgen export`` of a deleted one said it had "no complete stored result; run its
+        model again", of a model whose record is complete and current."""
+        drawing = self.root / "drawing.py"
+        drawing.write_text(
+            "from cadgen import dxf\nfrom cadgen import build123d as bd\n\n\n@dxf(out='profile.dxf')\n"
+            "def profile():\n    return bd.Rectangle(10, 5)\n\n\nif __name__ == '__main__':\n    profile()\n",
+            encoding="utf-8",
+        )
+        drawn = self.command(drawing.name)
+        self.assertEqual(drawn.returncode, 0, drawn.stdout + drawn.stderr)
+        self.assertTrue((self.root / "profile.dxf").is_file())
+        (self.root / "profile.dxf").unlink()
+        failed = self.export("profile.dxf", succeeds=False)
+        self.assertIn("profile.dxf is a drawing, written by its model's run and never from the store: run python drawing.py",
+                      failed.stderr)
+        self.assertNotIn("no complete stored result", failed.stderr)
+
     def test_cli_retries_step_and_dependent_mesh_with_changed_broken_and_deleted_source(self):
         from cadgen.store.records import read_record
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 import sys
 import time
@@ -1408,15 +1409,22 @@ def _run_with_spec_generation_status(
 
         # One running build per core: the body and its emit hold a job slot, and a
         # child's build inside the body runs in the slot its parent holds. `queued`
-        # shows in the tree only when the slot did not come at once.
+        # shows in the tree only when the slot did not come at once, and the time line
+        # counts the wait only then: asking the daemon for a slot is a round trip (a
+        # cold daemon's takes a tenth of a second), and a slot that came at once was
+        # no wait for one.
+        waited = False
+
         def queued() -> None:
+            nonlocal waited
+            waited = True
             _tree_event(spec, "queued", outputs=outputs)
             if on_queued is not None:
                 on_queued()
 
         waiting_from = time.perf_counter()
         with broker.held(spec.source_ref, on_queued=queued):
-            clock.queued = time.perf_counter() - waiting_from
+            clock.queued = time.perf_counter() - waiting_from if waited else 0.0
             _tree_event(spec, "building", phase="generate", outputs=outputs)
             try:
                 result = action(spec, run)
@@ -1612,14 +1620,18 @@ def build_model(
         return None if force else _checked_source_tree(peer_spec, verdict())
 
     def build(tracked_spec: EntrySpec, reporter: object) -> object:
-        return _generate_step_outputs(
-            tracked_spec,
-            generator=generator,
-            logger=logger if logger.verbose else None,
-            force=force,
-            progress=reporter,
-            verdict=None if force else verdict(),
-        )
+        try:
+            return _generate_step_outputs(
+                tracked_spec,
+                generator=generator,
+                logger=logger if logger.verbose else None,
+                force=force,
+                progress=reporter,
+                verdict=None if force else verdict(),
+            )
+        except Exception as error:
+            _name_model_site(error, tracked_spec)
+            raise
 
     from cadgen.daemon.executors import capture_source_result
 
@@ -1641,6 +1653,27 @@ def build_model(
         if spec.source == "generated":
             result.tree = captured.wait_result()
     return _Built(result.tree, "built", timings=timed.get("timings"), key=result.key)
+
+
+def _name_model_site(error: BaseException, spec: EntrySpec) -> None:
+    """A failure of a model's build that none of the model's code is on the way of --
+    what cadgen refused of its result after the body returned (a face colour's
+    ordinal, a kinematics label, the return itself) -- is reported at the model's own
+    line: its function (``__cadgen_site__``, ``cli_errors.report_cli_error``), never
+    at the line of cadgen's that raised."""
+    from cadgen._internal.cli_errors import _model_frames
+
+    if getattr(error, "__cadgen_site__", None) is not None or spec.script_path is None or _model_frames(error):
+        return
+    from cadgen.authoring import registered_model
+
+    function = getattr(spec.generator_metadata, "entry_function", None)
+    defn = registered_model(spec.script_path, function)
+    if defn is None:
+        return
+    code = getattr(inspect.unwrap(defn.func), "__code__", None)
+    if code is not None:
+        error.__cadgen_site__ = (str(spec.script_path), code.co_firstlineno, defn.name)  # type: ignore[attr-defined]
 
 
 def _say_owed(spec: EntrySpec, logger: CliLogger) -> None:
@@ -1665,7 +1698,7 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     current one, exporting what the files owe. None when there is none to restore,
     or its tree is gone; the verdict then names the restored key."""
     candidate = getattr(verdict, "candidate", None)
-    if spec.source != "generated" or spec.step_path is None or not candidate or verdict.stored is not None:
+    if spec.source not in ("generated", "imported") or spec.step_path is None or not candidate or verdict.stored is not None:
         # A record whose stored result stands is the candidate itself: what it owes
         # beyond an export (a drawing) is a run's, not a restore's.
         return None
@@ -1686,8 +1719,55 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     for output_path in record.get("outputs") or {}:
         note_output(output_path, model)
     verdict.tree = tree
-    logger.info(f"{spec.cad_ref}: an earlier build's result answers for the source as it is now; restored")
+    logger.info(f"{spec.source_ref}: an earlier build's result answers for the source as it is now; restored")
     return tree
+
+
+def restore_document_record(step_path: Path, tree: str) -> None:
+    """A document read whose bytes the store maps to ``tree`` (a warm read, nothing
+    compiled) has its path's record name that tree. The compile of those bytes wrote the
+    record and stored it under its key (``store.results``); a file changed and changed
+    back reads warm from the first compile's tree while its record still names the
+    other's, so ``cadgen store why <file>`` said STALE of a file whose result stands.
+    Restored as a model's source brought back to a state already built is
+    (:func:`_restore_result`), from the record the path holds: a path with no record
+    (bytes compiled under another path) restores nothing."""
+    from cadgen.authoring import current_run
+    from cadgen.store.gate import stale
+    from cadgen.store.records import read_record
+
+    model = str(step_path)
+    record = read_record(model)
+    if record is None or str(record.get("tree") or "") == tree:
+        return
+    verdict = stale(model)
+    if verdict.key is not None or verdict.stored is not None:
+        return
+    source = source_from_path(step_path)
+    if source is None:
+        return
+    run = current_run()
+    logger = run.logger if run is not None and run.logger is not None else CliLogger("cadgen")
+    _restore_result(_entry_spec_from_source(source), verdict, logger=logger)
+
+
+def _heal_documents(spec: EntrySpec, record: Mapping[str, object]) -> None:
+    """The documents a current model's body read (``read_step``: in its closure, by the
+    bytes the gate just verified) have their records name the tree those bytes map to
+    (:func:`restore_document_record`): the model taken as current or restored read
+    them, so a document changed and changed back reads as its model does."""
+    if spec.source != "generated" or spec.script_path is None:
+        return
+    from cadgen.store.records import document_entry_for_hash
+
+    shas = (record.get("closure") or {}).get("shas") or {}
+    for rel, sha in shas.items():
+        if Path(rel).suffix.lower() not in (".step", ".stp") or not sha:
+            continue
+        entry = document_entry_for_hash(str(sha))
+        tree = str((entry or {}).get("tree") or "")
+        if tree:
+            restore_document_record(Path(spec.script_path).parent / rel, tree)
 
 
 def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | None = None,
@@ -1723,7 +1803,17 @@ def _hit(spec: EntrySpec, tree: str, *, logger: CliLogger, verdict: object | Non
     healed.add(model)
     _current_source_result(spec, tree)
     record = read_record(model) or {}
-    if _record_mesh_recipes(spec, record):
+    _heal_documents(spec, record)
+    # The gate re-sliced a sliced file whose whole-file hash moved (an edit outside the
+    # names the model reaches) and found the slice standing: the record keeps the
+    # whole-file hash the file has now, so the next gate takes the recorded slice
+    # unanalysed, as a cold build's record would.
+    from cadgen.store.closure import refreshed_wholes
+
+    moved = refreshed_wholes(spec.script_path, record.get("closure") or {}) if spec.script_path is not None else {}
+    if moved:
+        record.setdefault("closure", {}).setdefault("wholes", {}).update(moved)
+    if _record_mesh_recipes(spec, record) or moved:
         from cadgen.store.records import note_output, write_record
 
         write_record(model, record)
@@ -1889,9 +1979,12 @@ def _answer(logger: CliLogger, reported: list[tuple[dict[str, object], list]], r
             document = entry["document"]
             print(f"{entry['outcome']} {_display_path(Path(document)) if document else entry['tree']}")
     if not json_output:
+        import shlex
+
         for path in run.owed() if run is not None else ():
             shown = _display_path(path)
-            print(f"saving {shown} (cadgen export {shown} waits for it)")
+            # The command as a shell takes it: a path with a space is quoted there.
+            print(f"saving {shown} (cadgen export {shlex.quote(shown)} waits for it)")
 
 
 def generate_dxf_targets(

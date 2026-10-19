@@ -44,6 +44,21 @@ class WorkerPrewarm(unittest.TestCase):
         self.assertEqual(len(frames), 1, frames)
         self.assertGreater(frames[0]["ready"], 0)
 
+    def test_a_spare_whose_supervisor_left_while_it_warmed_up_ends_quietly(self):
+        """The daemon stopped while this spare imported the kernel: its ready frame has
+        no reader. A worker nobody waits for ends with exit 0 and no traceback, as one
+        whose beat nobody reads does; it wrote a BrokenPipeError traceback to the log."""
+        program = "from cadgen.daemon import worker\nraise SystemExit(worker.serve())\n"
+        process = subprocess.Popen(
+            [sys.executable, "-c", program], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True,
+        )
+        process.stdout.close()  # the frame channel's reader is gone before the worker is ready
+        process.stdin.close()
+        err = process.stderr.read()
+        self.assertEqual(process.wait(timeout=90), 0, err)
+        self.assertNotIn("Traceback", err)
+
 
 class WorkerScratchSweep(unittest.TestCase):
     """A starting worker removes what killed processes left in the temp folder -- served

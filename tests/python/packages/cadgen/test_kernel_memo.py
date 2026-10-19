@@ -678,6 +678,40 @@ class ImportedFileTest(KernelMemoCase):
         _, replaced, _ = _run(model, True)
         self.assertEqual((kept["unkeyable"], replaced["unkeyable"]), (0, 1), "a tree the model attached keys nothing")
 
+    def test_a_composition_placed_or_copied_carries_its_own_tree_and_a_boolean_of_it_none(self) -> None:
+        """build123d copies a shape's attributes to what it makes of it, the occurrence tree
+        deep: a moved composition carried a copy whose leaves were copies of the prototypes
+        no operation keyed, so nothing given it was keyed and the packager named its parts
+        by their geometry. Placed or copied, it carries the composition's tree -- this run's,
+        on a hit too; a boolean of it carries none and walks as its geometry is."""
+        import copy
+
+        from build123d import Compound, Location, Solid
+
+        from cadgen import compound_from_instances
+
+        def model():
+            box = Solid.make_box(1, 1, 1)
+            pair = compound_from_instances("pair", [(box, Location((0, 0, 0)), "a"), (box, Location((3, 0, 0)), "b")])
+            moved = pair.moved(Location((0, 10, 0)))
+            copied = copy.deepcopy(pair)
+            cut = pair - Solid.make_box(0.5, 0.5, 0.5)
+            return pair, moved, copied, cut, Compound(children=[pair, moved, copied, cut])
+
+        for hot in (False, True):
+            (pair, moved, copied, cut, rack), stats, run = _run(model)
+            tree = pair.__dict__["_occurrence_tree"]
+            self.assertEqual(stats["unkeyable"], 0, f"hot={hot}: everything given the placed composition keys")
+            self.assertIs(moved.__dict__["_occurrence_tree"], tree, "placed: the composition's own tree")
+            # A copy keeps the tree it inherited when it was made: its leaves are the same
+            # prototypes as the composition's (a hit hands back the same objects).
+            self.assertTrue(all(mine["shape"] is theirs["shape"] for mine, theirs in
+                                zip(copied.__dict__["_occurrence_tree"]["children"], tree["children"], strict=True)))
+            self.assertNotIn("_occurrence_tree", cut.__dict__)
+            self.assertIsNotNone(run.identify(rack)[0], "the compound of them has a construction key")
+            if hot:
+                self.assertEqual(stats["misses"], 0)
+
 
 class CopyIdentityTest(KernelMemoCase):
     """Body identity follows a proven copy, independently of the copy call's memo key."""
@@ -1434,6 +1468,35 @@ class EffectTest(KernelMemoCase):
         self.assertEqual(run.identify(alias), (None, None))
 
 
+    def test_an_uncached_change_through_a_wrapper_holding_a_root_s_sub_shape_taints_the_root(self) -> None:
+        """A wrapper no operation of the memo made (a face plain OCCT built from a memoized
+        disc's edge) holds the disc's edge, not the disc: the uncached extrude of it appends
+        representations to that edge in place. Unseen, every warm run's hit handed the edge
+        back with the last run's additions kept, and the solid's bytes drifted run by run;
+        the disc's maker is forgotten instead, as for a root the wrapper holds whole."""
+        from build123d import Face, Solid, Vector, Wire
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakeWire
+        from OCP.TopoDS import TopoDS
+
+        def model():
+            disc = Face(Wire.make_circle(1))
+            rim = BRepBuilderAPI_MakeWire(TopoDS.Edge_s(disc.edges()[0].wrapped)).Wire()
+            profile = Face(BRepBuilderAPI_MakeFace(rim, True).Face())
+            return disc, Solid.extrude(profile, Vector(0, 0, 1))
+
+        def representations(disc):
+            return disc.edges()[0].wrapped.TShape().Curves().Extent()
+
+        (disc, cold), cold_stats, _ = _run(model)
+        self.assertEqual(cold_stats["tainted"], 1)
+        self.assertEqual(representations(disc), 3)
+        for _again in range(2):
+            (disc, warm), warm_stats, _ = _run(model)
+            self.assertEqual(warm_stats["tainted"], 1)
+            self.assertEqual(representations(disc), 3)
+            self.assertEqual(_bytes(warm.wrapped), _bytes(cold.wrapped))
+
+
 class CapacityTest(KernelMemoCase):
     def test_the_memo_is_bounded_and_a_rerun_past_the_bound_is_still_right(self) -> None:
         from build123d import Solid
@@ -2022,6 +2085,30 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(run2.identify(hot), cold_identity)
         self.assertRegex(cold_identity[0], r"^[0-9a-f]{64}$")
 
+    def test_a_hit_of_a_run_that_raised_names_as_a_cold_run_does(self) -> None:
+        """A run that raises after its constructions accounts nothing, so the next run
+        names what it hits from the miss's objects -- which hold the placements the
+        miss built them with, not the ones this run's ``move`` made again. The names
+        are a cold run's."""
+        from build123d import Box
+
+        def model(fail):
+            box = Box(4, 4, 4)  # make_box, then a move in place, then the compound build123d wraps it in
+            box.label = "u"
+            if fail:
+                raise RuntimeError("x")
+            return box
+
+        with self.assertRaises(RuntimeError):
+            _run(model, True)
+        hot, stats, run = _run(model, False)
+        self.assertEqual((stats["misses"], stats["hits"]), (0, 2))
+        hot_identity = run.identify(hot)
+        kernel_memo.clear()
+        cold, _, again = _run(model, False)
+        self.assertEqual(hot_identity, again.identify(cold))
+        self.assertEqual(hot_identity[1]["faces"][0], "f:model.make_box1.1")
+
 
 class ConstructionKeyTest(KernelMemoCase):
     def test_a_construction_key_follows_the_construction(self) -> None:
@@ -2095,6 +2182,30 @@ class ConstructionKeyTest(KernelMemoCase):
         self.assertEqual(kernel_memo.construction_key(second), key)
         kernel_memo.clear()
         self.assertEqual([kernel_memo.construction_key(screw) for screw in _run(screws, True)[0]], [key, key])
+
+    def test_a_sub_shape_extracted_from_another_result_is_keyed_by_its_place_there(self) -> None:
+        """A non-destructive boolean shares the edges it leaves alone with its input and
+        with an earlier result of other inputs. An edge the model extracts from the new
+        result was registered under the old one (an entry still in the memo), at its index
+        there; as an input it is keyed by its index in the shape it was extracted from now,
+        so an edit's warm key is the cold key."""
+        from build123d import Axis, Box, Cylinder, Pos, Rot, chamfer
+
+        def model(radius):
+            plate = Pos(2.0, 26.0, -22.0) * Box(44.0, 8.0, 44.0)
+            lobe = Pos(0, 26.0, 0) * Rot(-90, 0, 0) * Cylinder(radius=radius, height=8.0)
+            cheek = plate + lobe
+            return chamfer([edge for face in cheek.faces().filter_by(Axis.Y) for edge in face.edges()], 1.2)
+
+        first, _, run1 = _run(model, 24.0)
+        first_key = run1.identify(first)[0]
+        edited, stats, run2 = _run(model, 25.0)
+        self.assertGreater(stats["hits"], 0, "the plate hits; the lobe and what is made of it miss")
+        warm_key = run2.identify(edited)[0]
+        kernel_memo.clear()
+        cold, _, run3 = _run(model, 25.0)
+        self.assertEqual(warm_key, run3.identify(cold)[0])
+        self.assertNotEqual(warm_key, first_key)
 
     def test_a_construction_key_is_the_same_in_another_process(self) -> None:
         import subprocess

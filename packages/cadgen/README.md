@@ -352,7 +352,7 @@ beside the artifact — what a model declares about its own outputs, where a
 build came from, when it ran — belongs in the store record, never in a
 file next to the geometry.
 
-Schema 10 sidecars contain only `schemaVersion`, the saved STEP's `documentHash`,
+Schema 11 sidecars contain only `schemaVersion`, the saved STEP's `documentHash`,
 and optional `kinematics`, `appearance`, and `animation` sections. Appearance
 stores named material definitions plus canonical leaf occurrence assignments;
 animation stores keyframes baked from the model's Python clips when it built —

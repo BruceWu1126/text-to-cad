@@ -63,6 +63,41 @@ def _model_frames(exc: BaseException) -> list[traceback.FrameSummary]:
     return frames
 
 
+def model_site() -> tuple[str, int, str] | None:
+    """The innermost frame of the caller's own CAD sources on the stack now, as
+    ``(file, line, function)``, or None: where a declaration a decorator refuses was
+    written (the decorator's line in the model), for a report made where the decorator
+    was applied, below which the exception's own traceback never reaches."""
+    from cadgen._internal.source_hash import is_first_party_source_file
+
+    frame = sys._getframe(1)
+    while frame is not None:
+        filename = frame.f_code.co_filename
+        try:
+            path = Path(filename).resolve()
+        except (OSError, ValueError):
+            path = None
+        if path is not None and is_first_party_source_file(path):
+            return filename, frame.f_lineno, frame.f_code.co_name
+        frame = frame.f_back
+    return None
+
+
+def failure_text(exc: BaseException) -> str:
+    """The one line a failure is reported as where only its text fits (a ``--json``
+    envelope's ``error``): the exception's message, or, for one raised with none (a bare
+    ``AssertionError``), its type and where it was raised -- an empty string names
+    nothing."""
+    detail = str(exc).strip()
+    if detail:
+        return detail
+    raised = traceback.extract_tb(exc.__traceback__)
+    if not raised:
+        return type(exc).__name__
+    innermost = raised[-1]
+    return f"{type(exc).__name__} (raised in {_display(innermost.filename)}:{innermost.lineno})"
+
+
 def report_cli_error(
     exc: BaseException,
     *,
@@ -92,6 +127,7 @@ def report_cli_error(
     line(f"FAILED: {type(exc).__name__}: {detail}" if detail else f"FAILED: {type(exc).__name__}")
 
     frames = _model_frames(exc)
+    site = getattr(exc, "__cadgen_site__", None)
     if frames:
         if len(frames) > _MAX_FRAMES:
             line(f"  ... {len(frames) - _MAX_FRAMES} earlier frame(s) omitted")
@@ -99,6 +135,18 @@ def report_cli_error(
             line(f"  {_display(frame.filename)}:{frame.lineno} in {frame.name}")
             if frame.line:
                 line(f"      {frame.line.strip()}")
+    elif site is not None:
+        # None of the caller's code is on the exception's way, yet the failure is a
+        # model's: its declaration (a decorator refusing its arguments, caught where the
+        # decorator was applied) or what cadgen made of its result after the body
+        # returned (``__cadgen_site__``: the file, the line and the function).
+        import linecache
+
+        filename, lineno, name = site
+        line(f"  {_display(filename)}:{lineno} in {name}")
+        text = linecache.getline(filename, lineno).strip()
+        if text:
+            line(f"      {text}")
     else:
         # Nothing of the caller's ran -- a validation or resolution error raised before the
         # generator was reached. Name the frame that raised so it is still diagnosable; the

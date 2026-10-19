@@ -161,6 +161,18 @@ def tree_objects(tree_hash: str, *, _seen: set[str] | None = None) -> set[str]:
     return seen
 
 
+def component_kinds(tree_hash: str) -> set[str]:
+    """The kinds of the components of the tree's whole closure (``native``,
+    ``eager-only``), read off the capture :func:`tree_complete` verified -- a closure
+    verified in this process answers without reading an object again; empty for one
+    that cannot be captured."""
+    try:
+        descriptor, _read, _paths = _capture(tree_hash, retain_payloads=False)
+    except _CAPTURE_FAILURES:
+        return set()
+    return {str((entry or {}).get("kind") or "") for entry in (descriptor.get("components") or {}).values()}
+
+
 def tree_complete(tree_hash: str) -> bool:
     """Full verified geometry closure; parts' display data is not required.
 

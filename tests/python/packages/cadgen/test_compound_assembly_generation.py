@@ -29,8 +29,8 @@ class CompoundAssemblyGenerationTests(unittest.TestCase):
     def test_step_payload_rejects_non_shapes(self) -> None:
         for payload, named in ((None, "NoneType"), ({"shape": object()}, "dict")):
             with self.subTest(payload=named):
-                with self.assertRaisesRegex(TypeError, rf"must return a build123d Shape, got {named}$"):
-                    generation_runner._normalize_step_payload(payload, script_path=Path("part.py"))
+                with self.assertRaisesRegex(TypeError, rf"part\.py part\(\) must return a build123d Shape \(got {named}\)$"):
+                    generation_runner._normalize_step_payload(payload, script_path=Path("part.py"), function="part")
 
     def test_a_compound_with_children_packages_as_occurrences(self) -> None:
         # Packaging follows the shape and nothing else: a Compound placing

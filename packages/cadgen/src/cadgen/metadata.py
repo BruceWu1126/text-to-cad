@@ -483,6 +483,10 @@ def _check_step_return(
         if not isinstance(node, ast.Return):
             continue
         if node.value is None or (isinstance(node.value, ast.Constant) and node.value.value is None):
-            raise ValueError(
-                f"{_display_path(script_path)} {function.name}() must return a build123d shape"
+            refusal = ValueError(
+                f"{_display_path(script_path)}:{node.lineno} {function.name}() must return a build123d "
+                "Shape (got None)"
             )
+            # Where it is reported from (``cli_errors.report_cli_error``): the model's line.
+            refusal.__cadgen_site__ = (str(script_path), node.lineno, function.name)  # type: ignore[attr-defined]
+            raise refusal

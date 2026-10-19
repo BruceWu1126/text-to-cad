@@ -238,10 +238,14 @@ def _normalize_step_payload(
     result: object,
     *,
     script_path: Path,
+    function: str,
 ) -> dict[str, object]:
-    """A @step returns a build123d shape and nothing else; anything else is refused."""
+    """A @step returns a build123d shape and nothing else; anything else is refused,
+    naming the model (``function``, the one of the file's models whose return it is)
+    and what a @step returns."""
     from build123d import Shape as Build123dShape
 
+    model = f"{_display_path(script_path)} {function}()"
     if isinstance(result, Build123dShape):
         empty = _empty_shape(result)
         if empty is not None:
@@ -249,15 +253,12 @@ def _normalize_step_payload(
             # reads it, so unchecked this surfaced as a bare AssertionError from
             # inside cadgen: refused here, in words, as the model's mistake.
             raise ValueError(
-                f"{_display_path(script_path)} @step returned {empty}: it holds no geometry "
-                "(an empty Part(), Compound() or Solid(), or a builder nothing was added to). "
-                "Return the shape the model built."
+                f"{model} returned {empty}: a @step returns the shape the model built, with "
+                "geometry in it (not an empty Part(), Compound() or Solid(), or a builder "
+                "nothing was added to)."
             )
         return {"shape": result}
-    raise TypeError(
-        f"{_display_path(script_path)} @step must return a build123d Shape, got "
-        f"{type(result).__name__}"
-    )
+    raise TypeError(f"{model} must return a build123d Shape (got {type(result).__name__})")
 
 
 def _empty_shape(shape: object) -> str | None:
@@ -301,7 +302,6 @@ def _write_shape_step_payload(
     # Stash the compound: the tree build introspects its located
     # children (occurrence transforms + dedup), and the STEP export serializes it.
     scene.source_compound = shape
-    logger.debug(f"built render scene (no STEP written): {_display_path(output_path)}")
     return scene
 
 
@@ -520,8 +520,10 @@ def _run_script_generator_body(
         evict_first_party_modules(only=executed_hashes.ran_first())
     if frame.failed:
         # A child's build failed inside the body, which went on without it: the run
-        # fails with the child, whatever the body made of the exception (STORE.md §9a).
-        raise RuntimeError(f"{spec.source_ref}: a child model failed to build: {frame.failed[0]}") from frame.failed[0]
+        # fails with the child, whatever the body made of the exception (STORE.md §9a)
+        # -- the child's own exception, naming its error and its line, as the body
+        # letting it through would have.
+        raise frame.failed[0]
 
     # A model's own outputs are never its inputs: reading one back reads the
     # previous run, so a read the trace saw is dropped here, and a folder its
@@ -564,7 +566,7 @@ def _run_script_generator_body(
         own=store_closure.own,
     )
     if model_format == "step":
-        payload = _normalize_step_payload(raw_payload, script_path=spec.script_path)
+        payload = _normalize_step_payload(raw_payload, script_path=spec.script_path, function=entry_name)
         if spec.step_path is None:
             raise RuntimeError(f"{spec.source_ref} has no configured STEP output")
         # Kinematics (validated at decoration) rides the scene into the sidecar.

@@ -119,9 +119,17 @@ def _queue(model: str, record: dict, target: Path, logger: CliLogger):
     from cadgen._internal.generation import _Export, _export_plan
     from cadgen._internal.source_sidecar import source_sidecar_path
     from cadgen.store.exports import document_pair_state
+    from cadgen.store.index import split_model_ref
     from cadgen.store.trees import tree_complete
 
     tree = str(record.get("tree") or "")
+    if "tree" in record and record.get("tree") is None:
+        # A drawing (@dxf) has no stored result: its file is its model's run's to write.
+        script, _function = split_model_ref(model)
+        raise RuntimeError(
+            f"{display_path(target)} is a drawing, written by its model's run and never from the store: "
+            f"run python {display_path(Path(script))}"
+        )
     if not tree or not tree_complete(tree):
         raise RuntimeError(f"{display_path(target)} has no complete stored result; run its model again")
     spec = _spec(model, record, target)

@@ -288,6 +288,15 @@ class HitsHealTheTree(SerialChildrenCase):
         self.assertEqual((self.root / "child.step").read_bytes(), written)
         self.assertEqual(self.current(), ["child", "parent", "grand"], "the tree is healed children first")
 
+    def test_a_restored_model_is_named_by_its_source_not_its_output_s_stem(self):
+        self.child.write_text(CHILD.replace("@step\n", '@step(out="made/part.step")\n'), encoding="utf-8")
+        for size in ("4.0", "5.0", "4.0"):
+            (self.root / "size.txt").write_text(size, encoding="utf-8")
+            code, err = self.build(self.parent)
+            self.assertEqual(code, 0, err)
+        self.assertRegex(err, r"child\.py(::child)?: an earlier build's result answers for the source as it is now; restored")
+        self.assertNotRegex(err, r"\bpart: an earlier build's result")
+
     def test_a_child_brought_back_to_a_state_already_built_makes_its_parent_a_hit(self):
         code, err = self.build(self.parent)
         self.assertEqual(code, 0, err)

@@ -110,6 +110,19 @@ class AnswerAtResult(unittest.TestCase):
             self.assertRegex(out, rf"saving .*{name}\.step \(cadgen export .*{name}\.step waits for it\)")
         self.run_handed(handed)
 
+    def test_the_command_a_saving_line_offers_quotes_a_path_with_a_space(self):
+        import shutil
+
+        spaced = self.root / "with space"
+        spaced.mkdir()
+        for name in ("child.py", "parent.py"):
+            shutil.copyfile(self.root / name, spaced / name)
+        out, err = io.StringIO(), io.StringIO()
+        with self.supervised() as handed, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(run_model_argv([str(spaced / "parent.py")]), 0, err.getvalue())
+        self.assertRegex(out.getvalue(), r"saving .*with space/parent\.step \(cadgen export '.*with space/parent\.step' waits for it\)")
+        self.run_handed(handed)
+
     def test_without_a_worker_the_answer_names_saved_files(self):
         out, _err = self.command("--json")
         entry = json.loads(out.splitlines()[-1])

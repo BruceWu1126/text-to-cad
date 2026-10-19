@@ -244,6 +244,9 @@ class BuildTimeTest(_ModelRunCase):
         self.assertEqual(set(timings), {"seconds", "modelSeconds", "cadgenSeconds", "childrenSeconds", "queuedSeconds",
                                         "memoHits", "memoMisses", "memoUncached"})
         self.assertGreater(timings["modelSeconds"], 0.0)
+        # The one job of a fresh daemon took its slot at once: no wait for one, however
+        # long the cold daemon's round trip to ask for it took.
+        self.assertEqual(timings["queuedSeconds"], 0.0, timings)
         # How the parent's own kernel calls went in the memo: the box and the compound.
         self.assertGreater(timings["memoHits"] + timings["memoMisses"], 0, timings)
         self.assertEqual(timings["memoUncached"], 0, timings)

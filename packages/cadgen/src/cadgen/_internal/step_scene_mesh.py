@@ -190,7 +190,17 @@ def import_step(step_path: Path, *, label: str | None = None) -> Any:
             # produce different trees depending on where the file happens to live.
             return scene_to_build123d_compound(scene, label=label), scene.tree_hash
 
-        return kernel_memo.imported(lambda: document_tree(resolved), label, decode)
+        def mapped() -> str | None:
+            tree = document_tree(resolved)
+            if tree is not None:
+                # A warm read: the path's record names the tree its bytes map to, as
+                # the compile of those bytes recorded it (``generation``).
+                from cadgen._internal.generation import restore_document_record
+
+                restore_document_record(resolved, tree)
+            return tree
+
+        return kernel_memo.imported(mapped, label, decode)
 
 
 def prototype_topology(shape: Any) -> dict[str, Any]:

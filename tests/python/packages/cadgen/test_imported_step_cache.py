@@ -116,6 +116,71 @@ class ImportedStepCacheTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         return json.loads(completed.stdout)
 
+    def test_a_document_changed_and_changed_back_reads_warm_and_its_record_says_so(self) -> None:
+        """The bytes map to the first compile's tree, so nothing compiles; the path's record
+        still named the second compile's tree, and ``cadgen store why`` said STALE of a
+        document whose result stands. The warm read restores the record for the bytes as
+        they are (the compile stored it under its key), as a source brought back is."""
+        from cadgen._internal import kernel_memo
+        from cadgen.step_scene import read_step
+        from cadgen.store.gate import stale
+        from cadgen.store.records import read_record
+
+        kernel_memo.install()
+        self.addCleanup(kernel_memo.clear)
+
+        def read() -> str:
+            # As a model's body reads it: inside a run, where a read with a tree held is
+            # a hit that compiles nothing (``kernel_memo.imported``).
+            with kernel_memo.run(None):
+                read_step(self.step_path)
+            return read_record(str(self.step_path))["tree"]
+
+        self._write_fixture(offset=0.0)
+        first = read()
+        self._write_fixture(offset=1.0)
+        self.assertNotEqual(read(), first)
+        self._write_fixture(offset=0.0)
+        self.assertEqual(read(), first)
+        verdict = stale(str(self.step_path))
+        self.assertIsNotNone(verdict.key, verdict.reason())
+
+    def test_a_model_taken_as_current_heals_the_records_of_the_documents_it_read(self) -> None:
+        """The model's source brought back is restored without its body running, so no
+        read touches the document: the model's run heals the document's record from the
+        bytes its closure verified, as it heals its children's."""
+        import contextlib
+        import io
+
+        from tests.python.support.inline_artifacts import inline_artifacts
+
+        from cadgen.cli._run_model import run_model_argv
+        from cadgen.store.gate import stale
+        from cadgen.store.records import read_record
+
+        script = self.root / "rig.py"
+        script.write_text(
+            "from pathlib import Path\nfrom cadgen import read_step, step\nfrom cadgen import build123d as bd\n\n"
+            "@step\ndef rig():\n    motor = read_step(Path(__file__).resolve().parent / 'vendor.step')\n"
+            "    return bd.Compound(children=[motor.moved(bd.Location((0, 0, 0)))], label='rig')\n\n"
+            "if __name__ == '__main__':\n    rig()\n",
+            encoding="utf-8",
+        )
+
+        def build() -> str:
+            with inline_artifacts(), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(run_model_argv([str(script)]), 0)
+            return read_record(str(self.step_path))["tree"]
+
+        self._write_fixture(offset=0.0)
+        first = build()
+        self._write_fixture(offset=1.0)
+        self.assertNotEqual(build(), first)
+        self._write_fixture(offset=0.0)
+        self.assertEqual(build(), first)
+        verdict = stale(str(self.step_path))
+        self.assertIsNotNone(verdict.key, verdict.reason())
+
     def test_fresh_process_hit_skips_text_parse_and_preserves_the_authored_pair(self) -> None:
         from cadgen.store.index import entry_path
         from cadgen.store.records import record_key

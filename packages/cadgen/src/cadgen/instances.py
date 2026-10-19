@@ -77,6 +77,14 @@ def _occurrence_subtree(node: Any, parent_world_loc: Location, path: str, name: 
     multi-part prototype becomes a subassembly grouping its leaves."""
     node_loc = getattr(node, "location", None)
     world_loc = (parent_world_loc * node_loc) if node_loc is not None else parent_world_loc
+    nested = getattr(node, "__dict__", {}).get("_occurrence_tree")
+    if nested is not None:
+        # A prototype that is itself a composition: its occurrences, each placed by
+        # this instance's placement, as the packager splices them (``store.build``).
+        return {"id": path, "name": name, "leaf": False, "children": [
+            _placed_subtree(child, world_loc, f"{path}.{index}")
+            for index, child in enumerate(nested["children"], start=1)
+        ]}
     child_shapes = list(getattr(node, "children", []) or [])
     if not child_shapes:
         return {
@@ -97,3 +105,15 @@ def _occurrence_subtree(node: Any, parent_world_loc: Location, path: str, name: 
         for index, child in enumerate(child_shapes, start=1)
     ]
     return {"id": path, "name": name, "leaf": False, "children": children}
+
+
+def _placed_subtree(node: dict[str, Any], placement: Location, path: str) -> dict[str, Any]:
+    """``node``, an occurrence-tree node of a composition used as a prototype, placed by
+    ``placement``: its leaves' world locations composed with it, every node renumbered
+    under ``path``, the shapes shared."""
+    if node.get("leaf"):
+        return dict(node, id=path, world_loc=placement * node["world_loc"])
+    return dict(node, id=path, children=[
+        _placed_subtree(child, placement, f"{path}.{index}")
+        for index, child in enumerate(node["children"], start=1)
+    ])

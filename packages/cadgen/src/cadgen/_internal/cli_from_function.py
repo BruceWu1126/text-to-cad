@@ -363,11 +363,12 @@ def report_failure(
     (``cadgen.analytics.build_failure``), for the build's count (``cadgen.daemon.telemetry.job_failed``).
     """
     _report_crash(exc)
+    from cadgen._internal.cli_errors import failure_text, report_cli_error
+
     if as_json:
         out = stdout if stdout is not None else sys.stdout
-        print(json.dumps({"ok": False, "error": str(exc)}, separators=(",", ":")), file=out)
+        print(json.dumps({"ok": False, "error": failure_text(exc)}, separators=(",", ":")), file=out)
         return 1
-    from cadgen._internal.cli_errors import report_cli_error
 
     return report_cli_error(
         exc, tool=prog, verbose=verbose, verbose_hint=verbose_hint, stream=stderr

@@ -435,7 +435,13 @@ def serve() -> int:
 
         analytics.collect_crashes(telemetry.job_crashed)
     _warm_imports()
-    _emit({"ready": os.getpid()})
+    try:
+        _emit({"ready": os.getpid()})
+    except (OSError, ValueError):
+        # The supervisor that reads this channel is gone -- the daemon stopped while
+        # this spare warmed its imports: a worker nobody waits for ends quietly, as
+        # one whose beat nobody reads does (``_heartbeat``).
+        return 0
     for line in sys.stdin:
         line = line.strip()
         if not line:

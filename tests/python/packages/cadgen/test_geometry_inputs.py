@@ -98,6 +98,18 @@ class GeometryInputs(unittest.TestCase):
         export_build123d_step_file(shape,path)
         return path.read_bytes()
 
+    def test_a_colour_for_a_face_the_part_does_not_have_is_refused_not_dropped(self):
+        """``cad_face_ordinal_colors = {99: ...}`` on a six-faced box was dropped without a
+        word (README law 10): the ordinals are the part's faces, 1 to their number."""
+        import build123d as bd
+
+        box = bd.Box(1, 1, 1)
+        box.label = "free"
+        with self.assertRaisesRegex(ValueError, r"cad_face_ordinal_colors on 'free': no face 99; its faces are numbered 1 to 6"):
+            cp.prepare_geometry_component(box, face_colors={99: (1.0, 0.0, 0.0, 1.0)})
+        with self.assertRaisesRegex(ValueError, r"a face is named by its ordinal, a whole number from 1 \(got 0\)"):
+            cp.prepare_geometry_component(box, face_colors={0: (1.0, 0.0, 0.0, 1.0)})
+
     def test_geometry_and_native_read_extract_nothing(self):
         from cadgen._internal import topology_extract
         scene=self.scene(nested=True)
@@ -131,9 +143,12 @@ class GeometryInputs(unittest.TestCase):
         from cadgen._internal.component_package import _shape_brep_bytes
         shape=Solid.make_box(2,3,4)
         raw={1:(1.,0.,0.,1.),999:(0.,1.,0.,1.)}
-        shape.cad_face_ordinal_colors=raw
+        # A stored recipe names the part's faces alone (the decoder reads it so); a
+        # colour for a face the part lacks is refused at the build, never dropped.
         effective=cp.effective_face_colors(shape,raw)
         self.assertEqual(set(effective),{1})
+        raw={1:(1.,0.,0.,1.)}
+        shape.cad_face_ordinal_colors=raw
         cid,entry=store_component(shape,_shape_brep_bytes(shape),{})
         self.assertEqual(set(entry['faceColors']),{1})
         private=cp._decode_brep(entry['codec'],read_verified_object(entry['brep']))

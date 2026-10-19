@@ -670,6 +670,7 @@ def clear() -> None:
         _UNSTABLE.clear()
         _MAPS.clear()
         _STATE.clear()
+        _SUBS.clear()
 
 
 # --- the call -----------------------------------------------------------------------------
@@ -710,6 +711,13 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                     entry = None
         if entry is not None:
             result = _hit(state, entry, kind, function, args, kwargs, shapes)
+            # The hit's feature is the miss's: its results are the objects the miss made,
+            # so its inputs are the handles the miss was given -- the same TShapes at the
+            # same placements (the key says so), holding the locations those results were
+            # built from. A handle taken now would hold a location the model made again
+            # this run, equal in value and another object, which the kernel's ``IsSame``
+            # (a location is its datum) would not find among the results' elements.
+            inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
             feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
             # The very shapes the miss made, so the history it captured is theirs: no maker runs.
             feature.history = entry.history
@@ -736,6 +744,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         copied = _copy_origins(feature, state)
         del makers
         snapshot = None
+        inherited: dict[int, dict] = {}
         try:
             effects, sound = _effects(captured, state)
             if not sound or any(effect.geometric() for _index, effect in effects):
@@ -743,6 +752,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                 # cannot certify whether a nested copy preceded that change.
                 copied = _reject_copies(feature, copied, state)
             if sound:
+                inherited = _inherit_trees(result, feature, state)
                 if kind == "constructor":
                     snapshot = _Adopt(_wrapped(result), dict(_CONSTRUCTOR_TARGETS)[label])
                 else:
@@ -762,9 +772,11 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         for index, effect in effects:
             effect.origin = (key_id, n, index)
         entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
-                       history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
+                       history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0],
+                       handles=feature.handles)
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
+        _attach_trees(result, inherited, state)
         if _composes(label, kind):
             for made in entry.made:
                 made.container = True  # the children it was given are their makers'
@@ -825,7 +837,9 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
             copied = _reject_copies(feature, copied, state)
+    inherited = _inherit_trees(result, feature, state)
     _register(result, None, feature.index, state, None, copied)
+    _attach_trees(result, inherited, state)
     return function_result
 
 
@@ -866,6 +880,53 @@ def _copy_origins(feature: Any, state: _Run) -> dict[int, tuple | None]:
     return materials
 
 
+def _inherit_trees(result: Any, feature: Any, state: _Run) -> dict[int, dict]:
+    """The occurrence tree a result made of a keyed composition (``composed``) carries.
+    build123d copies a shape's attributes to what it makes of it, the tree among them,
+    deep: a ``moved`` composition carried a copy of its tree whose leaves were copies of
+    the prototypes no operation keyed, so the packager named them by their geometry and
+    the memo keyed nothing given the shape. A result that is the composition placed
+    (``moved``, ``located``: the same TShape) carries the composition's own tree; one
+    that is a certified whole-body copy of it carries its source's -- the same tree,
+    placing the same prototypes, which the result's own placement then places
+    (``store.build``); any other result (a boolean's) carries none, and walks as its
+    geometry is. Set on the result's objects now, before the snapshot; bound to a
+    registration by :func:`_attach_trees`. By position among the result's shapes."""
+    copies = feature.history.copies if feature.history is not None else {}
+    inherited: dict[int, dict] = {}
+    for position, shape in enumerate(_result_shapes(result)):
+        attributes = shape.__dict__
+        held = attributes.get("_occurrence_tree")
+        if held is None:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        tree = made.tree if made is not None else None
+        if tree is None and position in copies:
+            source = _made_of(copies[position].source.TShape(), state)
+            tree = source.tree if source is not None else None
+        if tree is None:
+            del attributes["_occurrence_tree"]
+            continue
+        attributes["_occurrence_tree"] = inherited[position] = tree
+    return inherited
+
+
+def _attach_trees(result: Any, inherited: dict[int, dict], state: _Run) -> None:
+    """Bind each inherited tree (:func:`_inherit_trees`) to its result's registration:
+    the one tree the shape is keyed with (``_shape_key``)."""
+    if not inherited:
+        return
+    for position, shape in enumerate(_result_shapes(result)):
+        tree = inherited.get(position)
+        if tree is None:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        if made is not None:
+            made.tree = tree
+
+
 def _reject_copies(feature: Any, copied: dict[int, tuple | None], state: _Run) -> dict[int, None]:
     """Withdraw both kinds of inheritance, including what a later hit could use."""
     if not copied:
@@ -902,7 +963,23 @@ def _hit(state: _Run, entry: "_Entry", kind: str, function: Any, args: tuple, kw
             made.effects.append(effect)
     for made in entry.made:
         made.born = next(_SEQUENCE)
+    _restore_trees(result, state)
     return result
+
+
+def _restore_trees(result: Any, state: _Run) -> None:
+    """A hit's result that carries an occurrence tree (:func:`_inherit_trees`) carries
+    the one its registration holds now -- a composition attaches its tree afresh on
+    every call, and the snapshot restored a copy of the miss's -- so the shape is keyed
+    by the tree it carries (``_shape_key``) and the packager places this run's leaves."""
+    for shape in _result_shapes(result):
+        attributes = shape.__dict__
+        if "_occurrence_tree" not in attributes:
+            continue
+        wrapped = _wrapped(shape)
+        made = _made_of(wrapped.TShape(), state) if wrapped is not None else None
+        if made is not None and made.tree is not None:
+            attributes["_occurrence_tree"] = made.tree
 
 
 def decoded(tree: str, label: str | None, decode: Callable[[], Any]) -> Any:
@@ -1959,7 +2036,17 @@ class _Made:
         parent = shape.__dict__.get("topo_parent")
         if parent is None:
             raise _Unkeyable("a sub-shape that lost its topo_parent")
-        return ("sub", _placed_key(parent, state), self.kind, self.index, applied)
+        index = self.index
+        parent_wrapped = _wrapped(parent)
+        if parent_wrapped is not None and parent_wrapped.TShape() != self.parent.tshape:
+            # Extracted now from another shape that holds this TShape -- a boolean's result
+            # shares what it left alone with its input, and with an earlier result of other
+            # inputs, whose extraction registered it first: its place is in THIS parent's map,
+            # as a run that extracted it from this parent alone would register it.
+            index = _sub_map(parent_wrapped, self.kind).FindIndex(_wrapped(shape))
+            if index == 0:
+                raise _Unkeyable("not a sub-shape of its topo_parent")
+        return ("sub", _placed_key(parent, state), self.kind, index, applied)
 
     def handle(self) -> Any:
         return _handle_of(self.tshape)
@@ -2030,6 +2117,11 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int | None, sta
                 _REGISTRY[tshape] = made
                 state.registered[tshape] = made
                 created.append(made)
+                # Every sub-shape below it names this root, the first to hold it (a
+                # result made from it shares them): what a foreign or transient wrapper
+                # that holds one of them embeds (``_embedded``).
+                for sub in _mapped(wrapped)[1]:
+                    _SUBS.setdefault(sub, made)
             if feature is not None:
                 state.owners[made] = feature
     return created
@@ -2048,7 +2140,7 @@ def _drop(entry: "_Entry") -> None:
         for effect in made.effects:
             effect.forget()
         if made.parent is None:
-            _forget_states(made.tshape)
+            _forget_states(made)
         pending.extend(made.subs)
     entry.made = []
 
@@ -2119,12 +2211,15 @@ def _result_shapes(result: Any) -> list:
 
 
 class _Entry:
-    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place")
+    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place", "handles")
 
     def __init__(self, *, key: tuple[int, int], inputs: list, snapshot: Any, effects: list,
-                 history: Any = None, in_place: bool = False) -> None:
+                 history: Any = None, in_place: bool = False, handles: list = ()) -> None:
         self.key = key
         self.inputs = inputs
+        # The inputs as the miss's feature was given them (``kernel_trace.Feature.handles``):
+        # what a hit's feature is given too, since its results are the miss's objects.
+        self.handles = list(handles)
         self.snapshot = snapshot
         self.effects = effects
         # What the makers reported of the results (``kernel_history.History``), captured on
@@ -2262,6 +2357,10 @@ def _snapshot(value: Any) -> Any:
 # already holds.
 
 _STATE: dict[Any, tuple] = {}
+# Every sub-shape of every persistent root, by TShape, to the first root registered
+# holding it (``_register``): what a foreign or transient wrapper embeds when it holds
+# one of them (``_embedded``). Forgotten with the root (``_forget_states``).
+_SUBS: dict[Any, "_Made"] = {}
 
 
 class _Captured:
@@ -2381,12 +2480,19 @@ def _covered(item: _Captured, distinct: list[_Captured]) -> bool:
 
 
 def _embedded(wrapped: Any, state: _Run | None, *, tshapes: list | None = None) -> list[_Made]:
-    """The persistent memoized roots a foreign or transient shape holds."""
+    """The persistent memoized roots a foreign or transient shape holds: by a root's own
+    TShape or an extracted sub-shape's (registered), or by any sub-shape of a root
+    (``_SUBS``) -- a boolean's result shares its inputs' faces and edges, and an
+    operation on it changes them in place."""
     if tshapes is None:
         _map, tshapes = _mapped(wrapped)
     found: list[_Made] = []
     for tshape in tshapes:
         made = _made_of(tshape, state)
+        if made is None:
+            made = _SUBS.get(tshape)
+            if made is not None and made.tainted:
+                made = None
         if made is not None and made.persistent() and made.root() not in found:
             found.append(made.root())
     return found
@@ -2456,13 +2562,15 @@ def _state(tshape: Any) -> tuple:
     return (int(tshape.ShapeType()), None, flags, None, None)
 
 
-def _forget_states(tshape: Any) -> None:
-    """Drop the states kept of a TShape's sub-shapes: the memo no longer holds it.
-    A sub-shape another entry's result shares is read again when next captured."""
-    mapped = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(_handle_of(tshape), mapped)
-    for ordinal in range(1, mapped.Extent() + 1):
-        _STATE.pop(mapped.FindKey(ordinal).TShape(), None)
+def _forget_states(made: _Made) -> None:
+    """Drop the states kept of a root's sub-shapes, and that they name it (``_SUBS``):
+    the memo no longer holds it. A sub-shape another entry's result shares is read
+    again when next captured, and names a root again when a result holding it
+    registers -- that entry misses next, its input gone, and registers its own."""
+    for tshape in _mapped(made.handle())[1]:
+        _STATE.pop(tshape, None)
+        if _SUBS.get(tshape) is made:
+            del _SUBS[tshape]
 
 
 def _representations(tshape: Any, kind: int) -> Any:

@@ -1461,6 +1461,32 @@ def file_hash_now(path: Path, rel: str, names: Mapping[str, Iterable[str]] | Non
     return sliced_source_hash(path, reached)
 
 
+def refreshed_wholes(script: Path, closure: Mapping[str, object]) -> dict[str, str]:
+    """The sliced files of a record's ``closure`` whose whole-file hash moved while their
+    slice stood (the gate re-sliced them by their recorded names and found the model
+    current), each with the whole-file hash it has now: what the record's ``wholes``
+    should say so the next gate takes the recorded slice unanalysed. Empty when every
+    sliced file is at its recorded whole-file hash."""
+    base = Path(script).resolve().parent
+    names = closure.get("names") or {}
+    wholes = closure.get("wholes") or {}
+    moved: dict[str, str] = {}
+    for rel in names:
+        recorded = wholes.get(rel)
+        if not recorded:
+            continue
+        resolved = _resolve_relative(rel, base)
+        if resolved is None:
+            continue
+        try:
+            now = _semantic_source_hash(resolved)
+        except OSError:
+            continue
+        if now != recorded:
+            moved[rel] = now
+    return moved
+
+
 def entry_hash_now(base: Path, rel: str, names: Mapping[str, Iterable[str]] | None,
                    shas: Mapping[str, str] | None = None, wholes: Mapping[str, str] | None = None,
                    own: Mapping[str, Iterable[str]] | None = None) -> str | None:
