@@ -218,7 +218,7 @@ class NoBakePointTests(unittest.TestCase):
 
     def test_at_is_an_unknown_key(self) -> None:
         with self.assertRaisesRegex(ValueError, r"unknown key\(s\) \['at'\]"):
-            normalize_kinematics(_arm_block(at="open"), where="@stl")
+            normalize_kinematics(_arm_block(at="open"), where="@step")
 
     def test_pose_is_an_unknown_key(self) -> None:
         with self.assertRaisesRegex(ValueError, r"unknown key\(s\) \['pose'\]"):

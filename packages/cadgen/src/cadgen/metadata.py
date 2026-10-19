@@ -45,9 +45,6 @@ class MeshExportDecl:
     out: str | None = None
     mesh_tolerance: float | None = None
     mesh_angular_tolerance: float | None = None
-    # Runtime-only (never parsed from AST): the declaration's OWN kinematics.
-    # Each mesh declaration stands alone — it never reads @step's kinematics.
-    kinematics: object | None = None
 
 
 # What each spelling of a mesh tolerance is in the tessellation policy's terms.

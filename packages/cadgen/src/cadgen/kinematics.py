@@ -1,7 +1,7 @@
 """Typed mates: the model's kinematics, declared as pure data.
 
-The ``kinematics=`` kwarg on ``@step``/``@stl``/``@glb``/``@threemf`` takes ONE
-dict whose shape mirrors the sidecar's kinematics section exactly::
+The ``kinematics=`` kwarg on ``@step`` (and ``cadgen step build --kinematics``)
+takes ONE dict whose shape mirrors the sidecar's kinematics section exactly::
 
     KINEMATICS = {
         "mates": [
@@ -24,11 +24,6 @@ controls, parents first) and a pose is a pure fold over it (forward
 kinematics), which the viewer plays. Closed loops are out of scope by design
 (the same call URDF made); declaring one is an error here, not a solver
 invocation.
-
-Each decorator's declaration stands alone: a mesh decorator never reads
-@step's kinematics. Sharing happens in the author's source — one module-level
-dict referenced from several decorators — never by cross-decorator
-inheritance.
 
 This module must import light (no OCP): it runs in the decoration-time
 pre-gate window. Axis selector refs are validated as SYNTAX here and resolved
