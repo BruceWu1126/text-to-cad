@@ -574,6 +574,22 @@ class PublishRule(StoreCase):
         script.write_text(script.read_text(encoding="utf-8").replace("SIZE = 10.0", "SIZE = 13.0"), encoding="utf-8")
         self.assertTrue(decide(script, ran_closure_hash="0" * 64, ran_files=[str(script)]).publish_outputs)
 
+    def test_a_current_record_whose_export_is_still_in_flight_is_not_replaced(self) -> None:
+        # Two edits in flight: the newer build records its result and hands its export to
+        # the pool; its STEP entry stays pending (an empty digest) until the file lands. The
+        # older build, finishing after it, ran sources that have moved on, and the newer
+        # record's pending file makes it no less current: the older result never replaces
+        # it, so the file on disk is never the older box.
+        from cadgen.store.publish import decide
+        from cadgen.store.records import read_record, write_record
+
+        script = self.model("plate")
+        self.record(script, tree=self.tree_for("plate"))
+        record = read_record(script)
+        record["outputs"][str(script.with_suffix(".step"))] = {"sha256": "", "writer": "pending"}
+        write_record(script, record)
+        self.assertFalse(decide(script, ran_closure_hash="0" * 64, ran_files=[str(script)]).publish_outputs)
+
 
 class TreeFlattening(StoreCase):
     def test_links_expand_with_rebased_ids_composed_placements_and_the_link_name(self) -> None:

@@ -5,9 +5,12 @@ model's closure files as they are on disk NOW and compare with the bytes this
 build ran:
 
 - unchanged → publish everything;
-- changed (this build is already stale) → if the record on disk is current,
-  publish only the objects (content-addressed, harmless) and skip record +
-  outputs; if the record on disk is also stale, publish anyway.
+- changed (this build is already stale) → if the record on disk is current --
+  its sources are the ones on disk now (the gate's clauses 1-4 and 6,
+  ``Verdict.stored``), whatever its files still owe: a result whose export is
+  still in flight is current, and that export is the file's -- publish only
+  the objects (content-addressed, harmless) and skip record + outputs; if the
+  record on disk is also stale, publish anyway.
 
 There is no serialization and no dedupe: two builds of one model run at once,
 whatever their sources; the disk never goes backwards; a build never blocks its
@@ -46,7 +49,9 @@ def decide(
     if now == ran_closure_hash:
         return PublishDecision(True, "source unchanged since this build ran")
     # This build ran source that has moved on. Only defer to the disk if what is
-    # there is CURRENT — a stale result is still better than nothing.
-    if not stale(model).stale:
+    # there is CURRENT -- a result of the sources as they are now, its files owed or
+    # not (a newer build's export still in flight is that build's to land, never this
+    # one's to overwrite) -- a stale result is still better than nothing.
+    if stale(model).stored is not None:
         return PublishDecision(False, "source changed during the build and the record on disk is already current")
     return PublishDecision(True, "source changed during the build; publishing anyway (record on disk is stale too)")

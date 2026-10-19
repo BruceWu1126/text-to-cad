@@ -185,6 +185,10 @@ def export_saved(path: Path | str) -> Path:
         await_writes(written)
         _latest_model, latest = _recorded(target)
         if latest is not None and export_state(latest) != captured:
+            # The job this command queued was superseded (STORE.md §3, *Exports*): the file
+            # is the newer result's, which this command finishes instead.
+            logger.info(f"{display_path(target)}: a newer result of its model was recorded while it was "
+                        "being exported; exporting that result")
             continue
         if latest is not None and _ready(target, latest):
             return target
