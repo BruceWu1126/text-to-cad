@@ -1664,7 +1664,7 @@ def _restore_result(spec: EntrySpec, verdict: object, *, logger: CliLogger) -> s
     for output_path in record.get("outputs") or {}:
         note_output(output_path, model)
     verdict.tree = tree
-    logger.info(f"{spec.cad_ref}: an earlier build's result answers for the source as it is now; restored")
+    logger.info(f"{spec.source_ref}: an earlier build's result answers for the source as it is now; restored")
     return tree
 
 
@@ -1908,9 +1908,12 @@ def _answer(logger: CliLogger, reported: list[tuple[dict[str, object], list]], r
             document = entry["document"]
             print(f"{entry['outcome']} {_display_path(Path(document)) if document else entry['tree']}")
     if not json_output:
+        import shlex
+
         for path in run.owed() if run is not None else ():
             shown = _display_path(path)
-            print(f"saving {shown} (cadgen export {shown} waits for it)")
+            # The command as a shell takes it: a path with a space is quoted there.
+            print(f"saving {shown} (cadgen export {shlex.quote(shown)} waits for it)")
 
 
 def generate_dxf_targets(
