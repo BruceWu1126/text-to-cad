@@ -826,7 +826,11 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   process, from its live shape, and published there by the same function,
   before the command answers.
 
-  **A newer result supersedes an older export.** An export writes only while
+  **A newer result supersedes an older export.** An older build never replaces
+  a current record either: the publish rule (`store/publish.py`) asks whether
+  the record's sources are current, whatever its files still owe, so a build
+  finishing after a newer one has recorded its result -- that result's export
+  still in flight -- publishes nothing and fails saying so. An export writes only while
   the model's record names its result, and reads the record again before it
   writes, before the file replaces the saved one, before it writes the record
   and before each mesh. Once a newer build of the model has recorded its
@@ -2035,8 +2039,10 @@ subjects, two workers): a request for a model whose worker is
 idle takes it; whose worker is busy binds a spare as an **extra** for that
 one job (the extra returns to the spare set after) -- nothing waits on another
 build; a model with no worker
-binds a spare and a replacement starts in the background; no spare means a
-spawn. A build's worker is busy for its build alone: what the build's results
+binds a spare and a replacement starts in the background; no spare, and none
+still importing, means a spawn (a request waits for a spare importing rather
+than start a kernel beside it, one waiter per spare; one waiting for memory takes
+a worker that returns meanwhile). A build's worker is busy for its build alone: what the build's results
 owe after it answers is the supervisor's (below), so the model's next edit
 finds its worker idle, with the kernel memo that edit hits (README law 18). Spares load build123d/OCP as well as the lazy tool parsers before
 announcing readiness; importing the supervisor never loads the kernel.
@@ -2057,7 +2063,9 @@ borrowed worker). Worker admission accounts for
 resident memory and pending reservations,
 and may reclaim idle workers or refuse work (§9 below). A worker is recycled after
 `CADGEN_DAEMON_RECYCLE` jobs (default 1000) as a leak hedge, and the daemon
-exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600). The
+exits after `CADGEN_DAEMON_IDLE_TIMEOUT` seconds idle (default 3600): builds
+and jobs are activity, a status read, a job watch or a command's counts are not,
+so an open viewer polling the ledger keeps no daemon resident. The
 first client that needs the daemon starts it, and `cadgen viewer` starts it as
 soon as its URL is announced, so a session's first build finds warm spares; a
 viewer where none can start refuses to start, naming why.
@@ -2192,9 +2200,12 @@ the address is a pipe name, which has no path to outgrow.
 (`client.DaemonUnavailable`): what a start needs and this machine lacks, found
 before any start (`client.unavailable`, what `cadgen doctor` reports: no local
 IPC family, a socket folder another user owns, a state directory this user
-cannot write), a start that failed, a daemon that exited instead of answering,
-or one that did not answer within thirty seconds of its start -- those two name
-its log. A request the daemon lost mid-job -- its worker died, the daemon was
+cannot write, a folder or a plain file standing at the socket's path -- which also
+fails the daemon's own start, exit 1), a start that failed, a daemon that exited
+instead of answering, one that did not answer within thirty seconds of its start,
+or one that accepted the connection and did not finish the key handshake within
+ten seconds (`transport.CONNECT_TIMEOUT_SECONDS`: stopped or wedged, and no
+second daemon is started over it) -- those three name its log. A request the daemon lost mid-job -- its worker died, the daemon was
 killed or stopped answering -- fails and says so, naming the log. Nothing runs
 a job anywhere else, and nothing runs it again: a job that ran half an hour and
 is then silently rerun is worse than its failure. Only a command its caller ran
@@ -2211,7 +2222,10 @@ pending past its tenth of a second, accepting waits for no new connection, so a
 burst of silent ones delays no one. A daemon that stops drops the connections
 still proving the key, and waits for their threads before it exits. Prevents:
 one connection whose challenge never reached its reader (another viewer thread
-read it off a reused file descriptor) holding every later request.
+read it off a reused file descriptor) holding every later request. Each
+authenticated client's request is then read on a thread of its own too
+(`server.serve`, `_take`), never on the accept loop, so one that proved the key
+and sends nothing holds up no status read and no running build's slot or compile.
 
 **A daemon retires when its address no longer names its socket.** The supervisor
 checks ownership every half second, independently of activity and the idle
@@ -2235,7 +2249,9 @@ state of its own beyond where each store's last housekeeping pass ended
 daemon ran in the last 120 s -- a row per request, and one per child a request
 built inside it (§9b) -- with its state (`submitted` → `queued` →
 `building` [phase, done/total] → `done` | `failed`), the output paths it
-declared, parsed statically from the script it names, and the files its
+declared -- parsed statically from the script it names (a literal `out=`), the
+rest named by the build's first event for each model, since the supervisor never
+imports a model or the kernel -- and the files its
 results still owe (§9b); a row that still owes a file stays listed until the
 job writing it ends. The ledger is the CAD Viewer's only progress source and what a
 door asks before it reads a file (§3, *Exports*), and it is process state,
@@ -2308,13 +2324,18 @@ CPU scheduling and reuse remain independent of memory admission:
    it; it reports a failed compile rather than resubmitting it. Readable
    geometry returns immediately, without waiting for display data.
 3. **Idle unbind — 10 minutes** (`CADGEN_DAEMON_IDLE_UNBIND`). A bound worker
-   idle that long returns to the spare set (spares beyond K exit); its model's
-   next build rebinds a spare — no import repaid.
+   idle that long returns to the spare set, its model's memo with it, and the
+   least recently used spare leaves when the set is over K; its model's
+   next build takes that very spare back (`Worker.last_model`) — no import repaid.
    Purely RAM: idle workers hold no slot and never block a new model.
 
 **Memory admission.** The daemon sums worker RSS including their
 descendants, pending spawn reservations, and retiring workers until they exit.
-Idle workers are reclaimed oldest first. Busy/suspended workers retain at
+Idle workers are reclaimed spares first, bound workers last (each least
+recently used first), and a job a model's result owes never reclaims that
+model's own worker; a release trims spares only, a bound worker goes by the
+admission of a request that needs its memory. A request held by admission reads
+`queued` with why. Busy/suspended workers retain at
 least a worker reservation. That reservation is calibrated, not configured: it
 starts at a 512 MiB seed and, on every accounting pass, becomes the lowest RSS
 among workers that are idle and have served no job — what a worker costs once
