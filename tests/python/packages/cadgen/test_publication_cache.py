@@ -8,8 +8,10 @@ extrusion reusing a profile already consumed), relabels a part, recolours a face
 part, and pins a label on a feature an unchanged part descends from -- with the kernel
 memo on and with hits off. With the memo on, a rebuild with no edit prepares no
 component, and the parts an edit changed -- in bytes, colours or names -- are prepared
-again. Each build is ``python rig.py`` run in this process, its exports and display jobs
-where they are submitted (``inline_artifacts``), with a store of its own.
+again. A parent that links its children publishes the unchanged ones by their trees, with
+no child geometry digested, no link expanded and no clip baked again, and writes what a
+cold build writes. Each build is ``python rig.py`` run in this process, its exports and
+display jobs where they are submitted (``inline_artifacts``), with a store of its own.
 """
 
 from __future__ import annotations
@@ -108,11 +110,18 @@ class PublicationCacheCase(unittest.TestCase):
         os.environ["CADGEN_CACHE_DIR"] = str(self.root / f"store-{self.stores}")
 
     def cold(self) -> None:
-        """This process as a fresh worker: nothing memoized, nothing prepared."""
-        from cadgen.store import build
+        """This process as a fresh worker: nothing memoized, prepared, digested, expanded,
+        measured or reduced."""
+        from cadgen._internal import animation_bake
+        from cadgen.store import bounds, build, materialize, trees
 
         kernel_memo.clear()
         build.clear_prepared()
+        materialize.clear_held_digests()
+        trees._reset_metadata_capture_cache()
+        bounds.clear()
+        with animation_bake._REDUCED_LOCK:
+            animation_bake._REDUCED.clear()
 
     def build(self, *flags: str) -> tuple[dict, dict, list[str]]:
         """``(record, provenance entry, labels of the components it prepared)`` of
@@ -223,6 +232,129 @@ class PublicationCache(PublicationCacheCase):
                 self.assertEqual(len(prepared), 6, "every component is prepared again")
                 _record, _provenance, prepared = self.build("--force")
                 self.assertEqual(prepared, [], "what was prepared after it is recalled")
+
+
+# A parent placing child models a lib module builds: two placements of an assembly child,
+# three of a part child grouped, a leaf of its own, and a clip moving the group.
+PARTS = """\
+from cadgen import build123d as bd
+
+SIZE = 4.0
+
+
+def bracket():
+    plate = bd.Solid.make_box(SIZE, 6, 1)
+    plate.label = "plate"
+    boss = bd.Pos(1, 1, 1) * bd.Solid.make_cylinder(0.8, 3)
+    boss.label = "boss"
+    return bd.Compound(children=[plate, boss], label="bracket")
+
+
+def pin():
+    pin = bd.Solid.make_cylinder(0.5, 5)
+    pin.label = "pin"
+    return pin
+"""
+
+CHILD = """\
+from cadgen import step
+
+from lib import parts
+
+
+@step
+def {name}():
+    return parts.{name}()
+"""
+
+ROOT = """\
+import cadgen
+from cadgen import build123d as bd
+from cadgen import step
+
+from bracket import bracket
+from pin import pin
+
+
+def _lift(t, m):
+    m.get("#pins").translate((0, 0, 2 * t))
+
+
+@step(animation={"lift": cadgen.clip(_lift, duration=1, label="Lift")})
+def rig():
+    parts = []
+    for index in range(2):
+        placed = bd.Pos(index * 20, 0, 0) * bracket()
+        placed.label = f"bracket_{index}"
+        parts.append(placed)
+    pins = []
+    for index in range(3):
+        placed = bd.Pos(index * 5, 10, 0) * pin()
+        placed.label = f"pin_{index}"
+        pins.append(placed)
+    parts.append(bd.Compound(children=pins, label="pins"))
+    base = bd.Solid.make_box(50, 20, 1)
+    base.label = "base"
+    parts.append(bd.Pos(-5, -5, -1) * base)
+    return bd.Compound(children=parts, label="rig")
+"""
+
+
+class LinkedPublication(PublicationCacheCase):
+    """A parent rebuilt with its children unchanged publishes them by their trees: its partner
+    checks digest no child geometry the memo hands back unchanged, its flattens expand no link
+    to an unchanged child again, and its bake of clips whose key and tree it has stored does
+    not run -- yet its tree, components and provenance, and its record's keyframes, are those a
+    cold build writes, after no edit and after an edit of one child."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.root / "lib").mkdir()
+        (self.root / "lib" / "__init__.py").write_text("", encoding="utf-8")
+        (self.root / "lib" / "parts.py").write_text(PARTS, encoding="utf-8")
+        for name in ("bracket", "pin"):
+            (self.root / f"{name}.py").write_text(CHILD.format(name=name), encoding="utf-8")
+        self.script.write_text(ROOT, encoding="utf-8")
+
+    def counted(self, *flags: str) -> tuple[dict, dict, list[str], dict[str, int]]:
+        """:meth:`build`, and how much of the children's publication it did again."""
+        from cadgen._internal import animation_bake
+        from cadgen.store.materialize import held_digest_stats
+        from cadgen.store.trees import expansion_stats
+
+        before = {**held_digest_stats(), **expansion_stats()}
+        bake = animation_bake.bake_document_animation
+        with mock.patch.object(animation_bake, "bake_document_animation", side_effect=bake) as baked:
+            record, provenance, prepared = self.build(*flags)
+        after = {**held_digest_stats(), **expansion_stats()}
+        work = {name: after[name] - before[name] for name in ("read", "trusted", "expanded", "reused")}
+        work["baked"] = baked.call_count
+        return record, provenance, prepared, work
+
+    def test_a_rebuild_publishes_unchanged_children_by_their_trees_and_writes_what_a_cold_build_writes(self) -> None:
+        self.cold()
+        self.store()
+        first = self.counted()
+        self.assertEqual(set(first[2]), {"plate", "boss", "pin", "base"})
+        self.counted("--force")  # the worker's first rebuild verifies what its cold build wrote
+        record, provenance, prepared, work = self.counted("--force")
+        self.assertEqual(prepared, [], "a rebuild with no edit prepares no component")
+        self.assertEqual((work["read"], work["expanded"], work["baked"]), (0, 0, 0),
+                         "and reads no child's geometry, expands no link and bakes nothing again")
+        self.assertEqual(work["trusted"], 2 * 2 + 3, "each placed child leaf's digest is the one taken before")
+        self.assertGreaterEqual(work["reused"], 5, "each link's expansion is the one made before")
+        self.assert_built_as_cold((record, provenance), first[:2])
+        self.assertEqual(record["animation"], first[0]["animation"])
+
+        parts = self.root / "lib" / "parts.py"
+        parts.write_text(parts.read_text(encoding="utf-8").replace("SIZE = 4.0", "SIZE = 4.5"), encoding="utf-8")
+        edited, edited_provenance, prepared, work = self.counted()
+        self.assertEqual(prepared, ["plate"], "an edit of one part prepares that part alone")
+        self.assertEqual(work["baked"], 1, "a new result bakes its clips")
+        self.assertGreaterEqual(work["reused"], 3, "the unchanged child's links are expanded as before")
+        cold_record, cold_provenance = self.cold_build()
+        self.assert_built_as_cold((edited, edited_provenance), (cold_record, cold_provenance))
+        self.assertEqual(edited["animation"], cold_record["animation"])
 
 
 if __name__ == "__main__":
