@@ -133,6 +133,8 @@ _USAGE_HEAD = "usage: cadgen <command> [args...]\n\ncommands:\n"
 _USAGE_TAIL = (
     "\nRun 'cadgen <command> --help' for a command's own options.\n"
     "Each command is also available as 'python -m <module>'.\n"
+    f"Where no build daemon can run, {NO_DAEMON_FLAG} builds in the command's own process:\n"
+    "a model script, export, step build|compile and stl|3mf|glb build take it.\n"
 )
 
 

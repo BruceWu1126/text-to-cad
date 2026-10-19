@@ -212,13 +212,15 @@ CAD app no longer tessellate, and nothing cadgen runs needs Node.
 `CADGEN_DAEMON=0` is gone, and nothing reads it: `python <model>.py`, `cadgen
 step build|compile` and `cadgen stl|3mf|glb build` hand their job to the warm
 daemon, which the first command that needs one starts, and no command builds in
-its own process. Where no daemon can start -- no local IPC family, a socket
-folder another user owns, a state directory this user cannot write -- the
-command fails naming why and what to set; `cadgen doctor` says whether one can
-start here, and the CAD Viewer does not start without one. A script that set
-`CADGEN_DAEMON=0` drops it; one that wants a daemon to itself sets
-`CADGEN_DAEMON_STATE_DIR`, and `CADGEN_DAEMON_IDLE_TIMEOUT` for how long it stays
-once idle.
+its own process unless it is given `--no-daemon`. Where no daemon can start -- no
+local IPC family, a socket folder another user owns, a state directory this user
+cannot write -- the command fails naming why and what to set; `cadgen doctor` says
+whether one can start here, and the CAD Viewer does not start without one. A
+script that set `CADGEN_DAEMON=0` where no daemon can run passes `--no-daemon`
+instead ([progress and runtime
+diagnostics](step-generation.md#progress-and-runtime-diagnostics)); one that wants
+a daemon to itself sets `CADGEN_DAEMON_STATE_DIR`, and `CADGEN_DAEMON_IDLE_TIMEOUT`
+for how long it stays once idle.
 
 ## Children build serially, and a parent follows its children by key, in 0.8
 

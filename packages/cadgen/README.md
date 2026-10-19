@@ -229,8 +229,14 @@ the script's folder declares it the standard Python way (`PYTHONPATH=src`).
 care, only the project's imports may.
 
 A script may declare several models, and builds the ones its `__main__` calls.
-Its flags (`--force`, `--json`, `--verbose`, `--profile`)
-apply to every model it builds: no flag names, selects or configures one of them. A command
+Its flags (`--force`, `--json`, `--verbose`, `--profile`, `--no-daemon`)
+apply to every model it builds: no flag names, selects or configures one of them.
+`--no-daemon`, on a model script and on every door that hands its work to the
+daemon, is an explicit opt-in for a place the build daemon cannot run: the command
+builds in its own process, runs every job its build owes there before it answers,
+writes the bytes a daemon build writes and asks no daemon anything -- never a
+fallback, since without it a daemon that cannot take the request is an error
+([`STORE.md`](STORE.md) §3, *Exports*). A command
 that addresses one model, such as `cadgen store why`, names it
 `script.py::function`; a bare `script.py` names its sole model, and a file that
 declares several must be named. *Pressure-test*: put two models in one file and

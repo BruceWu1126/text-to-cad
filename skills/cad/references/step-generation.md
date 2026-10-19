@@ -360,6 +360,16 @@ which file is owed, since when and why. `python part.py --help`
 lists the flags. A script builds the models its `__main__` block calls; no flag
 selects one.
 
+Where no daemon can run (a sandbox without local sockets, a CI runner),
+`--no-daemon` on a model run, `cadgen export`, `cadgen step build` or a `cadgen
+stl|3mf|glb build` builds in the command's own process and asks no daemon
+anything. Its display data, STEP and mesh files are written before it answers, so
+every file in its result is `saved`, and they are the files a daemon build
+writes. Every run is a cold one, with no warm kernel or memo kept from the last,
+and children and their files are built one at a time, so builds take longer; the
+time line says `daemonless`. Without the flag, a command whose daemon cannot start
+fails, naming why.
+
 Every model a run builds, its children included, prints where its time went:
 
 ```text

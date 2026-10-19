@@ -887,6 +887,23 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   command submits the jobs itself and awaits them before answering, relaying
   what they say, so no files are saving.
 
+  **Without the daemon, the jobs run inline.** A command given `--no-daemon`
+  (`python model.py`, `cadgen export`, `cadgen step build|compile`, `cadgen
+  stl|3mf|glb build`) is an explicit opt-in for a place no daemon can run, never
+  a fallback: it builds in its own process through the same pipeline, and each
+  job its results owe runs there as it is owed, before the command answers --
+  through the worker's own entry (`artifacts.execute`), one after another, in
+  the order owed: a result's display data, its STEP staged and published, its
+  declared meshes, children before the parent that called them. A document
+  compile a door or a body asks for runs the compile command a worker would
+  (`executors.submit_compile`), unseen by the body's file trace. Every file is
+  saved before the answer, so none is `saving`; the gate, the memo, the
+  publication and the store are the daemon build's, and so are the bytes. The
+  process never connects to, starts or asks a daemon
+  (`client.no_daemon_from_now`): a door's wait for a write reads at once, and
+  counts are kept for the next sender. The CAD Viewer and the CAD app need the
+  daemon and refuse the flag.
+
   A model's `done` event says its result is recorded; its `saved` result says
   each file has landed, the moment it does. A job that fails is its row's save failure and
   the ledger's reason (§9b), never the already answered command's exit. Files
@@ -2180,7 +2197,9 @@ or one that did not answer within thirty seconds of its start -- those two name
 its log. A request the daemon lost mid-job -- its worker died, the daemon was
 killed or stopped answering -- fails and says so, naming the log. Nothing runs
 a job anywhere else, and nothing runs it again: a job that ran half an hour and
-is then silently rerun is worse than its failure.
+is then silently rerun is worse than its failure. Only a command its caller ran
+with `--no-daemon` runs its jobs itself, asking no daemon at all (§3,
+*Exports*); a command without it never does.
 
 **A client that never answers holds up no one.** Each connection proves the
 authkey, and the daemon proves it back, on a thread of its own

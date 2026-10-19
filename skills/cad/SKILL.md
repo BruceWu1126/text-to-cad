@@ -39,6 +39,14 @@ one installation, and its warm build daemon, with the CAD app's server:
 this skill pins, whether the CAD kernel loads, and whether the build daemon every
 build runs on can start. Each command's `--help` lists its flags.
 
+Where the build daemon cannot run, such as a sandbox without local sockets or a CI
+runner, `--no-daemon` builds in the command's own process: `python src/bracket.py
+--no-daemon`, and the same flag on `cadgen export`, `cadgen step build` and the
+`cadgen stl|3mf|glb build` commands. It writes the same files, all of them before
+the command returns, but every edit pays a cold build (nothing stays warm between
+runs) and child models and their files are built one after another. The CAD Viewer
+and the CAD app need the daemon and do not take it.
+
 CLI paths and `read_scene`/`read_step` paths are relative to the working
 directory, as are a model's own file reads unless anchored on `__file__`.
 Decorator `out=` paths are **relative to the model script**.
