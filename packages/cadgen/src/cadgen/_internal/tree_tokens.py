@@ -121,6 +121,7 @@ def assign_tokens(
     *,
     label: Any,
     link_leaf: dict[str, Any] | None = None,
+    token: str | None = None,
 ) -> dict[str, str]:
     """The token of every node of ``root`` (keyed by the node's current id),
     minted from the tree's structure, names and placements alone.
@@ -129,8 +130,11 @@ def assign_tokens(
     share; a leaf's placement is its occurrence row's ``transform``. A link
     node is tokened as a group unless ``link_leaf`` maps its id to the
     placement of the one leaf it will be once flattened (a part child), in
-    which case it is tokened as that leaf. Nothing here rewrites the tree:
-    :func:`retoken` does, with the mapping this returns."""
+    which case it is tokened as that leaf. ``token``, when given, is the
+    token ``root`` has as a node of a larger tree (a link's, which a flattened
+    child's nodes are minted under); else ``root`` is a tree's root, tokened
+    from its label. Nothing here rewrites the tree: :func:`retoken` does, with
+    the mapping this returns."""
     placements = {str(row["id"]): row.get("transform") for row in occurrences}
     link_ids = {str(row["id"]) for row in links}
     leaf_placement = dict(link_leaf or {})
@@ -152,7 +156,7 @@ def assign_tokens(
         for child, child_tok in zip(children, _sibling_tokens(token, pairs)):
             visit(child, child_tok)
 
-    visit(root, root_token(label))
+    visit(root, token if token is not None else root_token(label))
     return mapping
 
 

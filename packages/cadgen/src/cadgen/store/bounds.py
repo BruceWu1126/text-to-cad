@@ -320,7 +320,34 @@ def composed_bounds(occurrences: list[dict[str, Any]], components: Mapping[str, 
     }
 
 
+# The box of the occurrences one link places in a result -- each a box ``composed_bounds``
+# found -- by the linked tree and the link's placement (16 numbers): a function of the two,
+# so a parent published again composes an unchanged link's box once per worker
+# (``store.build._bbox_from_authored_occurrences``). In this process only.
+_LINK_ENTRIES = 4096
+_links: OrderedDict[tuple, dict[str, list[float]] | None] = OrderedDict()
+
+
+def remembered_link_box(tree_hash: str, placement: tuple) -> tuple[bool, dict[str, list[float]] | None]:
+    """``(found, box)`` for the occurrences the linked tree ``tree_hash`` places at
+    ``placement``, as :func:`remember_link_box` kept it; None is the box of no bounds."""
+    key = (str(tree_hash), tuple(placement))
+    with _lock:
+        if key not in _links:
+            return False, None
+        _links.move_to_end(key)
+        return True, _links[key]
+
+
+def remember_link_box(tree_hash: str, placement: tuple, box: dict[str, list[float]] | None) -> None:
+    with _lock:
+        _links[(str(tree_hash), tuple(placement))] = box
+        while len(_links) > _LINK_ENTRIES:
+            _links.popitem(last=False)
+
+
 def clear() -> None:
     """Forget this process's remembered boxes; the store's entries stay."""
     with _lock:
         _ram.clear()
+        _links.clear()

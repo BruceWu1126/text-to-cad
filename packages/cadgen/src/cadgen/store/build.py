@@ -258,7 +258,9 @@ def build_tree_from_compound(
     from cadgen._internal.source_sidecar import resolve_materials
     from cadgen.store.trees import flatten_tree
 
-    descriptor = flatten_tree(walk.draft_tree(root_name=root_name))
+    # The result flattened once, for its materials, its edges and its bounds alike.
+    blocks: list[tuple[str, tuple[float, ...], int, int]] = []
+    descriptor = flatten_tree(walk.draft_tree(root_name=root_name), blocks=blocks)
     inherited_appearance = descriptor.get("appearance")
     appearance = resolve_materials(descriptor, materials, inherited=inherited_appearance)
     if live is not None:
@@ -269,7 +271,7 @@ def build_tree_from_compound(
     return _publish_tree(
         walk, bbox_shape=compound, root_name=root_name, force=force, progress=progress,
         extra=_edge_rendering(descriptor, walk), appearance=appearance, base_appearance=inherited_appearance,
-        authored_occurrence_bounds=True, repair_objects=True,
+        authored_occurrence_bounds=(descriptor, blocks), repair_objects=True,
     )
 
 
@@ -712,14 +714,15 @@ def _publish_tree(
     extra: dict[str, Any] | None,
     repair_objects: bool = False,
     prepared_occurrence_bounds: bool = False,
-    authored_occurrence_bounds: bool = False,
+    authored_occurrence_bounds: tuple[dict[str, Any], list] | None = None,
     appearance: dict[str, Any] | None = None,
     base_appearance: dict[str, Any] | None = None,
     prepare_bbox_shape: Callable[[], Any] | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Publish verified geometry inputs before any disposable display work.
 
-    ``authored_occurrence_bounds`` measures a result per leaf under the canonical key
+    ``authored_occurrence_bounds``, the result flattened and where its links' occurrences
+    lie in it, measures a result per leaf under the canonical key
     (:func:`_bbox_from_authored_occurrences`), ``prepared_occurrence_bounds`` a
     compiled document (:func:`_bbox_from_prepared_occurrences`); ``prepare_bbox_shape``
     stands in for ``bbox_shape`` when the document a miss measures is prepared on
@@ -794,8 +797,8 @@ def _publish_tree(
     bbox = None
     if prepared_occurrence_bounds and not force:
         bbox = _bbox_from_prepared_occurrences(walk)
-    if bbox is None and authored_occurrence_bounds:
-        bbox = _bbox_from_authored_occurrences(walk, root_name=root_name)
+    if bbox is None and authored_occurrence_bounds is not None:
+        bbox = _bbox_from_authored_occurrences(walk, *authored_occurrence_bounds)
     if bbox is None:
         bbox = _bbox_from_shape(bbox_shape if prepare_bbox_shape is None else prepare_bbox_shape())
     if bbox is not None:
@@ -826,50 +829,85 @@ def _publish_tree(
     return tree_hash, tree, stats
 
 
-def _bbox_from_authored_occurrences(walk: _Walk, *, root_name: str) -> dict[str, list[float]] | None:
+def _bbox_from_authored_occurrences(walk: _Walk, flattened: dict[str, Any],
+                                    blocks: list[tuple[str, tuple[float, ...], int, int]]) -> dict[str, list[float]] | None:
     """The result's bounds, measured per leaf under the canonical key
-    (``placed_prototype_bounds``): each occurrence's component placed by the transform
-    the tree records -- the prototype the walk holds for the components it prepared; for
-    a linked child's, or one this worker remembered publishing, the box the store
-    remembers for it at that placement (``bounds.composed_bounds``), else the component
-    decoded -- a remembered one from its own bytes, a child's from the store. So a
-    child's geometry is never assembled for its parent's bounds, and the box is the same
-    function of the tree whichever way it is found. None where a component cannot be
-    measured so (an eager-only child's): the whole result is measured instead."""
+    (``placed_prototype_bounds``): each occurrence of the result as ``flattened`` has it,
+    its component placed by the transform the tree records -- the prototype the walk holds
+    for the components it prepared; for a linked child's, or one this worker remembered
+    publishing, the box the store remembers for it at that placement
+    (``bounds.composed_bounds``), else the component decoded -- a remembered one from its
+    own bytes, a child's from the store. So a child's geometry is never assembled for its
+    parent's bounds, and the box is the same function of the tree whichever way it is
+    found. The occurrences one link places (``blocks``: the linked tree, the link's
+    placement and where they lie) are measured once per worker for that child at that
+    placement (``bounds.remembered_link_box``): their box is the same function of the two,
+    and the bounds of a run of boxes the box of their bounds, in order. None where a component
+    cannot be measured so (an eager-only child's): the whole result is measured instead."""
     from cadgen._internal.component_package import decode_geometry_component, placed_prototype_bounds
-    from cadgen.store.bounds import NotRemembered, composed_bounds
+    from cadgen.store.bounds import NotRemembered, composed_bounds, remember_link_box, remembered_link_box
     from cadgen.store.materialize import _location_from_matrix
-    from cadgen.store.trees import flatten_tree
 
     try:
-        flattened = flatten_tree(walk.draft_tree(root_name=root_name))
         components = flattened["components"]
+        occurrences = flattened["occurrences"]
         decoded: dict[str, Any] = {}
         boxes: list[dict[str, list[float]]] = []
-        for occurrence in flattened["occurrences"]:
+
+        def measure(occurrence: dict[str, Any]) -> tuple[dict[str, list[float]] | None, bool]:
+            """One occurrence's box, and whether it is the box the store remembers for its
+            component at its placement."""
             cid = str(occurrence["component"])
             entry = components[cid]
             prototype = (walk.prepared.get(cid) or {}).get("shape")
             if prototype is None:
                 try:
-                    boxes.append(composed_bounds([occurrence], components))
-                    continue
+                    return composed_bounds([occurrence], components), True
                 except NotRemembered:
                     prototype = walk.prototype(cid)
                     if prototype is None:
                         if cid not in decoded:
                             decoded[cid] = decode_geometry_component(entry, read_verified_object(entry["brep"]))
                         prototype = decoded[cid]
-            box = placed_prototype_bounds(str(entry["codec"]), str(entry["brep"]), prototype,
-                                          _location_from_matrix(list(occurrence["transform"])))
+            return placed_prototype_bounds(str(entry["codec"]), str(entry["brep"]), prototype,
+                                           _location_from_matrix(list(occurrence["transform"]))), False
+
+        def merged(found: list[dict[str, list[float]]]) -> dict[str, list[float]] | None:
+            if not found:
+                return None
+            return {
+                "min": [min(box["min"][axis] for box in found) for axis in range(3)],
+                "max": [max(box["max"][axis] for box in found) for axis in range(3)],
+            }
+
+        position = 0
+        for tree_hash, placement, start, stop in [*blocks, ("", (), len(occurrences), len(occurrences))]:
+            for occurrence in occurrences[position:start]:
+                box, _remembered = measure(occurrence)
+                if box is not None:
+                    boxes.append(box)
+            position = stop
+            if not tree_hash or start == stop:
+                continue
+            found_before, known = remembered_link_box(tree_hash, placement)
+            if found_before:
+                if known is not None:
+                    boxes.append(known)
+                continue
+            found, remembered = [], True
+            for occurrence in occurrences[start:stop]:
+                box, from_store = measure(occurrence)
+                remembered = remembered and from_store
+                if box is not None:
+                    found.append(box)
+            box = merged(found)
             if box is not None:
                 boxes.append(box)
-        if not boxes:
-            return None
-        return {
-            "min": [min(box["min"][axis] for box in boxes) for axis in range(3)],
-            "max": [max(box["max"][axis] for box in boxes) for axis in range(3)],
-        }
+            if remembered:
+                # Only boxes the store remembers, each a function of the child's tree and the link
+                # alone: none came of this walk's own prototypes.
+                remember_link_box(tree_hash, placement, box)
+        return merged(boxes)
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         return None
 

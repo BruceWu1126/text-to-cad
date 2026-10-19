@@ -959,7 +959,13 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   composed placement, an assembly child's group by its name,
   `_internal/tree_tokens.py`), composes transforms, and merges components. `cadgen.store.view` lays that
   out as a temporary directory or serves it virtually; nothing of the sort is
-  ever written INTO the store.
+  ever written INTO the store. A link's expansion -- the child's nodes and
+  occurrences re-rooted, placed and coloured, its components and its
+  appearance -- is a function of the linked tree and of the link (its token,
+  name, placement and colour), so a worker keeps each it made, in compact JSON
+  and bounded by bytes (`trees._expansion`), and takes it again while every
+  tree object it read still has the settled identity this process verified it
+  under (§10); a parent flattened again expands only the links that changed.
 
 ### Record
 
@@ -1729,8 +1735,12 @@ Decided mechanically from the returned geometry and occurrence metadata.
   for it at the kernel's own placement of each leaf (`bounds.composed_bounds`),
   else decoded from the store -- so no child is assembled for its parent's
   bounds, and the box is the same function of the tree whichever way it is
-  found. The animation bake's leaf boxes find for a result what its
-  publication measured. A miss measures every native leaf with the same
+  found. The box of the occurrences one link places, every one of them a box
+  the store remembers, is kept per worker by the linked tree and the link's
+  placement (`bounds.remembered_link_box`): the bounds of a run of boxes are
+  the box of their bounds, taken in order, so a parent published again
+  measures only its changed links. The animation bake's leaf boxes find for a
+  result what its publication measured. A miss measures every native leaf with the same
   optimal extrema operation; it never transforms a component AABB. A
   component that cannot be measured so (an eager-only child's) falls back to
   the whole composed native shape, after the same component validation and
