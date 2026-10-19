@@ -156,6 +156,10 @@ _FRAME_WORDS = frozenset(_FRAMES.values())
 # the places of one shape in another apart.
 _POSITION_QUANTUM = 1e-6
 _DIRECTION_QUANTUM = 1e-9
+# An object's identity, unique among live objects as id() is, without the audit event
+# id() raises: inside a build every audit hook (the file trace's, the execution hashes')
+# sees each one, which made an identity lookup cost ten times its own work.
+_object_key = object.__hash__
 
 
 def identifier(text: str) -> str:
@@ -343,8 +347,8 @@ class Trace:
         self.features: list[Feature] = []
         self._first_party: dict[str, str] = {}
         self._display: dict[str, str] = {}
-        # id(shape) -> (weakref, feature index): the feature that returned each
-        # live result object. A dead reference, or a recycled id, answers nothing.
+        # _object_key(shape) -> (weakref, feature index): the feature that returned each
+        # live result object. A dead reference, or a recycled key, answers nothing.
         self._by_object: dict[int, tuple[weakref.ref, int]] = {}
         # The same for the call that made each live object: the first feature that
         # returned it itself, never one that only held it (a compound it was attached to).
@@ -407,7 +411,7 @@ class Trace:
 
     def feature_of(self, shape: Any) -> int | None:
         """The feature that returned this very object, or None."""
-        found = self._by_object.get(id(shape))
+        found = self._by_object.get(_object_key(shape))
         if found is None:
             return None
         reference, index = found
@@ -416,7 +420,7 @@ class Trace:
     def made(self, shape: Any) -> int | None:
         """The feature whose call made this very object -- the first that returned it
         itself -- or None."""
-        found = self._made_object.get(id(shape))
+        found = self._made_object.get(_object_key(shape))
         if found is None:
             return None
         reference, index = found
@@ -477,14 +481,14 @@ class Trace:
                         self._copy_labels[context.label] = self._copy_labels.get(context.label, 0) | (1 << context.identity)
         for shape in results:
             try:
-                self._by_object[id(shape)] = (weakref.ref(shape), feature.index)
+                self._by_object[_object_key(shape)] = (weakref.ref(shape), feature.index)
             except TypeError:
                 pass
         for shape in made:
             try:
-                found = self._made_object.get(id(shape))
+                found = self._made_object.get(_object_key(shape))
                 if found is None or found[0]() is not shape:
-                    self._made_object[id(shape)] = (weakref.ref(shape), feature.index)
+                    self._made_object[_object_key(shape)] = (weakref.ref(shape), feature.index)
             except TypeError:
                 pass
         return feature

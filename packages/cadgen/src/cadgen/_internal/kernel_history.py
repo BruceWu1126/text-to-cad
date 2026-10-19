@@ -71,6 +71,10 @@ _STRENGTH = {SAME: 0, MODIFIED: 1, GENERATED: 2}
 _LOCAL = threading.local()
 _ORDER = itertools.count(1)
 _ABSENT = object()
+# An object's identity, unique among live objects as id() is, without the audit event
+# id() raises: inside a build every audit hook (the file trace's, the execution hashes')
+# sees each one, which made an identity lookup cost ten times its own work.
+_object_key = object.__hash__
 _FACE_AND_BELOW = frozenset(int(kind) for kind in (TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_VERTEX))
 _STATS = {"queries": 0, "raised": 0, "errors": 0}
 _installed = False
@@ -294,9 +298,9 @@ def _record(maker: Any, adapter: "_Adapter") -> _Record | None:
     if records is None:
         return None
     index = _LOCAL.index
-    record = index.get(id(maker))
+    record = index.get(_object_key(maker))
     if record is None or record.maker is not maker:
-        record = index[id(maker)] = _Record(maker, adapter)
+        record = index[_object_key(maker)] = _Record(maker, adapter)
         records.append(record)
     return record
 
@@ -562,7 +566,7 @@ def _finisher(original: Any) -> Any:
         answer = original(self, *args, **kwargs)
         index = getattr(_LOCAL, "index", None)
         if index is not None and isinstance(answer, TopoDS_Shape) and not answer.IsNull():
-            record = index.get(id(self))
+            record = index.get(_object_key(self))
             if record is not None and record.maker is self and record.result is None:
                 record.result = answer.Located(answer.Location())
                 record.order = next(_ORDER)
@@ -962,9 +966,9 @@ def _wire_copies(record: _Record, source: Callable[[Any, int], tuple | None],
             return None
         alive.append(curve)  # the wrapper kept alive, so the same curve answers as the same object
         if location.IsIdentity():
-            return id(curve), BRep_Tool.Range_s(cast), _IDENTITY
+            return _object_key(curve), BRep_Tool.Range_s(cast), _IDENTITY
         value = location.Transformation().Value
-        return (id(curve), BRep_Tool.Range_s(cast),
+        return (_object_key(curve), BRep_Tool.Range_s(cast),
                 tuple(value(row, column) for row in (1, 2, 3) for column in (1, 2, 3, 4)))
 
     held = TopTools_IndexedMapOfShape()
