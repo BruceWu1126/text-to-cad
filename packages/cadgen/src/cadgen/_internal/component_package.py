@@ -7,19 +7,14 @@ separately attested producer. Native imports remain local to operations.
 
 from __future__ import annotations
 
-import contextlib
 import io
 import struct
 import hashlib
 import json
 import math
-import os
-import time
 from pathlib import Path
 from typing import Any, Mapping
 
-PACKAGE_KIND = "assembly-package"
-COMPONENT_DIRNAME = "components"
 DESCRIPTOR_NAME = "assembly.json"
 
 
@@ -332,51 +327,12 @@ def _occurrence_material(child: Any) -> dict[str, Any] | None:
     return resolved or None
 
 
-def _unlocated_shape(shape: Any) -> Any:
-    """A copy of ``shape`` moved to the identity location (its LOCAL frame), preserving the
-    ``label``/``color`` a clean component still carries. Mirrors ``_content_hash_shape``'s
-    location stripping so the emitted GLB is the exact local geometry the cid addresses.
-
-    Uses OCCT's ``TopoDS_Shape.Located`` (shares the underlying ``TShape``, O(1)) rather than
-    build123d's ``shape.located()``, which ``copy.deepcopy``s the whole shape graph on every
-    call (~5 s per component on tom — historically ~85% of the fresh-build time). The
-    geometry-only content hash is unaffected: it excludes triangulation, and distinct parts
-    keep distinct ``TShape``s, so meshing one component never perturbs another's digest.
-
-    Parametric build123d primitives (``Box``/``Cylinder``/...) reject a ``TopoDS`` constructor,
-    so for those the cheap OCCT wrap raises ``TypeError`` and we fall back to build123d's
-    ``located()`` (correct, and primitives are small so the deepcopy is negligible)."""
-    from OCP.TopLoc import TopLoc_Location
-
-    try:
-        local = type(shape)(shape.wrapped.Located(TopLoc_Location()))
-    except TypeError:
-        from build123d import Location
-
-        local = shape.located(Location())
-    label = getattr(shape, "label", "")
-    if label:
-        local.label = label
-    color = getattr(shape, "color", None)
-    if color is not None:
-        local.color = color
-    face_colors = _normalized_face_colors(getattr(shape, "cad_face_ordinal_colors", None))
-    if face_colors:
-        local.cad_face_ordinal_colors = face_colors
-    return local
-
-
 def _shape_brep_bytes(shape: Any) -> bytes:
-    """Location-stripped binary BREP of a shape (no triangulation/normals) — the
-    process-boundary payload for parallel component builds. Mirrors
-    ``_content_hash_shape``'s serialization so the worker rebuilds exactly the
-    geometry the cid addresses.
+    """Location-stripped binary BREP of a shape (no triangulation/normals).
 
     Takes a build123d shape or a bare ``TopoDS_Shape``: a document's
     prototypes (``store.build``) and a materialized child (``store.materialize``)
     come through here too, and they hold kernel shapes, not wrappers."""
-    import io
-
     from OCP.BinTools import BinTools, BinTools_FormatVersion
     from OCP.TopLoc import TopLoc_Location
 
@@ -394,24 +350,6 @@ def _shape_brep_bytes(shape: Any) -> bytes:
         BinTools_FormatVersion.BinTools_FormatVersion_VERSION_4,
     )
     return stream.getvalue()
-
-
-def _build123d_shape_from_brep_bytes(payload: bytes) -> Any:
-    """Rebuild a build123d shape from ``_shape_brep_bytes`` output (worker side).
-
-    The component GLB is a pure function of geometry + mesh tolerances (labels
-    and provenance are stripped), so wrapping in the ShapeType-matched build123d
-    class reproduces the serial build byte-for-byte."""
-    import io
-
-    from OCP.BinTools import BinTools
-    from OCP.TopoDS import TopoDS_Shape
-
-    topo = TopoDS_Shape()
-    BinTools.Read_s(topo, io.BytesIO(payload))
-    if topo.IsNull():
-        raise RuntimeError("component BREP payload deserialized to a null shape")
-    return _build123d_shape_from_topods(topo)
 
 
 def _build123d_shape_from_topods(topo: Any) -> Any:
@@ -432,104 +370,6 @@ def _build123d_shape_from_topods(topo: Any) -> Any:
     }
     cls = by_type.get(topo.ShapeType(), build123d.Compound)
     return cls(topo)
-
-
-def parallel_worker_count(work_count: int, *, env_var: str) -> int:
-    """Worker count for a spawn pool over ``work_count`` independent OCP jobs.
-
-    ``env_var`` overrides (0/1 disables). Defaults engage only when there is
-    enough work to amortize the per-worker interpreter + OCP import cost
-    (~seconds each), and cap at eight so a large machine does not multiply a
-    ~300 MB resident kernel by its core count. One sizing rule for every such
-    pool, each with the variable that overrides it (the component build's is
-    ``CADGEN_COMPONENT_WORKERS``). The shared memory policy can lower a requested
-    count to fit extraction reservations inside the owning worker's allowance."""
-    from cadgen.daemon.memory import component_worker_limit
-
-    env_value = os.environ.get(env_var, "").strip()
-    if env_value:
-        try:
-            requested = int(env_value)
-        except ValueError:
-            requested = 0
-        return component_worker_limit(max(1, min(requested, work_count)) if requested > 1 else 1)
-    if work_count < 6:
-        return 1
-    return component_worker_limit(max(1, min((os.cpu_count() or 2) - 2, work_count, 8)))
-
-
-_SERIAL_COMPONENT_PAYLOAD_BYTES = 768 * 1024
-
-
-def _component_build_worker_count(missing_count: int, *, payload_bytes: int | None = None) -> int:
-    """Avoid spawn startup for small BREP batches unless workers are explicit.
-
-    Both schedules reconstruct private shapes from the same payloads. The
-    conservative byte cutoff limits only the default component scheduler;
-    larger/unknown work and explicit overrides retain CPU and memory sizing.
-    """
-    if (payload_bytes is not None and payload_bytes <= _SERIAL_COMPONENT_PAYLOAD_BYTES
-            and not os.environ.get("CADGEN_COMPONENT_WORKERS", "").strip()):
-        return 1
-    return parallel_worker_count(missing_count, env_var="CADGEN_COMPONENT_WORKERS")
-
-
-# Where a tree build spends its wall clock, gated behind an env var so the
-# hot path pays nothing when nobody is looking. Set CADGEN_PACKAGE_TIMING to a
-# file path and every build appends one JSON line: the per-stage seconds plus
-# the component counts they moved. This exists because the tree write is the
-# dominant cost of an edit-path rebuild and "107 s in build_tree_from_compound"
-# is not an actionable number -- serialize+hash, the missing scan, worker spawn,
-# and the extractions themselves each want a different fix.
-_TIMING_ENV = "CADGEN_PACKAGE_TIMING"
-
-
-class _StageTimer:
-    """Accumulating wall-clock spans, keyed by stage name. A no-op instance
-    (``enabled=False``) is installed when the env var is unset so the call sites
-    stay unconditional."""
-
-    __slots__ = ("enabled", "spans", "counts")
-
-    def __init__(self, enabled: bool) -> None:
-        self.enabled = enabled
-        self.spans: dict[str, float] = {}
-        self.counts: dict[str, float] = {}
-
-    def add(self, name: str, seconds: float) -> None:
-        if self.enabled:
-            self.spans[name] = self.spans.get(name, 0.0) + seconds
-
-    def count(self, name: str, value: float) -> None:
-        if self.enabled:
-            self.counts[name] = value
-
-    @contextlib.contextmanager
-    def span(self, name: str):
-        if not self.enabled:
-            yield
-            return
-        started = time.perf_counter()
-        try:
-            yield
-        finally:
-            self.add(name, time.perf_counter() - started)
-
-    def dump(self, *, package_dir: Path, extra: Mapping[str, Any]) -> None:
-        if not self.enabled:
-            return
-        path = os.environ.get(_TIMING_ENV, "").strip()
-        if not path:
-            return
-        record = {
-            "package": package_dir.name,
-            "spans": {k: round(v, 4) for k, v in sorted(self.spans.items())},
-            "counts": {k: v for k, v in sorted(self.counts.items())},
-            **dict(extra),
-        }
-        with contextlib.suppress(OSError):
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record) + "\n")
 
 
 # The ONLY version on a component's identity. A component's cid hashes its BREP
@@ -822,7 +662,7 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None,
     and their own byte fixed point. Failure pins the live shape's topology
     facts explicitly (``topology``, the bytes an eager-only component's tree
     pins), never a falsely readable native entry. ``identity`` is what the run
-    that made the shape names it by (``kernel_memo._Run.identify``): its
+    that made the shape names it by (``kernel_memo._Run.account``): its
     construction key and its lineage, which the entry carries as
     ``construction`` and ``lineage`` (the lineage's object, whose bytes ride the
     prepared component as ``lineage`` until it is published). Nothing here

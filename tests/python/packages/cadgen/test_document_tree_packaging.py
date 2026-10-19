@@ -22,9 +22,6 @@ class DocumentTreePackagingTest(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         env.start()
         self.addCleanup(env.stop)
-        workers = mock.patch("cadgen._internal.component_package._component_build_worker_count", return_value=1)
-        workers.start()
-        self.addCleanup(workers.stop)
 
     def box(self, name="box"):
         from build123d import Solid

@@ -393,7 +393,7 @@ class ARealDocumentPlaysItsClip(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="glb-animation-") as folder:
             root = Path(folder).resolve()
             (root / "arm.py").write_text(MODEL, encoding="utf-8")
-            env = {**os.environ, "CADGEN_COMPONENT_WORKERS": "1",
+            env = {**os.environ,
                    "CADGEN_CACHE_DIR": str(root / "store"), "PYTHONPATH": str(REPO / "packages/cadgen/src")}
 
             def run(*argv: str) -> subprocess.CompletedProcess:

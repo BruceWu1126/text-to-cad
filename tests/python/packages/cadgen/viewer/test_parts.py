@@ -49,7 +49,7 @@ class PartRequests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         env = mock.patch.dict(os.environ, {
-            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.root / "store"),
         })
         env.start()
         self.addCleanup(env.stop)

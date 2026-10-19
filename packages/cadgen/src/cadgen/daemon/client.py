@@ -40,12 +40,6 @@ RESTART_POLL_SECONDS = 0.5
 # fails rather than hanging. Generous, because a request waiting to be admitted, or for
 # its predecessor's drain, hears nothing meanwhile.
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
-# What makes a running daemon stale. The distribution version alone is not enough in a
-# checkout, where an editable install keeps one version across every edit; .py mtimes alone
-# are not enough for a wheel, where they are fixed at install time and two versions can be
-# installed in turn without any file changing under a given path. Use both.
-# Skill code is deliberately NOT watched any more: the skills hold thin shims that the
-# daemon never imports, so editing one cannot make the resident process stale.
 
 _RESTART = object()
 # A frame did not arrive in time, as distinct from the channel closing.
@@ -219,7 +213,10 @@ def _declared_version(base: Path) -> str:
 def compute_version_token(root: Path | None = None) -> str:
     """The running daemon's identity: the version declared beside its code plus the newest
     ``.py`` mtime under it. Client and server compute this identically from the same
-    files; inequality means restart.
+    files; inequality means restart. The version alone is not enough in a checkout, where
+    an editable install keeps one version across every edit; mtimes alone are not enough
+    for a wheel, where they are fixed at install time. Skill code is not watched: the
+    daemon never imports it.
 
     Read unseen by a build's file trace (``filetrace.paused``): a model body's compile or
     artifact job asks for it on the build's thread, and cadgen's own files are never a
@@ -797,21 +794,16 @@ def prewarm() -> bool:
 
     The first build of a session otherwise pays for both: spawning the daemon and
     importing build123d in a worker, seconds before any model code runs. Submits
-    nothing. A daemon that answers is only asked its status, which also replaces one
-    left running by older cadgen code. True once a current daemon answers; raises
-    :class:`DaemonUnavailable` naming why none could start.
+    nothing: a daemon that answers is only asked its status. True once a daemon
+    answers; raises :class:`DaemonUnavailable` naming why none could start.
     """
     if os.environ.get("CADGEN_DAEMON_CHILD"):
         return False
-    for _attempt in range(2):  # a stale daemon answers "restart" and gives up its address
-        try:
-            channel = _connect_or_spawn(daemon_address())
-        except (transport.AuthenticationError, transport.AddressUnusable) as error:
-            raise DaemonUnavailable(str(error)) from error
-        answer = _ask_status(channel)
-        if answer is not _RESTART:
-            return answer is not None
-    return False
+    try:
+        channel = _connect_or_spawn(daemon_address())
+    except (transport.AuthenticationError, transport.AddressUnusable) as error:
+        raise DaemonUnavailable(str(error)) from error
+    return _ask_status(channel) is not None
 
 
 # The most a command waits to hand its counts over (``hand_over``): past it, they are not counted.
@@ -862,23 +854,20 @@ def status() -> dict | None:
         channel = _connect(daemon_address())
     except OSError:
         return None
-    answer = _ask_status(channel)
-    # A stale daemon is on its way out: nothing is warm.
-    return None if answer is _RESTART else answer
+    return _ask_status(channel)
 
 
-def _ask_status(channel) -> object:
-    """Ask a connected daemon its state, then close the channel: its status, ``_RESTART``
-    from a daemon left by older code, or None when it does not answer."""
+def _ask_status(channel) -> dict | None:
+    """Ask a connected daemon its state, then close the channel: its status, or None when
+    it does not answer. A daemon answers status before it compares version tokens
+    (``server``), so the request carries none."""
     try:
-        if not _send_json(channel, {"kind": "status", "token": compute_version_token()}):
+        if not _send_json(channel, {"kind": "status"}):
             return None
         while True:
             message = _recv_json(channel, 10.0)
             if message is _TIMED_OUT or message is None:
                 return None
-            if message.get("restart"):
-                return _RESTART
             if "status" in message:
                 return message["status"]
     finally:

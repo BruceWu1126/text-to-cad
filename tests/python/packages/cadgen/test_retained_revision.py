@@ -26,7 +26,6 @@ class RetainedRevisionPublication(unittest.TestCase):
             os.environ,
             {
                 "CADGEN_CACHE_DIR": str(self.store),
-                "CADGEN_COMPONENT_WORKERS": "1",
             },
         )
         self._environment.start()

@@ -108,7 +108,6 @@ def _vendor_step() -> Path:
             cwd=str(workspace),
             env={
                 **os.environ,
-                "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_CACHE_DIR": str(workspace / "store"),
                 "PYTHONPATH": str(CADGEN_SRC),
             },
@@ -183,7 +182,6 @@ class _DrawingHarness(unittest.TestCase):
         self.environment.update(
             {
                 # A warm worker would serve another checkout's code.
-                "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_CACHE_DIR": str(self.project / "store"),
                 "PYTHONPATH": str(CADGEN_SRC),
             }

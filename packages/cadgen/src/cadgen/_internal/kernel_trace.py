@@ -120,7 +120,7 @@ from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 
-from cadgen._internal.kernel_history import listed
+from cadgen._internal.kernel_history import _map, _object_key, listed
 from cadgen._internal.source_hash import is_first_party_source_file
 from cadgen._internal.tree_tokens import is_occurrence_token
 from cadgen.cad_ref_syntax import folded_atoms
@@ -142,7 +142,7 @@ _HERE = Path(__file__).resolve().parent
 # (a child's materialization, the store's own constructions) is cadgen's, not
 # the model's: no feature. Its public helpers (``cadgen.geometry``,
 # ``cadgen.assembly``) are called by the model and count as build123d does.
-_OWN = tuple(_HERE.parent / name for name in ("store", "_internal", "daemon"))
+_OWN = tuple(_HERE.parent / name for name in ("store", "daemon"))
 _NOT_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # What a digest of a name looks like at its end, which a name written as it is never has.
@@ -156,10 +156,6 @@ _FRAME_WORDS = frozenset(_FRAMES.values())
 # the places of one shape in another apart.
 _POSITION_QUANTUM = 1e-6
 _DIRECTION_QUANTUM = 1e-9
-# An object's identity, unique among live objects as id() is, without the audit event
-# id() raises: inside a build every audit hook (the file trace's, the execution hashes')
-# sees each one, which made an identity lookup cost ten times its own work.
-_object_key = object.__hash__
 
 
 def identifier(text: str) -> str:
@@ -259,7 +255,8 @@ class _Structure:
     """One feature's naming: ``rules[position][kind][ordinal - 1]`` for each element of
     each result (None for an empty result), each rule one of ``("x",)`` passed on from
     a shape no feature made, no name; ``("s", input, ordinal)`` that input's element;
-    ``("h", sources)`` named by history, each source ``(input, kind, ordinal, how)``;
+    ``("h", sources, rank, place)`` named by history, each source ``(input, kind,
+    ordinal, how)``, ``rank`` its number among the elements one step named alike;
     ``("u", candidates)`` from a parent, each ``(kind, ordinal, number)``; ``("l",
     lowers)`` from its lower elements, each ``(kind, ordinal)``; ``("m", number)`` made;
     ``("c", position, kind, ordinal)`` in that result's frozen source context."""
@@ -430,9 +427,9 @@ class Trace:
         """The inputs of a call as it is given them, taken before it runs: each shape,
         the feature that made it (``feature_of``) and a handle of its ``TopoDS`` then --
         an in-place operation (``clean``) leaves its input object wrapping the result."""
-        # An account formerly completed these whole features immediately. Keep
-        # that causal snapshot before any later kernel call can mutate native
-        # topology, including constructors with implicit builder inputs.
+        # Complete every feature still owed a structure before this call runs: a later
+        # kernel call can mutate native topology, constructors with implicit builder
+        # inputs included.
         if self._results:
             for index in sorted(self._results):
                 self._structure(index)
@@ -1637,16 +1634,11 @@ def handle_of(shape: Any) -> Any:
     return None if wrapped is None else wrapped.Located(wrapped.Location())
 
 
-def _map(shape: Any, kind: Any) -> Any:
-    found = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(shape, kind, found)
-    return found
-
-
 def _input_index(given: list[tuple[int, list[Any]]], kind: int) -> tuple[Any, Any]:
     """An element's first input and ordinal, under the input maps' ``IsSame`` equality.
     A first input with no name still owns the element; later inputs never replace it.
-    Kept only while one feature's structure is computed, shared by all its results.
+    Kept with the feature's inputs (``Trace._identity_inputs``) until every result it
+    names, or its whole structure, is done.
     ``index.FindIndex(element)`` is the element's place among the inputs' elements, in
     input order (0 where none holds it), and ``owners[place - 1]`` its input and its
     ordinal there. A few inputs (a boolean's) are asked in turn (``_FirstOwners``), which

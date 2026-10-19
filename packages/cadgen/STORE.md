@@ -611,11 +611,12 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   **A build has its parts' display data derived; views only read.** A build
   never measures or meshes geometry on its own thread: the moment its result
   exists -- a model's or a re-emit's -- it asks the build pool for the parts of
-  its own components the store lacks (`parts.request_display`: one job, `kind:
+  its own components the store lacks (`parts.display_requests`: one job, `kind:
   display`, or on the daemon's pool, for a batch past half a megabyte of BREP,
   one per such share, balanced by size, a pool slot each but the build's own)
-  and queues them on its run. The command answers once its result is recorded;
-  its worker awaits these jobs before finishing the files. A linked child's parts
+  and hands them to its daemon worker's supervisor, which runs them
+  (`authoring.supervised`, as its exports are: *Exports* below). The command answers once its result is recorded, and its
+  worker takes its next job at once. A linked child's parts
   are its own build's, so a parent asks
   only for its own. A document compile queues every part of its tree on the same
   run and answers once its complete geometry is published and mapped to the
@@ -2292,7 +2293,7 @@ CPU scheduling and reuse remain independent of memory admission:
    next build rebinds a spare — no import repaid.
    Purely RAM: idle workers hold no slot and never block a new model.
 
-**Memory admission.** The daemon sums worker RSS including extraction
+**Memory admission.** The daemon sums worker RSS including their
 descendants, pending spawn reservations, and retiring workers until they exit.
 Idle workers are reclaimed oldest first. Busy/suspended workers retain at
 least a worker reservation. That reservation is calibrated, not configured: it
@@ -2317,7 +2318,6 @@ active shared work is not killed merely to recover budget.
 | Setting | Default |
 |---|---|
 | `CADGEN_MEMORY_MB` | 70% of discovered physical/cgroup RAM; `0` disables |
-| `CADGEN_COMPONENT_MEMORY_MB` | 384 MiB per extraction subprocess |
 
 The per-worker reservation and the dependency headroom have no settings; the
 pool calibrates both.
@@ -2325,9 +2325,7 @@ pool calibrates both.
 This is a soft admission envelope, not a native allocator limit. A single
 OCCT operation may grow between RSS samples. Where RSS cannot be enumerated,
 reservations still apply. CPU slot counts remain upper
-bounds, and extraction concurrency also fits a per-worker extraction ceiling
-(a third of the budget, capped at 2048 MiB), which is not the admission
-reservation and is likewise unconfigurable.
+bounds.
 Geometry publication starts no extraction subprocesses: a build's display
 data is derived by artifact jobs (§3), as a view's is. A display job for parts the
 store lacks uses the shared artifact-job admission and one private derivation

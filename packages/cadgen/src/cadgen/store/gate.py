@@ -57,7 +57,8 @@ from cadgen._internal.source_sidecar import SOURCE_SIDECAR_SUFFIX
 from cadgen.store.closure import current_closure_hash
 from cadgen.store.index import resolve_model_ref, split_model_ref
 from cadgen.store.records import read_record
-from cadgen.store.trees import _stamp, _stamp_is_settled, tree_complete
+from cadgen.store.objects import _stamp, _stamp_is_settled
+from cadgen.store.trees import tree_complete
 
 
 #: The outputs a standing result still owes without a run (``generation._hit``): its

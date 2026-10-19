@@ -220,8 +220,7 @@ def build_step_artifact(
         # A document's compile is a JOB (STORE.md §9): its kernel work -- the read
         # and the component emit -- holds a job slot the way a model body does.
         with build_run(logger), broker.held(spec.source_ref):
-            # _generate_part_outputs reports this phase itself when it does the loading;
-            # here the scene is preloaded, so the parse would otherwise go unreported.
+            # The scene is loaded here, so this phase is the compile's to report.
             # OCCT's reader reports no fraction of its own, so the read names the file
             # and its size: about half a large document's compile happens here.
             progress.phase(PHASE_GENERATE, detail=f"Reading {step_path.name} ({_megabytes(step_path)})")

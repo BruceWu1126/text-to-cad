@@ -29,7 +29,7 @@ class NativeArtifactTransport(unittest.TestCase):
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": self.store, "CADGEN_DAEMON_STATE_DIR": str(self.root / "state"),
             "CADGEN_JOBS": "1",
-            "CADGEN_DAEMON_SPARES": "1", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_DAEMON_SPARES": "1",
         }))
         from build123d import Solid
         from cadgen.store import parts

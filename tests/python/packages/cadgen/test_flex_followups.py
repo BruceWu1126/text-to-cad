@@ -225,16 +225,14 @@ class FollowUps(unittest.TestCase):
         from cadgen.store import objects
         from cadgen.store.paths import StoreUnwritableError
 
-        data, source = b"a new object", self.root / "source.bin"
-        source.write_bytes(data)
+        data = b"a new object"
         with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.store)}):
             shard = objects.object_path(objects.object_hash(data)).parent
             shard.mkdir(parents=True)
             os.chmod(shard, stat.S_IRUSR | stat.S_IXUSR)
             try:
-                for put in (lambda: objects.put_object(data), lambda: objects.put_object_from_file(source)):
-                    with self.assertRaisesRegex(StoreUnwritableError, "point CADGEN_CACHE_DIR at a folder"):
-                        put()
+                with self.assertRaisesRegex(StoreUnwritableError, "point CADGEN_CACHE_DIR at a folder"):
+                    objects.put_object(data)
             finally:
                 os.chmod(shard, stat.S_IRWXU)
 

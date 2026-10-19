@@ -89,12 +89,12 @@ class Measuring(unittest.TestCase):
     def test_model_code_is_the_body_minus_the_windows_cadgen_worked_or_waited_for_it(self):
         clock = _Clock()
         with mock.patch.object(build_timing.time, "perf_counter", clock):
-            with measuring(model_ref="/m/a.py::a", last_model_seconds=None) as measured:
+            with measuring(last_model_seconds=None) as measured:
                 clock.now = 1.0
                 with model_body(None):
                     clock.now = 2.0
                     with child_build():  # a child's build: 3 s, its model run ending in its own build
-                        with measuring(model_ref="/m/b.py::b", last_model_seconds=None) as child:
+                        with measuring(last_model_seconds=None) as child:
                             note_memo({"hits": 40, "misses": 0, "uncached": 0})
                         clock.now = 5.0
                     clock.now = 6.0
@@ -124,11 +124,11 @@ class Measuring(unittest.TestCase):
         note_memo({"hits": 1})  # outside a build: nothing to tell
 
     def test_a_profiled_build_keeps_the_last_unprofiled_time(self):
-        with measuring(model_ref=None, last_model_seconds=42.0, profile=True):
+        with measuring(last_model_seconds=42.0, profile=True):
             with model_body(None):
                 pass
             self.assertEqual(record_fields(), {"modelSeconds": 42.0})
-        with measuring(model_ref=None, last_model_seconds=None, profile=True):
+        with measuring(last_model_seconds=None, profile=True):
             with model_body(None):
                 pass
             self.assertEqual(record_fields(), {})
@@ -161,7 +161,7 @@ class Measuring(unittest.TestCase):
                 with mock.patch.object(build_timing.time, "perf_counter", clock), \
                         mock.patch.object(step_scene_mesh, "load_step_scene_cached", side_effect=load) as loader, \
                         mock.patch.object(step_scene_mesh, "scene_to_build123d_compound", side_effect=decode) as decoder:
-                    with measuring(model_ref=None, last_model_seconds=None) as measured:
+                    with measuring(last_model_seconds=None) as measured:
                         clock.now = 1.0
                         with model_body(None):
                             clock.now = 2.0
@@ -215,7 +215,7 @@ class ProfileReport(unittest.TestCase):
         spec.loader.exec_module(module)  # type: ignore[union-attr]
         self.addCleanup(sys.modules.pop, "build_timing_fixture_shapes", None)
 
-        with measuring(model_ref=None, last_model_seconds=None, profile=True) as measured:
+        with measuring(last_model_seconds=None, profile=True) as measured:
             with model_body(project):
                 module.model()
         report = measured.profile_report or ""

@@ -31,9 +31,6 @@ class SavedDocumentReadTest(unittest.TestCase):
         environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         environment.start()
         self.addCleanup(environment.stop)
-        workers = mock.patch("cadgen._internal.component_package._component_build_worker_count", return_value=1)
-        workers.start()
-        self.addCleanup(workers.stop)
 
     def shape(self, size=2):
         from build123d import Solid
@@ -520,7 +517,7 @@ class SavedDocumentReadTest(unittest.TestCase):
         self.addCleanup(retire)  # before its folder goes
         environment = {key: value for key, value in os.environ.items() if not key.startswith("CADGEN_")}
         environment.update({
-            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1",
             "CADGEN_DAEMON_STATE_DIR": state, "CADGEN_DAEMON_SOCKET": socket, "CADGEN_DAEMON_IDLE_TIMEOUT": "60",
             "PYTHONPATH": os.pathsep.join([str(guard_root), str(Path(cadgen.__file__).resolve().parent.parent)]),
         })
@@ -684,22 +681,17 @@ class ObjectRepairTest(unittest.TestCase):
         payload = b"known exact object bytes"
         digest = objects.put_object(payload)
         path = objects.object_path(digest)
-        source = self.root / "source.bin"
-        source.write_bytes(payload)
         original_stat = path.stat()
         with mock.patch.object(objects, "replace_atomic", side_effect=AssertionError("rewrote valid object")):
             self.assertEqual(objects.put_object(payload, repair=True), digest)
-            self.assertEqual(objects.put_object_from_file(source, repair=True), digest)
         # Claimed in place for the sweeper's grace window (STORE.md §8), never rewritten.
         self.assertEqual(path.stat().st_ino, original_stat.st_ino)
-        for writer in (lambda: objects.put_object(payload, repair=True),
-                       lambda: objects.put_object_from_file(source, repair=True)):
-            path.write_bytes(b"corrupt bytes")
-            # Normal idempotent writes remain unchanged; recovery is explicit.
-            self.assertEqual(objects.put_object(payload), digest)
-            self.assertEqual(path.read_bytes(), b"corrupt bytes")
-            self.assertEqual(writer(), digest)
-            self.assertEqual(path.read_bytes(), payload)
+        path.write_bytes(b"corrupt bytes")
+        # Normal idempotent writes remain unchanged; recovery is explicit.
+        self.assertEqual(objects.put_object(payload), digest)
+        self.assertEqual(path.read_bytes(), b"corrupt bytes")
+        self.assertEqual(objects.put_object(payload, repair=True), digest)
+        self.assertEqual(path.read_bytes(), payload)
 
     def test_two_repair_writers_never_remove_each_others_valid_object(self):
         from concurrent.futures import ThreadPoolExecutor

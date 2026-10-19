@@ -45,7 +45,6 @@ class MetadataCapture(unittest.TestCase):
         self.root = Path(temp.name)
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",
         }))
         from build123d import Solid
 
@@ -84,7 +83,7 @@ class MetadataCapture(unittest.TestCase):
         fixture took. These tests are about the fingerprint, not the clock.
 
         The offset is a whole multiple of every tick in
-        ``trees._TIMESTAMP_TICKS_NS``, so aging an object cannot change which
+        ``objects._TIMESTAMP_TICKS_NS``, so aging an object cannot change which
         clock its stamp is attributed to -- only how far past it the read sits.
         Twice the coarsest tick leaves the admission a tick of headroom; an
         offset that is not such a multiple (1.5 s, say) would reclassify a
@@ -404,7 +403,6 @@ class VerifiedIdentityAcrossClaims(unittest.TestCase):
         self.root = Path(temp.name)
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",
         }))
         from build123d import Solid
 
@@ -442,14 +440,14 @@ class VerifiedIdentityAcrossClaims(unittest.TestCase):
         self.assertFalse(reads.call_args_list)
 
     def test_a_claims_stamp_is_settled_as_it_is_set_and_recent(self):
-        from cadgen.store.objects import claim_object, delete_unclaimed, object_path
+        from cadgen.store.objects import _STAMP_MTIME_NS, _stamp_is_settled, claim_object, delete_unclaimed, object_path
 
         digest = next(iter(trees.get_tree(self.children[0])["components"].values()))["brep"]
         before = time.time_ns()
         self.assertTrue(claim_object(digest))
         stamp = trees._object_stamp(digest)
-        self.assertTrue(trees._stamp_is_settled(stamp), "a stamp two ticks back is past the tick it sits in")
-        self.assertLess(before - stamp[trees._STAMP_MTIME_NS], 5_000_000_000, "and recent enough for any sweep's window")
+        self.assertTrue(_stamp_is_settled(stamp), "a stamp two ticks back is past the tick it sits in")
+        self.assertLess(before - stamp[_STAMP_MTIME_NS], 5_000_000_000, "and recent enough for any sweep's window")
         self.assertEqual(delete_unclaimed(object_path(digest), time.time() - 3600), 0)
 
     @unittest.skipIf(os.name == "nt", "POSIX lets only a file's owner set an explicit time")

@@ -98,7 +98,6 @@ def _environment(store: Path) -> dict[str, str]:
     return {
         **os.environ,
         # A warm worker would serve another checkout's code.
-        "CADGEN_COMPONENT_WORKERS": "1",
         "CADGEN_CACHE_DIR": str(store),
         "PYTHONPATH": str(CADGEN_SRC),
     }

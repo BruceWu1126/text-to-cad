@@ -25,7 +25,8 @@ finish after it. A seventh, ``{"published": {...}}``, is an export or mesh job s
 file has landed (``store.exports``); the supervisor folds it into the ledger row of the
 build that owes the file and never relays it.
 
-One request kind, ``run`` — a CLI tool, output streamed as frames. The store root
+A request runs a CLI tool (``tool``, a key of the supervisor's registry) or, with
+``tool: "artifact"``, a typed artifact job, output streamed as frames. The store root
 arrives on every request (``store_root``) and is applied per job, so one daemon serves
 any number of isolated stores and a worker never inherits the root of whichever build
 spawned the daemon.
@@ -456,8 +457,6 @@ def serve() -> int:
         kind = request.get("kind")
         if kind == "ping":
             _emit({"pong": os.getpid()})
-        elif kind == "shutdown":
-            return 0
         else:
             _apply_request_env(request)
             telemetry.job_started()

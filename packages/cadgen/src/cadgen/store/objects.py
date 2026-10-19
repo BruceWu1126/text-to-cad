@@ -25,7 +25,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
-import shutil
 import threading
 import time
 from collections import OrderedDict
@@ -358,28 +357,6 @@ def put_object(data: bytes, *, repair: bool = False) -> str:
             handle.write(data)
     _replace_object(tmp, target, digest, repair=repair)
     return digest
-
-
-def put_object_from_file(path: Path, *, repair: bool = False) -> str:
-    """Store a file's bytes as an object (streamed hash, one copy)."""
-    path = Path(path)
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    hexdigest = digest.hexdigest()
-    target = object_path(hexdigest)
-    if target.is_file() and (not repair or _object_matches(target, hexdigest)) and _claim(target):
-        return hexdigest
-    _mkdir(target.parent)
-    tmp = target.with_name(f".{target.name}{temp_suffix()}")
-    with _writing(target):  # the source was just read whole: a refusal here is the store's
-        shutil.copyfile(path, tmp)
-    if repair and not _object_matches(tmp, hexdigest):
-        tmp.unlink(missing_ok=True)
-        raise ValueError(f"object source changed while repairing {hexdigest}")
-    _replace_object(tmp, target, hexdigest, repair=repair)
-    return hexdigest
 
 
 def read_object(digest: str) -> bytes:

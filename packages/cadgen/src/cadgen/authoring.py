@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from cadgen.kinematics import KinematicsDef, normalize_kinematics
-from cadgen.metadata import MeshExportDecl, normalize_mesh_numeric, resolve_model_output_path
+from cadgen.metadata import MeshExportDecl, normalize_mesh_numeric
 from cadgen.store.index import model_ref
 
 __all__ = [
@@ -351,12 +351,6 @@ class ModelDef:
     def ref(self) -> str:
         """The model's identity, ``/abs/script.py::name`` (cadgen.store.index)."""
         return model_ref(self.script_path, self.name)
-
-    @property
-    def output_path(self) -> Path:
-        return resolve_model_output_path(
-            self.script_path, fmt=self.fmt, explicit_out=self.out, function=self.name
-        )
 
 
 # Keyed by model ref (``script::function``). A file may hold several models --

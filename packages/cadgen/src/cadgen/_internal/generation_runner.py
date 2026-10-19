@@ -10,7 +10,6 @@ import importlib.util
 from pathlib import Path
 import sys
 import threading
-from typing import Iterator
 from typing import Sequence
 
 from cadgen._internal.source_hash import PythonSourceClosure
@@ -21,12 +20,7 @@ from cadgen._internal.source_hash import python_source_hash
 from cadgen._internal.step_scene import LoadedStepScene
 from cadgen.catalog import build_scope
 from cadgen.cli_logging import CliLogger
-from cadgen.cli_progress import cli_progress_line
-from cadgen.coordination import DRAWING_PACKAGE
 from cadgen.coordination import PHASE_GENERATE
-from cadgen.coordination import ProgressEvent
-from cadgen.coordination import STEP_PACKAGE
-from cadgen.coordination import generator_busy
 from cadgen.coordination import reporting_as
 from cadgen.coordination import resolve as resolve_progress
 from cadgen.render import relative_to_file
@@ -281,16 +275,6 @@ def _empty_shape(shape: object) -> str | None:
     return None
 
 
-def _mark_scene_step_payload(
-    scene: LoadedStepScene,
-    *,
-    payload_kind: str,
-) -> LoadedStepScene:
-    if isinstance(scene, LoadedStepScene):
-        scene.step_payload_kind = payload_kind
-    return scene
-
-
 def _write_shape_step_payload(
     payload: dict[str, object],
     *,
@@ -314,7 +298,6 @@ def _write_shape_step_payload(
     scene = LoadedStepScene(output_path.expanduser().resolve(), [], {}, source_kind="python",
                             source_hash=source_identity.source_hash)
     _mark_scene_python_backed(scene, source_identity=source_identity, source_path=script_path)
-    _mark_scene_step_payload(scene, payload_kind="shape")
     # Stash the compound: the tree build introspects its located
     # children (occurrence transforms + dedup), and the STEP export serializes it.
     scene.source_compound = shape
@@ -419,10 +402,7 @@ def run_script_generator(
     *,
     generator: Callable[[], object] | None = None,
     logger: CliLogger | None = None,
-    force: bool = False,
     progress: object | None = None,
-    intent: str = "write",
-    model_prints_to_stdout: bool = False,
 ) -> LoadedStepScene | None:
     """Run a model's decorated entry (``@step``/``@dxf``) and return its scene.
 
@@ -430,19 +410,9 @@ def run_script_generator(
     child a parent's body called, whose import ran in the parent's process -- and
     None for the root model, whose script is loaded here, under the run's scopes.
 
-    ``intent`` says whether this run will rewrite the model's outputs (``"write"``, the
-    default) or merely occupy its generator (``"generate"`` -- an export, a topology
-    extraction, an interference check). See :func:`_track_spec_generation`: getting this
-    wrong makes an export look like a build to the CAD Viewer.
-
-    ``model_prints_to_stdout`` decides where the MODEL's own ``print()`` output
-    lands. The CLI contract is "stdout carries the result; stderr carries
-    progress" — and when a generator runs as a subroutine of another verb
-    (a ``snapshot``, a mesh export), its prints ahead of the verb's
-    JSON broke every ``| jq`` pipeline. So the default routes them to stderr
-    with the rest of the progress; only the direct build flows (``cadgen step
-    build``, ``python model.py``), where the model's stdout is the user's own
-    channel, pass True.
+    ``progress`` is the reporter of the build that runs it (``artifact_build``'s). The
+    model's own ``print()`` output goes to stdout: a build is the only caller, and the
+    model's stdout is the user's own channel there.
 
     Closure capture is deterministic in every process shape: first-party modules
     are evicted from ``sys.modules`` BEFORE the generator loads (so its full
@@ -460,46 +430,10 @@ def run_script_generator(
         raise RuntimeError(f"Unsupported model format: {model_format}")
     if spec.script_path is None or spec.generator_metadata is None:
         raise ValueError(f"{spec.source_ref} is not a generated Python CAD source")
-    # A WRITER arrives with the BuildRun that already owns this model's status record and
-    # its progress line. An EXPORT arrives with neither, and until the generator run
-    # carried a reporter, `cad export` ran the same multi-minute model build a write runs
-    # and said nothing on any surface. So the generator run becomes the reporter when
-    # nobody above us is one.
-    owns_reporting = progress is None
-    with _generator_progress_line(spec, logger=logger, active=owns_reporting) as sink:
-        with _track_spec_generation(
-            spec, model_format, intent=intent, sink=sink
-        ) as generator_run:
-            active = generator_run if owns_reporting else progress
-            resolve_progress(active).phase(PHASE_GENERATE)
-            redirect = (
-                contextlib.nullcontext()
-                if model_prints_to_stdout
-                else contextlib.redirect_stdout(sys.stderr)
-            )
-            with redirect:
-                # Worker-pool admission owns memory policy; this call adds no second
-                # guard. The pool reports an OS-killed worker with its exit status.
-                return _run_script_generator_body(
-                    spec, model_format, generator=generator, logger=logger, force=force, progress=active,
-                )
-
-
-@contextlib.contextmanager
-def _generator_progress_line(
-    spec: EntrySpec, *, logger: CliLogger | None, active: bool
-) -> Iterator[Callable[[ProgressEvent], None] | None]:
-    """The terminal line for a generator run that owns its own reporting.
-
-    Inactive when a build above us already paints one — two painters on one tty interleave
-    into nonsense — and when there is no logger to paint through."""
-    if not active:
-        yield None
-        return
-    with cli_progress_line(
-        spec.source_ref, logger=logger or CliLogger("cad"), fallback="Building..."
-    ) as sink:
-        yield sink
+    resolve_progress(progress).phase(PHASE_GENERATE)
+    # Worker-pool admission owns memory policy; this call adds no second guard. The pool
+    # reports an OS-killed worker with its exit status.
+    return _run_script_generator_body(spec, model_format, generator=generator, logger=logger, progress=progress)
 
 
 def _run_script_generator_body(
@@ -508,7 +442,6 @@ def _run_script_generator_body(
     *,
     generator: Callable[[], object] | None = None,
     logger: CliLogger,
-    force: bool = False,
     progress: object | None = None,
 ) -> LoadedStepScene | None:
     # Order-stable shape de-duplication (see determinism.py): a re-executed model
@@ -730,31 +663,3 @@ def _spec_output_dir(spec: EntrySpec, model_format: str) -> str | None:
     if model_format == "dxf" and spec.script_path is not None:
         return build_scope(spec.script_path)
     return None
-
-
-def _track_spec_generation(
-    spec: EntrySpec,
-    model_format: str,
-    *,
-    intent: str = "write",
-    sink: Callable[[ProgressEvent], None] | None = None,
-) -> contextlib.AbstractContextManager[object]:
-    """Report a generator run under the model's progress scope.
-
-    ``intent`` picks the RECORD. A run that will rewrite the model's outputs already has
-    its BuildRun from ``artifact_build`` and reports through that, so this yields None. A
-    run that merely OCCUPIES the generator -- an export, an on-demand topology extraction,
-    an interference check -- reports through ``generator_busy`` instead, whose record is a
-    separate file: reporting it as a build made a fully-current model show `generating`
-    with an empty bar for the whole length of an export.
-
-    Nothing here excludes anything. Two runs of one model proceed concurrently and the
-    publish rule decides whose result the record points at (STORE.md §7).
-    """
-    scope = _spec_output_dir(spec, model_format)
-    if scope is None or intent != "generate":
-        return contextlib.nullcontext()
-    # The kind decides which phase set the run reports over, so a drawing generator
-    # counts its own phases rather than a STEP package's.
-    kind = DRAWING_PACKAGE if model_format == "dxf" else STEP_PACKAGE
-    return generator_busy(kind, scope, sink=sink)

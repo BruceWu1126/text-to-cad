@@ -22,7 +22,7 @@ class NativeDocumentDoors(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         self.store = self.root / "store"
         self.enterContext(mock.patch.dict(os.environ, {
-            "CADGEN_CACHE_DIR": str(self.store), "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.store),
         }))
         from build123d import Solid
         from cadgen import step

@@ -188,7 +188,7 @@ class ExplicitExport(unittest.TestCase):
 
         self.build(MESH_ONLY)
         previous = read_record(self.script)
-        _all, (spec,) = _selected_specs_for_targets([str(self.script)])
+        (spec,) = _selected_specs_for_targets([str(self.script)])
         spec = replace(spec, mesh_exports=tuple(replace(item, mesh_tolerance=0.025) if item.fmt == "stl"
                                                else item for item in spec.mesh_exports))
         handed = []

@@ -8,6 +8,7 @@ from tests.python.support.tree_ids import tokenized
 from unittest import mock
 
 from cadgen._internal import generation as cad_generation
+from cadgen._internal.source_hash import python_source_hash
 from cadgen import catalog as cad_catalog
 from cadgen._internal import source_hash as cad_source_hash
 from cadgen.authoring import build_run
@@ -33,7 +34,7 @@ class CadGenerationTests(unittest.TestCase):
 
     def _spec(self, path: Path):
         """The entry a run builds for ``path``, resolved as ``generate_step_targets`` resolves a target."""
-        _, specs = cad_generation._selected_specs_for_targets([str(path)])
+        specs = cad_generation._selected_specs_for_targets([str(path)])
         return specs[0]
 
     def _fixture_tree(self, label: str):
@@ -326,11 +327,11 @@ class CadGenerationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        before = cad_generation.python_source_hash(script_path)
+        before = python_source_hash(script_path)
         helper_path.write_text("SIZE = 2\n", encoding="utf-8")
-        after = cad_generation.python_source_hash(script_path)
+        after = python_source_hash(script_path)
         script_path.write_text(script_path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-        script_changed = cad_generation.python_source_hash(script_path)
+        script_changed = python_source_hash(script_path)
 
         self.assertEqual(before.source_hash, after.source_hash)
         self.assertNotEqual(before.source_hash, script_changed.source_hash)
@@ -452,12 +453,8 @@ class CadGenerationTests(unittest.TestCase):
 
         self.assertEqual(("model",), spec.generator_metadata.generator_names)
 
-    def test_subroutine_generator_prints_go_to_stderr_not_stdout(self) -> None:
-        # The CLI contract is "stdout carries the result; stderr carries
-        # progress". When a generator runs as a SUBROUTINE of another verb
-        # (inspect/snapshot/export), its own print() ahead of the verb's JSON
-        # broke every `| jq` pipeline — the documented `2>/dev/null` then read
-        # as a parse error on a successful inspection. Default: stderr.
+    def test_a_models_prints_go_to_stdout(self) -> None:
+        # A build is the generator's only caller, and the model's stdout is the user's own.
         script_path = self.temp_root / "printing_part.py"
         script_path.write_text(
             "\n".join(
@@ -479,17 +476,8 @@ class CadGenerationTests(unittest.TestCase):
         with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
             scene = cad_generation.run_script_generator(spec, "step")
         self.assertIsNotNone(scene)
-        self.assertNotIn("printing_part: 1 box placed", captured_out.getvalue())
-        self.assertIn("printing_part: 1 box placed", captured_err.getvalue())
-
-        # The direct build flows own stdout and say so explicitly.
-        captured_out, captured_err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(captured_out), contextlib.redirect_stderr(captured_err):
-            scene = cad_generation.run_script_generator(
-                spec, "step", model_prints_to_stdout=True
-            )
-        self.assertIsNotNone(scene)
         self.assertIn("printing_part: 1 box placed", captured_out.getvalue())
+        self.assertNotIn("printing_part: 1 box placed", captured_err.getvalue())
 
     def test_an_empty_shape_is_refused_as_the_models_mistake_not_a_crash(self) -> None:
         # build123d asserts on an empty shape's geometry; unchecked, that
@@ -546,10 +534,10 @@ class CadGenerationTests(unittest.TestCase):
         self.assertIsNotNone(scene)
         self.assertFalse(script_path.with_suffix(".step").exists())
         self.assertEqual("python", scene.source_kind)
-        self.assertEqual(cad_generation.python_source_hash(script_path).source_hash, scene.source_hash)
+        self.assertEqual(python_source_hash(script_path).source_hash, scene.source_hash)
         self.assertIsNotNone(scene)
         self.assertEqual("python", scene.source_kind)
-        self.assertEqual(cad_generation.python_source_hash(script_path).source_hash, scene.source_hash)
+        self.assertEqual(python_source_hash(script_path).source_hash, scene.source_hash)
 
     def test_bare_shape_return_is_supported(self) -> None:
         # The CLI stays naming-agnostic: a plain `.py` defining only drawing() is a
@@ -791,7 +779,7 @@ class CadGenerationTests(unittest.TestCase):
         # The run's shape, which the tree is built from: no document of it is assembled.
         self.assertIsNotNone(observed_scene.source_compound)
         self.assertEqual("python", observed_scene.source_kind)
-        self.assertEqual(cad_generation.python_source_hash(script_path).source_hash, observed_scene.source_hash)
+        self.assertEqual(python_source_hash(script_path).source_hash, observed_scene.source_hash)
         # gen_step writes no STEP, so there is no on-disk STEP to hash.
         self.assertFalse(step_path.exists())
 
@@ -876,36 +864,15 @@ class CadGenerationTests(unittest.TestCase):
         self.assertIsNotNone(spec.dxf_path)
         self.assertEqual(self.temp_root / "flat.dxf", spec.dxf_path)
 
-    def test_generate_part_outputs_emits_package(self) -> None:
-        step_path = self._write_step("selector-output")
-        spec = self._spec(step_path)
-        scene = self._fake_scene(step_path)
-        package_patch, package_calls = self._patch_package_build()
-
-        with mock.patch.object(cad_generation, "load_step_scene_cached", return_value=scene) as load_scene, package_patch, build_run():
-            cad_generation._generate_part_outputs(spec)
-
-        load_scene.assert_called_once_with(step_path)
-        # An imported STEP packages the parsed document itself.
-        self.assertEqual(1, len(package_calls))
-        self.assertIs(scene, package_calls[0]["scene"])
-        self.assertFalse(package_calls[0]["force"])
-        self.assertTrue(cad_catalog.result_view_dir(step_path).is_dir())
-
-
-
-
-
-    def test_generate_part_outputs_uses_preloaded_scene_without_reloading(self) -> None:
+    def test_generate_part_outputs_packages_its_scene(self) -> None:
         step_path = self._write_step("preloaded")
         spec = self._spec(step_path)
         scene = self._fake_scene(step_path)
 
         package_patch, package_calls = self._patch_package_build()
-        with mock.patch.object(cad_generation, "load_step_scene_cached") as load_scene, package_patch, build_run():
+        with package_patch, build_run():
             cad_generation._generate_part_outputs(spec, preloaded_scene=scene)
 
-        load_scene.assert_not_called()
         self.assertEqual(1, len(package_calls))
         self.assertIs(scene, package_calls[0]["scene"])
         self.assertTrue(cad_catalog.result_view_dir(step_path).is_dir())

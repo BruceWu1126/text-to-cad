@@ -92,7 +92,8 @@ class _Partner:
         self._owner = weakref.ref(node)
 
     def retarget(self, node: Any) -> "_Partner":
-        """Transfer already verified, freshly materialized data to a lazy shell."""
+        """Transfer already verified, freshly materialized data to ``node``, a deep copy of
+        the owner (:meth:`__deepcopy__`)."""
         holder = object.__new__(type(self))
         holder.shape, holder.baseline = self.shape, self.baseline
         holder._owner = weakref.ref(node)
@@ -585,7 +586,7 @@ _SHAPE_MEMO_LOCK = threading.Lock()
 
 
 def reset_memo() -> None:
-    """Release process-owned canonical bytes and immutable appearance recipes.
+    """Release process-owned canonical BREP bytes.
 
     Active consumers own their reconstructed TShapes and remain valid.
     """
@@ -886,7 +887,7 @@ def materialize_descriptor(
     if compound is None:
         children = list(placed_by_id.values())
         compound = children[0] if len(children) == 1 else Compound(children=children)
-    compound.label = str(label or descriptor.get("label") or descriptor.get("rootName") or getattr(compound, "label", "") or "model")
+    compound.label = str(label or descriptor.get("label") or getattr(compound, "label", "") or "model")
     color = _color_from_entry(descriptor)
     if color is not None and getattr(compound, "color", None) is None:
         compound.color = color

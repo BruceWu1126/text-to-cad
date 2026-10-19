@@ -22,7 +22,6 @@ class ImportedCompileSnapshot(unittest.TestCase):
         self.root = Path(temporary.name)
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",
         }))
 
     def document(self, name="part", *, assembly=False, width=2):

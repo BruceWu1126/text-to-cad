@@ -250,16 +250,6 @@ class ResidentProcessLifecycle(unittest.TestCase):
                 mock.patch.object(client, "_connect_or_spawn", side_effect=AssertionError("a daemon was started")):
             self.assertFalse(client.prewarm())
 
-    def test_prewarm_replaces_a_daemon_left_by_older_code(self):
-        stale, current = _ScriptedChannel([{"restart": True}]), _ScriptedChannel([{"status": {}}])
-        with mock.patch.dict("os.environ", {}), \
-                mock.patch.object(client, "daemon_address", return_value="test-address"), \
-                mock.patch.object(client, "_connect_or_spawn", side_effect=[stale, current]) as connect:
-            os.environ.pop("CADGEN_DAEMON_CHILD", None)
-            self.assertTrue(client.prewarm())
-        self.assertEqual(connect.call_count, 2)
-        self.assertEqual([frame["kind"] for frame in stale.sent + current.sent], ["status", "status"])
-
     def test_a_request_built_before_an_edit_is_asked_again_as_the_code_is_now(self):
         # A build in flight when cadgen's code changed was resent with the token it was built
         # under, so every daemon spawned to take over exited on it: 698 in ten minutes.

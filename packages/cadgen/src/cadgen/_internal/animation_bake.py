@@ -566,7 +566,6 @@ def _transform_keys(
             swept.append(swept[-1] + turn)
         quats.append(q)
     pivot = tuple(_length(c) for c in _pivot(values, center, reach))
-    # Each sample's key: d (where the pivot goes: M(pivot) - pivot) and q.
     # Each sample's key: d (where the pivot goes: M(pivot) - pivot), q, and their
     # rates -- central differences, one-sided at the ends, and none beside a HOLD
     # (the same pose two samples running): a part enters and leaves a hold at rest,

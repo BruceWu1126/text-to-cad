@@ -4,16 +4,16 @@
    ``N = os.cpu_count()`` (``CADGEN_JOBS`` overrides). A job takes a slot
    before its body runs and holds it through its emit; a child model built
    inside the body runs in the slot its parent holds (``held`` nests); the job
-   YIELDS the slot while it waits for a pool job -- its display or export
-   job -- and reacquires, queuing again if it must, when that is done.
-   That yield is the deadlock avoidance: a 1-slot pool still finishes a build
-   that waits on its own pool jobs. Work already under way goes first: a slot
-   asked for to continue it -- an artifact job a build or a view waits on, a job
-   taking back the slot it yielded -- is granted ahead of every job not yet
-   started, in order among themselves; the rest are granted in order (FIFO). So
-   a build's own display job runs in the slot the build yields to wait for it,
-   and the build takes the slot back the moment the job is done, rather than
-   both queuing behind builds that have not begun.
+   YIELDS the slot while it waits for a pool job -- a compile, an artifact it
+   reads, a file a door waits for -- and reacquires, queuing again if it must,
+   when that is done. That yield is the deadlock avoidance: a 1-slot pool still
+   finishes a build that waits on its own pool jobs. Work already under way goes
+   first: a slot asked for to continue it -- an artifact job a build or a view
+   waits on, a job taking back the slot it yielded -- is granted ahead of every
+   job not yet started, in order among themselves; the rest are granted in order
+   (FIFO). So a pool job a build waits on runs in the slot the build yields to
+   wait for it, and the build takes the slot back the moment the job is done,
+   rather than both queuing behind builds that have not begun.
 2. **In-flight coalescing** — a compile or an artifact request that matches a
    job already in flight (the same document's bytes, the same artifact request)
    attaches to that job instead of starting another. In flight only.
@@ -47,8 +47,6 @@ import threading
 from typing import Any, Callable, Iterator
 
 from cadgen.daemon import transport
-
-DEFAULT_IDLE_UNBIND_SECONDS = 600.0
 
 
 def job_limit() -> int:
@@ -86,10 +84,6 @@ class Broker:
         self._coalesced = 0
 
     # slots -------------------------------------------------------------------------
-
-    @property
-    def limit(self) -> int:
-        return self._limit
 
     def acquire(self, label: str, *, cancelled: Callable[[], bool] | None = None,
                 first: bool = False) -> int | None:
@@ -332,7 +326,7 @@ def acquire_slot(label: str, *, on_queued: Callable[[], None] | None = None,
                  required: bool = False, first: bool = False) -> Lease | None:
     """Block until the broker grants a slot. None when there is no broker. ``first``:
     the slot continues work under way, and goes ahead of jobs not yet started."""
-    conn = _open({"kind": "slot", "op": "acquire", "label": label, **({"first": True} if first else {})})
+    conn = _open({"kind": "slot", "label": label, **({"first": True} if first else {})})
     if conn is None:
         if required:
             raise RuntimeError("artifact CPU broker is unavailable; work was not run")

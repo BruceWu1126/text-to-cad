@@ -21,11 +21,6 @@ MIB = 1024 * 1024
 # resident. This seed is the reservation until the pool has measured a worker of
 # its own, and the floor a measured baseline may never fall below.
 WORKER_SEED_BYTES = 512 * MIB
-DEFAULT_COMPONENT_BYTES = 384 * MIB
-# One worker's own ceiling for extraction subprocesses. Not admission's
-# reservation: admission bounds the daemon as a whole, this only stops a single
-# worker's subprocess fan-out from claiming the entire budget.
-EXTRACTION_CEILING_BYTES = 2048 * MIB
 
 
 def _megabytes(name: str, default: int) -> int:
@@ -90,7 +85,6 @@ class MemoryPolicy:
 
     limit_bytes: int
     seed_bytes: int = WORKER_SEED_BYTES
-    component_bytes: int = DEFAULT_COMPONENT_BYTES
 
     def dependency_reserve(self, reservation: int) -> int:
         """Headroom an ordinary root request keeps so a nested request can run."""
@@ -100,9 +94,7 @@ class MemoryPolicy:
     def from_environment(cls) -> "MemoryPolicy":
         # Leave 30% to the daemon, browser and other applications. An explicit
         # zero disables admission; unknown host capacity also leaves it off.
-        limit = _megabytes("CADGEN_MEMORY_MB", physical_memory_bytes() * 7 // 10)
-        component = max(MIB, _megabytes("CADGEN_COMPONENT_MEMORY_MB", DEFAULT_COMPONENT_BYTES))
-        return cls(limit, component_bytes=component)
+        return cls(_megabytes("CADGEN_MEMORY_MB", physical_memory_bytes() * 7 // 10))
 
 
 def worker_baseline(samples: Iterable[int], *, seed: int, previous: int = 0) -> int:
@@ -120,13 +112,6 @@ def worker_baseline(samples: Iterable[int], *, seed: int, previous: int = 0) -> 
     """
     values = [value for value in samples if value > 0]
     return max(seed, min(values)) if values else max(seed, previous)
-
-
-def extraction_ceiling(limit_bytes: int) -> int:
-    """How much resident memory one worker may spend on itself and its
-    extraction subprocesses, from the budget alone.
-    """
-    return min(EXTRACTION_CEILING_BYTES, max(WORKER_SEED_BYTES, limit_bytes // 3))
 
 
 # pid -> (parent pid, resident bytes). Keep short-lived sampling work out of
@@ -175,7 +160,7 @@ def _read_processes() -> dict[int, tuple[int, int]]:
 
 
 def process_tree_bytes(pids: list[int], *, rows: Mapping[int, tuple[int, int]] | None = None) -> dict[int, int]:
-    """RSS per worker including its extraction subprocesses, counted once."""
+    """RSS per worker including its descendant processes, counted once."""
     if rows is None:
         global _sample_at, _sample
         with _sample_guard:
@@ -197,17 +182,3 @@ def process_tree_bytes(pids: list[int], *, rows: Mapping[int, tuple[int, int]] |
             parent = rows.get(parent, (0, 0))[0]
     return totals
 
-
-def component_worker_limit(requested: int) -> int:
-    """Fit extraction subprocess reservations inside one worker's ceiling.
-
-    One means inline work (no extra interpreter). Overrides remain upper
-    bounds; they cannot bypass configured memory admission.
-    """
-    policy = MemoryPolicy.from_environment()
-    if not policy.limit_bytes or requested <= 1:
-        return max(1, requested)
-    ceiling = extraction_ceiling(policy.limit_bytes)
-    resident = process_tree_bytes([os.getpid()]).get(os.getpid(), ceiling // 2)
-    available = max(0, ceiling - resident)
-    return max(1, min(requested, available // policy.component_bytes))

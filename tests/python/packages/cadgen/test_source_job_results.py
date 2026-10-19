@@ -25,7 +25,7 @@ class SourceJobResults(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         environment = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_JOBS": "2", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_JOBS": "2",
         })
         environment.start()
         self.addCleanup(environment.stop)
@@ -86,8 +86,6 @@ class SourceJobResults(unittest.TestCase):
         )
         namespace = runpy.run_path(str(script))
         with mock.patch.object(sys, "argv", [str(script)]), \
-             mock.patch("cadgen._internal.generation._assembly_glb_package_current",
-                        side_effect=AssertionError("generated outputs repeated an unused package gate")), \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             first = namespace["part"]()
             second = namespace["part"]()

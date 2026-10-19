@@ -309,10 +309,9 @@ def repo_local_loaded_modules(module_names: object) -> dict[str, Path]:
 # Nothing re-imports it (the generator is loaded under its own loader name), but
 # multiprocessing's spawn start method reads sys.modules['__main__'] in
 # get_preparation_data to tell the child what to re-import -- so evicting it turns
-# the very next process-pool component build into
-# `KeyError: '__main__'`, which is how a direct in-process run of a model with six
-# or more missing components used to die. __main__ is an entry point, never a
-# freshness input: re-executing it is exactly what must NOT happen.
+# the next process pool the process starts into `KeyError: '__main__'`.
+# __main__ is an entry point, never a freshness input: re-executing it is exactly
+# what must NOT happen.
 _NEVER_EVICTED = frozenset({"__main__"})
 
 

@@ -71,7 +71,6 @@ class DiscoveredFileInputTests(unittest.TestCase):
         self.environment.update(
             {
                 # A warm worker would serve another checkout's code.
-                "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_CACHE_DIR": str(self.project / "store"),
                 "PYTHONPATH": str(CADGEN_SRC),
             }
