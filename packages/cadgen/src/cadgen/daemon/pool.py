@@ -5,7 +5,7 @@ for a model whose worker is idle takes that worker. A request for a model whose
 worker is busy gets an *extra* — a spare bound to the same model for the length
 of one job — and runs now. A request for a model with no worker binds a spare. A
 request with no spare left spawns if its memory reservation fits. Admission
-counts resident worker trees (including extraction children), keeps headroom
+counts resident worker trees (including their child processes), keeps headroom
 for dependencies, and reclaims idle workers first. That reservation is not
 configured: it starts at the seed and is recalibrated on every accounting pass
 from the RSS of workers that are idle and have run nothing, which is what a

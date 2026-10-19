@@ -100,7 +100,6 @@ class SavedDocumentIdentityTest(unittest.TestCase):
             os.environ,
             {
                 "CADGEN_CACHE_DIR": str(self.store),
-                "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_JOBS": "1",
             },
         )

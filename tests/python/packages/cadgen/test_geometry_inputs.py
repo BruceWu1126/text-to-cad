@@ -63,7 +63,7 @@ class GeometryInputs(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.env = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",         })
+            })
         self.env.start(); self.addCleanup(self.env.stop)
         from cadgen.store.materialize import reset_memo
         reset_memo(); self.addCleanup(reset_memo)
@@ -439,7 +439,11 @@ class GeometryInputs(unittest.TestCase):
 
     def test_native_facts_are_the_extractors(self):
         from build123d import Box, Cylinder, Solid
+        import io
+
+        from OCP.BinTools import BinTools
         from OCP.BRepBuilderAPI import BRepBuilderAPI_NurbsConvert
+        from OCP.TopoDS import TopoDS_Shape
         from cadgen._internal.topology_extract import extract_topology_facts
         for shape in (Box(2, 3, 4), Box(4, 5, 3) - Cylinder(1, 6),
                       Solid(BRepBuilderAPI_NurbsConvert(Cylinder(2, 4).wrapped, True).Shape())):
@@ -447,8 +451,9 @@ class GeometryInputs(unittest.TestCase):
             digest, tree, cid, entry = self.component_tree(shape)
             payload = read_verified_object(entry["brep"])
             self.assertEqual(payload, cp._shape_brep_bytes(shape))
-            private = cp._build123d_shape_from_brep_bytes(payload)
-            expected = extract_topology_facts(private.wrapped)
+            private = TopoDS_Shape()
+            BinTools.Read_s(private, io.BytesIO(payload))
+            expected = extract_topology_facts(private)
             self.assertEqual(facts_of(digest, cid), expected)
 
     def test_geometry_gc_retains_partial_closure_and_display_data_is_independent(self):

@@ -31,7 +31,7 @@ class Accounting(unittest.TestCase):
         self.assertEqual(memory.process_tree_bytes([10, 99], rows=rows), {10: 100})
 
     def test_policy_reserves_dependency_capacity_and_honors_explicit_zero(self):
-        env = {key: "" for key in ("CADGEN_MEMORY_MB", "CADGEN_COMPONENT_MEMORY_MB")}
+        env = {"CADGEN_MEMORY_MB": ""}
         with mock.patch.dict(os.environ, env), mock.patch.object(memory, "physical_memory_bytes", return_value=12 * 1024 * MIB):
             policy = memory.MemoryPolicy.from_environment()
             self.assertEqual(policy.limit_bytes, 12 * 1024 * MIB * 7 // 10)
@@ -50,15 +50,6 @@ class Accounting(unittest.TestCase):
         self.assertEqual(memory.worker_baseline([900 * MIB, 780 * MIB], seed=seed), 780 * MIB)
         # No sample: the last baseline stands rather than collapsing to the seed.
         self.assertEqual(memory.worker_baseline([], seed=seed, previous=780 * MIB), 780 * MIB)
-
-    def test_component_processes_fit_the_parent_reservation(self):
-        policy = memory.MemoryPolicy(8192 * MIB, component_bytes=384 * MIB)
-        with mock.patch.object(memory.MemoryPolicy, "from_environment", return_value=policy):
-            with mock.patch.object(memory, "process_tree_bytes", return_value={os.getpid(): 300 * MIB}):
-                self.assertEqual(memory.component_worker_limit(8), 4)
-                self.assertEqual(memory.component_worker_limit(2), 2)
-            with mock.patch.object(memory, "process_tree_bytes", return_value={os.getpid(): 1900 * MIB}):
-                self.assertEqual(memory.component_worker_limit(8), 1, "no extra process fits: run inline")
 
 
 class Admission(unittest.TestCase):

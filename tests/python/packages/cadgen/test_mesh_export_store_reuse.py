@@ -63,7 +63,6 @@ class MeshExportStoreReuseTest(unittest.TestCase):
         entry = _write_model(cls._seed_root, size=6.0)
         env = dict(os.environ)
         env.update({
-            "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(cls._seed_root / "store"),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })
@@ -92,7 +91,6 @@ class MeshExportStoreReuseTest(unittest.TestCase):
         self.store = self.root / "store"
         self.env = dict(os.environ)
         self.env.update({
-            "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.store),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })

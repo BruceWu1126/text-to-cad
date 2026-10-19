@@ -4,8 +4,8 @@ Every cached artifact is written to a temp file and renamed into place, so a rea
 a half-written payload. On a Windows SMB share that rename is not reliably atomic-and-instant:
 the redirector can still hold the handle Python just closed, and the rename loses with
 ``WinError 32`` (ERROR_SHARING_VIOLATION, "file is being used by another process"). Under a
-parallel component build it happens reliably -- see issue #241, where 8 workers failed every
-time on a NAS and ``CADGEN_COMPONENT_WORKERS=1`` succeeded.
+parallel component build (since removed) it happened reliably -- see issue #241, where 8 workers
+failed every time on a NAS and one worker succeeded.
 
 The remedy is a short bounded retry, and the reason it lives here rather than at each writer is
 that there are seven of these renames in a build's write path. Hardening one moves the failure

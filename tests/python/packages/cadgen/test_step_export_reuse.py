@@ -49,7 +49,6 @@ def _write_model(root: Path) -> Path:
 def _run(entry: Path, args: list[str], store: Path) -> subprocess.CompletedProcess:
     env = dict(os.environ)
     env.update({
-        "CADGEN_COMPONENT_WORKERS": "1",
         "CADGEN_CACHE_DIR": str(store),
         "PYTHONPATH": str(REPO / "packages/cadgen/src"),
     })

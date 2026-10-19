@@ -29,7 +29,7 @@ class Fixture(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.env = mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",         })
+            })
         self.env.start()
         self.addCleanup(self.env.stop)
         bounds.clear()

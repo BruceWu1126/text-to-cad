@@ -40,7 +40,6 @@ class _ModelRunCase(unittest.TestCase):
         self.project = Path(self._tmp.name).resolve()
         self.env = dict(os.environ)
         self.env.update({
-            "CADGEN_COMPONENT_WORKERS": "1",
             "CADGEN_CACHE_DIR": str(self.project / "store"),
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })

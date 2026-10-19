@@ -73,7 +73,6 @@ class MeshExportEngineDeterminismTest(unittest.TestCase):
         self.addCleanup(self._cleanup)
         self.base_env = dict(os.environ)
         self.base_env.update({
-            "CADGEN_COMPONENT_WORKERS": "1",
             "PYTHONPATH": str(REPO / "packages/cadgen/src"),
         })
 

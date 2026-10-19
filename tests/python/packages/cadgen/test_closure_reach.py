@@ -801,7 +801,7 @@ class ReachClosure(unittest.TestCase):
                 listings.append(os.listdir(target.parent))
             replace_atomic(temp_path, target_path)
 
-        quiet = {"CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1"}
+        quiet = {"CADGEN_JOBS": "1"}
         # The export job publishes the file: run here, where the rename is watched.
         from tests.python.support.inline_artifacts import inline_artifacts
 

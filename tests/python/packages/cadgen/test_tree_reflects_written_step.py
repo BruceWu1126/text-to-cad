@@ -79,7 +79,6 @@ class TreeReflectsWrittenStep(unittest.TestCase):
         self.environment = dict(os.environ)
         self.environment.update(
             {
-                "CADGEN_COMPONENT_WORKERS": "1",
                 "CADGEN_CACHE_DIR": str(self.store),
                 "PYTHONPATH": str(CADGEN_SRC),
             }

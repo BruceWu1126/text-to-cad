@@ -45,7 +45,6 @@ class MetadataCapture(unittest.TestCase):
         self.root = Path(temp.name)
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",
         }))
         from build123d import Solid
 
@@ -404,7 +403,6 @@ class VerifiedIdentityAcrossClaims(unittest.TestCase):
         self.root = Path(temp.name)
         self.enterContext(mock.patch.dict(os.environ, {
             "CADGEN_CACHE_DIR": str(self.root / "store"),
-            "CADGEN_COMPONENT_WORKERS": "1",
         }))
         from build123d import Solid
 

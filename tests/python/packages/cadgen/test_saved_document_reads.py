@@ -31,9 +31,6 @@ class SavedDocumentReadTest(unittest.TestCase):
         environment = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.root / "store")})
         environment.start()
         self.addCleanup(environment.stop)
-        workers = mock.patch("cadgen._internal.component_package._component_build_worker_count", return_value=1)
-        workers.start()
-        self.addCleanup(workers.stop)
 
     def shape(self, size=2):
         from build123d import Solid
@@ -520,7 +517,7 @@ class SavedDocumentReadTest(unittest.TestCase):
         self.addCleanup(retire)  # before its folder goes
         environment = {key: value for key, value in os.environ.items() if not key.startswith("CADGEN_")}
         environment.update({
-            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1", "CADGEN_COMPONENT_WORKERS": "1",
+            "CADGEN_CACHE_DIR": str(self.root / "store"), "CADGEN_JOBS": "1",
             "CADGEN_DAEMON_STATE_DIR": state, "CADGEN_DAEMON_SOCKET": socket, "CADGEN_DAEMON_IDLE_TIMEOUT": "60",
             "PYTHONPATH": os.pathsep.join([str(guard_root), str(Path(cadgen.__file__).resolve().parent.parent)]),
         })
