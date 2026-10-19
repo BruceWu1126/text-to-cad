@@ -340,12 +340,12 @@ class CadgenDaemonTests(unittest.TestCase):
 
         deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
-            if "killing worker" in self.log_path.read_text(encoding="utf-8"):
+            if "stopping worker" in self.log_path.read_text(encoding="utf-8"):
                 break
             time.sleep(0.2)
         else:
             self.fail(
-                "watchdog never killed the orphaned job's worker:\n"
+                "watchdog never stopped the orphaned job's worker:\n"
                 f"{self.log_path.read_text(encoding='utf-8')}"
             )
 

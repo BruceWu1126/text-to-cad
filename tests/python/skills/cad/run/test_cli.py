@@ -50,9 +50,15 @@ class RunModelArgvTests(unittest.TestCase):
         return path
 
     def test_requires_an_existing_script(self) -> None:
-        with self.assertRaises(SystemExit) as caught:
-            runner.run_model_argv([str(self.root / "missing.py")])
-        self.assertEqual(2, caught.exception.code)
+        # A script that is not there is one sentence on stderr, exit 1, no usage block.
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            code = runner.run_model_argv([str(self.root / "missing.py")])
+        self.assertEqual(1, code)
+        lines = errors.getvalue().splitlines()
+        self.assertEqual(1, len(lines), errors.getvalue())
+        self.assertIn(str(self.root / "missing.py"), lines[0])
+        self.assertNotIn("usage:", errors.getvalue())
 
     def test_step_models_pair_the_sibling_artifact_and_forward_flags(self) -> None:
         script = self._write("bracket.py", STEP_MODEL)
