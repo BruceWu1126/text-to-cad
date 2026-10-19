@@ -1069,7 +1069,12 @@ An example (`robot`: a base, two placements of `arm`, one of `peg`):
   changed value is `environment variable NAME changed`, and a change to a
   variable the model never read changes nothing. The clips declared by `@step(animation=...)` are code,
   in the closure like the rest of the model's reach; the build bakes them to
-  keyframes in the unified sidecar, and they never enter geometry identity. The
+  keyframes in the unified sidecar, and they never enter geometry identity. A
+  build whose result -- its key and its tree -- a stored result holds already
+  takes that result's keyframes instead of baking the clips again
+  (`generation._stored_animation`: a result is a function of its key, §4), and
+  a bake reduces again only the tracks whose samples, parts' extents and
+  tolerance this worker has not reduced before (`animation_bake`). The
   boundary is decided statically by what the importer TAKES from a model
   file: only model functions (`from arm import arm`) → a result edge, file
   excluded, the child tracked by its key (also when that file declares several

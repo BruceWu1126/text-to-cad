@@ -1,7 +1,10 @@
 """Bake a model's clips (``cadgen.animation``) into sidecar keyframes.
 
 A clip runs ONCE, here, when its model builds: ``update(t, m)`` at every sample
-time, against the built tree's occurrence table. What ships is data — the
+time, against the built tree's occurrence table (a build of a result already stored,
+its key and its tree, takes that result's keyframes: ``generation._stored_animation``).
+A track's keys are reduced once per worker for the same samples, parts' extents and
+tolerance (``_reduced_transform_keys``). What ships is data — the
 ``animation`` section of the model's sidecar. Its keys are glTF's: every renderer
 and the animated GLB export play them as glTF's samplers do, so nothing downstream
 works out a motion of its own::
@@ -75,6 +78,8 @@ import hashlib
 import json
 import math
 import struct
+import threading
+from collections import OrderedDict
 from typing import Any, Iterable, Mapping, Sequence
 
 CHANNELS = ("transform", "opacity", "visible", "tube")
@@ -376,6 +381,12 @@ class Handle:
 
     def _apply(self, op: tuple) -> "Handle":
         transforms = self._frame.transform
+        if transforms.keys().isdisjoint(self._leaves):
+            # The sample's first move of every one of them: each takes the op itself.
+            fresh = dict.fromkeys(self._leaves, op)
+            if len(fresh) == len(self._leaves):
+                transforms.update(fresh)
+                return self
         for leaf in self._leaves:
             current = transforms.get(leaf)
             transforms[leaf] = op if current is None else _compose(op, current)
@@ -800,6 +811,91 @@ def _signature(channel: str, value: Any) -> Any:
     return value
 
 
+def _interned(transforms: dict[str, tuple], poses: dict[bytes, tuple]) -> dict[str, tuple]:
+    """``transforms`` with each value the first of the same bits the bake has seen
+    (``poses``), in the leaves' order: each distinct object is packed once, since the
+    leaves one ``m.get`` moved hold the one value it computed."""
+    values = list(transforms.values())
+    distinct = dict(zip(map(id, values), values))
+    first = {key: poses.setdefault(struct.pack(f"<{len(value)}d", *value), value) for key, value in distinct.items()}
+    return dict(zip(transforms, map(first.__getitem__, map(id, values))))
+
+
+def _transform_sequences(frames: list[_Frame], leaves: list[str], rest: tuple) -> dict[tuple, list[str]]:
+    """Each leaf's whole sequence of transforms (``rest`` where a sample left it alone),
+    and the leaves that share it, in the leaves' order: what grouping the leaves by their
+    sequences gives, keyed by the first leaf's. Interned values (``_interned``) are one
+    object for one bit pattern, so the leaves are grouped first by their values'
+    identities, read sample by sample at the kernel of the interpreter; groups whose
+    sequences are equal by value -- a zero and a negative zero -- are then one."""
+    import numpy as np
+
+    if not leaves:
+        return {}
+    # Sample by sample, the identity of each leaf's value -- ``rest``'s where the sample left
+    # it alone -- then, leaf by leaf, its row of them.
+    position = {leaf: index for index, leaf in enumerate(leaves)}
+    identities = np.full((len(frames), len(leaves)), id(rest), dtype=np.uint64)
+    for index, frame in enumerate(frames):
+        transforms = frame.transform
+        if transforms:
+            count = len(transforms)
+            identities[index, np.fromiter(map(position.__getitem__, transforms), dtype=np.intp, count=count)] = \
+                np.fromiter(map(id, transforms.values()), dtype=np.uint64, count=count)
+    rows = np.ascontiguousarray(identities.T)
+    del identities
+    labels: dict[bytes, int] = {}
+    leaf_labels = [labels.setdefault(row.tobytes(), len(labels)) for row in rows]
+    del rows
+    groups: dict[int, list[str]] = {}
+    exact: dict[tuple, list[str]] = {}
+    for leaf, label in zip(leaves, leaf_labels):
+        members = groups.get(label)
+        if members is None:
+            # A sequence is read and looked up once per identity row: its first leaf's.
+            sequence = tuple(frame.transform.get(leaf, rest) for frame in frames)
+            members = groups[label] = exact.setdefault(sequence, [])
+        members.append(leaf)
+    return exact
+
+
+# Each transform track's keys as reduced (``_transform_keys``), by a digest of everything
+# the reduction reads -- its sample times, its sequence of transforms, the corners and middle
+# of the parts it moves, the model's diagonal and the tolerance -- bit for bit: a model baked
+# again with a track unchanged reduces it once. In this process only, a few thousand tracks.
+_REDUCED_ENTRIES = 4096
+_REDUCED: "OrderedDict[bytes, tuple]" = OrderedDict()
+_REDUCED_LOCK = threading.Lock()
+
+
+def _reduced_transform_keys(
+    times: list[float], sequence: tuple, corners: list[tuple], center: Sequence[float], reach: float,
+    tolerance: float, where: str,
+) -> tuple[list[int], tuple[float, float, float], list[list[float]]]:
+    """:func:`_transform_keys`, taken from :data:`_REDUCED` where the same inputs were reduced."""
+    from itertools import chain
+
+    digest = hashlib.sha256()
+    digest.update(struct.pack(f"<q{len(times)}d", len(times), *times))
+    digest.update(struct.pack(f"<q{12 * len(sequence)}d", len(sequence), *chain.from_iterable(sequence)))
+    digest.update(struct.pack(f"<q{3 * len(corners)}d", len(corners), *chain.from_iterable(corners)))
+    digest.update(struct.pack("<5d", *center, reach, tolerance))
+    key = digest.digest()
+    with _REDUCED_LOCK:
+        found = _REDUCED.get(key)
+        if found is not None:
+            _REDUCED.move_to_end(key)
+    if found is not None:
+        keep, pivot, values = found
+        return list(keep), pivot, [list(value) for value in values]
+    keep, pivot, values = _transform_keys(times, list(sequence), corners, center, reach, tolerance, where)
+    with _REDUCED_LOCK:
+        _REDUCED[key] = (tuple(keep), pivot, tuple(tuple(value) for value in values))
+        while len(_REDUCED) > _REDUCED_ENTRIES:
+            _REDUCED.popitem(last=False)
+    return keep, pivot, values
+
+
 def bake_clip(
     clip_id: str, clip: Any, targets: AnimationTargets, bounds: Sequence[Sequence[float]], leaf_boxes: Any = None,
 ) -> dict[str, Any]:
@@ -838,8 +934,7 @@ def bake_clip(
             raise AnimationError(f"animation clip {clip_id!r} at t={t:g} s: {exc}") from None
         except Exception as exc:
             raise AnimationError(f"animation clip {clip_id!r} at t={t:g} s: {type(exc).__name__}: {exc}") from exc
-        frame.transform = {leaf: poses.setdefault(struct.pack(f"<{len(value)}d", *value), value)
-                           for leaf, value in frame.transform.items()}
+        frame.transform = _interned(frame.transform, poses)
         if frame.tube:
             frame.tube = shared_tubes(frame.tube)
         frames.append(frame)
@@ -857,13 +952,25 @@ def bake_clip(
         """Leaves grouped by their whole sequence on this channel: parts that move
         alike (``_signature``) share a track. A leaf no sample touched is left out."""
         leaves = dict.fromkeys(leaf for frame in frames for leaf in getattr(frame, name))
-        exact: dict[tuple, list[str]] = {}
-        for leaf in leaves:
-            exact.setdefault(tuple(getattr(frame, name).get(leaf, rest) for frame in frames), []).append(leaf)
-        # Rounding is the costly part, so only one sequence of each exact group is rounded.
+        if name == "transform":
+            exact = _transform_sequences(frames, list(leaves), rest)
+        else:
+            exact = {}
+            for leaf in leaves:
+                exact.setdefault(tuple(getattr(frame, name).get(leaf, rest) for frame in frames), []).append(leaf)
+        # Rounding is the costly part, so only one sequence of each exact group is rounded, and
+        # each value it holds once: the frames hold each value they share as one object.
+        signatures: dict[int, Any] = {}
+
+        def signature(value: Any) -> Any:
+            found = signatures.get(id(value))
+            if found is None:
+                found = signatures[id(value)] = (_signature(name, value),)
+            return found[0]
+
         groups: dict[tuple, tuple[tuple, list[str]]] = {}
         for sequence, members in exact.items():
-            groups.setdefault(tuple(_signature(name, value) for value in sequence), (sequence, []))[1].extend(members)
+            groups.setdefault(tuple(map(signature, sequence)), (sequence, []))[1].extend(members)
         return dict(groups.values())
 
     def measured(leaves: list[str]) -> tuple[list[tuple], tuple]:
@@ -882,7 +989,8 @@ def bake_clip(
             continue  # touched, never moved
         where = f"animation clip {clip_id!r} part {sorted(leaves, key=order)[0]}"
         track_corners, track_center = measured(leaves)
-        keep, pivot, values = _transform_keys(times, list(sequence), track_corners, track_center, diagonal, tolerance, where)
+        keep, pivot, values = _reduced_transform_keys(times, sequence, track_corners, track_center, diagonal,
+                                                      tolerance, where)
         track = _track(leaves, rounded_times, keep, "transform", values, order)
         track["pivot"] = list(pivot)
         tracks.append(track)

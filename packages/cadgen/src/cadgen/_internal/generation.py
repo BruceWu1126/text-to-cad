@@ -680,13 +680,15 @@ def _generate_part_outputs(
             # and for the preview as the one annotations object a viewer binds to. An axis
             # ref reads its component's selector table once the display job is done. The
             # clips are baked once: the file is written from this tree, so its sidecar
-            # carries these very keyframes.
+            # carries these very keyframes -- those the stored result of this key and tree
+            # carries already, where there is one (``_stored_animation``).
             resolved["kinematics"] = tree_kinematics(result_hash, display=display)
             clips = getattr(scene, "animation", None)
             if writes_step and clips is not None:
                 from cadgen._internal.animation_bake import bake_document_animation
 
-                resolved["animation"] = bake_document_animation(clips, result_hash)
+                baked = _stored_animation(scene, _model_for_spec(spec), result_hash)
+                resolved["animation"] = baked if baked is not None else bake_document_animation(clips, result_hash)
             if announce:
                 annotations = annotations_object(
                     result_hash, kinematics=resolved["kinematics"],
@@ -936,6 +938,27 @@ def _generate_part_outputs(
         tree_result = component_package_job()
     return GeneratedStepResult(spec=spec, scene=scene, tree=str(tree_result.get("tree") or "") or None,
                                key=tree_result.get("key"))
+
+
+def _stored_animation(scene: object, model: str | None, tree: str) -> dict | None:
+    """The keyframes a stored result of this very build carries -- the result at the key its
+    record will have (its model, closure, constants, children's keys and producer,
+    ``store.results``) whose tree is ``tree`` -- else None. A result is a function of its key
+    (the gate restores one by it, STORE.md §4), and its clips' bake a function of the clips its
+    closure holds and of its tree: baking them again gives these, so a model rebuilt with
+    nothing changed does not."""
+    closure_hash = str(getattr(scene, "source_closure_hash", "") or "")
+    if not closure_hash or model is None:
+        return None
+    from cadgen.store.results import key_for, producer_versions, read_result
+
+    key = key_for({"closure": {"hash": closure_hash},
+                   "constants": dict(getattr(scene, "source_closure_constants", None) or {}),
+                   "children": _children_by_key(getattr(scene, "store_children", None)),
+                   "producer": producer_versions()}, model)
+    result = read_result(key) or {}
+    animation = (result.get("record") or {}).get("animation") if result.get("tree") == tree else None
+    return copy.deepcopy(animation) if isinstance(animation, dict) else None
 
 
 def _children_by_key(called: object) -> list[dict[str, str]]:
