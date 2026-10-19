@@ -123,11 +123,12 @@ class DeadWorkerMessage(unittest.TestCase):
         self.assertIn("stopped responding", err)
         self.assertIn("NOT retried", err)
 
-    def test_ctrl_c_while_waiting_on_the_daemon_is_a_plain_interrupt(self):
-        with mock.patch.object(client, "_run_with_retry", side_effect=KeyboardInterrupt):
-            with self.assertRaises(KeyboardInterrupt) as stop:
-                client.run_via_daemon("run", ["/w/box.py"], "/w", prog="python box.py")
-        self.assertTrue(stop.exception.__suppress_context__, "no traceback through the wait")
+    def test_ctrl_c_while_waiting_on_the_daemon_is_one_line_and_the_interrupt_exit(self):
+        err = io.StringIO()
+        with mock.patch.object(client, "_run_with_retry", side_effect=KeyboardInterrupt), redirect_stderr(err):
+            code = client.run_via_daemon("run", ["/w/box.py"], "/w", prog="python box.py")
+        self.assertEqual(code, 130)
+        self.assertEqual(err.getvalue(), "python box.py: interrupted; the build daemon stops the job.\n")
 
     def test_a_job_with_no_prog_is_named_by_its_tool(self):
         payload = {**PAYLOAD, "tool": "probe", "prog": None, "argv": ["a b.step"]}

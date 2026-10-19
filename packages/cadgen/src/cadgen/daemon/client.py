@@ -303,9 +303,10 @@ def run_via_daemon(tool: str, argv: list[str], cwd: str | None = None, prog: str
         return 1
     except KeyboardInterrupt:
         # Ctrl-C while this process only waits on the daemon: the build service stops the
-        # job when its caller leaves. Raised fresh, so a script's own handler catches the
-        # interrupt without the transport's wait in its traceback.
-        raise KeyboardInterrupt from None
+        # job as its caller leaves. One line, and the exit a shell gives an interrupted
+        # command -- never a traceback through the transport's wait.
+        _say(f"{prog or f'cadgen {tool}'}: interrupted; the build daemon stops the job.\n")
+        return 130
 
 
 def run_nested(
