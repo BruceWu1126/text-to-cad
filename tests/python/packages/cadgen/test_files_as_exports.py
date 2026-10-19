@@ -200,6 +200,55 @@ class FilesAsExportsTest(unittest.TestCase):
         self.assertEqual("current", self.build()[0])
 
 
+class LiveShapeExportTest(unittest.TestCase):
+    """A result holding a component the store cannot decode (an eager-only one) has its STEP
+    written from the build's own live shape, never by the pool: while the file is owed, the
+    model owes a run (the gate, clause 5), and every run that cannot write it fails, loudly."""
+
+    WIRE = """
+from cadgen import step
+from cadgen import build123d as bd
+
+@step
+def m():
+    return bd.Wire.make_circle(3)
+
+
+if __name__ == "__main__":
+    m()
+"""
+
+    def setUp(self) -> None:
+        roots = IsolatedCadRoots(self, prefix="live-export-")
+        self.enterContext(inline_artifacts())
+        self.root = roots.cad_root
+        self.script = self.root / "m.py"
+        self.script.write_text(self.WIRE, encoding="utf-8")
+
+    def run_model(self) -> tuple[int, dict]:
+        from cadgen.cli._run_model import run_model_argv
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = run_model_argv([str(self.script), "--json"])
+        (line,) = [line for line in stdout.getvalue().splitlines() if line.startswith("{")]
+        return code, json.loads(line)
+
+    def test_a_step_only_a_run_can_write_fails_every_run_with_a_message(self) -> None:
+        from cadgen.store.gate import stale
+        from cadgen.store.index import model_ref
+
+        for attempt in ("first", "second"):
+            code, answer = self.run_model()
+            self.assertEqual(code, 1, attempt)
+            self.assertFalse(answer["ok"], attempt)
+            self.assertRegex(answer["error"], r"\S", f"{attempt}: an error names what failed")
+            self.assertFalse((self.root / "m.step").exists(), attempt)
+            verdict = stale(model_ref(self.script, "m"))
+            self.assertIsNotNone(verdict.stored, "the result is in the store")
+            self.assertIsNone(verdict.key, "and owes a run while its STEP is")
+
+
 class KeptRuleTest(unittest.TestCase):
     """A build keeps its STEP -- writes nothing -- only while its record's last build had the
     same tree, wrote the file with this writer, the file still has the bytes it recorded,

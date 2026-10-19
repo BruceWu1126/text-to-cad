@@ -63,6 +63,21 @@ def _model_frames(exc: BaseException) -> list[traceback.FrameSummary]:
     return frames
 
 
+def failure_text(exc: BaseException) -> str:
+    """The one line a failure is reported as where only its text fits (a ``--json``
+    envelope's ``error``): the exception's message, or, for one raised with none (a bare
+    ``AssertionError``), its type and where it was raised -- an empty string names
+    nothing."""
+    detail = str(exc).strip()
+    if detail:
+        return detail
+    raised = traceback.extract_tb(exc.__traceback__)
+    if not raised:
+        return type(exc).__name__
+    innermost = raised[-1]
+    return f"{type(exc).__name__} (raised in {_display(innermost.filename)}:{innermost.lineno})"
+
+
 def report_cli_error(
     exc: BaseException,
     *,

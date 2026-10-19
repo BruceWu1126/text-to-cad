@@ -76,6 +76,20 @@ def _exported(path: str) -> bool:
     return Path(name).suffix in _EXPORTED_SUFFIXES
 
 
+def _is_step(path: str) -> bool:
+    return Path(path).suffix.lower() in (".step", ".stp")
+
+
+def _live_shape_writes(tree: str) -> bool:
+    """Whether the result's STEP is written from a live shape of the build's own process
+    (STORE.md §3, *Exports*): a component the store cannot decode (an eager-only one)
+    reaches a file only that way, so a run owes the STEP, never the pool."""
+    from cadgen.store.trees import get_tree
+
+    components = ((get_tree(tree) if tree else None) or {}).get("components") or {}
+    return any((entry or {}).get("kind") == "eager-only" for entry in components.values())
+
+
 @dataclass
 class Verdict:
     model: str
@@ -331,8 +345,10 @@ def _stale(model: Path | str, *, memo: dict[str, Verdict] | None = None) -> Verd
         if not ok:
             verdict.stale = True
             # A STEP, its sidecar or a declared mesh is written again from the stored
-            # result and its record; any other output (a drawing) comes only from a run.
-            owed_a_run = owed_a_run or not _exported(path)
+            # result and its record; any other output (a drawing) comes only from a run --
+            # as does the STEP of a result holding a component the store cannot decode (an
+            # eager-only one), written from the build's own live shape (STORE.md §3).
+            owed_a_run = owed_a_run or not _exported(path) or (_is_step(path) and _live_shape_writes(tree))
     clauses.append({"clause": 5, "stale": any(c["stale"] for c in output_clauses), "outputs": output_clauses})
 
     from cadgen.store.results import producer_versions, result_key

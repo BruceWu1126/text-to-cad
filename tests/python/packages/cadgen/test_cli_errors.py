@@ -108,6 +108,17 @@ class ReportCliErrorTest(unittest.TestCase):
         text = self._report(ValueError("no traceback here"))
         self.assertIn("FAILED: ValueError: no traceback here", text)
 
+    def test_a_failure_with_no_message_is_named_by_its_type_and_where_it_was_raised(self):
+        """A bare ``assert`` in the kernel says nothing: the one-line text a ``--json``
+        envelope carries names the type and the raiser instead of an empty string."""
+        from cadgen._internal.cli_errors import failure_text
+
+        self.model.write_text("def model():\n    assert False\n", encoding="utf-8")
+        text = failure_text(_raise_from_model(self.model))
+        self.assertRegex(text, r"^AssertionError \(raised in .*widget\.py:2\)$")
+        self.assertEqual(failure_text(ValueError("bad radius")), "bad radius")
+        self.assertEqual(failure_text(AssertionError()), "AssertionError")
+
     def test_the_hint_is_offered_when_the_command_takes_the_flag(self):
         self.assertIn("re-run with --verbose", self._report(_raise_from_model(self.model)))
 
