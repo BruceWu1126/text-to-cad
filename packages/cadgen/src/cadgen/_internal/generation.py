@@ -1386,15 +1386,22 @@ def _run_with_spec_generation_status(
 
         # One running build per core: the body and its emit hold a job slot, and a
         # child's build inside the body runs in the slot its parent holds. `queued`
-        # shows in the tree only when the slot did not come at once.
+        # shows in the tree only when the slot did not come at once, and the time line
+        # counts the wait only then: asking the daemon for a slot is a round trip (a
+        # cold daemon's takes a tenth of a second), and a slot that came at once was
+        # no wait for one.
+        waited = False
+
         def queued() -> None:
+            nonlocal waited
+            waited = True
             _tree_event(spec, "queued")
             if on_queued is not None:
                 on_queued()
 
         waiting_from = time.perf_counter()
         with broker.held(spec.source_ref, on_queued=queued):
-            clock.queued = time.perf_counter() - waiting_from
+            clock.queued = time.perf_counter() - waiting_from if waited else 0.0
             _tree_event(spec, "building", phase="generate")
             try:
                 result = action(spec, run)
