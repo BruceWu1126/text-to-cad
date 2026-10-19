@@ -46,7 +46,6 @@ points, a text) has nothing to report and is not patched.
 from __future__ import annotations
 
 import bisect
-import contextlib
 import functools
 import itertools
 import threading
@@ -54,7 +53,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator
 
-from OCP.TopAbs import TopAbs_COMPOUND, TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX
+from OCP.TopAbs import TopAbs_COMPOUND, TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX, TopAbs_WIRE
 from OCP.TopExp import TopExp
 from OCP.TopoDS import TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedMapOfShape, TopTools_ListOfShape
@@ -71,6 +70,8 @@ _STRENGTH = {SAME: 0, MODIFIED: 1, GENERATED: 2}
 
 _LOCAL = threading.local()
 _ORDER = itertools.count(1)
+_ABSENT = object()
+_FACE_AND_BELOW = frozenset(int(kind) for kind in (TopAbs_FACE, TopAbs_WIRE, TopAbs_EDGE, TopAbs_VERTEX))
 _STATS = {"queries": 0, "raised": 0, "errors": 0}
 _installed = False
 
@@ -133,17 +134,26 @@ class _Origins(Mapping):
                                       for kinds in vectors.values() for _owners, ordinals in kinds)
 
     def __getitem__(self, key: tuple) -> tuple:
-        if key in self.sparse:
-            return self.sparse[key]
-        if not isinstance(key, tuple) or len(key) != 3:
+        found = self.get(key, _ABSENT)
+        if found is _ABSENT:
             raise KeyError(key)
+        return found
+
+    def get(self, key: tuple, default: Any = None) -> Any:
+        """``self[key]``, or ``default``: every element of a copied result is asked, and a
+        miss is no exception raised and caught."""
+        found = self.sparse.get(key, _ABSENT)
+        if found is not _ABSENT:
+            return found
+        if not isinstance(key, tuple) or len(key) != 3:
+            return default
         position, kind, ordinal = key
         kinds = self.vectors.get(position)
         if kinds is None or not isinstance(kind, int) or not 0 <= kind < len(KINDS) or not isinstance(ordinal, int):
-            raise KeyError(key)
+            return default
         owners, ordinals = kinds[kind]
         if not 0 < ordinal <= len(ordinals) or not ordinals[ordinal - 1]:
-            raise KeyError(key)
+            return default
         j = owners if isinstance(owners, int) else owners[ordinal - 1]
         return ((j, kind, ordinals[ordinal - 1], SAME, (1,)),)
 
@@ -262,17 +272,21 @@ class _Record:
         self.order = 0
 
 
-@contextlib.contextmanager
-def recording() -> Iterator[list[_Record]]:
+class recording:
     """The makers run on this thread until the block ends, in a list (``compose``'s third
-    argument). The list holds them alive; it is the feature call's, and gone with it."""
-    previous = getattr(_LOCAL, "records", None), getattr(_LOCAL, "index", None)
-    records: list[_Record] = []
-    _LOCAL.records, _LOCAL.index = records, {}
-    try:
-        yield records
-    finally:
-        _LOCAL.records, _LOCAL.index = previous
+    argument). The list holds them alive; it is the feature call's, and gone with it. A
+    plain context manager: every feature call opens one."""
+
+    __slots__ = ("_previous",)
+
+    def __enter__(self) -> list[_Record]:
+        self._previous = getattr(_LOCAL, "records", None), getattr(_LOCAL, "index", None)
+        records: list[_Record] = []
+        _LOCAL.records, _LOCAL.index = records, {}
+        return records
+
+    def __exit__(self, *exc_info: object) -> None:
+        _LOCAL.records, _LOCAL.index = self._previous
 
 
 def _record(maker: Any, adapter: "_Adapter") -> _Record | None:
@@ -296,7 +310,7 @@ def _note_inputs(record: _Record, values: Any) -> None:
                 record.inputs.append(value.Located(value.Location()))
         elif isinstance(value, TopTools_ListOfShape):
             record.inputs.extend(listed(value))
-        elif hasattr(value, "Length") and hasattr(value, "Value") and type(value).__name__.startswith("TopTools_"):
+        elif type(value).__name__.startswith("TopTools_") and hasattr(value, "Length") and hasattr(value, "Value"):
             for index in range(1, value.Length() + 1):
                 shape = value.Value(index)
                 if isinstance(shape, TopoDS_Shape) and not shape.IsNull():
@@ -596,8 +610,11 @@ def _then(first: str, second: str) -> str:
 
 def _held(shape: Any) -> set:
     """The TShapes a shape is made of whole: itself and every compound, solid, shell and
-    face it holds -- what one maker's result can reach another's, or a feature's, as."""
+    face it holds -- what one maker's result can reach another's, or a feature's, as. A
+    face, a wire, an edge or a vertex holds none of those but itself."""
     found = {shape.TShape()}
+    if int(shape.ShapeType()) in _FACE_AND_BELOW:
+        return found
     for kind in (TopAbs_COMPOUND, TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE):
         held = _map(shape, kind)
         found.update(held.FindKey(index).TShape() for index in range(1, held.Extent() + 1))
@@ -917,6 +934,17 @@ def _asked(query: Callable[[Any], list[tuple[Any, str]]], sub: Any) -> list[tupl
         return []
 
 
+def _identity() -> tuple:
+    from OCP.TopLoc import TopLoc_Location
+
+    value = TopLoc_Location().Transformation().Value
+    return tuple(value(row, column) for row in (1, 2, 3) for column in (1, 2, 3, 4))
+
+
+# The identity placement's transformation, as an edge's signature spells a placement.
+_IDENTITY = _identity()
+
+
 def _wire_copies(record: _Record, source: Callable[[Any, int], tuple | None],
                  report: Callable[[Any, tuple], None]) -> None:
     """``BRepBuilderAPI_MakeWire`` reports nothing, and copies each edge whose vertices it
@@ -928,32 +956,39 @@ def _wire_copies(record: _Record, source: Callable[[Any, int], tuple | None],
 
     def signature(edge: Any, alive: list) -> tuple | None:
         location = TopLoc_Location()
-        curve = BRep_Tool.Curve_s(TopoDS.Edge_s(edge), location, 0.0, 0.0)
+        cast = TopoDS.Edge_s(edge)
+        curve = BRep_Tool.Curve_s(cast, location, 0.0, 0.0)
         if curve is None:
             return None
         alive.append(curve)  # the wrapper kept alive, so the same curve answers as the same object
-        transform = location.Transformation()
-        return (id(curve), BRep_Tool.Range_s(TopoDS.Edge_s(edge)),
-                tuple(transform.Value(row, column) for row in (1, 2, 3) for column in (1, 2, 3, 4)))
+        if location.IsIdentity():
+            return id(curve), BRep_Tool.Range_s(cast), _IDENTITY
+        value = location.Transformation().Value
+        return (id(curve), BRep_Tool.Range_s(cast),
+                tuple(value(row, column) for row in (1, 2, 3) for column in (1, 2, 3, 4)))
 
-    alive: list = []
-    given: dict[tuple, Any] = {}
     held = TopTools_IndexedMapOfShape()
+    inputs = []
     for shape in record.inputs:
         edges = _map(shape, TopAbs_EDGE)
         for ordinal in range(1, edges.Extent() + 1):
             edge = edges.FindKey(ordinal)
             held.Add(edge)
-            key = signature(edge, alive)
-            if key is not None:
-                given.setdefault(key, edge)
+            inputs.append(edge)
+    result = _map(record.result, TopAbs_EDGE)
+    copies = [edge for edge in (result.FindKey(ordinal) for ordinal in range(1, result.Extent() + 1))
+              if not held.Contains(edge)]
+    if not copies:
+        return  # every edge of the wire is one it was given: it copied none
+    alive: list = []
+    given: dict[tuple, Any] = {}
+    for edge in inputs:
+        key = signature(edge, alive)
+        if key is not None:
+            given.setdefault(key, edge)
     if not given:
         return
-    edges = _map(record.result, TopAbs_EDGE)
-    for ordinal in range(1, edges.Extent() + 1):
-        edge = edges.FindKey(ordinal)
-        if held.Contains(edge):
-            continue
+    for edge in copies:
         key = signature(edge, alive)
         original = given.get(key) if key is not None else None
         if original is None:
