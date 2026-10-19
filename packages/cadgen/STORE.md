@@ -675,7 +675,11 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
   byte length, the mesh's decoded-bytes estimate and counts (and
   `unmeshedFaceCount` when a face could not be meshed), the table's counts. One
   probe answers whether a part's display data is stored: the entry is valid and
-  both objects are present at their sizes. Derivation (`parts._derive`) decodes
+  both objects are present at their sizes. A worker keeps each entry it read and
+  found valid under the entry file's settled fingerprint (§10) and parses it
+  again while the file keeps that fingerprint -- an entry is written by
+  replacing it -- still finding both objects at their sizes on every probe.
+  Derivation (`parts._derive`) decodes
   the component's BREP once, extracts its **topology facts** in memory
   (`_internal/topology_extract.py`: ordinal tables of its solids, faces and
   edges holding exactly what the mesher and the selector table read and no
