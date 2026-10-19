@@ -2022,6 +2022,30 @@ class TraceTest(KernelMemoCase):
         self.assertEqual(run2.identify(hot), cold_identity)
         self.assertRegex(cold_identity[0], r"^[0-9a-f]{64}$")
 
+    def test_a_hit_of_a_run_that_raised_names_as_a_cold_run_does(self) -> None:
+        """A run that raises after its constructions accounts nothing, so the next run
+        names what it hits from the miss's objects -- which hold the placements the
+        miss built them with, not the ones this run's ``move`` made again. The names
+        are a cold run's."""
+        from build123d import Box
+
+        def model(fail):
+            box = Box(4, 4, 4)  # make_box, then a move in place, then the compound build123d wraps it in
+            box.label = "u"
+            if fail:
+                raise RuntimeError("x")
+            return box
+
+        with self.assertRaises(RuntimeError):
+            _run(model, True)
+        hot, stats, run = _run(model, False)
+        self.assertEqual((stats["misses"], stats["hits"]), (0, 2))
+        hot_identity = run.identify(hot)
+        kernel_memo.clear()
+        cold, _, again = _run(model, False)
+        self.assertEqual(hot_identity, again.identify(cold))
+        self.assertEqual(hot_identity[1]["faces"][0], "f:model.make_box1.1")
+
 
 class ConstructionKeyTest(KernelMemoCase):
     def test_a_construction_key_follows_the_construction(self) -> None:

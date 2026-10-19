@@ -710,6 +710,13 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                     entry = None
         if entry is not None:
             result = _hit(state, entry, kind, function, args, kwargs, shapes)
+            # The hit's feature is the miss's: its results are the objects the miss made,
+            # so its inputs are the handles the miss was given -- the same TShapes at the
+            # same placements (the key says so), holding the locations those results were
+            # built from. A handle taken now would hold a location the model made again
+            # this run, equal in value and another object, which the kernel's ``IsSame``
+            # (a location is its datum) would not find among the results' elements.
+            inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
             feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
             # The very shapes the miss made, so the history it captured is theirs: no maker runs.
             feature.history = entry.history
@@ -762,7 +769,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         for index, effect in effects:
             effect.origin = (key_id, n, index)
         entry = _Entry(key=(key_id, n), inputs=given, snapshot=snapshot, effects=effects,
-                       history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0])
+                       history=feature.history, in_place=kind != "constructor" and bool(args) and result is args[0],
+                       handles=feature.handles)
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
         if _composes(label, kind):
@@ -2119,12 +2127,15 @@ def _result_shapes(result: Any) -> list:
 
 
 class _Entry:
-    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place")
+    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place", "handles")
 
     def __init__(self, *, key: tuple[int, int], inputs: list, snapshot: Any, effects: list,
-                 history: Any = None, in_place: bool = False) -> None:
+                 history: Any = None, in_place: bool = False, handles: list = ()) -> None:
         self.key = key
         self.inputs = inputs
+        # The inputs as the miss's feature was given them (``kernel_trace.Feature.handles``):
+        # what a hit's feature is given too, since its results are the miss's objects.
+        self.handles = list(handles)
         self.snapshot = snapshot
         self.effects = effects
         # What the makers reported of the results (``kernel_history.History``), captured on
