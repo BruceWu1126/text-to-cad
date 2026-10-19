@@ -1675,6 +1675,15 @@ Decided mechanically from the returned geometry and occurrence metadata.
   Native identity alone is insufficient: OCCT can mutate an existing TShape,
   and a nested label, color or placement can change independently. Verification
   reads private topology without altering caller geometry or meshing flags.
+  Inside a model run a decoded child's leaves are the kernel memo's (§9a), and
+  a check takes the digest an earlier check took of a leaf the memo holds while
+  everything the memo knows of it is as it was then -- the same ledger rows on
+  each of its sub-shapes, no change since that the memo could not replay
+  (`materialize.HeldDigests`) -- so an unchanged child's geometry is digested
+  once per worker, not at every publication that links it. A change the memo
+  does not see (a raw OCCT edit of a leaf a check has digested) is seen by
+  neither, as for a remembered component (§3, *Tree*); outside a run, and for
+  geometry the memo does not hold, every check reads every leaf.
   Copying a modified child cannot establish a clean baseline for the old tree.
   Root placement, label and color remain link overrides. A part's root color
   replaces its previous color; an assembly's root color inherits into otherwise

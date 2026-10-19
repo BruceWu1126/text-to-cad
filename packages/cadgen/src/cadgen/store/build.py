@@ -57,9 +57,11 @@ from cadgen.store.materialize import (
     PARTNER_TAG,
     ROOT_LOC_TAG,
     TREE_TAG,
+    HeldDigests,
     _ComponentIdentity,
     _location_from_matrix,
     materialized_children,
+    subshape_hashes,
 )
 from cadgen.store.objects import claim_object, put_object, read_verified_object
 from cadgen.store.trees import COMPONENT_OBJECTS, put_tree
@@ -83,9 +85,10 @@ class Namer(Protocol):
         """The feature of the run that made ``tshape``, or None."""
 
 
-def _tagged_intact(node: Any) -> str | None:
+def _tagged_intact(node: Any, held: HeldDigests | None = None) -> str | None:
     """The tree hash when ``node`` is a materialized child still carrying the
-    geometry it was materialized with (placement may differ), else None."""
+    geometry it was materialized with (placement may differ), else None. ``held`` is
+    the publication's reading of the kernel memo its checks share (``HeldDigests``)."""
     tag = getattr(node, TREE_TAG, None)
     if not tag:
         return None
@@ -94,7 +97,7 @@ def _tagged_intact(node: Any) -> str | None:
     if intact is None:
         return None
     try:
-        return str(tag) if intact(node) else None
+        return str(tag) if intact(node, held=held) else None
     except Exception:  # noqa: BLE001 - an odd wrapper is not intact
         return None
 
@@ -619,7 +622,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
         if baseline is None:
             baseline = getattr(getattr(node, PARTNER_TAG, None), "baseline", None)
         if path != "o1":
-            tagged = _tagged_intact(node)
+            tagged = _tagged_intact(node, held)
             if tagged is not None:
                 return _add_link(node, world_loc, path, tagged)
         nested_tree = getattr(node, "_occurrence_tree", None)
@@ -650,13 +653,15 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
         }
 
     progress.phase(PHASE_PACKAGE)
+    # What every partner check of this walk reads of the kernel memo, read once.
+    held = HeldDigests()
     holder = getattr(compound, PARTNER_TAG, None)
     baseline = getattr(holder, "baseline", None)
     verified_baseline = None
     verify = getattr(holder, "verified_baseline", None)
     if verify is not None:
         try:
-            verified_baseline = verify(compound)
+            verified_baseline = verify(compound, held=held)
         except Exception:  # noqa: BLE001 - unverifiable geometry takes the canonical slow path
             verified_baseline = None
     if single_component:
@@ -683,6 +688,7 @@ def _walk_compound(compound: Any, *, root_name: str, progress: Any, namer: Namer
         # A native compound with no wrapper children (a fuse whose pieces do not
         # all touch) walks to one leaf: it is that part, not a childless assembly.
         root["nodeType"] = "assembly" if root.get("children") else "part"
+    held.keep()
     if not occurrences and not links:
         raise RuntimeError(f"model {root_name!r} has no geometry")
     # The root is the model: it goes by the tree's label, whatever the compound was
@@ -1117,7 +1123,7 @@ def _pairs_then(remembered: _Remembered, key: tuple, node: Any) -> tuple[Any, di
     with _REMEMBERED_LOCK:
         subshapes, rows, ledger = remembered.subshapes, remembered.rows, remembered.ledger
     if subshapes is None:
-        subshapes = _subshape_hashes(node)
+        subshapes = subshape_hashes(node)
         snapshot, keys = ledger
         rows = {hashed: snapshot[hashed] for hashed in keys.intersection(subshapes)}
         with _REMEMBERED_LOCK:
@@ -1144,18 +1150,3 @@ def _resolved(walk: _Walk, namer: Namer, names: Mapping[str, int]) -> dict[str, 
         walk.places = {history: index for history, index in places.items() if history not in shared}
     resolved = {name: walk.places.get(history) for name, history in names.items()}
     return None if None in resolved.values() else resolved
-
-
-def _subshape_hashes(node: Any) -> Any:
-    """The hash of each of ``node``'s sub-shapes (itself included) at the identity
-    placement: a function of its TShape alone, as the ledger's snapshot hashes them."""
-    from array import array
-
-    from OCP.TopExp import TopExp
-    from OCP.TopLoc import TopLoc_Location
-    from OCP.TopTools import TopTools_IndexedMapOfShape
-
-    mapped = TopTools_IndexedMapOfShape()
-    TopExp.MapShapes_s(node.wrapped, mapped)
-    identity = TopLoc_Location()
-    return array("q", (hash(mapped.FindKey(ordinal).Located(identity)) for ordinal in range(1, mapped.Extent() + 1)))
