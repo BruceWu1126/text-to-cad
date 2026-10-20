@@ -415,5 +415,76 @@ class PlainReadTest(unittest.TestCase):
         self.assertAlmostEqual(high.X() - low.X(), 5.0, places=3)
 
 
+KEYED = """
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import read_json, xbf
+
+HERE = Path(__file__).parent
+GAP = {gap}
+
+
+def config():
+    return read_json(HERE / "data.json")
+
+
+@xbf
+def keyed():
+    return bd.Box(config()["width"], 1, 1)
+
+
+@xbf
+def holder():
+    return bd.Compound(children=[keyed(), bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
+"""
+
+
+class KeyedReadTest(unittest.TestCase):
+    """A body that reads its configuration through the engine (``read_json``) is keyed by
+    the file's bytes: replayed while they stay, run when they change."""
+
+    def setUp(self) -> None:
+        memo.clear()
+        self.addCleanup(memo.clear)
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-keyed-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "keyed.py"
+
+    def build(self, width: int, gap: int = 10) -> dict:
+        for path, text in ((self.script, textwrap.dedent(KEYED.format(gap=gap))),
+                           (self.folder / "data.json", json.dumps({"width": width}))):
+            if not path.exists() or path.read_text(encoding="utf-8") != text:
+                path.write_text(text, encoding="utf-8")
+                os.utime(path, ns=(time.time_ns(), time.time_ns()))
+        report = engine_build.build(self.script, ["holder"], cwd=self.folder)[-1]
+        self.assertTrue(report["ok"], report)
+        self.assertEqual(report["retention"]["fallbacks"], {}, "no body reads a file past the engine")
+        return report
+
+    def width(self) -> float:
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+
+        bounds = Bnd_Box()
+        BRepBndLib.Add_s(document.load(self.folder / "holder.xbf").prototypes[0].shape, bounds)
+        return bounds.CornerMax().X() - bounds.CornerMin().X()
+
+    def test_a_body_reading_json_through_the_engine_replays_until_the_file_changes(self) -> None:
+        self.build(3)
+        self.assertEqual(_counts(self.build(3)), (0, 2), "a no-op replays the holder and the reader")
+        changed = self.build(5)
+        self.assertEqual(_counts(changed), (2, 0), "the file's bytes changed: the reader runs, and its holder")
+        self.assertGreater(changed["memo"]["misses"], 0)
+        self.assertAlmostEqual(self.width(), 5.0, places=3)
+        self.assertEqual(_counts(self.build(5)), (0, 2))
+        # The holder's code and the file change together: the holder runs, and the reader's
+        # check reads the new file inside it -- the engine's read, not the holder's, so the
+        # holder stays retained.
+        self.assertEqual(_counts(self.build(7, gap=12)), (2, 0))
+        self.assertEqual(_counts(self.build(7, gap=12)), (0, 2))
+        self.assertAlmostEqual(self.width(), 7.0, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

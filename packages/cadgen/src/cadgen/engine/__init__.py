@@ -21,10 +21,17 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["glb", "paint", "read_step", "step", "stl", "threemf", "xbf"]
+__all__ = ["glb", "paint", "read_bytes", "read_json", "read_step", "read_text", "step", "stl", "threemf", "xbf"]
+
+# The files a model reads through the engine, keyed by their bytes (``reads``).
+_READS = frozenset({"read_bytes", "read_json", "read_text"})
 
 
 def __getattr__(name: str) -> Any:
+    if name in _READS:
+        from cadgen.engine import reads
+
+        return getattr(reads, name)
     if name in __all__:
         from cadgen.engine import model
 

@@ -195,8 +195,9 @@ _HERE = Path(__file__).resolve().parent
 _ENGINE = _HERE.parent
 _OWN = (_ENGINE,)
 # The functions a model calls (``cadgen.engine.model``: its decorators, ``read_step``,
-# ``paint``) count as build123d does: what they run for the model is the model's call.
-_API = _ENGINE / "model.py"
+# ``paint``; ``cadgen.engine.reads``: ``read_bytes``, ``read_text``, ``read_json``) count
+# as build123d does: what they run for the model is the model's call.
+_API = frozenset({_ENGINE / "model.py", _ENGINE / "reads.py"})
 _NOT_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # What a digest of a name looks like at its end, which a name written as it is never has.
@@ -1969,7 +1970,7 @@ def _classify(filename: str) -> str:
         path = Path(filename).resolve()
     except (OSError, RuntimeError):
         return "other"
-    if path.parent == _HERE or path == _API:
+    if path.parent == _HERE or path in _API:
         return "other"
     if any(root in path.parents for root in _OWN):
         return "own"

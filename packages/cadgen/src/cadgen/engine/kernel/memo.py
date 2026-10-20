@@ -272,8 +272,9 @@ _HELPER_TARGETS = (
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
 _IMPORTER_TARGETS = ("import_step", "import_brep")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
-# and the engine's own readers (``wrap_function``).
-_FILE_OPS = {"import_step", "import_brep", "read_step"}
+# and the engine's own readers (``wrap_function``: ``read_step``, and ``read_bytes``
+# under ``read_text`` and ``read_json``).
+_FILE_OPS = {"import_step", "import_brep", "read_step", "read_bytes"}
 _BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
@@ -930,12 +931,21 @@ def _replayable(record: _Body) -> bool:
                     pending.append(event[1])
                 elif _MEMO.get(event[1].key) is not event[1]:
                     return False
-    for check, expected in record.log.checks:
-        try:
-            if check() != expected:
+    # A check reads a file the body read through the engine, when its stat changed: the
+    # engine's own read, never one of the running body's (``_audited``).
+    state = getattr(_LOCAL, "run", None)
+    if state is not None:
+        state.depth += 1
+    try:
+        for check, expected in record.log.checks:
+            try:
+                if check() != expected:
+                    return False
+            except _Unkeyable:
                 return False
-        except _Unkeyable:
-            return False
+    finally:
+        if state is not None:
+            state.depth -= 1
     return True
 
 
@@ -2579,7 +2589,7 @@ def _snapshot(value: Any) -> Any:
         return _ShapeState(value)
     if isinstance(value, (list, tuple)):
         return _Sequence(type(value), [_snapshot(item) for item in value])
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
         return _Literal(value)
     raise _Unkeyable(f"a result that cannot be kept: {type(value).__name__}")
 

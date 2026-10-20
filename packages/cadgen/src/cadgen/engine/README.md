@@ -41,6 +41,7 @@ def arm():
 | Module | What it is |
 | --- | --- |
 | `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run |
+| `reads.py` | the files a model reads through the engine: `read_bytes`, `read_text`, `read_json`, keyed by their bytes |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer; binary STL, GLB and 3MF from the engine's tessellation |
@@ -257,7 +258,10 @@ A model body is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes;
+- every file it reads through the engine, by its bytes: `read_step`, and
+  `read_bytes`, `read_text` and `read_json` for a configuration or a table
+  (`reads.py`; the bytes are the memo's entry, the text or the value decoded
+  from them on every call, so a body may change what it was handed);
 - the engine's own code.
 
 A module falls back to its bytes, and those of every first-party module it
@@ -287,7 +291,7 @@ nothing. An edit to the root re-runs the root alone. A changed input file
 re-runs the body that reads it and the bodies that hold its result. The
 report's `memo` counts `bodies_run` and `bodies_skipped`.
 `CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body that opens a
-file itself, past the engine's readers (a CSV, a JSON, `np.loadtxt`), is heard: an
+file itself, past the engine's readers (`open`, `Path.read_text`, `np.loadtxt`), is heard: an
 audit hook on `open` (`kernel/memo.py`, `_audited`; Python's own files, a `.py` or
 `.pyc` or one of the standard library or an installed package, aside) makes it run
 on every build, as a plain kernel call does, and the report's `retention.fallbacks`
