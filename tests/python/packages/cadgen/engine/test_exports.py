@@ -58,6 +58,20 @@ class ExportTest(unittest.TestCase):
     def placed_triangles(self) -> int:
         return sum(self.triangles[self.loaded.prototypes[i.prototype].key] for i in self.loaded.instances)
 
+    def test_an_export_meshes_each_part_from_its_read_back_bytes(self) -> None:
+        # What the server and a worker mesh a key from: the bytes the document holds of it,
+        # as read -- never a live shape's further round trip, which can move it by a last bit.
+        from unittest import mock
+
+        exports._MESHES.clear()
+        given: list = []
+        real = mesh.mesh_shape
+        with mock.patch.object(mesh, "mesh_shape", side_effect=lambda shape, **kw: given.append(shape) or real(shape, **kw)):
+            exports.write_from_loaded("stl", self.loaded, self.folder / "read-back.stl")
+        expected = sorted(mesh.shape_bytes(p.shape, read=True) for p in self.loaded.prototypes)
+        self.assertTrue(all(isinstance(shape, bytes) for shape in given), "meshed from bytes")
+        self.assertEqual(sorted(given), expected)
+
     def test_stl_holds_every_placement_s_triangles(self) -> None:
         path = self.folder / "board.stl"
         exports.write_from_loaded("stl", self.loaded, path)

@@ -120,7 +120,11 @@ part's structure lists it under `unmeshed` (ordinals) with a verdict under
 part's mesh), then `BRepCheck_Analyzer`'s on that face ("BRepMesh:
 SelfIntersectingWire; BRepCheck: valid") -- and the rest of the part is drawn.
 A part is meshed from its binary shape bytes read into a fresh shape, so its
-mesh is a function of those bytes alone.
+mesh is a function of those bytes alone. Those are its read-back bytes, the
+bytes its document holds of it. A build's live part is written and read once to
+get them, as saving its document does. A part read from a document (the served
+document, `cadgen xbf export`) is written as it was read. So a worker, the
+server and an export all mesh one geometry key from the same bytes.
 
 Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
 2 tangent (two faces meeting at least G1), 3 seam (a face closing on itself),

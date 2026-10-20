@@ -60,7 +60,12 @@ def write_from_loaded(kind: str, loaded: Any, path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     if kind == "step":
         return write_step(loaded.doc, path)
-    parts = [(p.key, p.shape, p.name, p.color, p.face_colors) for p in loaded.prototypes]
+    from cadgen.engine.mesh import shape_bytes
+
+    # A part read back from its document is meshed from its bytes as read (``read``): a
+    # live shape's extra round trip would move it by a last bit, and mesh it differently
+    # from the worker and the served document, which mesh the same bytes.
+    parts = [(p.key, shape_bytes(p.shape, read=True), p.name, p.color, p.face_colors) for p in loaded.prototypes]
     placed = []
     for instance in loaded.instances:
         matrix = np.array(instance.matrix, dtype=float).reshape(4, 4).T
