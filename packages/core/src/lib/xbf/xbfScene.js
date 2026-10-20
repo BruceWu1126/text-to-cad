@@ -225,7 +225,9 @@ export function createXbfScene(THREE, document) {
     }
     return found;
   };
-  const lineMaterials = Object.fromEntries(XBF_EDGE_LINES.map(line => [line, new THREE.LineBasicMaterial({ color: 0x253443 })]));
+  // Edges draw after the surfaces, in the transparent pass (a see-through X-ray surface would
+  // otherwise wash out the edges under it), as a STEP's edge pass does.
+  const lineMaterials = Object.fromEntries(XBF_EDGE_LINES.map(line => [line, new THREE.LineBasicMaterial({ color: 0x253443, transparent: true })]));
   const hiddenDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
 
   // A prototype's surface geometry: the part's, or for painted faces one over its buffers with
@@ -341,8 +343,8 @@ export function createXbfScene(THREE, document) {
   const overlayObjects = new Map();
   // A lit part's edges, as a STEP part's: in the selection's colour, or the hover's.
   const partLineMaterials = {
-    selected: new THREE.LineBasicMaterial({ color: INK.highlightColor }),
-    hovered: new THREE.LineBasicMaterial({ color: REFERENCE_HOVER_COLOR })
+    selected: new THREE.LineBasicMaterial({ color: INK.highlightColor, transparent: true }),
+    hovered: new THREE.LineBasicMaterial({ color: REFERENCE_HOVER_COLOR, transparent: true })
   };
 
   const applyVisibility = () => {
@@ -388,7 +390,11 @@ export function createXbfScene(THREE, document) {
     const selected = indicesOf(visible(partInk.selected)), hovered = indicesOf(visible(partInk.hovered));
     for (const entry of instances) {
       const state = selected.has(entry.index) ? "selected" : hovered.has(entry.index) ? "hovered" : null;
-      for (const [line, object] of Object.entries(entry.lines)) object.material = state ? partLineMaterials[state] : lineMaterials[line];
+      for (const [line, object] of Object.entries(entry.lines)) {
+        object.material = state ? partLineMaterials[state] : lineMaterials[line];
+        // Over the lit surface, which is drawn after its neighbours (`sceneHighlight.js`).
+        object.renderOrder = state ? 24 : 1;
+      }
     }
     applyVisibility();
   };
