@@ -150,6 +150,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             body_started = time.perf_counter()
             tally = dict(run.tally)
             keys_before = context.key_seconds
+            run.reads.clear()
+            run.unread.clear()
             try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
@@ -164,14 +166,19 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             retention = {"keys": round(context.key_seconds - keys_before, 4),
                          "fallbacks": {name: list(reasons) for name, reasons in context.fallbacks.items()
                                        if name == model.identity or name in context.timings}}
-            # A body that opened a file past the engine's readers always runs: say which.
-            for body_name, paths in run.reads.items():
-                body_script, _, function = body_name.rpartition("::")
-                identity = f"{Path(body_script).name}::{function}"
-                if identity == model.identity or identity in context.timings:
-                    retention["fallbacks"].setdefault(identity, []).extend(
-                        f"reads {_shown(Path(path), Path(body_script).parent)} itself, not through the engine's"
-                        " readers (read_text, read_json, read_bytes): it runs on every build" for path in paths)
+            # The files each body this model ran or replayed read itself, its inputs by their
+            # bytes; and one it read that is no regular file, which keeps it running: say which.
+            retention["reads"] = {}
+            for table, into in ((run.reads, None), (run.unread, "fallbacks")):
+                for body_name, paths in table.items():
+                    body_script, _, function = body_name.rpartition("::")
+                    identity = f"{Path(body_script).name}::{function}"
+                    shown_paths = [_shown(Path(path), Path(body_script).parent) for path in paths]
+                    if into is None:
+                        retention["reads"][identity] = shown_paths
+                    else:
+                        retention["fallbacks"].setdefault(identity, []).extend(
+                            f"reads {path}, not a regular file: it runs on every build" for path in shown_paths)
             reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity}})

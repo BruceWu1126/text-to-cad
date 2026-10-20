@@ -275,9 +275,8 @@ _HELPER_TARGETS = (
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
 _IMPORTER_TARGETS = ("import_step", "import_brep")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
-# and the engine's own readers (``wrap_function``: ``read_step``, and ``read_bytes``
-# under ``read_text`` and ``read_json``).
-_FILE_OPS = {"import_step", "import_brep", "read_step", "read_bytes"}
+# and the engine's own reader (``wrap_function``: ``read_step``).
+_FILE_OPS = {"import_step", "import_brep", "read_step"}
 _BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
@@ -369,12 +368,15 @@ def _audit_reads() -> None:
 
 
 def _audited(event: str, args: tuple) -> None:
-    """An ``open`` while a body runs, of a file none of the engine's readers keys -- not
-    one a patched call reads (those run deeper than the body), not Python's own (a ``.py``
-    or ``.pyc``, a file of the standard library or an installed package), and for reading:
-    the body read it plain, so its bytes are in no key and replaying it could hand back a
-    stale result. The body is then no longer retained -- it always runs, as one that ran a
-    kernel call plain does -- and the file is what the build reports of it (``reads``)."""
+    """An ``open`` for reading while a body runs, of a file none of the engine's readers
+    keys -- not one a patched call reads (those run deeper than the body), not Python's own
+    (a ``.py`` or ``.pyc``, a file of the standard library or an installed package): the
+    body read it itself, so the file is one of its inputs. A regular file is noted with its
+    stat as it was opened, or as missing (a body may try a file and go on without it), and
+    is held to its bytes when the body returns (``_ReadInput``); anything else -- a pipe, a
+    socket, a device -- has no bytes to hold, and the body is no longer retained: it always
+    runs, and the build reports why (``unread``). An open for writing is an output: not
+    heard."""
     if event != "open":
         return
     state = getattr(_LOCAL, "run", None)
@@ -395,9 +397,95 @@ def _audited(event: str, args: tuple) -> None:
             return
     except Exception:  # noqa: BLE001 - an audit hook never fails the open it hears
         return
+    import stat as stat_module
+
+    path = os.path.abspath(name)
     log = state.bodies[-1]
-    log.retainable = False
-    log.reads.append(os.path.abspath(name))
+    if path in log.reads:
+        return
+    try:
+        found = os.stat(path)
+    except FileNotFoundError:
+        log.reads[path] = None
+        return
+    except OSError:
+        found = None
+    if found is None or not stat_module.S_ISREG(found.st_mode):
+        log.retainable = False
+        log.unread.append(path)
+        return
+    log.reads[path] = (found.st_size, found.st_mtime_ns)
+
+
+class _ReadInput:
+    """A file a body read itself (``_audited``), held to its bytes: the stat and blake2b
+    digest it had when the body returned, or ``None`` for a file the body found missing.
+    Called on the next build (``_replayable``) it answers the file's digest now: the stat
+    first -- the same size and mtime are the same bytes, no read -- else the bytes hashed
+    again, and a same digest under a new stat keeps the new stat."""
+
+    __slots__ = ("path", "size", "mtime_ns", "digest")
+
+    def __init__(self, path: str, size: int | None, mtime_ns: int | None, digest: str | None) -> None:
+        self.path, self.size, self.mtime_ns, self.digest = path, size, mtime_ns, digest
+
+    def __call__(self) -> str | None:
+        import stat as stat_module
+
+        try:
+            found = os.stat(self.path)
+        except FileNotFoundError:
+            return None
+        if not stat_module.S_ISREG(found.st_mode):
+            raise _Unkeyable(f"{self.path} is no longer a regular file")
+        if (found.st_size, found.st_mtime_ns) == (self.size, self.mtime_ns):
+            return self.digest
+        digest = _read_digest(self.path)
+        if digest == self.digest:
+            self.size, self.mtime_ns = found.st_size, found.st_mtime_ns
+        return digest
+
+
+def _read_digest(path: str) -> str:
+    hasher = hashlib.blake2b(digest_size=32)
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 22), b""):
+                hasher.update(chunk)
+    except OSError as exc:
+        raise _Unkeyable(str(exc)) from exc
+    return hasher.hexdigest()
+
+
+def _hold_reads(log: "_BodyLog", state: "_Run") -> None:
+    """When a body returns: each regular file it read held to its bytes (``_ReadInput``),
+    one of its checks. A file whose stat moved while the body ran may have been read in two
+    states: the body is not retained. The engine's own reads here are not the body's."""
+    state.depth += 1
+    try:
+        for path, opened in log.reads.items():
+            if opened is None:
+                if os.path.exists(path):
+                    log.retainable = False  # appeared while the body ran
+                    continue
+                held = _ReadInput(path, None, None, None)
+            else:
+                try:
+                    found = os.stat(path)
+                except OSError:
+                    log.retainable = False
+                    continue
+                if (found.st_size, found.st_mtime_ns) != opened:
+                    log.retainable = False
+                    continue
+                try:
+                    held = _ReadInput(path, found.st_size, found.st_mtime_ns, _read_digest(path))
+                except _Unkeyable:
+                    log.retainable = False
+                    continue
+            log.checks.append((held, held.digest))
+    finally:
+        state.depth -= 1
 
 
 def _library_file(name: str) -> bool:
@@ -653,8 +741,10 @@ class _Run:
         # this run has run or replayed: each is in the trace once.
         self.bodies: list[_BodyLog] = []
         self.done: set[str] = set()
-        # Per body that opened a file past the engine's readers, the files: it always runs.
+        # Per body, the files it read itself (``_audited``): its inputs by their bytes, and
+        # those that are no regular file, which keep it running.
         self.reads: dict[str, list[str]] = {}
+        self.unread: dict[str, list[str]] = {}
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -818,7 +908,7 @@ class _BodyLog:
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -826,8 +916,10 @@ class _BodyLog:
         self.keys: list[tuple] = []
         self.ids = array.array("q")
         self.retainable = True
-        # The files the body opened itself, past the engine's readers (``_audited``).
-        self.reads: list[str] = []
+        # The files the body read itself (``_audited``): each regular one with its stat when
+        # opened (``None``: missing), and those that are no regular file.
+        self.reads: dict[str, tuple | None] = {}
+        self.unread: list[str] = []
 
 
 class _Body:
@@ -883,7 +975,10 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
     finally:
         state.bodies.pop()
     if log.reads:
-        state.reads[name] = list(dict.fromkeys(log.reads))
+        _hold_reads(log, state)
+        state.reads[name] = list(log.reads)
+    if log.unread:
+        state.unread[name] = list(dict.fromkeys(log.unread))
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
     snapshot = None
@@ -920,6 +1015,8 @@ def used(name: str) -> None:
     else:
         parent.events.append(("body", record))
         parent.checks.extend(record.log.checks)
+        if record.log.reads:
+            state.reads[name] = list(record.log.reads)
 
 
 def _replayable(record: _Body) -> bool:
@@ -988,6 +1085,8 @@ def _replay(record: _Body, state: _Run) -> Any:
             _KEY_IDS.move_to_end(key)
     record.generation = generation
     state.done.add(record.name)
+    if record.log.reads:
+        state.reads[record.name] = list(record.log.reads)
     _STATS["bodies_skipped"] += 1
     state.tally["bodies_skipped"] += 1
     return record.snapshot.restore()

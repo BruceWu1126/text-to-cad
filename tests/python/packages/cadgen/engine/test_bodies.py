@@ -359,131 +359,141 @@ class SymbolsTest(SymbolsCase):
 
 READER = """
 import json
+import os
 from pathlib import Path
 
 import build123d as bd
 from cadgen.engine import xbf
 
 HERE = Path(__file__).parent
-
-
-@xbf
-def plain():
-    return bd.Box(1, 1, 1)
-
-
-@xbf
-def reader():
-    width = json.loads((HERE / "data.json").read_text())["width"]
-    return bd.Box(width, 1, 1)
-"""
-
-
-class PlainReadTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.folder = Path(tempfile.mkdtemp(prefix="engine-reads-")).resolve()
-        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
-
-    def test_a_body_that_opens_a_file_itself_runs_on_every_build(self) -> None:
-        script = self.folder / "reader.py"
-        script.write_text(textwrap.dedent(READER), encoding="utf-8")
-        data = self.folder / "data.json"
-
-        def build(width: int) -> dict[str, dict]:
-            data.write_text(json.dumps({"width": width}), encoding="utf-8")
-            reports = engine_build.build(script, cwd=self.folder)
-            self.assertTrue(all(report["ok"] for report in reports), reports)
-            return {report["model"].rsplit("::", 1)[-1]: report for report in reports}
-
-        build(3)
-        again = build(3)
-        # The body that reads no file is replayed; the reader runs, and the report says why.
-        self.assertEqual(again["plain"]["memo"]["bodies_skipped"], 1)
-        self.assertEqual(again["plain"]["retention"]["fallbacks"], {})
-        self.assertEqual(again["reader"]["memo"]["bodies_run"], 1)
-        reasons = again["reader"]["retention"]["fallbacks"]["reader.py::reader"]
-        self.assertTrue(any("data.json" in reason for reason in reasons), reasons)
-        # So an edit to the file it reads is built, never a stale replay.
-        build(5)
-        box = document.load(self.folder / "reader.xbf").prototypes[0].shape
-        from OCP.Bnd import Bnd_Box
-        from OCP.BRepBndLib import BRepBndLib
-
-        bounds = Bnd_Box()
-        BRepBndLib.Add_s(box, bounds)
-        low, high = bounds.CornerMin(), bounds.CornerMax()
-        self.assertAlmostEqual(high.X() - low.X(), 5.0, places=3)
-
-
-KEYED = """
-from pathlib import Path
-
-import build123d as bd
-from cadgen.engine import read_json, xbf
-
-HERE = Path(__file__).parent
 GAP = {gap}
 
 
 def config():
-    return read_json(HERE / "data.json")
+    try:
+        with open(HERE / "data.json", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return {{"width": 2}}
 
 
 @xbf
-def keyed():
+def reader():
     return bd.Box(config()["width"], 1, 1)
 
 
 @xbf
 def holder():
-    return bd.Compound(children=[keyed(), bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
+    return bd.Compound(children=[reader(), bd.Pos(GAP, 0, 0) * bd.Box(1, 1, 1)])
+
+
+@xbf
+def writer():
+    with open(HERE / "note.txt", "w", encoding="utf-8") as handle:
+        handle.write("built")
+    return bd.Box(1, 1, 1)
+
+
+@xbf
+def piped():
+    handle = os.open(HERE / "pipe", os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        data = os.read(handle, 16)
+    finally:
+        os.close(handle)
+    return bd.Box(float(data or 4), 1, 1)
 """
 
 
-class KeyedReadTest(unittest.TestCase):
-    """A body that reads its configuration through the engine (``read_json``) is keyed by
-    the file's bytes: replayed while they stay, run when they change."""
+class ReadTracingTest(unittest.TestCase):
+    """A file a body reads itself is one of its inputs, by its bytes (``_audited``,
+    ``_ReadInput``): the body is replayed while they stay and runs when they change or the
+    file goes; a file opened for writing is no input; a pipe keeps the body running."""
 
     def setUp(self) -> None:
         memo.clear()
         self.addCleanup(memo.clear)
-        self.folder = Path(tempfile.mkdtemp(prefix="engine-keyed-")).resolve()
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-reads-")).resolve()
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
-        self.script = self.folder / "keyed.py"
+        self.script = self.folder / "reader.py"
+        self.data = self.folder / "data.json"
 
-    def build(self, width: int, gap: int = 10) -> dict:
-        for path, text in ((self.script, textwrap.dedent(KEYED.format(gap=gap))),
-                           (self.folder / "data.json", json.dumps({"width": width}))):
-            if not path.exists() or path.read_text(encoding="utf-8") != text:
-                path.write_text(text, encoding="utf-8")
-                os.utime(path, ns=(time.time_ns(), time.time_ns()))
-        report = engine_build.build(self.script, ["holder"], cwd=self.folder)[-1]
+    def put(self, path: Path, text: str) -> None:
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
+            os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def build(self, width: int | None, gap: int = 10, model: str = "holder") -> dict:
+        self.put(self.script, textwrap.dedent(READER.format(gap=gap)))
+        if width is None:
+            self.data.unlink(missing_ok=True)
+        else:
+            self.put(self.data, json.dumps({"width": width}))
+        report = engine_build.build(self.script, [model], cwd=self.folder)[-1]
         self.assertTrue(report["ok"], report)
-        self.assertEqual(report["retention"]["fallbacks"], {}, "no body reads a file past the engine")
         return report
 
-    def width(self) -> float:
+    def width(self, model: str = "holder") -> float:
         from OCP.Bnd import Bnd_Box
         from OCP.BRepBndLib import BRepBndLib
 
         bounds = Bnd_Box()
-        BRepBndLib.Add_s(document.load(self.folder / "holder.xbf").prototypes[0].shape, bounds)
+        BRepBndLib.Add_s(document.load(self.folder / f"{model}.xbf").prototypes[0].shape, bounds)
         return bounds.CornerMax().X() - bounds.CornerMin().X()
 
-    def test_a_body_reading_json_through_the_engine_replays_until_the_file_changes(self) -> None:
+    def test_a_body_that_loads_a_file_replays_on_a_no_op(self) -> None:
+        first = self.build(3)
+        self.assertEqual(first["retention"]["reads"], {"reader.py::reader": ["data.json"]})
+        self.assertEqual(first["retention"]["fallbacks"], {})
+        again = self.build(3)
+        self.assertEqual(_counts(again), (0, 2), "a no-op replays the holder and the reader")
+        self.assertEqual(again["retention"]["reads"], {"reader.py::reader": ["data.json"]})
+
+    def test_it_runs_when_the_file_s_bytes_change(self) -> None:
         self.build(3)
-        self.assertEqual(_counts(self.build(3)), (0, 2), "a no-op replays the holder and the reader")
         changed = self.build(5)
-        self.assertEqual(_counts(changed), (2, 0), "the file's bytes changed: the reader runs, and its holder")
-        self.assertGreater(changed["memo"]["misses"], 0)
+        self.assertEqual(_counts(changed), (2, 0), "the reader runs, and its holder")
         self.assertAlmostEqual(self.width(), 5.0, places=3)
         self.assertEqual(_counts(self.build(5)), (0, 2))
         # The holder's code and the file change together: the holder runs, and the reader's
-        # check reads the new file inside it -- the engine's read, not the holder's, so the
-        # holder stays retained.
+        # check reads the new file inside it -- the engine's read, not the holder's.
         self.assertEqual(_counts(self.build(7, gap=12)), (2, 0))
         self.assertEqual(_counts(self.build(7, gap=12)), (0, 2))
         self.assertAlmostEqual(self.width(), 7.0, places=3)
+
+    def test_a_file_touched_with_the_same_bytes_is_hashed_once(self) -> None:
+        self.build(3)
+        os.utime(self.data, ns=(time.time_ns() + 10**9, time.time_ns() + 10**9))
+        with mock.patch.object(memo, "_read_digest", wraps=memo._read_digest) as digest:
+            self.assertEqual(_counts(self.build(3)), (0, 2), "the same bytes under a new mtime")
+            self.assertEqual(digest.call_count, 1)
+            self.assertEqual(_counts(self.build(3)), (0, 2))
+            self.assertEqual(digest.call_count, 1, "the new stat was kept: no second hash")
+
+    def test_it_runs_when_the_file_is_deleted_and_when_it_comes_back(self) -> None:
+        self.build(3)
+        gone = self.build(None)
+        self.assertEqual(_counts(gone), (2, 0))
+        self.assertAlmostEqual(self.width(), 2.0, places=3)
+        self.assertEqual(_counts(self.build(None)), (0, 2), "still missing: replayed")
+        self.assertEqual(_counts(self.build(6)), (2, 0), "the file came back")
+        self.assertAlmostEqual(self.width(), 6.0, places=3)
+
+    def test_a_file_opened_for_writing_changes_nothing(self) -> None:
+        first = self.build(3, model="writer")
+        self.assertEqual(first["retention"]["reads"], {})
+        self.assertEqual(first["retention"]["fallbacks"], {})
+        self.assertEqual(_counts(self.build(3, model="writer")), (0, 1))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "no named pipes on this platform")
+    def test_a_pipe_read_always_runs_and_is_reported(self) -> None:
+        os.mkfifo(self.folder / "pipe")
+        self.build(3, model="piped")
+        again = self.build(3, model="piped")
+        self.assertEqual(_counts(again), (1, 0))
+        self.assertEqual(again["retention"]["reads"], {})
+        self.assertEqual(again["retention"]["fallbacks"],
+                         {"reader.py::piped": ["reads pipe, not a regular file: it runs on every build"]})
 
 
 if __name__ == "__main__":

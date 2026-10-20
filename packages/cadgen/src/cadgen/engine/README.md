@@ -96,7 +96,6 @@ def hinge():
 | `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
-| `reads.py` | the files a model reads through the engine: `read_bytes`, `read_text`, `read_json`, keyed by their bytes |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
@@ -388,11 +387,26 @@ A model body is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes: `read_step`, and
-  `read_bytes`, `read_text` and `read_json` for a configuration or a table
-  (`reads.py`; the bytes are the memo's entry, the text or the value decoded
-  from them on every call, so a body may change what it was handed);
+- every file it reads through the engine, by its bytes: `read_step`;
+- every file it reads itself, observed, by its bytes: an audit hook on `open`
+  (`kernel/memo.py`, `_audited`) hears each file the body opens for reading
+  (`open`, `json.load`, `Path.read_text`, `np.loadtxt`), Python's own files
+  aside (a `.py` or `.pyc`, one of the standard library or an installed
+  package). When the body returns, each is held as its size, mtime and blake2b
+  digest, or as missing. On the next build a file with the same size and mtime
+  is the same; one whose stat moved is hashed again, and the same bytes keep
+  the body (and the new stat); other bytes, or a file gone or come, run it. A
+  file opened only for writing is an output, not an input. A pipe, a socket or a
+  device has no bytes to hold: the body runs on every build, and the report's
+  `retention.fallbacks` names the file. `retention.reads` lists, per body, the
+  files it read;
 - the engine's own code.
+
+A model's inputs are its code, what it reads through the engine, and every file
+its body reads, observed, by their bytes. What the engine cannot see is the
+author's: the clock, environment variables, randomness, a file only tested for
+(`Path.exists`, `os.stat`: an open is heard, a lookup is not), and OCCT's
+readers driven directly instead of through `read_step`.
 
 A module falls back to its bytes, and those of every first-party module it
 imports, wherever the walk cannot follow a reference by its value: a `getattr`,
@@ -420,15 +434,10 @@ bodies that hold their results. A comment, a blank line or a docstring re-runs
 nothing. An edit to the root re-runs the root alone. A changed input file
 re-runs the body that reads it and the bodies that hold its result. The
 report's `memo` counts `bodies_run` and `bodies_skipped`.
-`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body that opens a
-file itself, past the engine's readers (`open`, `Path.read_text`, `np.loadtxt`), is heard: an
-audit hook on `open` (`kernel/memo.py`, `_audited`; Python's own files, a `.py` or
-`.pyc` or one of the standard library or an installed package, aside) makes it run
-on every build, as a plain kernel call does, and the report's `retention.fallbacks`
-names the file. Otherwise a body must be a
-function of what it reaches as the build starts: a body that reads the clock or
-the environment is not seen to change, and
-nor is state one body leaves in a module for another (a registry it fills). A
+`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. Otherwise a body
+must be a function of its inputs: a body that reads the clock or the environment
+is not seen to change, and nor is state one body leaves in a module for another
+(a registry it fills). A
 replayed body's features keep the `file:line` of the run that recorded them,
 so after a line-only edit the provenance the worker serves can name a line that moved.
 
@@ -445,3 +454,7 @@ Measured with retention on, that collection takes 2.0–2.2 s on a 987-part mode
 about 1.3 s of which it also takes with retention off, and 0.7–0.8 s on a
 619-part model. It runs after the answer, so only a build sent while it is still
 running waits for it.
+
+The read hook costs nothing measurable: on a small model, built in-process, a
+no-op took a median 50–51 ms and an edit 0.89–0.95 s with the hook, against
+51 ms and 0.89 s with no hook installed.
