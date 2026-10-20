@@ -268,9 +268,14 @@ bodies that hold their results. A comment, a blank line or a docstring re-runs
 nothing. An edit to the root re-runs the root alone. A changed input file
 re-runs the body that reads it and the bodies that hold its result. The
 report's `memo` counts `bodies_run` and `bodies_skipped`.
-`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body must be a
-function of what it reaches as the build starts: a body that reads the clock,
-the environment or a file the engine does not read is not seen to change, and
+`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body that opens a
+file itself, past the engine's readers (a CSV, a JSON, `np.loadtxt`), is heard: an
+audit hook on `open` (`kernel/memo.py`, `_audited`; Python's own files, a `.py` or
+`.pyc` or one of the standard library or an installed package, aside) makes it run
+on every build, as a plain kernel call does, and the report's `retention.fallbacks`
+names the file. Otherwise a body must be a
+function of what it reaches as the build starts: a body that reads the clock or
+the environment is not seen to change, and
 nor is state one body leaves in a module for another (a registry it fills). A
 replayed body's features keep the `file:line` of the run that recorded them,
 so after a line-only edit the sidecar's provenance can name a line that moved.

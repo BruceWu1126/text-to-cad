@@ -158,8 +158,16 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             # What the bodies' keys cost (inside ``body``) and the modules each body's key
             # took by their bytes, with why.
             retention = {"keys": round(context.key_seconds - keys_before, 4),
-                         "fallbacks": {name: reasons for name, reasons in context.fallbacks.items()
+                         "fallbacks": {name: list(reasons) for name, reasons in context.fallbacks.items()
                                        if name == model.identity or name in context.timings}}
+            # A body that opened a file past the engine's readers always runs: say which.
+            for body_name, paths in run.reads.items():
+                body_script, _, function = body_name.rpartition("::")
+                identity = f"{Path(body_script).name}::{function}"
+                if identity == model.identity or identity in context.timings:
+                    retention["fallbacks"].setdefault(identity, []).extend(
+                        f"reads {_shown(Path(path), Path(body_script).parent)} itself, not through the engine:"
+                        " it runs on every build" for path in paths)
             reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity}})

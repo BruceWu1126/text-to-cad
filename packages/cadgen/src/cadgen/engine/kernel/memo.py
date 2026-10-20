@@ -343,8 +343,66 @@ def install() -> bool:
             original = getattr(module, class_name)
             if not getattr(original, "__kernel_memo__", False):
                 setattr(module, class_name, _maker_class(original, perform, idle, builds, setters))
+        _audit_reads()
         _installed = True
         return True
+
+
+# --- files a body opens itself --------------------------------------------------------------
+
+_AUDITING = False
+
+
+def _audit_reads() -> None:
+    """Hear every file a model body opens, once per process (an audit hook stays)."""
+    global _AUDITING
+    if not _AUDITING:
+        import sys
+
+        sys.addaudithook(_audited)
+        _AUDITING = True
+
+
+def _audited(event: str, args: tuple) -> None:
+    """An ``open`` while a body runs, of a file none of the engine's readers keys -- not
+    one a patched call reads (those run deeper than the body), not Python's own (a ``.py``
+    or ``.pyc``, a file of the standard library or an installed package), and for reading:
+    the body read it plain, so its bytes are in no key and replaying it could hand back a
+    stale result. The body is then no longer retained -- it always runs, as one that ran a
+    kernel call plain does -- and the file is what the build reports of it (``reads``)."""
+    if event != "open":
+        return
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth or not state.bodies:
+        return
+    try:
+        path, mode = args[0], args[1]
+        if isinstance(path, int):
+            return
+        if mode is None:
+            flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+            if flags & os.O_ACCMODE == os.O_WRONLY:
+                return
+        elif "r" not in mode and "+" not in mode:
+            return
+        name = os.fsdecode(path)
+        if name.endswith((".py", ".pyc")) or _library_file(name):
+            return
+    except Exception:  # noqa: BLE001 - an audit hook never fails the open it hears
+        return
+    log = state.bodies[-1]
+    log.retainable = False
+    log.reads.append(os.path.abspath(name))
+
+
+def _library_file(name: str) -> bool:
+    from cadgen.engine.kernel.trace import _library_roots
+
+    try:
+        path = Path(name).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return any(root in path.parents for root in _library_roots())
 
 
 def uninstall() -> bool:
@@ -590,6 +648,8 @@ class _Run:
         # this run has run or replayed: each is in the trace once.
         self.bodies: list[_BodyLog] = []
         self.done: set[str] = set()
+        # Per body that opened a file past the engine's readers, the files: it always runs.
+        self.reads: dict[str, list[str]] = {}
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -740,7 +800,7 @@ class _BodyLog:
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -748,6 +808,8 @@ class _BodyLog:
         self.keys: list[tuple] = []
         self.ids = array.array("q")
         self.retainable = True
+        # The files the body opened itself, past the engine's readers (``_audited``).
+        self.reads: list[str] = []
 
 
 class _Body:
@@ -802,6 +864,8 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         raise
     finally:
         state.bodies.pop()
+    if log.reads:
+        state.reads[name] = list(dict.fromkeys(log.reads))
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
     snapshot = None
