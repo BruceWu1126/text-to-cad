@@ -103,6 +103,65 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(model.count("<object "), 2)
         self.assertEqual(model.count("<item "), 4)
 
+    def test_a_colour_written_to_step_reads_back_as_written(self) -> None:
+        # The STEP writes a part's colour as the document keeps it; read back (``read_step``), the
+        # part carries the same numbers, not the kernel's colour converted once more.
+        import build123d as bd
+
+        part = bd.Box(4, 4, 4)
+        part.label = "grey"
+        part.color = bd.Color(0.58, 0.62, 0.66)
+        folder = Path(tempfile.mkdtemp(prefix="engine-colour-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        exports.write_step(document.to_xcaf(document.collect(bd.Compound(children=[part], label="one"), "one")),
+                           folder / "one.step")
+        read = document.read_step_shape(folder / "one.step")
+        found = read if read.label == "grey" else next(node for node in read.children if node.label == "grey")
+        for got, want in zip(tuple(found.color), (0.58, 0.62, 0.66, 1.0)):
+            self.assertAlmostEqual(got, want, delta=1e-6)
+
+
+class StepNameTest(unittest.TestCase):
+    """A STEP's names read as the file means them: an occurrence OCCT left a placeholder name
+    (``=>[0:1:1:2]``) takes its product's, and a name escaped as ISO 10303-21 escapes it reads
+    as its text."""
+
+    def setUp(self) -> None:
+        import build123d as bd
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-step-names-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        board = bd.Box(4, 4, 1)
+        board.label = "Board"
+        boss = bd.Pos(10, 0, 0) * bd.Cylinder(1, 2)
+        boss.label = "凸台-拉伸4"
+        tree = document.collect(bd.Compound(children=[board, boss], label="hat"), "hat")
+        tree.root.components[0].name = "=>[0:1:1:2]"  # as OCCT names an occurrence its file left unnamed
+        self.step = self.folder / "hat.step"
+        exports.write_step(document.to_xcaf(tree), self.step)
+
+    def names(self, path: Path) -> tuple[list[str], list[str]]:
+        loaded = document.Loaded(path)
+        read = document.read_step_shape(path)
+        return [instance.path[-1] for instance in loaded.instances], [child.label for child in read.children]
+
+    def test_a_placeholder_occurrence_name_is_its_product_s(self) -> None:
+        self.assertIn("=>[0:1:1:2]", self.step.read_text(encoding="utf-8"))
+        paths, labels = self.names(self.step)
+        self.assertEqual(paths, ["Board", "凸台-拉伸4"])
+        self.assertEqual(labels, ["Board", "凸台-拉伸4"])
+
+    def test_escaped_names_read_as_their_text(self) -> None:
+        text = self.step.read_text(encoding="utf-8")
+        for escaped in (r"\X2\51F853F0\X0\-\X2\62C94F38\X0\4", r"\\X2\\51F853F0\\X0\\-\\X2\\62C94F38\\X0\\4"):
+            path = self.folder / "escaped.step"
+            path.write_text(text.replace("凸台-拉伸4", escaped), encoding="utf-8")
+            paths, labels = self.names(path)
+            self.assertEqual(paths[-1], "凸台-拉伸4", escaped)
+            self.assertEqual(labels[-1], "凸台-拉伸4", escaped)
+            self.assertEqual(document.Loaded(path).prototypes[-1].name, "凸台-拉伸4", escaped)
+        self.assertEqual(document.step_name("caf\\X\\E9 \\X4\\0001F600\\X0\\"), "café 😀")
+
 
 if __name__ == "__main__":
     unittest.main()

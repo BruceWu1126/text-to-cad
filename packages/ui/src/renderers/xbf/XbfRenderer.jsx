@@ -13,7 +13,9 @@ import { usePointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useSceneSelection } from "../kit/tools/select/useSceneSelection.js";
 import { InfoRow, MonoValue } from "../kit/inspector/referenceRows.jsx";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
+import { xbfDrivenPairs, xbfPosedMatrices, xbfPoseValues, xbfSamePose } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
 import XbfElementSection from "./XbfElementSection.jsx";
+import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE } from "./XbfPositionSection.jsx";
 import XbfTreeSection from "./XbfTreeSection.jsx";
 import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js";
 import { useXbfScene } from "./useXbfScene.js";
@@ -103,6 +105,36 @@ function XbfSurface({ view, data }) {
   const [hidden, setHidden] = useState(EMPTY);
   useEffect(() => { scene?.setHiddenParts(hidden); shellRef.current?.requestRender?.(); }, [scene, hidden]);
 
+  // Position: the mechanism's pose, a configuration or values set by hand, the page's own forward
+  // kinematics moving the instances. A new version keeps the pose while its pairs and configurations
+  // are what they were; one that changed them starts as built.
+  const kinematics = scene?.kinematics || null;
+  const kinematicsKey = kinematics ? JSON.stringify([kinematics.pairs, kinematics.configurations, kinematics.asBuilt]) : "";
+  const [pose, setPose] = useState({ key: "", preset: DEFAULT_POSE_VALUE, given: null });
+  const current = pose.key === kinematicsKey ? pose : { key: kinematicsKey, preset: DEFAULT_POSE_VALUE, given: null };
+  const poseValues = useMemo(() => {
+    if (!kinematics || kinematics.loop?.length) return null;
+    try {
+      return xbfPoseValues(kinematics, current.given || (current.preset !== DEFAULT_POSE_VALUE && current.preset !== NO_PRESET_VALUE ? current.preset : null));
+    } catch {
+      return xbfPoseValues(kinematics);
+    }
+  }, [kinematics, current.given, current.preset]);
+  const asBuilt = useMemo(() => (kinematics && !kinematics.loop?.length ? xbfPoseValues(kinematics) : null), [kinematics]);
+  useEffect(() => {
+    if (!scene || !poseValues) return;
+    scene.setPose(xbfSamePose(poseValues, asBuilt) ? null : poseValues);
+    shellRef.current?.requestRender?.();
+  }, [scene, poseValues, asBuilt]);
+  const posePreset = !poseValues ? DEFAULT_POSE_VALUE : xbfSamePose(poseValues, asBuilt) ? DEFAULT_POSE_VALUE
+    : current.preset !== NO_PRESET_VALUE && current.preset !== DEFAULT_POSE_VALUE && !current.given ? current.preset : NO_PRESET_VALUE;
+  const setPoseValues = useCallback((values) => {
+    const driven = xbfDrivenPairs(kinematics);
+    setPose({ key: kinematicsKey, preset: NO_PRESET_VALUE, given: Object.fromEntries(Object.entries(values).filter(([label]) => !driven.has(label))) });
+  }, [kinematics, kinematicsKey]);
+  const choosePreset = useCallback(name => setPose({ key: kinematicsKey, preset: name, given: null }), [kinematicsKey]);
+  const resetPose = useCallback(() => setPose({ key: kinematicsKey, preset: DEFAULT_POSE_VALUE, given: null }), [kinematicsKey]);
+
   const live = useMemo(() => ({
     declined: XBF_DECLINED_LIVE_COMMANDS,
     commands: { clearSelection: () => { parts.clear(); clearElements(); } },
@@ -188,8 +220,11 @@ function XbfSurface({ view, data }) {
     return { references: rows.map(row => row.value).filter(Boolean), chips: rows.map(row => row.chip) };
   }, [scene, resource, parts, elements]);
 
-  // The panel reads the last element picked; the facts are the engine's.
-  const lastElement = elements.length ? scene?.describeElement(elements.at(-1)) || null : null;
+  // The panel reads the last element picked; the facts are the engine's, placed where the pose puts
+  // its instance (worked out here: the scene is posed after this render, in an effect).
+  const posedMatrices = useMemo(() => (scene && poseValues ? xbfPosedMatrices(scene.structure, poseValues) : null), [scene, poseValues]);
+  const described = elements.length ? scene?.describeElement(elements.at(-1)) || null : null;
+  const lastElement = described && posedMatrices ? { ...described, matrix: posedMatrices[described.instance] } : described;
   const sidebarShown = !shell.previewing;
   const update = loaded.update;
   const unmeshed = scene?.unmeshed?.reduce((sum, row) => sum + row.faces.length, 0) || 0;
@@ -201,6 +236,8 @@ function XbfSurface({ view, data }) {
   const sidebar = <>
     <XbfTreeSection key={document.modelKey} active={sidebarShown} structure={scene?.structure || null} selection={parts}
       hidden={hidden} onHiddenChange={setHidden} status={status} />
+    {kinematics ? <XbfPositionSection active={sidebarShown} kinematics={kinematics} values={poseValues || {}} preset={posePreset}
+      changed={posePreset !== DEFAULT_POSE_VALUE} onValues={setPoseValues} onPreset={choosePreset} onReset={resetPose} /> : null}
     <XbfElementSection element={lastElement} source={loaded.document?.source?.url || ""} version={loaded.revision} active={sidebarShown} />
   </>;
 

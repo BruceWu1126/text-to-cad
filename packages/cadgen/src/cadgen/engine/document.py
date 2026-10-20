@@ -23,23 +23,28 @@ BinXCAF driver as ``.xbf``, atomically, and only when its bytes changed -- every
 sub-shape's ``Checked`` flag written cleared (``unchecked``), so a cold build and a
 warm one of the same sources write the same bytes.
 
+An assembly whose parts carry build123d joints carries its mechanism too: links,
+pairs, the ground, the as-built configuration and the named ones, as a subtree of
+standard attributes beside the XCAF tools (``mechanism``).
+
 Read back (``Loaded``), a document is its prototypes, its instances with their world
-placements, and what each prototype's elements are named; a STEP the engine did not
-write reads the same way, with the XCAF reader.
+placements, what each prototype's elements are named, and its mechanism; a STEP the
+engine did not write reads the same way, with the XCAF reader.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-__all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "read_step_shape",
-           "save", "to_xcaf", "unchecked"]
+__all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "posed_tree",
+           "read_step_shape", "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
@@ -95,12 +100,14 @@ class Assembly:
 @dataclass
 class Tree:
     """A result as prototypes: ``order`` lists every prototype once, each after the ones
-    it places; ``root`` is what the document's one free shape is."""
+    it places; ``root`` is what the document's one free shape is; ``mechanism`` what its
+    joints make of it (``mechanism.harvest``), or None."""
 
     root: "Part | Assembly"
     order: list
     parts: list[Part]
     signature: tuple
+    mechanism: Any = None
 
 
 def _identity() -> Any:
@@ -211,17 +218,24 @@ def collect(result: Any, name: str) -> Tree:
             parts.append(found)
         return found, signature, color
 
+    from cadgen.engine import mechanism
+
     wrapped = result.wrapped
     root, signature, color = visit(result, wrapped.Located(_identity()), None)
     root_name = result.__dict__.get("label") or name
     location = wrapped.Location()
-    if isinstance(root, Assembly) and location.IsIdentity():
+    held = not (isinstance(root, Assembly) and location.IsIdentity())
+    if not held:
         root.name = root_name
     else:
         holder = Assembly(root_name, [Component(root, location, root.name, color)])
         order.append(holder)
         root = holder
-    return Tree(root, order, parts, (signature, _location_key(location), root_name))
+    tree = Tree(root, order, parts, (signature, _location_key(location), root_name))
+    # The result's joints, harvested: the result is the holder's one component where it has one.
+    tree.mechanism = mechanism.harvest(result, tree, (0,) if held else ())
+    tree.signature = (*tree.signature, tree.mechanism.signature() if tree.mechanism else None)
+    return tree
 
 
 # --- geometry keys ----------------------------------------------------------------------
@@ -393,6 +407,7 @@ def to_xcaf(tree: Tree) -> Any:
         materials = _Materials(doc)
         key_guid = Standard_GUID(KEY_GUID)
         labels: dict[int, Any] = {}
+        placements: dict[int, list] = {}  # each assembly's component labels, in order
         for prototype in tree.order:
             if isinstance(prototype, Part):
                 label = shapes.AddShape(prototype.shape, False, False)
@@ -439,11 +454,23 @@ def to_xcaf(tree: Tree) -> Any:
                 for component in prototype.components:
                     placed = shapes.AddComponent(label, labels[id(component.prototype)], component.location)
                     _name(placed, component.name)
+                    placements.setdefault(id(prototype), []).append(placed)
                     held = component.prototype
                     if component.color is not None and not (isinstance(held, Part) and held.color == component.color):
                         colors.SetColor(placed, _quantity(component.color), XCAFDoc_ColorSurf)
             labels[id(prototype)] = label
         shapes.UpdateAssemblies()
+        if tree.mechanism is not None:
+            from cadgen.engine import mechanism
+
+            def occurrence(path: tuple[int, ...]) -> list:
+                found, node = [labels[id(tree.root)]], tree.root
+                for at in path:
+                    found.append(placements[id(node)][at])
+                    node = node.components[at].prototype
+                return found
+
+            mechanism.write(doc, tree.mechanism, occurrence)
         _MADE[:] = [doc, tree]
         return doc
 
@@ -512,7 +539,7 @@ def read_step_shape(path: Any) -> Any:
     tell its occurrences apart. Colours are resolved once per product, not per placement."""
     import unicodedata
 
-    from build123d import Compound, Location
+    from build123d import Color, Compound, Location
     from build123d.topology.shape_core import downcast
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
@@ -529,8 +556,17 @@ def read_step_shape(path: Any) -> Any:
     from build123d.importers import topods_lut
 
     def name_of(label: Any) -> str:
-        text = _label_name(label)
+        text = step_name(_label_name(label))
         return "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")  # as the file has it
+
+    def as_color(rgba: Any) -> Any:
+        """A file's colour as the model's: the numbers the document keeps (``_quantity`` writes
+        a build123d colour's components as the kernel's RGB, and ``_label_color`` reads them
+        back so), not the kernel's colour object, whose build123d wrapper reads it as sRGB."""
+        if rgba is None:
+            return None
+        rgb = rgba.GetRGB()
+        return Color(rgb.Red(), rgb.Green(), rgb.Blue(), rgba.Alpha())
 
     def label_color(label: Any) -> Any:
         rgba = Quantity_ColorRGBA()
@@ -603,7 +639,7 @@ def read_step_shape(path: Any) -> Any:
                 # occurrence, never the product's other placements.
                 node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
             color = label_color(label) if referred is not label else None
-            node.color = color or product_color
+            node.color = as_color(color or product_color)
             node.label = (name_of(label) if referred is not label else "") or product_name
             node.move(Location(XCAFDoc_ShapeTool.GetLocation_s(label)))
             made.append(node)
@@ -664,7 +700,18 @@ class Loaded:
         self.instances: list[Instance] = []
         self.name = self.path.stem
         self.tree: dict[str, Any] = {}
+        # Each instance's occurrence as component indices from the root; each occurrence's
+        # placement by those, and its label entries (``/``-joined) to them.
+        self.instance_paths: list[tuple[int, ...]] = []
+        self.worlds: dict[tuple[int, ...], Any] = {}
+        self.occurrences: dict[str, tuple[int, ...]] = {}
+        self.step = self.path.suffix.lower() in (".step", ".stp")
         self._walk()
+        self.mechanism = None
+        if self.path.suffix.lower() == ".xbf":
+            from cadgen.engine import mechanism
+
+            self.mechanism = mechanism.read(self.doc, self.occurrences)
 
     def _walk(self) -> None:
         from OCP.TDF import TDF_Label, TDF_LabelSequence, TDF_Tool
@@ -673,14 +720,19 @@ class Loaded:
 
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(self.doc.Main())
         by_entry: dict[str, int] = {}
+        # A STEP's names as the file means them (``step_name``); an xbf's as the engine wrote them.
+        named = (lambda label: step_name(_label_name(label))) if self.step else _label_name
 
         def entry_of(label: Any) -> str:
             text = TCollection_AsciiString()
             TDF_Tool.Entry_s(label, text)
             return text.ToCString()
 
-        def visit(label: Any, location: Any, path: list[str], inherited: tuple | None, name: str) -> dict[str, Any]:
+        def visit(label: Any, location: Any, path: list[str], inherited: tuple | None, name: str,
+                  occurrence: tuple[int, ...], entries: list[str]) -> dict[str, Any]:
             color = _label_color(label) or inherited
+            self.worlds[occurrence] = location
+            self.occurrences["/".join(entries)] = occurrence
             if XCAFDoc_ShapeTool.IsAssembly_s(label):
                 node: dict[str, Any] = {"name": name, "children": []}
                 components = TDF_LabelSequence()
@@ -690,9 +742,10 @@ class Loaded:
                     referred = TDF_Label()
                     XCAFDoc_ShapeTool.GetReferredShape_s(component, referred)
                     placed = location.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(component))
-                    child_name = _label_name(component) or _label_name(referred) or f"{name}.{at}"
+                    child_name = named(component) or named(referred) or f"{name}.{at}"
                     child_color = _label_color(component) or color
-                    node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name))
+                    node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name,
+                                                  occurrence + (at - 1,), entries + [entry_of(component)]))
                 return node
             shape = XCAFDoc_ShapeTool.GetShape_s(label)
             entry = entry_of(label)
@@ -704,6 +757,7 @@ class Loaded:
             prototype = self.prototypes[index]
             self.instances.append(Instance(index, path, _matrix(placed),
                                            color if color != prototype.color else None))
+            self.instance_paths.append(occurrence)
             return {"name": name, "prototype": index, "instance": len(self.instances) - 1}
 
         free = TDF_LabelSequence()
@@ -711,8 +765,9 @@ class Loaded:
         roots = []
         for at in range(1, free.Length() + 1):
             label = free.Value(at)
-            name = _label_name(label) or f"{self.path.stem}{'' if free.Length() == 1 else at}"
-            roots.append(visit(label, _identity(), [name], None, name))
+            name = named(label) or f"{self.path.stem}{'' if free.Length() == 1 else at}"
+            roots.append(visit(label, _identity(), [name], None, name, () if free.Length() == 1 else (at - 1,),
+                               [entry_of(label)]))
         if len(roots) == 1:
             self.tree = roots[0]
             self.name = roots[0]["name"]
@@ -721,8 +776,9 @@ class Loaded:
 
     def structure(self) -> dict[str, Any]:
         """The document as the page reads it (``serve``): its prototypes, its instances
-        and its tree, with every name and colour; no geometry."""
-        return {
+        and its tree, with every name and colour, and its mechanism (``kinematics``,
+        where it has one); no geometry."""
+        found = {
             "name": self.name,
             "path": str(self.path),
             "version": f"{self.version[0]}-{self.version[1]}",
@@ -739,6 +795,12 @@ class Loaded:
                           for i in self.instances],
             "tree": self.tree,
         }
+        if self.mechanism is not None:
+            from cadgen.engine import mechanism
+
+            found["kinematics"] = mechanism.block(self.mechanism, self.instance_paths,
+                                                  lambda path: _matrix(self.worlds[path]))
+        return found
 
     def root_label(self) -> Any:
         from OCP.TDF import TDF_LabelSequence
@@ -808,7 +870,10 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
                 "material": material_json(material),
                 "faceMaterials": {str(k): material_json(v) for k, v in sorted(face_materials.items())}}
 
-    def visit(prototype: Any, location: Any, names: list[str], inherited: tuple | None, name: str) -> dict:
+    paths: list[tuple[int, ...]] = []
+
+    def visit(prototype: Any, location: Any, names: list[str], inherited: tuple | None, name: str,
+              occurrence: tuple[int, ...] = ()) -> dict:
         if isinstance(prototype, Assembly):
             node: dict[str, Any] = {"name": name, "children": []}
             for at, component in enumerate(prototype.components, 1):
@@ -818,7 +883,7 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
                 # wins over the one it inherits: either way the outcome is the same.
                 child_color = read(component.color) or inherited
                 node["children"].append(visit(held, location.Multiplied(component.location), names + [child_name],
-                                              child_color, child_name))
+                                              child_color, child_name, occurrence + (at - 1,)))
             return node
         own = read(prototype.color)
         color = own or inherited
@@ -829,11 +894,72 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
         instances.append({"prototype": index, "path": "/".join(names),
                           "matrix": _matrix(location.Multiplied(prototype.shape.Location())),
                           "color": color if color != own else None})
+        paths.append(occurrence)
         return {"name": name, "prototype": index, "instance": len(instances) - 1}
 
     root = visit(tree.root, _identity(), [tree.root.name], None, tree.root.name)
-    return {"name": root["name"], "path": str(path), "version": f"{stat.st_mtime_ns}-{stat.st_size}", "units": "mm",
-            "prototypes": prototypes, "instances": instances, "tree": root}
+    found = {"name": root["name"], "path": str(path), "version": f"{stat.st_mtime_ns}-{stat.st_size}", "units": "mm",
+             "prototypes": prototypes, "instances": instances, "tree": root}
+    if tree.mechanism is not None:
+        from cadgen.engine import mechanism
+
+        found["kinematics"] = mechanism.block(tree.mechanism, paths,
+                                              lambda at: _matrix(mechanism._occurrence(tree, at)[0]))
+    return found
+
+
+def posed_tree(loaded: "Loaded", matrices: list[list[float]]) -> Tree:
+    """A loaded document as a tree whose part instances stand at ``matrices`` (4x4,
+    column-major, one per instance): what a posed STEP is written from. Every placement of
+    an assembly is an assembly of its own here, so two placements of one sub-assembly can
+    stand two ways; names, colours, materials and element names are the document's."""
+    import numpy as np
+    from OCP.gp import gp_Trsf
+    from OCP.TopLoc import TopLoc_Location
+
+    from cadgen.engine.mechanism import _from_column, _numpy
+
+    def located(matrix: Any) -> Any:
+        trsf = gp_Trsf()
+        trsf.SetValues(*(float(matrix[row, column]) for row in range(3) for column in range(4)))
+        return TopLoc_Location(trsf)
+
+    def world(path: tuple[int, ...]) -> Any:
+        found = loaded.worlds.get(path)
+        return np.eye(4) if found is None else _numpy(found)
+
+    parts = []
+    for prototype in loaded.prototypes:
+        names = {kind: [given.get(ordinal) for ordinal in range(1, max(given, default=0) + 1)]
+                 for kind, given in (("faces", prototype.face_names), ("edges", prototype.edge_names))}
+        parts.append(Part(prototype.shape, prototype.name, prototype.color, dict(prototype.face_colors),
+                          prototype.key, names, material=prototype.material,
+                          face_materials=dict(prototype.face_materials)))
+    order: list = list(parts)
+
+    def leaf(node: dict[str, Any], parent: tuple[int, ...]) -> Component:
+        instance = loaded.instances[node["instance"]]
+        local = np.linalg.inv(world(parent)) @ _from_column(matrices[node["instance"]])
+        return Component(parts[node["prototype"]], located(local), node["name"], instance.color)
+
+    def assembly(node: dict[str, Any], path: tuple[int, ...]) -> Assembly:
+        made = Assembly(node["name"])
+        for at, child in enumerate(node["children"]):
+            if "children" in child:
+                below = assembly(child, path + (at,))
+                local = np.linalg.inv(world(path)) @ world(path + (at,))
+                made.components.append(Component(below, located(local), child["name"], None))
+            else:
+                made.components.append(leaf(child, path))
+        order.append(made)
+        return made
+
+    if "children" in loaded.tree:
+        root = assembly(loaded.tree, ())
+    else:
+        root = Assembly(loaded.tree["name"], [leaf(loaded.tree, ())])
+        order.append(root)
+    return Tree(root, order, parts, ("posed",))
 
 
 def _read(path: Path) -> Any:
@@ -888,6 +1014,36 @@ def _label_name(label: Any) -> str:
     if _find(label, found, TDataStd_Name.GetID_s()):
         return found.Get().ToExtString()
     return ""
+
+
+# OCCT's name for an occurrence its file left unnamed: the label it got (`=>[0:1:1:2]`).
+_PLACEHOLDER = re.compile(r"^=>\[[0-9:]*\]$")
+# ISO 10303-21's string escapes as a name can still hold them: a file that escaped its
+# backslashes once too often leaves them for the reader to undo (`\\X2\\51F8\\X0\\`).
+_ESCAPE = re.compile(r"\\{1,2}X2\\{1,2}((?:[0-9A-Fa-f]{4})+)\\{1,2}X0\\{1,2}|\\{1,2}X4\\{1,2}((?:[0-9A-Fa-f]{8})+)"
+                     r"\\{1,2}X0\\{1,2}|\\{1,2}X\\{1,2}([0-9A-Fa-f]{2})|\\{1,2}S\\{1,2}(.)")
+
+
+def step_name(text: str) -> str:
+    """A name as a STEP file means it: its ``\\X2\\``/``\\X4\\`` (UTF-16, UTF-32), ``\\X\\``
+    (ISO 8859-1) and ``\\S\\`` escapes decoded, and OCCT's placeholder for an unnamed
+    occurrence (``=>[0:1:1:2]``) no name at all, so the product's name stands."""
+    if _PLACEHOLDER.match(text):
+        return ""
+    if "\\" not in text:
+        return text
+
+    def decode(match: Any) -> str:
+        wide, widest, byte, shifted = match.groups()
+        if wide:
+            return bytes.fromhex(wide).decode("utf-16-be", errors="replace")
+        if widest:
+            return bytes.fromhex(widest).decode("utf-32-be", errors="replace")
+        if byte:
+            return bytes.fromhex(byte).decode("latin-1")
+        return chr(ord(shifted) + 128)
+
+    return _ESCAPE.sub(decode, text)
 
 
 def _label_color(label: Any) -> tuple | None:
@@ -1020,7 +1176,8 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     edge_names[ordinal] = name
-    return Prototype(index, local, _label_name(label) or f"part{index + 1}", _label_color(label), found_key,
+    name = step_name(_label_name(label)) if loaded.step else _label_name(label)
+    return Prototype(index, local, name or f"part{index + 1}", _label_color(label), found_key,
                      face_names, edge_names, face_colors, entry, _label_material(label), face_materials)
 
 

@@ -1,9 +1,9 @@
 """``cadgen xbf``: build models, export documents, serve them.
 
     cadgen xbf build SCRIPT[::FUNCTION] ...   build in the warm worker of each script
-    cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F]
+    cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-    cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--json]
+    cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON] [--json]
     cadgen xbf status | stop | daemon
 """
 
@@ -36,6 +36,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     export.add_argument("document", help="an .xbf (or a STEP)")
     for kind in ("step", "glb", "stl", "threemf"):
         export.add_argument(f"--{kind}", metavar="FILE")
+    export.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
+                                       "mechanism posed there; as built without it")
     serve = verbs.add_parser("serve", help="serve a document over HTTP and print its URL")
     serve.add_argument("document", help="an .xbf, or a STEP")
     serve.add_argument("--port", type=int, default=0)
@@ -143,9 +145,24 @@ def _export(args: argparse.Namespace) -> int:
     started = time.perf_counter()
     loaded = document.load(source)
     print(f"read {source} in {time.perf_counter() - started:.2f}s", file=sys.stderr)
+    pose = None
+    if args.pose is not None:
+        from cadgen.engine import mechanism
+        from cadgen.engine.snapshot import parse_pose
+
+        # The pose is checked whole before any file is written: a name, a joint or a value it gets
+        # wrong is refused by name, and a mechanism that is not a tree has no pose.
+        try:
+            pose = parse_pose(args.pose)
+            structure = loaded.structure()
+            values, _named = mechanism.resolve(structure.get("kinematics"), pose)
+            mechanism.link_worlds(structure["kinematics"], values)
+        except ValueError as error:
+            print(f"cadgen xbf export: --pose: {error}", file=sys.stderr)
+            return 2
     for kind, out in wanted:
         clock = time.perf_counter()
-        size = exports.write_from_loaded(kind, loaded, Path(out))
+        size = exports.write_from_loaded(kind, loaded, Path(out), pose=pose)
         print(f"wrote {out} ({size / 1e6:.1f} MB) in {time.perf_counter() - clock:.2f}s")
     return 0
 

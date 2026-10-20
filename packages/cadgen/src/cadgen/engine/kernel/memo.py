@@ -1679,6 +1679,10 @@ def _file_key(source: Any) -> tuple:
 _DOUBLE = struct.Struct("<d")
 
 
+_JOINT_FIELDS = ("relative_location", "relative_axis", "angle_reference", "angular_range", "linear_range",
+                 "_angle", "angle", "position")
+
+
 def _normalize(value: Any, state: _Run) -> Any:
     """One parameter as a hashable, deterministic key part. The kinds nearly every
     parameter is -- a float, an int, a string, a tuple or list of them -- are told by
@@ -1713,6 +1717,13 @@ def _normalize(value: Any, state: _Run) -> Any:
         return ("occ_op", type_name, _operation_settings(value))
     module = type(value).__module__ or ""
     if module.startswith("build123d"):
+        if type_name.endswith("Joint"):
+            # A joint by what places a part on it: its kind, label, frame or axis, reference, ranges,
+            # the values it was connected at, and the kind and label of the joint it is connected to.
+            other = getattr(value, "connected_to", None)
+            return ("Joint", type_name, value.label, tuple(
+                (name, _normalize(getattr(value, name), state)) for name in _JOINT_FIELDS if hasattr(value, name)),
+                None if other is None else (type(other).__name__, other.label))
         if type_name == "Axis":
             return ("Axis", _normalize(tuple(value.position), state), _normalize(tuple(value.direction), state))
         if type_name == "Plane":
@@ -1808,8 +1819,6 @@ def _shape_key(shape: Any, state: _Run) -> int:
     its children."""
     placed = _placed_key(shape, state)
     state_dict = shape.__dict__
-    if state_dict.get("joints"):
-        raise _Unkeyable("a shape with joints")
     label = state_dict.get("label")
     if not isinstance(label, str):
         raise _Unkeyable("a label that is not a string")
@@ -1824,6 +1833,7 @@ def _shape_key(shape: Any, state: _Run) -> int:
         material if material is None or isinstance(material, str) else _normalize(material, state),
         tuple(sorted((int(ordinal), _normalize(tuple(rgba), state)) for ordinal, rgba in face_colors.items())),
         tuple(sorted((int(ordinal), _normalize(value, state)) for ordinal, value in dict(face_materials).items())),
+        _normalize(state_dict.get("joints") or {}, state),  # a hit hands back the joints the first run held
     )
     children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
     return _intern((placed, attrs, children))

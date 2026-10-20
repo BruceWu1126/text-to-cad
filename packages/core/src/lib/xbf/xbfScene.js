@@ -34,6 +34,7 @@ import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
 import { XBF_EDGE_CLASS_NAMES, xbfEdgeLine, xbmFaceRow, xbmEdgeRow, xbmTriangleFaceRows, xbmVertexRow } from "./xbm.js";
+import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
 export const XBF_SCENE_UNITS = Object.freeze({ unit: "mm", perWorld: 1 });
 export const XBF_EDGE_LINES = Object.freeze(["feature", "tangent", "seam"]);
@@ -226,15 +227,20 @@ export function createXbfScene(THREE, document) {
       group.add(object);
     }
     root.add(group);
-    return { index, instance, prototype, surface, group, mesh, lines, record: { mesh } };
+    // `matrix`: where the instance stands now, the structure's placement or the pose's.
+    return { index, instance, prototype, surface, group, mesh, lines, record: { mesh }, matrix: instance.matrix };
   });
   root.updateMatrixWorld(true);
 
-  const box = new THREE.Box3();
-  for (const entry of instances) {
-    if (!entry.surface.held.box.isEmpty()) box.union(entry.surface.held.box.clone().applyMatrix4(entry.group.matrixWorld));
-  }
-  const bounds = box.isEmpty() ? { min: [0, 0, 0], max: [0, 0, 0] } : { min: box.min.toArray(), max: box.max.toArray() };
+  const measureBounds = () => {
+    const box = new THREE.Box3();
+    for (const entry of instances) {
+      if (!entry.surface.held.box.isEmpty()) box.union(entry.surface.held.box.clone().applyMatrix4(entry.group.matrixWorld));
+    }
+    return box.isEmpty() ? { min: [0, 0, 0], max: [0, 0, 0] } : { min: box.min.toArray(), max: box.max.toArray() };
+  };
+  const bounds = measureBounds();
+  const kinematics = xbfKinematics(structure);
   const records = instances.map(entry => entry.record);
   if (records.length) scheduleRuntimeRaycastBvh({ displayRecords: records }, { deferUntilRaycast: true });
 
@@ -449,6 +455,24 @@ export function createXbfScene(THREE, document) {
     object3D: root,
     bounds,
     restBounds: bounds,
+    /** The document's mechanism (`xbfKinematics.js`), or null: what Position poses. */
+    kinematics,
+    /**
+     * Pose the mechanism: each instance's placed group moved to where the mechanism stands at
+     * `values` (pair label → its values; null puts every instance back where the structure places
+     * it). Nothing is fetched or rebuilt; picks, highlights and an element's facts follow the
+     * groups. Throws, by name, for a mechanism that is not a tree.
+     */
+    setPose(values) {
+      if (disposed || !kinematics) return;
+      const matrices = values ? xbfPosedMatrices(structure, values) : structure.instances.map(instance => instance.matrix);
+      for (const entry of instances) {
+        entry.matrix = matrices[entry.index];
+        entry.group.matrix.fromArray(entry.matrix);
+      }
+      root.updateMatrixWorld(true);
+      scene.bounds = measureBounds();
+    },
     units: XBF_SCENE_UNITS,
     /** How many parts Parts colours: every placed instance its own. */
     partCount: instances.length,
@@ -507,7 +531,7 @@ export function createXbfScene(THREE, document) {
       const names = parsed.kind === "face" ? entry.prototype.faceNames : parsed.kind === "edge" ? entry.prototype.edgeNames : null;
       return { id, kind: parsed.kind, ordinal: parsed.ordinal, instance: parsed.instance, key: String(entry.prototype.key),
         name: (names || {})[String(parsed.ordinal)] || "", edgeClass, path: entry.instance.path, partName: entry.prototype.name || "",
-        matrix: entry.instance.matrix };
+        matrix: entry.matrix };
     },
     /** Light instances (ids `i3`): what the tree hovers and selects. */
     setHighlight({ hovered = [], selected = [] } = {}) {

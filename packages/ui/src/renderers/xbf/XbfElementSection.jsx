@@ -57,15 +57,16 @@ export default function XbfElementSection({ element, source, version, active = t
     const controller = new AbortController();
     setState({ id: element.id, facts: null, error: null });
     fetchXbfElementFacts(source, element.key, element.kind, element.ordinal, { signal: controller.signal })
-      // Measured in the part's own frame; read where this instance places it, as the view shows it.
-      .then(facts => setState({ id: element.id, facts: placeXbfFacts(facts, element.matrix), error: null }),
+      .then(facts => setState({ id: element.id, facts, error: null }),
         error => { if (!controller.signal.aborted) setState({ id: element.id, facts: null, error }); });
     return () => controller.abort();
     // The element by its id, the part by its key, again for a new version of the document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, element?.key, source, version]);
   if (!element) return null;
-  const facts = state.id === element.id ? state.facts : null;
+  // Measured in the part's own frame; read where this instance stands now, as the view shows it
+  // (a pose moves it, and the facts with it, without measuring again).
+  const facts = state.id === element.id && state.facts ? placeXbfFacts(state.facts, element.matrix) : null;
   const error = state.id === element.id ? state.error : null;
   return <ToolPanel id="xbf-element" title={`${KIND_LABEL[element.kind]} ${element.ordinal}`} label="Element" fit="details" hidden={!active}>
     <div className="px-2 pb-1.5 pt-0.5" aria-label="Element facts">

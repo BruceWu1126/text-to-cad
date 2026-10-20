@@ -58,12 +58,26 @@ def write(kind: str, doc: Any, tree: Any, path: Path) -> int:
     return _write_mesh(kind, parts, placed, path, tree.root.name)
 
 
-def write_from_loaded(kind: str, loaded: Any, path: Path) -> int:
-    """Write one export of a document read from a file (``cadgen xbf export``)."""
+def write_from_loaded(kind: str, loaded: Any, path: Path, pose: Any = None) -> int:
+    """Write one export of a document read from a file (``cadgen xbf export``); with
+    ``pose`` (a configuration's name or ``{joint: value}``), its mechanism posed there:
+    each link placed by its pairs from the ground (``mechanism``). A posed STEP is written
+    from the document's tree with every placement its own; no STEP carries the mechanism."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    matrices = None
+    if pose is not None:
+        from cadgen.engine import mechanism
+
+        structure = loaded.structure()
+        values, _named = mechanism.resolve(structure.get("kinematics"), pose)
+        matrices = mechanism.posed_instances(structure, values)
     if kind == "step":
-        return write_step(loaded.doc, path)
+        if matrices is None:
+            return write_step(loaded.doc, path)
+        from cadgen.engine.document import posed_tree, to_xcaf
+
+        return write_step(to_xcaf(posed_tree(loaded, matrices)), path)
     from cadgen.engine.mesh import shape_bytes
 
     # A part read back from its document is meshed from its bytes as read (``read``): a
@@ -72,8 +86,8 @@ def write_from_loaded(kind: str, loaded: Any, path: Path) -> int:
     parts = [(p.key, shape_bytes(p.shape, read=True), p.name, p.color, p.face_colors, p.material, p.face_materials)
              for p in loaded.prototypes]
     placed = []
-    for instance in loaded.instances:
-        matrix = np.array(instance.matrix, dtype=float).reshape(4, 4).T
+    for at, instance in enumerate(loaded.instances):
+        matrix = np.array(instance.matrix if matrices is None else matrices[at], dtype=float).reshape(4, 4).T
         placed.append((instance.prototype, matrix, instance.path, instance.color))
     return _write_mesh(kind, parts, placed, path, loaded.name)
 

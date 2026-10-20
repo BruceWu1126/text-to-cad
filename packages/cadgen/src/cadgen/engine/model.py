@@ -24,7 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["Model", "Output", "glb", "paint", "read_step", "step", "stl", "threemf", "xbf", "models_in"]
+__all__ = ["Model", "Output", "configuration", "glb", "paint", "read_step", "step", "stl", "threemf", "xbf",
+           "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
 SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -189,6 +190,20 @@ def paint(shape: Any, faces: Any, color: Any) -> Any:
     return shape
 
 
+def configuration(assembly: Any, name: str, **values: Any) -> Any:
+    """Name a configuration of an assembly's mechanism: ``configuration(arm, "raised",
+    elbow=90)`` sets the joint labelled ``elbow`` to 90 degrees in the configuration
+    ``raised`` (a number per joint, or for a joint of several values a sequence: a
+    cylindrical joint's angle and position, a ball joint's three angles). The joints are
+    build123d's, placed with ``connect_to``; the values they were connected at are the
+    as-built configuration, and a joint a configuration does not name stays as built. The
+    document keeps every configuration (AP242's mechanism states); the viewer offers them
+    as presets, ``--pose NAME`` poses a snapshot or an export at one. Returns ``assembly``."""
+    from cadgen.engine import mechanism
+
+    return mechanism.configuration(assembly, name, **values)
+
+
 def _read_step(path: Any) -> Any:
     from cadgen.engine.document import read_step_shape
 
@@ -218,7 +233,24 @@ def read_step(path: Any) -> Any:
 def instance(shape: Any) -> Any:
     """A new placement of ``shape``: new objects, of the same classes and attributes,
     sharing its geometry -- its TopoDS handle, and its children's -- with no kernel
-    call. What a second call of a child model in one build hands back."""
+    call. What a second call of a child model in one build hands back.
+
+    What a model may change in place is each placement's own: every dict and list it holds
+    is copied (a joint added to one placement is not on another), and its joints are new
+    joints on the new objects, a joint connected to one in the same placement connected to
+    that one's copy."""
+    copied: dict[int, Any] = {}
+    made = _instance(shape, copied)
+    for joint in copied.values():
+        other = joint.connected_to
+        if other is not None and id(other) in copied:
+            joint.connected_to = copied[id(other)]
+    return made
+
+
+def _instance(shape: Any, copied: dict[int, Any]) -> Any:
+    import copy
+
     cls = type(shape)
     made = cls.__new__(cls)
     attrs = dict(shape.__dict__)
@@ -227,9 +259,19 @@ def instance(shape: Any) -> Any:
     wrapped = attrs.get("_wrapped")
     if wrapped is not None:
         attrs["_wrapped"] = wrapped.Located(wrapped.Location())
+    attrs = {name: dict(value) if type(value) is dict else list(value) if type(value) is list else value
+             for name, value in attrs.items()}
+    joints = attrs.get("joints")
+    if joints:
+        from build123d import Joint
+
+        for label, joint in joints.items():
+            if isinstance(joint, Joint):
+                joints[label] = copied[id(joint)] = copy.copy(joint)
+                joints[label].parent = made
     made.__dict__.update(attrs)
     if children:
-        copies = [instance(child) for child in children]
+        copies = [_instance(child, copied) for child in children]
         for child in copies:
             child.__dict__["_NodeMixin__parent"] = made
         made.__dict__["_NodeMixin__children"] = copies

@@ -163,8 +163,8 @@ class BuildTest(EngineCase):
         self.assertEqual([path.stat().st_mtime_ns for path in written], before, "the sidecar too")
 
     def test_an_assembly_made_again_around_the_same_parts_rewrites_nothing(self) -> None:
-        # A child with joints cannot be keyed: the compound above it is made afresh on
-        # every build, around the very parts the memo handed back.
+        # A child holding what the memo cannot key (a stand-in for a joint) is not keyed: the
+        # compound above it is made afresh on every build, around the very parts the memo handed back.
         self.write(text=MODEL.replace('    rail.label = "rail"', '    rail.label = "rail"\n    rail.joints = {{"slide": object()}}'))
         self.build("frame")
         frame = self.build("frame")["frame"]

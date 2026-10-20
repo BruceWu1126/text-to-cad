@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE } from '../../../dist/renderers/xbf/XbfPositionSection.js';
+import FileSidebar from '../../../dist/renderers/kit/tools/FileSidebar.js';
+import { xbfPoseValues, xbfSamePose } from '@text-to-cad/core/lib/xbf/xbfKinematics.js';
 import { afterEach, expect, it, vi } from 'vitest';
 import XbfTreeSection from '../../../dist/renderers/xbf/XbfTreeSection.js';
 import XbfElementSection from '../../../dist/renderers/xbf/XbfElementSection.js';
@@ -88,6 +92,68 @@ it('the element panel says, in the engine\'s words, when it cannot measure', asy
   render(<XbfElementSection element={element} source="http://127.0.0.1:9/api/doc/abc" version="1-1" />);
   await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/no face 99/));
   expect(screen.getByText('(no element name)')).toBeTruthy();
+});
+
+// A served structure's kinematics (`cadgen/engine/mechanism.py`): a base, an arm on revolute `elbow`
+// and a sleeve on cylindrical `slide`, each pair's frames the identity; configuration `raised`.
+const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+const kinematics = {
+  schema: 'cadgen.kinematics/1', name: 'rig', ground: 0, loop: null,
+  links: [{ name: 'base', instances: [0], matrix: I }, { name: 'arm', instances: [1], matrix: I }, { name: 'sleeve', instances: [2], matrix: I }],
+  pairs: [
+    { label: 'elbow', type: 'revolute', links: [0, 1], frames: [I, I], limits: [[-10, 120]], units: ['deg'] },
+    { label: 'slide', type: 'cylindrical', links: [0, 2], frames: [I, I], limits: [[-180, 180], [0, 50]], units: ['deg', 'mm'] },
+  ],
+  asBuilt: { elbow: 30, slide: [0, 10] }, configurations: { raised: { elbow: 90 } },
+};
+
+/** The renderer's Position state over the section, in the file sidebar as the shell draws it. */
+function Position({ onPose }: { onPose: (values: any) => void }) {
+  const [layout, setLayout] = useState<any>({ panels: {}, collapsed: {} });
+  const [state, setState] = useState<{ preset: string, given: any }>({ preset: DEFAULT_POSE_VALUE, given: null });
+  const values = xbfPoseValues(kinematics, state.given || (state.preset === DEFAULT_POSE_VALUE || state.preset === NO_PRESET_VALUE ? null : state.preset));
+  onPose(values);
+  const asBuilt = xbfPoseValues(kinematics);
+  const preset = xbfSamePose(values, asBuilt) ? DEFAULT_POSE_VALUE : state.given ? NO_PRESET_VALUE : state.preset;
+  return <FileSidebar layout={layout} onLayoutChange={(patch: any) => setLayout((current: any) => ({ ...current, ...patch }))}>
+    <XbfPositionSection kinematics={kinematics} values={values} preset={preset} changed={preset !== DEFAULT_POSE_VALUE}
+      onValues={(given: any) => setState({ preset: NO_PRESET_VALUE, given })} onPreset={(name: string) => setState({ preset: name, given: null })}
+      onReset={() => setState({ preset: DEFAULT_POSE_VALUE, given: null })} />
+  </FileSidebar>;
+}
+
+it('Position: a control per value of each pair within its limits, the configurations as presets, as built the default', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  const user = userEvent.setup({ pointerEventsCheck: 0 });
+  const onPose = vi.fn();
+  render(<Position onPose={onPose} />);
+  const panel = screen.getByRole('region', { name: 'Position controls' });
+  const pose = () => within(panel).getByRole('button', { name: /^Pose: / });
+  const reset = () => within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }) as HTMLButtonElement;
+  // An angle for the revolute pair, an angle and a distance for the cylindrical one, each within its limits.
+  expect(within(panel).getAllByRole('slider').map(thumb => [thumb.getAttribute('aria-label'), thumb.getAttribute('aria-valuemin'),
+    thumb.getAttribute('aria-valuemax'), thumb.getAttribute('aria-valuenow')]))
+    .toEqual([['elbow', '-10', '120', '30'], ['slide angle', '-180', '180', '0'], ['slide position', '0', '50', '10']]);
+  expect([pose().getAttribute('aria-label'), reset().disabled]).toEqual(['Pose: Default', true]);
+  // A configuration chosen: its values, the rest as built.
+  await user.click(pose());
+  await user.click(within(document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!).getByRole('menuitemradio', { name: 'raised' }));
+  expect([pose().getAttribute('aria-label'), onPose.mock.lastCall![0]]).toEqual(['Pose: raised', { elbow: [90], slide: [0, 10] }]);
+  // A value set by hand is Custom; Reset puts the document back as built.
+  const position = within(panel).getByLabelText('slide position value in mm') as HTMLInputElement;
+  await user.clear(position);
+  await user.type(position, '25{Enter}');
+  expect([pose().getAttribute('aria-label'), onPose.mock.lastCall![0]]).toEqual(['Pose: Custom', { elbow: [90], slide: [0, 25] }]);
+  await user.click(reset());
+  expect([pose().getAttribute('aria-label'), onPose.mock.lastCall![0], reset().disabled]).toEqual(['Pose: Default', { elbow: [30], slide: [0, 10] }, true]);
+});
+
+it('Position says a mechanism that closes a loop has no pose, and offers no controls', () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  render(<XbfPositionSection kinematics={{ ...kinematics, loop: ['elbow', 'slide'] }} values={{}} preset={DEFAULT_POSE_VALUE} changed={false}
+    onValues={() => {}} onPreset={() => {}} onReset={() => {}} />);
+  expect(screen.getByText(/Not a tree: pairs elbow, slide close a loop/)).toBeTruthy();
+  expect(screen.queryAllByRole('slider')).toEqual([]);
 });
 
 it('an .xbf has its own renderer, prepared from its catalog entry', async () => {
