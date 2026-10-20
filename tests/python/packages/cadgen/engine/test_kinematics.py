@@ -193,12 +193,12 @@ class HingeTest(_Folder):
             self.assertFalse(_has_point(_vertices(posed, "arm"), _arm_tip(30)), pose)
             self.assertTrue(_has_point(_vertices(posed, "base"), np.array([50.0, 30.0, 10.0])), "the ground stays")
             # The STEP carries none of the mechanism: OCCT writes no AP242 kinematics.
-            text = out.read_text(errors="replace")
+            text = out.read_text(encoding="utf-8", errors="replace")
             self.assertEqual([word for word in ("_PAIR", "MECHANISM", "KINEMATIC") if word in text], [])
         # The build's own STEP is as built, and carries none either.
         built = document.Loaded(self.folder / "hinge.step")
         self.assertTrue(_has_point(_vertices(built, "arm"), _arm_tip(30)))
-        self.assertNotIn("MECHANISM", (self.folder / "hinge.step").read_text(errors="replace"))
+        self.assertNotIn("MECHANISM", (self.folder / "hinge.step").read_text(encoding="utf-8", errors="replace"))
         # A mesh export at a pose: the arm's node placed as the pair places it.
         glb = self.folder / "posed.glb"
         self.assertEqual(_run("export", path, "--glb", str(glb), "--pose", "raised")[0], 0)
