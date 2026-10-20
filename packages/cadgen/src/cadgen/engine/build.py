@@ -219,7 +219,9 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets})
     report["files"] = written
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
-    if xbf_path is not None:
+    # The sidecar describes the build that wrote the xbf: one that kept it keeps the sidecar.
+    if xbf_path is not None and (written[str(xbf_path)]["written"]
+                                 or not xbf_path.with_name(xbf_path.name + ".json").is_file()):
         _sidecar(xbf_path, model, report, tree, shown)
 
 

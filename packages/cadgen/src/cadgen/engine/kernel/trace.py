@@ -105,7 +105,7 @@ import hashlib
 import re
 import sys
 import weakref
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -118,6 +118,25 @@ from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 
 from cadgen.engine.kernel.history import _map, _object_key, listed
+
+# A shape's map of one kind of its sub-shapes in its own frame, by TShape and orientation:
+# what naming asks of every result on every run. A TShape's sub-shapes never change once
+# it is built and a hit hands back the same TShapes, so a map is made once per process and
+# kept for the shapes runs keep naming, the least recently asked dropped past the bound.
+_FRAME_MAPS: "OrderedDict[tuple, Any]" = OrderedDict()
+_FRAME_MAPS_HELD = 1 << 16
+
+
+def _frame_map(shape: Any, topabs: Any) -> Any:
+    key = (shape.TShape(), int(shape.Orientation()), int(topabs))
+    found = _FRAME_MAPS.get(key)
+    if found is not None:
+        _FRAME_MAPS.move_to_end(key)
+        return found
+    found = _FRAME_MAPS[key] = _map(shape.Located(TopLoc_Location()), topabs)
+    while len(_FRAME_MAPS) > _FRAME_MAPS_HELD:
+        _FRAME_MAPS.popitem(last=False)
+    return found
 
 __all__ = ["FOLD_LENGTH", "Feature", "Trace", "identifier", "operation_name"]
 
@@ -367,7 +386,6 @@ class Trace:
         self._skeys: dict[int, bytes] = {}
         self._origins: dict[tuple, tuple | None] = {}
         self._inputs: dict[tuple, tuple | None] = {}
-        self._local: dict[tuple, Any] = {}
         self._places: dict[tuple, dict[Any, list[int]]] = {}
 
     # --- recording ---------------------------------------------------------------------
@@ -757,22 +775,12 @@ class Trace:
     # --- where things are ----------------------------------------------------------------
 
     def _own_map(self, shape: Any, kind: int) -> Any:
-        key = ("own", shape.TShape(), kind)
-        found = self._local.get(key)
-        if found is None:
-            found = self._local[key] = _map(shape.Located(TopLoc_Location()), _TOPABS[kind])
-        return found
+        return _frame_map(shape, _TOPABS[kind])
 
     def _local_map(self, index: int, position: int, kind: Any) -> Any:
         """``TopExp.MapShapes`` of result ``position`` of feature ``index`` in its own frame,
         of one kind (an index of ``_TOPABS``, or a ``TopAbs`` type)."""
-        key = (index, position, kind)
-        found = self._local.get(key)
-        if found is None:
-            result = self.features[index].results[position]
-            topabs = _TOPABS[kind] if isinstance(kind, int) else kind
-            found = self._local[key] = _map(result.Located(TopLoc_Location()), topabs)
-        return found
+        return _frame_map(self.features[index].results[position], _TOPABS[kind] if isinstance(kind, int) else kind)
 
     def _located(self, index: int, shape: Any) -> tuple[int, Any] | None:
         """Where feature ``index`` returned ``shape``: ``(position, None)`` for a result

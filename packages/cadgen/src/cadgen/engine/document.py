@@ -345,11 +345,122 @@ def _same_bytes(first: Path, second: Path) -> bool:
 
 
 def read_step_shape(path: Any) -> Any:
-    """A STEP file as build123d's importer reads it: a compound tree, labelled and
-    coloured as the file is."""
-    from build123d import importers
+    """A STEP file as a build123d compound tree, as build123d's importer builds one -- an
+    assembly a ``Compound`` of its components, each placed by its own location -- but with
+    every node named as the file names that occurrence: a component's own name (the
+    file's instance name), else its product's. build123d's importer names each node by
+    its product, so every placement of one screw would read alike and a model could not
+    tell its occurrences apart. Colours are resolved once per product, not per placement."""
+    import unicodedata
 
-    return importers.import_step(os.fspath(path))
+    from build123d import Compound, Location
+    from build123d.topology.shape_core import downcast
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.Quantity import Quantity_ColorRGBA
+    from OCP.STEPCAFControl import STEPCAFControl_Reader
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDF import TDF_Label, TDF_LabelSequence
+    from OCP.TDocStd import TDocStd_Document
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.XCAFDoc import XCAFDoc_ColorCurv, XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_DocumentTool
+    from OCP.XCAFDoc import XCAFDoc_ColorTool, XCAFDoc_ShapeTool
+    from build123d.importers import topods_lut
+
+    def name_of(label: Any) -> str:
+        text = _label_name(label)
+        return "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")  # as the file has it
+
+    def label_color(label: Any) -> Any:
+        rgba = Quantity_ColorRGBA()
+        for kind in (XCAFDoc_ColorCurv, XCAFDoc_ColorGen, XCAFDoc_ColorSurf):
+            if XCAFDoc_ColorTool.GetColor_s(label, kind, rgba):
+                return rgba
+        return None
+
+    shape_colors: dict[Any, Any] = {}
+
+    def own_color(shape: Any) -> Any:
+        key = shape.TShape()
+        if key not in shape_colors:
+            rgba = Quantity_ColorRGBA()
+            shape_colors[key] = rgba if any(colors.GetColor(shape, kind, rgba) for kind in
+                                            (XCAFDoc_ColorCurv, XCAFDoc_ColorGen, XCAFDoc_ColorSurf)) else None
+        return shape_colors[key]
+
+    def shape_color(shape: Any) -> Any:
+        """A part's colour: its shape's, else its largest coloured face's, as build123d's
+        importer takes it -- each shape's lookup made once."""
+        found = own_color(shape)
+        if found is not None:
+            return found
+        best, extent = None, -1.0
+        explorer = TopExp_Explorer(shape, TopAbs_FACE)
+        while explorer.More():
+            face = explorer.Current()
+            color = own_color(face)
+            if color is not None:
+                box = Bnd_Box()
+                BRepBndLib.Add_s(face, box)
+                if box.SquareExtent() > extent:
+                    best, extent = color, box.SquareExtent()
+            explorer.Next()
+        return best
+
+    products: dict[str, tuple] = {}
+
+    def product(label: Any) -> tuple:
+        """A product's shape, name and colour, read once however often it is placed."""
+        key = _entry(label)
+        found = products.get(key)
+        if found is None:
+            topods = downcast(XCAFDoc_ShapeTool.GetShape_s(label))
+            # An assembly's colour is its label's: its parts carry their own.
+            color = label_color(label) or (None if XCAFDoc_ShapeTool.IsAssembly_s(label) else shape_color(topods))
+            found = products[key] = (topods, name_of(label), color)
+        return found
+
+    def build(parent: Any | None) -> list:
+        labels = TDF_LabelSequence()
+        if parent is None:
+            shapes.GetFreeShapes(labels)
+        else:
+            XCAFDoc_ShapeTool.GetComponents_s(parent, labels, False)
+        made = []
+        for at in range(1, labels.Length() + 1):
+            label = labels.Value(at)
+            referred = label
+            if XCAFDoc_ShapeTool.IsReference_s(label):
+                referred = TDF_Label()
+                XCAFDoc_ShapeTool.GetReferredShape_s(label, referred)
+            topods, product_name, product_color = product(referred)
+            if XCAFDoc_ShapeTool.IsAssembly_s(referred):
+                node = Compound()
+                node.children = build(referred)
+            else:
+                node = topods_lut[type(topods)](topods)
+            color = label_color(label) if referred is not label else None
+            node.color = color or product_color
+            node.label = (name_of(label) if referred is not label else "") or product_name
+            node.move(Location(XCAFDoc_ShapeTool.GetLocation_s(label)))
+            made.append(node)
+        return made
+
+    doc = TDocStd_Document(TCollection_ExtendedString("XCAF"))
+    shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+    colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+    reader = STEPCAFControl_Reader()
+    reader.SetNameMode(True)
+    reader.SetColorMode(True)
+    reader.SetLayerMode(True)
+    if reader.ReadFile(os.fspath(path)) != IFSelect_RetDone:
+        raise ValueError(f"cannot read the STEP file {path}")
+    reader.Transfer(doc)
+    root = Compound()
+    root.children = build(None)
+    return root.children[0] if len(root.children) == 1 else root
 
 
 @dataclass
@@ -506,6 +617,15 @@ def _read(path: Path) -> Any:
 def _find(label: Any, attribute: Any, guid: Any) -> bool:
     # FindAttribute faults on a label without the attribute: ask IsAttribute first.
     return label.IsAttribute(guid) and label.FindAttribute(guid, attribute)
+
+
+def _entry(label: Any) -> str:
+    from OCP.TCollection import TCollection_AsciiString
+    from OCP.TDF import TDF_Tool
+
+    text = TCollection_AsciiString()
+    TDF_Tool.Entry_s(label, text)
+    return text.ToCString()
 
 
 def _label_name(label: Any) -> str:

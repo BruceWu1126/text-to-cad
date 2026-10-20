@@ -84,9 +84,11 @@ history is composed from them. The feature carries it, and so does the entry: a 
 hands the feature the miss's history too, and runs no maker; the names the trace
 gives are the same either way.
 
-The memo lives in this process's memory for the life of the process, LRU-bounded by
-entries; nothing of it is ever written anywhere, and a new process computes
-everything. ``CADGEN_ENGINE_MEMO=0`` turns hits off and nothing else.
+The memo lives in this process's memory for the life of the process and holds what
+the last ``RUNS_KEPT`` builds used (``_sweep``): a build is a scan of every call the
+model makes, so a bound by count would evict, on a model larger than the bound, each
+entry just before the next build asks for it. Nothing of it is ever written anywhere,
+and a new process computes everything. ``CADGEN_ENGINE_MEMO=0`` turns hits off and nothing else.
 """
 
 from __future__ import annotations
@@ -115,13 +117,15 @@ from OCP.TopTools import TopTools_IndexedMapOfShape
 from cadgen.engine.kernel import history as kernel_history
 from cadgen.engine.kernel.trace import Trace
 
-__all__ = ["CAPACITY", "clear", "enabled", "install", "run", "stats", "uninstall", "wrap_function"]
+__all__ = ["CAPACITY", "RUNS_KEPT", "clear", "enabled", "install", "run", "stats", "uninstall", "wrap_function"]
 
-# Entries of live results: a model's intermediate geometry for a few models at
-# once, so an edit loop over a large model keeps every unchanged step.
-CAPACITY = 32768
+# What a build keeps: every entry and key the last RUNS_KEPT outermost runs used, so an
+# edit, its revert and a second edit in between all find the first run's steps. The
+# counts below are a safety far past any model's size, never the working bound.
+RUNS_KEPT = 4
+CAPACITY = 1 << 21
 _SUB_MAPS = 1024
-_KEYS = 8 * CAPACITY
+_KEYS = 1 << 24
 
 _LOCK = threading.RLock()
 _LOCAL = threading.local()
@@ -130,6 +134,10 @@ _REGISTRY: dict[Any, "_Made"] = {}
 _LEDGER: dict[Any, list["_Row"]] = {}
 _KEY_IDS: "OrderedDict[tuple, int]" = OrderedDict()
 _KEY_IDS_NEXT = itertools.count(1)
+# The outermost runs so far; each leaves a marker in the LRU order of the memo and of the
+# key table, behind which everything it touched is moved (``_sweep``).
+_GENERATIONS = itertools.count(1)
+_MARKS: list[int] = []
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 # A root's sub-shapes of one kind, TShape to its first ordinal (``_held``), for the roots a
 # model keeps casting shapes out of.
@@ -568,11 +576,50 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
     install()
     state = _Run(script_path)
     previous = getattr(_LOCAL, "run", None)
+    outermost = previous is None
+    if outermost:
+        _mark()
     _LOCAL.run = state
     try:
         yield state
     finally:
         _LOCAL.run = previous
+        if outermost:
+            _sweep()
+
+
+def _mark() -> None:
+    """A run begins: a marker at the end of both LRU orders. What the run hits, makes or
+    keys moves behind it."""
+    generation = next(_GENERATIONS)
+    with _LOCK:
+        _MEMO[(-generation, 0)] = None  # type: ignore[assignment]
+        _KEY_IDS[("run", -generation)] = -generation
+        _MARKS.append(generation)
+
+
+def _sweep() -> None:
+    """A run ended: forget every entry and key no run of the last ``RUNS_KEPT`` touched --
+    all that lies in front of the oldest kept run's marker, the earlier markers with it."""
+    with _LOCK:
+        if len(_MARKS) <= RUNS_KEPT:
+            return
+        oldest = _MARKS[-RUNS_KEPT]
+        del _MARKS[:-RUNS_KEPT]
+        stop = (-oldest, 0)
+        while _MEMO:
+            key, entry = next(iter(_MEMO.items()))
+            if key == stop:
+                break
+            _MEMO.popitem(last=False)
+            if entry is not None:
+                _drop(entry)
+        stop_key = ("run", -oldest)
+        while _KEY_IDS:
+            key = next(iter(_KEY_IDS))
+            if key == stop_key:
+                break
+            _KEY_IDS.popitem(last=False)
 
 
 def stats() -> dict[str, int]:
@@ -584,6 +631,7 @@ def clear() -> None:
     """Forget every entry, so the next run computes everything."""
     with _LOCK:
         _MEMO.clear()
+        _MARKS.clear()
         _REGISTRY.clear()
         _LEDGER.clear()
         _KEY_IDS.clear()
@@ -717,7 +765,8 @@ def _keep(entry: "_Entry") -> None:
         _MEMO.move_to_end(entry.key)
         while len(_MEMO) > CAPACITY:
             _old_key, old = _MEMO.popitem(last=False)
-            _drop(old)
+            if old is not None:
+                _drop(old)
 
 
 def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function: Any, args: tuple,

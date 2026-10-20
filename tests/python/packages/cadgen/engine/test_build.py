@@ -135,18 +135,27 @@ class BuildTest(EngineCase):
             self.assertIn(f"ADVANCED_FACE('{name}'", text)
         self.assertNotIn("ADVANCED_FACE(''", text)
 
+    def test_a_step_read_back_names_each_occurrence_as_the_file_does(self) -> None:
+        # Two placements of one part are told apart by their own names, not their product's.
+        self.write()
+        self.build("frame")
+        read = document.read_step_shape(self.folder / "out/frame.step")
+        self.assertEqual([child.label for child in read.children], ["bracket", "right", "rail"])
+        self.assertTrue(read.children[0].wrapped.TShape() == read.children[1].wrapped.TShape())
+
     def test_a_warm_build_hits_and_rewrites_nothing(self) -> None:
         self.write()
         self.build()
         target = self.folder / "out/frame.xbf"
-        before = target.stat().st_mtime_ns, (self.folder / "out/frame.step").stat().st_mtime_ns
+        written = [target, self.folder / "out/frame.step", self.folder / "out/frame.xbf.json"]
+        before = [path.stat().st_mtime_ns for path in written]
         reports = self.build()
         frame = reports["frame"]
         self.assertEqual(frame["memo"]["misses"], 0)
         self.assertGreater(frame["memo"]["hits"], 0)
         self.assertEqual(frame["named"], 0, "an unchanged part is not named again")
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
-        self.assertEqual((target.stat().st_mtime_ns, (self.folder / "out/frame.step").stat().st_mtime_ns), before)
+        self.assertEqual([path.stat().st_mtime_ns for path in written], before, "the sidecar too")
 
     def test_an_assembly_made_again_around_the_same_parts_rewrites_nothing(self) -> None:
         # A child with joints cannot be keyed: the compound above it is made afresh on

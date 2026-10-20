@@ -6,10 +6,16 @@ original stdout, one JSON object per line: a request ``{"id", "op": "build", "sc
 ``{"id", "done"}`` (the build's reports) or ``{"id", "failed"}`` at the end. What the
 model prints goes to the worker's stderr, which the daemon passes on. The worker exits
 when its stdin closes.
+
+A build runs with the cyclic collector off, and the worker collects once after it has
+answered: the memo keeps every live result of the last builds, millions of objects, and a
+full collection walks all of them -- a second on a large model, paid inside whichever call
+allocates when it falls due. Off the build's path it is paid while the worker is idle.
 """
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import sys
@@ -31,6 +37,7 @@ def main() -> int:
     from cadgen.engine.build import BuildError, build
 
     send({"ready": os.getpid()})
+    gc.disable()
     for line in sys.stdin:
         if not line.strip():
             continue
@@ -52,6 +59,7 @@ def main() -> int:
             send({"id": ident, "failed": "".join(traceback.format_exception(type(error), error, error.__traceback__))})
             if isinstance(error, (KeyboardInterrupt, SystemExit)):
                 return 1
+        gc.collect()  # answered: the cycles the build left, collected while idle
     return 0
 
 

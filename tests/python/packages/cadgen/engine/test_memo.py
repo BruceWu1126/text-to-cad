@@ -232,6 +232,27 @@ class CastTest(MemoCase):
         self.assertTrue(rounded2.wrapped.TShape() == rounded.wrapped.TShape())
 
 
+class RetentionTest(MemoCase):
+    @staticmethod
+    def _model(radius):
+        from build123d import Solid
+
+        return Solid.make_box(4, 4, 4) - Solid.make_cylinder(radius, 10)
+
+    def test_the_memo_keeps_what_the_last_runs_used_however_many_calls_they_made(self) -> None:
+        _run(self._model, 1.0)
+        for radius in [1.0 + i / 10 for i in range(1, memo.RUNS_KEPT)]:
+            _run(self._model, radius)
+        _, revert, _ = _run(self._model, 1.0)
+        self.assertEqual(revert["misses"], 0, "used within the last runs: kept")
+        for radius in [2.0 + i / 10 for i in range(memo.RUNS_KEPT + 1)]:
+            _run(self._model, radius)
+        _, gone, _ = _run(self._model, 1.0)
+        self.assertEqual(gone["misses"], 2, "unused for longer: forgotten (the cylinder and the cut)")
+        # What is held is what those runs made: the box, and a cylinder and a cut per radius.
+        self.assertLessEqual(memo.stats()["entries"], 2 * memo.RUNS_KEPT + 1 + memo.RUNS_KEPT)
+
+
 class MakerTest(MemoCase):
     def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
         from build123d import Solid
