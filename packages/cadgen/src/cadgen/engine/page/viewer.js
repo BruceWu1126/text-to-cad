@@ -3,7 +3,9 @@
 // its placement. Hovering shows the element under the pointer and its name: a vertex or
 // an edge within a few pixels of it (found in the hovered part's vertex and edge tables,
 // on screen), else the face, whose triangle's index range is found in the face table.
-// Clicking asks the server what the kernel measures of that element.
+// Clicking asks the server what the kernel measures of that element. A document with joints
+// gets a Position panel: its configurations, a slider per pair value within its limits, and as
+// built; the page poses the instances by forward kinematics over the structure's `kinematics`.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
@@ -205,6 +207,7 @@ async function show(doc) {
   clock = performance.now();
   const next = new Map();
   const children = [];
+  const byInstance = [];
   for (const instance of structure.instances) {
     const prototype = structure.prototypes[instance.prototype];
     const held = loaded[instance.prototype];
@@ -228,6 +231,7 @@ async function show(doc) {
     objects[0].userData = { instance, prototype, held };
     next.set(name, objects);
     children.push(...objects);
+    byInstance.push(objects);
   }
   clearHover();
   root.clear();
@@ -241,6 +245,7 @@ async function show(doc) {
   timing.scene = performance.now() - clock;
   current = structure;
   version = structure.version;
+  showPose(structure, byInstance);
   const triangles = loaded.reduce((sum, held) => sum + held.geometry.index.count / 3, 0);
   const unmeshed = loaded.reduce((sum, held) => sum + held.unmeshed, 0);
   statusLine.textContent = `${structure.prototypes.length} parts, ${structure.instances.length} instances, ` +
@@ -252,6 +257,105 @@ async function show(doc) {
     fitted = true;
   }
   return timing;
+}
+
+// --- position --------------------------------------------------------------------------
+//
+// The structure's `kinematics` (the engine's `mechanism.py`): link 2 of a pair stands at
+// link_1 · item_1 · M(v) · item_2⁻¹, M a turn about Z, a slide along Z, both, or an intrinsic
+// X-Y-Z rotation; a gear drives one pair from another. Each link's placement at the values over
+// its placement as built moves its instances.
+
+const poseBox = document.getElementById("pose");
+const COUNT = { revolute: 1, prismatic: 1, cylindrical: 2, spherical: 3 };
+const mat = (m) => new THREE.Matrix4().fromArray(m);
+const turn = (axis, degrees) => new THREE.Matrix4()[["makeRotationX", "makeRotationY", "makeRotationZ"][axis]](degrees * Math.PI / 180);
+function motion(type, v) {
+  if (type === "revolute") return turn(2, v[0]);
+  if (type === "prismatic") return new THREE.Matrix4().makeTranslation(0, 0, v[0]);
+  if (type === "cylindrical") return new THREE.Matrix4().makeTranslation(0, 0, v[1]).multiply(turn(2, v[0]));
+  return turn(0, v[0]).multiply(turn(1, v[1])).multiply(turn(2, v[2]));
+}
+const valuesOf = (value) => (Array.isArray(value) ? value.map(Number) : [Number(value)]);
+function linkPlacements(kinematics, values) {
+  const found = kinematics.links.map(() => null);
+  found[kinematics.ground] = mat(kinematics.links[kinematics.ground].matrix);
+  let pending = kinematics.pairs.filter((pair) => pair.type !== "gear" && pair.frames);
+  for (let progress = true; pending.length && progress;) {
+    progress = false;
+    pending = pending.filter((pair) => {
+      const [a, b] = pair.links, [one, two] = pair.frames.map(mat), moved = motion(pair.type, values[pair.label]);
+      if (found[a] && !found[b]) found[b] = found[a].clone().multiply(one).multiply(moved).multiply(two.invert());
+      else if (found[b] && !found[a]) found[a] = found[b].clone().multiply(two).multiply(moved.invert()).multiply(one.invert());
+      else if (!found[a]) return true;
+      progress = true;
+      return false;
+    });
+  }
+  return found.map((matrix, at) => matrix || mat(kinematics.links[at].matrix));
+}
+let pose = null; // { key, values }
+
+function showPose(structure, byInstance) {
+  const kinematics = structure.kinematics;
+  poseBox.style.display = kinematics ? "block" : "none";
+  if (!kinematics) return;
+  const asBuilt = Object.fromEntries(Object.entries(kinematics.asBuilt).map(([label, value]) => [label, valuesOf(value)]));
+  const driven = new Map(kinematics.pairs.filter((pair) => pair.type === "gear" && pair.drives).map((pair) => [pair.drives[1], pair]));
+  const key = JSON.stringify([kinematics.pairs, kinematics.configurations]);
+  if (pose?.key !== key) pose = { key, values: structuredClone(asBuilt) };
+  const reference = kinematics.loop ? null : linkPlacements(kinematics, asBuilt);
+  const apply = () => {
+    for (const [label, gear] of driven) pose.values[label][0] = pose.values[gear.drives[0]][0] * gear.ratio;
+    const now = linkPlacements(kinematics, pose.values);
+    kinematics.links.forEach((link, at) => {
+      const delta = now[at].clone().multiply(reference[at].clone().invert());
+      for (const index of link.instances) {
+        for (const object of byInstance[index]) object.matrix.copy(delta).multiply(mat(structure.instances[index].matrix));
+      }
+    });
+    clearHover();
+  };
+  poseBox.innerHTML = "";
+  const title = document.createElement("b");
+  title.textContent = "Position";
+  poseBox.append(title);
+  if (kinematics.loop) {
+    poseBox.append(` — not a tree: ${kinematics.loop.join(", ")} close a loop`);
+    return;
+  }
+  const preset = document.createElement("select");
+  preset.setAttribute("aria-label", "Configuration");
+  for (const name of ["as built", ...Object.keys(kinematics.configurations)]) preset.add(new Option(name, name));
+  const reset = document.createElement("button");
+  reset.textContent = "Reset";
+  poseBox.append(" ", preset, " ", reset);
+  const sliders = [];
+  for (const pair of kinematics.pairs) {
+    if (pair.type === "gear" || driven.has(pair.label)) continue;
+    for (let index = 0; index < COUNT[pair.type]; index += 1) {
+      const unit = pair.units[index];
+      let [min, max] = pair.limits[index];
+      min ??= max != null ? max - (unit === "deg" ? 360 : 100) : unit === "deg" ? -180 : -50;
+      max ??= min + (unit === "deg" ? 360 : 100);
+      const label = document.createElement("label");
+      const slider = Object.assign(document.createElement("input"), { type: "range", min, max, step: unit === "deg" ? 1 : 0.1 });
+      slider.setAttribute("aria-label", `${pair.label} ${index}`);
+      const shown = () => { label.firstChild.textContent = `${pair.label}${COUNT[pair.type] > 1 ? ` ${index}` : ""}: ${pose.values[pair.label][index]} ${unit}`; };
+      label.append(document.createTextNode(""), slider);
+      slider.addEventListener("input", () => { pose.values[pair.label][index] = Number(slider.value); shown(); preset.value = ""; apply(); });
+      sliders.push(() => { slider.value = pose.values[pair.label][index]; shown(); });
+      poseBox.append(label);
+    }
+  }
+  const sync = () => { for (const update of sliders) update(); apply(); };
+  preset.addEventListener("change", () => {
+    pose.values = structuredClone(asBuilt);
+    for (const [label, value] of Object.entries(kinematics.configurations[preset.value] || {})) pose.values[label] = valuesOf(value);
+    sync();
+  });
+  reset.addEventListener("click", () => { preset.value = "as built"; pose.values = structuredClone(asBuilt); sync(); });
+  sync();
 }
 
 function fit() {
@@ -502,7 +606,8 @@ async function start() {
   }
   docId = doc;
   await show(doc);
-  window.__xbf = { scene, camera, controls, current: () => current, readPart, hover, hovered: () => hovered, updates };
+  window.__xbf = { scene, camera, controls, current: () => current, readPart, hover, hovered: () => hovered, updates,
+                   pose: () => pose };
   requestAnimationFrame(frame);
   poll(doc);
 }
