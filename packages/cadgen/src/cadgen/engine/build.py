@@ -117,6 +117,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
         except Exception as error:  # noqa: BLE001 - the model's own error, reported
             return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
         loaded = time.perf_counter()
+        context.loaded = set(_first_party_modules())
         models = models_in(vars(module), script)
         if functions:
             by_name = {model.name: model for model in models}
@@ -130,6 +131,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
         for model in models:
             body_started = time.perf_counter()
             tally = dict(run.tally)
+            keys_before = context.key_seconds
             try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
@@ -139,7 +141,12 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             body = time.perf_counter() - body_started
             calls = {name: run.tally[name] - tally.get(name, 0) for name in run.tally}
             results.append((model, result, body))
-            reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls,
+            # What the bodies' keys cost (inside ``body``) and the modules each body's key
+            # took by their bytes, with why.
+            retention = {"keys": round(context.key_seconds - keys_before, 4),
+                         "fallbacks": {name: reasons for name, reasons in context.fallbacks.items()
+                                       if name == model.identity or name in context.timings}}
+            reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity}})
             context.timings.clear()
