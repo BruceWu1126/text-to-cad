@@ -17,12 +17,14 @@ an endpoint the server does not implement.
 ## Scope
 
 This is the rule inside the STEP renderer (`src/renderers/step`). A DXF,
-a GLB, a triangle mesh (STL, 3MF) and a robot description (URDF, SRDF, SDF) have renderers
-of their own (`src/renderers/dxf`, `src/renderers/glb`, `src/renderers/mesh`,
-`src/renderers/robot`; see [CAD renderer](cad-renderer.md#kit)): a vertical slice owns its
-tools, tabs and scene outright and consults no capability table. The `dxf`, `glb`, `stl`,
-`3mf`, `urdf`, `srdf` and `sdf` rows below remain for what is not a renderer: the file
-list's icon and label. The headless snapshot renderer consults no table either: it draws
+a GLB, a triangle mesh (STL, 3MF), a robot description (URDF, SRDF, SDF) and a cadgen engine
+document (`.xbf`) have renderers of their own (`src/renderers/dxf`, `src/renderers/glb`,
+`src/renderers/mesh`, `src/renderers/robot`, `src/renderers/xbf`; see [CAD renderer](cad-renderer.md#kit)):
+a vertical slice owns its tools, tabs and scene outright and consults no capability table. The
+`dxf`, `glb`, `stl`, `3mf`, `urdf`, `srdf`, `sdf` and `xbf` rows below remain for what is not a
+renderer: the file list's icon and label. An engine document is read by the page from the
+engine that serves it (`engineDocument` on the workspace service says where), never through the
+viewer's server; its row says `assetKind: engine-document`, `parts` and `topology`. The headless snapshot renderer consults no table either: it draws
 each of those families with the scene builder its renderer uses
 ([one scene builder per family](cad-renderer.md#one-scene-builder-per-family-the-viewer-and-the-snapshot-cli)).
 

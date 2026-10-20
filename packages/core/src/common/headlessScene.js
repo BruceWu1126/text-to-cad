@@ -25,6 +25,8 @@ import { buildMeshScene } from "../lib/render/meshScene.js";
 import { loadRobot } from "../lib/urdf/loadRobot.js";
 import { createRobotScene } from "../lib/urdf/robotScene.js";
 import { isKitScene, sceneFramingBounds } from "../lib/viewer/sceneContract.js";
+import { loadXbfDocument } from "../lib/xbf/xbfDocument.js";
+import { createXbfScene } from "../lib/xbf/xbfScene.js";
 import { resolveSceneSurfaceLook } from "./sceneSettings.js";
 
 function jobKind(job) {
@@ -97,6 +99,15 @@ const ROBOT_FAMILY = Object.freeze({
   release: () => {}
 });
 
+const XBF_FAMILY = Object.freeze({
+  name: "xbf",
+  // The document the xbf renderer loads (`useXbfScene`): its structure and part buffers, read
+  // from the engine that serves it (`resolved.url`, the document's API URL).
+  load: job => loadXbfDocument(jobUrl(job)),
+  build: (THREE, document) => createXbfScene(THREE, document),
+  release: document => document.release()
+});
+
 function hiddenPartsOf(job) {
   const hide = job?.selection?.hide ?? job?.resolved?.selection?.hide;
   return Array.isArray(hide) ? hide.map(String) : [];
@@ -113,7 +124,8 @@ const FAMILY_BY_KIND = Object.freeze({
   "3mf": MESH_FAMILY,
   urdf: ROBOT_FAMILY,
   srdf: ROBOT_FAMILY,
-  sdf: ROBOT_FAMILY
+  sdf: ROBOT_FAMILY,
+  xbf: XBF_FAMILY
 });
 
 /**
@@ -135,7 +147,8 @@ export function headlessResources() {
 /**
  * What a scene wears on this stage, from the job's resolved scene settings: the viewer's look
  * (`resolveSceneSurfaceLook`, the one the viewport resolves) and its shadow rule (the scene takes
- * shadows while the lighting is on).
+ * shadows while the lighting is on), and for a scene with CAD edges of its own the edges the mode
+ * draws (`edges`, the view's: the xbf renderer hands its scene the same).
  */
 export function headlessSceneDress(sceneSettings) {
   return {
@@ -145,7 +158,8 @@ export function headlessSceneDress(sceneSettings) {
       renderMode: sceneSettings.render.enabled,
       renderConfiguration: sceneSettings.render.configuration
     }),
-    receiveShadows: sceneSettings.view.lighting.enabled === true
+    receiveShadows: sceneSettings.view.lighting.enabled === true,
+    edges: sceneSettings.view.edges
   };
 }
 
@@ -184,11 +198,12 @@ function partIdentity(object) {
  * @param {import("../lib/viewer/sceneContract.js").KitScene} scene  A family builder's scene.
  * @param {{ look: object | null, receiveShadows: boolean }} dress  `headlessSceneDress`.
  */
-export function headlessSceneModel(THREE, scene, { look = null, receiveShadows = false } = {}) {
+export function headlessSceneModel(THREE, scene, { look = null, receiveShadows = false, edges = null } = {}) {
   if (!isKitScene(scene)) {
     throw new Error("the headless stage holds a family's scene: { object3D, bounds, dispose() } (lib/viewer/sceneContract.js)");
   }
   scene.setSurfaceLook?.(look);
+  if (edges) scene.setEdgeLook?.(edges);
   if (scene.setShadowReception) scene.setShadowReception(receiveShadows);
   else scene.object3D.traverse((object) => { if (object.isMesh) object.receiveShadow = receiveShadows; });
   const meshes = [];

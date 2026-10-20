@@ -102,6 +102,16 @@ snapshot's own.
   build, `#o2.1`; a robot's is its part id. `--focus` and `--hide` are STEP-only (a
   robot job's `selection.hide` takes its part ids).
 
+## Engine documents
+
+An `.xbf` (a `cadgen.engine` document) is drawn by `cadgen xbf snapshot DOC OUT.png`, with the
+scene the CAD Viewer draws for it: the engine serves and meshes the document, and the page reads
+it from the engine and builds it with the viewer's own builder. Every display mode applies (the
+document has its B-rep's edges), with `--grid`, `clip`, `--camera` and `--preview`;
+`display.exploded`, and `parts` for a document that places one part, are refused by name before
+anything renders. `--json` reports each stage's milliseconds. See
+[`src/cadgen/engine/README.md`](src/cadgen/engine/README.md).
+
 ## Drawings
 
 A `.dxf` is not rendered in a scene at all, so `cadgen dxf snapshot` is the

@@ -31,7 +31,7 @@ const args = parseArgs(process.argv.slice(2));
 const diagnosticDir = args.out || process.env.VIEWER_TEST_DIAGNOSTICS_DIR || "";
 const root = path.resolve(args.dir || ".");
 // One fixture per LOAD PATH: an exact-surface STEP package, a mesh, a 2D drawing,
-// a robot description.
+// a robot description, an engine document.
 const fixtures = [
   // `tools` is the file's own tool strip; unavailable tools are hidden. `threeD` has
   // Projection, Display and Preview at the strip's end; `sections`
@@ -41,6 +41,9 @@ const fixtures = [
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: ["Select", "Annotate", "Measure"], sections: [], threeD: false, minCoverage: 0.003 },
   { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Links"], threeD: true },
+  // A cadgen engine document: served by the engine, read by the page from it. Its elements are
+  // picked under Select; what they measure is the engine's (no Measure tool).
+  { format: "xbf", file: "smoke.xbf", parts: false, tools: ["Select", "Annotate", "Clip"], sections: ["Document"], threeD: true },
 ];
 // Small enough that software WebGL and the PNG encode stay cheap on CI, large enough for the
 // layout to be the desktop one.
@@ -100,7 +103,10 @@ async function newPage() {
         errors.push(`a relative file reached ${parsed.pathname}: ${file}`);
       }
     }
-    if (["http:", "https:"].includes(parsed.protocol) && parsed.origin !== viewerOrigin) {
+    // This machine is not external: an engine document is read from the cadgen engine that
+    // serves it, on a loopback origin of its own.
+    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
+    if (["http:", "https:"].includes(parsed.protocol) && parsed.origin !== viewerOrigin && !loopback) {
       errors.push(`unexpected external request: ${request.method()} ${url} (${request.resourceType()})`);
       await route.abort("blockedbyclient");
       return;

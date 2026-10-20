@@ -3,6 +3,7 @@
     cadgen xbf build SCRIPT[::FUNCTION] ...   build in the warm worker of each script
     cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
+    cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--json]
     cadgen xbf status | stop | daemon
 """
 
@@ -40,6 +41,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
     serve.add_argument("--foreground", action="store_true", help="serve from this process until interrupted")
+    from cadgen.engine.snapshot import add_parser as add_snapshot
+
+    add_snapshot(verbs)
     verbs.add_parser("status", help="the daemon's workers and served documents")
     verbs.add_parser("stop", help="stop the daemon")
     verbs.add_parser("daemon", help="run the daemon in this process")
@@ -186,6 +190,10 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
         return _export(args)
     if args.verb == "serve":
         return _serve(args)
+    if args.verb == "snapshot":
+        from cadgen.engine.snapshot import run as snapshot
+
+        return snapshot(args)
     if args.verb == "daemon":
         from cadgen.engine.daemon import main as run
 

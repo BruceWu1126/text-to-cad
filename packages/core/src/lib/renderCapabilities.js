@@ -34,7 +34,9 @@ export const PARAMETER_SOURCE = Object.freeze({
 export const ASSET_KIND = Object.freeze({
   MESH: "mesh",
   DRAWING: "drawing",
-  ROBOT: "robot"
+  ROBOT: "robot",
+  // A cadgen engine document: its structure and part buffers, read from the engine that serves it.
+  ENGINE_DOCUMENT: "engine-document"
 });
 
 // The file-list glyph. A table rather than a cascade of format tests: the icon is the most
@@ -145,7 +147,17 @@ export const RENDER_CAPABILITIES = Object.freeze({
   }),
   [RENDER_FORMAT.URDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
   [RENDER_FORMAT.SRDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
-  [RENDER_FORMAT.SDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES })
+  [RENDER_FORMAT.SDF]: Object.freeze({ ...DEFAULT_CAPABILITIES, ...ROBOT_CAPABILITIES }),
+  // A cadgen engine document (`packages/ui/src/renderers/xbf`): B-rep parts and their placements,
+  // every face, edge and vertex named by its ordinal. Drawn from what the engine serves, never from
+  // a package the viewer builds.
+  [RENDER_FORMAT.XBF]: Object.freeze({
+    ...DEFAULT_CAPABILITIES,
+    assetKind: ASSET_KIND.ENGINE_DOCUMENT,
+    iconKind: ENTRY_ICON_KIND.STEP,
+    parts: true,
+    topology: true
+  })
 });
 
 // Extension aliases that name the same render format.

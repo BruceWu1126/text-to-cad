@@ -24,7 +24,11 @@ The stages keep ownership narrow:
   materials, topology/display edges, and STEP parameter effects.
 - A family builder owns its scene: `createGlbScene` (`lib/render/glbScene.js`),
   `buildMeshScene` (`lib/render/meshScene.js`), `createRobotScene`
-  (`lib/urdf/robotScene.js`). Each returns the scene contract of
+  (`lib/urdf/robotScene.js`), `createXbfScene` (`lib/xbf/xbfScene.js`, a cadgen engine
+  document read by `loadXbfDocument` from the engine that serves it: one geometry per
+  prototype over its XBM2 buffer's own typed-array views, one placed group per instance, CAD
+  edges by class from the edge table, faces, edges and vertices picked by ordinal; the
+  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`). Each returns the scene contract of
   `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
   second scene of the same file with its own objects, materials and look over the first's
   geometry (`lib/render/sharedGeometry.js`), which the viewer's Preview draws beside
@@ -702,7 +706,10 @@ bundle this entrypoint into cadgen's packaged runtime (`cadgen/_runtime/browser`
 
 The snapshot page's half of "one scene builder per file family". `headlessSceneFamily(job)`
 answers, from the job's resolved kind, the family whose loader and builder draw it (GLB;
-STL and 3MF; URDF, SRDF and SDF), or null for a STEP document. A family is
+STL and 3MF; URDF, SRDF and SDF; an engine document, `xbf`, whose `resolved.url` is its API
+URL on the engine: `loadXbfDocument` + `createXbfScene`), or null for a STEP document. The
+dress carries the view's `edges` too, for a scene that draws CAD edges of its own (an engine
+document's), as the xbf renderer hands them to its scene in the viewer. A family is
 `{ load(job, { resources }), build(THREE, loaded, job), release(loaded) }`, each a call to
 the module the viewer's renderer calls: `loadRenderGlbDocument` + `createGlbScene`,
 `loadRenderMeshByUrl` + `buildMeshScene`, `loadRobot` + `createRobotScene`. A robot is
