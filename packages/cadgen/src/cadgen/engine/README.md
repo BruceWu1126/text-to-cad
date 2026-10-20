@@ -193,10 +193,19 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   document, its readers and every pose honour it.
 - **Configurations**: the as-built values and each named configuration, as pair values.
 
-A joint connected to a part the document does not hold where the joint put it (moved after
-`connect_to`, or connected after its compound was made), a linear joint connected to a
-revolute one (a pin in a slot, which no AP242 lower pair is), and a configuration naming a
-joint the assembly lacks or a value outside its range fail the build by name.
+**Geometry is never held hostage by a mechanism.** What the harvest finds inconsistent is a
+warning, said by name, and the document is written all the same: a pair whose part stands
+where it cannot put it (moved after `connect_to`, connected after its compound was made, a
+rigid joint off the joint's axis) or that joins two parts rigid joints make one body is kept
+with its frames and limits, no value, and `inconsistent: <reason>` (the pair's
+`cadgen_inconsistent` string), and its links hold as built; a moving joint matching two rigid
+joints alike, a linear joint connected to a revolute one (a pin in a slot, which no AP242 lower
+pair is) and a configuration value a pair cannot take are left out; pairs that close a loop
+are kept and not posed. The warnings travel with the mechanism (a `TDataStd_ExtStringArray` on
+its label), in the structure's `kinematics.warnings` and the build report's
+`kinematics.warnings`; posing a warned pair is refused by name, and the viewer's Position says
+why beside it. The one harvest error is a configuration naming a joint its assembly does not
+hold: it means nothing to store.
 
 The xbf holds the mechanism as a subtree under `Main():100`, found by the
 `TDataStd_UAttribute` of its GUID, of standard attributes only: `TDataStd_Name` on every
@@ -211,8 +220,8 @@ configuration (its name) or at joint values (`'{"elbow": 45}'`, the rest as buil
 engine places each link by composing its pairs from the ground down, exact forward
 kinematics, and draws or writes that (a posed STEP is written from the document's tree with
 every placement its own). No flag is as built. An unknown configuration or joint, a value out
-of range or a pair a gear drives, and a mechanism whose pairs close a loop (named, with the
-loop) are refused before anything renders or is written.
+of range, a pair a gear drives, a pair kept inconsistent and a pair of a loop are refused by
+name before anything renders or is written.
 
 ## Mesh
 

@@ -113,14 +113,14 @@ function XbfSurface({ view, data }) {
   const [pose, setPose] = useState({ key: "", preset: DEFAULT_POSE_VALUE, given: null });
   const current = pose.key === kinematicsKey ? pose : { key: kinematicsKey, preset: DEFAULT_POSE_VALUE, given: null };
   const poseValues = useMemo(() => {
-    if (!kinematics || kinematics.loop?.length) return null;
+    if (!kinematics) return null;
     try {
       return xbfPoseValues(kinematics, current.given || (current.preset !== DEFAULT_POSE_VALUE && current.preset !== NO_PRESET_VALUE ? current.preset : null));
     } catch {
       return xbfPoseValues(kinematics);
     }
   }, [kinematics, current.given, current.preset]);
-  const asBuilt = useMemo(() => (kinematics && !kinematics.loop?.length ? xbfPoseValues(kinematics) : null), [kinematics]);
+  const asBuilt = useMemo(() => (kinematics ? xbfPoseValues(kinematics) : null), [kinematics]);
   useEffect(() => {
     if (!scene || !poseValues) return;
     scene.setPose(xbfSamePose(poseValues, asBuilt) ? null : poseValues);

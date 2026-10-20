@@ -61,6 +61,29 @@ export function xbfPairMotion(type, values) {
 
 const asValues = value => (Array.isArray(value) ? value.map(Number) : [Number(value)]);
 
+/**
+ * Each pair that cannot be posed, and why: one the engine kept with no value because the built
+ * tree contradicts it (`inconsistent`), and each pair of a loop.
+ * @returns {Map<string, string>}
+ */
+export function xbfUnposable(kinematics) {
+  const found = new Map();
+  for (const pair of kinematics?.pairs || []) if (pair.inconsistent) found.set(pair.label, pair.inconsistent);
+  for (const label of kinematics?.loop || []) {
+    if (!found.has(label)) found.set(label, `pairs ${kinematics.loop.join(", ")} close a loop, which has no pose without a solver`);
+  }
+  return found;
+}
+
+/**
+ * What the engine found inconsistent and no pair's row says: the warnings of the block, but those
+ * of a pair kept with no value (its row says it).
+ */
+export function xbfOtherWarnings(kinematics) {
+  const kept = (kinematics?.pairs || []).filter(pair => pair.inconsistent).map(pair => `joint '${pair.label}' is kept`);
+  return (kinematics?.warnings || []).filter(text => !kept.some(prefix => text.startsWith(prefix)) && !text.startsWith("pairs "));
+}
+
 /** Each pair a gear drives: its driver, the ratio and the gear. */
 export function xbfDrivenPairs(kinematics) {
   const found = new Map();
@@ -107,6 +130,8 @@ export function xbfPoseValues(kinematics, pose = null) {
   for (const [label, value] of Object.entries(given)) {
     const pair = pairs.get(label);
     if (!pair || pair.type === "gear") throw new Error(`${where} names no joint '${label}'`);
+    const unposable = xbfUnposable(kinematics).get(label);
+    if (unposable) throw new Error(`${where}: joint '${label}' cannot be posed: ${unposable}`);
     if (driven.has(label) && typeof pose !== "string") {
       const { driver, gear } = driven.get(label);
       throw new Error(`${where}: joint '${label}' is driven by '${driver}' through gear '${gear}'`);
@@ -114,6 +139,7 @@ export function xbfPoseValues(kinematics, pose = null) {
     values[label] = checked(pair, asValues(value), where);
   }
   for (const [label, { driver, ratio, gear }] of driven) {
+    if (!values[driver] || !values[label]) continue;
     values[label] = checked(pairs.get(label), [values[driver][0] * ratio, ...values[label].slice(1)], `gear '${gear}'`);
   }
   return values;
@@ -125,7 +151,7 @@ export function xbfPoseValues(kinematics, pose = null) {
  * @returns {number[][]} 4x4, column-major, by link.
  */
 export function xbfLinkPlacements(kinematics, values) {
-  if (kinematics.loop?.length) throw new Error(`the mechanism is not a tree: pairs ${kinematics.loop.join(", ")} close a loop`);
+  if (!kinematics.links.length) return [];
   const found = kinematics.links.map(() => null);
   found[kinematics.ground] = kinematics.links[kinematics.ground].matrix;
   let pending = kinematics.pairs.filter(pair => pair.type !== "gear" && pair.frames);
@@ -133,8 +159,11 @@ export function xbfLinkPlacements(kinematics, values) {
     progress = false;
     pending = pending.filter((pair) => {
       const [first, second] = pair.links;
-      const [one, two] = pair.frames;
-      const moved = xbfPairMotion(pair.type, values[pair.label] || asValues(kinematics.asBuilt[pair.label]));
+      const value = values[pair.label] || (kinematics.asBuilt[pair.label] != null ? asValues(kinematics.asBuilt[pair.label]) : null);
+      // A pair with no value (inconsistent) holds its two links as they stand as built.
+      const [one, two] = pair.inconsistent || !value
+        ? [invert(kinematics.links[first].matrix), invert(kinematics.links[second].matrix)] : pair.frames;
+      const moved = pair.inconsistent || !value ? [...IDENTITY] : xbfPairMotion(pair.type, value);
       if (found[first] && !found[second]) found[second] = multiply(multiply(multiply(found[first], one), moved), invert(two));
       else if (found[second] && !found[first]) found[first] = multiply(multiply(multiply(found[second], two), invert(moved)), invert(one));
       else if (!found[first]) return true;
@@ -167,15 +196,16 @@ export function xbfPosedMatrices(structure, values) {
 }
 
 /**
- * What a Position panel drives: one control per value of every pair a gear does not drive, within
+ * What a Position panel drives: one control per value of every posable pair a gear does not drive, within
  * its limits (an unbounded side spans one turn or 100 mm from the other).
  * @returns {{ id: string, pair: string, index: number, label: string, unit: string, min: number, max: number }[]}
  */
 export function xbfPoseControls(kinematics) {
   const driven = xbfDrivenPairs(kinematics);
+  const unposable = xbfUnposable(kinematics);
   const controls = [];
   for (const pair of kinematics?.pairs || []) {
-    if (pair.type === "gear" || driven.has(pair.label)) continue;
+    if (pair.type === "gear" || driven.has(pair.label) || unposable.has(pair.label)) continue;
     const names = VALUE_NAMES[pair.type];
     for (let index = 0; index < XBF_PAIR_VALUES[pair.type]; index += 1) {
       const unit = pair.units?.[index] || "deg";

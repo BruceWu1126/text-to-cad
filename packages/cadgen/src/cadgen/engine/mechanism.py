@@ -111,6 +111,8 @@ class Pair:
     frames: tuple[tuple[float, ...], tuple[float, ...]] | None  # two AXIS2_PLACEMENT_3Ds: origin, Z, X
     limits: tuple[tuple[float | None, float | None], ...]
     ratio: float | None = None  # a gear pair's
+    # Why the pair has no value, where the built tree contradicts it: kept, warned, never posed.
+    inconsistent: str | None = None
 
     @property
     def dofs(self) -> int:
@@ -125,12 +127,15 @@ class Mechanism:
     pairs: list[Pair]
     as_built: dict[str, tuple[float, ...]]
     configurations: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=dict)
+    # What the harvest found inconsistent, each said by name: the document is written all the same.
+    warnings: list[str] = field(default_factory=list)
 
     def signature(self) -> tuple:
         return (self.name, tuple((link.name, tuple(link.members)) for link in self.links), self.ground,
-                tuple((p.label, p.kind, p.links, p.frames, p.limits, p.ratio) for p in self.pairs),
+                tuple((p.label, p.kind, p.links, p.frames, p.limits, p.ratio, p.inconsistent) for p in self.pairs),
                 tuple(sorted(self.as_built.items())),
-                tuple((name, tuple(sorted(values.items()))) for name, values in sorted(self.configurations.items())))
+                tuple((name, tuple(sorted(values.items()))) for name, values in sorted(self.configurations.items())),
+                tuple(self.warnings))
 
 
 # --- matrices ------------------------------------------------------------------------------
@@ -388,13 +393,13 @@ def _extract(pair: Pair, relative: np.ndarray, hint: tuple | None, scale: float)
     return found
 
 
-def _by_label(jointed: list, used: set[int], tree: Any) -> list[tuple]:
+def _by_label(jointed: list, used: set[int], tree: Any, warnings: list[str]) -> list[tuple]:
     """The pairings of joints no ``connect_to`` joined, by their labels: a moving joint and a
     ``RigidJoint`` of the same label on another part are its pair (the moving joint's part stays,
     the rigid one's is placed on it), and two rigid joints of one label fasten their parts. Of
     several candidates, the nearest in the tree is taken (what a placement of a sub-assembly
-    holds pairs within it); a moving joint with two equally near is refused by name, rigid
-    joints with two equally near are no pair. A joint that matches nothing is no pair."""
+    holds pairs within it); a moving joint with two equally near is no pair, and a warning,
+    rigid joints with two equally near are no pair. A joint that matches nothing is no pair."""
     rows: dict[str, list[tuple[tuple[int, ...], Any]]] = {}
     for path, joint in jointed:
         if id(joint) not in used and _joint_kind(joint) is not None:
@@ -408,17 +413,18 @@ def _by_label(jointed: list, used: set[int], tree: Any) -> list[tuple]:
             return None
         if len(ties) > 1:
             names = " and ".join("/".join(_occurrence(tree, other)[1]) for other, _joint in ties[:2])
-            raise KinematicsError(f"joint {label!r} on {'/'.join(_occurrence(tree, path)[1])} matches the rigid joints "
-                                  f"{label!r} on {names} alike: give each pair a label of its own, or connect it with "
-                                  "connect_to")
+            warnings.append(f"joint {label!r} on {'/'.join(_occurrence(tree, path)[1])} matches the rigid joints "
+                            f"{label!r} on {names} alike, so it pairs with neither: give each pair a label of its "
+                            "own, or connect it with connect_to")
+            return None
         return ties[0]
 
     for label, held in rows.items():
         rigid = [row for row in held if _joint_kind(row[1]) == "rigid"]
         for path, joint in [row for row in held if _joint_kind(row[1]) != "rigid"]:
             candidates = [row for row in rigid if row[0] != path]
-            if candidates:
-                other = nearest(path, label, candidates)
+            other = nearest(path, label, candidates) if candidates else None
+            if other is not None:
                 rigid.remove(other)
                 found.append((path, joint, other[0], other[1]))
         # Rigid joints alone fasten only where one is nearest: a datum a part carries in each of
@@ -465,12 +471,26 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             continue
         seen.add(key)
         pairings.append((path, joint, moved, other))
-    pairings.extend(_by_label(jointed, {id(joint) for row in pairings for joint in (row[1], row[3])}, tree))
+    warnings: list[str] = []
+    pairings.extend(_by_label(jointed, {id(joint) for row in pairings for joint in (row[1], row[3])}, tree, warnings))
+
+    def name_of(path: tuple[int, ...]) -> str:
+        return "/".join(_occurrence(tree, path)[1])
+
+    # A configuration naming a joint no part of its assembly holds means nothing: the one harvest
+    # error. Every other inconsistency is a warning, and the document is written.
+    for path, _obj, held in configured:
+        labels = {joint.label for holder, joint in jointed if holder[:len(path)] == path}
+        for name, values in held.items():
+            for key in values:
+                if key not in labels and not any(key.endswith(f":{label}") for label in labels):
+                    raise KinematicsError(f"configuration {name!r} of {name_of(path)} names no joint {key!r}; "
+                                          + (f"its joints are {', '.join(sorted(labels))}" if labels
+                                             else "it holds no joint"))
     if not pairings:
         if configured:
-            raise KinematicsError(f"configuration {next(iter(configured[0][2]))!r} names joints, and the assembly "
-                                  "has no connected joint: connect its parts' joints with connect_to")
-        return None
+            warnings.append("the configurations name joints, and no joint is paired with another")
+        return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     parent: dict[tuple[int, ...], tuple[int, ...]] = {}
 
@@ -480,9 +500,6 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             parent[path] = parent[parent[path]]
             path = parent[path]
         return path
-
-    def name_of(path: tuple[int, ...]) -> str:
-        return "/".join(_occurrence(tree, path)[1])
 
     moving_pairs = []
     for stays, joint, moves, other in pairings:
@@ -494,10 +511,11 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         if None in kinds:
             continue
         if "rigid" not in kinds:
-            raise KinematicsError(
+            warnings.append(
                 f"joint {joint.label!r} ({type(joint).__name__}) on {name_of(stays)} is connected to {other.label!r} "
-                f"({type(other).__name__}) on {name_of(moves)}: a pin in a slot, which no AP242 lower pair is. "
-                "Connect each moving joint to a RigidJoint")
+                f"({type(other).__name__}) on {name_of(moves)}: a pin in a slot, which no AP242 lower pair is, so it "
+                "is no pair. Connect each moving joint to a RigidJoint")
+            continue
         if kinds[0] == "rigid":
             moving, held_by, rigid, rigid_by = other, moves, joint, stays
         else:
@@ -505,14 +523,15 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         moving_pairs.append((moving, held_by, rigid, rigid_by, moves))
     if not moving_pairs:
         if configured:
-            raise KinematicsError(f"configuration {next(iter(configured[0][2]))!r} names joints, and the assembly "
-                                  "has no moving joint")
-        return None
+            warnings.append("the configurations name joints, and no moving joint is paired")
+        return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
     for path in sorted(parent):
         classes.setdefault(find(path), []).append(path)
-    moved_classes = {find(moves) for *_rest, moves in moving_pairs}
+    # A pair moves the class its moving side is in; one inside a single rigid body moves nothing.
+    moved_classes = {find(moves) for _moving, held_by, _rigid, rigid_by, moves in moving_pairs
+                     if find(held_by) != find(rigid_by)}
     ground_members = sorted(path for root, members in classes.items() if root not in moved_classes for path in members)
     links = [Link("", ground_members)]
     link_of: dict[tuple[int, ...], int] = {path: 0 for path in ground_members}
@@ -538,9 +557,6 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         kind = _joint_kind(moving)
         assert kind is not None and kind != "rigid"
         first, second = link_of[held_by], link_of[rigid_by]
-        if first == second:
-            raise KinematicsError(f"joint {moving.label!r} joins {name_of(held_by)} to {name_of(rigid_by)}, which are "
-                                  "one rigid body already (rigidly joined, or both unmoved): a pair joins two links")
         label = moving.label if counts[moving.label] == 1 else f"{name_of(held_by)}:{moving.label}"
         while any(pair.label == label for pair in pairs):
             label += "'"
@@ -548,21 +564,31 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         ax2_1 = _ax2(np.linalg.inv(frames[first]) @ worlds[held_by] @ item_1)
         ax2_2 = _ax2(np.linalg.inv(frames[second]) @ worlds[rigid_by] @ item_2)
         pair = Pair(label, kind, (first, second), (ax2_1, ax2_2), _limits(kind, moving))
-        relative = (np.linalg.inv(frame_matrix(ax2_1)) @ np.linalg.inv(frames[first]) @ frames[second]
-                    @ frame_matrix(ax2_2))
-        value = _extract(pair, relative, held, scale)
-        if value is None:
-            raise KinematicsError(
-                f"{name_of(rigid_by)} is not where joint {moving.label!r} can put it"
-                f"{'' if held is None else f' (it was connected at {_shown(held)})'}: its rigid joint's frame and the "
-                f"{kind} joint's are not one {kind} motion apart within its range (a part moved after connect_to, or "
-                "connected after the compound holding it was made, or a rigid joint off the joint's axis)")
+        if first == second:
+            together = len(links[first].members)
+            pair.inconsistent = (f"it joins {name_of(held_by)} to {name_of(rigid_by)}, which rigid joints make one "
+                                 f"link{f' with {together - 2} other parts' if together > 2 else ''}"
+                                 f"{' (the unmoved ground)' if first == 0 else ''}: the pair cannot move")
+        else:
+            relative = (np.linalg.inv(frame_matrix(ax2_1)) @ np.linalg.inv(frames[first]) @ frames[second]
+                        @ frame_matrix(ax2_2))
+            value = _extract(pair, relative, held, scale)
+            if value is None:
+                pair.inconsistent = (
+                    f"{name_of(rigid_by)} is not where it can put it"
+                    f"{'' if held is None else f' (it was connected at {_shown(held)})'}: its rigid joint's frame and "
+                    f"the {kind} joint's are not one {kind} motion apart within its range (a part moved after "
+                    "connect_to, or connected after the compound holding it was made, or a rigid joint off the "
+                    "joint's axis)")
+            else:
+                as_built[label] = value
+        if pair.inconsistent:
+            warnings.append(f"joint {label!r} is kept with no value and cannot be posed: {pair.inconsistent}")
         pairs.append(pair)
-        as_built[label] = value
         joint_labels.append((moving.label, held_by))
 
-    configurations = _configurations(configured, pairs, joint_labels, name_of)
-    return Mechanism(tree.root.name, links, 0, pairs, as_built, configurations)
+    configurations = _configurations(configured, pairs, joint_labels, name_of, warnings)
+    return Mechanism(tree.root.name, links, 0, pairs, as_built, configurations, warnings)
 
 
 def _shown(values: tuple[float, ...] | list[float]) -> str:
@@ -570,9 +596,11 @@ def _shown(values: tuple[float, ...] | list[float]) -> str:
     return text[0] if len(text) == 1 else "(" + ", ".join(text) + ")"
 
 
-def _configurations(configured: list, pairs: list[Pair], joint_labels: list, name_of: Callable) -> dict:
+def _configurations(configured: list, pairs: list[Pair], joint_labels: list, name_of: Callable,
+                    warnings: list[str]) -> dict:
     """Each named configuration, every assembly's that names it merged, a deeper one's
-    values first and a shallower one's over them."""
+    values first and a shallower one's over them. A value for a joint that is in no pair, or
+    one its pair cannot take, is left out, and warned."""
     merged: dict[str, dict[str, tuple[float, ...]]] = {}
     for path, _obj, held in sorted(configured, key=lambda item: -len(item[0])):
         for name, values in held.items():
@@ -581,12 +609,13 @@ def _configurations(configured: list, pairs: list[Pair], joint_labels: list, nam
                 matches = [pair for pair, (raw, holder) in zip(pairs, joint_labels)
                            if holder[:len(path)] == path and key in (pair.label, raw)]
                 if not matches:
-                    inside = sorted({pair.label for pair, (_raw, holder) in zip(pairs, joint_labels)
-                                     if holder[:len(path)] == path})
-                    raise KinematicsError(f"configuration {name!r} of {name_of(path)} names no joint {key!r}; "
-                                          + (f"its joints are {', '.join(inside)}" if inside else "it holds no joint"))
+                    warnings.append(f"configuration {name!r} of {name_of(path)} sets joint {key!r}, which is in no "
+                                    "pair: the value is left out")
                 for pair in matches:
-                    found[pair.label] = _checked(pair, value, f"configuration {name!r}")
+                    try:
+                        found[pair.label] = _checked(pair, value, f"configuration {name!r}")
+                    except KinematicsError as error:
+                        warnings.append(f"{error}: the value is left out")
     return {name: merged[name] for name in sorted(merged)}
 
 
@@ -685,7 +714,15 @@ def write(doc: Any, mechanism: Mechanism, occurrence: Callable[[tuple[int, ...]]
             XCAFDoc_AssemblyItemRef.Set_s(label.FindChild(member_at, True), XCAFDoc_AssemblyItemId(entries))
         link_labels.append(label)
     # MECHANISM_REPRESENTATION's base: the link that does not move.
-    TDataStd_ReferenceList.Set_s(top).Append(link_labels[mechanism.ground])
+    if link_labels:
+        TDataStd_ReferenceList.Set_s(top).Append(link_labels[mechanism.ground])
+    if mechanism.warnings:
+        # What the harvest found inconsistent, kept with the mechanism it describes.
+        from OCP.TDataStd import TDataStd_ExtStringArray
+
+        found = TDataStd_ExtStringArray.Set_s(top, 1, len(mechanism.warnings))
+        for at, text in enumerate(mechanism.warnings, 1):
+            found.SetValue(at, _text(text))
     pair_labels = []
     for at, pair in enumerate(mechanism.pairs, 1):
         entity, dofs = KINDS[pair.kind]
@@ -702,6 +739,8 @@ def write(doc: Any, mechanism: Mechanism, occurrence: Callable[[tuple[int, ...]]
                 data.SetReal(_text(upper_name), float(upper))
         if pair.ratio is not None:
             data.SetReal(_text("gear_ratio"), float(pair.ratio))
+        if pair.inconsistent:
+            data.SetString(_text("cadgen_inconsistent"), _text(pair.inconsistent))  # cadgen's, no AP242 attribute
         references = TDataStd_ReferenceList.Set_s(label)
         references.Append(link_labels[pair.links[0]])  # KINEMATIC_JOINT.edge_start: link 1
         references.Append(link_labels[pair.links[1]])  # edge_end: link 2
@@ -819,12 +858,17 @@ def read(doc: Any, occurrences: dict[str, tuple[int, ...]]) -> Mechanism | None:
         pair_at[_entry(label)] = len(pairs)
         pairs.append(Pair(_label_name(label), kind, (ends[0], ends[1]),
                           (first, second) if first is not None and second is not None else None, limits,
-                          _real(data, "gear_ratio")))
+                          _real(data, "gear_ratio"), _string(data, "cadgen_inconsistent")))
     ground = link_at.get(next(iter(_references(top)), ""), 0)
     as_built = _read_state(top.FindChild(3, False), pair_at, pairs)
     configurations = {_label_name(label): _read_state(label, pair_at, pairs)
                       for label in _children_of(top.FindChild(4, False))}
-    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations)
+    from OCP.TDataStd import TDataStd_ExtStringArray
+
+    held = TDataStd_ExtStringArray()
+    warnings = ([held.Value(at).ToExtString() for at in range(held.Lower(), held.Upper() + 1)]
+                if _find(top, held, TDataStd_ExtStringArray.GetID_s()) else [])
+    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations, warnings)
 
 
 # --- what the page reads -------------------------------------------------------------------
@@ -845,7 +889,7 @@ def _tree(mechanism: Mechanism) -> tuple[dict[int, int], list[str] | None]:
     while queue:
         link = queue.pop(0)
         for at, pair in enumerate(mechanism.pairs):
-            if pair.kind == "gear" or at in used or link not in pair.links:
+            if pair.kind == "gear" or at in used or link not in pair.links or pair.links[0] == pair.links[1]:
                 continue
             used.add(at)
             other = pair.links[1] if pair.links[0] == link else pair.links[0]
@@ -881,7 +925,7 @@ def block(mechanism: Mechanism, instance_paths: list[tuple[int, ...]],
     ``world(path)`` is an occurrence's placement as built (4x4, column-major)."""
     owner: dict[tuple[int, ...], int] = {path: at for at, link in enumerate(mechanism.links) for path in link.members}
     members: list[list[int]] = [[] for _ in mechanism.links]
-    for index, path in enumerate(instance_paths):
+    for index, path in enumerate(instance_paths if mechanism.links else ()):
         # The deepest link holding the instance; none, the ground.
         found = mechanism.ground
         for depth in range(len(path), -1, -1):
@@ -904,15 +948,21 @@ def block(mechanism: Mechanism, instance_paths: list[tuple[int, ...]],
             entry["frames"] = [_column(frame_matrix(frame)) for frame in pair.frames] if pair.frames else None
             entry["limits"] = [list(limits) for limits in pair.limits]
             entry["units"] = [unit for unit, *_names in KINDS[pair.kind][1]]
+        if pair.inconsistent:
+            entry["inconsistent"] = pair.inconsistent
         pairs.append(entry)
     links = [{"name": link.name, "instances": members[at],
               "matrix": world(link.members[0]) if link.members else _column(np.eye(4))}
              for at, link in enumerate(mechanism.links)]
+    warnings = list(mechanism.warnings)
+    if loop:
+        warnings.append(f"pairs {', '.join(loop)} close a loop, which has no pose without a solver: posing them is "
+                        "refused")
     return {"schema": SCHEMA, "name": mechanism.name, "ground": mechanism.ground, "links": links, "pairs": pairs,
             "asBuilt": {label: _json_value(values) for label, values in mechanism.as_built.items()},
             "configurations": {name: {label: _json_value(values) for label, values in values_.items()}
                                for name, values_ in mechanism.configurations.items()},
-            "loop": loop}
+            "loop": loop, "warnings": warnings}
 
 
 # --- poses -------------------------------------------------------------------------------
@@ -968,12 +1018,19 @@ def resolve(kinematics: dict[str, Any] | None, pose: Any) -> tuple[dict[str, tup
         if pair is None or pair["type"] == "gear":
             movable = ", ".join(sorted(name for name, found in pairs.items() if found["type"] != "gear")) or "none"
             raise KinematicsError(f"{where} names no joint {label!r}; the document's joints: {movable}")
+        if pair.get("inconsistent"):
+            raise KinematicsError(f"{where}: joint {label!r} cannot be posed: {pair['inconsistent']}")
+        if label in (kinematics.get("loop") or ()):
+            raise KinematicsError(f"{where}: joint {label!r} cannot be posed: pairs {', '.join(kinematics['loop'])} "
+                                  "close a loop, which has no pose without a solver")
         if label in driven and not named:
             driver, _ratio, gear = driven[label]
             raise KinematicsError(f"{where}: joint {label!r} is driven by {driver!r} through gear {gear!r}; "
                                   f"set {driver!r}")
         values[label] = _block_checked(pair, value, where)
     for label, (driver, ratio, gear) in driven.items():
+        if driver not in values or label not in values:
+            continue
         found = (values[driver][0] * ratio, *values[label][1:])
         values[label] = _block_checked(pairs[label], found, f"gear {gear!r} driving {label!r} from {driver!r}")
     return values, named
@@ -981,11 +1038,11 @@ def resolve(kinematics: dict[str, Any] | None, pose: Any) -> tuple[dict[str, tup
 
 def link_worlds(kinematics: dict[str, Any], values: dict[str, tuple[float, ...]]) -> list[np.ndarray]:
     """Each link's placement at ``values``: the ground where it is, every other link by its
-    pairs from the ground down. A mechanism whose pairs close a loop is refused by name."""
-    if kinematics.get("loop"):
-        raise KinematicsError(f"the mechanism is not a tree: pairs {', '.join(kinematics['loop'])} close a loop, "
-                              "and a loop has no pose without a solver")
+    pairs from the ground down (a pair that closes a loop is not followed; a pair with no value,
+    inconsistent, holds its links as built)."""
     links = kinematics["links"]
+    if not links:
+        return []
     found: list[np.ndarray | None] = [None] * len(links)
     found[kinematics["ground"]] = _from_column(links[kinematics["ground"]]["matrix"])
     pending = [pair for pair in kinematics["pairs"] if pair["type"] != "gear" and pair.get("frames")]
@@ -994,8 +1051,14 @@ def link_worlds(kinematics: dict[str, Any], values: dict[str, tuple[float, ...]]
         progress = False
         for pair in list(pending):
             first, second = pair["links"]
-            item_1, item_2 = (_from_column(frame) for frame in pair["frames"])
-            moved = motion(pair["type"], values[pair["label"]])
+            if pair.get("inconsistent") or pair["label"] not in values:
+                # The two links as they stand: the second's placement as built over the first's.
+                item_1 = np.linalg.inv(_from_column(links[first]["matrix"]))
+                item_2 = np.linalg.inv(_from_column(links[second]["matrix"]))
+                moved = np.eye(4)
+            else:
+                item_1, item_2 = (_from_column(frame) for frame in pair["frames"])
+                moved = motion(pair["type"], values[pair["label"]])
             if found[first] is not None and found[second] is None:
                 found[second] = found[first] @ item_1 @ moved @ np.linalg.inv(item_2)
             elif found[second] is not None and found[first] is None:

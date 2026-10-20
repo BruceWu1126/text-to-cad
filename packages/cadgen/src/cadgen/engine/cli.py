@@ -94,7 +94,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     worker = "" if fresh is None else (" cold" if fresh else " warm")
     return (f"built {report['model']}{worker} in {wall:.2f}s: body {timings.get('body', 0):.2f}s, "
             f"{memo.get('hits', 0)} hits, {memo.get('misses', 0)} misses, {memo.get('uncached', 0)} uncached"
-            + (f"; {', '.join(shown)}" if shown else ""))
+            + (f"; {', '.join(shown)}" if shown else "")
+            + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ())))
 
 
 def _build(args: argparse.Namespace) -> int:
