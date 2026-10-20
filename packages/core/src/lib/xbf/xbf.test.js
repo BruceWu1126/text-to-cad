@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { isKitScene } from "../viewer/sceneContract.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
-import { createXbfScene, parseXbfElementId, xbfElementId } from "./xbfScene.js";
+import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceOutline } from "./xbfScene.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "bracket");
 const STRUCTURE = JSON.parse(fs.readFileSync(path.join(FIXTURE, "structure.json"), "utf8"));
@@ -97,7 +97,7 @@ test("a new version fetches the parts it changed and keeps the rest, buffers and
   assert.deepEqual(v2.load.kept, [PEG.key]);
   assert.equal(v2.parts.get(PEG.key), v1.parts.get(PEG.key), "the same part, its buffer unfetched");
   const scene2 = createXbfScene(THREE, v2);
-  const pegGeometry = scene => scene.object3D.children[1].children.find(child => child.isMesh).geometry;
+  const pegGeometry = scene => scene.object3D.children[1].children[0].children.find(child => child.isMesh).geometry;
   assert.equal(pegGeometry(scene2), pegGeometry(scene1), "the unchanged part's geometry is the one already uploaded");
   let disposed = 0;
   pegGeometry(scene1).addEventListener("dispose", () => { disposed += 1; });
@@ -113,7 +113,7 @@ test("the scene: a group per instance over one geometry per prototype, colours, 
   const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
   const scene = createXbfScene(THREE, document);
   assert.equal(isKitScene(scene), true);
-  const groups = scene.object3D.children;
+  const groups = scene.object3D.children.map(carrier => carrier.children[0]);
   assert.deepEqual(groups.map(group => group.name), STRUCTURE.instances.map(instance => instance.path));
   const meshOf = group => group.children.find(child => child.isMesh);
   assert.equal(meshOf(groups[1]).geometry, meshOf(groups[2]).geometry, "the two pegs draw one geometry");
@@ -152,7 +152,7 @@ test("a face the mesher left without triangles is reported, not drawn", async ()
 test("display modes: the edges a mode draws, Hidden line's depth-only surfaces and Wireframe's none", async () => {
   const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
   const scene = createXbfScene(THREE, document);
-  const plate = scene.object3D.children[0];
+  const plate = scene.object3D.children[0].children[0];
   const mesh = plate.children.find(child => child.isMesh);
   const feature = plate.children.find(child => child.name === "feature edges");
   scene.setSurfaceLook(LOOK);
@@ -172,7 +172,7 @@ test("display modes: the edges a mode draws, Hidden line's depth-only surfaces a
   document.release();
 });
 
-test("picking: the face under the pointer with its element name, a vertex or an edge near it first", async () => {
+test("picking: a STEP's Select: an edge near the pointer, else the face under it, else the part, as the filter says", async () => {
   const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
   const scene = createXbfScene(THREE, document);
   const camera = new THREE.OrthographicCamera(-30, 30, 30, -30, 0.1, 1000);
@@ -198,15 +198,30 @@ test("picking: the face under the pointer with its element name, a vertex or an 
   // A hidden instance is not picked; the scene's contract pick names the instance.
   scene.setHiddenParts(["i1"]);
   assert.notEqual(scene.pickElement(rayAt(12, 3.05), view)?.instance, 1);
-  // On its seam's vertex: the vertex, before the edges through it.
   scene.setHiddenParts([]);
-  assert.deepEqual(scene.pickElement(rayAt(15, 0.05), view).kind, "vertex");
+  // The filter: Faces alone takes the face under a rim, Edges alone nothing off an edge, and an
+  // instance whose elements cannot be picked yet (a STEP part not open) is the part, where Parts is ticked.
+  assert.equal(scene.pickElement(rayAt(12, 3.05), view, { edges: false }).kind, "face");
+  assert.equal(scene.pickElement(rayAt(-7, 5), view, { faces: false }), null);
+  assert.deepEqual(scene.pickElement(rayAt(-7, 5), view, { parts: true, elements: new Set() }), {
+    ...scene.pickElement(rayAt(-7, 5), view, { parts: true, elements: new Set() }), id: "i0", kind: null, instance: 0 });
+  // An isolation dims every other instance and puts it out of reach.
+  scene.setFocusedParts(["i1"]);
+  assert.equal(scene.pickElement(rayAt(-7, 5), view, { parts: true }), null);
+  scene.setFocusedParts([]);
   assert.equal(scene.pick(rayAt(-7, 5)).id, "i0");
+  // A face's outline is the sides its triangles do not share.
+  assert.ok(xbfFaceOutline(document.parts.get(PLATE.key).mesh, face.ordinal).length >= 24);
+  // What a chip measures of parts, and what Zoom to selection frames.
+  const measured = scene.measureParts(["i0"]);
+  assert.equal(measured.size.length, 3);
+  assert.ok(measured.volume > 0);
+  assert.ok(scene.selectionBounds([face.id, "i1"]).max.every(Number.isFinite));
   // Highlights: an element's overlay hangs under its instance, and is gone with the hover.
   scene.setElementHighlight({ hovered: face.id, selected: [] });
-  assert.equal(scene.object3D.children[0].children.some(child => child.name === "hovered face"), true);
+  assert.equal(scene.object3D.children[0].children[0].children.some(child => child.name === "hovered face"), true);
   scene.setElementHighlight({ hovered: null, selected: [] });
-  assert.equal(scene.object3D.children[0].children.some(child => child.name === "hovered face"), false);
+  assert.equal(scene.object3D.children[0].children[0].children.some(child => child.name === "hovered face"), false);
   scene.dispose();
   document.release();
 });
@@ -217,7 +232,7 @@ test("a sibling draws the same geometry with its own objects; versions and facts
   const scene = createXbfScene(THREE, document);
   scene.setHiddenParts(["i2"]);
   const sibling = scene.createSibling();
-  const meshOf = (s, at) => s.object3D.children[at].children.find(child => child.isMesh);
+  const meshOf = (s, at) => s.object3D.children[at].children[0].children.find(child => child.isMesh);
   assert.equal(meshOf(sibling, 0).geometry.attributes.position, meshOf(scene, 0).geometry.attributes.position);
   assert.notEqual(meshOf(sibling, 0), meshOf(scene, 0));
   assert.deepEqual(sibling.hiddenParts(), ["i2"]);
@@ -242,4 +257,20 @@ test("an element's facts are read where its instance places it: points moved, le
   // A quarter turn about Z: a box is the box of its turned corners.
   const turned = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
   assert.deepEqual(placeXbfFacts({ box: { min: [0, 0, 0], max: [2, 1, 1] } }, turned).box, { min: [-1, 0, 0], max: [0, 2, 1] });
+});
+
+test("Explode moves each instance's carrier by the document's tree, and puts it back", async () => {
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const scene = createXbfScene(THREE, document);
+  assert.equal(scene.explodeParts, STRUCTURE.instances.length);
+  const rest = JSON.stringify(scene.bounds);
+  const carriers = scene.object3D.children;
+  assert.equal(scene.setExplode(1), true);
+  assert.ok(carriers.some(carrier => carrier.position.lengthSq() > 0), "the instances moved apart");
+  assert.notEqual(JSON.stringify(scene.bounds), rest);
+  assert.equal(scene.setExplode(0), true);
+  assert.ok(carriers.every(carrier => carrier.position.lengthSq() === 0));
+  assert.equal(JSON.stringify(scene.bounds), rest);
+  scene.dispose();
+  document.release();
 });

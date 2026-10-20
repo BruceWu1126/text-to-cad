@@ -99,6 +99,23 @@ class MeshContractTest(unittest.TestCase):
         self.assertEqual(found.get("tangent"), 8, found)  # each round meets two flat sides
         self.assertEqual(found.get("feature"), 16, found)  # the top and bottom rims
 
+    def test_a_pick_grows_by_tangent_groups_and_edge_chains(self) -> None:
+        import build123d as bd
+
+        rounded = bd.fillet(bd.Box(4, 4, 4).edges().filter_by(bd.Axis.Z), 0.5)
+        groups = mesh.Topology(rounded.wrapped).groups()
+        faces = {}
+        for face, group in groups["faces"].items():
+            faces.setdefault(group, []).append(int(face))
+        # The four sides and four rounds are one smooth band; the top and the bottom stand alone.
+        self.assertEqual(sorted(len(members) for members in faces.values()), [1, 1, 8])
+        edges = {}
+        for edge, chain in groups["edges"].items():
+            edges.setdefault(chain, []).append(int(edge))
+        # Each rim (four lines, four arcs) runs on round the box; each round's two seams to the
+        # sides stop at the rims' corners.
+        self.assertEqual(sorted(len(members) for members in edges.values()), [1] * 8 + [8, 8])
+
     def test_a_face_the_mesher_cannot_mesh_is_named_with_its_verdict(self) -> None:
         part = mesh.mesh_shape(bowtie_part().wrapped)
         self.assertEqual(sorted(part.unmeshed), [7])
@@ -268,6 +285,20 @@ class SurfaceFactsTest(unittest.TestCase):
                 area = expected[prototype["name"]][face["surface"]]
                 if area is not None:
                     self.assertAlmostEqual(face["area"], area, places=6)
+                # A round face's radii, which its card reads.
+                radii = {"cylinder": {"radius": 1}, "sphere": {"radius": 2}, "torus": {"majorRadius": 5, "minorRadius": 1}}
+                for name, value in radii.get(face["surface"], {}).items():
+                    self.assertAlmostEqual(face[name], value, places=6)
+            if prototype["name"] == "cylinder":
+                circles = [get(f"/api/doc/{ident}/part/{prototype['key']}/edge/{o}") for o in range(1, 4)]
+                circles = [edge for edge in circles if edge["curve"] == "circle"]
+                self.assertEqual(len(circles), 2)
+                for edge in circles:
+                    self.assertAlmostEqual(edge["radius"], 1, places=6)
+                    self.assertAlmostEqual(edge["sweepRadians"], 2 * math.pi, places=6)
+                groups = get(f"/api/doc/{ident}/part/{prototype['key']}/groups")
+                self.assertEqual(set(groups), {"faces", "edges"})
+                self.assertEqual(len(groups["faces"]), 3)
             found[prototype["name"]] = sorted({face["surface"] for face in faces})
         self.assertEqual(found, {"cylinder": ["cylinder", "plane"], "sphere": ["sphere"], "torus": ["torus"],
                                  "cone": ["cone", "plane"]})

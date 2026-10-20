@@ -87,10 +87,10 @@ test("the scene moves an instance's group to the pose, and its element's matrix 
   const scene = createXbfScene(THREE, { structure: STRUCTURE, parts, version: "1-1" });
   assert.ok(scene.kinematics);
   scene.setPose({ elbow: [90] });
-  const group = scene.object3D.children[ARM];
+  const group = scene.object3D.children[ARM].children[0];
   near(place(group.matrixWorld.elements, [120, 10, 10]), armTip(90), "the arm's group");
   near(place(scene.describeElement("i1/face/1").matrix, [120, 10, 10]), armTip(90), "the element's matrix");
-  assert.deepEqual(scene.object3D.children[0].matrix.elements, STRUCTURE.instances[0].matrix);
+  assert.deepEqual(scene.object3D.children[0].children[0].matrix.elements, STRUCTURE.instances[0].matrix);
   scene.setPose(null);
   assert.deepEqual(scene.describeElement("i1/face/1").matrix, STRUCTURE.instances[ARM].matrix);
   scene.dispose();

@@ -251,9 +251,12 @@ out.
 
 What the kernel measures of an element is asked for, never extracted ahead:
 `GET /api/doc/<id>/part/<key>/face/<ordinal>` is its area, centroid, surface
-type, exact bounding box and `BRepCheck` verdict; `.../edge/<ordinal>` its
-length, curve type, class, faces and endpoints; `.../vertex/<ordinal>` its
-position. Each also answers `made_by`: the element's name, the feature that made
+type, exact bounding box and `BRepCheck` verdict (and a round face's radii);
+`.../edge/<ordinal>` its length, curve type, class, faces and endpoints (and a
+circle's radius and sweep); `.../vertex/<ordinal>` its position;
+`.../groups` how a pick of one face or edge grows, as a STEP's selector table
+says: each face's tangent group (faces joined across tangent edges of one
+solid) and each edge's chain (edges that run on through a shared vertex). Each also answers `made_by`: the element's name, the feature that made
 it (its name's last step), that feature's operation, the function, file and line
 of its call, and, for a name that folds its derivation, the derivation spelled
 out. It comes from the trace of the worker that built the document, asked over

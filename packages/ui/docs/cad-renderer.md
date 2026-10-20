@@ -622,6 +622,31 @@ the loader asks which format it was. The STEP renderer matches none of them.
   with values and drawn travel), `window.__robotLinks()` (every link group's frame)
   and `window.__robotPoseStats()` (matrices written per pose, renders of the surface).
 
+## Engine document renderer
+
+`src/renderers/xbf` shows a cadgen engine document (`.xbf`) exactly as the STEP renderer shows a
+STEP: the strip is a STEP's (Select with its filter chevron, Annotate, Measure, Explode for two or
+more parts, Clip), the file sidebar a STEP's (an assembly's Model tree, then Position where the
+document carries a mechanism), and selection, hover, the menus, isolation, Escape and Quick Edit's
+chips follow the STEP rules of [Selection and inspection tools](#selection-and-inspection-tools).
+Where a STEP component is STEP-specific the slice holds a copy (`XbfSelectionModes.jsx`,
+`xbfSelectionFilter.js`, `XbfModelTree.jsx`, `XbfPartActions.jsx`, `XbfPartMenu.jsx`,
+`xbfMenuItems.js`, the Position section's layout); the copies become one at the renderers'
+migration, and `XbfPanels.test.tsx` mounts the two renderers' panels over one fixture and
+compares their controls so they cannot drift meanwhile.
+
+What is underneath differs. The page reads the document from the engine (`useXbfScene.js`), and
+every face and edge is to hand from the start, so nothing waits on topology: under Faces and Edges
+every part is pickable at once, and under All a part's faces and edges are once its row is open
+(its menu's Expand), the part (or the collapsed assembly holding it) elsewhere. The tree is the
+engine's (`xbfTree.js`): the document's wrapper is no row, and sibling parts of one prototype
+sharing a name's stem fold, as a STEP's repeated components do. Group faces and Group edges grow a
+pick by the engine's groups of the part (`GET …/part/<key>/groups`), and a chip's card reads the
+engine's facts of the element, measured on the exact shape. Position's rows are the mechanism's
+pairs (`xbfKinematics.js`), a geared pair written through its gear, and its knobs are Select's as
+a STEP's are (`xbfJointHandles.js`). A pair the engine could not keep a value for is said in the
+section, under the rows; a STEP's sidecar refuses such a joint at build time instead.
+
 ## Tools on a scene of triangles
 
 A GLB, a 3MF, an STL and a robot have the kit's tools as their matrix allows them

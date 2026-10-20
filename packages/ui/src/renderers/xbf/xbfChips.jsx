@@ -1,0 +1,182 @@
+import { useEffect, useMemo, useState } from "react";
+import { parseCadRefSelector } from "@text-to-cad/core/lib/cadRefs.js";
+import { fetchXbfElementFacts } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
+import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
+import { formatPromptReference } from "@text-to-cad/core/prompt";
+import { InfoRow, MonoValue, formatNumber } from "../kit/inspector/referenceRows.jsx";
+import { isXbfAssemblyId } from "./xbfTree.js";
+
+// What is selected in an engine document, as Quick Edit's chips -- a STEP's
+// (`step/components/workbench/StepReferenceSection.js`, copied in shape: one again at the
+// renderers' migration): a part or subassembly a chip of its own, its card its part count (a
+// subassembly's), size and volume; faces and edges a chip for each kind on each part -- "base ·
+// face 3" alone, "base · 6 faces" for several -- its card the key measurements, which the engine
+// measures on the exact shape when the element is picked (`fetchXbfElementFacts`).
+//
+// Each selected thing is also a reference into the document, by the name the document gives it
+// (`cadRefs.js`: a part's label, `label/f:…`), where the names spell one.
+
+const EMPTY = Object.freeze([]);
+const PLURAL = Object.freeze({ face: "faces", edge: "edges" });
+
+/**
+ * A face's or an edge's key measurements, as a STEP's card reads its pick data
+ * (`referenceMeasurements.js`): the diameter and radius of a round one, an edge's length (an arc's,
+ * a circle's circumference) and an arc's sweep, a face's area, a torus's radii.
+ * @returns {[string, number, string][]}
+ */
+export function xbfMeasurementRows(kind, facts) {
+  if (!facts) return [];
+  const positive = value => (Number(value) > 0 ? Number(value) : null);
+  const type = kind === "edge" ? facts.curve : facts.surface;
+  const circular = kind === "edge" && type === "circle";
+  const radius = circular || (kind === "face" && ["cylinder", "sphere"].includes(type)) ? positive(facts.radius) : null;
+  const span = circular ? positive(facts.sweepRadians) : null;
+  const sweep = span !== null && span <= 2 * Math.PI + 1e-8 ? Math.min(span, 2 * Math.PI) : null;
+  const arc = sweep !== null && sweep < 2 * Math.PI - 1e-8;
+  const length = kind === "edge" ? (radius !== null && sweep !== null ? radius * sweep : positive(facts.length)) : null;
+  const rows = [];
+  if (radius !== null) rows.push(["Diameter Ø", 2 * radius, "mm"], ["Radius R", radius, "mm"]);
+  if (length !== null) rows.push([arc ? "Arc length" : circular && sweep !== null ? "Circumference" : "Length", length, "mm"]);
+  if (arc) rows.push(["Sweep angle", sweep * 180 / Math.PI, "°"]);
+  if (kind === "face" && Number.isFinite(Number(facts.area))) rows.push(["Area", Number(facts.area), "mm²"]);
+  if (kind === "face" && type === "torus") {
+    if (positive(facts.majorRadius)) rows.push(["Major radius", Number(facts.majorRadius), "mm"]);
+    if (positive(facts.minorRadius)) rows.push(["Tube radius", Number(facts.minorRadius), "mm"]);
+  }
+  return rows;
+}
+
+function MeasurementRows({ rows }) {
+  return rows.map(([label, value, unit]) => <InfoRow key={label} label={label}><MonoValue>{`${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>);
+}
+
+/** A part's or subassembly's card: how many parts (a subassembly's), its size, its volume. */
+function PartDetail({ assembly, parts, measured }) {
+  return <>
+    {assembly && parts > 0 ? <InfoRow label="Parts"><MonoValue>{formatNumber(parts, 0)}</MonoValue></InfoRow> : null}
+    {measured?.size ? <InfoRow label="Size" title="XYZ bounding size"><MonoValue>{measured.size.map(value => formatNumber(value)).join(" × ")} mm</MonoValue></InfoRow> : null}
+    {measured?.volume ? <InfoRow label="Volume" title="Approximate mesh volume">
+      <MonoValue>{formatNumber(measured.volume, measured.volume >= 100 ? 0 : 2)} mm³</MonoValue>
+    </InfoRow> : null}
+  </>;
+}
+
+/**
+ * What the engine measures of each picked face and edge, asked for as it is picked and again for
+ * a new version of the document: by element id, `null` while it is asked.
+ */
+export function useXbfElementFacts({ source, version, scene, elementIds }) {
+  const [held, setHeld] = useState(() => ({ version: "", facts: new Map() }));
+  const key = elementIds.join("\n");
+  useEffect(() => {
+    if (!source || !scene || !elementIds.length) return undefined;
+    const controller = new AbortController();
+    const known = held.version === version ? held.facts : new Map();
+    const wanted = elementIds.filter(id => !known.has(id));
+    if (!wanted.length && held.version === version) return undefined;
+    for (const id of wanted) {
+      const element = scene.describeElement(id);
+      if (!element) continue;
+      fetchXbfElementFacts(source, element.key, element.kind, element.ordinal, { signal: controller.signal })
+        .then(facts => setHeld(current => ({ version, facts: new Map(current.version === version ? current.facts : []).set(id, facts) })),
+          () => {});
+    }
+    if (held.version !== version) setHeld({ version, facts: new Map() });
+    return () => controller.abort();
+    // The elements by their ids, again for a new version of the document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, version, scene, key]);
+  return held.version === version ? held.facts : new Map();
+}
+
+/**
+ * The selection as Quick Edit's chips, and the references Quick Edit attaches.
+ *
+ * @param {{ scene: object | null, tree: ReturnType<typeof import("./xbfTree.js").presentXbfTree>, resource: object | null,
+ *   selectedIds: string[], facts: Map<string, object>, onRemove: (ids: string[]) => void,
+ *   onHover: (ids: string[] | null) => void }} options
+ *   `selectedIds`: parts (`i3`), subassemblies (`n0.2`), faces and edges (`i3/face/12`), in the order picked.
+ */
+export function useXbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove, onHover }) {
+  return useMemo(() => xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove, onHover }),
+    [scene, tree, resource, selectedIds, facts, onRemove, onHover]);
+}
+
+/** What `ids` copy, as their chips do: their references, each with the file's path, a line each. */
+export function xbfCopyText({ scene, tree, resource, ids }) {
+  return xbfSelectionChips({ scene, tree, resource, selectedIds: ids, facts: new Map(), onRemove: () => {}, onHover: () => {} })
+    .chips.map(chip => chip.copy).filter(Boolean).join("\n");
+}
+
+function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove, onHover }) {
+  {
+    if (!scene || !selectedIds.length) return { references: EMPTY, chips: EMPTY };
+    const workspace = resource?.kind === "workspace-file";
+    const referenceOf = (selector) => {
+      const parsed = workspace && selector ? parseCadRefSelector(selector) : null;
+      return parsed && parsed.selectorType !== "opaque"
+        ? { resource: { ...resource }, target: { kind: "cad-selector", selectors: [parsed.canonical] } } : null;
+    };
+    // A part goes by its name in the document's paths (its label); a subassembly by its own.
+    const partSelector = id => String(scene.structure.instances[parseXbfElementId(id)?.instance]?.path || "").split("/").pop();
+    const nodeSelector = id => (isXbfAssemblyId(id) ? tree.nodes.get(id)?.label || "" : partSelector(id));
+    const partName = id => tree.nodes.get(id)?.label || scene.describePart(id)?.name || id;
+    const copyOf = (references, fallback) => (references.length ? references.map(formatPromptReference).join("\n") : fallback);
+    const chips = [];
+    const references = [];
+    const runs = new Map();
+    for (const id of selectedIds) {
+      const parsed = parseXbfElementId(id);
+      if (!parsed?.kind) {
+        const node = tree.nodes.get(id);
+        if (!node) continue;
+        const reference = referenceOf(nodeSelector(id));
+        if (reference) references.push(reference);
+        chips.push({ key: `node:${id}`, label: node.label, glyph: "solid", id: reference?.target.selectors[0] || nodeSelector(id),
+          copy: copyOf(reference ? [reference] : [], nodeSelector(id)),
+          card: <PartDetail assembly={node.kind === "assembly"} parts={node.leafPartIds.length} measured={scene.measureParts(node.leafPartIds)} />,
+          onRemove: () => onRemove([id]), onHover: on => onHover(on ? node.leafPartIds : null) });
+        continue;
+      }
+      const element = scene.describeElement(id);
+      if (!element) continue;
+      const part = `i${parsed.instance}`;
+      const reference = element.name ? referenceOf(`${partSelector(part)}/${element.name}`) : null;
+      if (reference) references.push(reference);
+      const runKey = `${part}|${parsed.kind}`;
+      let run = runs.get(runKey);
+      if (!run) {
+        run = { key: `run:${runKey}`, part, kind: parsed.kind, members: [] };
+        runs.set(runKey, run);
+        chips.push(run);
+      }
+      run.members.push({ id, element, reference });
+    }
+    return {
+      references,
+      chips: chips.map((chip) => {
+        if (!chip.members) return chip;
+        const name = partName(chip.part);
+        const ids = chip.members.map(member => member.id);
+        const memberReferences = chip.members.map(member => member.reference).filter(Boolean);
+        const fallback = chip.members.map(member => `${member.element.path} ${chip.kind} ${member.element.ordinal}`).join("\n");
+        const shared = { key: chip.key, glyph: chip.kind, copy: copyOf(memberReferences, fallback),
+          id: memberReferences.length ? memberReferences.flatMap(reference => reference.target.selectors).join(", ") : "",
+          onRemove: () => onRemove(ids), onHover: on => onHover(on ? ids : null) };
+        if (chip.members.length === 1) {
+          const [{ element }] = chip.members;
+          return { ...shared, label: `${name} · ${chip.kind} ${element.ordinal}`,
+            compact: { name, kind: chip.kind, number: String(element.ordinal) },
+            card: <MeasurementRows rows={xbfMeasurementRows(chip.kind, facts.get(element.id))} /> };
+        }
+        return { ...shared, label: `${name} · ${chip.members.length} ${PLURAL[chip.kind]}`,
+          compact: { name, kind: chip.kind, count: chip.members.length },
+          card: chip.members.map(({ element }) => {
+            const [, value, unit] = xbfMeasurementRows(chip.kind, facts.get(element.id))[0] || [];
+            return <InfoRow key={element.id} label={`${chip.kind} ${element.ordinal}`}><MonoValue>{value === undefined ? "—" : `${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>;
+          }) };
+      })
+    };
+  }
+}

@@ -348,6 +348,17 @@ def _point(point: Any) -> list[float]:
     return [point.X(), point.Y(), point.Z()]
 
 
+# How nearly two edges must run on through a vertex, opposed, to continue one chain where more
+# than one could: a STEP's selector table's alignment.
+CHAIN_ALIGNMENT_DEG = 3.0
+CHAIN_ALIGNMENT_COS = -math.cos(math.radians(CHAIN_ALIGNMENT_DEG))
+
+
+def _unit(vector: tuple[float, float, float]) -> tuple[float, float, float] | None:
+    size = math.sqrt(sum(value * value for value in vector))
+    return None if size < 1e-12 else (vector[0] / size, vector[1] / size, vector[2] / size)
+
+
 class Topology:
     """A part's faces, edges and vertices by ordinal, and what the kernel measures of each
     when asked (``face``, ``edge``, ``vertex``): nothing is measured ahead. It reads the
@@ -389,9 +400,19 @@ class Topology:
         box = Bnd_Box()
         BRepBndLib.AddOptimal_s(face, box, False, False)
         bounds = list(box.Get()) if not box.IsVoid() else None
-        return {"kind": "face", "ordinal": ordinal, "area": props.Mass(), "centroid": _point(props.CentreOfMass()),
-                "surface": _kind(BRepAdaptor_Surface(face, False).GetType()),
-                "box": None if bounds is None else {"min": bounds[:3], "max": bounds[3:]}, "check": check(face)}
+        surface = BRepAdaptor_Surface(face, False)
+        kind = _kind(surface.GetType())
+        found = {"kind": "face", "ordinal": ordinal, "area": props.Mass(), "centroid": _point(props.CentreOfMass()),
+                 "surface": kind, "box": None if bounds is None else {"min": bounds[:3], "max": bounds[3:]}, "check": check(face)}
+        # A round face's radii, as a STEP's pick data carries them: what its card reads.
+        if kind == "cylinder":
+            found["radius"] = surface.Cylinder().Radius()
+        elif kind == "sphere":
+            found["radius"] = surface.Sphere().Radius()
+        elif kind == "torus":
+            torus = surface.Torus()
+            found["majorRadius"], found["minorRadius"] = torus.MajorRadius(), torus.MinorRadius()
+        return found
 
     def edge(self, ordinal: int) -> dict[str, Any]:
         from OCP.BRep import BRep_Tool
@@ -416,12 +437,115 @@ class Topology:
         BRepGProp.LinearProperties_s(edge, props)
         first, last = TopExp.FirstVertex_s(edge, True), TopExp.LastVertex_s(edge, True)
         vertices = self.maps["vertex"]
-        return {"kind": "edge", "ordinal": ordinal, "length": props.Mass(),
-                "curve": "degenerate" if degenerate else _kind(BRepAdaptor_Curve(edge).GetType()),
-                "class": CLASS_NAMES.get(kind, "degenerate"), "classCode": kind,
-                "faces": [self.maps["face"].FindIndex(face) for face in faces],
-                "endpoints": [_point(BRep_Tool.Pnt_s(vertex)) for vertex in (first, last) if not vertex.IsNull()],
-                "vertices": [vertices.FindIndex(vertex) for vertex in (first, last) if not vertex.IsNull()]}
+        curve = None if degenerate else BRepAdaptor_Curve(edge)
+        found = {"kind": "edge", "ordinal": ordinal, "length": props.Mass(),
+                 "curve": "degenerate" if degenerate else _kind(curve.GetType()),
+                 "class": CLASS_NAMES.get(kind, "degenerate"), "classCode": kind,
+                 "faces": [self.maps["face"].FindIndex(face) for face in faces],
+                 "endpoints": [_point(BRep_Tool.Pnt_s(vertex)) for vertex in (first, last) if not vertex.IsNull()],
+                 "vertices": [vertices.FindIndex(vertex) for vertex in (first, last) if not vertex.IsNull()]}
+        # A circle's radius and the span it sweeps, as a STEP's pick data carries them.
+        if found["curve"] == "circle":
+            found["radius"] = curve.Circle().Radius()
+            found["sweepRadians"] = abs(curve.LastParameter() - curve.FirstParameter())
+        return found
+
+    def groups(self) -> dict[str, dict[str, int]]:
+        """How a pick of one face or edge grows, as a STEP's selector table says it: each face's
+        tangent group (faces joined across tangent edges of one solid) and each edge's chain (edges
+        that continue one another at a shared vertex: two edges of a common face of one solid,
+        where more than one could continue the one that runs on within ``CHAIN_ALIGNMENT_DEG``,
+        and only when each is the other's choice). Keyed by ordinal, as text; a group is the
+        smallest ordinal in it."""
+        from OCP.BRepAdaptor import BRepAdaptor_Curve
+        from OCP.BRepLib import BRepLib
+        from OCP.gp import gp_Pnt, gp_Vec
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
+
+        faces_map, edges_map, vertices_map = self.maps["face"], self.maps["edge"], self.maps["vertex"]
+        BRepLib.EncodeRegularity_s(self.shape, 1e-3)
+        ancestors = TopTools_IndexedDataMapOfShapeListOfShape()
+        TopExp.MapShapesAndAncestors_s(self.shape, TopAbs_EDGE, TopAbs_FACE, ancestors)
+        # Each face's solid (the first that holds it): neither grouping crosses solids.
+        solid_of: dict[int, int] = {}
+        solids = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.shape, TopAbs_SOLID, solids)
+        for at in range(1, solids.Extent() + 1):
+            held = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(solids.FindKey(at), TopAbs_FACE, held)
+            for index in range(1, held.Extent() + 1):
+                solid_of.setdefault(faces_map.FindIndex(held.FindKey(index)), at)
+
+        parent = {ordinal: ordinal for ordinal in range(1, faces_map.Extent() + 1)}
+
+        def root(table: dict[int, int], item: int) -> int:
+            while table[item] != item:
+                table[item] = table[table[item]]
+                item = table[item]
+            return item
+
+        edge_faces: dict[int, set[int]] = {}
+        tangents: dict[int, tuple[Any, Any]] = {}
+        ends: dict[int, tuple[int, int]] = {}
+        for ordinal in range(1, edges_map.Extent() + 1):
+            edge = TopoDS.Edge_s(edges_map.FindKey(ordinal))
+            at = ancestors.FindIndex(edge)
+            faces = _unique_faces(ancestors.FindFromIndex(at)) if at else []
+            owners = {faces_map.FindIndex(face) for face in faces}
+            edge_faces[ordinal] = owners
+            if BRep_Tool.Degenerated_s(edge):
+                continue
+            if len(faces) == 2 and edge_class(edge, faces) == TANGENT:
+                one, two = sorted(owners)
+                if solid_of.get(one) == solid_of.get(two):
+                    parent[root(parent, one)] = root(parent, two)
+            first, last = TopExp.FirstVertex_s(edge, False), TopExp.LastVertex_s(edge, False)
+            if first.IsNull() or last.IsNull():
+                continue
+            ends[ordinal] = (vertices_map.FindIndex(first), vertices_map.FindIndex(last))
+            if ends[ordinal][0] == ends[ordinal][1]:
+                continue
+            try:
+                curve, point, vector = BRepAdaptor_Curve(edge), gp_Pnt(), gp_Vec()
+                curve.D1(curve.FirstParameter(), point, vector)
+                into_first = _unit((vector.X(), vector.Y(), vector.Z()))
+                curve.D1(curve.LastParameter(), point, vector)
+                into_last = _unit((-vector.X(), -vector.Y(), -vector.Z()))
+            except Exception:  # noqa: BLE001 - an edge with no tangent is in no chain
+                continue
+            if into_first is not None and into_last is not None:
+                tangents[ordinal] = (into_first, into_last)
+
+        at_vertex: dict[int, list[tuple[int, int]]] = {}
+        for ordinal, pair in tangents.items():
+            for end, vertex in enumerate(ends[ordinal]):
+                at_vertex.setdefault(vertex, []).append((ordinal, end))
+        solid_of_edge = {ordinal: min((solid_of.get(face, 0) for face in owners), default=0) for ordinal, owners in edge_faces.items()}
+        choice: dict[tuple[int, int], tuple[int, int]] = {}
+        for here in at_vertex.values():
+            for ordinal, end in here:
+                candidates = [(other, other_end) for other, other_end in here if other != ordinal
+                              and solid_of_edge[other] == solid_of_edge[ordinal] and edge_faces[other] & edge_faces[ordinal]]
+                if len(candidates) > 1:
+                    direction = tangents[ordinal][end]
+                    candidates = [(other, other_end) for other, other_end in candidates
+                                  if sum(a * b for a, b in zip(direction, tangents[other][other_end])) < CHAIN_ALIGNMENT_COS]
+                if len(candidates) == 1:
+                    choice[(ordinal, end)] = candidates[0]
+        chains = {ordinal: ordinal for ordinal in tangents}
+        for here, there in choice.items():
+            if choice.get(there) == here:
+                chains[root(chains, here[0])] = root(chains, there[0])
+        # A group is named by its smallest member, so the answer does not hang on the union's order.
+        def named(table: dict[int, int]) -> dict[str, int]:
+            smallest: dict[int, int] = {}
+            for item in table:
+                top = root(table, item)
+                smallest[top] = min(smallest.get(top, item), item)
+            return {str(item): smallest[root(table, item)] for item in sorted(table)}
+        return {"faces": named(parent), "edges": named(chains)}
 
     def vertex(self, ordinal: int) -> dict[str, Any]:
         from OCP.BRep import BRep_Tool

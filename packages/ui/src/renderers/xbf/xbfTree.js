@@ -1,63 +1,159 @@
 import { xbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 
-// An engine document's tree, as FreeCAD's tree view shows a document: its assemblies, nesting as
-// the document nests them, and under them the parts each places, an instance a row. The tree is
-// the engine's (`structure.tree`): an assembly is `{ name, children }`, a placed part
-// `{ name, prototype, instance }`. A row's id is its place in the tree (`n0.2.1`); a part row
-// selects its instance (`i3`, `xbfElementId`), the id the scene picks, lights and hides it by.
+// An engine document's tree as a STEP's model tree presents an assembly (the STEP renderer's
+// `step/workbench/modelingPresentation.js`, copied: one again at the renderers' migration): its
+// assemblies over their children and each placed part a leaf, its faces and edges never rows
+// (they are the viewport's to pick). The tree is the engine's (`structure.tree`): an assembly is
+// `{ name, children }`, a placed part `{ name, prototype, instance }`.
+//
+// A node selects by its `selectionId`: a part by its instance (`i3`, the id the scene picks, lights
+// and hides it by), an assembly by its place in the tree (`n0.2`). `leafPartIds` are the instances
+// at and under it: what its eye hides and its selection lights. The document's own wrapper is not
+// a row (its children are the tree's first rows), and sibling parts of one prototype that share a
+// name's stem fold into one row carrying the count, as a STEP's repeated components do.
 
 /**
  * @typedef {object} XbfTreeNode
- * @property {string} id  Its place in the tree.
- * @property {"assembly" | "part"} kind
- * @property {string} label  Its name in the document.
- * @property {string} detail  A part's prototype, when its name is not the prototype's.
- * @property {string | null} selectionId  A part's instance id; an assembly has none.
- * @property {string[]} partIds  Every instance id at and under it: what its eye hides.
+ * @property {string} id  Its row's id (`model:<selectionId>`, or a folded group's).
+ * @property {string} [selectionId]  What it selects; a folded group has none.
+ * @property {string[]} leafPartIds
+ * @property {string[]} [memberSelectionIds]  A folded group's members.
+ * @property {"assembly" | "part" | "group"} kind
+ * @property {string} label
+ * @property {string | null} component  A part's prototype key: what folds repeated parts.
  * @property {XbfTreeNode[]} children
  */
 
-/**
- * @param {object | null} structure  The engine's structure (`loadXbfDocument`'s `structure`).
- * @returns {{ roots: XbfTreeNode[], nodesById: Map<string, XbfTreeNode>, parentOf: Map<string, string>,
- *   byInstance: Map<string, string> }}
- */
-export function buildXbfTree(structure) {
-  const nodesById = new Map();
-  const parentOf = new Map();
-  const byInstance = new Map();
-  const prototypes = structure?.prototypes || [];
-  const visit = (source, id, parent) => {
-    const children = Array.isArray(source?.children) ? source.children : null;
-    const placed = Number.isInteger(source?.instance);
-    const label = String(source?.name || (placed ? prototypes[source.prototype]?.name : "") || "(unnamed)");
-    const node = { id, kind: children ? "assembly" : "part", label, detail: "", selectionId: null, partIds: [], children: [] };
-    if (children) {
-      node.children = children.map((child, at) => visit(child, `${id}.${at}`, id));
-      node.partIds = node.children.flatMap(child => child.partIds);
-    } else if (placed) {
-      node.selectionId = xbfElementId(source.instance);
-      node.partIds = [node.selectionId];
-      const prototypeName = String(prototypes[source.prototype]?.name || "");
-      node.detail = prototypeName && prototypeName !== label ? prototypeName : "";
-      byInstance.set(node.selectionId, id);
-    }
-    nodesById.set(id, node);
-    if (parent) parentOf.set(id, parent);
-    return node;
-  };
-  const roots = structure?.tree ? [visit(structure.tree, "n0", null)] : [];
-  return { roots, nodesById, parentOf, byInstance };
+/** An assembly's selection id: its place in the engine's tree (`n0.2`). */
+export const xbfAssemblyId = path => `n${path}`;
+export const isXbfAssemblyId = id => /^n\d+(\.\d+)*$/.test(String(id || ""));
+
+// The name a folded row can honestly carry: the stem its members share, backed up past the digits
+// the common prefix splits. Empty means there is no such name, and that is a reason not to fold.
+function repeatedLabelStem(labels) {
+  let stem = labels[0] || "";
+  for (const label of labels.slice(1)) {
+    let at = 0;
+    while (at < stem.length && at < label.length && stem[at] === label[at]) at += 1;
+    stem = stem.slice(0, at);
+  }
+  return stem.replace(/[\s._-]*\d*$/, "");
 }
 
-/** The rows that hold `id`, outermost first: what opens to show it. */
-export function xbfTreeAncestors(tree, id) {
+// Sibling parts that share a prototype AND a name's stem fold into one row carrying the count,
+// every instance still under it; an assembly never folds.
+function foldRepeatedParts(nodes, ownerId) {
+  const repeats = new Map();
+  for (const node of nodes) {
+    if (node.kind !== "part" || !node.component) continue;
+    repeats.set(node.component, (repeats.get(node.component) || 0) + 1);
+  }
+  const folded = [], seen = new Set();
+  for (const node of nodes) {
+    const component = node.kind === "part" ? node.component : null;
+    if (!component || repeats.get(component) < 2) { folded.push(node); continue; }
+    if (seen.has(component)) continue;
+    seen.add(component);
+    const members = nodes.filter(other => other.kind === "part" && other.component === component);
+    const stem = repeatedLabelStem(members.map(member => member.label));
+    if (!stem) { for (const member of members) folded.push(member); continue; }
+    folded.push({
+      id: `${ownerId}:repeat:${component}`, kind: "group", label: `${stem} (${members.length})`,
+      leafPartIds: [...new Set(members.flatMap(member => member.leafPartIds))],
+      memberSelectionIds: members.map(member => member.selectionId), component: null, children: members
+    });
+  }
+  return folded;
+}
+
+/**
+ * The tree's rows, and what the host reads of it: every node by its selection id, each one's
+ * owners (outermost first), and each instance's own node.
+ * @param {object | null} structure  The engine's structure.
+ * @returns {{ roots: XbfTreeNode[], wrapper: XbfTreeNode | null, nodes: Map<string, XbfTreeNode>,
+ *   owners: Map<string, string[]>, partOf: Map<string, string> }}
+ */
+export function presentXbfTree(structure) {
+  const nodes = new Map();
+  const owners = new Map();
+  const prototypes = structure?.prototypes || [];
+  const visit = (source, path, chain) => {
+    const children = Array.isArray(source?.children) ? source.children : null;
+    const placed = Number.isInteger(source?.instance);
+    if (!children && !placed) return null;
+    const selectionId = children ? xbfAssemblyId(path) : xbfElementId(source.instance);
+    const label = String(source?.name || (placed ? prototypes[source.prototype]?.name : "") || "(unnamed)");
+    const node = { id: `model:${selectionId}`, selectionId, kind: children ? "assembly" : "part", label,
+      component: placed ? String(prototypes[source.prototype]?.key ?? source.prototype) : null, leafPartIds: [], children: [] };
+    nodes.set(selectionId, node);
+    owners.set(selectionId, chain);
+    if (children) {
+      const kids = children.map((child, at) => visit(child, `${path}.${at}`, [...chain, selectionId])).filter(Boolean);
+      node.leafPartIds = [...new Set(kids.flatMap(child => child.leafPartIds))];
+      node.children = foldRepeatedParts(kids, node.id);
+      // An assembly that holds no part is a part of the tree no pick reaches: a leaf, as a STEP's.
+      if (!kids.length) node.kind = "part";
+    } else {
+      node.leafPartIds = [selectionId];
+    }
+    return node;
+  };
+  const top = structure?.tree ? visit(structure.tree, "0", []) : null;
+  // The document's wrapper is a STEP's assembly root: its children are the tree's rows.
+  const wrapper = top?.kind === "assembly" ? top : null;
+  return { roots: wrapper ? wrapper.children : top ? [top] : [], wrapper, nodes, owners };
+}
+
+/**
+ * The structural wrappers that add no choice when there is only one: kept in the logical tree
+ * (and open in the host), their children shown. Never a folded group.
+ */
+export function implicitXbfRoots(roots) {
   const found = [];
-  for (let at = tree.parentOf.get(id); at; at = tree.parentOf.get(at)) found.unshift(at);
+  let nodes = roots;
+  while (nodes.length === 1 && nodes[0].kind === "assembly" && nodes[0].children?.length) {
+    found.push(nodes[0]);
+    nodes = nodes[0].children;
+  }
   return found;
 }
 
-/** Whether every one of `ids` is hidden: an eye's state. */
-export function allHidden(ids, hidden) {
-  return ids.length > 0 && ids.every(id => hidden.has(id));
+/** Every assembly's selection id: what Parts, Faces and Edges hold open. */
+export function xbfAssemblyIds(tree) {
+  return [...tree.nodes.values()].filter(node => node.kind === "assembly").map(node => node.selectionId);
+}
+
+/**
+ * The node a viewport press on instance `partId` reaches: the outermost owner the host has
+ * shut (a collapsed assembly is picked as a unit), else the part. The wrapper is always open.
+ */
+export function xbfPickFrontier(tree, partId, expanded) {
+  for (const owner of tree.owners.get(partId) || []) {
+    if (owner === tree.wrapper?.selectionId) continue;
+    if (!expanded.has(owner)) return owner;
+  }
+  return partId;
+}
+
+/**
+ * The tree paths the selection reveals: a selected part or assembly at its own row, a picked
+ * face or edge at the row of the part it belongs to.
+ */
+export function xbfSelectionPaths(roots, selectedIds) {
+  const paths = [];
+  const visit = (nodes, parents = []) => {
+    for (const node of nodes) {
+      const path = [...parents, node];
+      paths.push(path);
+      visit(node.children || [], path);
+    }
+  };
+  visit(roots);
+  const found = [];
+  for (const id of selectedIds) {
+    const part = String(id).split("/")[0];
+    const path = paths.find(p => p.at(-1).selectionId === part);
+    if (path) found.push(path);
+  }
+  return [...new Map(found.map(path => [path.at(-1).id, path])).values()];
 }
