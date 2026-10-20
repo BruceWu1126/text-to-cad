@@ -349,6 +349,70 @@ class JointMemoTest(_Folder):
         self.assertTrue(all(seen["parents"]), "each placement's joints are on it")
 
 
+NESTED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def nested():
+    base = bd.Box(100, 60, 20)
+    base.label = "base"
+    # The arm sits inside a group the assembly places by a location of its own, at elbow 30: no
+    # connect_to (which composes locations in each part's own compound) places it.
+    group_at = bd.Location((10, 5, 0), (0, 0, 20))
+    joint = bd.Axis((40, 0, 20), (0, 1, 0)).location
+    arm = (group_at.inverse() * joint * bd.Rotation(0, 0, 30)) * bd.Box(
+        120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
+    arm.label = "arm"
+    bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
+    bd.RigidJoint("elbow", arm, arm.location)  # the joint's frame: the arm's own origin
+    more = []
+    {extra}
+    group = bd.Compound(children=[arm], label="arm_group")
+    group.location = group_at
+    return bd.Compound(children=[base, group, *more], label="nested")
+"""
+SPARE = """spare = bd.Pos(0, 0, -40) * bd.Box(5, 5, 5)
+    spare.label = "spare"
+    bd.RigidJoint("elbow", spare, spare.location)
+    more.append(spare)"""
+
+
+class NestedTest(_Folder):
+    def test_joints_in_a_nested_assembly_pair_by_label_and_pose_exactly(self) -> None:
+        self.build("nested", NESTED.format(extra="pass"))
+        path = self.folder / "nested.xbf"
+        loaded = document.Loaded(path)
+        found = loaded.mechanism
+        # The pair is the two joints labelled `elbow`; its value is the placement's, the arm unmoved.
+        self.assertEqual([(link.name, link.members) for link in found.links], [("base", [(0,)]), ("arm", [(1, 0)])])
+        (pair,) = found.pairs
+        self.assertEqual((pair.label, pair.kind, pair.links), ("elbow", "revolute", (0, 1)))
+        self.assertAlmostEqual(found.as_built["elbow"][0], 30.0, places=9)
+        self.assertTrue(_has_point(_vertices(loaded, "arm"), _arm_tip(30)))
+        self.assertEqual(loaded.structure()["kinematics"],
+                         document.tree_structure(document.saved(path), path)["kinematics"])
+        for pose, q in (('{"elbow": 90}', 90.0), ('{"elbow": -10}', -10.0)):
+            out = self.folder / "posed.step"
+            code, _out, err = _run("export", str(path), "--step", str(out), "--pose", pose)
+            self.assertEqual(code, 0, err)
+            self.assertTrue(_has_point(_vertices(document.Loaded(out), "arm"), _arm_tip(q)), pose)
+
+    def test_a_moving_joint_matching_two_rigid_joints_alike_is_refused(self) -> None:
+        # A second rigid `elbow` as near the base's as the arm's: the pair is ambiguous.
+        report = self.build("nested", NESTED.format(extra=SPARE), ok=False)
+        self.assertIn("joint 'elbow' on nested/base matches the rigid joints 'elbow'", report["error"])
+
+    def test_connect_to_wins_over_a_label(self) -> None:
+        # The hinge connects `elbow` to the arm's `mount`; a spare's rigid `elbow` pairs with nothing.
+        self.hinge(connect=CONNECT + "; " + SPARE.replace("\n    ", "; ").replace("more.append(spare)", "pass"),
+                   after='root = bd.Compound(children=[base, arm, spare], label="hinge")')
+        loaded = document.Loaded(self.folder / "hinge.xbf")
+        self.assertEqual([(pair.label, pair.links) for pair in loaded.mechanism.pairs], [("elbow", (0, 1))])
+        self.assertEqual([link["instances"] for link in loaded.structure()["kinematics"]["links"]], [[0, 2], [1]])
+
+
 class ChainTest(_Folder):
     def test_a_chain_of_rigid_prismatic_and_revolute_joints_makes_its_links(self) -> None:
         self.build("lift", CHAIN)

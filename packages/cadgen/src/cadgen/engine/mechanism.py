@@ -5,8 +5,15 @@ Authoring is build123d's joints and nothing else. A model puts ``RevoluteJoint``
 places them with ``connect_to(..., angle=, position=, angles=)``; the values it connects
 them at are the **as-built configuration**. ``configuration(assembly, name, **values)``
 names another one. At document time the engine harvests every joint on every part of the
-result and every ``connect_to`` pairing (``harvest``) into a mechanism in ISO 10303-105's
-terms, the kinematics of STEP AP242:
+result (``harvest``) and pairs them two ways: by ``connect_to``, where the author used it; and,
+for every joint no ``connect_to`` joined, by label -- a moving joint and a ``RigidJoint`` of the
+same label on another part are a pair (the nearest in the tree, a tie refused), and so are two
+rigid joints of one label each the other's nearest. ``connect_to`` wins: a joint it joined is
+never matched by label. build123d's ``connect_to`` composes locations in each part's own
+compound, so in a nested assembly it cannot place a part; there a model authors both joints
+where the parts stand and lets the label pair them. Either way the document places nothing:
+every value, the as-built one included, is computed from where the two frames stand in the
+built tree. The pairs make a mechanism in ISO 10303-105's terms, the kinematics of STEP AP242:
 
 - **Links** are sets of occurrences moving as one rigid body: two parts whose rigid joints
   are connected are one link. The **ground** link is every link no ``connect_to`` moved
@@ -381,6 +388,52 @@ def _extract(pair: Pair, relative: np.ndarray, hint: tuple | None, scale: float)
     return found
 
 
+def _by_label(jointed: list, used: set[int], tree: Any) -> list[tuple]:
+    """The pairings of joints no ``connect_to`` joined, by their labels: a moving joint and a
+    ``RigidJoint`` of the same label on another part are its pair (the moving joint's part stays,
+    the rigid one's is placed on it), and two rigid joints of one label fasten their parts. Of
+    several candidates, the nearest in the tree is taken (what a placement of a sub-assembly
+    holds pairs within it); a moving joint with two equally near is refused by name, rigid
+    joints with two equally near are no pair. A joint that matches nothing is no pair."""
+    rows: dict[str, list[tuple[tuple[int, ...], Any]]] = {}
+    for path, joint in jointed:
+        if id(joint) not in used and _joint_kind(joint) is not None:
+            rows.setdefault(joint.label, []).append((path, joint))
+    found = []
+
+    def nearest(path: tuple[int, ...], label: str, candidates: list, strict: bool = True) -> Any:
+        best = max(_common(path, other) for other, _joint in candidates)
+        ties = [row for row in candidates if _common(path, row[0]) == best]
+        if len(ties) > 1 and not strict:
+            return None
+        if len(ties) > 1:
+            names = " and ".join("/".join(_occurrence(tree, other)[1]) for other, _joint in ties[:2])
+            raise KinematicsError(f"joint {label!r} on {'/'.join(_occurrence(tree, path)[1])} matches the rigid joints "
+                                  f"{label!r} on {names} alike: give each pair a label of its own, or connect it with "
+                                  "connect_to")
+        return ties[0]
+
+    for label, held in rows.items():
+        rigid = [row for row in held if _joint_kind(row[1]) == "rigid"]
+        for path, joint in [row for row in held if _joint_kind(row[1]) != "rigid"]:
+            candidates = [row for row in rigid if row[0] != path]
+            if candidates:
+                other = nearest(path, label, candidates)
+                rigid.remove(other)
+                found.append((path, joint, other[0], other[1]))
+        # Rigid joints alone fasten only where one is nearest: a datum a part carries in each of
+        # its placements (three pegs' `base`) is no fastening.
+        mates = {}
+        for at, (path, _joint) in enumerate(rigid):
+            candidates = [row for row in rigid if row[0] != path]
+            other = nearest(path, label, candidates, strict=False) if candidates else None
+            mates[at] = None if other is None else next(index for index, row in enumerate(rigid) if row is other)
+        for at, other in mates.items():
+            if other is not None and other > at and mates.get(other) == at:  # each the other's one nearest
+                found.append((*rigid[at], *rigid[other]))
+    return found
+
+
 def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | None:
     """The mechanism of a model's result (see the module docstring), or None for one with no
     connected joint. ``root_path`` is the result's own occurrence in ``tree`` (``()``, or
@@ -412,6 +465,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             continue
         seen.add(key)
         pairings.append((path, joint, moved, other))
+    pairings.extend(_by_label(jointed, {id(joint) for row in pairings for joint in (row[1], row[3])}, tree))
     if not pairings:
         if configured:
             raise KinematicsError(f"configuration {next(iter(configured[0][2]))!r} names joints, and the assembly "
@@ -449,6 +503,11 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         else:
             moving, held_by, rigid, rigid_by = joint, stays, other, moves
         moving_pairs.append((moving, held_by, rigid, rigid_by, moves))
+    if not moving_pairs:
+        if configured:
+            raise KinematicsError(f"configuration {next(iter(configured[0][2]))!r} names joints, and the assembly "
+                                  "has no moving joint")
+        return None
 
     classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
     for path in sorted(parent):
@@ -495,8 +554,9 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         if value is None:
             raise KinematicsError(
                 f"{name_of(rigid_by)} is not where joint {moving.label!r} can put it"
-                f"{'' if held is None else f' (it was connected at {_shown(held)})'}: a part moved after connect_to, "
-                "or connected after the compound holding it was made. Connect parts before assembling them")
+                f"{'' if held is None else f' (it was connected at {_shown(held)})'}: its rigid joint's frame and the "
+                f"{kind} joint's are not one {kind} motion apart within its range (a part moved after connect_to, or "
+                "connected after the compound holding it was made, or a rigid joint off the joint's axis)")
         pairs.append(pair)
         as_built[label] = value
         joint_labels.append((moving.label, held_by))

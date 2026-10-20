@@ -30,7 +30,8 @@ An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
 as-built configuration; `configuration(assembly, name, **values)` names another, by joint
-label. Connect parts before putting them in the compound that holds them.
+label. Connect parts before putting them in the compound that holds them; where `connect_to`
+cannot place them (a nested assembly), give the two joints one label where the parts stand.
 
 ```python
 from cadgen.engine import configuration, xbf
@@ -145,8 +146,16 @@ face the mesher left without triangles is named in a warning. Nothing is written
 
 ## Kinematics
 
-At document time the engine harvests every joint on every part of the result and every
-`connect_to` pairing into a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
+At document time the engine harvests every joint on every part of the result and pairs them
+two ways: by `connect_to` where the author used it, and, for every joint `connect_to` did not
+join, by label -- a moving joint and a `RigidJoint` of the same label on another part are its
+pair (the nearest in the tree; two alike are refused by name), and two rigid joints of one label,
+each the other's nearest, fasten their parts. `connect_to` wins where both would pair a joint.
+build123d's `connect_to` composes locations within each part's own compound, so it cannot place
+a part in a nested assembly: there the model puts each part where it stands, authors the two
+joints there, and the label pairs them. The engine never moves a part: every value, as built
+included, is computed from where the two joints' frames stand in the built tree. The pairs make
+a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
 
 - **Links** are occurrences that move as one: two parts whose rigid joints are connected
   are one link. The **ground** is every link no `connect_to` moved (the joint whose
