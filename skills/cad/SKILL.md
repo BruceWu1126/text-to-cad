@@ -34,8 +34,8 @@ Use the corresponding robot-description skill for URDF, SRDF or SDF.
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
 one installation, and its warm build daemon, with the CAD app's server:
 
-- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.24 cadgen`
-- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.24 python`
+- `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.25 cadgen`
+- `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.7.25 python`
 
 The first run downloads that installation and the first snapshot its headless
 browser; later runs reuse both.
@@ -143,8 +143,6 @@ for selection in scene.resolve("/work/robot/STEP/assembly.step#o1.2.f7,o1.2.f8")
 
 A Quick Edit prompt names its document under `File:`, selected entities under
 `References:`, and snapshot context as inline JSON or a `.snapshot.json` path.
-Read `measurements` for endpoints in model units and displayed labels; these are
-reference dimensions, not constraints automatically applied to geometry.
 To render, save inline JSON to a temporary `.snapshot.json` and run
 `cadgen snapshot --job <snapshot file>` (`--job` takes a file path).
 Inspect supplied annotations before editing. Without annotations, the captured
@@ -163,10 +161,6 @@ file's own terms (none is a STEP selector `read_scene` resolves):
 | 3MF | `/work/out/plate.3mf#o2.1` | the 2nd `<build><item>`'s 1st `<component>` (1-based); `#o3` is the 3rd build item |
 | STL | the file alone, on `File:` | one mesh: nothing in it is picked |
 
-A measurement taken on a mesh (a GLB, a 3MF or a robot's links) is between two points of
-its triangles, in the file's unit, and APPROXIMATE: its label starts with `≈` ("≈ 0.0425 m").
-Never read a width across two facets of a tessellated curve as an exact diameter; measure
-the source model for that.
 
 For a bare `#o1.2.f7`, use the identified target file. Do not guess between
 ambiguous files or labels. Numeric refs belong to that saved revision;
