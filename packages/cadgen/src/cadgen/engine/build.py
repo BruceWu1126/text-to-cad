@@ -279,6 +279,7 @@ def _names(run: Any, part: Any) -> tuple[Any, dict[tuple[str, str], str | None]]
         if ref not in refs:
             refs[ref] = _skeleton(ref, skeletons)
     return {"faces": lineage.get("faces") or [], "edges": lineage.get("edges") or [],
+            "vertices": lineage.get("vertices") or [],
             "table": lineage.get("table") or {}, "features": provenance}, refs
 
 
@@ -330,7 +331,7 @@ def _sidecar(xbf_path: Path, model: Any, report: dict[str, Any], tree: Any, show
     for part in tree.parts:
         names = part.names or {}
         elements = {}
-        for kind in ("faces", "edges"):
+        for kind in ("faces", "edges", "vertices"):
             for text in names.get(kind) or []:
                 if text is not None:
                     elements[text] = _last_feature(text)

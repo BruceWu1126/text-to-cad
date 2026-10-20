@@ -292,7 +292,7 @@ def to_xcaf(tree: Tree) -> Any:
     from OCP.TCollection import TCollection_AsciiString
     from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_Label
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.UnitsMethods import UnitsMethods_LengthUnit_Millimeter
@@ -330,10 +330,12 @@ def to_xcaf(tree: Tree) -> Any:
                         _name(sub, text)
                     if rgba is not None:
                         colors.SetColor(sub, _quantity(rgba), XCAFDoc_ColorSurf)
-                edge_names = (prototype.names or {}).get("edges") or []
-                if any(text is not None for text in edge_names):
+                for kind, topabs in (("edges", TopAbs_EDGE), ("vertices", TopAbs_VERTEX)):  # vertices: naming
+                    edge_names = (prototype.names or {}).get(kind) or []
+                    if not any(text is not None for text in edge_names):
+                        continue
                     edges = TopTools_IndexedMapOfShape()
-                    TopExp.MapShapes_s(prototype.shape, TopAbs_EDGE, edges)
+                    TopExp.MapShapes_s(prototype.shape, topabs, edges)
                     for ordinal in range(1, min(edges.Extent(), len(edge_names)) + 1):
                         text = edge_names[ordinal - 1]
                         if text is None:
@@ -555,6 +557,7 @@ class Prototype:
     edge_names: dict[int, str]
     face_colors: dict[int, tuple]
     entry: str
+    vertex_names: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -646,6 +649,7 @@ class Loaded:
                 "index": p.index, "key": p.key, "name": p.name, "color": p.color,
                 "faceNames": {str(k): v for k, v in sorted(p.face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(p.edge_names.items())},
+                "vertexNames": {str(k): v for k, v in sorted(p.vertex_names.items())},
                 "faceColors": {str(k): v for k, v in sorted(p.face_colors.items())},
             } for p in self.prototypes],
             "instances": [{"prototype": i.prototype, "path": "/".join(i.path), "matrix": i.matrix, "color": i.color}
@@ -675,7 +679,7 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
     own colour wins over the one its placement passes down, an assembly label has none, a
     colour reads back as the kernel stores it, and a name falls back to the referred
     prototype's, then to its parent's with the component's place."""
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
@@ -709,11 +713,18 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
             TopExp.MapShapes_s(part.shape, TopAbs_EDGE, edges)
             edge_names = {ordinal: text for ordinal, text in enumerate(names.get("edges") or [], 1)
                           if text and ordinal <= edges.Extent()}
+        vertex_names: dict[int, str] = {}
+        if any(names.get("vertices") or []):
+            vertices = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(part.shape, TopAbs_VERTEX, vertices)
+            vertex_names = {ordinal: text for ordinal, text in enumerate(names.get("vertices") or [], 1)
+                            if text and ordinal <= vertices.Extent()}
         face_colors = {ordinal: read(rgba) for ordinal, rgba in part.face_colors.items()
                        if 1 <= ordinal <= faces.Extent()}
         return {"index": index, "key": part.key, "name": part.name or f"part{index + 1}", "color": read(part.color),
                 "faceNames": {str(k): v for k, v in sorted(face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(edge_names.items())},
+                "vertexNames": {str(k): v for k, v in sorted(vertex_names.items())},
                 "faceColors": {str(k): v for k, v in sorted(face_colors.items())}}
 
     def visit(prototype: Any, location: Any, names: list[str], inherited: tuple | None, name: str) -> dict:
@@ -814,7 +825,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     from OCP.Standard import Standard_GUID
     from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_LabelSequence
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
@@ -828,6 +839,8 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
         found_key = f"{loaded.version[0]}-{loaded.version[1]}-{entry}"
     face_names: dict[int, str] = {}
     edge_names: dict[int, str] = {}
+    vertex_names: dict[int, str] = {}
+    vertices = None
     face_colors: dict[int, tuple] = {}
     subs = TDF_LabelSequence()
     XCAFDoc_ShapeTool.GetSubShapes_s(label, subs)
@@ -856,8 +869,16 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     edge_names[ordinal] = name
+            elif kind == TopAbs_VERTEX:
+                if vertices is None:
+                    vertices = TopTools_IndexedMapOfShape()
+                    TopExp.MapShapes_s(shape, TopAbs_VERTEX, vertices)
+                ordinal = vertices.FindIndex(held)
+                name = _label_name(sub) if ordinal else ""
+                if name:
+                    vertex_names[ordinal] = name
     return Prototype(index, local, _label_name(label) or f"part{index + 1}", _label_color(label), found_key,
-                     face_names, edge_names, face_colors, entry)
+                     face_names, edge_names, face_colors, entry, vertex_names)
 
 
 def _matrix(location: Any) -> list[float]:

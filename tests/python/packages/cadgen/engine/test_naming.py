@@ -290,5 +290,25 @@ class ImportedNamesTest(NamingCase):
             self.assertEqual(sorted(imported["faces"]), sorted(source["faces"]))
 
 
+class VertexNamesTest(NamingCase):
+    def test_every_vertex_is_named_in_the_document_and_its_structure(self) -> None:
+        self.names(BLOCK, insert="", relief="relief")
+        path = self.folder / "block.xbf"
+        loaded = document.load(path)
+        prototype = loaded.prototypes[0]
+        from OCP.TopAbs import TopAbs_VERTEX
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        vertices = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(prototype.shape, TopAbs_VERTEX, vertices)
+        self.assertEqual(sorted(prototype.vertex_names), list(range(1, vertices.Extent() + 1)))
+        self.assertTrue(all(name.startswith("v:block.") for name in prototype.vertex_names.values()))
+        # Read back from the file's labels, and made from the build's tree in memory alike.
+        read = loaded.structure()["prototypes"][0]["vertexNames"]
+        self.assertEqual(read, {str(k): v for k, v in sorted(prototype.vertex_names.items())})
+        self.assertEqual(document.tree_structure(document.saved(path), path)["prototypes"][0]["vertexNames"], read)
+
+
 if __name__ == "__main__":
     unittest.main()
