@@ -49,6 +49,17 @@ class MeshContractTest(unittest.TestCase):
         self.assertAlmostEqual(part.linear, (10 + 20 + 30) / 300 * 0.5, places=6)
         self.assertAlmostEqual(part.angular, math.radians(28.5), places=6)
 
+    def test_an_extrusions_far_cap_edges_are_drawn_where_they_are(self) -> None:
+        import build123d as bd
+
+        # The far cap's edges share the near cap's TShapes, moved by a location: each is its own polyline.
+        prism = bd.extrude(bd.Polygon((-9, 8), (9, 8), (0, -8)), 35)
+        part = mesh.mesh_shape(prism.wrapped)
+        polylines = {tuple(np.round(part.edge_points[first:first + count].ravel(), 3)) for _o, first, count, _k in part.edges}
+        self.assertEqual(len(polylines), 9)
+        ends = sorted({round(float(z), 3) for line in polylines for z in line[2::3] if len(set(line[2::3])) == 1})
+        self.assertEqual([len(ends), ends[-1] - ends[0]], [2, 35.0], "a cap's edges at each end")
+
     def test_an_analytic_face_is_held_to_the_deflection(self) -> None:
         import build123d as bd
 

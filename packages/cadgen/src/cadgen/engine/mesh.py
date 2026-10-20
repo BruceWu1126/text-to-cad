@@ -644,7 +644,9 @@ def _extract(shape: Any, mesher_status: str = "no status") -> Mesh:
             edge_rows.append((ordinal, kind, -1, None))
             continue
         polygon, triangulation, face_index, location = found
-        key = (edge.TShape(), face_index)
+        # An extrusion's far cap shares its edges' TShapes with the near cap's, moved by a
+        # location: the same face holds a polygon for each, so the edge's location is the key's too.
+        key = (edge.TShape(), edge.Location().HashCode(), face_index)
         index = polygons.get(key)
         if index is None:
             index = polygons[key] = len(polygon_list)

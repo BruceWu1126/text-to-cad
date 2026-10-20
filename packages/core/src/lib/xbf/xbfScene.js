@@ -16,8 +16,9 @@
 //   (boundary and non-manifold edges drawn as feature edges), tangent and seam, each a line of
 //   its own weight (`cadInk.js`'s palette), never the tessellation's triangles.
 // - Faces by the face table's index ranges, edges by the edge table's polylines; every element
-//   named by its ordinal, with the element name the document gives it. A pick takes an edge
-//   within a few pixels of the pointer, else the face under it, as a STEP's Select does.
+//   named by its ordinal, with the element name the document gives it. A pick takes the face
+//   under the pointer unless one of that face's own edges is within a few pixels of it, and an
+//   edge near the pointer where no face is under it, as a STEP's Select does.
 // - A face the mesher left without triangles is not drawn and is reported (`unmeshed`).
 // - Each instance's placed group hangs in a carrier of its own, which Explode moves
 //   (`sceneExplode.js`, a STEP's layout over the document's tree).
@@ -36,6 +37,7 @@ import { resolveCadEdgeSettings } from "../../common/cadInk.js";
 import { createScreenSpaceLineSegments, topologyLineDepthBiasForWidth } from "../../common/renderEdges.js";
 import { syncMaterialClipPlanes } from "../viewer/clipPlane.js";
 import { FOCUSED_DIMMED_SURFACE_OPACITY } from "../viewer/partVisualState.js";
+import { worldUnitsPerPixelAtDistance } from "../viewer/pickingThresholds.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
 import { REFERENCE_HOVER_COLOR } from "../viewer/referenceGeometry.js";
 import { createSceneExplode } from "../viewer/sceneExplode.js";
@@ -47,9 +49,17 @@ import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
 export const XBF_SCENE_UNITS = Object.freeze({ unit: "mm", perWorld: 1 });
 export const XBF_EDGE_LINES = Object.freeze(["feature", "tangent", "seam"]);
-// How near the pointer, in CSS pixels, an edge is picked before the face under it: a STEP's
-// Select's, a press's and a resting pointer's (`useStepPicking.js`).
-export const XBF_PICK_PIXELS = Object.freeze({ edge: 10, edgeHover: 6 });
+// A STEP's Select's edge pick (`useStepPicking.js`): how near the pointer, in CSS pixels, an
+// edge is taken -- a press's, a resting pointer's, a touch's -- and, over a face, how near one
+// of THAT face's own edges must be to win over it (an edge the face does not own never does).
+export const XBF_PICK_PIXELS = Object.freeze({ edge: 10, edgeHover: 6, edgeTouch: 20, edgeTouchOverFace: 16 });
+// The world reach of a STEP's edge raycast: the model's radius over 320, at least 0.65, never
+// wider than the pixel reach at the surface's distance; and how far behind the nearest surface
+// an edge may lie and still be picked (0.75 of that reach, at least 0.08).
+const EDGE_REACH_PER_RADIUS = 1 / 320;
+const EDGE_REACH_MIN = 0.65;
+const EDGE_OCCLUSION_FACTOR = 0.75;
+const EDGE_OCCLUSION_MIN = 0.08;
 const DEFAULT_SURFACE = 0xb8bcc4;
 const HIGHLIGHT_ORDER = 30;
 // A STEP's reference highlight (`cadInk.js`): one colour, opaque, its lines this many
@@ -125,7 +135,7 @@ function partGeometry(THREE, part) {
         geometry.boundingSphere = surface.boundingSphere.clone();
       }
     }
-    return { surface, lines, points, box, triangleFaces: null };
+    return { surface, lines, points, box, triangleFaces: null, faceEdges: null };
   }, held => {
     held.surface.dispose();
     for (const geometry of Object.values(held.lines)) geometry.dispose();
@@ -135,6 +145,11 @@ function partGeometry(THREE, part) {
 function triangleFaces(held, part) {
   held.triangleFaces ||= xbmTriangleFaceRows(part.mesh);
   return held.triangleFaces;
+}
+
+function faceEdges(held, part) {
+  held.faceEdges ||= xbfFaceEdges(part.mesh);
+  return held.faceEdges;
 }
 
 /**
@@ -167,6 +182,72 @@ export function xbfFaceOutline(mesh, ordinal) {
     out.push(p[a * 3], p[a * 3 + 1], p[a * 3 + 2], p[b * 3], p[b * 3 + 1], p[b * 3 + 2]);
   }
   return new Float32Array(out);
+}
+
+/**
+ * Which edges bound which face: face ordinal → the ordinals of its own edges. The part buffer
+ * carries no face-to-edge table, so it is read from the mesh, once per part: an edge bounds a face
+ * when a segment of its polyline is a side of one of the face's triangles (the mesher draws an
+ * edge's polyline through the nodes of the faces it bounds). Nodes are matched by where they are,
+ * to a hair of the part's size, so a seam's split rows and a neighbour's own copy of the nodes
+ * meet.
+ * @returns {Map<number, Set<number>>}
+ */
+export function xbfFaceEdges(mesh) {
+  const p = mesh.positions, q = mesh.edgePoints;
+  let extent = 0;
+  for (let at = 0; at < p.length; at += 1) extent = Math.max(extent, Math.abs(p[at]));
+  const tolerance = Math.max(extent * 1e-5, 1e-9);
+  const cells = new Map();
+  let ids = 0;
+  // The id of the place a point is at: one id for every point within `tolerance` of it.
+  const placeOf = (x, y, z, add) => {
+    const cx = Math.floor(x / tolerance), cy = Math.floor(y / tolerance), cz = Math.floor(z / tolerance);
+    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {
+      const found = cells.get(`${cx + dx},${cy + dy},${cz + dz}`);
+      if (!found) continue;
+      for (const place of found) {
+        if (Math.abs(place.x - x) <= tolerance && Math.abs(place.y - y) <= tolerance && Math.abs(place.z - z) <= tolerance) return place.id;
+      }
+    }
+    if (!add) return -1;
+    const name = `${cx},${cy},${cz}`;
+    const place = { x, y, z, id: ids++ };
+    if (cells.has(name)) cells.get(name).push(place); else cells.set(name, [place]);
+    return place.id;
+  };
+  const nodes = new Int32Array(p.length / 3);
+  for (let node = 0; node < nodes.length; node += 1) nodes[node] = placeOf(p[node * 3], p[node * 3 + 1], p[node * 3 + 2], true);
+  const sideKey = (a, b) => (a < b ? a * ids + b : b * ids + a);
+  const sides = new Map();
+  for (let row = 0; row < mesh.faces.length / 3; row += 1) {
+    const ordinal = mesh.faces[row * 3], first = mesh.faces[row * 3 + 1], count = mesh.faces[row * 3 + 2];
+    for (let at = first; at + 2 < first + count; at += 3) {
+      for (let side = 0; side < 3; side += 1) {
+        const a = nodes[mesh.indices[at + side]], b = nodes[mesh.indices[at + (side + 1) % 3]];
+        if (a === b) continue;
+        const key = sideKey(a, b);
+        const owners = sides.get(key);
+        if (!owners) sides.set(key, [ordinal]); else if (!owners.includes(ordinal)) owners.push(ordinal);
+      }
+    }
+  }
+  const out = new Map();
+  for (let row = 0; row < mesh.edges.length / 4; row += 1) {
+    const ordinal = mesh.edges[row * 4], first = mesh.edges[row * 4 + 1], count = mesh.edges[row * 4 + 2];
+    let previous = count ? placeOf(q[first * 3], q[first * 3 + 1], q[first * 3 + 2], false) : -1;
+    for (let at = first + 1; at < first + count; at += 1) {
+      const next = placeOf(q[at * 3], q[at * 3 + 1], q[at * 3 + 2], false);
+      if (previous >= 0 && next >= 0 && previous !== next) {
+        for (const face of sides.get(sideKey(previous, next)) || []) {
+          if (!out.has(face)) out.set(face, new Set());
+          out.get(face).add(ordinal);
+        }
+      }
+      previous = next;
+    }
+  }
+  return out;
 }
 
 /** A part's volume from its triangles (the divergence theorem over the closed mesh): approximate, as a STEP's card says. */
@@ -424,48 +505,39 @@ export function createXbfScene(THREE, document) {
   });
 
   /**
-   * The edge of `entry` nearest the pointer on screen, within `pixels`, and not behind the surface
-   * the pointer is on (`limit`: the hit's distance along the ray).
+   * The edge of `entry` a STEP's edge pick takes (`useStepPicking.js`'s `pickEdgeCandidate`): of
+   * the edges whose polyline passes within `reach.threshold` of the ray (in the scene's units),
+   * not clipped, not behind the nearest surface by more than `reach.allowance` (`reach.nearest`:
+   * that surface's distance along the ray, Infinity for none) and within `reach.pixels` of the
+   * pointer on screen (`pointer`, CSS pixels), the nearest on screen, then the nearest to the ray,
+   * then the nearest along it.
    */
-  function nearestEdgeOnScreen(entry, ray, view, limit, pixels) {
+  function nearestEdgeOnScreen(entry, ray, view, reach, pointer) {
     const { camera, width, height } = view;
-    const matrix = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).multiply(entry.group.matrixWorld);
-    const m = matrix.elements;
-    const world = entry.group.matrixWorld.elements;
-    const pointer = ray.at(Math.max(camera.near || 0, 1e-3) * 2, new THREE.Vector3()).applyMatrix4(
-      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    const px = (pointer.x * 0.5 + 0.5) * width, py = (-pointer.y * 0.5 + 0.5) * height;
-    const project = (x, y, z, out) => {
-      const w = m[3] * x + m[7] * y + m[11] * z + m[15];
-      if (!(w > 0)) return false;
-      out[0] = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / w * 0.5 + 0.5) * width;
-      out[1] = (-(m[1] * x + m[5] * y + m[9] * z + m[13]) / w * 0.5 + 0.5) * height;
-      return true;
-    };
-    const toWorld = (x, y, z) => new THREE.Vector3(
-      world[0] * x + world[4] * y + world[8] * z + world[12],
-      world[1] * x + world[5] * y + world[9] * z + world[13],
-      world[2] * x + world[6] * y + world[10] * z + world[14]);
-    const slack = Math.max(limit === Infinity ? 0 : limit * 0.02, 1e-6);
-    const unhidden = (point) => kept(point) && (limit === Infinity || point.clone().sub(ray.origin).dot(ray.direction) <= limit + slack);
-    const mesh = entry.surface.part.mesh;
-    const a = [0, 0], b = [0, 0];
-    let best = pixels;
+    const project = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const world = entry.group.matrixWorld;
+    const p = entry.surface.part.mesh.edgePoints, e = entry.surface.part.mesh.edges;
+    const start = new THREE.Vector3(), end = new THREE.Vector3(), onRay = new THREE.Vector3(), onSegment = new THREE.Vector3();
+    const screen = new THREE.Vector3();
+    const limitSq = reach.threshold * reach.threshold;
     let found = null;
-    const p = mesh.edgePoints, e = mesh.edges;
     for (let row = 0; row < e.length / 4; row += 1) {
       const first = e[row * 4 + 1], count = e[row * 4 + 2];
       for (let at = first; at + 1 < first + count; at += 1) {
-        if (!project(p[at * 3], p[at * 3 + 1], p[at * 3 + 2], a) || !project(p[at * 3 + 3], p[at * 3 + 4], p[at * 3 + 5], b)) continue;
-        const dx = b[0] - a[0], dy = b[1] - a[1];
-        const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / (dx * dx + dy * dy || 1)));
-        const d = Math.hypot(a[0] + t * dx - px, a[1] + t * dy - py);
-        if (d >= best) continue;
-        const point = toWorld(p[at * 3] + t * (p[at * 3 + 3] - p[at * 3]), p[at * 3 + 1] + t * (p[at * 3 + 4] - p[at * 3 + 1]),
-          p[at * 3 + 2] + t * (p[at * 3 + 5] - p[at * 3 + 2]));
-        if (!unhidden(point)) continue;
-        best = d;
-        found = { ...elementHit(entry, "edge", e[row * 4], point), pixels: d };
+        start.set(p[at * 3], p[at * 3 + 1], p[at * 3 + 2]).applyMatrix4(world);
+        end.set(p[at * 3 + 3], p[at * 3 + 4], p[at * 3 + 5]).applyMatrix4(world);
+        const errorSq = ray.distanceSqToSegment(start, end, onRay, onSegment);
+        if (errorSq > limitSq || !kept(onSegment)) continue;
+        const distance = ray.origin.distanceTo(onRay);
+        if (distance > reach.nearest + reach.allowance) continue;
+        screen.copy(onSegment).applyMatrix4(project);
+        if (!(screen.z >= -1 && screen.z <= 1)) continue;
+        const pixels = Math.hypot((screen.x * 0.5 + 0.5) * width - pointer[0], (-screen.y * 0.5 + 0.5) * height - pointer[1]);
+        if (pixels > reach.pixels) continue;
+        const error = Math.sqrt(errorSq);
+        if (found && !(Math.abs(pixels - found.pixels) > 0.25 ? pixels < found.pixels
+          : Math.abs(error - found.error) > 1e-4 ? error < found.error : distance < found.distance)) continue;
+        found = { ...elementHit(entry, "edge", e[row * 4], onSegment), pixels, error, distance };
       }
     }
     return found;
@@ -479,12 +551,22 @@ export function createXbfScene(THREE, document) {
   // A face or edge under the pointer is drawn as a picked one is.
   const fillMaterial = new THREE.MeshBasicMaterial({ color: INK.highlightColor, transparent: INK.highlightOpacity < 0.999, opacity: INK.highlightOpacity,
     depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide, toneMapped: false });
-  const lineContext = { LineSegments2, LineSegmentsGeometry, LineMaterial };
+  // Every screen-space line material the scene has made, registered with the viewport that shows
+  // it (`setLineRegistry`), as a STEP scene's are: the viewport keeps their `resolution` at its
+  // drawing buffer's size across resizes and pixel-ratio changes, and keeps its pixel ratio while
+  // the camera moves so their widths do not jump.
+  const screenSpaceLineMaterials = new Set();
+  let lineRegistry = null;
+  const lineContext = {
+    LineSegments2, LineSegmentsGeometry, LineMaterial,
+    registerScreenSpaceLineMaterial: material => lineRegistry?.registerScreenSpaceLineMaterial?.(material),
+    unregisterScreenSpaceLineMaterial: material => lineRegistry?.unregisterScreenSpaceLineMaterial?.(material)
+  };
   const highlightLine = (positions, onTop) => {
     const line = createScreenSpaceLineSegments(lineContext, positions, {
       color: INK.highlightColor, opacity: INK.highlightOpacity, lineWidth: EDGE_HIGHLIGHT_PIXELS, renderOrder: HIGHLIGHT_ORDER + 1,
       depthTest: !onTop, depthWrite: false, depthBias: topologyLineDepthBiasForWidth(EDGE_HIGHLIGHT_PIXELS)
-    });
+    }, screenSpaceLineMaterials);
     if (!line) return null;
     line.raycast = () => {};
     syncMaterialClipPlanes(line.material, clipPlanes);
@@ -542,7 +624,8 @@ export function createXbfScene(THREE, document) {
       // attribute a disposed geometry holds, so that one is let go of first.
       if (geometry.userData.xbfSharedPosition) geometry.deleteAttribute("position");
       geometry.dispose();
-      // A line's material is its own; the fill's is shared.
+      // A line's material is its own, registered with the viewport until now; the fill's is shared.
+      child.userData.beforeDispose?.();
       if (child.material !== fillMaterial) child.material.dispose();
     }
   }
@@ -716,6 +799,21 @@ export function createXbfScene(THREE, document) {
       partInk = { hovered: hovered.filter(id => scene.hasPart(id)), selected: selected.filter(id => scene.hasPart(id)) };
       applySurfaces();
     },
+    /**
+     * The viewport the scene is shown in, as its screen-space lines' registry
+     * (`registerScreenSpaceLineMaterial` / `unregisterScreenSpaceLineMaterial`, a viewer runtime's),
+     * or null: every line material the scene holds moves to it, and every one it makes later is
+     * registered with it, as a STEP scene's are.
+     */
+    setLineRegistry(registry) {
+      const next = disposed ? null : registry || null;
+      if (next === lineRegistry) return;
+      for (const found of screenSpaceLineMaterials) lineRegistry?.unregisterScreenSpaceLineMaterial?.(found);
+      lineRegistry = next;
+      for (const found of screenSpaceLineMaterials) lineRegistry?.registerScreenSpaceLineMaterial?.(found);
+    },
+    /** How many screen-space line materials the scene holds now. */
+    get screenSpaceLineMaterialCount() { return screenSpaceLineMaterials.size; },
     /** Light elements (ids `i3/face/12`): the one under the pointer and those picked. */
     setElementHighlight({ hovered = null, selected = [] } = {}) {
       if (disposed) return;
@@ -747,45 +845,63 @@ export function createXbfScene(THREE, document) {
       return { id: xbfElementId(index), name: instances[index].prototype.name || instances[index].instance.path, point: hit.point.toArray() };
     },
     /**
-     * What a STEP's Select takes under the pointer: an edge within `XBF_PICK_PIXELS` of it (a
-     * press's or, `hover`, a resting pointer's), else the face under it -- each only where
-     * `faces` / `edges` say so and only on an instance whose elements can be picked (`elements`:
-     * a set of instance indices, or null for every one) -- else, where `parts` says so, the
-     * instance under it (`{ id: "i3", kind: null }`). `view` is the camera and the viewport's
-     * size in CSS pixels, what "near on screen" is measured in.
-     * @param {{ faces?: boolean, edges?: boolean, parts?: boolean, elements?: Set<number> | null, hover?: boolean }} [options]
+     * What a STEP's Select takes under the pointer (`useStepPicking.js`'s
+     * `pickTopologyReference`): the face under it is found first; the edge nearest the pointer
+     * within `XBF_PICK_PIXELS` (a press's, `hover` a resting pointer's, `touch` a finger's) wins
+     * over that face only when it is one of the face's own edges (`xbfFaceEdges`) and within the
+     * face's priority distance -- an edge the face does not own loses to it, however near; with
+     * no face under the pointer the edge is taken (a silhouette, an edge in Wireframe). Each only
+     * where `faces` / `edges` say so and only on an instance whose elements can be picked
+     * (`elements`: a set of instance indices, or null for every one); else, where `parts` says
+     * so, the instance under it (`{ id: "i3", kind: null }`). `view` is the camera and the
+     * viewport's size in CSS pixels, what "near on screen" is measured in.
+     * @param {{ faces?: boolean, edges?: boolean, parts?: boolean, elements?: Set<number> | null, hover?: boolean, touch?: boolean }} [options]
      * @returns {XbfHit | null}
      */
-    pickElement(ray, view, { faces = true, edges = true, parts = false, elements = null, hover = false } = {}) {
+    pickElement(ray, view, { faces = true, edges = true, parts = false, elements = null, hover = false, touch = false } = {}) {
       if (disposed || !view?.camera) return null;
       const hit = surfaceHit(ray);
       const open = entry => !elements || elements.has(entry.index);
-      // An edge near the pointer and in front of the surface under it, of any part the ray passes
-      // near (a peg's rim over the plate behind it, a silhouette, every edge in Wireframe).
+      const entry = hit ? instances[hit.object.userData.xbfInstance] : null;
+      const faceOrdinal = entry && faces && open(entry) ? faceOf(entry, hit) : null;
+      const face = faceOrdinal != null ? elementHit(entry, "face", faceOrdinal, hit.point) : null;
+      let edge = null;
       if (edges) {
-        const limit = hit ? hit.distance : Infinity;
-        let best = null;
-        const sphere = new THREE.Sphere();
-        for (const entry of instances) {
-          if (!reachable(entry) || !open(entry) || entry.surface.held.box.isEmpty()) continue;
-          entry.surface.held.box.getBoundingSphere(sphere).applyMatrix4(entry.group.matrixWorld);
-          sphere.radius = sphere.radius * 1.05 + 1e-6;
-          if (!ray.intersectsSphere(sphere)) continue;
-          const near = nearestEdgeOnScreen(entry, ray, view, limit, hover ? XBF_PICK_PIXELS.edgeHover : XBF_PICK_PIXELS.edge);
-          if (near && (!best || near.pixels < best.pixels)) best = near;
+        const camera = view.camera;
+        const pixels = touch ? XBF_PICK_PIXELS.edgeTouch : hover ? XBF_PICK_PIXELS.edgeHover : XBF_PICK_PIXELS.edge;
+        const sphere = new THREE.Box3(new THREE.Vector3(...bounds.min), new THREE.Vector3(...bounds.max)).getBoundingSphere(new THREE.Sphere());
+        const distance = hit ? hit.distance : camera.getWorldPosition(new THREE.Vector3()).distanceTo(sphere.center) || 1;
+        const perPixel = worldUnitsPerPixelAtDistance(camera, view.height, distance);
+        const base = Math.max(sphere.radius * EDGE_REACH_PER_RADIUS, EDGE_REACH_MIN);
+        const threshold = perPixel > 0 ? Math.min(base, perPixel * pixels) : base;
+        const reach = { threshold, pixels, nearest: hit ? hit.distance : Infinity,
+          allowance: Math.max(EDGE_OCCLUSION_MIN, threshold * EDGE_OCCLUSION_FACTOR) };
+        const pointerAt = ray.at(Math.max(camera.near || 0, 1e-3) * 2, new THREE.Vector3())
+          .applyMatrix4(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+        const pointer = [(pointerAt.x * 0.5 + 0.5) * view.width, (-pointerAt.y * 0.5 + 0.5) * view.height];
+        const reachSphere = new THREE.Sphere();
+        for (const candidate of instances) {
+          if (!reachable(candidate) || !open(candidate) || candidate.surface.held.box.isEmpty()) continue;
+          candidate.surface.held.box.getBoundingSphere(reachSphere).applyMatrix4(candidate.group.matrixWorld);
+          reachSphere.radius = reachSphere.radius * 1.05 + threshold;
+          if (!ray.intersectsSphere(reachSphere)) continue;
+          const near = nearestEdgeOnScreen(candidate, ray, view, reach, pointer);
+          if (near && (!edge || (Math.abs(near.pixels - edge.pixels) > 0.25 ? near.pixels < edge.pixels
+            : Math.abs(near.error - edge.error) > 1e-4 ? near.error < edge.error : near.distance < edge.distance))) edge = near;
         }
-        if (best) {
-          const { pixels: _pixels, ...found } = best;
-          return found;
+        if (edge && face) {
+          const priority = touch ? XBF_PICK_PIXELS.edgeTouchOverFace : pixels;
+          const owned = edge.instance === entry.index
+            && faceEdges(entry.surface.held, entry.surface.part).get(faceOrdinal)?.has(edge.ordinal);
+          if (!owned || edge.pixels > priority) edge = null;
         }
       }
-      if (!hit) return null;
-      const entry = instances[hit.object.userData.xbfInstance];
-      if (faces && open(entry)) {
-        const ordinal = faceOf(entry, hit);
-        if (ordinal != null) return elementHit(entry, "face", ordinal, hit.point);
+      if (edge) {
+        const { pixels: _pixels, error: _error, distance: _distance, ...found } = edge;
+        return found;
       }
-      if (!parts) return null;
+      if (face) return face;
+      if (!hit || !parts) return null;
       return { id: xbfElementId(entry.index), kind: null, instance: entry.index, key: String(entry.prototype.key), ordinal: null,
         name: entry.prototype.name || entry.instance.path, point: hit.point.toArray(), path: entry.instance.path, partName: entry.prototype.name || "" };
     },
@@ -804,6 +920,9 @@ export function createXbfScene(THREE, document) {
       root.removeFromParent();
       for (const object of overlayObjects.values()) dropOverlay(object);
       overlayObjects.clear();
+      for (const found of screenSpaceLineMaterials) lineRegistry?.unregisterScreenSpaceLineMaterial?.(found);
+      screenSpaceLineMaterials.clear();
+      lineRegistry = null;
       ink.dispose();
       look.dispose();
       for (const found of materials.values()) found.dispose();

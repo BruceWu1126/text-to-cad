@@ -13,7 +13,7 @@ import * as THREE from "three";
 import { isKitScene } from "../viewer/sceneContract.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
-import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceOutline } from "./xbfScene.js";
+import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline } from "./xbfScene.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "bracket");
 const STRUCTURE = JSON.parse(fs.readFileSync(path.join(FIXTURE, "structure.json"), "utf8"));
@@ -187,8 +187,9 @@ test("picking: a STEP's Select: an edge near the pointer, else the face under it
   assert.equal(face.instance, 0);
   assert.equal(face.name, PLATE.faceNames[String(face.ordinal)]);
   assert.ok(String(face.ordinal) in PLATE.faceColors, "the top face is the painted one");
-  // A peg's top circle, seen from above: within a few pixels of its rim is the edge, over the plate behind it.
-  const edge = scene.pickElement(rayAt(12, 3.05), view);
+  // A peg's top circle, seen from above: on its top face within a few pixels of its rim, the rim
+  // (one of that face's own edges) wins over the face.
+  const edge = scene.pickElement(rayAt(12, 2.95), view);
   assert.deepEqual([edge.kind, edge.instance], ["edge", 1]);
   assert.equal(edge.name, PEG.edgeNames[String(edge.ordinal)]);
   // An element's id round-trips, and its description names its class.
@@ -197,7 +198,7 @@ test("picking: a STEP's Select: an edge near the pointer, else the face under it
   assert.equal(xbfElementId(2), "i2");
   // A hidden instance is not picked; the scene's contract pick names the instance.
   scene.setHiddenParts(["i1"]);
-  assert.notEqual(scene.pickElement(rayAt(12, 3.05), view)?.instance, 1);
+  assert.notEqual(scene.pickElement(rayAt(12, 2.95), view)?.instance, 1);
   scene.setHiddenParts([]);
   // The filter: Faces alone takes the face under a rim, Edges alone nothing off an edge, and an
   // instance whose elements cannot be picked yet (a STEP part not open) is the part, where Parts is ticked.
@@ -223,6 +224,66 @@ test("picking: a STEP's Select: an edge near the pointer, else the face under it
   scene.setElementHighlight({ hovered: null, selected: [] });
   assert.equal(scene.object3D.children[0].children[0].children.some(child => child.name === "hovered face"), false);
   scene.dispose();
+  document.release();
+});
+
+test("picking: an edge wins over the face under the pointer only when it is that face's own, as a STEP's", async () => {
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const scene = createXbfScene(THREE, document);
+  const camera = new THREE.OrthographicCamera(-30, 30, 30, -30, 0.1, 1000);
+  camera.position.set(0, 0, 100);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  const view = { camera, width: 600, height: 600 };
+  const at = (x, y, options) => scene.pickElement(new THREE.Ray(new THREE.Vector3(x, y, 100), new THREE.Vector3(0, 0, -1)), view, options);
+  // The faces' own edges, read from the mesh: every edge of the plate bounds one or two of its faces.
+  const owners = xbfFaceEdges(document.parts.get(PLATE.key).mesh);
+  const owned = new Set([...owners.values()].flatMap(edges => [...edges]));
+  assert.equal(owned.size, Object.keys(PLATE.edgeNames).length);
+  // On a peg's top face, half a pixel inside its rim: the rim is the face's own edge, so it wins.
+  const rim = at(12, 2.95);
+  assert.deepEqual([rim.kind, rim.instance], ["edge", 1]);
+  const top = at(12, 0);
+  assert.deepEqual([top.kind, top.instance], ["face", 1]);
+  assert.ok(xbfFaceEdges(document.parts.get(PEG.key).mesh).get(top.ordinal).has(rim.ordinal));
+  // Half a pixel outside the rim, over the plate: the rim is as near, but not the plate face's, so the face wins.
+  const plate = at(12, 3.05);
+  assert.deepEqual([plate.kind, plate.instance], ["face", 0]);
+  assert.equal(owners.get(plate.ordinal)?.has(rim.ordinal) && rim.instance === 0, false);
+  // A resting pointer reaches less far than a press: the rim from 6 pixels inside is the press's, not the hover's.
+  assert.equal(at(12, 2.35).kind, "edge");
+  assert.equal(at(12, 2.35, { hover: true }).kind, "face");
+  // Off the plate's side, with no face under the pointer: the silhouette edge is taken.
+  const silhouette = at(-20.3, 5);
+  assert.deepEqual([silhouette.kind, silhouette.instance], ["edge", 0]);
+  assert.equal(at(-21, 5), null, "beyond the edge's reach: nothing");
+  scene.dispose();
+  document.release();
+});
+
+test("a highlight's screen-space lines are registered with the viewport showing the scene, as a STEP's", async () => {
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const scene = createXbfScene(THREE, document);
+  const registry = (size) => {
+    const held = new Set();
+    return { held, registerScreenSpaceLineMaterial: (material) => { held.add(material); material.resolution.set(...size); },
+      unregisterScreenSpaceLineMaterial: material => held.delete(material) };
+  };
+  const first = registry([1239, 1273]);
+  scene.setLineRegistry(first);
+  scene.setElementHighlight({ hovered: "i1/edge/1", selected: [] });
+  assert.equal(first.held.size, 1, "the hovered edge's line, registered as it is made");
+  const [material] = first.held;
+  assert.deepEqual(material.resolution.toArray(), [1239, 1273], "at the viewport's drawing buffer");
+  // A new viewport (a restored context) takes every line the scene holds.
+  const second = registry([826, 849]);
+  scene.setLineRegistry(second);
+  assert.deepEqual([first.held.size, second.held.size], [0, 1]);
+  scene.setElementHighlight({ hovered: null, selected: [] });
+  assert.equal(second.held.size, 0, "a dropped highlight is unregistered");
+  scene.setElementHighlight({ hovered: null, selected: ["i1/edge/1"] });
+  scene.dispose();
+  assert.equal(second.held.size, 0, "and every line with the scene");
   document.release();
 });
 
