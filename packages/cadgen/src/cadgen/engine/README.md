@@ -46,6 +46,8 @@ def arm():
 | `exports.py` | STEP through the XCAF writer; binary STL, GLB and 3MF from the engine's tessellation |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
+| `access.py` | which pages may read a served document from another origin: loopback ones |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder into a PNG |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -56,6 +58,8 @@ def arm():
 cadgen xbf build SCRIPT[::FUNCTION] ... [--json]   build in the script's warm worker
 cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
+cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview]
+                    [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf status | stop | daemon
 ```
 
@@ -78,6 +82,28 @@ build's tree, the meshes of the parts that are new to it and to the daemon,
 meshed in the worker, and the shapes the daemon lacks. The daemon puts it in
 place of the one it serves and answers the waiting page. The file is read
 again only when another process rewrote it.
+
+## The viewer and the snapshot
+
+The CAD Viewer opens an `.xbf` by asking this engine to serve it (the `serve` op, through the
+daemon) and handing the page the document's URL here; the page reads the structure and every
+part buffer from the engine itself and waits on `/version` for the next build. So a part's
+bytes leave the engine's memory once, straight to the page, and an edit reaches the page the
+moment the engine has it. Every answer names a loopback page's origin as an allowed reader
+(`access.py`: `localhost`, `127.0.0.1`, `[::1]`, any port); a page from anywhere else gets no
+such header and its browser keeps the answer from it.
+
+`cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
+daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
+cadgen's snapshot page (the package's built `_runtime/browser`, read as files) with one job for
+the xbf family: the page loads the document from the engine and builds the viewer's own scene
+of it, dressed in the look the viewer resolves for the same display settings. `--display` takes
+a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`) or the display object
+(`mode`, `grid`, `appearance`, `camera`, `clip`); `--json` reports what was drawn and each
+stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
+`captureMs`, `totalMs`). `display.exploded` (a document's parts stand where it places them) and
+`parts` for a document that places one part are refused by name before any browser starts. A
+face the mesher left without triangles is named in a warning. Nothing is written but OUT.
 
 ## Mesh
 

@@ -35,7 +35,7 @@ from .backend import absolute_path, asset_path
 from .cadgen_ops import CadgenOps
 from .content_types import content_type_for_path, content_type_for_static_asset, extension_of
 from .encoding import UriError, strict_decode_uri_component
-from .scanner import CAD_CATALOG_SCHEMA_VERSION, SOURCE_EXTENSIONS, catalog_entry, to_posix_path
+from .scanner import CAD_CATALOG_SCHEMA_VERSION, VIEWER_EXTENSIONS, catalog_entry, to_posix_path
 from .store_paths import preview_annotations, virtual_store_asset
 from .tess_cache import (
     TESS_CACHE_BATCH_PATH, TESS_CACHE_METADATA_MAX_BYTES, TESS_CACHE_PROBE_PATH, TESS_CACHE_ROUTE_PREFIX,
@@ -60,7 +60,7 @@ POST_GUARD_HEADER = "x-cadgen-viewer"
 _LIBRARY_BODY_LIMIT = 768 * 1024
 # A thumbnail's name is its content's (``recents.RecentStore.thumbnail``): nothing else is read.
 _THUMBNAIL_NAME = re.compile(r"[0-9a-f]{32}\.png")
-_CAD_EXTENSIONS = ", ".join(sorted(SOURCE_EXTENSIONS))
+_CAD_EXTENSIONS = ", ".join(sorted(VIEWER_EXTENSIONS))
 _LOOPBACK_NAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 # Routes that do NOT hold the development auto-reload back (``reload.py``).
@@ -721,7 +721,7 @@ class CadApp:
             raise ValueError("a recents change is {action, path}")
         action, path = payload.get("action"), absolute_path(payload.get("path"))
         if action == "open":
-            if extension_of(path) not in SOURCE_EXTENSIONS or not os.path.isfile(path):
+            if extension_of(path) not in VIEWER_EXTENSIONS or not os.path.isfile(path):
                 raise ValueError(f"no CAD file at {path}")
             self.recents.opened(path)
             if self.analytics is not None:
@@ -774,7 +774,7 @@ class CadApp:
             return
         if chosen is None:
             response.send_json(200, {"cancelled": True})
-        elif extension_of(chosen) not in SOURCE_EXTENSIONS:
+        elif extension_of(chosen) not in VIEWER_EXTENSIONS:
             response.send_json(400, {"error": f"CAD opens {_CAD_EXTENSIONS} files; {os.path.basename(chosen)} is not one."})
         else:
             response.send_json(200, {"path": to_posix_path(os.path.abspath(chosen))})

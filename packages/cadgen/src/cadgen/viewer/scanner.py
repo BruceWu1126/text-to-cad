@@ -50,6 +50,7 @@ from .store_paths import (
 __all__ = [
     "CAD_CATALOG_SCHEMA_VERSION",
     "SOURCE_EXTENSIONS",
+    "VIEWER_EXTENSIONS",
     "VIEWER_SKIPPED_DIRECTORIES",
     "asset_for_path",
     "catalog_entry",
@@ -67,9 +68,12 @@ __all__ = [
 CAD_CATALOG_SCHEMA_VERSION = 4
 
 SOURCE_EXTENSIONS = frozenset(
-    # `.xbf`: a cadgen engine document, served to the page by the engine (`xbf.py`).
-    {".step", ".stp", ".stl", ".3mf", ".glb", ".dxf", ".urdf", ".srdf", ".sdf", ".xbf"}
+    {".step", ".stp", ".stl", ".3mf", ".glb", ".dxf", ".urdf", ".srdf", ".sdf"}
 )
+# What the CAD Viewer lists and opens: every CAD source, and a cadgen engine document (`.xbf`),
+# which the engine serves to the viewer's page (`xbf.py`). Only the viewer's page reads one, so
+# no other host (the CAD app) is offered it.
+VIEWER_EXTENSIONS = SOURCE_EXTENSIONS | frozenset({".xbf"})
 
 # The folders the explorer's search never walks (``folders.py``), beside every hidden one. Matched
 # with EXACT case: ``Dist/`` and ``Build/`` are walked, only the lowercase spellings are skipped.
@@ -118,7 +122,7 @@ def is_catalog_file(file_path) -> bool:
     Only the file's own name: a file under a hidden folder is named, never found, and has its row.
     """
     name = node_basename(str(file_path or ""))
-    return not is_hidden_name(name) and extension_of(name) in SOURCE_EXTENSIONS
+    return not is_hidden_name(name) and extension_of(name) in VIEWER_EXTENSIONS
 
 
 # --- file stats / hashing / urls ------------------------------------------
