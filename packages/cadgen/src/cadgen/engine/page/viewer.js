@@ -130,42 +130,61 @@ function faceAt(faces, at) {
   return -1;
 }
 
-const materials = new Map(); // colour -> one material, shared by every instance of that colour
+const materials = new Map(); // look -> one material, shared by every instance of that look
 
-function material(rgba) {
-  const name = rgba ? rgba.join(",") : "default";
+/** The material of one look: a colour and, where the document gives one, a material's
+ * PBR factors (metallic, roughness, emissive); without one, the engine's matte default. */
+function material(rgba, pbr) {
+  const name = (rgba ? rgba.join(",") : "default") + (pbr ? `|${pbr.metallic},${pbr.roughness},${pbr.emissive}` : "");
   let found = materials.get(name);
   if (!found) {
     found = new THREE.MeshStandardMaterial({ color: linearColor(rgba, 0xb8bcc4), roughness: 0.55, metalness: 0.05 });
+    if (pbr) {
+      found.metalness = pbr.metallic;
+      found.roughness = pbr.roughness;
+      found.emissive = linearColor(pbr.emissive, 0x000000);
+    }
+    if (rgba && rgba[3] < 1) {
+      found.transparent = true;
+      found.opacity = rgba[3];
+    }
     materials.set(name, found);
   }
   return found;
 }
 
 /** A part's material in one colour: that colour's material or -- for a part with painted
- * faces -- that colour's then each paint's, its geometry grouped by face once. */
+ * faces -- that colour's then each paint's, its geometry grouped by face again whenever
+ * its paints change (an edit of paints alone keeps the part's geometry). */
 function materialOf(held, prototype, rgba) {
+  const pbr = prototype.material;
   const painted = Object.entries(prototype.faceColors || {});
-  if (!painted.length) return material(rgba);
-  if (!held.paints) {
+  const given = prototype.faceMaterials || {};
+  if (!painted.length) return material(rgba, pbr);
+  const signature = JSON.stringify([painted, given]);
+  if (held.paintsFor !== signature) {
+    held.paintsFor = signature;
     held.paints = [];
+    held.geometry.clearGroups();
     const index = new Map();
     const byOrdinal = new Map(painted);
     for (let row = 0; row < held.buffer.faces.length; row += 3) {
-      const paint = byOrdinal.get(String(held.buffer.faces[row]));
+      const ordinal = String(held.buffer.faces[row]);
+      const paint = byOrdinal.get(ordinal);
       let at = 0;
       if (paint) {
-        const name = paint.join(",");
+        const look = [paint, given[ordinal] || null];
+        const name = JSON.stringify(look);
         if (!index.has(name)) {
           index.set(name, held.paints.length + 1);
-          held.paints.push(paint);
+          held.paints.push(look);
         }
         at = index.get(name);
       }
       held.geometry.addGroup(held.buffer.faces[row + 1], held.buffer.faces[row + 2], at);
     }
   }
-  return [material(rgba), ...held.paints.map(material)];
+  return [material(rgba, pbr), ...held.paints.map(([paint, look]) => material(paint, look || pbr))];
 }
 
 // The objects on screen by what places them -- part, path, colour and placement -- so a
@@ -190,7 +209,8 @@ async function show(doc) {
     const prototype = structure.prototypes[instance.prototype];
     const held = loaded[instance.prototype];
     const rgba = instance.color || prototype.color;
-    const name = `${prototype.key}|${instance.path}|${rgba}|${instance.matrix.join(",")}`;
+    const look = JSON.stringify([prototype.material, prototype.faceColors, prototype.faceMaterials]);
+    const name = `${prototype.key}|${instance.path}|${rgba}|${look}|${instance.matrix.join(",")}`;
     let objects = placed.get(name);
     if (!objects) {
       objects = [new THREE.Mesh(held.geometry, materialOf(held, prototype, rgba))];

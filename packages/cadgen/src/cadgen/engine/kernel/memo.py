@@ -26,8 +26,9 @@ of the operation that made its ``TShape`` (the registry, pointer to key) and its
 position among the shapes that call returned, or, for a sub-shape, its ancestor's
 key with its kind and its index in the ancestor's ``TopExp`` map; with the shape's
 own location and orientation, the attributes an operation may copy from it (label,
-colour, ``for_construction``, the face colours a model painted) and the keys of its
-children; and with the effects (below) every operation so far has had on it. A shape cast
+colour, ``for_construction``, its material, the face colours and materials a model
+painted; a compound's constructor leaves the materials out, which it does not hold)
+and the keys of its children; and with the effects (below) every operation so far has had on it. A shape cast
 afresh from a compound -- what iterating one hands back, as build123d's intersection
 and ``unwrap`` do -- has no ancestor to name it by; when a root holds its TShape
 (``_SUBS``) it is keyed as that root's sub-shape, by its kind and its ordinal among the
@@ -172,6 +173,7 @@ _installed = False
 _EDGE, _VERTEX, _FACE, _COMPOUND = int(TopAbs_EDGE), int(TopAbs_VERTEX), int(TopAbs_FACE), int(TopAbs_COMPOUND)
 # The attribute a model's painted face colours live in (``cadgen.engine.paint``).
 FACE_COLORS = "xbf_face_colors"
+FACE_MATERIALS = "xbf_face_materials"
 
 
 class _Unkeyable(Exception):
@@ -1593,12 +1595,20 @@ def _build_key(label: str, kind: str, function: Any, args: tuple, kwargs: dict, 
         parts = (("cls", args[0].__module__, args[0].__qualname__), font)
         kw = arguments
     else:
-        parts = tuple(_normalize(value, state) for value in _key_args(label, kind, args))
+        # A compound made again around the same geometry is the same TopoDS, whatever
+        # materials its children and it hold: a hit runs the constructor on them as given.
+        bare = _LOCAL.bare = label == "Compound" and kind == "constructor"
+        try:
+            parts = tuple(_normalize(value, state) for value in _key_args(label, kind, args))
+            kw = {name: value for name, value in kwargs.items() if not (bare and name == "material")}
+            keywords = tuple(sorted((name, _normalize(value, state)) for name, value in kw.items()))
+        finally:
+            _LOCAL.bare = False
         if kind == "classmethod":
             parts = (("cls", args[0].__module__, args[0].__qualname__), *parts)
         elif kind == "constructor":
             parts = (("cls", type(args[0]).__module__, type(args[0]).__qualname__), *parts)
-        kw = kwargs
+        return (label, parts, keywords, _settings())
     keywords = tuple(sorted((name, _normalize(value, state)) for name, value in kw.items()))
     return (label, parts, keywords, _settings())
 
@@ -1717,6 +1727,8 @@ def _normalize(value: Any, state: _Run) -> Any:
         # Vector, Location, Rotation, Color: their components, in order.
         if hasattr(value, "__iter__"):
             return (type_name, _normalize(tuple(value), state))
+    if module == "cadgen.engine.materials" and type_name == "Material":
+        return ("Material", repr(value))  # a frozen value of strings and floats
     raise _Unkeyable(f"unkeyable argument type: {module}.{type_name}")
 
 
@@ -1804,11 +1816,14 @@ def _shape_key(shape: Any, state: _Run) -> int:
     color = state_dict.get("_color")
     color_key = None if color is None else _normalize(tuple(color), state)
     face_colors = state_dict.get(FACE_COLORS) or {}
-    material = state_dict.get("material")
+    # A compound's constructor holds its children's geometry, not their materials (``_build_key``).
+    material = None if getattr(_LOCAL, "bare", False) else state_dict.get("material")
+    face_materials = () if getattr(_LOCAL, "bare", False) else state_dict.get(FACE_MATERIALS) or ()
     attrs = (
         "attrs", label, color_key, bool(state_dict.get("for_construction")),
         material if material is None or isinstance(material, str) else _normalize(material, state),
         tuple(sorted((int(ordinal), _normalize(tuple(rgba), state)) for ordinal, rgba in face_colors.items())),
+        tuple(sorted((int(ordinal), _normalize(value, state)) for ordinal, value in dict(face_materials).items())),
     )
     children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
     return _intern((placed, attrs, children))

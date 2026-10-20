@@ -1,8 +1,8 @@
 """Serving documents over HTTP: the structure as JSON, each part as one binary buffer.
 
 ``GET /api/docs`` lists the documents served; ``GET /api/doc/<id>`` is one document's
-structure (``document.Loaded.structure``): its parts with their names, keys, colours
-and element names, its instances with world matrices, its tree, and its version, and
+structure (``document.Loaded.structure``): its parts with their names, keys, colours,
+materials and element names, its instances with world matrices, its tree, and its version, and
 for each part already meshed the faces its mesher left without triangles
 (``unmeshed``) with ``BRepCheck``'s verdict on each (``unmeshedCheck``);
 ``GET /api/doc/<id>/version?after=V`` answers the version once it is not ``V`` (or after

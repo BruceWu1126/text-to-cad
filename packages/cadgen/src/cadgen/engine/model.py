@@ -142,26 +142,50 @@ def models_in(namespace: dict[str, Any], script: Path) -> list[Model]:
 
 
 def paint(shape: Any, faces: Any, color: Any) -> Any:
-    """Colour faces of a part: ``faces`` (a face, or several) of ``shape`` take ``color``
-    (anything ``build123d.Color`` takes) in the document, by their ordinal in the part.
-    Returns ``shape``, whose face colours the memo keys like its label."""
+    """Colour faces of a part, or give them a material: ``faces`` (a face, or several) of
+    ``shape`` take ``color`` -- anything ``build123d.Color`` takes, or a ``Material`` --
+    in the document, by their ordinal in the part. A face holds one paint: a colour
+    replaces its material, a material its colour. Returns ``shape``, whose paints the
+    memo keys like its label.
+
+    A part's material is set as its colour is, on the shape: ``part.material =
+    materials.steel``; on an assembly, it is every part's below it that has none. Both
+    are attributes of the object, and travel as build123d moves them: a copy, ``moved``
+    and ``located`` keep them, and a boolean's result takes those of its first operand
+    where its class holds the field (a ``Part`` does, a bare ``Solid`` has no
+    ``material``). Paint and materials are for finished parts: set them after the last
+    operation, so an edit of one is no kernel call (the memo keys them with the shape,
+    and a compound does not hold its children's materials in its key)."""
     import build123d as bd
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    from cadgen.engine.kernel.memo import FACE_COLORS
+    from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
+    from cadgen.engine.materials import Material
 
-    rgba = tuple(float(value) for value in (color if isinstance(color, bd.Color) else bd.Color(color)))
+    material = color if isinstance(color, Material) else None
+    rgba = None if material is not None else tuple(
+        float(value) for value in (color if isinstance(color, bd.Color) else bd.Color(color)))
     mapped = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(shape.wrapped, TopAbs_FACE, mapped)
     painted = dict(shape.__dict__.get(FACE_COLORS) or {})
+    given = dict(shape.__dict__.get(FACE_MATERIALS) or {})
     for face in ([faces] if isinstance(faces, bd.Shape) else list(faces)):
         ordinal = mapped.FindIndex(face.wrapped)
         if not ordinal:
             raise ValueError("paint: a face that is not one of the shape's")
-        painted[ordinal] = rgba
+        if material is not None:
+            given[ordinal] = material
+            painted.pop(ordinal, None)
+        else:
+            painted[ordinal] = rgba
+            given.pop(ordinal, None)
     shape.__dict__[FACE_COLORS] = painted
+    if given:
+        shape.__dict__[FACE_MATERIALS] = given
+    else:
+        shape.__dict__.pop(FACE_MATERIALS, None)
     return shape
 
 
