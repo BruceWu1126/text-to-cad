@@ -762,6 +762,8 @@ class Symbols:
             return f"typing:{value!r}"
         if top == "build123d":
             return "build123d:" + _build123d(value)
+        if module == "cadgen.engine.materials" and kind.__name__ == "Material":
+            return "material:" + repr(value)  # a frozen value of strings and floats
         if top == "numpy":
             return "numpy:" + _numpy(value)
         if self._reach_class(kind, node):

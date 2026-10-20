@@ -12,7 +12,10 @@ from the TopoDS compounds themselves, child by child, so a placed copy of an
 assembly is placed as the kernel holds it.
 
 The XCAF document: units millimetres; a name on every prototype and component; a
-colour per part and per painted face; on each part's face and edge sub-shape labels
+colour per part and per painted face; a material per part and per face given one
+(``materials``), as an ``XCAFDoc_Material`` (name, description, density) and an
+``XCAFDoc_VisMaterial`` (PBR: base colour, metallic, roughness, emissive, alpha), its
+base colour the part's colour too so a reader of colours alone agrees; on each part's face and edge sub-shape labels
 the element names the memo's history gave them (``kernel.trace``), so a face's name
 survives into the file and into a STEP; and on each part the key of its geometry
 (``KEY_GUID``), what a reader caches the part's tessellation by. Saved with the
@@ -52,8 +55,13 @@ SAVED_LISTENERS: list = []
 @dataclass
 class Part:
     """A part prototype: its geometry at the identity (orientation kept), its name, the
-    colour of its first instance, the face colours painted on it by ordinal, and,
-    once named, its element names (``faces``/``edges`` lists by ordinal)."""
+    colour of its first instance, the face colours painted on it by ordinal, its
+    material and its faces' by ordinal, and, once named, its element names
+    (``faces``/``edges`` lists by ordinal). A part's colour is its base colour: its own
+    material's colour, else its own colour, else the material it inherits' colour,
+    else the colour it inherits; a part with a material and no colour at all is drawn
+    in ``DEFAULT_COLOR``. A face given a material is coloured as the material, or as
+    the part where the material has no colour."""
 
     shape: Any
     name: str
@@ -62,6 +70,12 @@ class Part:
     key: str = ""
     names: dict[str, Any] | None = None
     origin: Any = None  # the result's object it was first seen as
+    material: Any = None
+    face_materials: dict[int, Any] = field(default_factory=dict)
+
+
+# The base colour of a part with a material and no colour: the exports' default grey.
+DEFAULT_COLOR = (0.8, 0.8, 0.8, 1.0)
 
 
 @dataclass
@@ -112,6 +126,16 @@ def _rgba(color: Any) -> tuple | None:
     return values if len(values) == 4 else (*values[:3], 1.0)
 
 
+def _material(value: Any) -> Any:
+    """A shape's ``material`` field as the document takes it: a ``Material``, or None for
+    none (build123d's own default for a compound is the empty string)."""
+    from cadgen.engine.materials import Material
+
+    if value is None or isinstance(value, Material) or value == "":
+        return value or None
+    raise TypeError(f"a shape's material is a cadgen.engine.Material, not {value!r}")
+
+
 def _children(topods: Any) -> list[Any]:
     from OCP.TopoDS import TopoDS_Iterator
 
@@ -127,16 +151,20 @@ def collect(result: Any, name: str) -> Tree:
     """The prototypes and instances of a model's result (see the module docstring)."""
     from OCP.TopAbs import TopAbs_COMPOUND
 
-    from cadgen.engine.kernel.memo import FACE_COLORS
+    from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
 
     prototypes: dict[tuple, Part | Assembly] = {}
     signatures: dict[int, tuple] = {}
     order: list = []
     parts: list[Part] = []
 
-    def visit(obj: Any, topods: Any, inherited: tuple | None) -> tuple[Part | Assembly, tuple, tuple | None]:
+    def visit(obj: Any, topods: Any, inherited: tuple | None,
+              inherited_material: Any = None) -> tuple[Part | Assembly, tuple, tuple | None]:
         state = obj.__dict__ if obj is not None else {}
-        color = _rgba(state.get("_color")) or inherited
+        own_color = _rgba(state.get("_color"))
+        color = own_color or inherited
+        own_material = _material(state.get("material"))
+        material = own_material or inherited_material
         children = state.get("_NodeMixin__children") or ()
         label = state.get("label") or ""
         held = _children(topods) if children and int(topods.ShapeType()) == int(TopAbs_COMPOUND) else []
@@ -144,7 +172,7 @@ def collect(result: Any, name: str) -> Tree:
             components = []
             parts_signature = []
             for child, child_topods in zip(children, held):
-                prototype, signature, child_color = visit(child, child_topods.Located(_identity()), color)
+                prototype, signature, child_color = visit(child, child_topods.Located(_identity()), color, material)
                 child_label = child.__dict__.get("label") or ""
                 components.append((prototype, child_topods.Location(), child_label, child_color))
                 parts_signature.append((signature, _location_key(child_topods.Location()), child_label, child_color))
@@ -159,11 +187,25 @@ def collect(result: Any, name: str) -> Tree:
                 prototypes[signature] = found
                 order.append(found)
             return found, signature, color
-        painted = tuple(sorted((int(ordinal), tuple(rgba)) for ordinal, rgba in (state.get(FACE_COLORS) or {}).items()))
-        signature = ("part", topods.TShape(), int(topods.Orientation()), painted)
+        if own_material is not None and own_material.color is not None:
+            color = own_material.color
+        elif own_color is None and material is not None and material.color is not None:
+            color = material.color
+        if material is not None and color is None:
+            color = DEFAULT_COLOR
+        face_materials = {int(ordinal): given for ordinal, given in (state.get(FACE_MATERIALS) or {}).items()}
+        face_colors = {int(ordinal): tuple(rgba) for ordinal, rgba in (state.get(FACE_COLORS) or {}).items()
+                       if int(ordinal) not in face_materials}
+        for ordinal, given in face_materials.items():
+            face_color = given.color or color or DEFAULT_COLOR
+            face_colors[ordinal] = face_color
+        painted = tuple(sorted(face_colors.items()))
+        signature = ("part", topods.TShape(), int(topods.Orientation()), painted, material,
+                     tuple(sorted(face_materials.items(), key=lambda item: item[0])))
         found = prototypes.get(signature)
         if found is None:
-            found = Part(topods, label or f"part{len(parts) + 1}", color, dict(painted), origin=obj)
+            found = Part(topods, label or f"part{len(parts) + 1}", color, dict(painted), origin=obj,
+                         material=material, face_materials=face_materials)
             prototypes[signature] = found
             order.append(found)
             parts.append(found)
@@ -286,6 +328,50 @@ def _name(label: Any, text: str) -> None:
     TDataStd_Name.Set_s(label, TCollection_ExtendedString(text, True))
 
 
+class _Materials:
+    """A document's materials, each written once: an ``XCAFDoc_Material`` per material
+    (density in g/cm^3, the kernel's unit, which its STEP writer writes with its unit),
+    an ``XCAFDoc_VisMaterial`` per material and base colour."""
+
+    def __init__(self, doc: Any) -> None:
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+        self.physical = XCAFDoc_DocumentTool.MaterialTool_s(doc.Main())
+        self.visual = XCAFDoc_DocumentTool.VisMaterialTool_s(doc.Main())
+        self.physical_labels: dict[Any, Any] = {}
+        self.visual_labels: dict[tuple, Any] = {}
+
+    def set(self, label: Any, material: Any, rgba: tuple) -> None:
+        from OCP.TCollection import TCollection_HAsciiString
+
+        found = self.physical_labels.get(material)
+        if found is None:
+            found = self.physical_labels[material] = self.physical.AddMaterial(
+                TCollection_HAsciiString(material.name), TCollection_HAsciiString(material.description or ""),
+                (material.density or 0.0) / 1000.0, TCollection_HAsciiString("density"),
+                TCollection_HAsciiString("MASS_DENSITY_MEASURE"))
+        self.physical.SetMaterial(label, found)
+        key = (material, tuple(rgba))
+        visual = self.visual_labels.get(key)
+        if visual is None:
+            from OCP.gp import gp_Vec3f
+            from OCP.Graphic3d import Graphic3d_AlphaMode_Blend, Graphic3d_AlphaMode_Opaque
+            from OCP.TCollection import TCollection_AsciiString
+            from OCP.XCAFDoc import XCAFDoc_VisMaterial, XCAFDoc_VisMaterialPBR
+
+            pbr = XCAFDoc_VisMaterialPBR()
+            pbr.BaseColor = _quantity(rgba)
+            pbr.Metallic = material.metallic
+            pbr.Roughness = material.roughness
+            pbr.EmissiveFactor = gp_Vec3f(*(material.emissive or (0.0, 0.0, 0.0)))
+            pbr.IsDefined = True
+            made = XCAFDoc_VisMaterial()
+            made.SetPbrMaterial(pbr)
+            made.SetAlphaMode(Graphic3d_AlphaMode_Blend if rgba[3] < 1.0 else Graphic3d_AlphaMode_Opaque, 0.5)
+            visual = self.visual_labels[key] = self.visual.AddMaterial(made, TCollection_AsciiString(material.name))
+        self.visual.SetShapeMaterial(label, visual)
+
+
 def to_xcaf(tree: Tree) -> Any:
     """The XCAF document of a tree whose parts are named (``Part.names``) and keyed."""
     from OCP.Standard import Standard_GUID
@@ -304,6 +390,7 @@ def to_xcaf(tree: Tree) -> Any:
         XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 1.0, UnitsMethods_LengthUnit_Millimeter)
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
         colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+        materials = _Materials(doc)
         key_guid = Standard_GUID(KEY_GUID)
         labels: dict[int, Any] = {}
         for prototype in tree.order:
@@ -312,6 +399,8 @@ def to_xcaf(tree: Tree) -> Any:
                 _name(label, prototype.name)
                 if prototype.color is not None:
                     colors.SetColor(label, _quantity(prototype.color), XCAFDoc_ColorSurf)
+                if prototype.material is not None:
+                    materials.set(label, prototype.material, prototype.color or DEFAULT_COLOR)
                 if prototype.key:
                     TDataStd_AsciiString.Set_s(label, key_guid, TCollection_AsciiString(prototype.key))
                 faces = TopTools_IndexedMapOfShape()
@@ -321,7 +410,8 @@ def to_xcaf(tree: Tree) -> Any:
                 for ordinal in range(1, faces.Extent() + 1):
                     text = face_names[ordinal - 1] if ordinal <= len(face_names) else None
                     rgba = painted.get(ordinal)
-                    if text is None and rgba is None:
+                    given = prototype.face_materials.get(ordinal)
+                    if text is None and rgba is None and given is None:
                         continue
                     sub = TDF_Label()
                     if not shapes.AddSubShape(label, faces.FindKey(ordinal), sub) and sub.IsNull():
@@ -330,6 +420,8 @@ def to_xcaf(tree: Tree) -> Any:
                         _name(sub, text)
                     if rgba is not None:
                         colors.SetColor(sub, _quantity(rgba), XCAFDoc_ColorSurf)
+                    if given is not None:
+                        materials.set(sub, given, rgba or DEFAULT_COLOR)
                 edge_names = (prototype.names or {}).get("edges") or []
                 if any(text is not None for text in edge_names):
                     edges = TopTools_IndexedMapOfShape()
@@ -546,6 +638,8 @@ class Prototype:
     edge_names: dict[int, str]
     face_colors: dict[int, tuple]
     entry: str
+    material: Any = None
+    face_materials: dict[int, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -638,6 +732,8 @@ class Loaded:
                 "faceNames": {str(k): v for k, v in sorted(p.face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(p.edge_names.items())},
                 "faceColors": {str(k): v for k, v in sorted(p.face_colors.items())},
+                "material": material_json(p.material),
+                "faceMaterials": {str(k): material_json(v) for k, v in sorted(p.face_materials.items())},
             } for p in self.prototypes],
             "instances": [{"prototype": i.prototype, "path": "/".join(i.path), "matrix": i.matrix, "color": i.color}
                           for i in self.instances],
@@ -702,10 +798,15 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
                           if text and ordinal <= edges.Extent()}
         face_colors = {ordinal: read(rgba) for ordinal, rgba in part.face_colors.items()
                        if 1 <= ordinal <= faces.Extent()}
+        material = None if part.material is None else as_read(part.material, read(part.color or DEFAULT_COLOR))
+        face_materials = {ordinal: as_read(given, read(part.face_colors.get(ordinal) or DEFAULT_COLOR))
+                          for ordinal, given in part.face_materials.items() if 1 <= ordinal <= faces.Extent()}
         return {"index": index, "key": part.key, "name": part.name or f"part{index + 1}", "color": read(part.color),
                 "faceNames": {str(k): v for k, v in sorted(face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(edge_names.items())},
-                "faceColors": {str(k): v for k, v in sorted(face_colors.items())}}
+                "faceColors": {str(k): v for k, v in sorted(face_colors.items())},
+                "material": material_json(material),
+                "faceMaterials": {str(k): material_json(v) for k, v in sorted(face_materials.items())}}
 
     def visit(prototype: Any, location: Any, names: list[str], inherited: tuple | None, name: str) -> dict:
         if isinstance(prototype, Assembly):
@@ -756,6 +857,7 @@ def _read(path: Path) -> Any:
             reader = STEPCAFControl_Reader()
             reader.SetNameMode(True)
             reader.SetColorMode(True)
+            reader.SetMatMode(True)
             # The reader defines the translator's parameters: set them once it exists.
             Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)
             if reader.ReadFile(str(path)) != IFSelect_RetDone or not reader.Transfer(doc):
@@ -801,6 +903,73 @@ def _label_color(label: Any) -> tuple | None:
     return None
 
 
+def _f32(value: float) -> float:
+    """A value as the document keeps it, a 32-bit float, rounded as colours read back."""
+    import struct
+
+    return round(struct.unpack("<f", struct.pack("<f", float(value)))[0], 6)
+
+
+def as_read(material: Any, rgba: tuple) -> Any:
+    """``material`` as a document read back gives it: drawn in ``rgba`` (the base colour
+    as read), its PBR factors as 32-bit floats, its density through the kernel's g/cm^3,
+    no emissive where it is black, no description where it is empty."""
+    from cadgen.engine.materials import Material
+
+    emissive = tuple(_f32(value) for value in (material.emissive or (0.0, 0.0, 0.0)))
+    return Material(material.name, round(material.density / 1000.0 * 1000.0, 6) if material.density else None,
+                    rgba, _f32(material.metallic), _f32(material.roughness), emissive if any(emissive) else None,
+                    material.description or None)
+
+
+def material_json(material: Any) -> dict[str, Any] | None:
+    """A material as the structure carries it."""
+    if material is None:
+        return None
+    return {"name": material.name, "density": material.density, "color": list(material.color or DEFAULT_COLOR),
+            "metallic": material.metallic, "roughness": material.roughness,
+            "emissive": list(material.emissive or (0.0, 0.0, 0.0)), "description": material.description}
+
+
+def _label_material(label: Any) -> Any:
+    """The material a label was given, as ``as_read`` describes it, or None: its
+    ``XCAFDoc_Material`` (name, description, density) and its ``XCAFDoc_VisMaterial``
+    (PBR), either alone too -- a STEP the engine did not write has no PBR, and is drawn
+    in the label's colour."""
+    from OCP.TDataStd import TDataStd_TreeNode
+    from OCP.XCAFDoc import XCAFDoc, XCAFDoc_Material, XCAFDoc_VisMaterialTool
+
+    from cadgen.engine.materials import Material
+
+    name = description = ""
+    density = None
+    node = TDataStd_TreeNode()
+    if _find(label, node, XCAFDoc.MaterialRefGUID_s()) and node.HasFather():
+        physical = XCAFDoc_Material()
+        if _find(node.Father().Label(), physical, XCAFDoc_Material.GetID_s()):
+            name = physical.GetName().ToCString() if physical.GetName() is not None else ""
+            description = physical.GetDescription().ToCString() if physical.GetDescription() is not None else ""
+            density = round(physical.GetDensity() * 1000.0, 6) or None
+    visual = XCAFDoc_VisMaterialTool.GetShapeMaterial_s(label)
+    pbr = visual.PbrMaterial() if visual is not None and visual.HasPbrMaterial() else None
+    if pbr is not None:
+        if not name:
+            raw = visual.RawName()
+            name = raw.ToCString() if raw is not None else ""
+        base = pbr.BaseColor
+        rgb = base.GetRGB()
+        rgba = (round(rgb.Red(), 6), round(rgb.Green(), 6), round(rgb.Blue(), 6), round(base.Alpha(), 6))
+        glow = pbr.EmissiveFactor
+        emissive = (_f32(glow.x()), _f32(glow.y()), _f32(glow.z()))
+        metallic, roughness = _f32(pbr.Metallic), _f32(pbr.Roughness)
+    elif name:
+        rgba, emissive, metallic, roughness = _label_color(label), (0.0, 0.0, 0.0), 0.0, 0.5
+    else:
+        return None
+    return Material(name or "material", density, rgba, metallic, roughness, emissive if any(emissive) else None,
+                    description or None)
+
+
 def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -> Prototype:
     from OCP.Standard import Standard_GUID
     from OCP.TDataStd import TDataStd_AsciiString
@@ -820,6 +989,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     face_names: dict[int, str] = {}
     edge_names: dict[int, str] = {}
     face_colors: dict[int, tuple] = {}
+    face_materials: dict[int, Any] = {}
     subs = TDF_LabelSequence()
     XCAFDoc_ShapeTool.GetSubShapes_s(label, subs)
     if subs.Length():
@@ -842,13 +1012,16 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                     color = _label_color(sub)
                     if color is not None:
                         face_colors[ordinal] = color
+                    given = _label_material(sub)
+                    if given is not None:
+                        face_materials[ordinal] = given
             elif kind == TopAbs_EDGE:
                 ordinal = edges.FindIndex(held)
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     edge_names[ordinal] = name
     return Prototype(index, local, _label_name(label) or f"part{index + 1}", _label_color(label), found_key,
-                     face_names, edge_names, face_colors, entry)
+                     face_names, edge_names, face_colors, entry, _label_material(label), face_materials)
 
 
 def _matrix(location: Any) -> list[float]:

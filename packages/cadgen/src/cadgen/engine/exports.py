@@ -6,7 +6,10 @@ formats are written from the engine's own tessellation (``mesh``): each part mes
 once, wherever it is placed, and kept in this process's memory by its geometry key,
 so a later export meshes only the parts that changed. Binary STL is every placed
 triangle; GLB is a glTF 2.0 binary with one mesh per part, a node per placement, the
-assembly's names on its nodes and a material per colour; 3MF is a zip with one XML
+assembly's names on its nodes and a PBR material per colour and material (a part's
+material's metallic, roughness, emissive and alpha mode, its base colour the part's;
+a part without one is a matte one of its colour); STEP carries the materials' names
+and densities (the writer's material mode); 3MF is a zip with one XML
 model, an object per part and a build item per placement. Every file is written
 beside its target and moved over it.
 """
@@ -48,7 +51,8 @@ def write(kind: str, doc: Any, tree: Any, path: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     if kind == "step":
         return write_step(doc, path)
-    parts = [(part.key, part.shape, part.name, part.color, part.face_colors) for part in tree.parts]
+    parts = [(part.key, part.shape, part.name, part.color, part.face_colors, part.material, part.face_materials)
+             for part in tree.parts]
     index = {id(part): at for at, part in enumerate(tree.parts)}
     placed = [(index[id(part)], matrix, path_names, color) for part, matrix, path_names, color in placements(tree)]
     return _write_mesh(kind, parts, placed, path, tree.root.name)
@@ -65,7 +69,8 @@ def write_from_loaded(kind: str, loaded: Any, path: Path) -> int:
     # A part read back from its document is meshed from its bytes as read (``read``): a
     # live shape's extra round trip would move it by a last bit, and mesh it differently
     # from the worker and the served document, which mesh the same bytes.
-    parts = [(p.key, shape_bytes(p.shape, read=True), p.name, p.color, p.face_colors) for p in loaded.prototypes]
+    parts = [(p.key, shape_bytes(p.shape, read=True), p.name, p.color, p.face_colors, p.material, p.face_materials)
+             for p in loaded.prototypes]
     placed = []
     for instance in loaded.instances:
         matrix = np.array(instance.matrix, dtype=float).reshape(4, 4).T
@@ -92,6 +97,7 @@ def write_step(doc: Any, path: Path) -> int:
         Interface_Static.SetCVal_s("write.step.schema", "AP214IS")
         writer.SetNameMode(True)
         writer.SetColorMode(True)
+        writer.SetMaterialMode(True)
         writer.SetLayerMode(False)
         if not writer.Transfer(doc, STEPControl_AsIs) or writer.Write(str(temporary)) != IFSelect_RetDone:
             temporary.unlink(missing_ok=True)
@@ -158,7 +164,7 @@ def mesh_of(key: str, shape: Any) -> Any:
 
 
 def _write_mesh(kind: str, parts: list, placed: list, path: Path, name: str) -> int:
-    meshes = [mesh_of(key, shape) for key, shape, _name, _color, _faces in parts]
+    meshes = [mesh_of(key, shape) for key, shape, *_rest in parts]
     temporary = _temporary(path)
     try:
         if kind == "stl":
@@ -199,15 +205,18 @@ def _stl(meshes: list, placed: list, path: Path, name: str) -> None:
             handle.write(rows.tobytes())
 
 
-def _groups(mesh: Any, part_color: tuple | None, face_colors: dict) -> list[tuple[tuple | None, np.ndarray]]:
-    """A part's triangles by colour: its painted faces' colours, and its own for the rest."""
-    if not face_colors:
-        return [(part_color, mesh.indices)]
-    by_color: dict[Any, list] = {}
+def _groups(mesh: Any, part_color: tuple | None, face_colors: dict, part_material: Any = None,
+            face_materials: dict | None = None) -> list[tuple[tuple, np.ndarray]]:
+    """A part's triangles by look, ``(colour, material)``: its painted faces' colours and
+    materials, and its own for the rest."""
+    if not face_colors and not face_materials:
+        return [((part_color, part_material), mesh.indices)]
+    face_materials = face_materials or {}
+    by_look: dict[Any, list] = {}
     for ordinal, first, count in mesh.faces:
-        color = face_colors.get(int(ordinal), part_color)
-        by_color.setdefault(color, []).append(mesh.indices[first:first + count])
-    return [(color, np.concatenate(chunks)) for color, chunks in by_color.items()]
+        look = (face_colors.get(int(ordinal), part_color), face_materials.get(int(ordinal), part_material))
+        by_look.setdefault(look, []).append(mesh.indices[first:first + count])
+    return [(look, np.concatenate(chunks)) for look, chunks in by_look.items()]
 
 
 def _glb(meshes: list, parts: list, placed: list, path: Path, name: str) -> None:
@@ -231,26 +240,32 @@ def _glb(meshes: list, parts: list, placed: list, path: Path, name: str) -> None
     materials: list[dict] = []
     material_of: dict[Any, int] = {}
 
-    def material(color: tuple | None) -> int:
-        key = tuple(color) if color is not None else None
+    def material(look: tuple) -> int:
+        color, given = look
+        key = (tuple(color) if color is not None else None, given)
         found = material_of.get(key)
         if found is None:
-            rgba = list(color) if color is not None else [0.8, 0.8, 0.8, 1.0]
-            entry: dict[str, Any] = {"pbrMetallicRoughness": {"baseColorFactor": rgba, "metallicFactor": 0.0,
-                                                               "roughnessFactor": 0.6}, "doubleSided": False}
-            if rgba[3] < 1.0:
-                entry["alphaMode"] = "BLEND"
+            rgba = [float(value) for value in (color if color is not None else (0.8, 0.8, 0.8, 1.0))]
+            entry: dict[str, Any] = {"pbrMetallicRoughness": {
+                "baseColorFactor": rgba,
+                "metallicFactor": float(given.metallic) if given is not None else 0.0,
+                "roughnessFactor": float(given.roughness) if given is not None else 0.6}, "doubleSided": False,
+                "alphaMode": "BLEND" if rgba[3] < 1.0 else "OPAQUE"}
+            if given is not None:
+                entry["name"] = given.name
+                if given.emissive is not None and any(given.emissive):
+                    entry["emissiveFactor"] = [float(value) for value in given.emissive]
             materials.append(entry)
             found = material_of[key] = len(materials) - 1
         return found
 
     gltf_meshes = []
-    for mesh, (_key, _shape, part_name, color, face_colors) in zip(meshes, parts):
+    for mesh, (_key, _shape, part_name, color, face_colors, part_material, face_materials) in zip(meshes, parts):
         primitives = []
         if mesh.triangles:
             positions = add(np.ascontiguousarray(mesh.positions, "<f4"), 34962, "VEC3", 5126)
             normals = add(np.ascontiguousarray(mesh.normals, "<f4"), 34962, "VEC3", 5126)
-            for group_color, indices in _groups(mesh, color, face_colors):
+            for group_color, indices in _groups(mesh, color, face_colors, part_material, face_materials):
                 primitives.append({"attributes": {"POSITION": positions, "NORMAL": normals},
                                    "indices": add(np.ascontiguousarray(indices, "<u4"), 34963, "SCALAR", 5125),
                                    "material": material(group_color)})
@@ -295,7 +310,7 @@ def _threemf(meshes: list, parts: list, placed: list, path: Path, name: str) -> 
     colors: list[str] = []
     color_index: dict[str, int] = {}
     objects = []
-    for at, (mesh, (_key, _shape, part_name, color, _faces)) in enumerate(zip(meshes, parts), start=1):
+    for at, (mesh, (_key, _shape, part_name, color, *_faces)) in enumerate(zip(meshes, parts), start=1):
         hexed = _hex(color)
         if hexed not in color_index:
             color_index[hexed] = len(colors)

@@ -15,6 +15,14 @@ def arm():
     return bd.Box(10, 20, 30)
 ```
 
+A part's material is set on the shape, as its colour is: `part.material =
+materials.aluminium` (a catalogue of common engineering materials, names and densities
+from FreeCAD's material cards), or `Material("name", density, color=..., metallic=...,
+roughness=...)` for any other. `paint(part, faces, material)` gives faces one. On an
+assembly, a material is every part's below it that has none: a whole-model default.
+Set materials on finished parts, after the last operation: an edit of one is then no
+kernel call.
+
 ## Laws
 
 1. **Nothing to disk.** The engine writes the files a model declares (the xbf,
@@ -26,8 +34,10 @@ def arm():
    OCP, build123d, numpy and the standard library only. A test holds it.
 3. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
-   and instance, colours per part and per painted face, and element names on
-   face and edge sub-shape labels. STEP, GLB, STL and 3MF are translations of it.
+   and instance, colours per part and per painted face, materials per part and
+   per face given one (`XCAFDoc_Material`: name, description, density;
+   `XCAFDoc_VisMaterial`: PBR), and element names on face and edge sub-shape
+   labels. STEP, GLB, STL and 3MF are translations of it.
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
@@ -40,10 +50,11 @@ def arm():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run |
+| `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
+| `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
-| `document.py` | result to XCAF (prototypes, instances, names, colours, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `exports.py` | STEP through the XCAF writer; binary STL, GLB and 3MF from the engine's tessellation |
+| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
+| `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
@@ -140,8 +151,10 @@ position.
 ## Wire format
 
 `GET /api/doc/<id>` returns the structure as JSON: prototypes (key, name,
-colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, and once meshed
-`unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
+colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, `material` and
+`faceMaterials` by ordinal -- each `{name, density, color, metallic, roughness,
+emissive, description}`, its colour the base colour it is drawn in, density in kg/m^3
+-- and once meshed `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
 colour), the tree, and the document's version.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
 `V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch

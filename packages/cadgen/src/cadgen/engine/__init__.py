@@ -14,17 +14,26 @@ edit cost what it changed; the document is written to ``arm.xbf`` beside the scr
 and the declared exports after it. ``cadgen xbf serve arm.xbf`` shows it. Nothing but
 those files is written: every cache lives in a process's memory.
 
-Importing this package imports no kernel: the names below load on first use.
+A part's material is a value set on the shape: ``part.material = materials.aluminium``
+(``Material`` for any other). Importing this package imports no kernel: the names below load on first use.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["glb", "paint", "read_step", "step", "stl", "threemf", "xbf"]
+__all__ = ["Material", "glb", "materials", "paint", "read_step", "step", "stl", "threemf", "xbf"]
 
 
 def __getattr__(name: str) -> Any:
+    if name == "materials":
+        import importlib
+
+        return importlib.import_module("cadgen.engine.materials")
+    if name == "Material":
+        from cadgen.engine.materials import Material
+
+        return Material
     if name in __all__:
         from cadgen.engine import model
 
