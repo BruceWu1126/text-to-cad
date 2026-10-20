@@ -227,13 +227,13 @@ class Served:
         return self.structure["version"]
 
     def shape_data(self, key: str) -> bytes | None:
-        """A part's shape bytes: made once from a live shape."""
+        """A part's shape bytes: made once from the shape its file read gave."""
         found = self.shapes.get(key)
         if found is None or isinstance(found, (bytes, bytearray)):
             return found
         made = self.data.get(key)
         if made is None:
-            made = self.data[key] = shape_bytes(found)
+            made = self.data[key] = shape_bytes(found, read=True)
         return made
 
 

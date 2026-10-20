@@ -112,6 +112,38 @@ class MeshContractTest(unittest.TestCase):
         self.assertEqual(mesh.Mesh.from_bytes(part.to_bytes()).unmeshed.keys(), {7})
 
 
+TURNED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def turned():
+    return bd.Rot(0, 0, 33) * bd.Box(4, 3, 2) + bd.Rot(17, 29, 41) * bd.Cylinder(1, 3)
+"""
+
+
+class OneKeyOneMeshTest(unittest.TestCase):
+    def test_a_part_meshes_alike_live_and_read_back_from_its_document(self) -> None:
+        """A build's live part and the same part read back from its xbf -- what a daemon
+        that never ran the build holds -- give the same bytes, so the same mesh. The part's
+        sub-shape locations move by a last bit at every read of its bytes: its raw bytes
+        live and read back differ, and so did its meshes."""
+        from cadgen.engine import document
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-mesh-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        script = folder / "turned.py"
+        script.write_text(textwrap.dedent(TURNED), encoding="utf-8")
+        self.assertTrue(engine_build.build(script, ["turned"], cwd=folder)[-1]["ok"])
+        live = document.saved(folder / "turned.xbf").parts[0]
+        read = document.Loaded(folder / "turned.xbf").prototypes[0]
+        self.assertEqual(live.key, read.key)
+        data = mesh.shape_bytes(live.shape)
+        self.assertEqual(data, mesh.shape_bytes(read.shape, read=True))
+        self.assertEqual(mesh.mesh_shape(live.shape).to_bytes(), mesh.mesh_shape(mesh.shape_bytes(read.shape, read=True)).to_bytes())
+
+
 MODEL = """
 import build123d as bd
 from cadgen.engine import xbf
@@ -185,6 +217,60 @@ class FactsTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as missing:
             self.get(f"/api/doc/{self.ident}/part/{key}/edge/999")
         self.assertEqual(missing.exception.code, 404)
+
+
+SOLIDS = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def solids():
+    parts = []
+    for at, (label, shape) in enumerate((("cylinder", bd.Cylinder(1, 2)), ("sphere", bd.Sphere(2)),
+                                         ("torus", bd.Torus(5, 1)), ("cone", bd.Cone(2, 1, 3)))):
+        placed = bd.Pos(20 * at, 0, 0) * shape
+        placed.label = label
+        parts.append(placed)
+    return bd.Compound(children=parts, label="solids")
+"""
+
+
+class SurfaceFactsTest(unittest.TestCase):
+    """Every surface type answers its facts: a face closed on itself by a seam too."""
+
+    def test_every_face_of_curved_solids_answers_its_facts(self) -> None:
+        folder = Path(tempfile.mkdtemp(prefix="engine-mesh-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        script = folder / "solids.py"
+        script.write_text(textwrap.dedent(SOLIDS), encoding="utf-8")
+        self.assertTrue(engine_build.build(script, ["solids"], cwd=folder)[-1]["ok"])
+        server = Server(port=0, mesh_mode="inline")
+        server.start()
+        self.addCleanup(server.stop)
+        ident = server.add(folder / "solids.xbf")
+
+        def get(path: str) -> dict:
+            with urllib.request.urlopen(server.url + path, timeout=120) as response:
+                return json.loads(response.read())
+
+        expected = {"cylinder": {"cylinder": 4 * math.pi, "plane": math.pi}, "sphere": {"sphere": 16 * math.pi},
+                    "torus": {"torus": 20 * math.pi ** 2}, "cone": {"cone": None, "plane": None}}
+        found = {}
+        for prototype in get(f"/api/doc/{ident}")["prototypes"]:
+            faces = [get(f"/api/doc/{ident}/part/{prototype['key']}/face/{o}") for o in range(1, 4)
+                     if o <= {"cylinder": 3, "sphere": 1, "torus": 1, "cone": 3}[prototype["name"]]]
+            for face in faces:
+                self.assertEqual(face["check"], "valid", face)
+                self.assertGreater(face["area"], 0)
+                self.assertEqual(len(face["centroid"]), 3)
+                self.assertEqual(len(face["box"]["min"]), 3)
+                area = expected[prototype["name"]][face["surface"]]
+                if area is not None:
+                    self.assertAlmostEqual(face["area"], area, places=6)
+            found[prototype["name"]] = sorted({face["surface"] for face in faces})
+        self.assertEqual(found, {"cylinder": ["cylinder", "plane"], "sphere": ["sphere"], "torus": ["torus"],
+                                 "cone": ["cone", "plane"]})
 
 
 if __name__ == "__main__":

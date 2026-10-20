@@ -47,6 +47,25 @@ def pair():
 """
 
 
+CUT = """
+import build123d as bd
+from cadgen.engine import xbf
+
+SIZE = {size}
+
+
+@xbf
+def cut():
+    peg = bd.Cylinder(2, 10)
+    plate = bd.Box(10, 10, 4) - bd.Pos(SIZE / 10, 0, 0) * peg
+    plate.label = "plate"
+    peg.label = "peg"
+    other = bd.Pos(20, 0, 0) * (bd.Box(6, 6, 6) + bd.Sphere(3.5))
+    other.label = "other"
+    return bd.Compound(children=[plate, bd.Pos(0, 20, 0) * peg, other], label="cut")
+"""
+
+
 def get(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=120) as response:
         return response.read()
@@ -107,12 +126,15 @@ class DaemonTest(unittest.TestCase):
         self.script = self.folder / "block.py"
 
     def _stop(self) -> None:
+        self._stop_daemon()
+        shutil.rmtree(self.folder, ignore_errors=True)
+        shutil.rmtree(self.state, ignore_errors=True)
+
+    def _stop_daemon(self) -> None:
         self.cli("stop")
         deadline = time.monotonic() + 20
         while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
             time.sleep(0.05)
-        shutil.rmtree(self.folder, ignore_errors=True)
-        shutil.rmtree(self.state, ignore_errors=True)
 
     def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env,
@@ -140,6 +162,27 @@ class DaemonTest(unittest.TestCase):
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
+
+    def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
+        """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
+        them; the document writes them all cleared. So the first build after a restart
+        finds the file it would write already there and rewrites nothing."""
+        self.script = self.folder / "cut.py"
+        xbf = self.folder / "cut.xbf"
+
+        def build(size: int) -> dict:
+            self.script.write_text(textwrap.dedent(CUT.format(size=size)), encoding="utf-8")
+            done = self.cli("build", "--json", "cut.py")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return json.loads(done.stdout.strip().splitlines()[-1])
+
+        build(10)
+        cold = xbf.read_bytes()
+        build(12)
+        self.assertTrue(build(10)["files"][str(xbf)]["written"], "the edit's file is replaced")
+        self.assertEqual(xbf.read_bytes(), cold, "the warm worker wrote the cold one's bytes")
+        self._stop_daemon()
+        self.assertFalse(build(10)["files"][str(xbf)]["written"], "a fresh worker keeps the same bytes")
 
     def test_a_served_document_follows_the_build_without_its_file_being_read(self) -> None:
         self.script = self.folder / "pair.py"
