@@ -89,7 +89,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(cold["memo"]["hits"], 0)
         warm = self.build(10)
         self.assertEqual(warm["memo"]["misses"], 0)
-        self.assertEqual(warm["memo"]["hits"], cold["memo"]["misses"])
+        self.assertEqual((warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]), (0, 1))
         edited = self.build(12)
         self.assertGreater(edited["memo"]["misses"], 0)
         self.assertTrue(edited["files"][str(self.folder / "block.xbf")]["written"])
