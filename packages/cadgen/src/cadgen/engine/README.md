@@ -230,12 +230,24 @@ A feature is the author's name for its result. A call whose result an assignment
 stores is `<function>.<target>` (`relief = body - hole` in `plate` is `plate.relief`;
 `self.body = ...` is `body`; each target of `a, b = ...` names its own); the calls the
 same statement made on the way are `<function>.<target>_<operation><n>`
-(`plate.relief_make_cylinder1`); the second assignment to one target in one function is
-`<target>2`, then `<target>3`. A call whose result is not assigned (a return
-expression, an expression statement) is `<function>.<operation><count>`
-(`peg.make_cylinder1`), counted among the part's unassigned calls. So inserting a
-feature renames only what it touches, and renaming a variable renames that feature's
-elements and nothing else. An author's `label` on a shape handed to a later construction
+(`plate.relief_make_cylinder1`). The first statement in a function to assign a target
+names it as it is; a later one -- a reassignment, `plate = plate - hole` -- is identified
+by its statement's skeleton, its syntax tree with every literal (number, string)
+masked: it is `<target>_<tag>`, the tag six letters of that skeleton
+(`plate_cfjpgj`), counted only among the statements of the same skeleton in the
+function (`plate_cfjpgj2` for the second, or for a loop's second run). So inserting a
+step of another shape renames none of the steps around it, and a dimension edit -- a
+literal -- keeps every name. Two statements of one skeleton still count in order:
+inserting one before another of its shape renames the later one, and a statement
+inserted before a function's first assignment to a target becomes the one named as it
+is. A helper that makes a shape in its `return` statement and hands it back unassigned
+(`return bd.Pos(x, 0, 0) * bd.Cylinder(r, h)`) makes it for its caller: its calls are
+named by the caller's assignment the result flows into, as the calls that statement
+made on the way (`plate.plate_cfjpgj_make_cylinder1`), through further helpers that
+return it too. A call whose result is assigned nowhere (a return expression of the
+model, an expression statement) is `<function>.<operation><count>` (`plate.fuse1`),
+counted among the part's unassigned calls. So inserting a feature renames only what it
+touches, and renaming a variable renames that feature's elements and nothing else. An author's `label` on a shape handed to a later construction
 names, in what that construction makes, the feature that first made the labelled shape
 (back along what each feature was made of, to where the shape stops being one chain):
 a cut appended to it after takes nothing over. A shape a model places, copies or fixes past

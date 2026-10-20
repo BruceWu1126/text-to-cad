@@ -291,6 +291,11 @@ def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tu
                             "line": feature.line}
         if ref not in refs:
             refs[ref] = _skeleton(ref, skeletons)
+        if feature.assigner is not None:
+            # Named by its caller's assignment (a helper returned it): that function too.
+            caller = (trace.path_of(feature.assigner[0]), feature.assigner[1])
+            if caller not in refs:
+                refs[caller] = _skeleton(caller, skeletons)
     return {"faces": lineage.get("faces") or [], "edges": lineage.get("edges") or [],
             "vertices": lineage.get("vertices") or [], "table": lineage.get("table") or {}}, provenance, refs
 

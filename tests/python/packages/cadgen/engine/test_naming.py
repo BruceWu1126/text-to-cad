@@ -60,6 +60,26 @@ def pair():
 """
 
 
+# A reassignment chain, a helper returning what it makes unassigned among its steps.
+CHAIN = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+def _bore(radius, x):
+    return bd.Pos(x, 0, 0) * bd.Cylinder(radius, 30)
+
+
+@xbf
+def chain():
+    plate = bd.Box(40, 20, 10)
+    plate = plate - _bore(2, -12)
+{insert}    plate = plate - _bore({radius}, 12)
+    plate = plate - bd.Pos(0, 6, 0) * bd.Box(4, 4, 30)
+    return plate
+"""
+
+
 BAKED = """
 import build123d as bd
 from build123d.topology.shape_core import downcast
@@ -163,18 +183,23 @@ class NamingCase(unittest.TestCase):
 
 class AssignedNamesTest(NamingCase):
     def test_a_feature_is_named_by_the_target_its_result_is_assigned_to(self) -> None:
-        faces = self.names(BLOCK, insert="", relief="relief")["faces"]
+        faces = self.derivations(self.names(BLOCK, insert="", relief="relief"))["faces"]
         text = "\n".join(faces)
         # The box: the first assignment to ``body``; the cut: ``relief``; the cylinder it
         # cut with, made in the same statement: ``relief_make_cylinder1``.
         self.assertIn("f:block.body.", text)
         self.assertIn(";M:block.relief", text)
         self.assertIn("f:block.relief_make_cylinder1.", text)
-        # A reassignment is the target's next: ``final`` then ``final2``.
-        self.assertIn(";M:block.final2", text)
+        # The first assignment to ``final`` is ``final``; a reassignment is the target and
+        # its statement's tag, six letters of its skeleton.
         self.assertRegex(text, r";M:block\.final(;|\n|$)")
-        # A call in a return expression is named as before, by function and operation.
-        self.assertIn("f:peg.make_cylinder1.", text)
+        self.assertRegex(text, r";M:block\.final_[a-p]{6}(;|\n|$)")
+        # A helper's call in its return expression (``peg``'s cylinder) is named by the
+        # assignment its result flows into, ``final``'s.
+        self.assertIn("f:block.final_make_cylinder1.", text)
+        self.assertNotIn("f:peg.", text)
+        # A call whose result nothing assigns is its function's and operation's.
+        self.assertIn(";M:block.fuse1", text)
         # A tuple target names each of its values.
         self.assertIn("f:block.a.", text)
         self.assertIn("f:block.b.", text)
@@ -194,6 +219,51 @@ class AssignedNamesTest(NamingCase):
         lost_edges = set(before["edges"]) - set(after["edges"])
         self.assertTrue(lost_edges)
         self.assertEqual({name.split(";")[0][2:] for name in lost_edges}, {"block.body.5", "block.body.6"})
+
+    def test_a_reassignment_is_its_skeleton_and_a_helper_s_call_its_caller_s(self) -> None:
+        before = self.derivations(self.names(CHAIN, name="chain", insert="", radius=3), name="chain")
+        names = "\n".join(before["faces"])
+        self.assertRegex(names, r"(?m)^f:chain\.plate\.1$")  # the first assignment: the target
+        self.assertRegex(names, r"(?m);M:chain\.plate_([a-p]{6});M:chain\.plate_\1(2);M:chain\.plate_[a-p]{6}$")
+        # ``_bore`` returns its cylinder unassigned: named by the caller's assignment.
+        self.assertRegex(names, r"f:chain\.plate_[a-p]{6}2_make_cylinder1\.1")
+        self.assertNotIn("_bore.", names)
+        # A dimension edit -- a literal -- keeps every name.
+        self.assertEqual(self.derivations(self.names(CHAIN, name="chain", insert="", radius=3.5), name="chain"), before)
+        # A step of another shape inserted into the chain, through the helper too: it
+        # renames the faces it cuts (the top and the bottom) and nothing else -- not the
+        # reassignments after it, not the cylinder the helper makes for the next one.
+        hole = "    plate = plate - _bore(1, 0).moved(bd.Location((0, -6, 0)))\n"
+        after = self.derivations(self.names(CHAIN, name="chain", insert=hole, radius=3), name="chain")
+        lost = set(before["faces"]) - set(after["faces"])
+        self.assertEqual({name.split(";")[0] for name in lost}, {"f:chain.plate.5", "f:chain.plate.6"})
+        self.assertEqual(len(set(after["faces"]) - set(before["faces"])), 3)  # those two, and the hole's
+        lost_edges = set(before["edges"]) - set(after["edges"])
+        self.assertEqual({name.split(";")[0] for name in lost_edges}, {"e:chain.plate.5", "e:chain.plate.6"})
+
+    def test_a_child_model_names_its_own_result_whatever_its_caller_assigns(self) -> None:
+        # A child's body is called by the engine, not by its caller's code: what it returns
+        # is named in the child, as when it is built alone.
+        child = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def peg():
+    return bd.Cylinder(2, 10)
+
+
+@xbf
+def stand():
+    post = peg()
+    return bd.Compound(children=[post, bd.Pos(10, 0, 0) * bd.Box(2, 2, 2)])
+"""
+        alone = self.names(child, name="peg")["faces"]
+        self.assertTrue(alone and all(name.startswith("f:peg.") for name in alone), alone)
+        self.names(child, name="stand")
+        placed = [[p.face_names[k] for k in sorted(p.face_names)] for p in document.load(self.folder / "stand.xbf").prototypes]
+        self.assertIn(alone, placed)
 
     def test_renaming_a_variable_renames_exactly_that_feature(self) -> None:
         # A warm build: every call hits and hands back the same shapes, and the part is

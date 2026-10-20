@@ -14,11 +14,17 @@ whatever they were given -- in call order. A call made by an assignment statemen
 from the source at the call's instruction, ``sources.assigned``) is that target's:
 the call whose result the statement stores is ``<function>.<target>`` (``dial.relief``),
 the calls the same run of the statement made before it ``<function>.<target>_<operation><n>``
-(``dial.relief_make_cylinder1``), and the n-th run of an assignment to one target in
-one function that the part descends from -- a reassignment, a loop -- is ``<target>``,
-then ``<target>2``, ``<target>3``... A call whose result is not assigned (a return
-expression, an argument of a call that is no assignment, an expression statement) is
-``<function>.<operation><count>``: the enclosing function, the operation (``extrude``,
+(``dial.relief_make_cylinder1``). The first statement of a function to assign a target
+names it as it is; a later one, a reassignment, by the target and six letters of its
+statement's skeleton -- the statement with every literal masked (``sources._named_sites``:
+``plate_cfjpgj``) -- so the n-th run of an assignment to one target, of one skeleton, in
+one function that the part descends from -- a loop, a repeated step -- is ``<target>``,
+then ``<target>2``, ``<target>3``... (``_2`` after a digit). A helper making a shape in
+its ``return`` statement, unassigned, makes it for the model code that called it: the
+call is named by that caller's assignment, as a call its statement made on the way
+(``Feature.assigner``, ``Trace._returned``). A call whose result is not assigned (a
+return expression, an argument of a call that is no assignment, an expression statement)
+is ``<function>.<operation><count>``: the enclosing function, the operation (``extrude``,
 ``fillet``, ``cut``, a constructor's class in lower case) and how many of the part's
 unassigned features before it, this one included, that function's calls of that
 operation were: ``dial.extrude1``. So an edit elsewhere in the model -- another
@@ -133,6 +139,7 @@ from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_Ind
 from cadgen.engine.kernel.history import _map, _object_key, listed
 from cadgen.engine.kernel.imported import ELEMENT_NAMES
 from cadgen.engine.sources import assigned as _assigned_names
+from cadgen.engine.sources import returning as _returning
 
 # Every execution of an assignment statement a feature ran in, numbered process-wide: a
 # replayed body's features keep the executions of the run that recorded them, never one
@@ -278,6 +285,9 @@ class Feature:
     execution: int | None = None
     targets: tuple[str, ...] | None = None
     groups: tuple[int, ...] | None = field(default=None, repr=False)
+    # Where the call ran in a helper that returns what it makes, unassigned: the caller
+    # whose assignment names it, ``(file, function)`` (``Trace.frame``); else None.
+    assigner: tuple[str, str] | None = None
     # A file read's: per result position, what the file names that product's elements
     # (``kernel.imported``), by kind and ordinal.
     imported: dict[int, dict] = field(default_factory=dict, repr=False)
@@ -301,6 +311,12 @@ class Feature:
     def target(self) -> str | None:
         """The name the feature's assignment gives it, its targets joined for a tuple."""
         return None if self.targets is None else "_".join(self.targets)
+
+    @property
+    def namer(self) -> str:
+        """The function whose assignment names the feature: its own, or for a call a helper
+        returned unassigned, its caller's (``assigner``)."""
+        return self.function if self.assigner is None else self.assigner[1]
 
     def position_of(self, tshape: Any) -> int | None:
         """The first position among the results at which ``tshape`` was returned, or None."""
@@ -457,26 +473,54 @@ class Trace:
 
     # --- recording ---------------------------------------------------------------------
 
-    def frame(self) -> tuple[str, int, str, tuple | None] | None:
+    def _verdict(self, filename: str) -> str:
+        verdict = self._first_party.get(filename)
+        if verdict is None:
+            verdict = self._first_party[filename] = _classify(filename)
+        return verdict
+
+    def frame(self) -> tuple | None:
         """The innermost first-party frame of the current stack: ``(file, line,
-        function, assignment)``, the file relative to the model's folder, and the
+        function, assignment, assigner)``, the file relative to the model's folder, the
         assignment the call runs in (``_execution``: which execution of the statement and
-        the names it assigns), or None; None when the call is cadgen's own (one of its
-        internal frames comes first) or no model code is on the stack."""
+        the names it assigns), or None, and the caller that assignment is made in, when it
+        is not the frame's own (``_returned``), or None; None when the call is cadgen's own
+        (one of its internal frames comes first) or no model code is on the stack."""
         frame = sys._getframe(1)
         below = None
         while frame is not None:
             filename = frame.f_code.co_filename
-            verdict = self._first_party.get(filename)
-            if verdict is None:
-                verdict = self._first_party[filename] = _classify(filename)
+            verdict = self._verdict(filename)
             if verdict == "model":
-                return (self._display_path(filename), frame.f_lineno, frame.f_code.co_name,
-                        self._execution(frame, below))
+                assignment = self._execution(frame, below)
+                assigner = None
+                if assignment is None:
+                    found = self._returned(frame)
+                    if found is not None:
+                        assignment, caller = found
+                        assigner = (self._display_path(caller.f_code.co_filename), caller.f_code.co_name)
+                return (self._display_path(filename), frame.f_lineno, frame.f_code.co_name, assignment, assigner)
             if verdict == "own":
                 return None
             below = frame
             frame = frame.f_back
+        return None
+
+    def _returned(self, frame: Any) -> tuple[tuple[int, tuple[str, ...]], Any] | None:
+        """The assignment a helper's call is named by, when the helper makes it in its
+        ``return`` statement -- what it makes flows out unassigned -- and the first-party
+        function that called it directly (through further helpers returning it) assigns
+        it: that caller's execution of its statement, and the caller. None where the result
+        is assigned nowhere, or the helper was not called by model code directly -- a
+        child model, which the engine calls, names its own result whatever its caller."""
+        while _returning(frame.f_code, frame.f_lasti):
+            caller = frame.f_back
+            if caller is None or self._verdict(caller.f_code.co_filename) != "model":
+                return None
+            assignment = self._execution(caller, frame)
+            if assignment is not None:
+                return assignment, caller
+            frame = caller
         return None
 
     def _execution(self, frame: Any, below: Any) -> tuple[int, tuple[str, ...]] | None:
@@ -533,7 +577,7 @@ class Trace:
                 head = indices[-1]
             heads[key] = head
             feature = self.features[head]
-            function = identifier(feature.function)
+            function = identifier(feature.namer)
             names = [feature.target]
             if feature.groups is not None:
                 names.extend(feature.targets)
@@ -625,6 +669,7 @@ class Trace:
                     feature.imported[position] = found
         assignment = frame[3] if len(frame) > 3 else None
         if assignment is not None:
+            feature.assigner = frame[4] if len(frame) > 4 else None
             feature.execution = assignment[0]
             feature.targets = tuple(identifier(name) for name in assignment[1])
             if len(feature.targets) > 1:
@@ -1502,7 +1547,7 @@ class _Names:
         self.trace._assignments()
         if self.trace._heads.get((feature.execution, feature.target)) != index:
             return name
-        function = identifier(feature.function)
+        function = identifier(feature.namer)
         return f"{function}.{self._counted(index, feature.targets[feature.groups[position]], function)}"
 
     def binding(self, index: int) -> int:
@@ -1556,7 +1601,7 @@ class _Names:
         if feature.execution is not None:
             trace._assignments()
             head = trace._heads[(feature.execution, feature.target)]
-            function = identifier(feature.function)
+            function = identifier(feature.namer)
             base = self._counted(head, feature.target, function)
             if index == head:
                 return f"{function}.{base}"
@@ -1565,11 +1610,15 @@ class _Names:
         return f"{stem}{(self.ancestors & trace._stems[stem] & ((2 << index) - 1)).bit_count()}"
 
     def _counted(self, head: int, target: str, function: str) -> str:
-        """``target`` as the n-th assignment to it in ``function`` that this part descends
-        from, head ``head`` the n-th: the first as it is, then ``target2``, ``target3``..."""
+        """``target`` as the n-th execution of an assignment to it in ``function`` that this
+        part descends from -- of a reassignment, the n-th of its skeleton, whose tag its
+        target carries (``sources._named_sites``) -- head ``head`` the n-th: the first as it
+        is, then ``target2``, ``target3``... (``target_2`` for a target ending in a digit)."""
         stem = self.trace._target_stems.get(f"{function}.{target}", 0)
         count = (self.ancestors & stem & ((1 << head) - 1)).bit_count() + 1
-        return target if count == 1 else f"{target}{count}"
+        if count == 1:
+            return target
+        return f"{target}{'_' if target[-1].isdigit() else ''}{count}"
 
     def _pins(self, index: int) -> bool:
         feature = self.trace.features[index]

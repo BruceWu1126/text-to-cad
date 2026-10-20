@@ -115,7 +115,8 @@ class BuildTest(EngineCase):
         self.assertEqual(bracket.color, (0.1, 0.5, 0.9, 1.0))
         self.assertEqual(list(rail.face_colors.values()), [(1.0, 0.0, 0.0, 1.0)])
         self.assertTrue(bracket.face_names and all(name.startswith("f:bracket.") for name in bracket.face_names.values()))
-        self.assertTrue(any(";M:bracket.plate3" in name for name in bracket.face_names.values()))
+        # The third assignment to ``plate``, a reassignment: the target and its statement's tag.
+        self.assertTrue(any(re.search(r"bracket\.plate_[a-p]{6}", name) for name in bracket.face_names.values()))
         self.assertTrue(bracket.edge_names)
         self.assertEqual(len(bracket.key), 32)
         # What wrote it is on the document's main label; where its code is, nowhere.
