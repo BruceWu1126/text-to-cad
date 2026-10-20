@@ -16,7 +16,9 @@ colour per part and per painted face; on each part's face and edge sub-shape lab
 the element names the memo's history gave them (``kernel.trace``), so a face's name
 survives into the file and into a STEP; and on each part the key of its geometry
 (``KEY_GUID``), what a reader caches the part's tessellation by. Saved with the
-BinXCAF driver as ``.xbf``, atomically, and only when its bytes changed.
+BinXCAF driver as ``.xbf``, atomically, and only when its bytes changed -- every
+sub-shape's ``Checked`` flag written cleared (``unchecked``), so a cold build and a
+warm one of the same sources write the same bytes.
 
 Read back (``Loaded``), a document is its prototypes, its instances with their world
 placements, and what each prototype's elements are named; a STEP the engine did not
@@ -28,12 +30,13 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 __all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "read_step_shape",
-           "save", "to_xcaf"]
+           "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
@@ -182,27 +185,66 @@ def collect(result: Any, name: str) -> Tree:
 # --- geometry keys ----------------------------------------------------------------------
 
 
+@contextmanager
+def unchecked(shapes: Iterable[Any]) -> Iterator[None]:
+    """Every sub-shape of ``shapes`` with its ``Checked`` flag cleared, and set again
+    after: what the document writes of a shape, with the model's shapes left as they
+    were.
+
+    ``Checked`` is bookkeeping, not geometry: the kernel's face makers leave it set on
+    the faces they make, a modifier walking a shape clears it on the faces it visits
+    (``direct``), and the memo, which rewinds and reapplies each sub-shape's flags
+    with the operations that changed them, leaves a warm build's faces with whichever
+    value its replay last set. The flag is written with the shape, so a cold build and
+    a warm build of the same sources wrote different bytes -- and the first build after
+    a restart rewrote every file for nothing. Written cleared, it is one value on
+    every path. No other flag differs between the two."""
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    cleared = []
+    for shape in shapes:
+        mapped = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, mapped)
+        find = mapped.FindKey
+        for ordinal in range(1, mapped.Extent() + 1):
+            tshape = find(ordinal).TShape()
+            if tshape.Checked():
+                tshape.Checked(False)
+                cleared.append(tshape)
+    try:
+        yield
+    finally:
+        for tshape in cleared:
+            tshape.Checked(True)
+
+
 def direct(shape: Any) -> Any:
     """``shape`` as the document holds it: every face on a direct (right-handed)
     surface. A STEP writer makes faces direct before it writes them, and a face it
     remakes loses its sub-shape label's name; made direct here, the writer remakes
     none and every face keeps its name. Face and edge ordinals are unchanged: the
-    kernel's modifier rebuilds the shape in the order it walks it."""
+    kernel's modifier rebuilds the shape in the order it walks it. The modifier
+    clears the ``Checked`` flag of the faces it visits; the model's shape keeps its
+    own (``unchecked``)."""
     from OCP.ShapeCustom import ShapeCustom
 
-    found = ShapeCustom.DirectFaces_s(shape)
+    with unchecked([shape]):
+        found = ShapeCustom.DirectFaces_s(shape)
     return shape if found is None or found.IsNull() else found
 
 
 def geometry_key(shape: Any) -> str:
-    """A key of a part's geometry: a digest of its binary BRep, no triangulation. Two
-    parts with the same key tessellate alike, in any process."""
+    """A key of a part's geometry: a digest of its binary BRep as the document writes
+    it (``unchecked``), no triangulation. Two parts with the same key tessellate
+    alike, in any process."""
     import io
 
     from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
 
     stream = io.BytesIO()
-    BinTools.Write_s(shape, stream, False, False, BinTools_FormatVersion_VERSION_4)
+    with unchecked([shape]):
+        BinTools.Write_s(shape, stream, False, False, BinTools_FormatVersion_VERSION_4)
     return hashlib.blake2b(stream.getvalue(), digest_size=16).hexdigest()
 
 
@@ -330,7 +372,8 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.stem}.{os.getpid()}.{threading.get_ident()}.xbf")
-    with _XCAF_LOCK:
+    shapes = [part.shape for part in tree.parts] if tree is not None else _free_shapes(doc)
+    with _XCAF_LOCK, unchecked(shapes):
         status = _application().SaveAs(doc, TCollection_ExtendedString(str(temporary), True))
     if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
         temporary.unlink(missing_ok=True)
@@ -344,6 +387,15 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)
     return True, size
+
+
+def _free_shapes(doc: Any) -> list[Any]:
+    from OCP.TDF import TDF_LabelSequence
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+
+    free = TDF_LabelSequence()
+    XCAFDoc_DocumentTool.ShapeTool_s(doc.Main()).GetFreeShapes(free)
+    return [XCAFDoc_ShapeTool.GetShape_s(free.Value(at)) for at in range(1, free.Length() + 1)]
 
 
 def _same_bytes(first: Path, second: Path) -> bool:
