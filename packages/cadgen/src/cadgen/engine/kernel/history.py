@@ -58,7 +58,7 @@ from OCP.TopExp import TopExp
 from OCP.TopoDS import TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedMapOfShape, TopTools_ListOfShape
 
-__all__ = ["History", "KINDS", "compose", "install", "listed", "recording", "stats", "uninstall"]
+__all__ = ["History", "KINDS", "by_ordinal", "compose", "install", "listed", "recording", "stats", "uninstall"]
 
 # The element kinds named, in the order a source is preferred by (FreeCAD's NameKey: a
 # vertex before an edge before a face), with the kernel's enum for each.
@@ -652,6 +652,31 @@ def _feeding(taken: list[_Record], results: list[Any]) -> list[_Record]:
             unopened.extend(record.inputs)
     feeding.reverse()
     return feeding
+
+
+def by_ordinal(source: Any, result: Any, how: str) -> History | None:
+    """The history of a maker that reported nothing, where its result maps one-to-one onto
+    the one shape it was given: as many vertices, edges and faces, each face bounded by the
+    edges of the same ordinals and each edge by the vertices of the same ordinals -- what a
+    copy or a placement of the shape is, element for element. Each element of the result
+    then comes from the element of its ordinal, ``how`` (``M`` for a transformation, ``I``
+    for a copy); None where the two do not map so."""
+    sources = [_map(source, kind) for kind in KINDS]
+    results = [_map(result, kind) for kind in KINDS]
+    if any(a.Extent() != b.Extent() for a, b in zip(sources, results)):
+        return None
+    for upper in (2, 1):
+        for ordinal in range(1, sources[upper].Extent() + 1):
+            lower = KINDS[upper - 1]
+            first = _map(sources[upper].FindKey(ordinal), lower)
+            second = _map(results[upper].FindKey(ordinal), lower)
+            if first.Extent() != second.Extent():
+                return None
+            if sorted(sources[upper - 1].FindIndex(first.FindKey(at)) for at in range(1, first.Extent() + 1)) != \
+                    sorted(results[upper - 1].FindIndex(second.FindKey(at)) for at in range(1, second.Extent() + 1)):
+                return None
+    return History(origins={(0, kind, ordinal): ((0, kind, ordinal, how, (1,)),)
+                            for kind in range(len(KINDS)) for ordinal in range(1, results[kind].Extent() + 1)})
 
 
 def _simple_copy_rows(taken: list[_Record]) -> list[_CopyRows] | None:

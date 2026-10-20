@@ -13,9 +13,11 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document
+from cadgen.engine.kernel import memo
 from cadgen.engine.kernel.trace import folded_atoms
 
 BLOCK = """
@@ -51,6 +53,46 @@ def pair():
     twin = fork.mirror(bd.Plane.YZ).moved(bd.Location((40, 0, 0)))
     twin.label = "twin"
     return bd.Compound(children=[fork, twin])
+"""
+
+
+BAKED = """
+import build123d as bd
+from build123d.topology.shape_core import downcast
+from cadgen.engine import xbf
+
+OFFSET = {offset}
+
+
+def bake(shape, kind):
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy, BRepBuilderAPI_GTransform, BRepBuilderAPI_Transform
+    from OCP.gp import gp_GTrsf
+    from OCP.TopLoc import TopLoc_Location
+
+    occt = shape.wrapped
+    if kind == "copy":
+        made = BRepBuilderAPI_Copy(occt)
+    elif kind == "gtransform":
+        made = BRepBuilderAPI_GTransform(occt.Located(TopLoc_Location()), gp_GTrsf(occt.Location().Transformation()),
+                                         True)
+    else:
+        made = BRepBuilderAPI_Transform(occt.Located(TopLoc_Location()), occt.Location().Transformation(), True)
+    return bd.Solid(downcast(made.Shape()))
+
+
+@xbf
+def wheel():
+    hub = bd.Cylinder(10, 5) - bd.Cylinder(3, 10)
+    return bake(bd.Pos(30, 0, 0) * hub, "transform")
+
+
+@xbf
+def baked():
+    hub = bd.Cylinder(10, 5) - bd.Cylinder(4, 10)
+    copied = bake(hub, "copy")
+    stretched = bake(bd.Pos(0, 30, 0) * hub, "gtransform")
+    return bd.Compound(children=[wheel().moved(bd.Location((0, 0, OFFSET))), copied.moved(bd.Location((60, 0, 0))),
+                                 stretched])
 """
 
 
@@ -148,6 +190,42 @@ class LabelTest(NamingCase):
         lost_twin = set(twin["faces"]) - set(twin_after["faces"])
         self.assertTrue(lost_direct)
         self.assertEqual(len(lost_twin), len(lost_direct), (lost_twin, lost_direct))
+
+
+class RawMakerTest(NamingCase):
+    def parts(self, offset: int) -> list[dict[str, list[str]]]:
+        return [self.derivations(self.names(BAKED, name="baked", part=part, offset=offset), "baked", part)
+                for part in range(3)]
+
+    def assert_named_from_the_hub(self, parts: list[dict[str, list[str]]]) -> None:
+        wheel, copied, stretched = parts
+        for names, step in ((wheel, ";M:bake.made"), (copied, None), (stretched, ";M:bake.made")):
+            # Every face and edge named, from the hub's own names: a placement or a copy
+            # made past build123d keeps them, a transformation with its step.
+            self.assertTrue(names["faces"] and names["edges"])
+            for name in names["faces"] + names["edges"]:
+                self.assertRegex(name, r"^[fe]:(wheel|baked)\.hub")
+                if step is not None:
+                    self.assertIn(step, name)
+                else:
+                    self.assertNotIn("bake.", name)
+
+    def test_a_shape_placed_or_copied_by_a_raw_maker_keeps_its_names(self) -> None:
+        first = self.parts(0)
+        self.assert_named_from_the_hub(first)
+        # A build that runs the root again and replays the child keeps every name, the
+        # child's replayed transformation included.
+        engine_build._PARTS.clear()
+        self.assertEqual(self.parts(5), first)
+
+    def test_a_maker_that_reports_nothing_names_by_ordinal(self) -> None:
+        composed = memo._history
+
+        def silent(feature, makers):
+            return None if feature.op in ("transform", "gtransform", "copy") else composed(feature, makers)
+
+        with mock.patch.object(memo, "_history", silent):
+            self.assert_named_from_the_hub(self.parts(0))
 
 
 if __name__ == "__main__":
