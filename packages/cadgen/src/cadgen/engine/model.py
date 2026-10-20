@@ -233,7 +233,24 @@ def read_step(path: Any) -> Any:
 def instance(shape: Any) -> Any:
     """A new placement of ``shape``: new objects, of the same classes and attributes,
     sharing its geometry -- its TopoDS handle, and its children's -- with no kernel
-    call. What a second call of a child model in one build hands back."""
+    call. What a second call of a child model in one build hands back.
+
+    What a model may change in place is each placement's own: every dict and list it holds
+    is copied (a joint added to one placement is not on another), and its joints are new
+    joints on the new objects, a joint connected to one in the same placement connected to
+    that one's copy."""
+    copied: dict[int, Any] = {}
+    made = _instance(shape, copied)
+    for joint in copied.values():
+        other = joint.connected_to
+        if other is not None and id(other) in copied:
+            joint.connected_to = copied[id(other)]
+    return made
+
+
+def _instance(shape: Any, copied: dict[int, Any]) -> Any:
+    import copy
+
     cls = type(shape)
     made = cls.__new__(cls)
     attrs = dict(shape.__dict__)
@@ -242,9 +259,16 @@ def instance(shape: Any) -> Any:
     wrapped = attrs.get("_wrapped")
     if wrapped is not None:
         attrs["_wrapped"] = wrapped.Located(wrapped.Location())
+    attrs = {name: dict(value) if type(value) is dict else list(value) if type(value) is list else value
+             for name, value in attrs.items()}
+    joints = attrs.get("joints")
+    if joints:
+        for label, joint in joints.items():
+            joints[label] = copied[id(joint)] = copy.copy(joint)
+            joints[label].parent = made
     made.__dict__.update(attrs)
     if children:
-        copies = [instance(child) for child in children]
+        copies = [_instance(child, copied) for child in children]
         for child in copies:
             child.__dict__["_NodeMixin__parent"] = made
         made.__dict__["_NodeMixin__children"] = copies

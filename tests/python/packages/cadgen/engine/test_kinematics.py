@@ -317,6 +317,37 @@ class JointMemoTest(_Folder):
         self.build("hinge", source.replace("(-10, 120)", "(-20, 100)"))
         self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.pairs[0].limits, ((-20.0, 100.0),))
 
+    def test_each_placement_of_a_child_holds_its_own_joints(self) -> None:
+        self.build("pegs", """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+            SEEN = {}
+
+
+            @xbf
+            def peg():
+                peg = bd.Box(2, 2, 6)
+                bd.RigidJoint("base", peg, bd.Location((0, 0, -3)))
+                return peg
+
+
+            @xbf
+            def pegs():
+                first, second, third = peg(), bd.Pos(10, 0, 0) * peg(), peg()
+                bd.RigidJoint("front", first, bd.Location())
+                bd.RigidJoint("rear", third, bd.Location())
+                SEEN.update(shared=first.joints is third.joints, first=sorted(first.joints), third=sorted(third.joints),
+                            parents=[joint.parent is shape for shape in (first, third) for joint in shape.joints.values()])
+                return bd.Compound(children=[first, second, third], label="pegs")
+            """)
+        import sys
+
+        seen = sys.modules["pegs"].SEEN
+        self.assertFalse(seen["shared"])
+        self.assertEqual((seen["first"], seen["third"]), (["base", "front"], ["base", "rear"]))
+        self.assertTrue(all(seen["parents"]), "each placement's joints are on it")
+
 
 class ChainTest(_Folder):
     def test_a_chain_of_rigid_prismatic_and_revolute_joints_makes_its_links(self) -> None:
