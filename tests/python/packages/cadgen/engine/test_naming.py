@@ -51,7 +51,8 @@ from cadgen.engine import xbf
 @xbf
 def pair():
     fork = bd.Box(20, 10, 10)
-    fork = fork - bd.Pos(0, 0, 5) * bd.Cylinder(3, 4)
+    trial = bd.fillet(fork.edges().filter_by(bd.Axis.X), 1)  # an attempt the model throws away
+{insert}    fork = fork - bd.Pos(0, 0, 5) * bd.Cylinder(3, 4)
 {append}    fork.label = "fork"
     twin = fork.mirror(bd.Plane.YZ).moved(bd.Location((40, 0, 0)))
     twin.label = "twin"
@@ -205,25 +206,27 @@ class AssignedNamesTest(NamingCase):
 
 class LabelTest(NamingCase):
     def test_a_label_names_the_feature_that_first_made_the_labelled_shape(self) -> None:
-        def both(append: str) -> list[dict[str, list[str]]]:
-            fields = {"name": "pair", "append": append}
+        def both(insert: str = "", append: str = "") -> list[dict[str, list[str]]]:
+            fields = {"name": "pair", "insert": insert, "append": append}
             found = [self.names(PAIR, part=0, **fields)]
             found.append(self.names(PAIR, part=1, **fields))
             return [self.derivations(names, "pair", part) for part, names in enumerate(found)]
 
-        direct, twin = both("")
+        direct, twin = both()
         # The twin is made of the labelled shape after it was labelled: the label names the
-        # feature that first made it, the box, never the cut that last did.
+        # feature that first made it, the box -- through the fillet the model tried on it
+        # and threw away -- never the cut that last did.
         self.assertTrue(any(name.startswith("f:fork.") for name in twin["faces"]), twin["faces"])
         self.assertFalse(any(name.startswith("f:fork.") for name in direct["faces"]))
         hole = "    fork = fork - bd.Pos(6, 0, 0) * bd.Cylinder(1, 30)\n"
-        direct_after, twin_after = both(hole)
-        # A cut appended after the label's shape was made takes nothing over: the twin
-        # loses exactly the names the direct part does -- the faces the new hole cuts.
-        lost_direct = set(direct["faces"]) - set(direct_after["faces"])
-        lost_twin = set(twin["faces"]) - set(twin_after["faces"])
-        self.assertTrue(lost_direct)
-        self.assertEqual(len(lost_twin), len(lost_direct), (lost_twin, lost_direct))
+        for edit in ({"append": hole}, {"insert": hole}):
+            direct_after, twin_after = both(**edit)
+            # A cut appended, or inserted, takes the label over from nothing: the twin loses
+            # exactly the names the direct part does.
+            lost_direct = set(direct["faces"]) - set(direct_after["faces"])
+            lost_twin = set(twin["faces"]) - set(twin_after["faces"])
+            self.assertTrue(lost_direct, edit)
+            self.assertEqual(len(lost_twin), len(lost_direct), (edit, lost_twin, lost_direct))
 
 
 class RawMakerTest(NamingCase):

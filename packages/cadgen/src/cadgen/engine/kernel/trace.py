@@ -142,6 +142,8 @@ _EXECUTIONS = itertools.count(1)
 # The operations that read a file: what they make is named per product of the file
 # (``_read_structure``).
 _FILE_READS = frozenset({"read_step", "import_step", "import_brep"})
+# The operations that answer a question of a shape and make nothing of it.
+_QUERIES = frozenset({"is_valid"})
 # The operations that only place or hold the shapes they are given: an element of an
 # input no name reaches stays unnamed in what they return, never theirs.
 _PLACEMENTS = frozenset({"moved", "located", "compound", "copy", "deepcopy"})
@@ -707,13 +709,19 @@ class Trace:
                 found = unwrapped[index] = self.unwrapped(index)
             return found
 
+        # What each feature was made of is its first input: the shape it changes. (Its other
+        # inputs -- a tool, the edges a fillet rounds -- are not, and an edge left alone keeps
+        # the maker of the shape it was first made in.) A feature counts as made of it only
+        # when something is made of what it made in turn: an attempt the model threw away (a
+        # fillet it found wanting) branches nothing.
+        real = [feature for feature in self.features if through(feature.index) == feature.index]
+        used = {through(up) for feature in real if feature.operation not in _QUERIES
+                for up in feature.inputs if up is not None and through(up) != feature.index}
         consumers: Counter = Counter()
-        for feature in self.features:
-            if through(feature.index) != feature.index:
-                continue  # a placement or a wrapper makes nothing of what it holds
-            for given in {through(up) for up in feature.inputs if up is not None}:
-                if given != feature.index:
-                    consumers[given] += 1
+        for feature in real:
+            first = next((up for up in feature.inputs if up is not None), None)
+            if first is not None and through(first) != feature.index and feature.index in used:
+                consumers[through(first)] += 1
         for feature in self.features:
             feature.label = feature.pinned_at = None
         labelled: dict[str, list[int]] = {}
