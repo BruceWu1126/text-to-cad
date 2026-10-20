@@ -38,26 +38,42 @@ def block():
 """
 
 
+PAIR = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def pair():
+    fork = bd.Box(20, 10, 10)
+    fork = fork - bd.Pos(0, 0, 5) * bd.Cylinder(3, 4)
+{append}    fork.label = "fork"
+    twin = fork.mirror(bd.Plane.YZ).moved(bd.Location((40, 0, 0)))
+    twin.label = "twin"
+    return bd.Compound(children=[fork, twin])
+"""
+
+
 class NamingCase(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-naming-")).resolve()
         self.addCleanup(lambda: shutil.rmtree(self.folder, ignore_errors=True))
 
-    def names(self, text: str, name: str = "block", **fields: str) -> dict[str, list[str]]:
-        """Build ``text`` (formatted with ``fields``) afresh and read its first part's names."""
+    def names(self, text: str, name: str = "block", part: int = 0, **fields: str) -> dict[str, list[str]]:
+        """Build ``text`` (formatted with ``fields``) and read one part's names."""
         script = self.folder / f"{name}.py"
         script.write_text(textwrap.dedent(text.format(**fields)), encoding="utf-8")
         os.utime(script, ns=(time.time_ns(), time.time_ns()))
         reports = engine_build.build(script, [name], cwd=self.folder)
         self.assertTrue(all(report["ok"] for report in reports), reports)
-        prototype = document.load(self.folder / f"{name}.xbf").prototypes[0]
+        prototype = document.load(self.folder / f"{name}.xbf").prototypes[part]
         return {"faces": [prototype.face_names[k] for k in sorted(prototype.face_names)],
                 "edges": [prototype.edge_names[k] for k in sorted(prototype.edge_names)]}
 
-    def derivations(self, names: dict[str, list[str]], name: str = "block") -> dict[str, list[str]]:
+    def derivations(self, names: dict[str, list[str]], name: str = "block", part: int = 0) -> dict[str, list[str]]:
         """``names`` with every folded atom spelled out, from the sidecar's table."""
         sidecar = json.loads((self.folder / f"{name}.xbf.json").read_text(encoding="utf-8"))
-        table = sidecar["parts"][0]["table"]
+        table = sidecar["parts"][part]["table"]
 
         def spelled(text: str) -> str:
             for atom in folded_atoms(text):
@@ -109,6 +125,29 @@ class AssignedNamesTest(NamingCase):
         for kind in ("faces", "edges"):
             self.assertNotEqual(before[kind], after[kind])
             self.assertEqual([name.replace("block.relief", "block.arch") for name in before[kind]], after[kind])
+
+
+class LabelTest(NamingCase):
+    def test_a_label_names_the_feature_that_first_made_the_labelled_shape(self) -> None:
+        def both(append: str) -> list[dict[str, list[str]]]:
+            fields = {"name": "pair", "append": append}
+            found = [self.names(PAIR, part=0, **fields)]
+            found.append(self.names(PAIR, part=1, **fields))
+            return [self.derivations(names, "pair", part) for part, names in enumerate(found)]
+
+        direct, twin = both("")
+        # The twin is made of the labelled shape after it was labelled: the label names the
+        # feature that first made it, the box, never the cut that last did.
+        self.assertTrue(any(name.startswith("f:fork.") for name in twin["faces"]), twin["faces"])
+        self.assertFalse(any(name.startswith("f:fork.") for name in direct["faces"]))
+        hole = "    fork = fork - bd.Pos(6, 0, 0) * bd.Cylinder(1, 30)\n"
+        direct_after, twin_after = both(hole)
+        # A cut appended after the label's shape was made takes nothing over: the twin
+        # loses exactly the names the direct part does -- the faces the new hole cuts.
+        lost_direct = set(direct["faces"]) - set(direct_after["faces"])
+        lost_twin = set(twin["faces"]) - set(twin_after["faces"])
+        self.assertTrue(lost_direct)
+        self.assertEqual(len(lost_twin), len(lost_direct), (lost_twin, lost_direct))
 
 
 if __name__ == "__main__":

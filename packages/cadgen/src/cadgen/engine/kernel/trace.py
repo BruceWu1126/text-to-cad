@@ -26,8 +26,11 @@ part's feature, a call no element of this part descends from -- renames nothing 
 an inserted statement renames only what it touches, and renaming a variable renames
 that feature's elements and nothing else. An author's label pins the
 name instead, in what is made of the labelled shape: a shape the model labels
-and hands to another construction names the feature that made it by that label
-(``lid``) in every part made from that call on that the feature is an ancestor
+and hands to another construction names the feature that FIRST made it by that label
+(``lid``) -- back from the feature that last made it, along what each was made of, to
+the first of the features that alone made something of the one before (``_labels``),
+so a feature applied after it never takes the label over -- in every part made from
+that call on that the feature is an ancestor
 of, the part's first feature to claim a label keeping it -- never in a part made
 before the label reached a construction, and not in the part that shape is itself:
 there (an assembly's leaf) the label names the occurrence, and the elements keep
@@ -405,6 +408,10 @@ class Trace:
         self._copy_labels: dict[str, int] = {}
         self._stems: dict[str, int] = {}
         self._labelled: dict[str, list[int]] = {}
+        # Per feature whose shape was handed on labelled, the label and the call that
+        # handed it on first (``_pin``); resolved to the features they name (``_labels``).
+        self._pinned: dict[int, tuple[str, int]] = {}
+        self._labels_count = -1
         # Per model frame making calls, the assignment it is executing (``_execution``):
         # the frame, the statement, the instruction, the frame it called and the
         # execution's number. Held only while the run records (``release``).
@@ -645,17 +652,65 @@ class Trace:
         return feature
 
     def _pin(self, index: int, label: object, *, at: int) -> None:
-        """Name feature ``index`` by the author's ``label``, the first one it is
-        handed on with -- by the call of feature ``at`` -- in what is made of the shape
-        it made from that call on (:meth:`_names`); a label that is an occurrence token
-        (a tree's, not an author's) pins nothing. Of a part's features, the first to
-        claim a label keeps it."""
+        """Note that the shape feature ``index`` made is handed on labelled ``label`` --
+        the first label it is handed on with, by the call of feature ``at``. The label
+        names the feature that first made that shape (``_labels``) in what is made of it
+        from that call on (:meth:`_names`). Of a part's features, the first to claim a
+        label keeps it."""
         if not isinstance(label, str) or not label:
             return
-        feature = self.features[self.unwrapped(index)]
-        if feature.label is None:
-            feature.label, feature.pinned_at = identifier(label), at
-            bisect.insort(self._labelled.setdefault(feature.label, []), feature.index)
+        maker = self.unwrapped(index)
+        if maker not in self._pinned:
+            self._pinned[maker] = (identifier(label), at)
+
+    def _labels(self) -> None:
+        """Resolve each label to the feature it names, once the run's features are all
+        recorded (and again if more were): the feature that FIRST made the labelled shape
+        -- back from the one that last made it along what each was made of (its first
+        input), through every feature that alone made something of the one before, to
+        the first, stopping at a shape something else was made of too, at a shape another
+        label names, and at an assembly. So a feature applied to a labelled shape after
+        another -- a cut appended, one inserted -- never takes the label over, and the
+        elements the label names keep their names."""
+        if self._labels_count == len(self.features):
+            return
+        unwrapped: dict[int, int] = {}
+
+        def through(index: int) -> int:
+            found = unwrapped.get(index)
+            if found is None:
+                found = unwrapped[index] = self.unwrapped(index)
+            return found
+
+        consumers: Counter = Counter()
+        for feature in self.features:
+            if through(feature.index) != feature.index:
+                continue  # a placement or a wrapper makes nothing of what it holds
+            for given in {through(up) for up in feature.inputs if up is not None}:
+                if given != feature.index:
+                    consumers[given] += 1
+        for feature in self.features:
+            feature.label = feature.pinned_at = None
+        labelled: dict[str, list[int]] = {}
+        for maker, (label, at) in sorted(self._pinned.items(), key=lambda pin: (pin[1][1], pin[0])):
+            root = maker
+            seen = {root}
+            while self.features[root].operation != "compound":
+                given = next((up for up in self.features[root].inputs if up is not None), None)
+                if given is None:
+                    break
+                given = through(given)
+                pinned = self._pinned.get(given)
+                if given in seen or consumers[given] > 1 or (pinned is not None and pinned[0] != label):
+                    break
+                seen.add(given)
+                root = given
+            feature = self.features[root]
+            if feature.label is None:
+                feature.label, feature.pinned_at = label, at
+                bisect.insort(labelled.setdefault(label, []), root)
+        self._labelled = labelled
+        self._labels_count = len(self.features)
 
     def unwrapped(self, index: int) -> int:
         """The feature that made what feature ``index`` returned, through the features
@@ -1418,6 +1473,7 @@ class _Names:
     def _claimer(self, label: str) -> tuple[int, int] | None:
         if label in self._claims:
             return self._claims[label]
+        self.trace._labels()
         claims = [(index, -1) for index in self.trace._labelled.get(label, ())
                   if index in self and self._pins(index)]
         copied = self.copies & self.trace._copy_labels.get(label, 0)
@@ -1439,6 +1495,7 @@ class _Names:
         return None
 
     def _labelled_name(self, index: int) -> str | None:
+        self.trace._labels()
         label = self.trace.features[index].label
         if label is not None and self._pins(index) and self._claimer(label) == (index, -1):
             return label

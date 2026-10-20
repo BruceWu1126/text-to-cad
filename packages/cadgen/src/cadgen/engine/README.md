@@ -200,7 +200,10 @@ same statement made on the way are `<function>.<target>_<operation><n>`
 expression, an expression statement) is `<function>.<operation><count>`
 (`peg.make_cylinder1`), counted among the part's unassigned calls. So inserting a
 feature renames only what it touches, and renaming a variable renames that feature's
-elements and nothing else. A warm build that hands a part back unchanged keeps its names
+elements and nothing else. An author's `label` on a shape handed to a later construction
+names, in what that construction makes, the feature that first made the labelled shape
+(back along what each feature was made of, to where the shape stops being one chain):
+a cut appended to it after takes nothing over. A warm build that hands a part back unchanged keeps its names
 while the functions they come from assign the same targets; a rename names it again.
 
 ## Body retention
