@@ -111,6 +111,7 @@ and a new process computes everything. ``CADGEN_ENGINE_MEMO=0`` turns hits off a
 
 from __future__ import annotations
 
+import array
 import contextlib
 import enum
 import functools
@@ -724,17 +725,20 @@ def clear() -> None:
 
 class _BodyLog:
     """What one run of a model body did, kept to replay it (**Bodies**): its events in
-    order -- ``("call", entry, op, frame, objects, labels, handles, results, returned)`` for
-    a call it hit or made, ``("maker", entry, inputs)`` for a maker it ran, ``("body",
-    record)`` for a body it called -- the checks its bytes are held to (a callable and what
-    it answered), the keys it interned with their ids, and whether it can be replayed."""
+    order -- ``("call", entry, op, frame, inputs, results, labels, *objects, *handles,
+    *results, *returned)`` for a call it hit or made (one flat tuple: a log holds tens of
+    thousands, and the collector walks every container), ``("maker", entry)`` for a maker
+    it ran, ``("body", record)`` for a body it called -- the checks its bytes are held to (a
+    callable and what it answered), the keys it interned and, apart, their ids, and whether
+    it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "retainable")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
         self.checks: list[tuple[Callable[[], Any], Any]] = []
-        self.keys: list[tuple[tuple, int]] = []
+        self.keys: list[tuple] = []
+        self.ids = array.array("q")
         self.retainable = True
 
 
@@ -856,7 +860,9 @@ def _replay(record: _Body, state: _Run) -> Any:
     for event in record.log.events:
         kind = event[0]
         if kind == "call":
-            _, entry, op, frame, objects, labels, handles, results, returned = event
+            _, entry, op, frame, n_in, n_out, labels = event[:7]
+            objects, handles = event[7:7 + n_in], event[7 + n_in:7 + n_in + n_out]
+            results, returned = event[7 + n_in + n_out:7 + n_in + 2 * n_out], event[7 + n_in + 2 * n_out:]
             inputs = state.trace.given(objects, state.feature_of)
             _rebind(entry, state)
             inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
@@ -865,13 +871,13 @@ def _replay(record: _Body, state: _Run) -> Any:
             copied = _copy_origins(feature, state)
             entry.refresh(feature.index, state, copied)
         elif kind == "maker":
-            _, entry, inputs = event
+            entry = event[1]
             _rebind(entry, state)
             entry.refresh(None, state, {})
         elif event[1].name not in state.done:
             _replay(event[1], state)
     with _LOCK:
-        for key, found in record.log.keys:
+        for key, found in zip(record.log.keys, record.log.ids):
             _KEY_IDS[key] = found
             _KEY_IDS.move_to_end(key)
     record.generation = generation
@@ -900,8 +906,8 @@ def _log_call(state: _Run, entry: "_Entry", op: str, frame: tuple, inputs: list,
               results: list, returned: list) -> None:
     objects = [shape for shape, _index, _handle in inputs]
     labels = [getattr(shape, "__dict__", {}).get("label") for shape in objects]
-    state.bodies[-1].events.append(("call", entry, op, frame, objects, labels, list(feature.results),
-                                    list(results), list(returned)))
+    state.bodies[-1].events.append(("call", entry, op, frame, len(objects), len(feature.results), tuple(labels),
+                                    *objects, *feature.results, *results, *returned))
 
 
 # --- the call -----------------------------------------------------------------------------
@@ -1365,7 +1371,7 @@ class _Maker:
             _STATS["hits"] += 1
             state.tally["hits"] += 1
             if state.bodies:
-                state.bodies[-1].events.append(("maker", entry, list(inputs)))
+                state.bodies[-1].events.append(("maker", entry))
             return entry.snapshot.answer
         _STATS["misses"] += 1
         state.tally["misses"] += 1
@@ -1403,7 +1409,7 @@ class _Maker:
         _keep(entry)
         self.entry = entry
         if state.bodies:
-            state.bodies[-1].events.append(("maker", entry, list(inputs)))
+            state.bodies[-1].events.append(("maker", entry))
         return answer
 
     def key(self) -> tuple[int, list]:
@@ -1559,7 +1565,9 @@ def _intern(key: tuple) -> int:
             _KEY_IDS.move_to_end(key)
     state = getattr(_LOCAL, "run", None)
     if state is not None and state.bodies:
-        state.bodies[-1].keys.append((key, found))
+        log = state.bodies[-1]
+        log.keys.append(key)
+        log.ids.append(found)
     return found
 
 
