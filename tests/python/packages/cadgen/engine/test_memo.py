@@ -301,6 +301,27 @@ class VertexTest(MemoCase):
         self.assertEqual(warm, cold)
 
 
+class ConfigurationTest(MemoCase):
+    def test_an_operation_on_a_configured_assembly_is_keyed_by_its_configurations(self) -> None:
+        import build123d as bd
+
+        from cadgen.engine import mechanism
+
+        self.assertEqual(memo.CONFIGURATIONS, mechanism.CONFIGURATIONS)
+
+        def model(angle):
+            assembly = bd.Compound(children=[bd.Solid.make_box(1, 2, 3)], label="arm")
+            mechanism.configuration(assembly, "open", hinge=angle)
+            placed = assembly.moved(bd.Location((5, 0, 0)))
+            return placed.__dict__.get(mechanism.CONFIGURATIONS)
+
+        first, _, _ = _run(model, 10.0)
+        self.assertEqual(first["open"]["hinge"], (10.0,))
+        edited, delta, _ = _run(model, 20.0)
+        self.assertEqual(edited["open"]["hinge"], (20.0,), "the placement carries the edited configuration")
+        self.assertGreater(delta["misses"], 0)
+
+
 class MakerTest(MemoCase):
     def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
         from build123d import Solid

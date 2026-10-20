@@ -175,6 +175,7 @@ _EDGE, _VERTEX, _FACE, _COMPOUND = int(TopAbs_EDGE), int(TopAbs_VERTEX), int(Top
 # The attribute a model's painted face colours live in (``cadgen.engine.paint``).
 FACE_COLORS = "xbf_face_colors"
 FACE_MATERIALS = "xbf_face_materials"
+CONFIGURATIONS = "xbf_configurations"  # an assembly's poses by name (``mechanism.configuration``)
 
 
 class _Unkeyable(Exception):
@@ -2021,6 +2022,9 @@ def _shape_key(shape: Any, state: _Run) -> int:
         tuple(sorted((int(ordinal), _normalize(tuple(rgba), state)) for ordinal, rgba in face_colors.items())),
         tuple(sorted((int(ordinal), _normalize(value, state)) for ordinal, value in dict(face_materials).items())),
         _normalize(state_dict.get("joints") or {}, state),  # a hit hands back the joints the first run held
+        # and the configurations an assembly was given (``mechanism.configuration``): a hit of an
+        # operation on it hands back what the first run held, so a configuration is its input.
+        _normalize(state_dict.get(CONFIGURATIONS) or {}, state),
     )
     children = tuple(_shape_key(child, state) for child in state_dict.get("_NodeMixin__children") or ())
     return _intern((placed, attrs, children))
