@@ -1018,12 +1018,32 @@ def _label_name(label: Any) -> str:
 
 # OCCT's name for an occurrence its file left unnamed: the label it got (`=>[0:1:1:2]`).
 _PLACEHOLDER = re.compile(r"^=>\[[0-9:]*\]$")
+# ISO 10303-21's string escapes as a name can still hold them: a file that escaped its
+# backslashes once too often leaves them for the reader to undo (`\\X2\\51F8\\X0\\`).
+_ESCAPE = re.compile(r"\\{1,2}X2\\{1,2}((?:[0-9A-Fa-f]{4})+)\\{1,2}X0\\{1,2}|\\{1,2}X4\\{1,2}((?:[0-9A-Fa-f]{8})+)"
+                     r"\\{1,2}X0\\{1,2}|\\{1,2}X\\{1,2}([0-9A-Fa-f]{2})|\\{1,2}S\\{1,2}(.)")
 
 
 def step_name(text: str) -> str:
-    """A name as a STEP file means it: OCCT's placeholder for an unnamed occurrence
-    (``=>[0:1:1:2]``) is no name at all, so the product's name stands."""
-    return "" if _PLACEHOLDER.match(text) else text
+    """A name as a STEP file means it: its ``\\X2\\``/``\\X4\\`` (UTF-16, UTF-32), ``\\X\\``
+    (ISO 8859-1) and ``\\S\\`` escapes decoded, and OCCT's placeholder for an unnamed
+    occurrence (``=>[0:1:1:2]``) no name at all, so the product's name stands."""
+    if _PLACEHOLDER.match(text):
+        return ""
+    if "\\" not in text:
+        return text
+
+    def decode(match: Any) -> str:
+        wide, widest, byte, shifted = match.groups()
+        if wide:
+            return bytes.fromhex(wide).decode("utf-16-be", errors="replace")
+        if widest:
+            return bytes.fromhex(widest).decode("utf-32-be", errors="replace")
+        if byte:
+            return bytes.fromhex(byte).decode("latin-1")
+        return chr(ord(shifted) + 128)
+
+    return _ESCAPE.sub(decode, text)
 
 
 def _label_color(label: Any) -> tuple | None:

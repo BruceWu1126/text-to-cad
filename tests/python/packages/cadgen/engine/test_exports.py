@@ -151,6 +151,17 @@ class StepNameTest(unittest.TestCase):
         self.assertEqual(paths, ["Board", "凸台-拉伸4"])
         self.assertEqual(labels, ["Board", "凸台-拉伸4"])
 
+    def test_escaped_names_read_as_their_text(self) -> None:
+        text = self.step.read_text(encoding="utf-8")
+        for escaped in (r"\X2\51F853F0\X0\-\X2\62C94F38\X0\4", r"\\X2\\51F853F0\\X0\\-\\X2\\62C94F38\\X0\\4"):
+            path = self.folder / "escaped.step"
+            path.write_text(text.replace("凸台-拉伸4", escaped), encoding="utf-8")
+            paths, labels = self.names(path)
+            self.assertEqual(paths[-1], "凸台-拉伸4", escaped)
+            self.assertEqual(labels[-1], "凸台-拉伸4", escaped)
+            self.assertEqual(document.Loaded(path).prototypes[-1].name, "凸台-拉伸4", escaped)
+        self.assertEqual(document.step_name("caf\\X\\E9 \\X4\\0001F600\\X0\\"), "café 😀")
+
 
 if __name__ == "__main__":
     unittest.main()
