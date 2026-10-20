@@ -2228,7 +2228,11 @@ class _Made:
             return ("held", self.parent.base(None, state), self.kind, self.index, applied)
         parent = shape.__dict__.get("topo_parent")
         if parent is None:
-            raise _Unkeyable("a sub-shape that lost its topo_parent")
+            # It was handed another shape's attributes, ``topo_parent`` None among them --
+            # build123d's fuse copies a sketch's onto the first face it fuses, a face of a
+            # text's compound -- so no ancestor names it now: the root holding its TShape
+            # does, as it names a shape cast afresh out of a compound (``_held``).
+            return ("held", *_held_head(self.tshape, self.kind), applied)
         index = self.index
         parent_wrapped = _wrapped(parent)
         if parent_wrapped is not None and parent_wrapped.TShape() != self.parent.tshape:
