@@ -226,6 +226,32 @@ test("picking: a STEP's Select: an edge near the pointer, else the face under it
   document.release();
 });
 
+test("a highlight's screen-space lines are registered with the viewport showing the scene, as a STEP's", async () => {
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const scene = createXbfScene(THREE, document);
+  const registry = (size) => {
+    const held = new Set();
+    return { held, registerScreenSpaceLineMaterial: (material) => { held.add(material); material.resolution.set(...size); },
+      unregisterScreenSpaceLineMaterial: material => held.delete(material) };
+  };
+  const first = registry([1239, 1273]);
+  scene.setLineRegistry(first);
+  scene.setElementHighlight({ hovered: "i1/edge/1", selected: [] });
+  assert.equal(first.held.size, 1, "the hovered edge's line, registered as it is made");
+  const [material] = first.held;
+  assert.deepEqual(material.resolution.toArray(), [1239, 1273], "at the viewport's drawing buffer");
+  // A new viewport (a restored context) takes every line the scene holds.
+  const second = registry([826, 849]);
+  scene.setLineRegistry(second);
+  assert.deepEqual([first.held.size, second.held.size], [0, 1]);
+  scene.setElementHighlight({ hovered: null, selected: [] });
+  assert.equal(second.held.size, 0, "a dropped highlight is unregistered");
+  scene.setElementHighlight({ hovered: null, selected: ["i1/edge/1"] });
+  scene.dispose();
+  assert.equal(second.held.size, 0, "and every line with the scene");
+  document.release();
+});
+
 test("a sibling draws the same geometry with its own objects; versions and facts are asked of the engine", async () => {
   const { fetch, asked } = engine({ version: { version: "9-9", patch: { seconds: 0.1 } } });
   const document = await loadXbfDocument(URL_BASE, { fetch });

@@ -479,12 +479,22 @@ export function createXbfScene(THREE, document) {
   // A face or edge under the pointer is drawn as a picked one is.
   const fillMaterial = new THREE.MeshBasicMaterial({ color: INK.highlightColor, transparent: INK.highlightOpacity < 0.999, opacity: INK.highlightOpacity,
     depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide, toneMapped: false });
-  const lineContext = { LineSegments2, LineSegmentsGeometry, LineMaterial };
+  // Every screen-space line material the scene has made, registered with the viewport that shows
+  // it (`setLineRegistry`), as a STEP scene's are: the viewport keeps their `resolution` at its
+  // drawing buffer's size across resizes and pixel-ratio changes, and keeps its pixel ratio while
+  // the camera moves so their widths do not jump.
+  const screenSpaceLineMaterials = new Set();
+  let lineRegistry = null;
+  const lineContext = {
+    LineSegments2, LineSegmentsGeometry, LineMaterial,
+    registerScreenSpaceLineMaterial: material => lineRegistry?.registerScreenSpaceLineMaterial?.(material),
+    unregisterScreenSpaceLineMaterial: material => lineRegistry?.unregisterScreenSpaceLineMaterial?.(material)
+  };
   const highlightLine = (positions, onTop) => {
     const line = createScreenSpaceLineSegments(lineContext, positions, {
       color: INK.highlightColor, opacity: INK.highlightOpacity, lineWidth: EDGE_HIGHLIGHT_PIXELS, renderOrder: HIGHLIGHT_ORDER + 1,
       depthTest: !onTop, depthWrite: false, depthBias: topologyLineDepthBiasForWidth(EDGE_HIGHLIGHT_PIXELS)
-    });
+    }, screenSpaceLineMaterials);
     if (!line) return null;
     line.raycast = () => {};
     syncMaterialClipPlanes(line.material, clipPlanes);
@@ -542,7 +552,8 @@ export function createXbfScene(THREE, document) {
       // attribute a disposed geometry holds, so that one is let go of first.
       if (geometry.userData.xbfSharedPosition) geometry.deleteAttribute("position");
       geometry.dispose();
-      // A line's material is its own; the fill's is shared.
+      // A line's material is its own, registered with the viewport until now; the fill's is shared.
+      child.userData.beforeDispose?.();
       if (child.material !== fillMaterial) child.material.dispose();
     }
   }
@@ -716,6 +727,21 @@ export function createXbfScene(THREE, document) {
       partInk = { hovered: hovered.filter(id => scene.hasPart(id)), selected: selected.filter(id => scene.hasPart(id)) };
       applySurfaces();
     },
+    /**
+     * The viewport the scene is shown in, as its screen-space lines' registry
+     * (`registerScreenSpaceLineMaterial` / `unregisterScreenSpaceLineMaterial`, a viewer runtime's),
+     * or null: every line material the scene holds moves to it, and every one it makes later is
+     * registered with it, as a STEP scene's are.
+     */
+    setLineRegistry(registry) {
+      const next = disposed ? null : registry || null;
+      if (next === lineRegistry) return;
+      for (const found of screenSpaceLineMaterials) lineRegistry?.unregisterScreenSpaceLineMaterial?.(found);
+      lineRegistry = next;
+      for (const found of screenSpaceLineMaterials) lineRegistry?.registerScreenSpaceLineMaterial?.(found);
+    },
+    /** How many screen-space line materials the scene holds now. */
+    get screenSpaceLineMaterialCount() { return screenSpaceLineMaterials.size; },
     /** Light elements (ids `i3/face/12`): the one under the pointer and those picked. */
     setElementHighlight({ hovered = null, selected = [] } = {}) {
       if (disposed) return;
@@ -804,6 +830,9 @@ export function createXbfScene(THREE, document) {
       root.removeFromParent();
       for (const object of overlayObjects.values()) dropOverlay(object);
       overlayObjects.clear();
+      for (const found of screenSpaceLineMaterials) lineRegistry?.unregisterScreenSpaceLineMaterial?.(found);
+      screenSpaceLineMaterials.clear();
+      lineRegistry = null;
       ink.dispose();
       look.dispose();
       for (const found of materials.values()) found.dispose();

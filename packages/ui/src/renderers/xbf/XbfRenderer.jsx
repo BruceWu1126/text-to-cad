@@ -187,11 +187,16 @@ function XbfSurface({ view, data }) {
     active: selected.length > 0 || isolatedIds.length > 0 || toolMode !== XBF_TOOL.SELECT || measure.selected.length > 0,
     handle: () => escapeRef.current()
   }), [selected.length, isolatedIds.length, toolMode, measure.selected.length]);
+  // An xbf's CAD edges are hairlines (`xbfScene.js`): while the view draws them the viewport keeps
+  // its pixel ratio through a camera gesture, as a STEP's does for its edges, so a press or a
+  // drag never softens and shifts the model (the edges the view draws are only known after the
+  // shell resolves them; until then a view draws them, as every display mode but Shaded does).
+  const [edgesDrawn, setEdgesDrawn] = useState(true);
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    live, escape, measurements, deleteSelection: measure.removeSelected,
+    live, escape, measurements, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
@@ -211,11 +216,18 @@ function XbfSurface({ view, data }) {
   const edges = shell.frame.resolvedScene?.view?.edges || null;
   const edgesKey = JSON.stringify(edges);
   useEffect(() => {
-    if (!scene || !edges) return;
+    if (!edges) return;
+    setEdgesDrawn(edges.enabled !== false);
+    if (!scene) return;
     scene.setEdgeLook(edges);
     shell.requestRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, edgesKey]);
+  // The scene's screen-space lines (its highlights) are registered with the viewport showing it,
+  // as a STEP's are: the viewport keeps their resolution at its drawing buffer's and counts them.
+  // The viewport's runtime is made after the first render and again after a lost context, so
+  // every render hands the scene the one there is (the scene ignores the same one twice).
+  useEffect(() => { scene?.setLineRegistry(viewportRef.current?.runtimeRef.current || null); });
   const previewScene = usePreviewScene(scene, previewing);
   useEffect(() => { previewScene?.setEdgeLook({ enabled: false }); }, [previewScene]);
   const previewView = useMemo(() => ({ scene: previewScene }), [previewScene]);
