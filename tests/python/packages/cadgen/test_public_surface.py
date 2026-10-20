@@ -99,6 +99,8 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "mcp": frozenset(),
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
+    # The engine's verbs (cadgen.engine.cli), each with its own options.
+    "xbf": frozenset({"verb", "build", "export", "serve", "status", "stop", "daemon"}),
     "export": frozenset({"path"}),
 }
 

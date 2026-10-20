@@ -1,0 +1,253 @@
+"""The kernel memo as the engine holds it: a hit is the first run's objects, booleans
+leave their inputs alone and write their own p-curves, a hit's restore costs what
+changed, a container registers at its children's cost, a maker a model runs is a call."""
+
+from __future__ import annotations
+
+import io
+import os
+import unittest
+from unittest import mock
+
+from cadgen.engine.kernel import memo
+
+
+def _delta(before: dict, after: dict) -> dict:
+    return {key: after[key] - before.get(key, 0) for key in after if key in ("hits", "misses", "unkeyable",
+                                                                             "unreplayable", "errors")}
+
+
+def _run(function, *args):
+    before = memo.stats()
+    with memo.run(None) as run:
+        result = function(*args)
+    return result, _delta(before, memo.stats()), run
+
+
+def _bytes(shape) -> bytes:
+    from OCP.BinTools import BinTools
+
+    stream = io.BytesIO()
+    BinTools.Write_s(shape, stream)
+    return stream.getvalue()
+
+
+class MemoCase(unittest.TestCase):
+    def setUp(self) -> None:
+        memo.install()
+        memo.clear()
+        self.addCleanup(memo.clear)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        os.environ.pop("CADGEN_ENGINE_MEMO", None)
+
+
+class HitTest(MemoCase):
+    @staticmethod
+    def _model(radius=1.0):
+        from build123d import Solid, fillet
+
+        box = Solid.make_box(4, 4, 4)
+        hole = Solid.make_cylinder(radius, 10)
+        cut = box - hole
+        return box, cut, fillet(cut.edges().filter_by(lambda e: e.length > 3.9), 0.4)
+
+    def test_a_hit_is_the_first_run_s_objects(self) -> None:
+        (box, cut, rounded), cold, run = _run(self._model)
+        self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
+        (box2, cut2, rounded2), hot, _ = _run(self._model)
+        self.assertEqual(hot["misses"], 0)
+        self.assertIs(box2, box)
+        self.assertIs(cut2, cut)
+        # build123d's fillet() wraps what the hit hands back: the same geometry.
+        self.assertTrue(rounded2.wrapped.TShape() == rounded.wrapped.TShape())
+        self.assertEqual(run.tally["misses"], cold["misses"])
+
+    def test_every_miss_makes_its_downstream_miss(self) -> None:
+        (_box, cut, rounded), _, _ = _run(self._model)
+        (box2, cut2, rounded2), hot, _ = _run(self._model, 1.2)
+        self.assertIsNot(cut2, cut)
+        self.assertIsNot(rounded2, rounded)
+        self.assertGreaterEqual(hot["misses"], 3)
+
+    def test_with_hits_off_every_call_runs(self) -> None:
+        (box, _cut, _rounded), _, _ = _run(self._model)
+        os.environ["CADGEN_ENGINE_MEMO"] = "0"
+        (box2, _cut2, _rounded2), hot, _ = _run(self._model)
+        self.assertEqual(hot["hits"], 0)
+        self.assertIsNot(box2, box)
+
+
+class BooleanTest(MemoCase):
+    def test_a_boolean_leaves_its_inputs_and_writes_its_own_pcurves(self) -> None:
+        from build123d import Location, Polygon, Rectangle, extrude
+        from OCP.BRep import BRep_Tool
+        from OCP.Geom import Geom_Plane
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+        from OCP.TopExp import TopExp
+        from OCP.TopoDS import TopoDS
+        from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
+
+        from cadgen.engine.kernel.history import listed
+
+        def edges(shape):
+            found = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(shape.wrapped, TopAbs_EDGE, found)
+            return [found.FindKey(ordinal) for ordinal in range(1, found.Extent() + 1)]
+
+        def model():
+            # Extrusions: their sides are planes with no p-curve stored.
+            plate = extrude(Rectangle(20, 20), 4)
+            rib = extrude(Polygon((0, 0), (6, 0), (6, 3), (0, 6), align=None), 6).moved(Location((0, 0, 4)))
+            given = {edge.TShape(): edge.TShape().Curves().Extent() for shape in (plate, rib) for edge in edges(shape)}
+            return given, plate.fuse(rib)
+
+        (given, result), _, _ = _run(model)
+        self.assertEqual({tshape: tshape.Curves().Extent() for tshape in given}, given,
+                         "the boolean writes into no edge it was given")
+        made = [edge for edge in edges(result) if edge.TShape() not in given]
+        self.assertTrue(made)
+        ancestors = TopTools_IndexedDataMapOfShapeListOfShape()
+        TopExp.MapShapesAndAncestors_s(result.wrapped, TopAbs_EDGE, TopAbs_FACE, ancestors)
+        for edge in made:
+            faces = {face.TShape(): face for face in listed(ancestors.FindFromKey(edge))}
+            planes = sum(isinstance(BRep_Tool.Surface_s(TopoDS.Face_s(face)), Geom_Plane) for face in faces.values())
+            self.assertGreater(planes, 0)
+            self.assertGreaterEqual(edge.TShape().Curves().Extent(), 1 + planes, "its curve on each plane it bounds")
+
+
+class RestoreCostTest(MemoCase):
+    """A hit's restore costs the rows later operations left on its result, never the
+    result's size: a moved copy of a nested compound is handed back without a walk."""
+
+    @staticmethod
+    def _nested(extruding=False):
+        from build123d import Compound, Pos, Solid, Vector
+
+        inner = Compound(children=[Solid.make_box(1, 2, 3), Pos(5, 0, 0) * Solid.make_cylinder(1, 2)])
+        outer = Compound(children=[inner, Pos(0, 5, 0) * Solid.make_sphere(1)])
+        placed = outer.moved(Pos(10, 0, 0))
+        if extruding:
+            Solid.extrude(placed.children[0].children[0].faces()[0], Vector(0, 0, -1))
+        return Compound(children=[placed]), placed
+
+    @staticmethod
+    def _nodes(shape):
+        pending, found = [shape], []
+        while pending:
+            node = pending.pop()
+            found.append(node)
+            pending.extend(node.children)
+        return found
+
+    def test_a_hit_reads_its_rows_not_its_sub_shapes(self) -> None:
+        (assembly, placed), cold, _ = _run(self._nested)
+        self.assertEqual((cold["hits"], cold["unkeyable"], cold["errors"]), (0, 0, 0))
+        copies = {node.wrapped.TShape() for node in self._nodes(placed)[1:]}
+        self.assertEqual(len(copies), 4)
+        walked: list = []
+        mapped = memo._mapped
+
+        def walking(handle):
+            walked.append(handle.TShape())
+            return mapped(handle)
+
+        with mock.patch.object(memo, "_mapped", side_effect=walking):
+            (assembly2, placed2), hot, _ = _run(self._nested)
+        self.assertEqual((hot["misses"], hot["errors"]), (0, 0))
+        self.assertIs(placed2, placed)
+        self.assertFalse(copies & set(walked), "no node of the moved copy is walked on a hit")
+        self.assertEqual(_bytes(assembly2.wrapped), _bytes(assembly.wrapped))
+
+    def test_a_hit_still_undoes_what_a_later_operation_did_below_a_moved_copy(self) -> None:
+        (_assembly, placed), _, _ = _run(self._nested)
+        leaf = placed.children[0].children[0]
+        fresh = _bytes(leaf.wrapped)
+        (_assembly, placed2), extruded, _ = _run(self._nested, True)
+        self.assertIs(placed2, placed)
+        self.assertEqual(extruded["misses"], 1, "the extrusion alone")
+        self.assertNotEqual(_bytes(leaf.wrapped), fresh)
+        (_assembly, placed3), again, _ = _run(self._nested)
+        self.assertIs(placed3, placed)
+        self.assertEqual(again["misses"], 0)
+        self.assertEqual(_bytes(leaf.wrapped), fresh, "with the extrusion edited out, the copy is as moved")
+
+
+class RegistrationCostTest(MemoCase):
+    def test_a_container_of_registered_parts_registers_its_children_alone(self) -> None:
+        from build123d import Compound, Pos, Solid
+
+        walked: list = []
+        mapped = memo._mapped
+
+        def walking(handle):
+            found = mapped(handle)
+            walked.extend(found[1])
+            return found
+
+        def model():
+            parts = [Solid.make_box(1, 2, 3), Pos(5, 0, 0) * Solid.make_cylinder(1, 2),
+                     Pos(0, 5, 0) * Solid.make_sphere(1)]
+            inner = Compound(children=parts[:2])
+            walked.clear()
+            with mock.patch.object(memo, "_mapped", side_effect=walking):
+                assembly = Compound(children=[inner, parts[2]])
+            return parts, inner, assembly, list(walked)
+
+        (parts, inner, assembly, walked), cold, _ = _run(model)
+        self.assertEqual((cold["unkeyable"], cold["errors"]), (0, 0))
+        below = {sub for part in parts for sub in mapped(part.wrapped)[1]} - {p.wrapped.TShape() for p in parts}
+        self.assertTrue(below)
+        self.assertFalse(below & set(walked), "the parts' sub-shapes are mapped already: not walked again")
+        self.assertTrue(all(memo._SUBS.get(sub) is memo._REGISTRY[part.wrapped.TShape()]
+                            for part in parts for sub in mapped(part.wrapped)[1]))
+        self.assertIs(memo._SUBS.get(assembly.wrapped.TShape()), memo._REGISTRY[assembly.wrapped.TShape()])
+
+
+class MakerTest(MemoCase):
+    def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
+        from build123d import Solid
+        from OCP.ShapeFix import ShapeFix_Shape
+
+        def model(asking=False):
+            box = Solid.make_box(1, 2, 3)
+            fix = ShapeFix_Shape(box.wrapped)
+            if asking:
+                fix.FixSolidTool()
+            fix.Perform()
+            return Solid(fix.Shape())
+
+        _, cold, cold_run = _run(model)
+        self.assertEqual(cold_run.tally, {"hits": 0, "misses": 2, "uncached": 0})
+        _, hot, hot_run = _run(model)
+        self.assertEqual(hot_run.tally, {"hits": 2, "misses": 0, "uncached": 0})
+        _, _, plain_run = _run(model, True)
+        self.assertEqual(plain_run.tally, {"hits": 1, "misses": 0, "uncached": 1})
+
+
+class FileTest(MemoCase):
+    def test_a_file_read_is_keyed_by_its_bytes_and_held(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        import build123d as bd
+
+        from cadgen.engine.model import read_step
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "box.step"
+            bd.export_step(bd.Compound(children=[bd.Solid.make_box(1, 2, 3)]), str(path))
+            first, cold, _ = _run(read_step, path)
+            again, hot, _ = _run(read_step, path)
+            self.assertIs(again, first, "parsed once and held")
+            self.assertEqual(hot["misses"], 0)
+            bd.export_step(bd.Compound(children=[bd.Solid.make_box(2, 2, 3)]), str(path))
+            os.utime(path, ns=(1, 1))
+            changed, edited, _ = _run(read_step, path)
+            self.assertIsNot(changed, first)
+            self.assertEqual(edited["misses"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

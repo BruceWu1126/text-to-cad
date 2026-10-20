@@ -184,6 +184,17 @@ def _mcp_change(path: str) -> Select:
     return select(flags=["packaging"], cadgen=_cadgen_tests_naming(_NAMES_MCP, ("mcp",)))
 
 
+# The engine (cadgen.engine) is a leaf too: nothing in cadgen imports it but the CLI's
+# command table, by name. A change to it reaches its own suite, the cadgen tests that name
+# it or read all of cadgen, and the wheel it ships in.
+ENGINE_CODE = (f"{CADGEN_SRC}/engine/**",)
+_NAMES_ENGINE = r"cadgen\.engine|[\"']xbf[\"' ]"
+
+
+def _engine_change(path: str) -> Select:
+    return select(flags=["packaging"], cadgen=_cadgen_tests_naming(_NAMES_ENGINE, ("engine",)))
+
+
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
@@ -236,6 +247,7 @@ RULES: tuple[Rule, ...] = (
     Rule(VIEWER_SHARED, CADGEN_CONSUMERS, final=True),
     Rule(VIEWER_CODE, _viewer_change, final=True),
     Rule(MCP_CODE, _mcp_change, final=True),
+    Rule(ENGINE_CODE, _engine_change, final=True),
     Rule(("packages/cadgen/**", "scripts/bundle/**"), CADGEN_CONSUMERS),
 
     # The shared UI and the apps. The snapshot runtime is built from core alone, so ui

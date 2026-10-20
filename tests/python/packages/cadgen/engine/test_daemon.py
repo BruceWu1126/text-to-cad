@@ -1,0 +1,93 @@
+"""The warm loop through the daemon: started on demand, one worker per script that keeps
+its memo between builds, its socket and lock its only files, gone when idle."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
+
+MODEL = """
+import build123d as bd
+from cadgen.engine import xbf
+
+SIZE = {size}
+
+
+@xbf
+def block():
+    return bd.fillet(bd.Box(SIZE, 4, 2).edges().filter_by(bd.Axis.Z), 0.5)
+"""
+
+
+class DaemonTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
+        self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                    "CADGEN_ENGINE_IDLE": "60"}
+        self.addCleanup(self._stop)
+        self.script = self.folder / "block.py"
+
+    def _stop(self) -> None:
+        self.cli("stop")
+        deadline = time.monotonic() + 20
+        while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        shutil.rmtree(self.folder, ignore_errors=True)
+        shutil.rmtree(self.state, ignore_errors=True)
+
+    def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env,
+                              capture_output=True, text=True, timeout=300)
+
+    def build(self, size: int) -> dict:
+        self.script.write_text(textwrap.dedent(MODEL.format(size=size)))
+        done = self.cli("build", "--json", "block.py::block")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_a_warm_worker_keeps_its_memo_between_builds(self) -> None:
+        cold = self.build(10)
+        self.assertGreater(cold["memo"]["misses"], 0)
+        self.assertEqual(cold["memo"]["hits"], 0)
+        warm = self.build(10)
+        self.assertEqual(warm["memo"]["misses"], 0)
+        self.assertEqual(warm["memo"]["hits"], cold["memo"]["misses"])
+        edited = self.build(12)
+        self.assertGreater(edited["memo"]["misses"], 0)
+        self.assertTrue(edited["files"][str(self.folder / "block.xbf")]["written"])
+        status = json.loads(self.cli("status").stdout)
+        self.assertEqual(len(status["workers"]), 1)
+        self.assertEqual(status["workers"][0]["builds"], 3)
+        # The daemon's only files are its socket and lock; the build's, its outputs.
+        self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
+
+    def test_a_failing_body_answers_with_its_error(self) -> None:
+        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n")
+        done = self.cli("build", "block.py")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("RuntimeError: no", done.stderr)
+
+    def test_an_idle_daemon_exits(self) -> None:
+        env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)))
+        self.assertEqual(self.cli("build", "block.py", env=env).returncode, 0)
+        deadline = time.monotonic() + 30
+        while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(any(self.state.glob("*.sock")), "the idle daemon left")
+
+
+if __name__ == "__main__":
+    unittest.main()
