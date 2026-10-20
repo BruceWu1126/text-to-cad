@@ -163,6 +163,10 @@ _ATTRIBUTE_CALLS = frozenset({"getattr", "setattr", "delattr", "hasattr"})
 _FACTS: "OrderedDict[str, tuple[dict, str | None]]" = OrderedDict()
 
 
+def _reads_dict(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "__dict__"
+
+
 def _facts(path: Path, file_digest: str) -> tuple[dict, str | None]:
     """What of a file the walk cannot follow by value: per function or lambda, keyed as its
     code object names it -- ``(name, first line)``, the line of its first decorator -- the
@@ -194,6 +198,15 @@ def _facts(path: Path, file_digest: str) -> tuple[dict, str | None]:
                     reason = f"{name} with a computed name"
             elif isinstance(node, ast.Name) and node.id == "importlib":
                 reason = "importlib"
+            elif isinstance(node, ast.Attribute) and node.attr == "modules" and isinstance(node.value, ast.Name) \
+                    and node.value.id == "sys":
+                reason = "sys.modules"
+            elif isinstance(node, ast.Subscript) and _reads_dict(node.value) and not isinstance(node.slice, ast.Constant):
+                reason = "__dict__ with a computed name"
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and _reads_dict(node.func.value) \
+                    and node.func.attr in ("get", "items", "keys", "values", "copy") and not (
+                        node.args and isinstance(node.args[0], ast.Constant)):
+                reason = f"__dict__.{node.func.attr}"
             elif isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "importlib" for alias in node.names):
                 reason = "importlib"
             elif isinstance(node, ast.ImportFrom):

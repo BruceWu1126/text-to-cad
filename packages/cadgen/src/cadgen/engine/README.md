@@ -154,13 +154,35 @@ took, the bytes, the triangles and the unmeshed faces.
 ## Body retention
 
 A model body is one coarse entry above its calls, kept in the worker's memory
-(`kernel/memo.py`, `body`). Its key is the bytes it is made of:
+(`kernel/memo.py`, `body`). Its key is what it is made of:
 
-- its function's module and every first-party module that module imports,
-  transitively (`sources.py`; imports are read from the source, so one inside a
-  function counts too);
+- the symbols its function reaches (`sources.py`, `Symbols`): the global names
+  its code and the code nested in it load, read through module attributes, its
+  defaults and closure cells, and from there, transitively, every first-party
+  function, class, child model and value. A function counts by its code: its
+  instructions with their constants and names, its variables, arguments and
+  flags, but not its file, its lines or its docstring. A class counts by its
+  bases and its attributes. A value counts by a canonical form: numbers,
+  strings, containers, enums, build123d vectors, locations and colours, numpy
+  arrays, first-party dataclass and class instances. Each global binding the
+  code reads counts as what it is bound to, by the module that holds it, so
+  rebinding a name is an edit. The walk stops at what is not first-party (the
+  standard library, build123d, OCP, numpy): the engine's own code covers those;
 - every file it reads through the engine, by its bytes;
 - the engine's own code.
+
+A module falls back to its bytes, and those of every first-party module it
+imports, wherever the walk cannot follow a reference by its value: a `getattr`,
+`setattr`, `hasattr` or `delattr` with a computed name, `globals()`, `locals()`,
+`vars()`, `eval`, `exec`, `compile`, `__import__` or `importlib` in a function
+the body reaches (that function's module falls back); a `from x import *`; a
+first-party module the code holds as a value (stored in a local it uses other
+than to read attributes, passed, or put in a container); a module a function
+imports when it runs that the script's load does not import (whether it is in
+memory would depend on which bodies ran); a value with no canonical form (a
+shape made at import, an open file). Where no module holds what cannot be
+keyed, the body always runs. The report's `retention` gives the time keys took
+and, per body, each fallback with its reason.
 
 When the key is what it was in the body's last run in this worker, the body is
 not called. That run is replayed instead: each entry it hit or made is bound to
@@ -170,12 +192,22 @@ is the one a run leaves, so names, the xbf and the caller's own calls come out a
 if the body had run. A body that ran a call plain, or whose entries are gone, runs.
 
 Retained bodies follow the memo's retention: what the last four builds used. An
-edit to a shared module re-runs every body that imports it. An edit to the root
-re-runs the root alone. A changed input file re-runs the body that reads it and
-the bodies that hold its result. The report's `memo` counts `bodies_run` and
-`bodies_skipped`. `CADGEN_ENGINE_BODIES=0` turns retention off and nothing else.
-A body must be a function of those bytes: a body that reads the clock, the
-environment or a file the engine does not read is not seen to change.
+edit to a constant or a function re-runs the bodies that reach it, and the
+bodies that hold their results. A comment, a blank line or a docstring re-runs
+nothing. An edit to the root re-runs the root alone. A changed input file
+re-runs the body that reads it and the bodies that hold its result. The
+report's `memo` counts `bodies_run` and `bodies_skipped`.
+`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body must be a
+function of what it reaches as the build starts: a body that reads the clock,
+the environment or a file the engine does not read is not seen to change, and
+nor is state one body leaves in a module for another (a registry it fills). A
+replayed body's features keep the `file:line` of the run that recorded them,
+so after a line-only edit the sidecar's provenance can name a line that moved.
+
+Keys are worked out once a build, for every body the build asks about, against
+the namespaces as they are when the first body asks. A code object is read once
+per value of it (a module loaded again makes equal code objects), and a file's
+dynamic spots once per digest, in the worker's memory.
 
 Retention costs little. Measured on a 60,000-call model whose 14 bodies all ran,
 the logging added nothing measurable to the build (body 12.4–12.6 s, against
