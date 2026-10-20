@@ -283,6 +283,41 @@ class HingeTest(_Folder):
         self.assertIn("'elbw'", json.loads(refused.exception.read())["error"])
 
 
+class JointMemoTest(_Folder):
+    def test_a_body_with_joints_is_retained_and_an_edited_joint_runs_it_again(self) -> None:
+        # A joint on a part keys the compound that holds it: an unchanged build replays the body.
+        self.hinge()
+        warm = self.hinge()
+        self.assertEqual((warm["memo"]["uncached"], warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]),
+                         (0, 0, 1), warm["memo"])
+        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.as_built, {"elbow": (30.0,)})
+        # A joint unconnected keys too.
+        lone = """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+            @xbf
+            def lone():
+                a = bd.Box(10, 10, 10)
+                bd.RigidJoint("top", a, bd.Location((0, 0, 5)))
+                return bd.Compound(children=[a])
+            """
+        self.build("lone", lone)
+        self.assertEqual(self.build("lone", lone)["memo"]["bodies_skipped"], 1)
+        # The angle connected at is the joint's: an edit of it misses, and the arm moves.
+        moved = self.hinge(connect=CONNECT.replace("angle=30", "angle=60"))
+        self.assertEqual(moved["memo"]["bodies_run"], 1)
+        loaded = document.Loaded(self.folder / "hinge.xbf")
+        self.assertEqual(loaded.mechanism.as_built, {"elbow": (60.0,)})
+        self.assertTrue(_has_point(_vertices(loaded, "arm"), _arm_tip(60)))
+        # A range keys the joint: an edit of it alone, which moves nothing, is no hit of the old
+        # joint (a copy of the base hands its joints on: a hit would hand back the first run's).
+        source = HINGE.format(connect="base = base.moved(bd.Location()); " + CONNECT, after="pass", flat="elbow=0")
+        self.build("hinge", source)
+        self.build("hinge", source.replace("(-10, 120)", "(-20, 100)"))
+        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.pairs[0].limits, ((-20.0, 100.0),))
+
+
 class ChainTest(_Folder):
     def test_a_chain_of_rigid_prismatic_and_revolute_joints_makes_its_links(self) -> None:
         self.build("lift", CHAIN)
