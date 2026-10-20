@@ -51,7 +51,7 @@ class DaemonTest(unittest.TestCase):
                               capture_output=True, text=True, timeout=300)
 
     def build(self, size: int) -> dict:
-        self.script.write_text(textwrap.dedent(MODEL.format(size=size)))
+        self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
         done = self.cli("build", "--json", "block.py::block")
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout.strip().splitlines()[-1])
@@ -74,14 +74,14 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
-        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n")
+        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")
         done = self.cli("build", "block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
 
     def test_an_idle_daemon_exits(self) -> None:
         env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}
-        self.script.write_text(textwrap.dedent(MODEL.format(size=3)))
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
         self.assertEqual(self.cli("build", "block.py", env=env).returncode, 0)
         deadline = time.monotonic() + 30
         while any(self.state.glob("*.sock")) and time.monotonic() < deadline:

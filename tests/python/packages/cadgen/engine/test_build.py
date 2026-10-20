@@ -55,7 +55,7 @@ class EngineCase(unittest.TestCase):
         self.script = self.folder / "frame.py"
 
     def write(self, width: int = 30, text: str = MODEL) -> None:
-        self.script.write_text(textwrap.dedent(text.format(width=width)))
+        self.script.write_text(textwrap.dedent(text.format(width=width)), encoding="utf-8")
         # A rewrite within the same clock tick still reads as a new file.
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
 
@@ -120,7 +120,7 @@ class BuildTest(EngineCase):
         self.assertTrue(bracket.edge_names)
         self.assertEqual(len(bracket.key), 32)
         # The sidecar: the model, timings, and provenance per element name.
-        sidecar = json.loads((self.folder / "out/frame.xbf.json").read_text())
+        sidecar = json.loads((self.folder / "out/frame.xbf.json").read_text(encoding="utf-8"))
         self.assertEqual(sidecar["model"], "frame.py::frame")
         self.assertIn("body", sidecar["timings"])
         part = sidecar["parts"][0]
@@ -129,7 +129,7 @@ class BuildTest(EngineCase):
         self.assertEqual(part["features"]["bracket.cut1"][0], "cut")
         self.assertRegex(part["features"]["bracket.cut1"][1], r"^frame\.py:\d+$")
         # The STEP is a translation: names, and every face's element name.
-        text = (self.folder / "out/frame.step").read_text()
+        text = (self.folder / "out/frame.step").read_text(encoding="utf-8")
         self.assertIn("PRODUCT('frame'", text)
         for name in bracket.face_names.values():
             self.assertIn(f"ADVANCED_FACE('{name}'", text)
@@ -193,8 +193,8 @@ class BuildTest(EngineCase):
 
     def test_no_bytecode_and_no_other_file(self) -> None:
         self.write()
-        (self.folder / "helper.py").write_text("WIDTH = 3\n")
-        self.script.write_text(self.script.read_text().replace("WIDTH = 30", "from helper import WIDTH"))
+        (self.folder / "helper.py").write_text("WIDTH = 3\n", encoding="utf-8")
+        self.script.write_text(self.script.read_text(encoding="utf-8").replace("WIDTH = 30", "from helper import WIDTH"), encoding="utf-8")
         self.build()
         self.assertFalse(any("__pycache__" in name for name in _files(self.folder)))
 

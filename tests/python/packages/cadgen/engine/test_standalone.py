@@ -59,7 +59,7 @@ class StandaloneTest(unittest.TestCase):
                 @stl
                 def part():
                     return bd.Box(1, 2, 3) - bd.Cylinder(0.3, 5)
-            """))
+            """), encoding="utf-8")
             code = textwrap.dedent(f"""
                 import json, sys
                 import cadgen

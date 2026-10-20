@@ -114,7 +114,9 @@ class DeadVersionsStayDeadTest(unittest.TestCase):
         # The container's magic, version and chunk types are the glTF 2.0 spec's, not ours
         # to bump, and two copies of an external constant is two places to get it wrong:
         # every GLB cadgen writes or reads is framed with cadgen.store.meshes' constants,
-        # so the magic appears in that one source.
+        # so the magic appears in that one source. cadgen.engine is the one exception: it is
+        # standalone by law (it imports nothing of cadgen outside itself) and writes its own
+        # GLB, so it declares the container once more, in its exports module.
         package = ROOT / "packages/cadgen/src/cadgen"
         magic = re.compile(r"0x46546c67|b[\"']glTF[\"']", re.IGNORECASE)
         declarations = sorted(
@@ -122,7 +124,7 @@ class DeadVersionsStayDeadTest(unittest.TestCase):
             for path in package.rglob("*.py")
             if magic.search(path.read_text(encoding="utf-8"))
         )
-        self.assertEqual(["store/meshes.py"], declarations)
+        self.assertEqual(["engine/exports.py", "store/meshes.py"], declarations)
 
 
 if __name__ == "__main__":

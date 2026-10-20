@@ -322,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
     if WINDOWS:
         port = server.getsockname()[1]
         temporary = port_path().with_suffix(".tmp")
-        temporary.write_text(f"{port} {daemon.token}\n")
+        temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
         os.replace(temporary, port_path())
     server.settimeout(0.5)
     threading.Thread(target=daemon.watch, daemon=True).start()

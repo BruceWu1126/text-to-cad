@@ -18,7 +18,7 @@ __all__ = ["request"]
 def _connect() -> socket.socket | None:
     try:
         if _daemon.WINDOWS:
-            port, _token = _daemon.port_path().read_text().split()
+            port, _token = _daemon.port_path().read_text(encoding="utf-8").split()
             return socket.create_connection(("127.0.0.1", int(port)), timeout=5)
         path = _daemon.socket_path()
         if not path.exists():
@@ -79,7 +79,7 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
     if connection is None:
         return None
     if _daemon.WINDOWS:
-        message = {**message, "token": _daemon.port_path().read_text().split()[1]}
+        message = {**message, "token": _daemon.port_path().read_text(encoding="utf-8").split()[1]}
     with connection:
         connection.settimeout(None)
         stream = connection.makefile("rwb")
