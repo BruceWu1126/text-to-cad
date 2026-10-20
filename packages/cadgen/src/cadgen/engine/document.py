@@ -326,10 +326,12 @@ def _new_document() -> Any:
     from OCP.TCollection import TCollection_ExtendedString
     from OCP.TDocStd import TDocStd_Document
 
-    app = _application()
-    doc = TDocStd_Document(TCollection_ExtendedString("BinXCAF"))
-    app.NewDocument(TCollection_ExtendedString("BinXCAF"), doc)
-    return doc
+    # The document is made here and never handed to the application: OCP cannot hand back
+    # the document ``NewDocument`` makes (it assigns a handle the binding copied), so that
+    # call made a second, empty document the application kept open for the process's life,
+    # one per document made. Saving and retrieval need only the format's drivers.
+    _application()
+    return TDocStd_Document(TCollection_ExtendedString("BinXCAF"))
 
 
 def _quantity(rgba: tuple) -> Any:
