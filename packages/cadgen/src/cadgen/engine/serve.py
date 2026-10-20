@@ -11,10 +11,10 @@ how long that took. A document is read again when its file changes: the page pol
 the version. ``/`` is a page that shows one (``page/``), with three.js served from a
 ``node_modules`` folder (``--three``, or the nearest one above the working directory).
 
-Meshing runs off the request's thread on a pool of the server's own: threads by
-default (the kernel's mesher runs without the interpreter's lock, and the parts are
-already in this process), or processes (``CADGEN_ENGINE_MESH=processes``), each of
-which reads the document once and meshes the parts it is handed.
+Meshing runs off the request's thread (``Mesher``): ``inline`` by default, one part after
+another on one thread, each spread over the kernel's own threads; or on a warm pool of
+processes (``CADGEN_ENGINE_MESH=processes``, or ``?mode=processes``), each handed one
+part's shape as bytes.
 """
 
 from __future__ import annotations
@@ -69,6 +69,14 @@ class MeshCache:
                 self.items.move_to_end(key)
             return found
 
+    def drop(self, keys: Any) -> None:
+        """Forget these parts' tessellations (``POST .../mesh?drop=1``: mesh them again)."""
+        with self.lock:
+            for key in keys:
+                found = self.items.pop(key, None)
+                if found is not None:
+                    self.size -= len(found)
+
     def put(self, key: str, data: bytes) -> None:
         with self.lock:
             if key in self.items:
@@ -81,9 +89,13 @@ class MeshCache:
 
 
 # --- the pools ---------------------------------------------------------------------------
-
-# A pool process's documents, by path and version: read once per process, in its memory.
-_PROCESS_DOCUMENTS: dict[str, tuple[Any, Any]] = {}
+#
+# The kernel's mesher holds the interpreter's lock for the whole of a call (measured: ten
+# threads mesh no faster than one), so parts are meshed in parallel two ways: ``inline``,
+# one part after another, each call spreading that part's faces over the kernel's own
+# threads; or ``processes``, a pool started with the server and kept warm, each job one
+# part's shape handed over as the kernel's binary shape bytes -- no process reads a
+# document, so a large document costs its parts' bytes, not one read per process.
 
 
 def _timed(shape: Any, parallel: bool) -> tuple[bytes, float]:
@@ -94,24 +106,52 @@ def _timed(shape: Any, parallel: bool) -> tuple[bytes, float]:
     return data, time.perf_counter() - started
 
 
-def _mesh_in_process(path: str, version: Any, index: int) -> tuple[bytes, float]:
-    """A pool process's job: the part ``index`` of the document at ``path``, the document
-    read once per process and version."""
-    from cadgen.engine.document import load
+def _shape_bytes(shape: Any) -> bytes:
+    import io
 
-    held = _PROCESS_DOCUMENTS.get(path)
-    if held is None or held[0] != version:
-        held = _PROCESS_DOCUMENTS[path] = (version, load(Path(path)))
-    return _timed(held[1].prototypes[index].shape, False)
+    from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
+    from OCP.TopLoc import TopLoc_Location
+
+    stream = io.BytesIO()
+    # Geometry only: the process meshes it, so a triangulation already held is not sent.
+    BinTools.Write_s(shape.Located(TopLoc_Location()), stream, False, False, BinTools_FormatVersion_VERSION_4)
+    return stream.getvalue()
+
+
+def _mesh_shape_bytes(data: bytes) -> tuple[bytes, float]:
+    """A pool process's job: one part, from its shape's bytes."""
+    import io
+
+    from OCP.BinTools import BinTools
+    from OCP.TopoDS import TopoDS_Shape
+
+    shape = TopoDS_Shape()
+    BinTools.Read_s(shape, io.BytesIO(data))
+    return _timed(shape, False)
+
+
+def _ready() -> bool:
+    """A pool process's first job: import the kernel, so the first part waits on nothing."""
+    import cadgen.engine.mesh  # noqa: F401
+
+    return True
+
+
+MODES = ("inline", "processes")
 
 
 class Mesher:
     def __init__(self, mode: str | None = None, workers: int | None = None) -> None:
-        self.mode = mode or os.environ.get("CADGEN_ENGINE_MESH", "threads")
+        self.mode = mode or os.environ.get("CADGEN_ENGINE_MESH", "inline")
+        if self.mode not in MODES:
+            raise ValueError(f"CADGEN_ENGINE_MESH is one of {', '.join(MODES)}")
         self.workers = workers or max(1, (os.cpu_count() or 2))
-        self._threads = concurrent.futures.ThreadPoolExecutor(self.workers, thread_name_prefix="mesh")
+        # One thread runs inline meshing: the kernel's threads are its parallelism.
+        self._inline = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix="mesh")
         self._processes: concurrent.futures.ProcessPoolExecutor | None = None
         self.lock = threading.Lock()
+        if self.mode == "processes":
+            self.processes()
 
     def processes(self) -> concurrent.futures.ProcessPoolExecutor:
         with self.lock:
@@ -120,16 +160,19 @@ class Mesher:
 
                 self._processes = concurrent.futures.ProcessPoolExecutor(
                     self.workers, mp_context=multiprocessing.get_context("spawn"))
+                for _ in range(self.workers):
+                    self._processes.submit(_ready)
             return self._processes
 
     def submit(self, loaded: Any, index: int, mode: str | None = None) -> concurrent.futures.Future:
-        """One part meshed on the pool: a future of its buffer and the seconds it took."""
+        """One part meshed: a future of its buffer and the seconds it took."""
+        shape = loaded.prototypes[index].shape
         if (mode or self.mode) == "processes":
-            return self.processes().submit(_mesh_in_process, str(loaded.path), loaded.version, index)
-        return self._threads.submit(_timed, loaded.prototypes[index].shape, False)
+            return self.processes().submit(_mesh_shape_bytes, _shape_bytes(shape))
+        return self._inline.submit(_timed, shape, True)
 
     def stop(self) -> None:
-        self._threads.shutdown(wait=False, cancel_futures=True)
+        self._inline.shutdown(wait=False, cancel_futures=True)
         if self._processes is not None:
             self._processes.shutdown(wait=False, cancel_futures=True)
 
@@ -223,6 +266,10 @@ class Server:
                     return self.part(handler, loaded, parts[4])
                 if len(parts) == 4 and parts[3] == "mesh" and method == "POST":
                     mode = (query.get("mode") or [None])[0]
+                    if mode is not None and mode not in MODES:
+                        return self.error(handler, 400, f"mode is one of {', '.join(MODES)}")
+                    if (query.get("drop") or ["0"])[0] == "1":
+                        self.cache.drop(p.key for p in loaded.prototypes)
                     return self.json(handler, self.mesh_all(loaded, mode))
             self.error(handler, 404, "not found")
         except (BrokenPipeError, ConnectionResetError):

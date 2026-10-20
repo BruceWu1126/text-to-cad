@@ -64,8 +64,10 @@ every file is on disk. If the document is unchanged, the xbf is not rewritten.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. The daemon starts on demand and exits after an idle hour
 (`CADGEN_ENGINE_IDLE` seconds). `CADGEN_ENGINE_DIR` moves its socket and lock.
-`CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=threads|processes`
-picks how a whole document is meshed.
+`CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=inline|processes`
+picks how parts are meshed: inline, one part at a time over the kernel's own
+threads (the kernel's mesher holds the interpreter's lock, so Python threads add
+nothing), or on a warm pool of processes, each handed one part's shape as bytes.
 
 ## Wire format
 
@@ -95,5 +97,5 @@ point count) and the edge polylines `f32[P*3]`. Ordinals are the part's
 face reads a range of the index buffer, and selecting an edge reads a range of
 the polyline buffer.
 
-`POST /api/doc/<id>/mesh?mode=threads|processes` meshes every part not held
+`POST /api/doc/<id>/mesh?mode=inline|processes` meshes every part not held
 yet, in parallel, and returns the time it took.
