@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+import urllib.request
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
@@ -29,12 +30,38 @@ def block():
 """
 
 
+PAIR = """
+import build123d as bd
+from cadgen.engine import xbf
+
+SIZE = {size}
+
+
+@xbf
+def pair():
+    block = bd.Box(SIZE, 4, 2)
+    block.label = "block"
+    peg = bd.Pos(20, 0, 0) * bd.Cylinder(2, 5)
+    peg.label = "peg"
+    return bd.Compound(children=[block, peg], label="pair")
+"""
+
+
+def get(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=120) as response:
+        return response.read()
+
+
+def get_json(url: str) -> dict:
+    return json.loads(get(url))
+
+
 class DaemonTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                    "CADGEN_ENGINE_IDLE": "60"}
+                    "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}
         self.addCleanup(self._stop)
         self.script = self.folder / "block.py"
 
@@ -72,6 +99,30 @@ class DaemonTest(unittest.TestCase):
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
+
+    def test_a_served_document_follows_the_build_without_its_file_being_read(self) -> None:
+        self.script = self.folder / "pair.py"
+        self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
+        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        served = self.cli("serve", "pair.xbf")
+        self.assertEqual(served.returncode, 0, served.stderr)
+        base, ident = served.stdout.strip().split("/?doc=")
+        api = f"{base}/api/doc/{ident}"
+        before = get_json(api)
+        for prototype in before["prototypes"]:  # the page has every part
+            self.assertEqual(get(f"{api}/part/{prototype['key']}")[:4], b"XBM2")
+        self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
+        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        answer = get_json(f"{api}/version?after={before['version']}&wait=60")
+        stat = (self.folder / "pair.xbf").stat()
+        self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}")
+        self.assertIsNotNone(answer["patch"], "the document came from the worker, not from its file")
+        self.assertEqual(answer["patch"]["meshes"], 1, "the worker meshed the changed part alone")
+        after = get_json(api)
+        keys = lambda s: {p["name"]: p["key"] for p in s["prototypes"]}  # noqa: E731
+        self.assertNotEqual(keys(after)["block"], keys(before)["block"])
+        self.assertEqual(keys(after)["peg"], keys(before)["peg"])
+        self.assertEqual(get(f"{api}/part/{keys(after)['block']}")[:4], b"XBM2")
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")

@@ -114,7 +114,6 @@ async function part(doc, key) {
 
 function dispose(key, held) {
   for (const geometry of [held.geometry, held.lineGeometry, held.softGeometry, held.allLines]) geometry.dispose();
-  for (const material of held.materials || []) material.dispose();
   parts.delete(key);
 }
 
@@ -131,63 +130,95 @@ function faceAt(faces, at) {
   return -1;
 }
 
+const materials = new Map(); // colour -> one material, shared by every instance of that colour
+
+function material(rgba) {
+  const name = rgba ? rgba.join(",") : "default";
+  let found = materials.get(name);
+  if (!found) {
+    found = new THREE.MeshStandardMaterial({ color: linearColor(rgba, 0xb8bcc4), roughness: 0.55, metalness: 0.05 });
+    materials.set(name, found);
+  }
+  return found;
+}
+
+/** A part's material in one colour: that colour's material or -- for a part with painted
+ * faces -- that colour's then each paint's, its geometry grouped by face once. */
+function materialOf(held, prototype, rgba) {
+  const painted = Object.entries(prototype.faceColors || {});
+  if (!painted.length) return material(rgba);
+  if (!held.paints) {
+    held.paints = [];
+    const index = new Map();
+    const byOrdinal = new Map(painted);
+    for (let row = 0; row < held.buffer.faces.length; row += 3) {
+      const paint = byOrdinal.get(String(held.buffer.faces[row]));
+      let at = 0;
+      if (paint) {
+        const name = paint.join(",");
+        if (!index.has(name)) {
+          index.set(name, held.paints.length + 1);
+          held.paints.push(paint);
+        }
+        at = index.get(name);
+      }
+      held.geometry.addGroup(held.buffer.faces[row + 1], held.buffer.faces[row + 2], at);
+    }
+  }
+  return [material(rgba), ...held.paints.map(material)];
+}
+
+// The objects on screen by what places them -- part, path, colour and placement -- so a
+// version that changed a few parts makes objects for those alone.
+let placed = new Map();
+
 async function show(doc) {
+  const timing = {};
+  let clock = performance.now();
   const response = await fetch(`/api/doc/${doc}`);
   const structure = await response.json();
   if (structure.error) throw new Error(structure.error);
   titleLine.textContent = structure.name;
-  const started = performance.now();
+  timing.structure = performance.now() - clock;
+  const started = clock = performance.now();
   const loaded = await Promise.all(structure.prototypes.map((p) => part(doc, p.key)));
-  const next = new THREE.Group();
+  timing.parts = performance.now() - clock;
+  clock = performance.now();
+  const next = new Map();
+  const children = [];
   for (const instance of structure.instances) {
     const prototype = structure.prototypes[instance.prototype];
     const held = loaded[instance.prototype];
-    const base = new THREE.MeshStandardMaterial({ color: linearColor(instance.color || prototype.color, 0xb8bcc4),
-                                                  roughness: 0.55, metalness: 0.05 });
-    let material = base;
-    const painted = Object.entries(prototype.faceColors || {});
-    if (painted.length && held.geometry.groups.length === 0) {
-      const colors = new Map();
-      const materials = [base];
-      const byOrdinal = new Map(painted);
-      for (let row = 0; row < held.buffer.faces.length; row += 3) {
-        const rgba = byOrdinal.get(String(held.buffer.faces[row]));
-        let index = 0;
-        if (rgba) {
-          const name = rgba.join(",");
-          if (!colors.has(name)) {
-            colors.set(name, materials.length);
-            materials.push(new THREE.MeshStandardMaterial({ color: linearColor(rgba), roughness: 0.55 }));
-          }
-          index = colors.get(name);
-        }
-        held.geometry.addGroup(held.buffer.faces[row + 1], held.buffer.faces[row + 2], index);
+    const rgba = instance.color || prototype.color;
+    const name = `${prototype.key}|${instance.path}|${rgba}|${instance.matrix.join(",")}`;
+    let objects = placed.get(name);
+    if (!objects) {
+      objects = [new THREE.Mesh(held.geometry, materialOf(held, prototype, rgba))];
+      for (const [geometry, lineMaterial] of [[held.lineGeometry, edgeMaterial], [held.softGeometry, softEdgeMaterial]]) {
+        const lines = new THREE.LineSegments(geometry, lineMaterial);
+        lines.raycast = () => {};
+        objects.push(lines);
       }
-      held.materials = materials;
+      for (const object of objects) {
+        object.matrixAutoUpdate = false;
+        object.matrix.fromArray(instance.matrix);
+        object.matrixWorldNeedsUpdate = true;
+      }
     }
-    if (held.materials) material = held.materials;
-    const mesh = new THREE.Mesh(held.geometry, material);
-    mesh.matrixAutoUpdate = false;
-    mesh.matrix.fromArray(instance.matrix);
-    mesh.matrixWorldNeedsUpdate = true;
-    mesh.userData = { instance, prototype, held };
-    next.add(mesh);
-    for (const [geometry, lineMaterial] of [[held.lineGeometry, edgeMaterial], [held.softGeometry, softEdgeMaterial]]) {
-      const lines = new THREE.LineSegments(geometry, lineMaterial);
-      lines.matrixAutoUpdate = false;
-      lines.matrix.fromArray(instance.matrix);
-      lines.raycast = () => {};
-      next.add(lines);
-    }
+    objects[0].userData = { instance, prototype, held };
+    next.set(name, objects);
+    children.push(...objects);
   }
   clearHover();
   root.clear();
-  root.add(next);
+  for (let at = 0; at < children.length; at += 4096) root.add(...children.slice(at, at + 4096));
+  placed = next;
   // Parts no longer in the document are let go.
   const wanted = new Set(structure.prototypes.map((p) => p.key));
   for (const [key, pending] of [...parts]) {
     if (!wanted.has(key)) pending.then((held) => dispose(key, held), () => {});
   }
+  timing.scene = performance.now() - clock;
   current = structure;
   version = structure.version;
   const triangles = loaded.reduce((sum, held) => sum + held.geometry.index.count / 3, 0);
@@ -200,6 +231,7 @@ async function show(doc) {
     fit();
     fitted = true;
   }
+  return timing;
 }
 
 function fit() {
@@ -400,15 +432,42 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
+/** Draw now, without waiting for an animation frame, and wait for the GPU to finish: the
+ * moment the new geometry is on screen. (A hidden page gets no animation frames.) */
+function drawNow() {
+  sun.position.copy(camera.position);
+  renderer.render(scene, camera);
+  const gl = renderer.getContext();
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+}
+
+// Each version the page drew after the first: when it noticed the version, when its first
+// draw of it ended (epoch milliseconds), and the daemon's account of the patch.
+const updates = [];
+
+/** Wait on the server for a version other than the one shown; show it, timed. */
 async function poll(doc) {
+  let delay = 0;
   try {
-    const response = await fetch(`/api/doc/${doc}/version`);
+    const response = await fetch(`/api/doc/${doc}/version?after=${encodeURIComponent(version)}&wait=25`);
     const answer = await response.json();
-    if (answer.version && answer.version !== version) await show(doc);
+    if (answer.version && answer.version !== version) {
+      const noticed = performance.now();
+      const timing = await show(doc);
+      const clock = performance.now();
+      drawNow();
+      const drawn = performance.now();
+      timing.draw = drawn - clock;
+      for (const name in timing) timing[name] = Math.round(timing[name]);
+      updates.push({ version: answer.version, noticedAt: performance.timeOrigin + noticed,
+                     drawnAt: performance.timeOrigin + drawn, ms: Math.round(drawn - noticed), timing,
+                     patch: answer.patch });
+    }
   } catch (error) {
     statusLine.textContent = String(error);
+    delay = 1000;
   }
-  setTimeout(() => poll(doc), 1000);
+  setTimeout(() => poll(doc), delay);
 }
 
 async function start() {
@@ -423,9 +482,9 @@ async function start() {
   }
   docId = doc;
   await show(doc);
-  window.__xbf = { scene, camera, controls, current: () => current, readPart, hover, hovered: () => hovered };
+  window.__xbf = { scene, camera, controls, current: () => current, readPart, hover, hovered: () => hovered, updates };
   requestAnimationFrame(frame);
-  setTimeout(() => poll(doc), 1000);
+  poll(doc);
 }
 
 start().catch((error) => { statusLine.textContent = String(error); });

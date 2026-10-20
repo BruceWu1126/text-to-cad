@@ -66,9 +66,18 @@ previous files stay. The daemon starts on demand and exits after an idle hour
 (`CADGEN_ENGINE_IDLE` seconds). `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
-processes started with the server, each handed one part's shape as bytes.
+processes started with the server, each handed one part's shape as bytes,
+largest first, a large part meshed with the kernel's face parallelism too.
 `inline` meshes one part at a time over the kernel's own threads. Python
 threads add nothing, because the kernel's mesher holds the interpreter's lock.
+
+A served document stays in memory. `serve` reads its file once; from then on
+the script's worker sends each build's document to the daemon the moment the
+xbf is in place, before the exports are written: its structure, made from the
+build's tree, the meshes of the parts that are new to it and to the daemon,
+meshed in the worker, and the shapes the daemon lacks. The daemon puts it in
+place of the one it serves and answers the waiting page. The file is read
+again only when another process rewrote it.
 
 ## Mesh
 
@@ -103,8 +112,16 @@ position.
 `GET /api/doc/<id>` returns the structure as JSON: prototypes (key, name,
 colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, and once meshed
 `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
-colour), the tree, and the document's version. The page polls the version, and
-the server reads the file again when its mtime changes.
+colour), the tree, and the document's version.
+`GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
+`V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
+reaches it at once. The answer carries the patch's timings.
+
+Between the worker and the daemon a patch is one frame on the worker's pipe: a
+JSON line `{"id", "patch": {"path", "structure", "meshes": [[key, size,
+unmeshed]], "shapes": [[key, size]], "timings"}, "bytes": N}`, then exactly `N`
+bytes: the meshes' buffers, then the shapes' binary shape bytes, in the order
+listed.
 
 `GET /api/doc/<id>/part/<key>` returns one part's buffer. A client reads it
 with typed-array views, without parsing. The header grew from 64 to 80 bytes in
