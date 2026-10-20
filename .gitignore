@@ -64,6 +64,21 @@ models/**/*.mov
 models/**/*.webm
 models/**/*.mkv
 
+# models-xbf/ is the xbf engine's staging corpus: sources only. Every build writes
+# into an XBF/ folder beside a model's src (the xbf, its sidecar, its exports).
+models-xbf/**/XBF/
+# tom's vendor STEP inputs (536 MB, tom-cad's read-only data): a local copy, never committed.
+models-xbf/tom/STEP/
+models-xbf/**/__pycache__/
+models-xbf/**/*.png
+models-xbf/**/*.jpg
+models-xbf/**/*.jpeg
+models-xbf/**/*.gif
+models-xbf/**/*.webp
+models-xbf/**/*.svg
+models-xbf/**/*.mp4
+models-xbf/**/*.webm
+
 # Component-GLB render packages are regenerated on demand; never committed.
 .*.step.glb/
 .*.step.glb
