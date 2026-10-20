@@ -49,6 +49,14 @@ class MeshContractTest(unittest.TestCase):
         self.assertAlmostEqual(part.linear, (10 + 20 + 30) / 300 * 0.5, places=6)
         self.assertAlmostEqual(part.angular, math.radians(28.5), places=6)
 
+    def test_an_analytic_face_is_held_to_the_deflection(self) -> None:
+        import build123d as bd
+
+        part = mesh.mesh_shape(bd.Torus(10, 3).wrapped)
+        centroids = part.positions[part.indices.reshape(-1, 3)].astype(float).mean(axis=1)
+        off = np.abs(3 - np.hypot(np.hypot(centroids[:, 0], centroids[:, 1]) - 10, centroids[:, 2]))
+        self.assertLessEqual(off.max(), part.linear, "every triangle within the deflection of the torus")
+
     def test_a_part_is_meshed_from_its_bytes_and_left_as_it_was(self) -> None:
         import build123d as bd
         from OCP.BRep import BRep_Tool
@@ -95,7 +103,9 @@ class MeshContractTest(unittest.TestCase):
         part = mesh.mesh_shape(bowtie_part().wrapped)
         self.assertEqual(sorted(part.unmeshed), [7])
         self.assertIn("SelfIntersectingWire", part.unmeshed[7])
-        self.assertTrue(part.unmeshed[7].startswith("wire 1:"), part.unmeshed[7])
+        brepmesh, brepcheck = part.unmeshed[7].split("; BRepCheck: ", 1)
+        self.assertIn("SelfIntersectingWire", brepmesh.removeprefix("BRepMesh: ").split(", "), "the mesher's own status first")
+        self.assertTrue(brepcheck.startswith("wire 1: SelfIntersectingWire"), brepcheck)
         drawn = {int(o): int(c) for o, _first, c in part.faces}
         self.assertEqual(drawn[7], 0, "the face is left out")
         self.assertTrue(all(drawn[o] > 0 for o in range(1, 7)), "the rest of the part is drawn")
@@ -147,7 +157,7 @@ class FactsTest(unittest.TestCase):
         self.get(f"/api/doc/{self.ident}/part/{key}")
         prototype = json.loads(self.get(f"/api/doc/{self.ident}"))["prototypes"][0]
         self.assertEqual(prototype["unmeshed"], [7])
-        self.assertIn("SelfIntersectingWire", prototype["unmeshedCheck"]["7"])
+        self.assertRegex(prototype["unmeshedCheck"]["7"], r"^BRepMesh: [^;]*SelfIntersectingWire[^;]*; BRepCheck: ")
         face = json.loads(self.get(f"/api/doc/{self.ident}/part/{key}/face/7"))
         self.assertFalse(face["meshed"])
         self.assertIn("SelfIntersectingWire", face["check"])

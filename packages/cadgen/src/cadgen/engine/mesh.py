@@ -4,19 +4,29 @@
 ``BRepMesh_IncrementalMesh`` at an absolute linear deflection of ``(Lx + Ly + Lz) / 300 *
 DEVIATION`` of its own bounding box (``DEVIATION`` 0.5: FreeCAD's Deviation of 0.5 %) and an
 angular deflection of ``ANGULAR`` (28.5 degrees), with the kernel's face parallelism on. The
-constant pair is configurable nowhere.
+constant pair is configurable nowhere. The call goes through ``IMeshTools_Parameters`` with
+one knob set besides: ``EnableControlSurfaceDeflectionAllSurfaces``, which holds analytic
+faces (torus, sphere, cone) to the deflection -- measured across nine large documents,
+from 1.5-2x the deflection to under 1x, for 2-13 % more triangles on those parts. Every
+other knob was measured to change nothing useful and stays at its default.
 
-**BRepMesh as it is.** No check, no second pass, no other tessellator. A face the mesher
-leaves without triangles is left out of the buffer -- its face-table row has no indices --
-and named: ``Mesh.unmeshed`` maps its ordinal to what ``BRepCheck_Analyzer`` says of that
-face (``check``), so the report reads "its wire intersects itself", not "the mesher failed".
+**BRepMesh as it is.** No check, no second pass, no finer retry, no other tessellator: the
+same measurement found the faces left without triangles the same few hundredths of a per
+cent at every tolerance, different faces each time, and a retry finer brought back half,
+unreliably. A face the mesher leaves without triangles is left out of the buffer -- its
+face-table row has no indices -- and named: ``Mesh.unmeshed`` maps its ordinal to the
+verdict, the mesher's own status first (``GetStatusFlags`` of the part's mesh, e.g.
+``SelfIntersectingWire``: the face's discretized wire crosses itself), then what
+``BRepCheck_Analyzer`` says of that face (``check``), which called most such faces valid.
 
 A part is meshed from its binary shape bytes (``shape_bytes``: geometry only, at the
 identity), read into a fresh shape: the mesh is a function of those bytes alone -- the same
-in this process, in a pool process handed the bytes, and in a model's worker -- never of a
+wherever they are meshed, in this process or in a pool process handed them -- never of a
 triangulation some earlier call left on the shape, and the caller's shape is not written
 to. (A topological copy is not enough: measured on a large document, a copy and the bytes
-read back meshed 65 of 987 parts with their triangles' corners in another order.)
+read back meshed 65 of 987 parts with other triangles on some planar faces. Nor is the
+round trip idempotent: bytes read and written again differ, and so can their mesh. So a
+caller hands a pool process the bytes, never a shape made from them.)
 
 The buffer (``Mesh.to_bytes``, format ``XBM2``) holds float32 positions and surface normals,
 uint32 triangle indices, a face table of (face ordinal, first index, index count), an edge
@@ -53,6 +63,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from OCP.BRep import BRep_Tool
+from OCP.GeomAbs import GeomAbs_G1
+from OCP.TopoDS import TopoDS
+from OCP.TopTools import TopTools_ListOfShape
 
 __all__ = ["ANGULAR", "BOUNDARY", "DEVIATION", "FEATURE", "HEADER", "MAGIC", "Mesh", "NONMANIFOLD", "SEAM",
            "TANGENT", "Topology", "check", "deflection", "mesh_shape"]
@@ -65,6 +79,10 @@ ANGULAR = math.radians(28.5)
 FEATURE, TANGENT, SEAM, BOUNDARY, NONMANIFOLD = 1, 2, 3, 5, 6
 CLASS_NAMES = {FEATURE: "feature", TANGENT: "tangent", SEAM: "seam", BOUNDARY: "boundary",
                NONMANIFOLD: "non-manifold"}
+
+_G1 = int(GeomAbs_G1)
+# BRepMesh_Status bits, as the mesher's GetStatusFlags reports them.
+_MESH_FLAGS = ((1, "Failure"), (2, "ReMesh"), (4, "SelfIntersectingWire"), (8, "UserBreak"))
 
 MAGIC = b"XBM2"
 VERSION = 2
@@ -168,11 +186,16 @@ def mesh_shape(shape: Any, *, parallel: bool = True) -> Mesh:
     """Mesh one part (a shape, or its ``shape_bytes``) at its own frame: its location is not
     applied. ``parallel`` is the kernel's face parallelism; it does not change the result."""
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.IMeshTools import IMeshTools_Parameters
 
     local = read_shape(shape if isinstance(shape, (bytes, bytearray, memoryview)) else shape_bytes(shape))
     linear = deflection(local)
-    BRepMesh_IncrementalMesh(local, linear, False, ANGULAR, parallel)
-    mesh = _extract(local)
+    parameters = IMeshTools_Parameters()
+    parameters.Deflection, parameters.Angle, parameters.Relative, parameters.InParallel = linear, ANGULAR, False, parallel
+    parameters.EnableControlSurfaceDeflectionAllSurfaces = True
+    mesher = BRepMesh_IncrementalMesh(local, parameters)
+    flags = mesher.GetStatusFlags()
+    mesh = _extract(local, ", ".join(name for bit, name in _MESH_FLAGS if flags & bit) or "no status")
     mesh.linear, mesh.angular = linear, ANGULAR
     return mesh
 
@@ -183,9 +206,6 @@ def mesh_shape(shape: Any, *, parallel: bool = True) -> Mesh:
 def _unique_faces(owners: Any) -> list[Any]:
     """The distinct faces of an ancestor list (a seam's face is in it twice). Read with
     ``First``/``Last``: the bound list's Python iterator costs milliseconds per list."""
-    from OCP.TopoDS import TopoDS
-    from OCP.TopTools import TopTools_ListOfShape
-
     size = owners.Size()
     if size == 0:
         listed = []
@@ -207,16 +227,13 @@ def _unique_faces(owners: Any) -> list[Any]:
 
 def edge_class(edge: Any, faces: list[Any]) -> int:
     """One edge's class from its distinct faces (see the module docstring)."""
-    from OCP.BRep import BRep_Tool
-    from OCP.GeomAbs import GeomAbs_G1
-
     if any(BRep_Tool.IsClosed_s(edge, face) for face in faces):
         return SEAM
     if len(faces) == 1:
         return BOUNDARY
     if len(faces) > 2:
         return NONMANIFOLD
-    if len(faces) == 2 and int(BRep_Tool.Continuity_s(edge, faces[0], faces[1])) >= int(GeomAbs_G1):
+    if len(faces) == 2 and int(BRep_Tool.Continuity_s(edge, faces[0], faces[1])) >= _G1:
         return TANGENT
     return FEATURE
 
@@ -365,7 +382,7 @@ def _transform(location: Any) -> np.ndarray | None:
     return np.array([[value(row, column) for column in (1, 2, 3, 4)] for row in (1, 2, 3)])
 
 
-def _extract(shape: Any) -> Mesh:
+def _extract(shape: Any, mesher_status: str = "no status") -> Mesh:
     from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
     from OCP.BRep import BRep_Builder, BRep_Tool
     from OCP.BRepLib import BRepLib, BRepLib_ToolTriangulatedShape
@@ -391,7 +408,7 @@ def _extract(shape: Any) -> Mesh:
         triangulation = BRep_Tool.Triangulation_s(face, location)
         if triangulation is None or triangulation.NbTriangles() == 0:
             face_rows.append(_Face(ordinal, -1, None, False))
-            unmeshed[ordinal] = check(face)
+            unmeshed[ordinal] = f"BRepMesh: {mesher_status}; BRepCheck: {check(face)}"
             continue
         tshape = face.TShape()
         index = triangulations.get(tshape)
@@ -536,43 +553,61 @@ def _read_accessors(held: list, polygons: list) -> tuple[list, list]:
 
 def _assemble(face_rows: list[_Face], edge_rows: list, polygon_list: list, triangulations: list,
               polygons: list, vertices: np.ndarray) -> Mesh:
-    positions, normals, indices = [], [], []
+    """The part's arrays from its faces' triangulations, joined first and computed on as one:
+    a part of a thousand faces costs a few array operations, not a few per face."""
     face_table = np.zeros((len(face_rows), 3), dtype=np.uint32)
-    vertex_base = 0
-    index_base = 0
-    for row, face in enumerate(face_rows):
-        face_table[row, 0] = face.ordinal
-        face_table[row, 1] = index_base
-        if face.triangulation < 0:
-            continue
+    face_table[:, 0] = [face.ordinal for face in face_rows]
+    meshed = [(row, face) for row, face in enumerate(face_rows) if face.triangulation >= 0]
+    points_list, corners_list, normals_list = [], [], []
+    node_counts, triangle_counts, stored_flags, reversed_flags = [], [], [], []
+    for _row, face in meshed:
         points, corners, stored = triangulations[face.triangulation]
+        has = stored is not None and len(stored) == len(points)
+        normals = stored if has else np.zeros((len(points), 3), dtype=np.float32)
         if face.transform is not None:
             points = points @ face.transform[:, :3].T + face.transform[:, 3]
-        corners = corners.astype(np.int64) - 1
-        if face.reversed:
-            corners = corners[:, [0, 2, 1]]
-        a, b, c = points[corners[:, 0]], points[corners[:, 1]], points[corners[:, 2]]
+            normals = normals @ face.transform[:, :3].T
+        points_list.append(points)
+        corners_list.append(corners)
+        normals_list.append(normals)
+        node_counts.append(len(points))
+        triangle_counts.append(len(corners))
+        stored_flags.append(has)
+        reversed_flags.append(face.reversed)
+    if meshed:
+        nodes = np.asarray(node_counts)
+        triangles = np.asarray(triangle_counts)
+        positions = np.concatenate(points_list).astype(np.float64, copy=False)
+        normals = np.concatenate(normals_list).astype(np.float64)
+        bases = np.concatenate(([0], np.cumsum(nodes)[:-1]))
+        corners = np.concatenate(corners_list).astype(np.int64) - 1 + np.repeat(bases, triangles)[:, None]
+        flipped = np.repeat(np.asarray(reversed_flags), triangles)
+        corners[flipped] = corners[flipped][:, [0, 2, 1]]
+        a, b, c = positions[corners[:, 0]], positions[corners[:, 1]], positions[corners[:, 2]]
         geometric = np.cross(b - a, c - a)
-        if stored is not None and len(stored) == len(points):
-            vertex_normals = stored.astype(np.float64)
-            if face.transform is not None:
-                vertex_normals = vertex_normals @ face.transform[:, :3].T
-            # A triangulation is shared by both orientations of its face: its normals
-            # point whichever way the first one to compute them faced.
-            if np.einsum("ij,ij->", geometric, vertex_normals[corners[:, 0]]) < 0:
-                vertex_normals = -vertex_normals
-        else:
-            vertex_normals = np.zeros_like(points)
+        stored = np.asarray(stored_flags)
+        starts = np.concatenate(([0], np.cumsum(triangles)[:-1]))
+        # A triangulation is shared by both orientations of its face: its normals point
+        # whichever way the first one to compute them faced.
+        facing = np.add.reduceat(np.einsum("ij,ij->i", geometric, normals[corners[:, 0]]), starts)
+        normals[np.repeat(stored & (facing < 0), nodes)] *= -1
+        if not stored.all():
+            mine = np.repeat(~stored, triangles)
+            summed = np.zeros_like(positions)
             for column in range(3):
-                np.add.at(vertex_normals, corners[:, column], geometric)
-            lengths = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
-            vertex_normals = vertex_normals / np.where(lengths > 0, lengths, 1)
-        positions.append(points.astype(np.float32))
-        normals.append(vertex_normals.astype(np.float32))
-        indices.append((corners + vertex_base).astype(np.uint32).ravel())
-        vertex_base += len(points)
-        index_base += corners.size
-        face_table[row, 2] = corners.size
+                np.add.at(summed, corners[mine, column], geometric[mine])
+            lengths = np.linalg.norm(summed, axis=1, keepdims=True)
+            computed = np.repeat(~stored, nodes)
+            normals[computed] = (summed / np.where(lengths > 0, lengths, 1))[computed]
+        counts = np.zeros(len(face_rows), dtype=np.int64)
+        counts[[row for row, _face in meshed]] = triangles * 3
+        face_table[:, 2] = counts
+        face_table[:, 1] = np.concatenate(([0], np.cumsum(counts)[:-1]))
+        positions32, normals32 = positions.astype(np.float32), normals.astype(np.float32)
+        indices = corners.astype(np.uint32).ravel()
+    else:
+        positions32 = normals32 = np.zeros((0, 3), dtype=np.float32)
+        indices = np.zeros(0, dtype=np.uint32)
     edge_table = np.zeros((len(edge_rows), 4), dtype=np.uint32)
     lines = []
     point_base = 0
@@ -592,5 +627,4 @@ def _assemble(face_rows: list[_Face], edge_rows: list, polygon_list: list, trian
     def joined(items: list, width: int, dtype: Any) -> np.ndarray:
         return np.concatenate(items) if items else np.zeros((0, width) if width > 1 else 0, dtype=dtype)
 
-    return Mesh(joined(positions, 3, np.float32), joined(normals, 3, np.float32), joined(indices, 1, np.uint32),
-                face_table, edge_table, joined(lines, 3, np.float32), vertices)
+    return Mesh(positions32, normals32, indices, face_table, edge_table, joined(lines, 3, np.float32), vertices)

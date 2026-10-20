@@ -75,13 +75,17 @@ threads add nothing, because the kernel's mesher holds the interpreter's lock.
 One tolerance, FreeCAD's default, configurable nowhere: a linear deflection of
 `(Lx + Ly + Lz) / 300 * 0.5` of the part's own bounding box (FreeCAD's
 Deviation of 0.5 %) and an angular deflection of 28.5 degrees, both absolute,
-with the kernel's face parallelism on. `BRepMesh_IncrementalMesh` is used as it
-is: no check before it, no second pass, no other tessellator. A face it leaves
-without triangles is left out and named: the part's structure lists it under
-`unmeshed` (ordinals) with `BRepCheck_Analyzer`'s verdict on that face under
-`unmeshedCheck` ("wire 1: SelfIntersectingWire"), and the rest of the part is
-drawn. A part is meshed as a topological copy of itself, so its mesh is a
-function of its geometry alone.
+with the kernel's face parallelism on, through `IMeshTools_Parameters` with
+`EnableControlSurfaceDeflectionAllSurfaces` set (analytic faces held to the
+deflection; every other knob stays at its default). `BRepMesh_IncrementalMesh`
+is used as it is: no check before it, no second pass, no finer retry, no other
+tessellator. A face it leaves without triangles is left out and named: the
+part's structure lists it under `unmeshed` (ordinals) with a verdict under
+`unmeshedCheck` -- the mesher's own status first (`GetStatusFlags` of the
+part's mesh), then `BRepCheck_Analyzer`'s on that face ("BRepMesh:
+SelfIntersectingWire; BRepCheck: valid") -- and the rest of the part is drawn.
+A part is meshed from its binary shape bytes read into a fresh shape, so its
+mesh is a function of those bytes alone.
 
 Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
 2 tangent (two faces meeting at least G1), 3 seam (a face closing on itself),
