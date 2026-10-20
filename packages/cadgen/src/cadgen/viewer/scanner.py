@@ -67,7 +67,8 @@ __all__ = [
 CAD_CATALOG_SCHEMA_VERSION = 4
 
 SOURCE_EXTENSIONS = frozenset(
-    {".step", ".stp", ".stl", ".3mf", ".glb", ".dxf", ".urdf", ".srdf", ".sdf"}
+    # `.xbf`: a cadgen engine document, served to the page by the engine (`xbf.py`).
+    {".step", ".stp", ".stl", ".3mf", ".glb", ".dxf", ".urdf", ".srdf", ".sdf", ".xbf"}
 )
 
 # The folders the explorer's search never walks (``folders.py``), beside every hidden one. Matched

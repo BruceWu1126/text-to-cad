@@ -521,6 +521,10 @@ class CadApp:
                     self._handle_tube_skins(request, response, query)
                 elif pathname == "/__cad/robot":
                     self._handle_robot(request, response, query)
+                elif pathname == "/__cad/xbf":
+                    from .xbf import engine_document
+
+                    response.send_json(200, engine_document(query.get("file") or ""))
                 elif pathname == "/__cad/prompt-files" or pathname.startswith("/__cad/prompt-files/"):
                     self._handle_prompt_files_get(request, response, pathname, query)
                 elif pathname == "/__cad/store":
