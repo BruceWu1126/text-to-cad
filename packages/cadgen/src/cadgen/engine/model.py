@@ -230,6 +230,7 @@ class BuildContext:
         self.timings: dict[str, float] = {}
         self.stack: list[str] = []
         self.sources: dict[str, str] = {}
+        self.resolved: dict[str, list] = {}
 
     def source(self, model: Model) -> str:
         """What a model's body is made of: its code's bytes (``sources.closure``) and the
@@ -239,7 +240,7 @@ class BuildContext:
         if found is None:
             from cadgen.engine.sources import closure
 
-            found = self.sources[key] = closure(model.script, model.function.__module__) + _engine_version()
+            found = self.sources[key] = closure(model.script, model.function.__module__, self.resolved) + _engine_version()
         return found
 
     def __enter__(self) -> "BuildContext":
@@ -265,7 +266,7 @@ class BuildContext:
             with memo.scope(key):
                 # One coarse entry above the body's calls: not called when the bytes it is
                 # made of are what they were (``memo.body``).
-                result = memo.body(key, self.source(model), model.function)
+                result = memo.body(key, lambda: self.source(model), model.function)
         finally:
             self.stack.pop()
         self.timings[model.identity] = self.timings.get(model.identity, 0.0) + time.perf_counter() - started

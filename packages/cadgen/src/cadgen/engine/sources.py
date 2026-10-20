@@ -94,9 +94,11 @@ def _files(name: str) -> list[tuple[str, Path]]:
     return []
 
 
-def closure(path: Path, module: str) -> str:
+def closure(path: Path, module: str, resolved: dict[str, list] | None = None) -> str:
     """The digest of a body's code: the file it is defined in (as module ``module``) and
-    every first-party module it imports, transitively, by path and bytes."""
+    every first-party module it imports, transitively, by path and bytes. ``resolved``
+    keeps what each module name resolved to, for the bodies of one build to share."""
+    resolved = {} if resolved is None else resolved
     seen: dict[Path, str] = {}
     pending = [(module, Path(path).resolve())]
     while pending:
@@ -114,7 +116,10 @@ def closure(path: Path, module: str) -> str:
                 continue
             candidates = [target, *(f"{target}.{item}" for item in names if item != "*")]
             for candidate in candidates:
-                pending.extend(_files(candidate))
+                found = resolved.get(candidate)
+                if found is None:
+                    found = resolved[candidate] = _files(candidate)
+                pending.extend(found)
     hasher = hashlib.sha256()
     for file in sorted(seen):
         hasher.update(f"{file}\0{seen[file]}\n".encode())

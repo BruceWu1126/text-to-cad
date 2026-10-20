@@ -753,10 +753,11 @@ class _Body:
 _BODIES: dict[str, _Body] = {}
 
 
-def body(name: str, source: str, function: Callable[[], Any]) -> Any:
+def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> Any:
     """Run a model body, or replay its last run (**Bodies**). ``name`` is the body's
-    identity, ``source`` a digest of the code it is made of; the files it reads through the
-    memo are held to their bytes here. Outside a run, or with hits off, it is called."""
+    identity, ``source()`` a digest of the code it is made of (asked only when bodies are
+    kept); the files it reads through the memo are held to their bytes here. Outside a
+    run, or with hits off, it is called."""
     state = getattr(_LOCAL, "run", None)
     if state is None or not enabled():
         return function()
@@ -767,6 +768,7 @@ def body(name: str, source: str, function: Callable[[], Any]) -> Any:
         finally:
             _STATS["bodies_run"] += 1
             state.tally["bodies_run"] += 1
+    source = source()
     record = _BODIES.get(name)
     if record is not None and record.source == source and _replayable(record):
         state.done.discard(name)
