@@ -265,6 +265,74 @@ class RawMakerTest(NamingCase):
             self.assert_named_from_the_hub(self.parts(0))
 
 
+PLACED = """
+import build123d as bd
+from build123d.topology.shape_core import downcast
+from cadgen.engine import xbf
+
+
+@xbf
+def placed():
+    plate = bd.Box(10, 6, 2) - bd.Cylinder(1, 5)
+    plate.label = "plate"
+    peg = bd.Pos(20, 0, 0) * bd.Cylinder(2, 6)
+    peg.label = "peg"
+    inner = bd.Compound(children=[plate, peg], label="inner")
+    pin = bd.Pos(0, 20, 0) * bd.Cylinder(1, 6)
+    pin.label = "pin"
+    assembly = bd.Compound(children=[inner, pin], label="assembly")
+    # build123d's ``moved`` copies an assembly's parts; built again from them, the copies
+    # are the parts, which no call returned itself.
+    moved = assembly.moved(bd.Location((0, 0, 5)))
+    kids = list(moved.children)
+    moved.children = ()
+    return bd.Compound(children=kids, label="rebuilt")
+
+
+@xbf
+def unified():
+    from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+
+    block = bd.Box(10, 6, 2) + bd.Pos(5, 0, 0) * bd.Box(10, 6, 2)
+    merged = ShapeUpgrade_UnifySameDomain(block.wrapped, True, True, True)
+    merged.Build()
+    return bd.Solid(downcast(merged.Shape()))
+"""
+
+
+class PlacedPartsTest(NamingCase):
+    def assert_named_from_their_own_features(self, parts: list[dict[str, list[str]]]) -> None:
+        for names in parts:
+            self.assertTrue(names["faces"])
+            for name in names["faces"] + names["edges"]:
+                self.assertNotIn(".moved", name.split(";")[0], name)
+                self.assertRegex(name, r"^[fe]:(placed\.)?(plate|peg|pin)")
+
+    def test_a_part_an_assembly_s_copy_holds_is_named_there(self) -> None:
+        self.assert_named_from_their_own_features([self.names(PLACED, name="placed", part=part) for part in range(3)])
+
+    def test_a_placement_that_copies_an_assembly_s_parts_never_names_them_its_own(self) -> None:
+        from cadgen.engine.kernel import history as kernel_history
+
+        composed = kernel_history.compose
+
+        def unreported(inputs, results, records):
+            # As when the makers' account of the parts an assembly's placement copies is lost.
+            found = composed(inputs, results, records)
+            if len(results) > 2:
+                found = kernel_history.History()
+            return found
+
+        with mock.patch.object(kernel_history, "compose", unreported):
+            self.assert_named_from_their_own_features(
+                [self.names(PLACED, name="placed", part=part) for part in range(3)])
+
+    def test_a_shape_a_model_unifies_itself_is_named(self) -> None:
+        names = self.names(PLACED, name="unified")
+        self.assertTrue(names["faces"])
+        self.assertTrue(all(name.startswith("f:unified.block") for name in names["faces"]), names["faces"])
+
+
 class ImportedNamesTest(NamingCase):
     def parts(self, name: str, **fields: str) -> list[dict[str, list[str]]]:
         found = []
@@ -292,6 +360,12 @@ class ImportedNamesTest(NamingCase):
         # Placed elsewhere, each keeps every name.
         engine_build._PARTS.clear()
         self.assertEqual(self.parts("imported", file="plain.step", lift=7), first)
+        # A file that names every face 'NONE' (the schema's empty name) names none of them.
+        text = (self.folder / "plain.step").read_text(encoding="utf-8")
+        (self.folder / "none.step").write_text(text.replace("ADVANCED_FACE(''", "ADVANCED_FACE('NONE'"),
+                                               encoding="utf-8")
+        self.assertIn("ADVANCED_FACE('NONE'", (self.folder / "none.step").read_text(encoding="utf-8"))
+        self.assertEqual(self.parts("imported", file="none.step", lift=0), first)
 
     def test_an_imported_element_the_file_names_keeps_that_name(self) -> None:
         # The engine's own STEP names every face: read back, each keeps its name.

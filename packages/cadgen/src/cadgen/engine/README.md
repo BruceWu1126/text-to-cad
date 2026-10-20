@@ -206,16 +206,21 @@ feature renames only what it touches, and renaming a variable renames that featu
 elements and nothing else. An author's `label` on a shape handed to a later construction
 names, in what that construction makes, the feature that first made the labelled shape
 (back along what each feature was made of, to where the shape stops being one chain):
-a cut appended to it after takes nothing over. A shape a model places or copies past
-build123d, with OCCT's `BRepBuilderAPI_Transform`, `_GTransform` or `_Copy`, is a feature
-like any other (`kernel/memo.py`, `_MAKER_FEATURES`): its elements are named from what
-the maker reports, or, where it reports nothing, from the shape it was given by ordinal
-when the two map one-to-one.
+a cut appended to it after takes nothing over. A shape a model places, copies or fixes past
+build123d, with OCCT's `BRepBuilderAPI_Transform`, `_GTransform` or `_Copy`,
+`ShapeFix_Shape`, `ShapeUpgrade_UnifySameDomain` or `BRepFilletAPI_MakeFillet`, is a
+feature like any other (`kernel/memo.py`, `_MAKER_FEATURES`): its elements are named
+from what the maker reports, or, where it reports nothing, from the shape it was given
+by ordinal when the two map one-to-one. So are the parts build123d's `moved` copies
+while placing an assembly: a copy the makers left unaccounted is matched to its
+original in the assembly by ordinal, and a part a later compound is built from those
+copies is named in the copy that holds it.
 
 An element of a shape read from a file (`read_step`) is named within its own product,
 the part of the file it belongs to, however often the file places it: by the name the
 file gives it (`read.stepcaf.subshapes.name`; a STEP this engine wrote names every face,
-and those names come back as they were), else by its ordinal in the product
+and those names come back as they were; `NONE`, the schema's empty name, is none),
+else by its ordinal in the product
 (`f:<feature>.<ordinal>`), never by an ordinal across the file. A placement or a compound
 of a shape no name reaches never claims its elements as its own.
 

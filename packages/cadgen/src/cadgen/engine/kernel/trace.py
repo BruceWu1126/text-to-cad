@@ -142,6 +142,8 @@ _EXECUTIONS = itertools.count(1)
 # The operations that read a file: what they make is named per product of the file
 # (``_read_structure``).
 _FILE_READS = frozenset({"read_step", "import_step", "import_brep"})
+# What a STEP writer names an element it gives no name ('NONE' is the schema's empty name).
+_UNNAMED = frozenset({"", "NONE", "NULL"})
 # The operations that answer a question of a shape and make nothing of it.
 _QUERIES = frozenset({"is_valid"})
 # The operations that only place or hold the shapes they are given: an element of an
@@ -879,7 +881,8 @@ class Trace:
         """The run's features in call order, as the sidecar's provenance records them."""
         return [feature.row() for feature in self.features]
 
-    def account(self, body: Any, made_by: Callable[[Any], int | None]) -> tuple[dict[str, Any] | None, dict[str, int]]:
+    def account(self, body: Any, made_by: Callable[[Any], int | None],
+                holder: Callable[[Any], int | None] | None = None) -> tuple[dict[str, Any] | None, dict[str, int]]:
         """The lineage of one unlocated component ``body`` (a ``TopoDS_Shape``):
         ``{"made": <feature name or None>, "faces": [...], "edges": [...],
         "vertices": [...], "table": {<folded atom>: <derivation>}}``, each list
@@ -897,6 +900,15 @@ class Trace:
             return None, {}
         maker = self._maker(made_by, body)
         owners = self._owners(made_by, body)
+        if maker is None and not owners and holder is not None:
+            # No call returned it, but a result holds it -- a part of an assembly a
+            # placement copied whole: it is that result's sub-shape, named there.
+            for entity in (body, *shape_entities(body)):
+                held = holder(entity)
+                if held is not None and self._located(held, entity) is not None:
+                    owners.append((entity, held))
+                    if entity is body:
+                        break
         if maker is None and not owners:
             return None, {}
         # A body build123d only wrapped or placed was made by what it wraps.
@@ -1818,7 +1830,7 @@ def _read_structure(feature: Feature) -> _Structure:
                 rule = rules.get((kind, tshape))
                 if rule is None:
                     text = texts.get(ordinal)
-                    if text is None:
+                    if text is None or text.strip().upper() in _UNNAMED:
                         rule = ("m", ordinal)
                     elif ELEMENT_NAME.fullmatch(text) and text[0] == _LETTER[kind]:
                         rule = ("n", text[2:])

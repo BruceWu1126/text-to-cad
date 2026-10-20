@@ -12,8 +12,8 @@ Builder-mode wrappers are not patched: their inner topology calls are the ones s
 Each call seen is a **feature** for naming (``trace``), whatever the memo does with
 it. The OCCT makers a model may run itself past build123d -- a shape fix, a unify, a
 fillet, a transform, a copy (``_MAKER_TARGETS``) -- are handed to it as this layer's
-subclasses, each run of one an operation (``_maker_class``), a transformation's or a
-copy's a feature too (``_MAKER_FEATURES``), and a
+subclasses, each run of one an operation (``_maker_class``) and a feature
+(``_MAKER_FEATURES``), and a
 file the engine reads for a model (``wrap_function``) is an operation keyed by the
 file's bytes.
 
@@ -291,10 +291,11 @@ _MAKER_TARGETS = (
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_GTransform", None, (1,), True, ()),
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Copy", None, (), True, ()),
 )
-# Of those, the makers whose run is a feature, as a build123d call is, by the operation
-# its name spells: a shape placed or copied past build123d keeps its names.
+# Every one of them is a feature when the model runs it, as a build123d call is, by the operation
+# its name spells: a shape placed, copied, fixed, unified or filleted past build123d is named.
 _MAKER_FEATURES = {"BRepBuilderAPI_Transform": "transform", "BRepBuilderAPI_GTransform": "gtransform",
-                   "BRepBuilderAPI_Copy": "copy"}
+                   "BRepBuilderAPI_Copy": "copy", "ShapeFix_Shape": "fix", "ShapeUpgrade_UnifySameDomain": "unify",
+                   "BRepFilletAPI_MakeFillet": "fillet"}
 
 
 def install() -> bool:
@@ -689,7 +690,20 @@ class _Run:
         part's ``TopoDS_Shape``; its location is not part of it."""
         from OCP.TopLoc import TopLoc_Location
 
-        return self.trace.account(handle.Located(TopLoc_Location()), self.made_by)
+        return self.trace.account(handle.Located(TopLoc_Location()), self.made_by, self.holder)
+
+    def holder(self, shape: Any) -> int | None:
+        """The feature of this run whose result holds ``shape`` as a sub-shape (``_SUBS``,
+        by its own TShape or its first face's): a part an assembly's copy holds, which no
+        call returned itself."""
+        from OCP.TopExp import TopExp_Explorer
+
+        root = _SUBS.get(shape.TShape())
+        if root is None:
+            explorer = TopExp_Explorer(shape, TopAbs_FACE)
+            if explorer.More():
+                root = _SUBS.get(explorer.Current().TShape())
+        return None if root is None or root.tainted else self.owners.get(root)
 
 
 @contextlib.contextmanager
@@ -1167,10 +1181,20 @@ def _history(feature: Any, makers: list) -> "kernel_history.History | None":
     """What the makers the call ran report of its results (``kernel_history``), or None
     where it cannot be composed: the feature is then named without it, never failed."""
     try:
-        return kernel_history.compose(feature.handles, feature.results, makers)
+        history = kernel_history.compose(feature.handles, feature.results, makers)
     except Exception:  # noqa: BLE001
         kernel_history._STATS["errors"] += 1
         return None
+    if feature.operation in _PLACING:
+        try:
+            kernel_history.placed_by_ordinal(history, feature.handles, feature.results)
+        except Exception:  # noqa: BLE001 - what compose reported stands
+            kernel_history._STATS["errors"] += 1
+    return history
+
+
+# The calls that place or copy a shape (build123d's ``moved`` copies an assembly's parts).
+_PLACING = frozenset({"moved", "located", "copy", "deepcopy"})
 
 
 def _copy_origins(feature: Any, state: _Run) -> dict[int, Any]:
@@ -1292,8 +1316,8 @@ def wrap_function(label: str, function: Callable[..., Any]) -> Callable[..., Any
 # as does a run that is not the model's; once it ran, a setter is OCCT's own on it, and
 # running it again runs OCCT's own, forgetting what its own run kept. A maker's run is one
 # of the model's calls: its hit, its miss or its plain run is counted as a build123d call's
-# is (``stats``, ``_Run.tally``). A transformation's or a copy's (``_MAKER_FEATURES``) is a
-# feature too, so a shape a model places or copies past build123d keeps its names: given
+# is (``stats``, ``_Run.tally``). It is a feature too (``_MAKER_FEATURES``), so a
+# shape a model places, copies or fixes past build123d keeps its names: given
 # the shapes it was handed, named from what it reports (``Modified``), its hit's from what
 # its miss reported, and where it reported nothing, from the shape it was given by
 # ordinal when the two map one-to-one (``kernel_history.by_ordinal``).
