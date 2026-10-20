@@ -41,9 +41,9 @@ const fixtures = [
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: ["Select", "Annotate", "Measure"], sections: [], threeD: false, minCoverage: 0.003 },
   { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Links"], threeD: true },
-  // A cadgen engine document: served by the engine, read by the page from it. Its elements are
-  // picked under Select; what they measure is the engine's (no Measure tool).
-  { format: "xbf", file: "smoke.xbf", parts: false, tools: ["Select", "Annotate", "Clip"], sections: ["Document"], threeD: true },
+  // A cadgen engine document: served by the engine, read by the page from it, and picked,
+  // measured and laid out as a STEP's is.
+  { format: "xbf", file: "smoke.xbf", parts: true, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Model tree"], threeD: true },
 ];
 // Small enough that software WebGL and the PNG encode stay cheap on CI, large enough for the
 // layout to be the desktop one.
