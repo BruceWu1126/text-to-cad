@@ -26,7 +26,9 @@ triangulation some earlier call left on the shape, and the caller's shape is not
 to. (A topological copy is not enough: measured on a large document, a copy and the bytes
 read back meshed 65 of 987 parts with other triangles on some planar faces. Nor is the
 round trip idempotent: bytes read and written again differ, and so can their mesh. So a
-caller hands a pool process the bytes, never a shape made from them.)
+caller hands a pool process the bytes, never a shape made from them.) The bytes are those
+of the part as its document reads it back: a build's live shape is written and read once
+first, so a worker and a daemon that only read the xbf mesh one key from the same bytes.
 
 The buffer (``Mesh.to_bytes``, format ``XBM2``) holds float32 positions and surface normals,
 uint32 triangle indices, a face table of (face ordinal, first index, index count), an edge
@@ -59,8 +61,9 @@ from __future__ import annotations
 import io
 import math
 import struct
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 from OCP.BRep import BRep_Tool
@@ -161,15 +164,75 @@ def deflection(shape: Any) -> float:
     return max(((xmax - xmin) + (ymax - ymin) + (zmax - zmin)) / 300.0 * DEVIATION, 1e-4)
 
 
-def shape_bytes(shape: Any) -> bytes:
-    """A part's shape as the kernel's binary shape bytes, geometry only (no triangulation),
-    at the identity: the canonical form a part is meshed from."""
+def _write(shape: Any) -> bytes:
     from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
     from OCP.TopLoc import TopLoc_Location
 
     stream = io.BytesIO()
     BinTools.Write_s(shape.Located(TopLoc_Location()), stream, False, False, BinTools_FormatVersion_VERSION_4)
     return stream.getvalue()
+
+
+# The bookkeeping flags of every sub-shape, as the canonical bytes hold them: (Free,
+# Modified, Checked, Locked). They say what was done to a shape, not what it is: a read
+# leaves the root free or not depending on the reader, a face maker leaves Checked set.
+# Orientable, Closed, Infinite and Convex describe the geometry and are kept.
+_BOOKKEEPING = (True, True, False, False)
+
+
+@contextmanager
+def _settled(shape: Any) -> Iterator[None]:
+    """``shape`` with every sub-shape's bookkeeping flags at ``_BOOKKEEPING``, set back after."""
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, mapped)
+    free, modified, checked, locked = _BOOKKEEPING
+    changed = []
+    for ordinal in range(1, mapped.Extent() + 1):
+        tshape = mapped.FindKey(ordinal).TShape()
+        held = (tshape.Free(), tshape.Modified(), tshape.Checked(), tshape.Locked())
+        if held != _BOOKKEEPING:
+            changed.append((tshape, held))
+            tshape.Free(free)
+            tshape.Modified(modified)
+            tshape.Checked(checked)
+            tshape.Locked(locked)
+    try:
+        yield
+    finally:
+        for tshape, (free, modified, checked, locked) in changed:
+            tshape.Free(free)
+            tshape.Modified(modified)
+            tshape.Checked(checked)
+            tshape.Locked(locked)
+
+
+def shape_bytes(shape: Any, *, read: bool = False) -> bytes:
+    """A part's shape as the kernel's binary shape bytes, geometry only (no triangulation),
+    at the identity: the canonical form a part is meshed from, one per geometry key -- the
+    part's bytes as its document reads it back, with its bookkeeping flags at one value.
+
+    A part's mesh must be the same whether the shape comes from a build's memory or from
+    its xbf read back by a process that never built it. Neither the shape nor the round
+    trip is idempotent: reading a shape's bytes sets each sub-shape location from its
+    matrix, which moves it by a last bit (``gp_Trsf.SetValues`` normalises and
+    orthogonalises the matrix it is given), so each write and read moves it again and
+    never settles -- measured on a 987-part document, a second round trip changed 171
+    parts' bytes, and a third, a fourth and a seventh kept changing some; the live shape's
+    bytes and the read-back shape's differed in all 987 and meshed 65 parts differently.
+    But one read is one read: a live shape written and read once has, bit for bit, the
+    bytes of the same shape read from the saved xbf (all 987 parts, and every mesh
+    equal). So a live shape -- a build's part -- is written and read once here, as saving
+    and reading its document does; a shape a document read (``read``, the served
+    document's parts) already is, and is written as it is."""
+    if read:
+        with _settled(shape):
+            return _write(shape)
+    copy = read_shape(_write(shape))
+    with _settled(copy):
+        return _write(copy)
 
 
 def read_shape(data: bytes) -> Any:

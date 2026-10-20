@@ -112,6 +112,38 @@ class MeshContractTest(unittest.TestCase):
         self.assertEqual(mesh.Mesh.from_bytes(part.to_bytes()).unmeshed.keys(), {7})
 
 
+TURNED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def turned():
+    return bd.Rot(0, 0, 33) * bd.Box(4, 3, 2) + bd.Rot(17, 29, 41) * bd.Cylinder(1, 3)
+"""
+
+
+class OneKeyOneMeshTest(unittest.TestCase):
+    def test_a_part_meshes_alike_live_and_read_back_from_its_document(self) -> None:
+        """A build's live part and the same part read back from its xbf -- what a daemon
+        that never ran the build holds -- give the same bytes, so the same mesh. The part's
+        sub-shape locations move by a last bit at every read of its bytes: its raw bytes
+        live and read back differ, and so did its meshes."""
+        from cadgen.engine import document
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-mesh-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        script = folder / "turned.py"
+        script.write_text(textwrap.dedent(TURNED), encoding="utf-8")
+        self.assertTrue(engine_build.build(script, ["turned"], cwd=folder)[-1]["ok"])
+        live = document.saved(folder / "turned.xbf").parts[0]
+        read = document.Loaded(folder / "turned.xbf").prototypes[0]
+        self.assertEqual(live.key, read.key)
+        data = mesh.shape_bytes(live.shape)
+        self.assertEqual(data, mesh.shape_bytes(read.shape, read=True))
+        self.assertEqual(mesh.mesh_shape(live.shape).to_bytes(), mesh.mesh_shape(mesh.shape_bytes(read.shape, read=True)).to_bytes())
+
+
 MODEL = """
 import build123d as bd
 from cadgen.engine import xbf

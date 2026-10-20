@@ -21,7 +21,8 @@ whose mesh the daemon does not hold, meshed here (``mesh.mesh_shape``, the kerne
 and ``patch.shapes`` -- ``[key, size]`` for each part whose shape the daemon does not
 hold, as ``mesh.shape_bytes``; the payload is the meshes' buffers, then the shapes' bytes,
 in that order. A part is meshed from the very bytes that are sent, so a mesh the daemon
-makes again of it is the same. Only what the build changed is meshed here, and only for a
+makes again of it is the same; and they are the part's bytes as its xbf reads back
+(``mesh.shape_bytes``), so a daemon that only read the file meshes the key alike. Only what the build changed is meshed here, and only for a
 document the daemon serves: a build of a document nobody serves meshes nothing, and the
 parts of a served one the build did not change are meshed by the daemon's pool, when they
 are asked for -- the build's answer never waits on a whole document's mesh. Each report
