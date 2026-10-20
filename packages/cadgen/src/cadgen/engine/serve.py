@@ -82,16 +82,27 @@ class MeshCache:
 
 # --- the pools ---------------------------------------------------------------------------
 
-_PROCESS_DOCUMENTS: dict[str, Any] = {}
+# A pool process's documents, by path and version: read once per process, in its memory.
+_PROCESS_DOCUMENTS: dict[str, tuple[Any, Any]] = {}
 
 
-def _mesh_in_process(path: str, index: int) -> bytes:
-    """A pool process's job: the part ``index`` of the document at ``path``, read once."""
-    from cadgen.engine.document import load
+def _timed(shape: Any, parallel: bool) -> tuple[bytes, float]:
     from cadgen.engine.mesh import mesh_shape
 
-    loaded = load(Path(path))
-    return mesh_shape(loaded.prototypes[index].shape).to_bytes()
+    started = time.perf_counter()
+    data = mesh_shape(shape, parallel=parallel).to_bytes()
+    return data, time.perf_counter() - started
+
+
+def _mesh_in_process(path: str, version: Any, index: int) -> tuple[bytes, float]:
+    """A pool process's job: the part ``index`` of the document at ``path``, the document
+    read once per process and version."""
+    from cadgen.engine.document import load
+
+    held = _PROCESS_DOCUMENTS.get(path)
+    if held is None or held[0] != version:
+        held = _PROCESS_DOCUMENTS[path] = (version, load(Path(path)))
+    return _timed(held[1].prototypes[index].shape, False)
 
 
 class Mesher:
@@ -112,12 +123,10 @@ class Mesher:
             return self._processes
 
     def submit(self, loaded: Any, index: int, mode: str | None = None) -> concurrent.futures.Future:
-        from cadgen.engine.mesh import mesh_shape
-
+        """One part meshed on the pool: a future of its buffer and the seconds it took."""
         if (mode or self.mode) == "processes":
-            return self.processes().submit(_mesh_in_process, str(loaded.path), index)
-        shape = loaded.prototypes[index].shape
-        return self._threads.submit(lambda: mesh_shape(shape, parallel=False).to_bytes())
+            return self.processes().submit(_mesh_in_process, str(loaded.path), loaded.version, index)
+        return self._threads.submit(_timed, loaded.prototypes[index].shape, False)
 
     def stop(self) -> None:
         self._threads.shutdown(wait=False, cancel_futures=True)
@@ -237,7 +246,7 @@ class Server:
             if future is None:
                 future = self.cache.pending[key] = self.mesher.submit(loaded, index, mode)
         try:
-            data = future.result()
+            data = future.result()[0]
         finally:
             with self.cache.lock:
                 self.cache.pending.pop(key, None)
@@ -256,12 +265,17 @@ class Server:
         timings = []
         total_bytes = 0
         for key, (index, future) in futures.items():
-            data = future.result()
+            data, seconds = future.result()
             self.cache.put(key, data)
             total_bytes += len(data)
-            timings.append(len(data))
+            timings.append((seconds, loaded.prototypes[index].name))
+        timings.sort(reverse=True)
+        each = [seconds for seconds, _name in timings]
         return {"parts": len(loaded.prototypes), "meshed": len(futures), "seconds": round(time.perf_counter() - started, 4),
-                "bytes": total_bytes, "mode": mode or self.mesher.mode, "workers": self.mesher.workers}
+                "bytes": total_bytes, "mode": mode or self.mesher.mode, "workers": self.mesher.workers,
+                "per_part": {"sum": round(sum(each), 4), "max": round(each[0], 4) if each else 0.0,
+                             "median": round(each[len(each) // 2], 4) if each else 0.0,
+                             "slowest": [[name, round(seconds, 4)] for seconds, name in timings[:5]]}}
 
     # --- responses -------------------------------------------------------------------
 

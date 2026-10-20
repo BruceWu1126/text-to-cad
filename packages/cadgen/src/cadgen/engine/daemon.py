@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["IDLE_SECONDS", "lock_path", "main", "socket_path", "state_dir"]
+__all__ = ["IDLE_SECONDS", "lock", "lock_path", "main", "socket_path", "state_dir"]
 
 IDLE_SECONDS = 3600.0
 PROTOCOL = 1
@@ -291,7 +291,7 @@ def _bind() -> socket.socket:
     return server
 
 
-def _lock() -> Any:
+def lock() -> Any:
     """The daemon's lock, held for its life; None when another daemon holds it."""
     state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
     handle = open(lock_path(), "a+")
@@ -313,7 +313,7 @@ def _lock() -> Any:
 def main(argv: list[str] | None = None) -> int:
     sys.dont_write_bytecode = True
     idle = float(os.environ.get("CADGEN_ENGINE_IDLE", IDLE_SECONDS))
-    held = _lock()
+    held = lock()
     if held is None:
         return 0  # another daemon is up
     daemon = Daemon(idle)

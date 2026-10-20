@@ -27,12 +27,17 @@ position among the shapes that call returned, or, for a sub-shape, its ancestor'
 key with its kind and its index in the ancestor's ``TopExp`` map; with the shape's
 own location and orientation, the attributes an operation may copy from it (label,
 colour, ``for_construction``, the face colours a model painted) and the keys of its
-children; and with the effects (below) every operation so far has had on it. The
-n-th call with one key in a run is its own entry, so two identical constructions in
-one run are two objects, as in plain Python. A shape no operation of this process
-made has no key, and a call given one runs uncached. The run's calls are the model's
-code, children included, in the order it makes them, so a key's ordinal is the same
-in every run of the same code: no other build can shift it.
+children; and with the effects (below) every operation so far has had on it. A shape cast
+afresh from a compound -- what iterating one hands back, as build123d's intersection
+and ``unwrap`` do -- has no ancestor to name it by; when a root holds its TShape
+(``_SUBS``) it is keyed as that root's sub-shape, by its kind and its ordinal among the
+root's sub-shapes of that kind (``_held``). A shape no operation of this process made
+has no key, and a call given one runs uncached. The n-th call with one key in a
+model's body is its own entry (``scope``), so two identical constructions in one body
+are two objects, as in plain Python; and the body's ordinals are its own, the same
+whether it runs as a build's root or as a child and whatever the build ran before it
+-- another model reading the same file or making the same box. The model's name is
+part of the entry's key, so two bodies never share an object.
 
 **Hits.** A hit requires the key and, for every shape input, the very ``TShape``
 the entry was computed with, and returns the SAME Python objects the first run made,
@@ -57,8 +62,9 @@ sub-shape's state -- kind, tolerance, the seven flags, how many representations 
 holds, an edge's parametric flags -- read after the operation and compared with the
 state before it. A compound's constructor changes nothing of an input but its own
 ``Free`` flag: its capture reads each input's own state alone (``_capture``'s
-``top``), and its hit resets its container alone, so an assembly's compound costs its
-children's count, not their sub-shapes'. A change is a sparse delta per sub-shape,
+``top``), and its hit, as any hit, costs the rows later operations left on what it
+made (``_reset``), so an assembly's compound costs its children's count, not their
+sub-shapes'. A change is a sparse delta per sub-shape,
 noted in a ledger, and the ledger indexes each row at the roots whose reset may undo
 it (``_rowed``): a hit replays the delta on the input as it was given, and a hit of a
 shape's maker undoes every delta applied to it since it returned, reading that index,
@@ -67,7 +73,7 @@ a moved copy of an imported assembly is handed back without walking its sub-shap
 change no delta expresses makes the input's maker forget its entry.
 
 **Registration.** A result's shapes are registered under the entry that made them, and
-every sub-shape below a root names the root that holds it most closely (``_SUBS``):
+every sub-shape below a root names the first root registered holding it (``_SUBS``):
 what a foreign wrapper embeds, and where a ledger row is indexed. The walk stops at a
 shape a root already holds, so registering a container of registered parts costs its
 direct children, not the parts' sub-shapes.
@@ -125,6 +131,9 @@ _LEDGER: dict[Any, list["_Row"]] = {}
 _KEY_IDS: "OrderedDict[tuple, int]" = OrderedDict()
 _KEY_IDS_NEXT = itertools.count(1)
 _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
+# A root's sub-shapes of one kind, TShape to its first ordinal (``_held``), for the roots a
+# model keeps casting shapes out of.
+_ORDINALS: "OrderedDict[tuple[Any, int], dict]" = OrderedDict()
 _STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0}
 _RUN_IDS = itertools.count(1)
 _EFFECT_IDS = itertools.count(1)
@@ -488,6 +497,14 @@ class _Run:
         self.registered: dict[Any, _Made] = {}
         self.owners: dict[_Made, int] = {}
         self.previous: _Run | None = getattr(_LOCAL, "run", None)
+        # The model whose body is running (``scope``): its calls are counted, and keyed,
+        # as its own.
+        self.scope: str | None = None
+
+    def scoped(self, key_id: int) -> int:
+        """A call's key as the running model's own: two bodies making the same call are
+        two entries, each counted in its body."""
+        return key_id if self.scope is None else _intern(("scope", self.scope, key_id))
 
     def count(self, key_id: int) -> int:
         n = self.counts.get(key_id, 0) + 1
@@ -526,6 +543,23 @@ class _Run:
 
 
 @contextlib.contextmanager
+def scope(name: str) -> Iterator[None]:
+    """Inside it, the calls of this thread's run are the model ``name``'s own: counted
+    from its first, and keyed with its name. A child's body opens its own scope and the
+    parent's resumes after it, so neither shifts the other's ordinals."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None:
+        yield
+        return
+    previous, saved = state.scope, state.counts
+    state.scope, state.counts = name, {}
+    try:
+        yield
+    finally:
+        state.scope, state.counts = previous, saved
+
+
+@contextlib.contextmanager
 def run(script_path: Path | None = None) -> Iterator[_Run]:
     """A model run on this thread: inside it every patched call from the
     model's code is a feature, and a hit when the memo has one. ``script_path``
@@ -554,6 +588,7 @@ def clear() -> None:
         _LEDGER.clear()
         _KEY_IDS.clear()
         _MAPS.clear()
+        _ORDINALS.clear()
         _STATE.clear()
         _SUBS.clear()
 
@@ -585,6 +620,7 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         if key_id is None:
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=True)
         inputs = state.trace.given(shapes, state.feature_of)
+        key_id = state.scoped(key_id)
         n = state.count(key_id)
         entry = None
         if enabled():
@@ -659,9 +695,6 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                        handles=feature.handles)
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
-        if _composes(label, kind):
-            for made in entry.made:
-                made.container = True  # the children it was given are their makers'
         _keep(entry)
         return function_result
     finally:
@@ -984,6 +1017,7 @@ class _Maker:
             if own:
                 state.tally["uncached"] += 1
             return real()
+        key_id = state.scoped(key_id)
         n = state.count(key_id)
         entry = None
         if enabled():
@@ -1101,7 +1135,9 @@ def _raw_key(handle: Any, state: _Run, base: Any) -> int:
     if handle.IsNull():
         raise _Unkeyable("an empty shape")
     made = _made_of(handle.TShape(), state)
-    if made is not None and made.parent is None:
+    if made is None and _SUBS.get(handle.TShape()) is not None and (base is None or handle is base):
+        made = _held(handle.TShape(), int(handle.ShapeType()), state)
+    if made is not None and (made.parent is None or made.held):
         head = made.base(None, state)
     elif base is not None and handle is not base:
         kind = int(handle.ShapeType())
@@ -1116,7 +1152,9 @@ def _raw_key(handle: Any, state: _Run, base: Any) -> int:
 
 def _raw_placed(handle: Any, state: _Run) -> tuple:
     made = _made_of(handle.TShape(), state)
-    if made is None or made.parent is not None:
+    if made is None:
+        made = _held(handle.TShape(), int(handle.ShapeType()), state)
+    if made.parent is not None and not made.held:
         raise _Unkeyable("a shape no operation of this process made")
     return ("shape", made.base(None, state), _location_key(handle), int(handle.Orientation()))
 
@@ -1472,7 +1510,7 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
 
     parent = shape.__dict__.get("topo_parent")
     if not isinstance(parent, Shape) or parent is shape:
-        raise _Unkeyable("a shape no operation of this process made")
+        return _held(tshape, int(wrapped.ShapeType()), state)
     parent_wrapped = _wrapped(parent)
     if parent_wrapped is None:
         raise _Unkeyable("a sub-shape of an empty shape")
@@ -1482,7 +1520,9 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
     kind = int(wrapped.ShapeType())
     index = _sub_map(parent_wrapped, kind).FindIndex(wrapped)
     if index == 0:
-        raise _Unkeyable("not a sub-shape of its topo_parent")
+        # Its topo_parent does not hold it where it is -- a copy, a shape re-placed below
+        # its parent: the root holding its TShape names it.
+        return _held(tshape, kind, state)
     made = _Made(tshape, key=None, entry=None, parent=parent_made, kind=kind, index=index)
     parent_made.subs.append(made)
     with _LOCK:
@@ -1492,6 +1532,56 @@ def _register_sub(shape: Any, wrapped: Any, tshape: Any, state: _Run) -> "_Made"
         else:
             state.transient[tshape] = made
     return made
+
+
+def _held(tshape: Any, kind: int, state: _Run) -> "_Made":
+    """Key a shape with no ancestor to name it by -- one cast afresh out of a compound,
+    or one its ``topo_parent`` does not hold where it is -- by the persistent root
+    holding its TShape (``_SUBS``): its kind and its first ordinal among the root's
+    sub-shapes of that kind, by TShape. The root is the same object on a hit, so the
+    ordinal is too; its location is the shape's own, keyed beside it (``_placed_key``)."""
+    root, index = _holder(tshape, kind)
+    made = _Made(tshape, key=None, entry=None, parent=root, kind=kind, index=index)
+    made.held = True
+    with _LOCK:
+        root.subs.append(made)
+        _REGISTRY[tshape] = made
+        state.registered[tshape] = made
+    return made
+
+
+def _held_head(tshape: Any, kind: int) -> tuple:
+    """What names a sub-shape by the root holding its TShape: the root's key, the kind
+    and the ordinal (``_held``)."""
+    root, index = _holder(tshape, kind)
+    return root.base(None, None), kind, index
+
+
+def _holder(tshape: Any, kind: int) -> tuple["_Made", int]:
+    """The persistent root holding ``tshape`` (``_SUBS``) and the TShape's first ordinal
+    among the root's sub-shapes of ``kind``."""
+    from OCP.TopAbs import TopAbs_ShapeEnum
+
+    root = _SUBS.get(tshape)
+    if root is None or root.tainted or root.parent is not None or not root.persistent():
+        raise _Unkeyable("a shape no operation of this process made")
+    with _LOCK:
+        ordinals = _ORDINALS.get((root.tshape, kind))
+        if ordinals is None:
+            mapped = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(_handle_of(root.tshape), TopAbs_ShapeEnum(kind), mapped)
+            ordinals = {}
+            for ordinal in range(1, mapped.Extent() + 1):
+                ordinals.setdefault(mapped.FindKey(ordinal).TShape(), ordinal)
+            _ORDINALS[(root.tshape, kind)] = ordinals
+            while len(_ORDINALS) > _SUB_MAPS:
+                _ORDINALS.popitem(last=False)
+        else:
+            _ORDINALS.move_to_end((root.tshape, kind))
+    index = ordinals.get(tshape)
+    if index is None:
+        raise _Unkeyable("a shape no operation of this process made")
+    return root, index
 
 
 def _sub_map(parent_wrapped: Any, kind: int) -> Any:
@@ -1553,7 +1643,7 @@ class _Made:
     registered sub-shapes. Runs bind their own features to this shared record."""
 
     __slots__ = ("tshape", "key", "position", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born", "origin", "tainted", "container", "rowed")
+                 "subs", "born", "origin", "tainted", "rowed", "held")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
@@ -1574,12 +1664,12 @@ class _Made:
         # Unlike eviction, an unreplayable native mutation invalidates every
         # run still holding this very registration and its sub-shape records.
         self.tainted = False
-        # A compound whose native shape is its children and nothing more: a
-        # compound's constructor's (``_reset``).
-        self.container = False
         # The sub-shapes of this root the ledger holds rows for (``_rowed``): what a
         # reset of it reads, instead of every sub-shape it holds.
         self.rowed: set | None = None
+        # Keyed by the root holding its TShape, not by an ancestor it was taken from
+        # (``_held``).
+        self.held = False
 
     def root(self) -> "_Made":
         made = self
@@ -1598,6 +1688,8 @@ class _Made:
             if self.key is None:
                 raise _Unkeyable("a shape no memoized operation made")
             return ("made", self.key[0], self.key[1], self.position, applied)
+        if self.held:
+            return ("held", self.parent.base(None, state), self.kind, self.index, applied)
         parent = shape.__dict__.get("topo_parent")
         if parent is None:
             raise _Unkeyable("a sub-shape that lost its topo_parent")
@@ -1610,7 +1702,7 @@ class _Made:
             # as a run that extracted it from this parent alone would register it.
             index = _sub_map(parent_wrapped, self.kind).FindIndex(_wrapped(shape))
             if index == 0:
-                raise _Unkeyable("not a sub-shape of its topo_parent")
+                return ("held", *_held_head(self.tshape, self.kind), applied)
         return ("sub", _placed_key(parent, state), self.kind, index, applied)
 
     def handle(self) -> Any:
@@ -1628,12 +1720,12 @@ def _reset(makers: list[_Made], run_id: int) -> None:
     the one that made the sub-shape, an input-ancestor of the maker's, which a hit
     handed back before it -- is the earlier root's, undone when it was reset; a row
     on a sub-shape of the maker's own, or on one it changed as an input, is the
-    maker's. A container (``_Made.container``) is read alone: below its own TShape
-    lie its children, each reset by its own maker."""
+    maker's. A row on a sub-shape a container holds is the first root's registered
+    holding it: a part's, reset by its own maker, or the container's own."""
     for maker in makers:
         rowed = maker.rowed
         if _LEDGER:
-            if rowed is None or maker.container:
+            if rowed is None:
                 candidates: Any = (maker.tshape,)
             else:
                 candidates = rowed if maker.tshape in rowed else [maker.tshape, *rowed]
@@ -1690,11 +1782,9 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int | None, sta
     """Register every shape of a result under the entry that made it, each at its
     position among the result's shapes, and bound to the run's ``feature`` that made
     it. A TShape already registered (a move shares its input's) keeps its first maker.
-    Every sub-shape below a persistent root names the root that holds it most closely
-    (``_SUBS``, ``_map_subs``): of the roots registered before, the first to hold it;
-    of this result's, a node before the group above it."""
+    Every sub-shape below a persistent root names the first root registered holding it
+    (``_SUBS``, ``_map_subs``): a result made from an input shares the input's."""
     created: list[_Made] = []
-    handles: list[Any] = []
     for position, shape in enumerate(_result_shapes(result)):
         wrapped = _wrapped(shape)
         if wrapped is None:
@@ -1711,12 +1801,9 @@ def _register(result: Any, key: tuple[int, int] | None, feature: int | None, sta
                 _REGISTRY[tshape] = made
                 state.registered[tshape] = made
                 created.append(made)
-                handles.append(wrapped)
+                _map_subs(wrapped, made, state)
             if feature is not None:
                 state.owners[made] = feature
-    with _LOCK:
-        for made, wrapped in zip(reversed(created), reversed(handles)):
-            _map_subs(wrapped, made, state)
     return created
 
 
@@ -1726,12 +1813,13 @@ def _map_subs(wrapped: Any, made: _Made, state: _Run) -> None:
     embeds (``_embedded``), and where a ledger row on one is indexed (``_rowed``).
     The walk stops at a shape a persistent root already holds -- a part a compound
     is made of, registered when it was made -- whose sub-shapes are mapped already,
-    under the root that holds them most closely: registering a container of parts
+    under the first root to hold them: registering a container of parts
     costs its direct children, not the parts' sub-shapes. A compound no root holds
     is entered, a shape of any other kind mapped whole."""
     from OCP.TopoDS import TopoDS_Iterator
 
-    _SUBS.setdefault(wrapped.TShape(), made)
+    if _SUBS.setdefault(wrapped.TShape(), made) is not made:
+        return  # a root registered before holds it, and walked below it
     pending = [wrapped]
     entered: set = set()
     while pending:

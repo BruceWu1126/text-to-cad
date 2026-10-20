@@ -139,7 +139,9 @@ def collect(result: Any, name: str) -> Tree:
                 child_label = child.__dict__.get("label") or ""
                 components.append((prototype, child_topods.Location(), child_label, child_color))
                 parts_signature.append((signature, _location_key(child_topods.Location()), child_label, child_color))
-            signature = ("assembly", topods.TShape(), int(topods.Orientation()), label, tuple(parts_signature))
+            # An assembly is its components: the compound holding them is no content of its
+            # own, so one made again around the same parts is the same assembly.
+            signature = ("assembly", int(topods.Orientation()), label, tuple(parts_signature))
             found = prototypes.get(signature)
             if found is None:
                 found = Assembly(label or f"assembly{len(order) + 1}")

@@ -148,6 +148,15 @@ class BuildTest(EngineCase):
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
         self.assertEqual((target.stat().st_mtime_ns, (self.folder / "out/frame.step").stat().st_mtime_ns), before)
 
+    def test_an_assembly_made_again_around_the_same_parts_rewrites_nothing(self) -> None:
+        # A child with joints cannot be keyed: the compound above it is made afresh on
+        # every build, around the very parts the memo handed back.
+        self.write(text=MODEL.replace('    rail.label = "rail"', '    rail.label = "rail"\n    rail.joints = {{"slide": object()}}'))
+        self.build("frame")
+        frame = self.build("frame")["frame"]
+        self.assertGreater(frame["memo"]["uncached"], 0)
+        self.assertFalse(any(row["written"] for row in frame["files"].values()))
+
     def test_an_edit_misses_from_where_it_changed_and_rewrites(self) -> None:
         self.write(30)
         self.build()
@@ -185,6 +194,40 @@ class BuildTest(EngineCase):
         self.assertIn("frame.py", frame["error"])
         self.assertNotIn("build123d", frame["error"])
         self.assertEqual(target.stat().st_mtime_ns, stamp)
+
+    def test_a_file_read_hits_whether_or_not_a_child_reading_it_ran_alone(self) -> None:
+        # A child's body runs inline in every build of its parent, so the n-th read of
+        # one file in a build is fixed by the code: building the child alone in between
+        # shifts no ordinal of the parent's.
+        import build123d as bd
+
+        bd.export_step(bd.Compound(children=[bd.Solid.make_box(3, 4, 5)]), str(self.folder / "bought.step"))
+        self.write(text="""
+            from pathlib import Path
+
+            import build123d as bd
+            from cadgen.engine import xbf, read_step
+
+            BOUGHT = Path(__file__).parent / "bought.step"
+
+
+            @xbf
+            def holder():
+                return read_step(BOUGHT) - bd.Cylinder(1, 20)
+
+
+            @xbf
+            def stand():
+                part = read_step(BOUGHT).moved(bd.Location((10, 0, 0)))
+                return bd.Compound(children=[holder(), part])
+        """)
+        self.assertTrue(self.build("stand")["stand"]["ok"])
+        holder = self.build("holder")["holder"]
+        self.assertTrue(holder["ok"], holder)
+        self.assertEqual(holder["memo"]["misses"], 0)
+        stand = self.build("stand")["stand"]
+        self.assertTrue(stand["ok"], stand)
+        self.assertEqual((stand["memo"]["misses"], stand["memo"]["uncached"]), (0, 0))
 
     def test_a_missing_function_is_the_request_s_error(self) -> None:
         self.write()

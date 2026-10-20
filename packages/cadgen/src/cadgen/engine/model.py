@@ -236,10 +236,13 @@ class BuildContext:
         key = str(model.script) + "::" + model.name
         if key in self.stack:
             raise RecursionError(f"model {model.identity} calls itself")
+        from cadgen.engine.kernel import memo
+
         self.stack.append(key)
         started = time.perf_counter()
         try:
-            result = model.function()
+            with memo.scope(key):
+                result = model.function()
         finally:
             self.stack.pop()
         self.timings[model.identity] = self.timings.get(model.identity, 0.0) + time.perf_counter() - started

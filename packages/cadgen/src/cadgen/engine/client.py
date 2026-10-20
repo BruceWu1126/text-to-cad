@@ -62,13 +62,36 @@ def connect(*, start: bool = True, timeout: float = 60.0) -> socket.socket | Non
         return found
     _daemon.state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
     _start()
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
     while time.monotonic() < deadline:
         found = _connect()
         if found is not None:
             return found
         time.sleep(0.05)
+        if time.monotonic() - started > 1.0:
+            # A daemon that is stopping still holds the lock, and the one just started
+            # left at once: start another once the lock is free.
+            _start()
+            started = time.monotonic()
     raise ConnectionError("the engine daemon did not start")
+
+
+def wait_gone(timeout: float = 60.0) -> bool:
+    """Wait until the daemon is gone: its socket no longer connects and its lock, held
+    until its workers have stopped, is free."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        found = _connect()
+        if found is None:
+            held = _daemon.lock()
+            if held is not None:
+                held.close()
+                return True
+        else:
+            found.close()
+        time.sleep(0.05)
+    return False
 
 
 def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = lambda _m: None, *,

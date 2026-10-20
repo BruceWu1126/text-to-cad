@@ -196,6 +196,13 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
     if answer is None:
         print("no engine daemon is running")
         return 0
+    if args.verb == "stop":
+        from cadgen.engine.client import wait_gone
+
+        # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
+        if not wait_gone():
+            print("cadgen xbf stop: the engine daemon did not exit", file=sys.stderr)
+            return 1
     print(json.dumps(answer, indent=2))
     return 0
 

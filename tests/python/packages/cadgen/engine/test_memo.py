@@ -205,6 +205,33 @@ class RegistrationCostTest(MemoCase):
         self.assertIs(memo._SUBS.get(assembly.wrapped.TShape()), memo._REGISTRY[assembly.wrapped.TShape()])
 
 
+class CastTest(MemoCase):
+    def test_a_shape_cast_out_of_a_compound_is_keyed_by_the_root_holding_it(self) -> None:
+        # Intersecting a compound casts its solids afresh, with no ancestor to name them
+        # by; so does bd.scale, which hands back its result out of a compound.
+        import build123d as bd
+
+        def model():
+            # Algebra parts are compounds: the solid inside one is no operation's result.
+            shell = bd.Sphere(5) - bd.Pos(0, 0, -4) * bd.Box(20, 20, 4)
+            grown = bd.scale(shell, by=1.05)
+            tool = bd.Pos(4, 0, 0) * bd.Box(4, 2, 2)
+            cast = list(shell)[0]
+            # A face whose topo_parent does not hold it: named by the root holding its TShape.
+            stray = (bd.Box(3, 3, 3) - bd.Cylinder(1, 8)).faces().sort_by(bd.Axis.Z)[-1]
+            stray.topo_parent = tool
+            return (grown & tool) - shell, cast & tool, bd.Solid.extrude(stray, bd.Vector(0, 0, 1))
+
+        (visor, rounded, _stray), cold, _ = _run(model)
+        self.assertEqual((cold["unkeyable"], cold["errors"]), (0, 0))
+        (visor2, rounded2, _stray2), hot, run = _run(model)
+        self.assertEqual((hot["misses"], hot["unkeyable"]), (0, 0))
+        self.assertEqual(run.tally["uncached"], 0)
+        # build123d wraps what the hits hand back: the same geometry.
+        self.assertTrue(visor2.wrapped.TShape() == visor.wrapped.TShape())
+        self.assertTrue(rounded2.wrapped.TShape() == rounded.wrapped.TShape())
+
+
 class MakerTest(MemoCase):
     def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
         from build123d import Solid
