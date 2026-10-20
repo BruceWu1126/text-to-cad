@@ -189,7 +189,10 @@ changed (`kernel/trace.py`). A name is its kind and its derivation: the atom it
 starts from, the n-th element of its kind a feature made, and a step per feature that
 made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modified
 by the relief cut). A long derivation folds to its last feature and a digest
-(`f:plate.relief~5d1e0c2f9a3b`); the sidecar's `table` spells it out.
+(`f:plate.relief~5d1e0c2f9a3b`); the sidecar's `table` spells it out. Every name is a
+reference the CAD Viewer's ref grammar parses (`packages/core`'s `cadRefs`, mirrored as
+`kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
+is an identifier, and an atom ends in a number or a digest.
 
 A feature is the author's name for its result. A call whose result an assignment
 stores is `<function>.<target>` (`relief = body - hole` in `plate` is `plate.relief`;

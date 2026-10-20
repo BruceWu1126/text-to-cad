@@ -18,7 +18,10 @@ from unittest import mock
 from cadgen.engine import build as engine_build
 from cadgen.engine import document
 from cadgen.engine.kernel import memo
-from cadgen.engine.kernel.trace import folded_atoms
+from cadgen.engine.kernel.trace import ELEMENT_NAME, folded_atoms
+
+# The viewer's ref grammar's shared cases (read, never imported: the engine stands alone).
+PARITY = Path(__file__).resolve().parents[5] / "packages/core/src/lib/cadRefs.parity.json"
 
 BLOCK = """
 import build123d as bd
@@ -134,7 +137,12 @@ class NamingCase(unittest.TestCase):
         os.utime(script, ns=(time.time_ns(), time.time_ns()))
         reports = engine_build.build(script, [name], cwd=self.folder)
         self.assertTrue(all(report["ok"] for report in reports), reports)
-        prototype = document.load(self.folder / f"{name}.xbf").prototypes[part]
+        loaded = document.load(self.folder / f"{name}.xbf")
+        for each in loaded.prototypes:
+            # Every name the engine writes is a reference the viewer's grammar parses.
+            for text in [*each.face_names.values(), *each.edge_names.values(), *each.vertex_names.values()]:
+                self.assertIsNotNone(ELEMENT_NAME.fullmatch(text), text)
+        prototype = loaded.prototypes[part]
         return {"faces": [prototype.face_names[k] for k in sorted(prototype.face_names)],
                 "edges": [prototype.edge_names[k] for k in sorted(prototype.edge_names)]}
 
@@ -288,6 +296,17 @@ class ImportedNamesTest(NamingCase):
         read = self.parts("imported", file="source.step", lift=0)
         for source, imported in zip(written, read):
             self.assertEqual(sorted(imported["faces"]), sorted(source["faces"]))
+
+
+class GrammarTest(unittest.TestCase):
+    def test_the_engine_reads_element_names_as_the_viewer_s_grammar_does(self) -> None:
+        cases = json.loads(PARITY.read_text(encoding="utf-8"))["selectorCases"]
+        elements = [case["element"] for case in cases if case.get("element")]
+        self.assertTrue(elements)
+        for element in elements:
+            self.assertIsNotNone(ELEMENT_NAME.fullmatch(element), element)
+        for text in ("f:a.b.c.1", "f:plate.relief", "x:plate.body.1", "f:plate.body.1;Q:plate.cut"):
+            self.assertIsNone(ELEMENT_NAME.fullmatch(text), text)
 
 
 class VertexNamesTest(NamingCase):
