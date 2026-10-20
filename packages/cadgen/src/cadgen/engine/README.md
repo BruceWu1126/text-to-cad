@@ -322,7 +322,7 @@ starts from, the n-th element of its kind a feature made, and a step per feature
 made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modified
 by the relief cut). A long derivation folds to its last feature and a digest
 (`f:plate.relief~5d1e0c2f9a3b`); the worker that built it spells it out. Every name is a
-reference the CAD Viewer's ref grammar parses (`packages/core`'s `cadRefs`, mirrored as
+reference the CAD Viewer's ref grammar parses (`cadRefs` in the bundled `@text-to-cad/core` runtime, mirrored as
 `kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
 is an identifier, and an atom ends in a number or a digest.
 
