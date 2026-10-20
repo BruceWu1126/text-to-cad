@@ -263,9 +263,12 @@ def _instance(shape: Any, copied: dict[int, Any]) -> Any:
              for name, value in attrs.items()}
     joints = attrs.get("joints")
     if joints:
+        from build123d import Joint
+
         for label, joint in joints.items():
-            joints[label] = copied[id(joint)] = copy.copy(joint)
-            joints[label].parent = made
+            if isinstance(joint, Joint):
+                joints[label] = copied[id(joint)] = copy.copy(joint)
+                joints[label].parent = made
     made.__dict__.update(attrs)
     if children:
         copies = [_instance(child, copied) for child in children]
