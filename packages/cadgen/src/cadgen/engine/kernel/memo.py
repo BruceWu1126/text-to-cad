@@ -258,8 +258,11 @@ _CLASSMETHOD_TARGETS = tuple(
 # A constructor and the kernel helper it calls for the shape it builds: on a
 # hit the helper hands back the first run's TopoDS instead of building one.
 # ``Compound`` builds its container on every attachment of children, so its hit
-# lets the constructor run and then takes the first run's container.
-_CONSTRUCTOR_TARGETS = (("Face", "face"), ("Wire", "wire"), ("Shell", "shell"), ("Solid", "solid"), ("Compound", None))
+# lets the constructor run and then takes the first run's container; so does a
+# ``Vertex`` made from coordinates, which calls no helper -- keyed, so what a model
+# makes of a point (a placed vertex) is keyed too.
+_CONSTRUCTOR_TARGETS = (("Face", "face"), ("Wire", "wire"), ("Shell", "shell"), ("Solid", "solid"), ("Compound", None),
+                        ("Vertex", None))
 _HELPER_TARGETS = (
     ("two_d", "_make_topods_face_from_wires", "face"),
     ("two_d", "_sew_topods_faces", "shell"),

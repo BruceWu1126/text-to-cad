@@ -273,6 +273,20 @@ class QueryTest(MemoCase):
         self.assertAlmostEqual(edited[3] - edited[0], 5.0, places=5)
 
 
+class VertexTest(MemoCase):
+    def test_a_point_placed_by_a_model_is_keyed(self) -> None:
+        import build123d as bd
+
+        def model():
+            return bd.Vertex(1, 2, 3).moved(bd.Location((5, 0, 0), (0, 0, 1), 30)).center().to_tuple()
+
+        cold, _, _ = _run(model)
+        warm, hot, run = _run(model)
+        self.assertEqual(run.tally["uncached"], 0, "the vertex is made by a keyed construction")
+        self.assertEqual(hot["misses"], 0)
+        self.assertEqual(warm, cold)
+
+
 class MakerTest(MemoCase):
     def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
         from build123d import Solid
