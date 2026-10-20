@@ -183,6 +183,18 @@ class BuildTest(EngineCase):
         frame = self.build("frame")["frame"]
         self.assertEqual(frame["memo"]["misses"], 0, "a revert is the first build's entries")
 
+    def test_a_document_made_or_read_is_not_left_open_in_the_kernel_application(self) -> None:
+        # The kernel's application keeps every document opened in it until it is closed;
+        # the engine opens none there, so a warm worker's builds and reads leave nothing.
+        application = document._application()
+        open_before = application.NbDocuments()
+        for width in (30, 34, 30):
+            self.write(width)
+            frame = self.build("frame")["frame"]
+            self.assertTrue(frame["files"][str(self.folder / "out/frame.xbf")]["written"])
+            document.Loaded(self.folder / "out/frame.xbf")
+        self.assertEqual(application.NbDocuments(), open_before)
+
     def test_a_fresh_process_keeps_a_file_with_the_same_bytes(self) -> None:
         self.write()
         self.build()
