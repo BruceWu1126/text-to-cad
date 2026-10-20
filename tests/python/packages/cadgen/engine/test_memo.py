@@ -287,11 +287,11 @@ class MakerTest(MemoCase):
             return Solid(fix.Shape())
 
         _, cold, cold_run = _run(model)
-        self.assertEqual(cold_run.tally, {"hits": 0, "misses": 2, "uncached": 0})
+        self.assertEqual({k: cold_run.tally[k] for k in ("hits", "misses", "uncached")}, {"hits": 0, "misses": 2, "uncached": 0})
         _, hot, hot_run = _run(model)
-        self.assertEqual(hot_run.tally, {"hits": 2, "misses": 0, "uncached": 0})
+        self.assertEqual({k: hot_run.tally[k] for k in ("hits", "misses", "uncached")}, {"hits": 2, "misses": 0, "uncached": 0})
         _, _, plain_run = _run(model, True)
-        self.assertEqual(plain_run.tally, {"hits": 1, "misses": 0, "uncached": 1})
+        self.assertEqual({k: plain_run.tally[k] for k in ("hits", "misses", "uncached")}, {"hits": 1, "misses": 0, "uncached": 1})
 
 
 class FileTest(MemoCase):

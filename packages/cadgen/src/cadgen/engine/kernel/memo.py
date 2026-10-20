@@ -85,6 +85,17 @@ geometry (it clears any mesh first and takes no tolerance), so a box is a functi
 TShape, its placement and the arguments: one of a TShape this process made is kept by
 those, with the effects applied to it so far, and answered again (``_bounding_box``).
 
+**Bodies.** A model's body is one coarse entry above its calls (``body``): keyed by the
+bytes it is made of -- the source its caller names, the files it read, by their bytes -- it
+is not called when they are what they were in its last run in this process. Its run is
+replayed instead (``_replay``): every entry it hit or made reset and bound to this run as a
+hit binds it, every feature it recorded recorded again in the same order with what it was
+given and returned then, every body it called replayed in turn, and its result handed back
+as it returned it -- the same live objects. The trace is the one a run of the body would
+leave, so the names of what a caller makes of it compose as if it had run, and a skipped
+body makes no call, so its caller's ordinals are what they would be. A body that ran a call
+plain, or whose entries are gone, runs.
+
 **History.** While a call from the model's code runs, the OCCT makers it runs record
 what they were given and what they made (``history``), and right after it the call's
 history is composed from them. The feature carries it, and so does the entry: a hit
@@ -149,7 +160,8 @@ _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 # A root's sub-shapes of one kind, TShape to its first ordinal (``_held``), for the roots a
 # model keeps casting shapes out of.
 _ORDINALS: "OrderedDict[tuple[Any, int], dict]" = OrderedDict()
-_STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0}
+_STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0,
+          "bodies_run": 0, "bodies_skipped": 0}
 _RUN_IDS = itertools.count(1)
 _EFFECT_IDS = itertools.count(1)
 # Every row applied takes the next stamp: a maker's reset undoes the rows applied
@@ -549,7 +561,7 @@ class _Run:
         self.id = next(_RUN_IDS)
         self.trace = Trace(Path(script_path).resolve().parent if script_path is not None else None)
         self.counts: dict[int, int] = {}
-        self.tally = {"hits": 0, "misses": 0, "uncached": 0}
+        self.tally = {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0}
         self.depth = 0
         self.transient: dict[Any, _Made] = {}
         # Foreign inputs walked once and found to embed no persistent root, by
@@ -563,6 +575,10 @@ class _Run:
         # The model whose body is running (``scope``): its calls are counted, and keyed,
         # as its own.
         self.scope: str | None = None
+        # The logs of the model bodies running, innermost last (``body``), and the bodies
+        # this run has run or replayed: each is in the trace once.
+        self.bodies: list[_BodyLog] = []
+        self.done: set[str] = set()
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -669,6 +685,8 @@ def _sweep() -> None:
             _MEMO.popitem(last=False)
             if entry is not None:
                 _drop(entry)
+        for name in [name for name, body in _BODIES.items() if body.generation < oldest]:
+            del _BODIES[name]
         stop_key = ("run", -oldest)
         while _KEY_IDS:
             key = next(iter(_KEY_IDS))
@@ -687,6 +705,7 @@ def clear() -> None:
     with _LOCK:
         _MEMO.clear()
         _MARKS.clear()
+        _BODIES.clear()
         _REGISTRY.clear()
         _LEDGER.clear()
         _KEY_IDS.clear()
@@ -695,6 +714,189 @@ def clear() -> None:
         _BOXES.clear()
         _STATE.clear()
         _SUBS.clear()
+
+
+# --- bodies -------------------------------------------------------------------------------
+
+
+class _BodyLog:
+    """What one run of a model body did, kept to replay it (**Bodies**): its events in
+    order -- ``("call", entry, op, frame, objects, labels, handles, results, returned)`` for
+    a call it hit or made, ``("maker", entry, inputs)`` for a maker it ran, ``("body",
+    record)`` for a body it called -- the checks its bytes are held to (a callable and what
+    it answered), the keys it interned with their ids, and whether it can be replayed."""
+
+    __slots__ = ("events", "checks", "keys", "retainable")
+
+    def __init__(self) -> None:
+        self.events: list[tuple] = []
+        self.checks: list[tuple[Callable[[], Any], Any]] = []
+        self.keys: list[tuple[tuple, int]] = []
+        self.retainable = True
+
+
+class _Body:
+    """A model body's last run in this process: what its caller said it is made of, its
+    log, its result as it returned it, and the last outermost run that used it."""
+
+    __slots__ = ("name", "source", "log", "snapshot", "generation")
+
+    def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int) -> None:
+        self.name, self.source, self.log, self.snapshot, self.generation = name, source, log, snapshot, generation
+
+
+# Per model body, by its caller's name for it: the body's last run, kept while one of the
+# last ``RUNS_KEPT`` outermost runs used it (``_sweep``).
+_BODIES: dict[str, _Body] = {}
+
+
+def body(name: str, source: str, function: Callable[[], Any]) -> Any:
+    """Run a model body, or replay its last run (**Bodies**). ``name`` is the body's
+    identity, ``source`` a digest of the code it is made of; the files it reads through the
+    memo are held to their bytes here. Outside a run, or with hits off, it is called."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or not enabled():
+        return function()
+    if os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        # Bodies off: every body runs, its calls hit one by one, nothing is logged.
+        try:
+            return function()
+        finally:
+            _STATS["bodies_run"] += 1
+            state.tally["bodies_run"] += 1
+    record = _BODIES.get(name)
+    if record is not None and record.source == source and _replayable(record):
+        state.done.discard(name)
+        result = _replay(record, state)
+        if state.bodies:
+            parent = state.bodies[-1]
+            parent.events.append(("body", record))
+            parent.checks.extend(record.log.checks)
+        return result
+    log = _BodyLog()
+    state.done.add(name)
+    state.bodies.append(log)
+    uncached, errors = state.tally["uncached"], _STATS["errors"]
+    try:
+        result = function()
+    except BaseException:
+        if len(state.bodies) > 1:
+            state.bodies[-2].retainable = False
+        raise
+    finally:
+        state.bodies.pop()
+    _STATS["bodies_run"] += 1
+    state.tally["bodies_run"] += 1
+    snapshot = None
+    if log.retainable and state.tally["uncached"] == uncached and _STATS["errors"] == errors:
+        try:
+            snapshot = _snapshot(result)
+        except _Unkeyable:
+            snapshot = None
+    with _LOCK:
+        if snapshot is None:
+            _BODIES.pop(name, None)
+        else:
+            _BODIES[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0)
+    if state.bodies:
+        parent = state.bodies[-1]
+        if snapshot is None:
+            parent.retainable = False
+        else:
+            parent.events.append(("body", _BODIES[name]))
+            parent.checks.extend(log.checks)
+    return result
+
+
+def used(name: str) -> None:
+    """A body is handed a result another body made earlier in this run (a child model
+    called again): replaying it needs that body's run too, and its bytes count."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None or not state.bodies:
+        return
+    record = _BODIES.get(name)
+    parent = state.bodies[-1]
+    if record is None:
+        parent.retainable = False
+    else:
+        parent.events.append(("body", record))
+        parent.checks.extend(record.log.checks)
+
+
+def _replayable(record: _Body) -> bool:
+    """Whether every entry the body's run hit or made is still the memo's, and every file
+    it read still has the bytes it read."""
+    pending = [record]
+    with _LOCK:
+        while pending:
+            log = pending.pop().log
+            for event in log.events:
+                if event[0] == "body":
+                    pending.append(event[1])
+                elif _MEMO.get(event[1].key) is not event[1]:
+                    return False
+    for check, expected in record.log.checks:
+        try:
+            if check() != expected:
+                return False
+        except _Unkeyable:
+            return False
+    return True
+
+
+def _replay(record: _Body, state: _Run) -> Any:
+    """The body's last run, again, without its code: each entry bound to this run as a hit
+    binds it and each feature recorded as it was; the result restored as it returned."""
+    generation = _MARKS[-1] if _MARKS else 0
+    for event in record.log.events:
+        kind = event[0]
+        if kind == "call":
+            _, entry, op, frame, objects, labels, handles, results, returned = event
+            inputs = state.trace.given(objects, state.feature_of)
+            _rebind(entry, state)
+            inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
+            feature = state.trace.record(op, frame, inputs, results, returned, labels=labels, result_handles=handles)
+            feature.history = entry.history
+            copied = _copy_origins(feature, state)
+            entry.refresh(feature.index, state, copied)
+        elif kind == "maker":
+            _, entry, inputs = event
+            _rebind(entry, state)
+            entry.refresh(None, state, {})
+        elif event[1].name not in state.done:
+            _replay(event[1], state)
+    with _LOCK:
+        for key, found in record.log.keys:
+            _KEY_IDS[key] = found
+            _KEY_IDS.move_to_end(key)
+    record.generation = generation
+    state.done.add(record.name)
+    _STATS["bodies_skipped"] += 1
+    state.tally["bodies_skipped"] += 1
+    return record.snapshot.restore()
+
+
+def _rebind(entry: "_Entry", state: _Run) -> None:
+    """What a hit does to an entry's shapes: its makers back to the state its operation
+    returned, its effects on its inputs applied again, its place in the memo's order."""
+    _reset(entry.made, state.id)
+    for index, effect in entry.effects:
+        made = _made_of(entry.inputs[index], state)
+        effect.apply(state.id, None if made is None else made.root())
+        if made is not None:
+            made.effects.append(effect)
+    for made in entry.made:
+        made.born = next(_SEQUENCE)
+    with _LOCK:
+        _MEMO.move_to_end(entry.key)
+
+
+def _log_call(state: _Run, entry: "_Entry", op: str, frame: tuple, inputs: list, feature: Any,
+              results: list, returned: list) -> None:
+    objects = [shape for shape, _index, _handle in inputs]
+    labels = [getattr(shape, "__dict__", {}).get("label") for shape in objects]
+    state.bodies[-1].events.append(("call", entry, op, frame, objects, labels, list(feature.results),
+                                    list(results), list(returned)))
 
 
 # --- the call -----------------------------------------------------------------------------
@@ -743,13 +945,16 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
             # this run, equal in value and another object, which the kernel's ``IsSame``
             # (a location is its datum) would not find among the results' elements.
             inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
-            feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
+            results, returned = _result_shapes(result), _returned_shapes(result)
+            feature = state.trace.record(op, frame, inputs, results, returned)
             # The very shapes the miss made, so the history it captured is theirs: no maker runs.
             feature.history = entry.history
             copied = _copy_origins(feature, state)
             entry.refresh(feature.index, state, copied)
             _STATS["hits"] += 1
             state.tally["hits"] += 1
+            if state.bodies:
+                _log_call(state, entry, op, frame, inputs, feature, results, returned)
             return None if kind == "constructor" else result
         try:
             captured = _capture(shapes, top=_composes(label, kind))
@@ -764,7 +969,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         result = args[0] if kind == "constructor" else function_result
         _STATS["misses"] += 1
         state.tally["misses"] += 1
-        feature = state.trace.record(op, frame, inputs, _result_shapes(result), _returned_shapes(result))
+        results, returned = _result_shapes(result), _returned_shapes(result)
+        feature = state.trace.record(op, frame, inputs, results, returned)
         feature.history = _history(feature, makers)
         copied = _copy_origins(feature, state)
         del makers
@@ -791,6 +997,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                 _taint(_made_of(item.handle.TShape(), state), state)
         if snapshot is None:
             _register(result, None, feature.index, state, None, copied)
+            if state.bodies:
+                state.bodies[-1].retainable = False  # nothing kept to replay
             return function_result
         for index, effect in effects:
             effect.origin = (key_id, n, index)
@@ -800,6 +1008,8 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
         _keep(entry)
+        if state.bodies:
+            _log_call(state, entry, op, frame, inputs, feature, results, returned)
         return function_result
     finally:
         state.depth -= 1
@@ -831,6 +1041,8 @@ def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
     state.tally["uncached"] += 1
+    if state.bodies:
+        state.bodies[-1].retainable = False
     inputs = state.trace.given(shapes, state.feature_of)
     verified = capture
     try:
@@ -1147,6 +1359,8 @@ class _Maker:
             self.served, self.entry = entry.snapshot, entry
             _STATS["hits"] += 1
             state.tally["hits"] += 1
+            if state.bodies:
+                state.bodies[-1].events.append(("maker", entry, list(inputs)))
             return entry.snapshot.answer
         _STATS["misses"] += 1
         state.tally["misses"] += 1
@@ -1154,6 +1368,8 @@ class _Maker:
             captured = _capture(inputs)
         except Exception:  # noqa: BLE001
             _STATS["errors"] += 1
+            if state.bodies:
+                state.bodies[-1].retainable = False
             return real()
         given = [_wrapped(item).TShape() for item in inputs]
         answer = _decoding(real, state)
@@ -1163,12 +1379,16 @@ class _Maker:
             _STATS["errors"] += 1
             for item in captured:
                 _taint(_made_of(item.handle.TShape(), state), state)
+            if state.bodies:
+                state.bodies[-1].retainable = False
             return answer
         try:
             result = self.cls.Shape(instance)
         except Exception:  # noqa: BLE001 - it made nothing: nothing to keep
-            return answer
+            result = None
         if not sound or result is None or result.IsNull():
+            if state.bodies:
+                state.bodies[-1].retainable = False
             return answer
         for index, effect in effects:
             effect.origin = (key_id, n, index)
@@ -1177,6 +1397,8 @@ class _Maker:
         entry.made = _register_handle(result, entry.key, state, entry)
         _keep(entry)
         self.entry = entry
+        if state.bodies:
+            state.bodies[-1].events.append(("maker", entry, list(inputs)))
         return answer
 
     def key(self) -> tuple[int, list]:
@@ -1330,7 +1552,10 @@ def _intern(key: tuple) -> int:
                 _KEY_IDS.popitem(last=False)
         else:
             _KEY_IDS.move_to_end(key)
-        return found
+    state = getattr(_LOCAL, "run", None)
+    if state is not None and state.bodies:
+        state.bodies[-1].keys.append((key, found))
+    return found
 
 
 def _build_key(label: str, kind: str, function: Any, args: tuple, kwargs: dict, state: _Run) -> tuple:
@@ -1338,14 +1563,20 @@ def _build_key(label: str, kind: str, function: Any, args: tuple, kwargs: dict, 
         source = args[0] if args else kwargs.get("file_name", kwargs.get("filename", kwargs.get("path")))
         rest = args[1:]
         kw = {name: value for name, value in kwargs.items() if name not in ("file_name", "filename", "path")}
-        parts: tuple = (_file_key(source), *(_normalize(value, state) for value in rest))
+        file_key = _file_key(source)
+        parts: tuple = (file_key, *(_normalize(value, state) for value in rest))
+        if state.bodies:
+            state.bodies[-1].checks.append((functools.partial(_file_key, source), file_key))
     elif label == "make_text":
         # A text reads a font file: its bytes are the parameter, wherever the file is.
         bound = inspect.signature(function).bind(*args, **kwargs)
         bound.apply_defaults()
         arguments = dict(bound.arguments)
         arguments.pop("cls", None)
-        font = _font_key(arguments.get("font"), arguments.pop("font_path", None), arguments.get("font_style"))
+        font_args = (arguments.get("font"), arguments.pop("font_path", None), arguments.get("font_style"))
+        font = _font_key(*font_args)
+        if state.bodies:
+            state.bodies[-1].checks.append((functools.partial(_font_key, *font_args), font))
         parts = (("cls", args[0].__module__, args[0].__qualname__), font)
         kw = arguments
     else:

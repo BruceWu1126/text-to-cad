@@ -451,17 +451,20 @@ class Trace:
         return [(shape, feature_of(shape), handle_of(shape)) for shape in shapes]
 
     def record(self, op: str, frame: tuple[str, int, str], inputs: list[tuple[Any, int | None, Any]],
-               results: list[Any], made: list[Any] = ()) -> Feature:
+               results: list[Any], made: list[Any] = (), *, labels: list[Any] | None = None,
+               result_handles: list[Any] | None = None) -> Feature:
         """One feature: ``inputs`` are the call's, as :meth:`given` took them,
         ``results`` the live result objects the call returned and the children they hold,
         ``made`` the objects it returned itself. A labelled input pins the name of the
-        feature that made it."""
+        feature that made it. A replayed call (a model body the memo did not run) gives
+        the labels its inputs had and the handles of its results when it was recorded:
+        the objects are the same, their state since then may not be."""
         file, line, function = frame
         feature = Feature(
             index=len(self.features), op=op, file=file, line=line, function=function,
             inputs=[index for _shape, index, _handle in inputs],
             handles=[handle for _shape, _index, handle in inputs],
-            results=[handle_of(shape) for shape in results],
+            results=list(result_handles) if result_handles is not None else [handle_of(shape) for shape in results],
         )
         self.features.append(feature)
         ancestors = 1 << feature.index
@@ -482,9 +485,9 @@ class Trace:
         self._ancestors.append(ancestors)
         self._copy_ancestors.append(copied_inputs)
         self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
-        for (shape, index, _handle), context in zip(inputs, contexts):
+        for j, ((shape, index, _handle), context) in enumerate(zip(inputs, contexts)):
             if index is not None:
-                label = getattr(shape, "__dict__", {}).get("label")
+                label = labels[j] if labels is not None else getattr(shape, "__dict__", {}).get("label")
                 if context is None:
                     self._pin(index, label, at=feature.index)
                 elif context.label is None:

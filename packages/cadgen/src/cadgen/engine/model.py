@@ -212,6 +212,15 @@ def instance(shape: Any) -> Any:
     return made
 
 
+@functools.cache
+def _engine_version() -> str:
+    """The engine's own code, by its bytes: a body replayed is one this engine ran."""
+    from cadgen.engine.sources import digest
+
+    here = Path(__file__).resolve().parent
+    return ":" + "".join(digest(path)[:12] for path in sorted([*here.glob("*.py"), *here.glob("kernel/*.py")]))
+
+
 class BuildContext:
     """The models a build runs on this thread: the children each body calls, built once
     and placed again, and how long each took."""
@@ -220,6 +229,18 @@ class BuildContext:
         self.results: dict[str, tuple[Any, Any]] = {}
         self.timings: dict[str, float] = {}
         self.stack: list[str] = []
+        self.sources: dict[str, str] = {}
+
+    def source(self, model: Model) -> str:
+        """What a model's body is made of: its code's bytes (``sources.closure``) and the
+        engine's own, read once a build."""
+        key = str(model.script) + "::" + model.function.__module__
+        found = self.sources.get(key)
+        if found is None:
+            from cadgen.engine.sources import closure
+
+            found = self.sources[key] = closure(model.script, model.function.__module__) + _engine_version()
+        return found
 
     def __enter__(self) -> "BuildContext":
         self.previous = getattr(_CONTEXT, "build", None)
@@ -242,7 +263,9 @@ class BuildContext:
         started = time.perf_counter()
         try:
             with memo.scope(key):
-                result = model.function()
+                # One coarse entry above the body's calls: not called when the bytes it is
+                # made of are what they were (``memo.body``).
+                result = memo.body(key, self.source(model), model.function)
         finally:
             self.stack.pop()
         self.timings[model.identity] = self.timings.get(model.identity, 0.0) + time.perf_counter() - started
@@ -260,6 +283,9 @@ class BuildContext:
         key = str(model.script) + "::" + model.name
         found = self.results.get(key)
         if found is not None:
+            from cadgen.engine.kernel import memo
+
+            memo.used(key)  # the calling body's replay needs this one's run
             made = instance(found[1])
         else:
             made = self.run(model)

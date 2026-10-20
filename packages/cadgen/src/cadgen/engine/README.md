@@ -100,3 +100,29 @@ the polyline buffer.
 
 `POST /api/doc/<id>/mesh?mode=inline|processes` meshes every part not held
 yet, in parallel, and returns the time it took.
+
+## Body retention
+
+A model body is one coarse entry above its calls, kept in the worker's memory
+(`kernel/memo.py`, `body`). Its key is the bytes it is made of:
+
+- its function's module and every first-party module that module imports,
+  transitively (`sources.py`; imports are read from the source, so one inside a
+  function counts too);
+- every file it reads through the engine, by its bytes;
+- the engine's own code.
+
+When the key is what it was in the body's last run in this worker, the body is
+not called. That run is replayed instead: each entry it hit or made is bound to
+this run as a hit binds it, and each feature it recorded is recorded again, in
+order. The result is the same live objects, as the body returned them. The trace
+is the one a run leaves, so names, the xbf and the caller's own calls come out as
+if the body had run. A body that ran a call plain, or whose entries are gone, runs.
+
+Retained bodies follow the memo's retention: what the last four builds used. An
+edit to a shared module re-runs every body that imports it. An edit to the root
+re-runs the root alone. A changed input file re-runs the body that reads it and
+the bodies that hold its result. The report's `memo` counts `bodies_run` and
+`bodies_skipped`. `CADGEN_ENGINE_BODIES=0` turns retention off and nothing else.
+A body must be a function of those bytes: a body that reads the clock, the
+environment or a file the engine does not read is not seen to change.

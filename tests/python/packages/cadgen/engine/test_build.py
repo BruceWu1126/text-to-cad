@@ -156,7 +156,8 @@ class BuildTest(EngineCase):
         reports = self.build()
         frame = reports["frame"]
         self.assertEqual(frame["memo"]["misses"], 0)
-        self.assertGreater(frame["memo"]["hits"], 0)
+        self.assertEqual((frame["memo"]["bodies_run"], frame["memo"]["bodies_skipped"]), (0, 1),
+                         "an unchanged body is not run: its last run is replayed")
         self.assertEqual(frame["named"], 0, "an unchanged part is not named again")
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
         self.assertEqual([path.stat().st_mtime_ns for path in written], before, "the sidecar too")
