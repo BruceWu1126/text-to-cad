@@ -38,7 +38,8 @@ their construction's names, so identical constructions labelled apart are one
 part. A function or a label that is not an ASCII identifier
 is written as its ASCII form and a digest of it (``identifier``), so no two are
 written alike. Lines and files are not in a name: they are where the trace
-says a feature ran (the provenance the document's sidecar keeps).
+says a feature ran: the provenance the worker serves while it holds the run, never
+written.
 
 **Lineage is the kernel's history, composed as FreeCAD 1.0 composes it**
 (``TopoShape::makeShapeWithElementMap``). The makers a feature runs report, of each
@@ -105,9 +106,7 @@ sibling's makers in a leaf's names. Histories retain only copy ordinals; each ru
 them to its own feature nodes, and no copy invents lineage for foreign elements.
 
 ``Trace.account`` is a part's whole account: the feature that made the body, per element
-ordinal its name, the table, and the feature each feature name it holds stands for;
-``Trace.feature_rows`` is the run's features, what the sidecar's provenance keeps with
-those names.
+ordinal its name, the table, and the feature each feature name it holds stands for.
 """
 
 from __future__ import annotations
@@ -311,12 +310,6 @@ class Feature:
                 if result is not None:
                     positions.setdefault(result.TShape(), position)
         return positions.get(tshape)
-
-    def row(self) -> dict[str, Any]:
-        """The feature as the sidecar's provenance records it: where it ran, and the
-        features that made what it was given, by their place in the run."""
-        return {"op": self.op, "file": self.file, "line": self.line, "function": self.function,
-                "inputs": list(self.inputs)}
 
 
 @dataclass
@@ -877,10 +870,6 @@ class Trace:
 
     # --- the payload ---------------------------------------------------------------------
 
-    def feature_rows(self) -> list[dict[str, Any]]:
-        """The run's features in call order, as the sidecar's provenance records them."""
-        return [feature.row() for feature in self.features]
-
     def account(self, body: Any, made_by: Callable[[Any], int | None],
                 holder: Callable[[Any], int | None] | None = None) -> tuple[dict[str, Any] | None, dict[str, int]]:
         """The lineage of one unlocated component ``body`` (a ``TopoDS_Shape``):
@@ -891,7 +880,7 @@ class Trace:
         it. ``made_by`` answers, for a ``TopoDS_TShape``, the feature of this run that
         made it. With it, the feature (its index in the run) each feature name the
         lineage holds stands for, with the features those were given: what the
-        sidecar's provenance answers a name of this part with."""
+        worker's provenance answers a name of this part with."""
         self._made_by = made_by
         copied = self._copy_of(body, made_by)
         if copied is not None and copied.names is None and copied.made is None:

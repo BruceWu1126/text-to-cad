@@ -5,9 +5,9 @@ declare written -- in this process, with the memo this process holds.
 too: an edit anywhere in the model's code is read), runs each model named, or every
 model the script defines, in one memo run, and then, outside the run, makes each
 result a document (``document.collect``), names its parts' elements from the run's
-history, writes the xbf when its content changed, writes the exports in order, and
-writes the sidecar. A model whose body raises reports the error with the model's own
-frames and leaves its files as they were.
+history, writes the xbf when its content changed, and writes the exports in order:
+those files and nothing else. A model whose body raises reports the error with the
+model's own frames and leaves its files as they were.
 
 What this process remembers between builds is in memory only: per part ``TShape``,
 its element names and its geometry key; per output path, the document it last wrote.
@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import json
 import os
 import sys
 import time
@@ -178,7 +177,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             continue
         report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
         try:
-            _finish(model, result, run, report, log, shown)
+            _finish(model, result, run, report, log)
         except Exception as error:  # noqa: BLE001 - a file that cannot be written is the build's error
             report["ok"] = False
             report["error"] = "".join(traceback.format_exception_only(type(error), error)).rstrip()
@@ -193,8 +192,7 @@ def _shown(script: Path, cwd: Path | None) -> str:
         return str(script)
 
 
-def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None],
-            shown: str) -> None:
+def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None]) -> None:
     from cadgen.engine import document, exports
 
     timings = report["timings"]
@@ -233,7 +231,6 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)
     report["named"] = named
-    xbf_path = next((path for kind, path in targets if kind == "xbf"), None)
     key = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(key)
     stats = {str(path): _stat(path) for _kind, path in targets}
@@ -260,10 +257,6 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets})
     report["files"] = written
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
-    # The sidecar describes the build that wrote the xbf: one that kept it keeps the sidecar.
-    if xbf_path is not None and (written[str(xbf_path)]["written"]
-                                 or not xbf_path.with_name(xbf_path.name + ".json").is_file()):
-        _sidecar(xbf_path, model, report, tree, shown)
 
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[tuple[str, str], str | None]]:
@@ -329,32 +322,3 @@ def _last_feature(name: str) -> str:
     text = name.split(":", 1)[1] if ":" in name[:2] else name
     found = _features(text)
     return found[-1] if found else ""
-
-
-def _sidecar(xbf_path: Path, model: Any, report: dict[str, Any], tree: Any, shown: str) -> None:
-    """``<name>.xbf.json``: the model, the build's timings and calls, the files, and per
-    part the provenance of each element name -- the feature that made it, and that
-    feature's operation and ``file:line``."""
-    parts = []
-    for part in tree.parts:
-        names = part.names or {}
-        elements = {}
-        for kind in ("faces", "edges", "vertices"):
-            for text in names.get(kind) or []:
-                if text is not None:
-                    elements[text] = _last_feature(text)
-        parts.append({"name": part.name, "key": part.key, "features": names.get("features") or {},
-                      "elements": elements, "table": names.get("table") or {}})
-    payload = {
-        "model": f"{shown}::{model.name}",
-        "engine": 1,
-        "timings": report.get("timings", {}),
-        "memo": report.get("memo", {}),
-        "files": {os.path.basename(path): row for path, row in report.get("files", {}).items()},
-        "parts": parts,
-    }
-    target = xbf_path.with_name(xbf_path.name + ".json")
-    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, separators=(",", ":"))
-    os.replace(temporary, target)

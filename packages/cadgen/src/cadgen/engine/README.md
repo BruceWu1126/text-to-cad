@@ -17,11 +17,11 @@ def arm():
 
 ## Laws
 
-1. **Nothing to disk.** The engine writes the files a model declares (the xbf,
-   its `.xbf.json` sidecar, the exports its decorators name) and the operating
+1. **Nothing to disk.** The engine writes the files a model declares -- the xbf
+   and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
-   `tempfile.gettempdir()/cadgen-engine`. It writes no cache, index, memo, mesh
-   or parsed document. A restart is cold.
+   `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
+   cache, index, memo, mesh or parsed document. A restart is cold.
 2. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
    OCP, build123d, numpy and the standard library only. A test holds it.
 3. **The file is the document.** The xbf is the native document: units in
@@ -189,7 +189,7 @@ changed (`kernel/trace.py`). A name is its kind and its derivation: the atom it
 starts from, the n-th element of its kind a feature made, and a step per feature that
 made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modified
 by the relief cut). A long derivation folds to its last feature and a digest
-(`f:plate.relief~5d1e0c2f9a3b`); the sidecar's `table` spells it out. Every name is a
+(`f:plate.relief~5d1e0c2f9a3b`); the worker that built it spells it out. Every name is a
 reference the CAD Viewer's ref grammar parses (`packages/core`'s `cadRefs`, mirrored as
 `kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
 is an identifier, and an atom ends in a number or a digest.
@@ -283,7 +283,7 @@ function of what it reaches as the build starts: a body that reads the clock or
 the environment is not seen to change, and
 nor is state one body leaves in a module for another (a registry it fills). A
 replayed body's features keep the `file:line` of the run that recorded them,
-so after a line-only edit the sidecar's provenance can name a line that moved.
+so after a line-only edit the provenance the worker serves can name a line that moved.
 
 Keys are worked out once a build, for every body the build asks about, against
 the namespaces as they are when the first body asks. A code object is read once

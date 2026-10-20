@@ -161,7 +161,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
-        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf"])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
         """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
