@@ -264,10 +264,10 @@ export const STEP_PART_VIEW_FEATURES = Object.freeze({
   settings: Object.freeze(VIEW_SETTING_IDS.filter(id => id !== "exploded"))
 });
 
-/** A cadgen engine document: its CAD edges in every mode, and Clip; no Explode. @type {ViewFeatures} */
-export const XBF_VIEW_FEATURES = Object.freeze({ modes: VIEW_MODE_VALUES, settings: Object.freeze(["edges", "clip"]) });
-/** A cadgen engine document of one part: no Parts either. @type {ViewFeatures} */
-export const XBF_PART_VIEW_FEATURES = Object.freeze({ modes: STEP_PART_VIEW_FEATURES.modes, settings: XBF_VIEW_FEATURES.settings });
+/** A cadgen engine document: what a STEP assembly offers (its CAD edges in every mode, Clip, Explode). @type {ViewFeatures} */
+export const XBF_VIEW_FEATURES = ALL_VIEW_FEATURES;
+/** A cadgen engine document of one part: what a STEP part file offers (no Parts, no Explode). @type {ViewFeatures} */
+export const XBF_PART_VIEW_FEATURES = STEP_PART_VIEW_FEATURES;
 
 /**
  * What a file of `kind` offers, for the viewer and a snapshot alike: a STEP everything; any other
@@ -283,7 +283,7 @@ export function viewFeaturesForKind(kind, { parts = 0, explodeParts = 0 } = {}) 
   const normalized = String(kind || "").trim().toLowerCase();
   if (normalized === "step" || normalized === "stp") return ALL_VIEW_FEATURES;
   if (normalized === "dxf") return EDGELESS_VIEW_FEATURES;
-  // A cadgen engine document has its B-rep's edges: every mode, Parts where it places several parts.
+  // A cadgen engine document is offered what a STEP is: an assembly everything, a part no Parts or Explode.
   if (normalized === "xbf") return parts > 1 ? XBF_VIEW_FEATURES : XBF_PART_VIEW_FEATURES;
   return {
     modes: parts > 1 ? ["solid", "parts"] : ["solid"],
