@@ -34,6 +34,7 @@ engine did not write reads the same way, with the XCAF reader.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import re
@@ -48,6 +49,9 @@ __all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geomet
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
+# What wrote a document, on its main label: the engine's xbf format and cadgen's release.
+WRITER_GUID = "c49e4620-5730-422f-808f-c1e84d7bd163"
+WRITER = "cadgen.engine xbf/1 (cadgen {release})"
 _XCAF_LOCK = threading.RLock()
 # The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
 _MADE: list = []
@@ -392,7 +396,7 @@ def to_xcaf(tree: Tree) -> Any:
     from OCP.TCollection import TCollection_AsciiString
     from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_Label
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.UnitsMethods import UnitsMethods_LengthUnit_Millimeter
@@ -405,6 +409,7 @@ def to_xcaf(tree: Tree) -> Any:
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
         colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
         materials = _Materials(doc)
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(WRITER_GUID), TCollection_AsciiString(_writer()))
         key_guid = Standard_GUID(KEY_GUID)
         labels: dict[int, Any] = {}
         placements: dict[int, list] = {}  # each assembly's component labels, in order
@@ -437,10 +442,12 @@ def to_xcaf(tree: Tree) -> Any:
                         colors.SetColor(sub, _quantity(rgba), XCAFDoc_ColorSurf)
                     if given is not None:
                         materials.set(sub, given, rgba or DEFAULT_COLOR)
-                edge_names = (prototype.names or {}).get("edges") or []
-                if any(text is not None for text in edge_names):
+                for kind, topabs in (("edges", TopAbs_EDGE), ("vertices", TopAbs_VERTEX)):  # vertices: naming
+                    edge_names = (prototype.names or {}).get(kind) or []
+                    if not any(text is not None for text in edge_names):
+                        continue
                     edges = TopTools_IndexedMapOfShape()
-                    TopExp.MapShapes_s(prototype.shape, TopAbs_EDGE, edges)
+                    TopExp.MapShapes_s(prototype.shape, topabs, edges)
                     for ordinal in range(1, min(edges.Extent(), len(edge_names)) + 1):
                         text = edge_names[ordinal - 1]
                         if text is None:
@@ -638,6 +645,9 @@ def read_step_shape(path: Any) -> Any:
                 # A handle of its own on the product's geometry: a move places this
                 # occurrence, never the product's other placements.
                 node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
+                element_names = imported.names(referred, topods, held_names)  # what the file names its elements
+                if element_names:
+                    node.__dict__[imported.ELEMENT_NAMES] = element_names
             color = label_color(label) if referred is not label else None
             node.color = as_color(color or product_color)
             node.label = (name_of(label) if referred is not label else "") or product_name
@@ -652,6 +662,12 @@ def read_step_shape(path: Any) -> Any:
     reader.SetNameMode(True)
     reader.SetColorMode(True)
     reader.SetLayerMode(True)
+    from OCP.Interface import Interface_Static
+
+    from cadgen.engine.kernel import imported
+
+    Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)  # the names the file gives elements
+    held_names: dict = {}
     if reader.ReadFile(os.fspath(path)) != IFSelect_RetDone:
         raise ValueError(f"cannot read the STEP file {path}")
     reader.Transfer(doc)
@@ -676,6 +692,7 @@ class Prototype:
     entry: str
     material: Any = None
     face_materials: dict[int, Any] = field(default_factory=dict)
+    vertex_names: dict[int, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -696,6 +713,7 @@ class Loaded:
         stat = self.path.stat()
         self.version = (stat.st_mtime_ns, stat.st_size)
         self.doc = _read(self.path)
+        self.writer = _label_text(self.doc.Main(), WRITER_GUID)  # None for a file this engine did not write
         self.prototypes: list[Prototype] = []
         self.instances: list[Instance] = []
         self.name = self.path.stem
@@ -787,6 +805,7 @@ class Loaded:
                 "index": p.index, "key": p.key, "name": p.name, "color": p.color,
                 "faceNames": {str(k): v for k, v in sorted(p.face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(p.edge_names.items())},
+                "vertexNames": {str(k): v for k, v in sorted(p.vertex_names.items())},
                 "faceColors": {str(k): v for k, v in sorted(p.face_colors.items())},
                 "material": material_json(p.material),
                 "faceMaterials": {str(k): material_json(v) for k, v in sorted(p.face_materials.items())},
@@ -824,7 +843,7 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
     own colour wins over the one its placement passes down, an assembly label has none, a
     colour reads back as the kernel stores it, and a name falls back to the referred
     prototype's, then to its parent's with the component's place."""
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
@@ -858,6 +877,12 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
             TopExp.MapShapes_s(part.shape, TopAbs_EDGE, edges)
             edge_names = {ordinal: text for ordinal, text in enumerate(names.get("edges") or [], 1)
                           if text and ordinal <= edges.Extent()}
+        vertex_names: dict[int, str] = {}
+        if any(names.get("vertices") or []):
+            vertices = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(part.shape, TopAbs_VERTEX, vertices)
+            vertex_names = {ordinal: text for ordinal, text in enumerate(names.get("vertices") or [], 1)
+                            if text and ordinal <= vertices.Extent()}
         face_colors = {ordinal: read(rgba) for ordinal, rgba in part.face_colors.items()
                        if 1 <= ordinal <= faces.Extent()}
         material = None if part.material is None else as_read(part.material, read(part.color or DEFAULT_COLOR))
@@ -866,6 +891,7 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
         return {"index": index, "key": part.key, "name": part.name or f"part{index + 1}", "color": read(part.color),
                 "faceNames": {str(k): v for k, v in sorted(face_names.items())},
                 "edgeNames": {str(k): v for k, v in sorted(edge_names.items())},
+                "vertexNames": {str(k): v for k, v in sorted(vertex_names.items())},
                 "faceColors": {str(k): v for k, v in sorted(face_colors.items())},
                 "material": material_json(material),
                 "faceMaterials": {str(k): material_json(v) for k, v in sorted(face_materials.items())}}
@@ -991,6 +1017,24 @@ def _read(path: Path) -> Any:
         else:
             raise ValueError(f"not a document the engine reads: {path.name}")
     return doc
+
+
+@functools.cache
+def _writer() -> str:
+    from importlib import metadata
+
+    try:
+        return WRITER.format(release=metadata.version("cadgen"))
+    except metadata.PackageNotFoundError:
+        return WRITER.format(release="unknown")
+
+
+def _label_text(label: Any, guid: str) -> str | None:
+    from OCP.Standard import Standard_GUID
+    from OCP.TDataStd import TDataStd_AsciiString
+
+    found = TDataStd_AsciiString()
+    return found.Get().ToCString() if _find(label, found, Standard_GUID(guid)) else None
 
 
 def _find(label: Any, attribute: Any, guid: Any) -> bool:
@@ -1130,7 +1174,7 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
     from OCP.Standard import Standard_GUID
     from OCP.TDataStd import TDataStd_AsciiString
     from OCP.TDF import TDF_LabelSequence
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.XCAFDoc import XCAFDoc_ShapeTool
@@ -1144,6 +1188,8 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
         found_key = f"{loaded.version[0]}-{loaded.version[1]}-{entry}"
     face_names: dict[int, str] = {}
     edge_names: dict[int, str] = {}
+    vertex_names: dict[int, str] = {}
+    vertices = None
     face_colors: dict[int, tuple] = {}
     face_materials: dict[int, Any] = {}
     subs = TDF_LabelSequence()
@@ -1176,9 +1222,18 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     edge_names[ordinal] = name
+            elif kind == TopAbs_VERTEX:
+                if vertices is None:
+                    vertices = TopTools_IndexedMapOfShape()
+                    TopExp.MapShapes_s(shape, TopAbs_VERTEX, vertices)
+                ordinal = vertices.FindIndex(held)
+                name = _label_name(sub) if ordinal else ""
+                if name:
+                    vertex_names[ordinal] = name
     name = step_name(_label_name(label)) if loaded.step else _label_name(label)
     return Prototype(index, local, name or f"part{index + 1}", _label_color(label), found_key,
-                     face_names, edge_names, face_colors, entry, _label_material(label), face_materials)
+                     face_names, edge_names, face_colors, entry, _label_material(label), face_materials,
+                     vertex_names=vertex_names)
 
 
 def _matrix(location: Any) -> list[float]:

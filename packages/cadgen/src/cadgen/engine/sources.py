@@ -34,6 +34,7 @@ from __future__ import annotations
 import ast
 import bisect
 import builtins
+import copy
 import dis
 import enum
 import functools
@@ -46,7 +47,7 @@ from collections import OrderedDict
 from pathlib import Path, PurePath
 from typing import Any
 
-__all__ = ["Symbols", "closure", "digest"]
+__all__ = ["Symbols", "assigned", "closure", "digest", "returning", "skeleton"]
 
 _HELD = 4096
 # (device, inode, size, mtime) -> the file's digest; digest -> the imports its source makes.
@@ -167,11 +168,15 @@ def _reads_dict(node: ast.AST) -> bool:
     return isinstance(node, ast.Attribute) and node.attr == "__dict__"
 
 
-def _facts(path: Path, file_digest: str) -> tuple[dict, str | None]:
+def _facts(path: Path, file_digest: str) -> tuple[dict, str | None, tuple, dict, tuple]:
     """What of a file the walk cannot follow by value: per function or lambda, keyed as its
     code object names it -- ``(name, first line)``, the line of its first decorator -- the
     first dynamic reference in it or in what it nests; and a ``from x import *`` at the
-    module's top, which binds names the source does not spell."""
+    module's top, which binds names the source does not spell. With them, from the same
+    pass, the file's assignments (``_assignment_site``), what names a feature
+    (``assigned``), each target named as ``_named_sites`` names it; per function, the
+    skeleton of those names (``skeleton``); and the spans of its ``return`` statements
+    (``returning``)."""
     found = _FACTS.get(file_digest)
     if found is None:
         try:
@@ -180,15 +185,26 @@ def _facts(path: Path, file_digest: str) -> tuple[dict, str | None]:
             tree = ast.Module(body=[], type_ignores=[])
         spots: dict[tuple[str, int], str] = {}
         star = None
+        sites: list[tuple] = []
+        returns: list[tuple] = []
+        functions: set[str] = {"<module>"}
         pending: list[tuple[ast.AST, tuple]] = [(tree, ())]
         while pending:
             node, scopes = pending.pop()
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                site = _assignment_site(node)
+                if site is not None:
+                    sites.append((*site, scopes[-1][0] if scopes else "<module>", _statement_tag(node)))
+            elif isinstance(node, ast.Return) and node.value is not None:
+                returns.append(_span(node))
             reason = None
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 first = min([decorator.lineno for decorator in node.decorator_list] + [node.lineno])
                 scopes = (*scopes, (node.name, first))
+                functions.add(node.name)
             elif isinstance(node, ast.Lambda):
                 scopes = (*scopes, ("<lambda>", node.lineno))
+                functions.add("<lambda>")
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                 name = node.func.id
                 if name in _DYNAMIC_CALLS:
@@ -218,10 +234,228 @@ def _facts(path: Path, file_digest: str) -> tuple[dict, str | None]:
                 for scope in scopes:
                     spots.setdefault(scope, f"{reason} (line {node.lineno})")
             pending.extend((child, scopes) for child in ast.iter_child_nodes(node))
-        found = _FACTS[file_digest] = (spots, star)
+        sites = _named_sites(sorted(sites, key=lambda site: site[0]))
+        returns.sort()
+        # Per function name, what its features are named from: the targets of its
+        # assignments in source order, as named (``skeleton``).
+        targets: dict[str, list] = {name: [] for name in functions}
+        for site in sites:
+            targets.setdefault(site[4], []).append(site[2])
+        skeleton = {name: hashlib.blake2b(repr(found).encode(), digest_size=8).hexdigest()
+                    for name, found in targets.items()}
+        found = _FACTS[file_digest] = (spots, star, tuple(sites), skeleton, tuple(returns))
         while len(_FACTS) > _HELD:
             _FACTS.popitem(last=False)
     return found
+
+
+def skeleton(path: Path) -> dict[str, str]:
+    """Per function name of a file (``<module>`` its top level), a digest of what its
+    features' names are made of: the targets its assignments name, in order, as
+    ``_named_sites`` names them. A part whose shape a warm build hands back unchanged keeps
+    its names while the functions its names come from have the same skeleton; a renamed
+    variable or function, an assignment added, a statement whose shape changed, is a new
+    one (``build``)."""
+    return _facts(Path(path), digest(Path(path)))[3]
+
+
+# --- a statement's shape, its literals aside ---------------------------------------------
+
+# The letters a statement's tag is spelled in: hex digits as letters, so the count a name
+# takes after it (``target_<tag>2``) is never read as part of it.
+_TAG_LETTERS = str.maketrans("0123456789abcdef", "abcdefghijklmnop")
+
+
+class _Literals(ast.NodeTransformer):
+    """A statement with every literal one placeholder: a number (signed too), a string,
+    a bytes, a constant of any kind."""
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        return ast.Constant(value=...)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        if isinstance(node.op, (ast.USub, ast.UAdd)) and isinstance(node.operand, ast.Constant):
+            return ast.Constant(value=...)
+        return self.generic_visit(node)
+
+
+def _statement_tag(node: ast.AST) -> str:
+    """The statement's skeleton -- its syntax tree with every literal masked -- as six
+    letters: equal for two statements that differ only in their numbers and strings, so a
+    dimension edit keeps it, and different for a statement of another shape."""
+    masked = _Literals().visit(copy.deepcopy(node))
+    text = ast.dump(masked, annotate_fields=False, include_attributes=False)
+    return hashlib.blake2b(text.encode(), digest_size=3).hexdigest().translate(_TAG_LETTERS)
+
+
+def _named_sites(sites: list[tuple]) -> list[tuple]:
+    """Each assignment site as ``assigned`` reads it, ``(start, end, names, elements,
+    function)``, each name the author's name for the feature it stores: the first
+    statement in a function to assign a target names it as it is (``relief``); every
+    later one -- a reassignment -- by the target and its statement's tag
+    (``relief_kdpgac``), so a reassignment is identified by its skeleton and counted
+    (``trace``) only among the statements of that skeleton in the function. Inserting a
+    statement of another shape renames none of them; two statements of one skeleton still
+    count in order."""
+    first: dict[tuple[str, str], tuple] = {}
+    for start, _end, names, _elements, function, _tag in sites:
+        for name in names:
+            first.setdefault((function, name), start)
+    named = []
+    for start, end, names, elements, function, tag in sites:
+        names = tuple(name if first[(function, name)] == start else f"{name}_{tag}" for name in names)
+        named.append((start, end, names, elements, function))
+    return named
+
+
+# --- what a call's result is assigned to ---------------------------------------------------
+
+
+def _target_name(node: ast.AST) -> str | None:
+    """The author's name for what an assignment target holds: a variable's name, an
+    attribute's (``self.body`` is ``body``), the container's for an item (``parts[i]`` is
+    ``parts``), the starred name's."""
+    while True:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        if isinstance(node, (ast.Subscript, ast.Starred)):
+            node = node.value
+            continue
+        return None
+
+
+def _span(node: ast.AST) -> tuple[tuple[int, int], tuple[int, int]]:
+    return (node.lineno, node.col_offset), (node.end_lineno or node.lineno, node.end_col_offset or 0)
+
+
+def _assignment_site(node: ast.AST) -> tuple | None:
+    """An assignment as ``assigned`` reads it: ``(start, end, names, elements)`` -- its span
+    as (line, column) pairs, the names its first target assigns (one, or a tuple target's
+    each), and, where a tuple target is given a tuple of as many values, each value's span,
+    so a call in one of them is named by its own target."""
+    if isinstance(node, ast.Assign):
+        target, value = node.targets[0], node.value
+    elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+        target, value = node.target, node.value
+    else:
+        return None
+    if value is None:
+        return None
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = tuple(_target_name(element) for element in target.elts)
+        if not names or any(name is None for name in names):
+            return None
+        elements = None
+        if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(names) \
+                and not any(isinstance(element, ast.Starred) for element in value.elts):
+            elements = tuple(_span(element) for element in value.elts)
+        start, end = _span(node)
+        return start, end, names, elements
+    name = _target_name(target)
+    if name is None:
+        return None
+    start, end = _span(node)
+    return start, end, (name,), None
+
+
+# id(code) -> (code, its instructions' positions, per instruction offset the names it assigns).
+_SITES: "OrderedDict[int, tuple]" = OrderedDict()
+_UNSEEN = object()
+
+
+def assigned(code: types.CodeType, offset: int) -> tuple[tuple[int, int], tuple[str, ...]] | None:
+    """The assignment running instruction ``offset`` (``frame.f_lasti``) of ``code``: where
+    the statement starts, ``(line, column)``, and the names it assigns its value to --
+    ``relief = cut(...)`` is ``("relief",)``, ``a, b = split(...)`` is ``("a", "b")``, a
+    call in the second of ``a, b = box(), cylinder()`` is ``("b",)`` -- or None where it is
+    no assignment (a return, an expression, a loop's header). Read from the file's source
+    by the instruction's position, parsed once per digest (``_facts``) and looked up once
+    per instruction."""
+    held = _SITES.get(id(code))
+    if held is None or held[0] is not code:
+        held = _SITES[id(code)] = (code, [None], {})
+        while len(_SITES) > _HELD * 4:
+            _SITES.popitem(last=False)
+    else:
+        _SITES.move_to_end(id(code))
+    found = held[2].get(offset, _UNSEEN)
+    if found is _UNSEEN:
+        found = held[2][offset] = _assigned(code, offset, held[1])
+    return found
+
+
+def _assigned(code: types.CodeType, offset: int, positions: list) -> tuple[tuple[int, int], tuple[str, ...]] | None:
+    filename = code.co_filename
+    if not filename or filename.startswith("<"):
+        return None
+    if positions[0] is None:
+        positions[0] = list(code.co_positions())
+    at = offset // 2
+    if not 0 <= at < len(positions[0]):
+        return None
+    line, _end_line, column, _end_column = positions[0][at]
+    if line is None:
+        return None
+    try:
+        sites = _facts(Path(filename), digest(Path(filename)))[2]
+    except OSError:
+        return None
+    point = (line, column if column is not None else 0)
+    index = bisect.bisect_right(sites, point, key=lambda site: site[0]) - 1
+    if index < 0:
+        return None
+    start, end, names, elements, _function = sites[index]
+    if not start <= point <= end:
+        return None
+    if elements is not None:
+        for name, (first, last) in zip(names, elements):
+            if first <= point <= last:
+                return start, (name,)
+    return start, names
+
+
+# id(code) -> (code, its instructions' positions, per instruction offset whether it returns).
+_RETURNS: "OrderedDict[int, tuple]" = OrderedDict()
+
+
+def returning(code: types.CodeType, offset: int) -> bool:
+    """Whether instruction ``offset`` of ``code`` runs in a ``return`` statement's value: a
+    helper handing back what it makes, unassigned (``return bd.Pos(...) * bd.Cylinder(...)``),
+    whose calls its caller's assignment names (``trace``)."""
+    held = _RETURNS.get(id(code))
+    if held is None or held[0] is not code:
+        held = _RETURNS[id(code)] = (code, [None], {})
+        while len(_RETURNS) > _HELD * 4:
+            _RETURNS.popitem(last=False)
+    else:
+        _RETURNS.move_to_end(id(code))
+    found = held[2].get(offset)
+    if found is None:
+        found = held[2][offset] = _returning(code, offset, held[1])
+    return found
+
+
+def _returning(code: types.CodeType, offset: int, positions: list) -> bool:
+    filename = code.co_filename
+    if not filename or filename.startswith("<"):
+        return False
+    if positions[0] is None:
+        positions[0] = list(code.co_positions())
+    at = offset // 2
+    if not 0 <= at < len(positions[0]):
+        return False
+    line, _end_line, column, _end_column = positions[0][at]
+    if line is None:
+        return False
+    try:
+        spans = _facts(Path(filename), digest(Path(filename)))[4]
+    except OSError:
+        return False
+    point = (line, column if column is not None else 0)
+    index = bisect.bisect_right(spans, (point, (1 << 62, 0))) - 1
+    return index >= 0 and spans[index][0] <= point <= spans[index][1]
 
 
 _HASCONST = frozenset(dis.hasconst)

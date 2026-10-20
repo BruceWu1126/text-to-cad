@@ -3,8 +3,8 @@ again, and the law that nothing but the declared files is written."""
 
 from __future__ import annotations
 
-import json
 import os
+import re
 import tempfile
 import textwrap
 import time
@@ -101,8 +101,7 @@ class BuildTest(EngineCase):
         self.write()
         reports = self.build()
         self.assertTrue(all(report["ok"] for report in reports.values()), reports)
-        self.assertEqual(_files(self.folder), {"frame.py", "bracket.xbf", "bracket.xbf.json", "out/frame.xbf",
-                                               "out/frame.xbf.json", "out/frame.step"})
+        self.assertEqual(_files(self.folder), {"frame.py", "bracket.xbf", "out/frame.xbf", "out/frame.step"})
         loaded = document.load(self.folder / "out/frame.xbf")
         structure = loaded.structure()
         self.assertEqual(structure["name"], "frame")
@@ -116,24 +115,23 @@ class BuildTest(EngineCase):
         self.assertEqual(bracket.color, (0.1, 0.5, 0.9, 1.0))
         self.assertEqual(list(rail.face_colors.values()), [(1.0, 0.0, 0.0, 1.0)])
         self.assertTrue(bracket.face_names and all(name.startswith("f:bracket.") for name in bracket.face_names.values()))
-        self.assertTrue(any(";M:bracket.cut1" in name for name in bracket.face_names.values()))
+        # The third assignment to ``plate``, a reassignment: the target and its statement's tag.
+        self.assertTrue(any(re.search(r"bracket\.plate_[a-p]{6}", name) for name in bracket.face_names.values()))
         self.assertTrue(bracket.edge_names)
         self.assertEqual(len(bracket.key), 32)
-        # The sidecar: the model, timings, and provenance per element name.
-        sidecar = json.loads((self.folder / "out/frame.xbf.json").read_text(encoding="utf-8"))
-        self.assertEqual(sidecar["model"], "frame.py::frame")
-        self.assertIn("body", sidecar["timings"])
-        part = sidecar["parts"][0]
-        cut = next(name for name in part["elements"] if ";M:bracket.cut1" in name)
-        self.assertEqual(part["elements"][cut], "bracket.cut1")
-        self.assertEqual(part["features"]["bracket.cut1"][0], "cut")
-        self.assertRegex(part["features"]["bracket.cut1"][1], r"^frame\.py:\d+$")
+        # What wrote it is on the document's main label; where its code is, nowhere.
+        self.assertRegex(loaded.writer, r"^cadgen\.engine xbf/1 \(cadgen .+\)$")
+        raw = (self.folder / "out/frame.xbf").read_bytes()
+        self.assertNotIn(b"frame.py", raw)
+        self.assertNotIn(str(self.folder).encode(), raw)
+        self.assertIsNone(document.Loaded(self.folder / "out/frame.step").writer, "a STEP names no engine writer")
         # The STEP is a translation: names, and every face's element name.
         text = (self.folder / "out/frame.step").read_text(encoding="utf-8")
         self.assertIn("PRODUCT('frame'", text)
         for name in bracket.face_names.values():
-            self.assertIn(f"ADVANCED_FACE('{name}'", text)
-        self.assertNotIn("ADVANCED_FACE(''", text)
+            # The writer may break a long entity's line before its name.
+            self.assertRegex(text, rf"ADVANCED_FACE\(\s*'{re.escape(name)}'")
+        self.assertNotRegex(text, r"ADVANCED_FACE\(\s*''")
 
     def test_a_step_read_back_names_each_occurrence_as_the_file_does(self) -> None:
         # Two placements of one part are told apart by their own names, not their product's.
@@ -151,7 +149,7 @@ class BuildTest(EngineCase):
         self.write()
         self.build()
         target = self.folder / "out/frame.xbf"
-        written = [target, self.folder / "out/frame.step", self.folder / "out/frame.xbf.json"]
+        written = [target, self.folder / "out/frame.step"]
         before = [path.stat().st_mtime_ns for path in written]
         reports = self.build()
         frame = reports["frame"]
@@ -160,7 +158,7 @@ class BuildTest(EngineCase):
                          "an unchanged body is not run: its last run is replayed")
         self.assertEqual(frame["named"], 0, "an unchanged part is not named again")
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
-        self.assertEqual([path.stat().st_mtime_ns for path in written], before, "the sidecar too")
+        self.assertEqual([path.stat().st_mtime_ns for path in written], before)
 
     def test_an_assembly_made_again_around_the_same_parts_rewrites_nothing(self) -> None:
         # A child holding what the memo cannot key (a stand-in for a joint) is not keyed: the
@@ -254,6 +252,9 @@ class BuildTest(EngineCase):
         self.script.write_text(self.script.read_text(encoding="utf-8").replace("WIDTH = 30", "from helper import WIDTH"), encoding="utf-8")
         self.build()
         self.assertFalse(any("__pycache__" in name for name in _files(self.folder)))
+        # The declared outputs and nothing else: no sidecar, no record of the build.
+        self.assertEqual(_files(self.folder), {"frame.py", "helper.py", "bracket.xbf", "out/frame.xbf", "out/frame.step"})
+        self.assertFalse([name for name in _files(self.folder) if name.endswith(".json")])
 
 
 if __name__ == "__main__":

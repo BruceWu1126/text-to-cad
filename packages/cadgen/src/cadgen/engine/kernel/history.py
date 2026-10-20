@@ -58,7 +58,7 @@ from OCP.TopExp import TopExp
 from OCP.TopoDS import TopoDS_Shape
 from OCP.TopTools import TopTools_IndexedMapOfShape, TopTools_ListOfShape
 
-__all__ = ["History", "KINDS", "compose", "install", "listed", "recording", "stats", "uninstall"]
+__all__ = ["History", "KINDS", "by_ordinal", "compose", "install", "listed", "recording", "stats", "uninstall"]
 
 # The element kinds named, in the order a source is preferred by (FreeCAD's NameKey: a
 # vertex before an edge before a face), with the kernel's enum for each.
@@ -652,6 +652,106 @@ def _feeding(taken: list[_Record], results: list[Any]) -> list[_Record]:
             unopened.extend(record.inputs)
     feeding.reverse()
     return feeding
+
+
+def by_ordinal(source: Any, result: Any, how: str) -> History | None:
+    """The history of a maker that reported nothing, where its result maps one-to-one onto
+    the one shape it was given: as many vertices, edges and faces, each face bounded by the
+    edges of the same ordinals and each edge by the vertices of the same ordinals -- what a
+    copy or a placement of the shape is, element for element. Each element of the result
+    then comes from the element of its ordinal, ``how`` (``M`` for a transformation, ``I``
+    for a copy); None where the two do not map so."""
+    sources = [_map(source, kind) for kind in KINDS]
+    results = [_map(result, kind) for kind in KINDS]
+    if any(a.Extent() != b.Extent() for a, b in zip(sources, results)):
+        return None
+    for upper in (2, 1):
+        for ordinal in range(1, sources[upper].Extent() + 1):
+            lower = KINDS[upper - 1]
+            first = _map(sources[upper].FindKey(ordinal), lower)
+            second = _map(results[upper].FindKey(ordinal), lower)
+            if first.Extent() != second.Extent():
+                return None
+            if sorted(sources[upper - 1].FindIndex(first.FindKey(at)) for at in range(1, first.Extent() + 1)) != \
+                    sorted(results[upper - 1].FindIndex(second.FindKey(at)) for at in range(1, second.Extent() + 1)):
+                return None
+    return History(origins={(0, kind, ordinal): ((0, kind, ordinal, how, (1,)),)
+                            for kind in range(len(KINDS)) for ordinal in range(1, results[kind].Extent() + 1)})
+
+
+def placed_by_ordinal(history: History, inputs: list[Any], results: list[Any]) -> None:
+    """Complete the history of a placement (``moved``, a copy) of one shape: each result
+    its makers reported nothing of -- a part build123d copied while placing an assembly --
+    and that is no sub-shape of the input as it is, is taken to be its counterpart there:
+    the input's sub-shapes and the results are walked in the same order (an assembly's
+    shape holds its parts in the order its object does), and the next sub-shape of the
+    input that maps one-to-one onto the result (``by_ordinal``) is the one it copies.
+    Its elements then come from that sub-shape's, as the same elements, so a placement
+    never names a part as its own."""
+    from OCP.TopoDS import TopoDS_Iterator
+
+    if len(inputs) != 1 or inputs[0] is None or len(results) < 2:
+        return
+    origins = history.origins
+    covered = set(history.copies)
+    covered.update(key[0] for key in origins)
+    if all(result is None or position in covered for position, result in enumerate(results)):
+        return
+    source = inputs[0]
+    subs = []
+    pending = [source]
+    while pending:
+        shape = pending.pop()
+        subs.append(shape)
+        if shape.ShapeType() == TopAbs_COMPOUND:
+            children = []
+            iterator = TopoDS_Iterator(shape)
+            while iterator.More():
+                children.append(iterator.Value())
+                iterator.Next()
+            pending.extend(reversed(children))
+    tshapes = {shape.TShape() for shape in subs}
+
+    def counts(shape: Any) -> tuple:
+        return (shape.ShapeType(), *(_map(shape, kind).Extent() for kind in KINDS))
+
+    given = None
+    added: dict = {}
+    at = 0
+    for position, result in enumerate(results):
+        if result is None:
+            continue
+        identity = result.TShape() in tshapes
+        wanted = None if identity else counts(result)
+        while at < len(subs):
+            sub = subs[at]
+            at += 1
+            if identity:
+                if sub.TShape() == result.TShape():
+                    break
+                continue
+            if sub.ShapeType() != result.ShapeType() or counts(sub) != wanted:
+                continue
+            if position in covered:
+                break  # its makers reported it: only its place in the walk is wanted
+            if by_ordinal(sub, result, SAME) is None:
+                continue
+            if given is None:
+                given = [_map(source, kind) for kind in KINDS]
+            for kind in range(len(KINDS)):
+                elements = _map(sub, KINDS[kind])
+                for ordinal in range(1, elements.Extent() + 1):
+                    found = given[kind].FindIndex(elements.FindKey(ordinal))
+                    if found:
+                        added[(position, kind, ordinal)] = ((0, kind, found, SAME, (1,)),)
+            break
+    if not added:
+        return
+    if isinstance(origins, _Origins):
+        origins.sparse.update(added)
+        origins.size += len(added)
+    else:
+        history.origins = {**origins, **added}
 
 
 def _simple_copy_rows(taken: list[_Record]) -> list[_CopyRows] | None:

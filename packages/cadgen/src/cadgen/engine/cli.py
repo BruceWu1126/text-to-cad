@@ -4,6 +4,7 @@
     cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
     cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON] [--json]
+    cadgen xbf where DOC REF                  what made one element: its facts and ``made_by``
     cadgen xbf status | stop | daemon
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -46,6 +48,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     from cadgen.engine.snapshot import add_parser as add_snapshot
 
     add_snapshot(verbs)
+    where = verbs.add_parser("where", help="what made one element of a document: its facts, and the feature, "
+                                           "function, file and line behind it")
+    where.add_argument("document", help="an .xbf")
+    where.add_argument("ref", help="PART/face N (or edge, vertex), PART a part's or an instance's name (or the "
+                                   "document's, for a document of one part); "
+                                   "or an element name (f:..., e:..., v:...)")
     verbs.add_parser("status", help="the daemon's workers and served documents")
     verbs.add_parser("stop", help="stop the daemon")
     verbs.add_parser("daemon", help="run the daemon in this process")
@@ -199,6 +207,69 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
+_REF = re.compile(r"(?P<part>.+?)/(?P<kind>face|edge|vertex)[ /]?(?P<ordinal>[1-9][0-9]*)")
+_LETTERS = {"f": "face", "e": "edge", "v": "vertex"}
+
+
+def _elements(structure: dict[str, Any], ref: str) -> list[tuple[dict[str, Any], str, int]]:
+    """The elements ``ref`` names in a document's structure: ``(prototype, kind, ordinal)``
+    for ``PART/face N`` -- PART a prototype's name, else an instance's path -- or for every
+    element bearing an element name."""
+    prototypes = structure["prototypes"]
+    found = _REF.fullmatch(ref.strip())
+    if found is not None:
+        part, kind, ordinal = found["part"], found["kind"], int(found["ordinal"])
+        named = [p for p in prototypes if p["name"] == part]
+        if not named:
+            named = [prototypes[i["prototype"]] for i in structure["instances"] if i["path"] == part][:1]
+        if not named and part == structure["name"] and len(prototypes) == 1:
+            named = prototypes  # a document of one part: the model's own name
+        return [(prototype, kind, ordinal) for prototype in named]
+    from cadgen.engine.kernel.trace import ELEMENT_NAME
+
+    if not ELEMENT_NAME.fullmatch(ref):
+        raise SystemExit(f"cadgen xbf where: {ref!r} is neither PART/face N (edge, vertex) nor an element name")
+    kind = _LETTERS[ref[0]]
+    return [(prototype, kind, int(ordinal)) for prototype in prototypes
+            for ordinal, text in prototype.get(f"{kind}Names", {}).items() if text == ref]
+
+
+def _where(args: argparse.Namespace) -> int:
+    """Serve the document (through the daemon, on demand), find the elements the ref names
+    and print, for each, what the kernel measures of it and what made it (``made_by``,
+    null for a document no live worker built)."""
+    import urllib.request
+
+    from cadgen.engine.client import request
+
+    path = Path(args.document).resolve()
+    if not path.is_file():
+        print(f"cadgen xbf where: no document {args.document}", file=sys.stderr)
+        return 2
+    answer = request({"op": "serve", "path": str(path)})
+    if answer is None or "failed" in answer:
+        print(f"cadgen xbf where: {(answer or {}).get('failed', 'no daemon')}", file=sys.stderr)
+        return 1
+    base, _sep, ident = answer["url"].partition("/?doc=")
+
+    def get(route: str) -> Any:
+        with urllib.request.urlopen(f"{base}/api/doc/{ident}{route}", timeout=300) as response:
+            return json.loads(response.read())
+
+    structure = get("")
+    elements = _elements(structure, args.ref)
+    if not elements:
+        print(f"cadgen xbf where: {path.name} has no element {args.ref!r}", file=sys.stderr)
+        return 1
+    found = []
+    for prototype, kind, ordinal in elements:
+        facts = get(f"/part/{prototype['key']}/{kind}/{ordinal}")
+        found.append({"part": prototype["name"], "key": prototype["key"], "kind": kind, "ordinal": ordinal,
+                      "name": prototype.get(f"{kind}Names", {}).get(str(ordinal)), **facts})
+    print(json.dumps(found[0] if len(found) == 1 else found, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
     args = _parser(prog).parse_args(argv)
     if args.verb == "build":
@@ -207,6 +278,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
         return _export(args)
     if args.verb == "serve":
         return _serve(args)
+    if args.verb == "where":
+        return _where(args)
     if args.verb == "snapshot":
         from cadgen.engine.snapshot import run as snapshot
 

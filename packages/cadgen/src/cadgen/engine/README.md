@@ -48,20 +48,22 @@ def hinge():
 
 ## Laws
 
-1. **Nothing to disk.** The engine writes the files a model declares (the xbf,
-   its `.xbf.json` sidecar, the exports its decorators name) and the operating
+1. **Nothing to disk.** The engine writes the files a model declares -- the xbf
+   and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
-   `tempfile.gettempdir()/cadgen-engine`. It writes no cache, index, memo, mesh
-   or parsed document. A restart is cold.
+   `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
+   cache, index, memo, mesh or parsed document. A restart is cold.
 2. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
    OCP, build123d, numpy and the standard library only. A test holds it.
 3. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
    per face given one (`XCAFDoc_Material`: name, description, density;
-   `XCAFDoc_VisMaterial`: PBR), and element names on face and edge sub-shape
+   `XCAFDoc_VisMaterial`: PBR), element names on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
-   Kinematics). STEP, GLB, STL and 3MF are translations of it.
+   Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
+   <release>)`, `document.Loaded.writer`). No script path and no code location
+   is in it. STEP, GLB, STL and 3MF are translations of it.
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
@@ -69,9 +71,23 @@ def hinge():
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap.
-5. **No animation, ever.** The document carries kinematics -- the mechanism and
-   its configurations, each a pose -- and never time. Nothing in the engine
-   keys, plays or bakes motion.
+5. **One file per model.** A model is one xbf, plus the exports it declares --
+   translations of that xbf, written after it. There is no second file of a
+   model: no sidecar, no manifest, no record of what a build did.
+6. **Provenance is served live, never written.** What made an element -- the
+   feature, its operation, the function, file and line of its call -- lives in
+   the trace of the worker that built the document, and is asked of it while it
+   lives (`made_by` on the facts endpoints, `cadgen xbf where`). A document
+   opened with no such worker has none to give, and says so (`made_by: null`).
+7. **Poses, never time.** The document carries kinematics -- the mechanism and
+   its configurations, each a pose: where its parts stand, how they may move --
+   and never time: no animation, no clip, no keyframe, ever. Nothing in the
+   engine keys, plays or bakes motion.
+8. **Names are the durable tie to code.** An element's name is spelled from the
+   function that made its feature and the author's name for that feature (the
+   target its result is assigned to, or a label), never from a line or a file:
+   moving code renames nothing, and the file holds no line to go stale. A line
+   is what the worker serves, now.
 
 ## Layout
 
@@ -80,6 +96,7 @@ def hinge():
 | `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
+| `reads.py` | the files a model reads through the engine: `read_bytes`, `read_text`, `read_json`, keyed by their bytes |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
@@ -99,6 +116,7 @@ cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen xbf where DOC REF                    REF: PART/face N (edge, vertex), or an element name
 cadgen xbf status | stop | daemon
 ```
 
@@ -227,12 +245,24 @@ What the kernel measures of an element is asked for, never extracted ahead:
 `GET /api/doc/<id>/part/<key>/face/<ordinal>` is its area, centroid, surface
 type, exact bounding box and `BRepCheck` verdict; `.../edge/<ordinal>` its
 length, curve type, class, faces and endpoints; `.../vertex/<ordinal>` its
-position.
+position. Each also answers `made_by`: the element's name, the feature that made
+it (its name's last step), that feature's operation, the function, file and line
+of its call, and, for a name that folds its derivation, the derivation spelled
+out. It comes from the trace of the worker that built the document, asked over
+the worker's pipe (a `where` request, answered by the worker's reading thread,
+during a build too) and never from a file: a document served cold, with no live
+worker that built it (a daemon started again, `serve --foreground`), answers
+`made_by: null`, and so does an element the served version names otherwise than
+that worker's last build. The line is the call's in the run that named the part.
+`cadgen xbf where DOC REF` serves the document on demand and prints one
+element's facts and `made_by`; `REF` is `PART/face N` (`edge`, `vertex`), `PART`
+a part's or an instance's name as the structure spells it, or an element name
+in the viewer's ref grammar (`f:plate.relief.3`).
 
 ## Wire format
 
 `GET /api/doc/<id>` returns the structure as JSON: prototypes (key, name,
-colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, `material` and
+colour, `faceNames`, `edgeNames`, `vertexNames`, `faceColors` by ordinal, `material` and
 `faceMaterials` by ordinal -- each `{name, density, color, metallic, roughness,
 emissive, description}`, its colour the base colour it is drawn in, density in kg/m^3
 -- and once meshed `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
@@ -283,6 +313,64 @@ table.
 held yet (with `drop=1`, every part again), in parallel, and returns the time it
 took, the bytes, the triangles and the unmeshed faces.
 
+## Element names
+
+Every face, edge and vertex of a part is named as FreeCAD's topological naming names
+it: by the feature history that made it, so it keeps its name unless that history
+changed (`kernel/trace.py`). A name is its kind and its derivation: the atom it
+starts from, the n-th element of its kind a feature made, and a step per feature that
+made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modified
+by the relief cut). A long derivation folds to its last feature and a digest
+(`f:plate.relief~5d1e0c2f9a3b`); the worker that built it spells it out. Every name is a
+reference the CAD Viewer's ref grammar parses (`packages/core`'s `cadRefs`, mirrored as
+`kernel/trace.py`'s `ELEMENT_NAME`): a feature name has at most one dot, every segment
+is an identifier, and an atom ends in a number or a digest.
+
+A feature is the author's name for its result. A call whose result an assignment
+stores is `<function>.<target>` (`relief = body - hole` in `plate` is `plate.relief`;
+`self.body = ...` is `body`; each target of `a, b = ...` names its own); the calls the
+same statement made on the way are `<function>.<target>_<operation><n>`
+(`plate.relief_make_cylinder1`). The first statement in a function to assign a target
+names it as it is; a later one -- a reassignment, `plate = plate - hole` -- is identified
+by its statement's skeleton, its syntax tree with every literal (number, string)
+masked: it is `<target>_<tag>`, the tag six letters of that skeleton
+(`plate_cfjpgj`), counted only among the statements of the same skeleton in the
+function (`plate_cfjpgj2` for the second, or for a loop's second run). So inserting a
+step of another shape renames none of the steps around it, and a dimension edit -- a
+literal -- keeps every name. Two statements of one skeleton still count in order:
+inserting one before another of its shape renames the later one, and a statement
+inserted before a function's first assignment to a target becomes the one named as it
+is. A helper that makes a shape in its `return` statement and hands it back unassigned
+(`return bd.Pos(x, 0, 0) * bd.Cylinder(r, h)`) makes it for its caller: its calls are
+named by the caller's assignment the result flows into, as the calls that statement
+made on the way (`plate.plate_cfjpgj_make_cylinder1`), through further helpers that
+return it too. A call whose result is assigned nowhere (a return expression of the
+model, an expression statement) is `<function>.<operation><count>` (`plate.fuse1`),
+counted among the part's unassigned calls. So inserting a feature renames only what it
+touches, and renaming a variable renames that feature's elements and nothing else. An author's `label` on a shape handed to a later construction
+names, in what that construction makes, the feature that first made the labelled shape
+(back along what each feature was made of, to where the shape stops being one chain):
+a cut appended to it after takes nothing over. A shape a model places, copies or fixes past
+build123d, with OCCT's `BRepBuilderAPI_Transform`, `_GTransform` or `_Copy`,
+`ShapeFix_Shape`, `ShapeUpgrade_UnifySameDomain` or `BRepFilletAPI_MakeFillet`, is a
+feature like any other (`kernel/memo.py`, `_MAKER_FEATURES`): its elements are named
+from what the maker reports, or, where it reports nothing, from the shape it was given
+by ordinal when the two map one-to-one. So are the parts build123d's `moved` copies
+while placing an assembly: a copy the makers left unaccounted is matched to its
+original in the assembly by ordinal, and a part a later compound is built from those
+copies is named in the copy that holds it.
+
+An element of a shape read from a file (`read_step`) is named within its own product,
+the part of the file it belongs to, however often the file places it: by the name the
+file gives it (`read.stepcaf.subshapes.name`; a STEP this engine wrote names every face,
+and those names come back as they were; `NONE`, the schema's empty name, is none),
+else by its ordinal in the product
+(`f:<feature>.<ordinal>`), never by an ordinal across the file. A placement or a compound
+of a shape no name reaches never claims its elements as its own.
+
+A warm build that hands a part back unchanged keeps its names
+while the functions they come from assign the same targets; a rename names it again.
+
 ## Body retention
 
 A model body is one coarse entry above its calls, kept in the worker's memory
@@ -300,7 +388,10 @@ A model body is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes;
+- every file it reads through the engine, by its bytes: `read_step`, and
+  `read_bytes`, `read_text` and `read_json` for a configuration or a table
+  (`reads.py`; the bytes are the memo's entry, the text or the value decoded
+  from them on every call, so a body may change what it was handed);
 - the engine's own code.
 
 A module falls back to its bytes, and those of every first-party module it
@@ -329,12 +420,17 @@ bodies that hold their results. A comment, a blank line or a docstring re-runs
 nothing. An edit to the root re-runs the root alone. A changed input file
 re-runs the body that reads it and the bodies that hold its result. The
 report's `memo` counts `bodies_run` and `bodies_skipped`.
-`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body must be a
-function of what it reaches as the build starts: a body that reads the clock,
-the environment or a file the engine does not read is not seen to change, and
+`CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. A body that opens a
+file itself, past the engine's readers (`open`, `Path.read_text`, `np.loadtxt`), is heard: an
+audit hook on `open` (`kernel/memo.py`, `_audited`; Python's own files, a `.py` or
+`.pyc` or one of the standard library or an installed package, aside) makes it run
+on every build, as a plain kernel call does, and the report's `retention.fallbacks`
+names the file. Otherwise a body must be a
+function of what it reaches as the build starts: a body that reads the clock or
+the environment is not seen to change, and
 nor is state one body leaves in a module for another (a registry it fills). A
 replayed body's features keep the `file:line` of the run that recorded them,
-so after a line-only edit the sidecar's provenance can name a line that moved.
+so after a line-only edit the provenance the worker serves can name a line that moved.
 
 Keys are worked out once a build, for every body the build asks about, against
 the namespaces as they are when the first body asks. A code object is read once

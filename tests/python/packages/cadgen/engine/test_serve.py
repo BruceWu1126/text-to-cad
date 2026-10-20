@@ -112,12 +112,13 @@ class ServeTest(unittest.TestCase):
 
 SHELF = """
 import build123d as bd
-from cadgen.engine import paint, xbf
+from cadgen.engine import paint, step, xbf
 
 SIZE = {size}
 
 
 @xbf
+@step
 def shelf():
     post = bd.fillet(bd.Box(SIZE, 4, 10).edges().filter_by(bd.Axis.Z), 0.5)
     post.label = "post"
@@ -176,11 +177,11 @@ class DocumentInMemoryTest(unittest.TestCase):
         before = server.document(ident)
         server.mesh_all(before, None)
         held = server.hold([str(self.path)])  # as the daemon does while a build writes the file
-        sidecar = self.path.with_name("shelf.xbf.json")
+        export = self.path.with_name("shelf.step")
         sent = []
         patcher = worker.Patcher({"served": server.versions(), "held": server.cache.keys(),
                                   "shapes": server.shape_keys()}, lambda message, payload: sent.append(
-                                      (message["patch"], payload, sidecar.stat().st_mtime_ns)))
+                                      (message["patch"], payload, export.stat().st_mtime_ns)))
         document.SAVED_LISTENERS.append(patcher.saved)
         try:
             reports = self.build(6)
@@ -188,8 +189,8 @@ class DocumentInMemoryTest(unittest.TestCase):
             document.SAVED_LISTENERS.remove(patcher.saved)
         patcher.finish(reports)
         self.assertEqual(len(sent), 1)
-        header, payload, sidecar_then = sent[0]
-        self.assertLess(sidecar_then, sidecar.stat().st_mtime_ns, "sent before the build finished")
+        header, payload, export_then = sent[0]
+        self.assertLess(export_then, export.stat().st_mtime_ns, "sent before the exports were written")
         self.assertEqual(len(header["meshes"]), 1, "only the changed post is meshed by the worker")
         self.assertEqual([key for key, _size in header["shapes"]], [header["meshes"][0][0]])
         self.assertEqual(server.document(ident).version, before.version, "a held file is not read again")

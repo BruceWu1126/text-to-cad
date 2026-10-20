@@ -161,7 +161,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
-        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf", "block.xbf.json"])
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf"])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
         """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
@@ -227,6 +227,33 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(answer["patch"]["meshes"], 1)
         unchanged = self.cli("build", "--json", "pair.py")
         self.assertEqual(json.loads(unchanged.stdout.strip().splitlines()[-1])["meshed"], 0)
+
+    def where(self, ref: str) -> dict:
+        found = self.cli("where", "block.xbf", ref)
+        self.assertEqual(found.returncode, 0, found.stderr)
+        return json.loads(found.stdout)
+
+    def test_an_element_answers_what_made_it_from_the_worker_that_built_it(self) -> None:
+        self.build(10)
+        face = self.where("block/face 1")
+        made = face["made_by"]
+        line = next(n for n, text in enumerate(self.script.read_text(encoding="utf-8").splitlines(), 1)
+                    if "bd.fillet" in text)
+        self.assertEqual((made["function"], made["file"], made["line"]), ("block", str(self.script), line))
+        self.assertEqual(made["name"], face["name"])
+        self.assertTrue(made["feature"].startswith("block.") and made["operation"])
+        self.assertGreater(face["area"], 0)
+        # By its element name, the same element.
+        self.assertEqual(self.where(face["name"])["ordinal"], 1)
+        # A daemon started again with no build serves the file cold: no worker holds a
+        # trace of it, so ``made_by`` is null -- and every fact the kernel measures is
+        # what it was. Nothing of the provenance was written anywhere.
+        self._stop_daemon()
+        cold = self.where("block/face 1")
+        self.assertIsNone(cold.pop("made_by"))
+        drop = ("made_by", "meshed")
+        self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")

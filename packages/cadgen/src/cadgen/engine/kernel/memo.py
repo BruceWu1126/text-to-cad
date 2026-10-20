@@ -11,8 +11,9 @@ model's own code inside a run (``run()``) is seen once, at the boundary.
 Builder-mode wrappers are not patched: their inner topology calls are the ones seen.
 Each call seen is a **feature** for naming (``trace``), whatever the memo does with
 it. The OCCT makers a model may run itself past build123d -- a shape fix, a unify, a
-fillet, a transform (``_MAKER_TARGETS``) -- are handed to it as this layer's
-subclasses, each run of one an operation that is no feature (``_maker_class``), and a
+fillet, a transform, a copy (``_MAKER_TARGETS``) -- are handed to it as this layer's
+subclasses, each run of one an operation (``_maker_class``) and a feature
+(``_MAKER_FEATURES``), and a
 file the engine reads for a model (``wrap_function``) is an operation keyed by the
 file's bytes.
 
@@ -273,8 +274,9 @@ _HELPER_TARGETS = (
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
 _IMPORTER_TARGETS = ("import_step", "import_brep")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
-# and the engine's own readers (``wrap_function``).
-_FILE_OPS = {"import_step", "import_brep", "read_step"}
+# and the engine's own readers (``wrap_function``: ``read_step``, and ``read_bytes``
+# under ``read_text`` and ``read_json``).
+_FILE_OPS = {"import_step", "import_brep", "read_step", "read_bytes"}
 _BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
@@ -289,7 +291,14 @@ _MAKER_TARGETS = (
      ("SetLinearTolerance", "SetAngularTolerance", "AllowInternalEdges", "SetSafeInputMode", "KeepShape")),
     ("OCP.BRepFilletAPI", "BRepFilletAPI_MakeFillet", "Build", (), True, ("Add", "SetParams", "SetContinuity")),
     ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Transform", None, (1,), True, ()),
+    ("OCP.BRepBuilderAPI", "BRepBuilderAPI_GTransform", None, (1,), True, ()),
+    ("OCP.BRepBuilderAPI", "BRepBuilderAPI_Copy", None, (), True, ()),
 )
+# Every one of them is a feature when the model runs it, as a build123d call is, by the operation
+# its name spells: a shape placed, copied, fixed, unified or filleted past build123d is named.
+_MAKER_FEATURES = {"BRepBuilderAPI_Transform": "transform", "BRepBuilderAPI_GTransform": "gtransform",
+                   "BRepBuilderAPI_Copy": "copy", "ShapeFix_Shape": "fix", "ShapeUpgrade_UnifySameDomain": "unify",
+                   "BRepFilletAPI_MakeFillet": "fillet"}
 
 
 def install() -> bool:
@@ -338,8 +347,66 @@ def install() -> bool:
             original = getattr(module, class_name)
             if not getattr(original, "__kernel_memo__", False):
                 setattr(module, class_name, _maker_class(original, perform, idle, builds, setters))
+        _audit_reads()
         _installed = True
         return True
+
+
+# --- files a body opens itself --------------------------------------------------------------
+
+_AUDITING = False
+
+
+def _audit_reads() -> None:
+    """Hear every file a model body opens, once per process (an audit hook stays)."""
+    global _AUDITING
+    if not _AUDITING:
+        import sys
+
+        sys.addaudithook(_audited)
+        _AUDITING = True
+
+
+def _audited(event: str, args: tuple) -> None:
+    """An ``open`` while a body runs, of a file none of the engine's readers keys -- not
+    one a patched call reads (those run deeper than the body), not Python's own (a ``.py``
+    or ``.pyc``, a file of the standard library or an installed package), and for reading:
+    the body read it plain, so its bytes are in no key and replaying it could hand back a
+    stale result. The body is then no longer retained -- it always runs, as one that ran a
+    kernel call plain does -- and the file is what the build reports of it (``reads``)."""
+    if event != "open":
+        return
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth or not state.bodies:
+        return
+    try:
+        path, mode = args[0], args[1]
+        if isinstance(path, int):
+            return
+        if mode is None:
+            flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+            if flags & os.O_ACCMODE == os.O_WRONLY:
+                return
+        elif "r" not in mode and "+" not in mode:
+            return
+        name = os.fsdecode(path)
+        if name.endswith((".py", ".pyc")) or _library_file(name):
+            return
+    except Exception:  # noqa: BLE001 - an audit hook never fails the open it hears
+        return
+    log = state.bodies[-1]
+    log.retainable = False
+    log.reads.append(os.path.abspath(name))
+
+
+def _library_file(name: str) -> bool:
+    from cadgen.engine.kernel.trace import _library_roots
+
+    try:
+        path = Path(name).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return any(root in path.parents for root in _library_roots())
 
 
 def uninstall() -> bool:
@@ -585,6 +652,8 @@ class _Run:
         # this run has run or replayed: each is in the trace once.
         self.bodies: list[_BodyLog] = []
         self.done: set[str] = set()
+        # Per body that opened a file past the engine's readers, the files: it always runs.
+        self.reads: dict[str, list[str]] = {}
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -624,7 +693,20 @@ class _Run:
         part's ``TopoDS_Shape``; its location is not part of it."""
         from OCP.TopLoc import TopLoc_Location
 
-        return self.trace.account(handle.Located(TopLoc_Location()), self.made_by)
+        return self.trace.account(handle.Located(TopLoc_Location()), self.made_by, self.holder)
+
+    def holder(self, shape: Any) -> int | None:
+        """The feature of this run whose result holds ``shape`` as a sub-shape (``_SUBS``,
+        by its own TShape or its first face's): a part an assembly's copy holds, which no
+        call returned itself."""
+        from OCP.TopExp import TopExp_Explorer
+
+        root = _SUBS.get(shape.TShape())
+        if root is None:
+            explorer = TopExp_Explorer(shape, TopAbs_FACE)
+            if explorer.More():
+                root = _SUBS.get(explorer.Current().TShape())
+        return None if root is None or root.tainted else self.owners.get(root)
 
 
 @contextlib.contextmanager
@@ -661,6 +743,7 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
         yield state
     finally:
         _LOCAL.run = previous
+        state.trace.release()
         if outermost:
             _sweep()
 
@@ -729,12 +812,12 @@ class _BodyLog:
     """What one run of a model body did, kept to replay it (**Bodies**): its events in
     order -- ``("call", entry, op, frame, inputs, results, labels, *objects, *handles,
     *results, *returned)`` for a call it hit or made (one flat tuple: a log holds tens of
-    thousands, and the collector walks every container), ``("maker", entry)`` for a maker
+    thousands, and the collector walks every container), ``("maker", entry, frame, op, *objects)`` for a maker
     it ran, ``("body", record)`` for a body it called -- the checks its bytes are held to (a
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -742,6 +825,8 @@ class _BodyLog:
         self.keys: list[tuple] = []
         self.ids = array.array("q")
         self.retainable = True
+        # The files the body opened itself, past the engine's readers (``_audited``).
+        self.reads: list[str] = []
 
 
 class _Body:
@@ -796,6 +881,8 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         raise
     finally:
         state.bodies.pop()
+    if log.reads:
+        state.reads[name] = list(dict.fromkeys(log.reads))
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
     snapshot = None
@@ -846,12 +933,21 @@ def _replayable(record: _Body) -> bool:
                     pending.append(event[1])
                 elif _MEMO.get(event[1].key) is not event[1]:
                     return False
-    for check, expected in record.log.checks:
-        try:
-            if check() != expected:
+    # A check reads a file the body read through the engine, when its stat changed: the
+    # engine's own read, never one of the running body's (``_audited``).
+    state = getattr(_LOCAL, "run", None)
+    if state is not None:
+        state.depth += 1
+    try:
+        for check, expected in record.log.checks:
+            try:
+                if check() != expected:
+                    return False
+            except _Unkeyable:
                 return False
-        except _Unkeyable:
-            return False
+    finally:
+        if state is not None:
+            state.depth -= 1
     return True
 
 
@@ -873,9 +969,16 @@ def _replay(record: _Body, state: _Run) -> Any:
             copied = _copy_origins(feature, state)
             entry.refresh(feature.index, state, copied)
         elif kind == "maker":
-            entry = event[1]
+            entry, frame, op = event[1:4]
+            inputs = state.trace.given(event[4:], state.feature_of) if op is not None else None
             _rebind(entry, state)
-            entry.refresh(None, state, {})
+            feature = None
+            if op is not None:
+                inputs = [(shape, index, kept) for (shape, index, _handle), kept in zip(inputs, entry.handles)]
+                feature = state.trace.record(op, frame, inputs, [], result_handles=[entry.snapshot.restore()])
+                feature.history = entry.history
+                _copy_origins(feature, state)
+            entry.refresh(None if feature is None else feature.index, state, {})
         elif event[1].name not in state.done:
             _replay(event[1], state)
     with _LOCK:
@@ -1090,10 +1193,20 @@ def _history(feature: Any, makers: list) -> "kernel_history.History | None":
     """What the makers the call ran report of its results (``kernel_history``), or None
     where it cannot be composed: the feature is then named without it, never failed."""
     try:
-        return kernel_history.compose(feature.handles, feature.results, makers)
+        history = kernel_history.compose(feature.handles, feature.results, makers)
     except Exception:  # noqa: BLE001
         kernel_history._STATS["errors"] += 1
         return None
+    if feature.operation in _PLACING:
+        try:
+            kernel_history.placed_by_ordinal(history, feature.handles, feature.results)
+        except Exception:  # noqa: BLE001 - what compose reported stands
+            kernel_history._STATS["errors"] += 1
+    return history
+
+
+# The calls that place or copy a shape (build123d's ``moved`` copies an assembly's parts).
+_PLACING = frozenset({"moved", "located", "copy", "deepcopy"})
 
 
 def _copy_origins(feature: Any, state: _Run) -> dict[int, Any]:
@@ -1213,9 +1326,13 @@ def wrap_function(label: str, function: Callable[..., Any]) -> Callable[..., Any
 # from that earlier maker, which made it. A call its key cannot name -- another method
 # before it runs, an argument no key names, a shape no operation made -- makes it run plain,
 # as does a run that is not the model's; once it ran, a setter is OCCT's own on it, and
-# running it again runs OCCT's own, forgetting what its own run kept. A maker's run is no
-# feature, but it is one of the model's calls: its hit, its miss or its plain run is
-# counted as a build123d call's is (``stats``, ``_Run.tally``).
+# running it again runs OCCT's own, forgetting what its own run kept. A maker's run is one
+# of the model's calls: its hit, its miss or its plain run is counted as a build123d call's
+# is (``stats``, ``_Run.tally``). It is a feature too (``_MAKER_FEATURES``), so a
+# shape a model places, copies or fixes past build123d keeps its names: given
+# the shapes it was handed, named from what it reports (``Modified``), its hit's from what
+# its miss reported, and where it reported nothing, from the shape it was given by
+# ordinal when the two map one-to-one (``kernel_history.by_ordinal``).
 
 
 def _maker_class(cls: type, perform: str | None, idle: tuple[int, ...], builds: bool,
@@ -1283,9 +1400,9 @@ class _Maker:
     arguments and the setters called on it while it has not run; once it ran, the entry
     its run is (a miss's or a hit's) and, on a hit, the earlier run that serves it."""
 
-    __slots__ = ("cls", "args", "calls", "state", "pending", "plain", "served", "entry")
+    __slots__ = ("cls", "args", "calls", "state", "pending", "plain", "served", "entry", "frame", "op")
 
-    def __init__(self, cls: type, args: tuple, state: "_Run | None") -> None:
+    def __init__(self, cls: type, args: tuple, state: "_Run | None", frame: tuple | None = None) -> None:
         self.cls = cls
         self.args = args
         self.calls: list[tuple[str, tuple]] = []
@@ -1294,14 +1411,21 @@ class _Maker:
         self.plain = False
         self.served: _MakerRun | None = None
         self.entry: _Entry | None = None
+        # Where the model constructed it, and the operation it is as a feature (None for a
+        # maker whose run is no feature).
+        self.frame = frame
+        self.op = _MAKER_FEATURES.get(cls.__name__)
 
     @staticmethod
     def open(cls: type, args: tuple, kwargs: dict) -> "_Maker | None":
         """A maker to key, or None: not a model's run, or constructed by name."""
         state = getattr(_LOCAL, "run", None)
-        if state is None or state.depth or kwargs or state.trace.frame() is None:
+        if state is None or state.depth or kwargs:
             return None
-        return _Maker(cls, args, state)
+        frame = state.trace.frame()
+        if frame is None:
+            return None
+        return _Maker(cls, args, state, frame)
 
     def refuse(self) -> None:
         """A call no key names before the maker ran: it runs plain."""
@@ -1341,12 +1465,34 @@ class _Maker:
                 pass
             except Exception:  # noqa: BLE001
                 _STATS["errors"] += 1
+        from OCP.TopoDS import TopoDS_Shape
+
+        shapes = [_Given(value) for value in self.args if isinstance(value, TopoDS_Shape)] if own else []
         # Run once: a maker an entry keeps holds no run, argument or call of its own.
         self.pending, self.state, self.args, self.calls = False, None, (), []
+        # A feature's inputs as it is given them, taken before it runs (``Trace.given``).
+        given = state.trace.given(shapes, state.feature_of) if own and self.op is not None else None
         if key_id is None:
-            if own:
-                state.tally["uncached"] += 1
-            return real()
+            if not own:
+                return real()
+            state.tally["uncached"] += 1
+            if given is None:
+                return real()
+            # It runs plain, and is still a feature: what it made is this run's, named.
+            with kernel_history.recording() as makers:
+                answer = _decoding(real, state)
+                result = self._result(instance)
+            if result is not None:
+                feature = self._feature(state, given, result, makers=makers)
+                tshape = result.TShape()
+                if _made_of(tshape, state) is None:
+                    made = _Made(tshape, key=None, entry=None)
+                    with _LOCK:
+                        state.transient[tshape] = made
+                        state.owners[made] = feature.index
+            if state.bodies:
+                state.bodies[-1].retainable = False
+            return answer
         key_id = state.scoped(key_id)
         n = state.count(key_id)
         entry = None
@@ -1368,12 +1514,18 @@ class _Maker:
                     made.effects.append(effect)
             for made in entry.made:
                 made.born = next(_SEQUENCE)
-            entry.refresh(None, state, {})
+            feature = None
+            if given is not None:
+                # The miss's feature again: its inputs the handles the miss was given.
+                given = [(shape, index, kept) for (shape, index, _handle), kept in zip(given, entry.handles)]
+                feature = self._feature(state, given, entry.snapshot.wrapped, history=entry.history)
+            entry.refresh(None if feature is None else feature.index, state, {})
             self.served, self.entry = entry.snapshot, entry
             _STATS["hits"] += 1
             state.tally["hits"] += 1
             if state.bodies:
-                state.bodies[-1].events.append(("maker", entry))
+                state.bodies[-1].events.append(("maker", entry, self.frame, self.op,
+                                                *(shape for shape, _index, _handle in given or ())))
             return entry.snapshot.answer
         _STATS["misses"] += 1
         state.tally["misses"] += 1
@@ -1384,8 +1536,14 @@ class _Maker:
             if state.bodies:
                 state.bodies[-1].retainable = False
             return real()
-        given = [_wrapped(item).TShape() for item in inputs]
-        answer = _decoding(real, state)
+        tshapes = [_wrapped(item).TShape() for item in inputs]
+        with kernel_history.recording() as makers:
+            answer = _decoding(real, state)
+            result = self._result(instance)
+        feature = None
+        if given is not None and result is not None:
+            feature = self._feature(state, given, result, makers=makers)
+        del makers
         try:
             effects, sound = _effects(captured, state)
         except Exception:  # noqa: BLE001
@@ -1395,24 +1553,53 @@ class _Maker:
             if state.bodies:
                 state.bodies[-1].retainable = False
             return answer
-        try:
-            result = self.cls.Shape(instance)
-        except Exception:  # noqa: BLE001 - it made nothing: nothing to keep
-            result = None
-        if not sound or result is None or result.IsNull():
+        if not sound or result is None:
             if state.bodies:
                 state.bodies[-1].retainable = False
             return answer
         for index, effect in effects:
             effect.origin = (key_id, n, index)
-        entry = _Entry(key=(key_id, n), inputs=given, snapshot=_MakerRun(result, answer, instance), effects=effects)
+        entry = _Entry(key=(key_id, n), inputs=tshapes, snapshot=_MakerRun(result, answer, instance), effects=effects,
+                       history=None if feature is None else feature.history,
+                       handles=() if feature is None else feature.handles)
         _replace(entry.key)
         entry.made = _register_handle(result, entry.key, state, entry)
+        if feature is not None:
+            for made in entry.made:
+                state.owners[made] = feature.index
         _keep(entry)
         self.entry = entry
         if state.bodies:
-            state.bodies[-1].events.append(("maker", entry))
+            state.bodies[-1].events.append(("maker", entry, self.frame, self.op,
+                                            *(shape for shape, _index, _handle in given or ())))
         return answer
+
+    def _result(self, instance: Any) -> Any:
+        """What the maker made, as it hands it back (``Shape``), or None for nothing."""
+        try:
+            result = self.cls.Shape(instance)
+        except Exception:  # noqa: BLE001 - it made nothing: nothing to keep
+            return None
+        return None if result is None or result.IsNull() else result
+
+    def _feature(self, state: _Run, given: list, result: Any, *, makers: list | None = None,
+                 history: Any = None) -> Any:
+        """The maker's run as a feature of the run: the shapes it was given and what it
+        made, named from what it reports (``makers``, composed) or reported (``history``,
+        a hit's), as a build123d call's is."""
+        feature = state.trace.record(self.op, self.frame, given, [], result_handles=[result.Located(result.Location())])
+        if makers is not None:
+            history = _history(feature, makers)
+            if (history is None or not history.origins) and len(feature.handles) == 1 and feature.handles[0] is not None:
+                # It reported nothing: what maps one-to-one onto what it was given is that.
+                try:
+                    history = kernel_history.by_ordinal(feature.handles[0], feature.results[0],
+                                                        "I" if self.op == "copy" else "M") or history
+                except Exception:  # noqa: BLE001 - naming cannot make geometry fail
+                    _STATS["errors"] += 1
+        feature.history = history
+        _copy_origins(feature, state)
+        return feature
 
     def key(self) -> tuple[int, list]:
         """The maker's key, as an operation's: its class, the constructor's arguments and
@@ -1453,13 +1640,13 @@ def _maker_value(value: Any, state: _Run, base: Any) -> Any:
     """One argument a maker was given, as a key part: a shape by :func:`_raw_key`, a
     transformation by its matrix, an OCCT enumeration by its value."""
     from OCP.TopoDS import TopoDS_Shape
-    from OCP.gp import gp_Trsf
+    from OCP.gp import gp_GTrsf, gp_Trsf
 
     if isinstance(value, TopoDS_Shape):
         return ("shape", _raw_key(value, state, base))
-    if isinstance(value, gp_Trsf):
-        return ("trsf", tuple(("n", _DOUBLE.pack(value.Value(row, column)))
-                              for row in (1, 2, 3) for column in (1, 2, 3, 4)))
+    if isinstance(value, (gp_Trsf, gp_GTrsf)):
+        return ("trsf" if isinstance(value, gp_Trsf) else "gtrsf",
+                tuple(("n", _DOUBLE.pack(value.Value(row, column))) for row in (1, 2, 3) for column in (1, 2, 3, 4)))
     if value is None or isinstance(value, (bool, str, numbers.Real)):
         return _normalize(value, state)
     if hasattr(type(value), "__members__") and (type(value).__module__ or "").startswith("OCP"):
@@ -2066,7 +2253,11 @@ class _Made:
             return ("held", self.parent.base(None, state), self.kind, self.index, applied)
         parent = shape.__dict__.get("topo_parent")
         if parent is None:
-            raise _Unkeyable("a sub-shape that lost its topo_parent")
+            # It was handed another shape's attributes, ``topo_parent`` None among them --
+            # build123d's fuse copies a sketch's onto the first face it fuses, a face of a
+            # text's compound -- so no ancestor names it now: the root holding its TShape
+            # does, as it names a shape cast afresh out of a compound (``_held``).
+            return ("held", *_held_head(self.tshape, self.kind), applied)
         index = self.index
         parent_wrapped = _wrapped(parent)
         if parent_wrapped is not None and parent_wrapped.TShape() != self.parent.tshape:
@@ -2427,7 +2618,7 @@ def _snapshot(value: Any) -> Any:
         return _ShapeState(value)
     if isinstance(value, (list, tuple)):
         return _Sequence(type(value), [_snapshot(item) for item in value])
-    if value is None or isinstance(value, (bool, int, float, str)):
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
         return _Literal(value)
     raise _Unkeyable(f"a result that cannot be kept: {type(value).__name__}")
 

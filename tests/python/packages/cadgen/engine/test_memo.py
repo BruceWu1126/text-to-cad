@@ -231,6 +231,20 @@ class CastTest(MemoCase):
         self.assertTrue(visor2.wrapped.TShape() == visor.wrapped.TShape())
         self.assertTrue(rounded2.wrapped.TShape() == rounded.wrapped.TShape())
 
+    def test_a_text_fused_with_another_sketch_is_keyed(self) -> None:
+        # The fuse hands its first face -- one of the text's compound -- the sketch's own
+        # attributes, topo_parent None among them: the root holding the face names it.
+        import build123d as bd
+
+        def model():
+            return bd.extrude(bd.Text("A", 5) + bd.Pos(10, 0, 0) * bd.Rectangle(1, 2), amount=1)
+
+        first, cold, run = _run(model)
+        self.assertEqual((cold["unkeyable"], run.tally["uncached"]), (0, 0))
+        again, hot, run = _run(model)
+        self.assertEqual((hot["misses"], hot["unkeyable"], run.tally["uncached"]), (0, 0, 0))
+        self.assertTrue(again.wrapped.TShape() == first.wrapped.TShape())
+
 
 class RetentionTest(MemoCase):
     @staticmethod

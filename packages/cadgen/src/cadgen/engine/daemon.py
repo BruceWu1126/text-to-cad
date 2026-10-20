@@ -14,6 +14,7 @@ are JSON lines, the last of which carries ``done``, ``failed`` or ``ok``.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import os
 import queue
@@ -80,7 +81,9 @@ class Worker:
     build's caller, each served document it saves -- a ``patch`` frame, sent the moment
     the xbf is in place, before the exports -- to ``on_patch``, its ``done``/``failed``
     answer to the waiting ``build`` call, and its closing ``settled`` to ``on_settled``,
-    which lets the server look at those files again."""
+    which lets the server look at those files again. ``where`` asks the worker what made
+one element of a document it built (``worker``): a request of its own, answered on the
+same pipe, even while a build runs."""
 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
@@ -97,6 +100,9 @@ class Worker:
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
                                         cwd=str(Path(script).parent))
         self.lock = threading.Lock()
+        self.writing = threading.Lock()  # one request line at a time on the worker's stdin
+        self.asked: dict[str, "queue.Queue[Any]"] = {}
+        self.questions = itertools.count(1)
         self.sink: Callable[[dict[str, Any]], None] | None = None
         self.on_patch = on_patch
         self.on_settled = on_settled
@@ -141,24 +147,48 @@ class Worker:
                         pass
                 elif "settled" in message:
                     self.on_settled(self)
+                elif "where" in message:
+                    waiting = self.asked.pop(str(message.get("id")), None)
+                    if waiting is not None:
+                        waiting.put(message["where"])
                 else:
                     self.answers.put(message)
         except (OSError, ValueError, EOFError):
             pass
         finally:
             self.answers.put(None)  # gone: every build it held settles
+            for waiting in list(self.asked.values()):
+                waiting.put(None)
             self.on_settled(self, True)
 
     def alive(self) -> bool:
         return self.process.poll() is None
 
+    def _write(self, request: dict[str, Any]) -> None:
+        assert self.process.stdin is not None
+        with self.writing:
+            self.process.stdin.write((json.dumps(request) + "\n").encode())
+            self.process.stdin.flush()
+
+    def where(self, path: str, key: str, kind: str, ordinal: int, timeout: float = 10.0) -> dict[str, Any] | None:
+        """What made one element of a document this worker built, as its last build of it
+        named the element (``build.made_by``); None when it did not build it, or is gone."""
+        ident = f"where{next(self.questions)}"
+        waiting: "queue.Queue[Any]" = queue.Queue(1)
+        self.asked[ident] = waiting
+        try:
+            self._write({"id": ident, "op": "where", "path": path, "key": key, "kind": kind, "ordinal": ordinal})
+            return waiting.get(timeout=timeout)
+        except (OSError, ValueError, queue.Empty):
+            return None
+        finally:
+            self.asked.pop(ident, None)
+
     def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         with self.lock:
             self.sink = send
             try:
-                assert self.process.stdin is not None
-                self.process.stdin.write((json.dumps(request) + "\n").encode())
-                self.process.stdin.flush()
+                self._write(request)
                 message = self.answers.get()
                 if message is None:
                     code = self.process.wait()
@@ -204,6 +234,9 @@ class Daemon:
         self.stopping = threading.Event()
         self.server = None
         self.token = secrets.token_hex(16) if WINDOWS else ""
+        # Per xbf a build wrote (its path, ``os.path.normcase``d), the worker that built
+        # it last: the one that holds its provenance (``provenance``).
+        self.builders: dict[str, Worker] = {}
 
     def touch(self) -> None:
         self.last = time.monotonic()
@@ -219,6 +252,15 @@ class Daemon:
                 found.stop()
             found = self.workers[key] = Worker(script, environment, self.patched, self.settled)
             return found
+
+    def provenance(self, path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
+        """What made one element of a served document, asked of the worker that built it
+        (``Worker.where``): None for a document no live worker built -- one served cold."""
+        resolved = str(Path(path).resolve())
+        worker = self.builders.get(os.path.normcase(resolved))
+        if worker is None or not worker.alive():
+            return None
+        return worker.where(resolved, key, kind, ordinal)
 
     def patched(self, header: dict[str, Any], payload: bytes, arrived: float) -> None:
         """A worker's document for a served path, put in place of the one served."""
@@ -259,6 +301,10 @@ class Daemon:
                                          served_keys=server.served_keys())
                             worker.held.append(server.hold(list(order["served"])))
                         answer = worker.build(order, send)
+                        for report in answer.get("done") or []:
+                            for path in report.get("files") or {}:
+                                if path.endswith(".xbf"):
+                                    self.builders[os.path.normcase(path)] = worker
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         send(answer)
                         return
@@ -276,7 +322,8 @@ class Daemon:
             from cadgen.engine.serve import Server
 
             if self.server is None:
-                self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch)
+                self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
+                                     provenance=self.provenance)
                 self.server.start()
             try:
                 ident = self.server.add(Path(request["path"]))
