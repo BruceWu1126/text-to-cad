@@ -21,7 +21,10 @@ from FreeCAD's material cards), or `Material("name", density, color=..., metalli
 roughness=...)` for any other. `paint(part, faces, material)` gives faces one. On an
 assembly, a material is every part's below it that has none: a whole-model default.
 Set materials on finished parts, after the last operation: an edit of one is then no
-kernel call.
+kernel call. Two limits of OCCT's STEP writer show in a STEP export: it names the density
+unit gram³·cm² (the exponents wrong, the number right: the reader gives the density back as
+written), and it writes materials sharing a name as one entity, so a STEP gives every such
+material the first one's description.
 
 An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with

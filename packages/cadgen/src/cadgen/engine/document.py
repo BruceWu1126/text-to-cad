@@ -538,7 +538,7 @@ def read_step_shape(path: Any) -> Any:
     tell its occurrences apart. Colours are resolved once per product, not per placement."""
     import unicodedata
 
-    from build123d import Compound, Location
+    from build123d import Color, Compound, Location
     from build123d.topology.shape_core import downcast
     from OCP.Bnd import Bnd_Box
     from OCP.BRepBndLib import BRepBndLib
@@ -557,6 +557,15 @@ def read_step_shape(path: Any) -> Any:
     def name_of(label: Any) -> str:
         text = _label_name(label)
         return "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")  # as the file has it
+
+    def as_color(rgba: Any) -> Any:
+        """A file's colour as the model's: the numbers the document keeps (``_quantity`` writes
+        a build123d colour's components as the kernel's RGB, and ``_label_color`` reads them
+        back so), not the kernel's colour object, whose build123d wrapper reads it as sRGB."""
+        if rgba is None:
+            return None
+        rgb = rgba.GetRGB()
+        return Color(rgb.Red(), rgb.Green(), rgb.Blue(), rgba.Alpha())
 
     def label_color(label: Any) -> Any:
         rgba = Quantity_ColorRGBA()
@@ -629,7 +638,7 @@ def read_step_shape(path: Any) -> Any:
                 # occurrence, never the product's other placements.
                 node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
             color = label_color(label) if referred is not label else None
-            node.color = color or product_color
+            node.color = as_color(color or product_color)
             node.label = (name_of(label) if referred is not label else "") or product_name
             node.move(Location(XCAFDoc_ShapeTool.GetLocation_s(label)))
             made.append(node)

@@ -103,6 +103,23 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(model.count("<object "), 2)
         self.assertEqual(model.count("<item "), 4)
 
+    def test_a_colour_written_to_step_reads_back_as_written(self) -> None:
+        # The STEP writes a part's colour as the document keeps it; read back (``read_step``), the
+        # part carries the same numbers, not the kernel's colour converted once more.
+        import build123d as bd
+
+        part = bd.Box(4, 4, 4)
+        part.label = "grey"
+        part.color = bd.Color(0.58, 0.62, 0.66)
+        folder = Path(tempfile.mkdtemp(prefix="engine-colour-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        exports.write_step(document.to_xcaf(document.collect(bd.Compound(children=[part], label="one"), "one")),
+                           folder / "one.step")
+        read = document.read_step_shape(folder / "one.step")
+        found = read if read.label == "grey" else next(node for node in read.children if node.label == "grey")
+        for got, want in zip(tuple(found.color), (0.58, 0.62, 0.66, 1.0)):
+            self.assertAlmostEqual(got, want, delta=1e-6)
+
 
 if __name__ == "__main__":
     unittest.main()
