@@ -1,5 +1,7 @@
 """Serving a document: its structure, one plain buffer per part in the wire format, the
-same buffer whichever way it is meshed, and a document read again after a rebuild."""
+same buffer whichever way it is meshed, a document read again after another process
+rebuilt it, a worker's build patched in without its file being read, and the cap on the
+buffers held."""
 
 from __future__ import annotations
 
@@ -8,6 +10,7 @@ import os
 import shutil
 import tempfile
 import textwrap
+import threading
 import time
 import unittest
 import urllib.request
@@ -71,7 +74,7 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(len(structure["prototypes"]), 2, "the post placed twice is one prototype")
         post = structure["prototypes"][structure["instances"][0]["prototype"]]
         data = self.get(f"/api/doc/{self.ident}/part/{post['key']}")
-        self.assertEqual(data[:4], b"XBM1")
+        self.assertEqual(data[:4], b"XBM2")
         part = mesh.Mesh.from_bytes(data)
         self.assertEqual(part.positions.dtype, np.float32)
         self.assertEqual(part.indices.dtype, np.uint32)
@@ -86,7 +89,7 @@ class ServeTest(unittest.TestCase):
 
     def test_inline_and_processes_mesh_the_same_buffers(self) -> None:
         keys = [p["key"] for p in self.structure()["prototypes"]]
-        first = json.loads(self.get(f"/api/doc/{self.ident}/mesh?mode=inline", "POST"))
+        first = json.loads(self.get(f"/api/doc/{self.ident}/mesh?mode=inline&drop=1", "POST"))
         self.assertEqual(first["meshed"], 2)
         inline = {key: self.server.cache.get(key) for key in keys}
         again = json.loads(self.get(f"/api/doc/{self.ident}/mesh?mode=processes&drop=1", "POST"))
@@ -105,6 +108,124 @@ class ServeTest(unittest.TestCase):
         self.assertNotEqual(post(after), post(before), "the post's geometry changed")
         self.assertEqual(after["prototypes"][after["instances"][2]["prototype"]]["key"],
                          before["prototypes"][before["instances"][2]["prototype"]]["key"], "the base did not")
+
+
+SHELF = """
+import build123d as bd
+from cadgen.engine import paint, xbf
+
+SIZE = {size}
+
+
+@xbf
+def shelf():
+    post = bd.fillet(bd.Box(SIZE, 4, 10).edges().filter_by(bd.Axis.Z), 0.5)
+    post.label = "post"
+    left = post.moved(bd.Location((0, 0, 0)))
+    right = post.moved(bd.Location((20, 0, 0)))
+    right.label = "right"
+    right.color = bd.Color(0.8, 0.1, 0.1)
+    board = bd.Pos(10, 0, -6) * bd.Box(30, 6, 2)
+    board = paint(board, board.faces().sort_by(bd.Axis.Z)[-1], (0.1, 0.2, 0.9))
+    board.label = "board"
+    board.color = bd.Color(0.3, 0.6, 0.2)
+    unnamed = bd.Pos(0, 10, 0) * bd.Sphere(2)
+    repainted = board.moved(bd.Location((0, 0, -4)))
+    repainted.label = "repainted"
+    repainted.color = bd.Color(0.9, 0.9, 0.1)
+    tier = bd.Compound(children=[board, repainted, unnamed], label="tier")
+    return bd.Compound(children=[left, right, tier], label="shelf")
+"""
+
+
+class DocumentInMemoryTest(unittest.TestCase):
+    """A worker's build reaches a served page without its file being read: the structure
+    made from the build's tree is the file's, a patch replaces the document in place, and
+    a page waiting on the version is answered by it."""
+
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-patch-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "shelf.py"
+        self.path = self.folder / "shelf.xbf"
+
+    def build(self, size: int) -> list:
+        self.script.write_text(textwrap.dedent(SHELF.format(size=size)), encoding="utf-8")
+        os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
+        reports = engine_build.build(self.script, ["shelf"], cwd=self.folder)
+        self.assertTrue(reports[-1]["ok"], reports)
+        return reports
+
+    def test_the_structure_made_from_the_tree_is_the_files(self) -> None:
+        from cadgen.engine import document
+
+        self.build(4)
+        made = document.tree_structure(document.saved(self.path), self.path)
+        read = document.Loaded(self.path).structure()
+        self.assertEqual(json.loads(json.dumps(made)), json.loads(json.dumps(read)))
+        self.assertTrue(any(p["faceColors"] for p in read["prototypes"]), "a painted face is in it")
+        self.assertTrue(any(i["color"] for i in read["instances"]), "an instance's own colour is in it")
+
+    def test_a_patch_replaces_the_document_and_answers_the_page(self) -> None:
+        from cadgen.engine import document, worker
+
+        self.build(4)
+        server = Server(port=0, mesh_mode="inline")
+        self.addCleanup(server.stop)
+        ident = server.add(self.path)
+        before = server.document(ident)
+        server.mesh_all(before, None)
+        held = server.hold([str(self.path)])  # as the daemon does while a build writes the file
+        sidecar = self.path.with_name("shelf.xbf.json")
+        sent = []
+        patcher = worker.Patcher({"served": server.versions(), "held": server.cache.keys(),
+                                  "shapes": server.shape_keys()}, lambda message, payload: sent.append(
+                                      (message["patch"], payload, sidecar.stat().st_mtime_ns)))
+        document.SAVED_LISTENERS.append(patcher.saved)
+        try:
+            reports = self.build(6)
+        finally:
+            document.SAVED_LISTENERS.remove(patcher.saved)
+        patcher.finish(reports)
+        self.assertEqual(len(sent), 1)
+        header, payload, sidecar_then = sent[0]
+        self.assertLess(sidecar_then, sidecar.stat().st_mtime_ns, "sent before the build finished")
+        self.assertEqual(len(header["meshes"]), 1, "only the changed post is meshed by the worker")
+        self.assertEqual([key for key, _size in header["shapes"]], [header["meshes"][0][0]])
+        self.assertEqual(server.document(ident).version, before.version, "a held file is not read again")
+        answers = []
+        waiting = threading.Thread(target=lambda: answers.append(server.wait(ident, before.version, 60)))
+        waiting.start()
+        server.patch(header, payload, time.time())
+        waiting.join()
+        after = answers[0]
+        stat = self.path.stat()
+        self.assertEqual(after.version, f"{stat.st_mtime_ns}-{stat.st_size}")
+        self.assertIsNotNone(after.patch, "the document came from the patch, not the file")
+        self.assertEqual(json.loads(json.dumps(after.structure)),
+                         json.loads(json.dumps(document.Loaded(self.path).structure())))
+        changed = header["meshes"][0][0]
+        self.assertEqual(server.cache.get(changed)[:4], b"XBM2", "the worker's mesh is held")
+        server.release(held)
+        self.assertIs(server.document(ident), after, "the file the patch describes is not read again")
+
+
+class MeshCacheTest(unittest.TestCase):
+    def test_the_least_recently_used_buffer_goes_past_the_cap(self) -> None:
+        from cadgen.engine.serve import MeshCache
+
+        cache = MeshCache(cap=30)
+        cache.put("a", b"x" * 10, {3: "valid"})
+        cache.put("b", b"x" * 10)
+        cache.put("c", b"x" * 10)
+        self.assertIsNotNone(cache.get("a"))  # a is used: b is now the least recent
+        cache.put("d", b"x" * 10)
+        self.assertEqual(list(cache.items), ["c", "a", "d"])
+        self.assertEqual(cache.size, 30)
+        self.assertEqual(cache.unmeshed("a"), {3: "valid"})
+        cache.put("e", b"x" * 25)
+        self.assertEqual(list(cache.items), ["e"], "past the cap, the oldest go first")
+        self.assertIsNone(cache.unmeshed("a"))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import secrets
 import socket
 import subprocess
@@ -71,9 +72,19 @@ class WorkerGone(Exception):
 
 
 class Worker:
-    """One warm worker process and the script it builds."""
+    """One warm worker process and the script it builds.
 
-    def __init__(self, script: str, environment: dict[str, str]) -> None:
+    The worker's protocol pipe (its original stdout) carries frames: a JSON object on one
+    line and, when the object has ``bytes``, exactly that many bytes after the line. A
+    reader thread takes every frame as it comes: a build's ``log`` lines go to that
+    build's caller, each served document it saves -- a ``patch`` frame, sent the moment
+    the xbf is in place, before the exports -- to ``on_patch``, its ``done``/``failed``
+    answer to the waiting ``build`` call, and its closing ``settled`` to ``on_settled``,
+    which lets the server look at those files again."""
+
+    def __init__(self, script: str, environment: dict[str, str],
+                 on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
+                 on_settled: Callable[..., None] = lambda _worker, _every=False: None) -> None:
         self.script = script
         self.environment = environment
         env = dict(environment)
@@ -84,55 +95,76 @@ class Worker:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         self.process = subprocess.Popen([sys.executable, "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                                        cwd=str(Path(script).parent), text=True, encoding="utf-8",
-                                        errors="replace", bufsize=1)
+                                        cwd=str(Path(script).parent))
         self.lock = threading.Lock()
-        self.sink: Callable[[str], None] | None = None
+        self.sink: Callable[[dict[str, Any]], None] | None = None
+        self.on_patch = on_patch
+        self.on_settled = on_settled
+        self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
+        self.held: list[Any] = []  # what the daemon holds for this worker's build until it settles
         threading.Thread(target=self._stderr, daemon=True).start()
-        ready = self._read()
+        threading.Thread(target=self._reader, daemon=True).start()
+        ready = self.answers.get()
         if ready is None or "ready" not in ready:
             raise WorkerGone(f"the worker for {script} did not start")
         self.pid = ready["ready"]
 
     def _stderr(self) -> None:
         assert self.process.stderr is not None
-        for line in self.process.stderr:
+        for line in iter(self.process.stderr.readline, b""):
             sink = self.sink
             if sink is not None:
-                sink(line.rstrip("\n"))
+                sink({"log": line.decode("utf-8", "replace").rstrip("\n"), "stream": "model"})
 
-    def _read(self) -> dict[str, Any] | None:
-        assert self.process.stdout is not None
-        while True:
-            line = self.process.stdout.readline()
-            if not line:
-                return None
-            line = line.strip()
-            if line.startswith("{"):
-                return json.loads(line)
+    def _reader(self) -> None:
+        stream = self.process.stdout
+        assert stream is not None
+        try:
+            for line in iter(stream.readline, b""):
+                line = line.strip()
+                if not line.startswith(b"{"):
+                    continue
+                message = json.loads(line)
+                arrived = time.time()
+                size = int(message.get("bytes") or 0)
+                payload = _read_exactly(stream, size) if size else b""
+                if "log" in message:
+                    sink = self.sink
+                    if sink is not None:
+                        sink({"log": message["log"]})
+                elif "patch" in message:
+                    try:
+                        self.on_patch(message["patch"], payload, arrived)
+                    except Exception:  # noqa: BLE001 - a document that cannot be patched is read from its file
+                        pass
+                elif "settled" in message:
+                    self.on_settled(self)
+                else:
+                    self.answers.put(message)
+        except (OSError, ValueError, EOFError):
+            pass
+        finally:
+            self.answers.put(None)  # gone: every build it held settles
+            self.on_settled(self, True)
 
     def alive(self) -> bool:
         return self.process.poll() is None
 
     def build(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         with self.lock:
-            self.sink = lambda text: send({"log": text, "stream": "model"})
+            self.sink = send
             try:
                 assert self.process.stdin is not None
-                self.process.stdin.write(json.dumps(request) + "\n")
+                self.process.stdin.write((json.dumps(request) + "\n").encode())
                 self.process.stdin.flush()
-                while True:
-                    message = self._read()
-                    if message is None:
-                        code = self.process.wait()
-                        raise WorkerGone(f"the worker for {Path(self.script).name} exited ({code}) during the build")
-                    if "log" in message:
-                        send({"log": message["log"]})
-                        continue
-                    self.builds += 1
-                    return message
+                message = self.answers.get()
+                if message is None:
+                    code = self.process.wait()
+                    raise WorkerGone(f"the worker for {Path(self.script).name} exited ({code}) during the build")
+                self.builds += 1
+                return message
             except (BrokenPipeError, OSError) as error:
                 raise WorkerGone(str(error)) from error
             finally:
@@ -145,6 +177,17 @@ class Worker:
             self.process.wait(timeout=5)
         except Exception:  # noqa: BLE001
             self.process.kill()
+
+
+def _read_exactly(stream: Any, size: int) -> bytes:
+    chunks = []
+    while size:
+        chunk = stream.read(size)
+        if not chunk:
+            raise EOFError("the worker closed its pipe inside a frame")
+        chunks.append(chunk)
+        size -= len(chunk)
+    return b"".join(chunks)
 
 
 # --- the daemon ---------------------------------------------------------------------------
@@ -174,8 +217,24 @@ class Daemon:
                 return found
             if found is not None:
                 found.stop()
-            found = self.workers[key] = Worker(script, environment)
+            found = self.workers[key] = Worker(script, environment, self.patched, self.settled)
             return found
+
+    def patched(self, header: dict[str, Any], payload: bytes, arrived: float) -> None:
+        """A worker's document for a served path, put in place of the one served."""
+        server = self.server
+        if server is not None:
+            server.patch(header, payload, arrived)
+
+    def settled(self, worker: Worker, every: bool = False) -> None:
+        """A worker is done with a build's documents (``every``: it is gone): their files
+        may be looked at again."""
+        with self.workers_lock:
+            held = [paths for paths in worker.held] if every else worker.held[:1]
+            del worker.held[:len(held)]
+        if self.server is not None:
+            for paths in held:
+                self.server.release(paths)
 
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
@@ -189,8 +248,16 @@ class Daemon:
                     try:
                         worker = self.worker(script, request.get("env") or {})
                         fresh = worker.builds == 0
-                        answer = worker.build({"id": 1, "op": "build", "script": script,
-                                               "functions": request.get("functions"), "cwd": request.get("cwd")}, send)
+                        order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
+                                 "cwd": request.get("cwd")}
+                        server = self.server
+                        if server is not None:
+                            # The worker sends each served document it builds back as a patch,
+                            # with the meshes and shapes the server does not hold; until it has,
+                            # the server does not read those files again.
+                            order.update(served=server.versions(), held=server.cache.keys(), shapes=server.shape_keys())
+                            worker.held.append(server.hold(list(order["served"])))
+                        answer = worker.build(order, send)
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
                         send(answer)
                         return

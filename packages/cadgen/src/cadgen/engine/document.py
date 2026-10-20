@@ -38,6 +38,12 @@ __all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geomet
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
 _XCAF_LOCK = threading.RLock()
+# The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
+_MADE: list = []
+_SAVED: dict[Path, "Tree"] = {}
+# Called with (path, tree) the moment ``save`` has put a new file in place: a worker sends
+# the document on before the build goes on to its exports.
+SAVED_LISTENERS: list = []
 
 
 @dataclass
@@ -304,6 +310,7 @@ def to_xcaf(tree: Tree) -> Any:
                         colors.SetColor(placed, _quantity(component.color), XCAFDoc_ColorSurf)
             labels[id(prototype)] = label
         shapes.UpdateAssemblies()
+        _MADE[:] = [doc, tree]
         return doc
 
 
@@ -311,10 +318,15 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
     """Save ``doc`` to ``path`` atomically: a temporary file beside it whose name ends in
     ``.xbf`` (BinXCAF appends the suffix to any other name), then replaced over the
     path. With ``compare``, an existing file with the same bytes is left as it is.
-    Returns whether the file was written, and its size."""
+    Returns whether the file was written, and its size. The tree ``doc`` was made from
+    is remembered as the one at ``path`` (``saved``)."""
     from OCP.PCDM import PCDM_StoreStatus
     from OCP.TCollection import TCollection_ExtendedString
 
+    tree = None
+    if _MADE and _MADE[0] is doc:
+        tree = _SAVED[Path(path).resolve()] = _MADE[1]
+        _MADE.clear()
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.stem}.{os.getpid()}.{threading.get_ident()}.xbf")
@@ -328,6 +340,9 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
         temporary.unlink()
         return False, size
     os.replace(temporary, path)
+    if tree is not None:
+        for listener in list(SAVED_LISTENERS):
+            listener(path.resolve(), tree)
     return True, size
 
 
@@ -584,6 +599,88 @@ class Loaded:
         free = TDF_LabelSequence()
         XCAFDoc_DocumentTool.ShapeTool_s(self.doc.Main()).GetFreeShapes(free)
         return free
+
+
+def saved(path: Path) -> "Tree | None":
+    """The tree this process last saved at ``path`` (``save``), or None."""
+    return _SAVED.get(Path(path).resolve())
+
+
+def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
+    """The structure ``Loaded(path).structure()`` reads from the document ``tree`` was saved
+    as -- the same prototypes in the same order, instances, names, colours as the file
+    gives them back, and the file's version -- made from the tree in memory, without
+    reading the file. It follows ``to_xcaf`` and ``Loaded._walk`` rule for rule: a part's
+    own colour wins over the one its placement passes down, an assembly label has none, a
+    colour reads back as the kernel stores it, and a name falls back to the referred
+    prototype's, then to its parent's with the component's place."""
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    path = Path(path).resolve()
+    stat = path.stat()
+    prototypes: list[dict[str, Any]] = []
+    instances: list[dict[str, Any]] = []
+    index_of: dict[int, int] = {}
+    read_colors: dict[tuple, tuple] = {}
+
+    def read(rgba: tuple | None) -> tuple | None:
+        if rgba is None:
+            return None
+        found = read_colors.get(rgba)
+        if found is None:
+            quantity = _quantity(rgba)
+            rgb = quantity.GetRGB()
+            found = read_colors[rgba] = (round(rgb.Red(), 6), round(rgb.Green(), 6), round(rgb.Blue(), 6),
+                                         round(quantity.Alpha(), 6))
+        return found
+
+    def entry(part: Part, index: int) -> dict[str, Any]:
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(part.shape, TopAbs_FACE, faces)
+        names = part.names or {}
+        face_names = {ordinal: text for ordinal, text in enumerate(names.get("faces") or [], 1)
+                      if text and ordinal <= faces.Extent()}
+        edge_names: dict[int, str] = {}
+        if any(names.get("edges") or []):
+            edges = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(part.shape, TopAbs_EDGE, edges)
+            edge_names = {ordinal: text for ordinal, text in enumerate(names.get("edges") or [], 1)
+                          if text and ordinal <= edges.Extent()}
+        face_colors = {ordinal: read(rgba) for ordinal, rgba in part.face_colors.items()
+                       if 1 <= ordinal <= faces.Extent()}
+        return {"index": index, "key": part.key, "name": part.name or f"part{index + 1}", "color": read(part.color),
+                "faceNames": {str(k): v for k, v in sorted(face_names.items())},
+                "edgeNames": {str(k): v for k, v in sorted(edge_names.items())},
+                "faceColors": {str(k): v for k, v in sorted(face_colors.items())}}
+
+    def visit(prototype: Any, location: Any, names: list[str], inherited: tuple | None, name: str) -> dict:
+        if isinstance(prototype, Assembly):
+            node: dict[str, Any] = {"name": name, "children": []}
+            for at, component in enumerate(prototype.components, 1):
+                held = component.prototype
+                child_name = component.name or held.name or f"{name}.{at}"
+                # A component colour equal to its part's is not written, and a part's own colour
+                # wins over the one it inherits: either way the outcome is the same.
+                child_color = read(component.color) or inherited
+                node["children"].append(visit(held, location.Multiplied(component.location), names + [child_name],
+                                              child_color, child_name))
+            return node
+        own = read(prototype.color)
+        color = own or inherited
+        index = index_of.get(id(prototype))
+        if index is None:
+            index = index_of[id(prototype)] = len(prototypes)
+            prototypes.append(entry(prototype, index))
+        instances.append({"prototype": index, "path": "/".join(names),
+                          "matrix": _matrix(location.Multiplied(prototype.shape.Location())),
+                          "color": color if color != own else None})
+        return {"name": name, "prototype": index, "instance": len(instances) - 1}
+
+    root = visit(tree.root, _identity(), [tree.root.name], None, tree.root.name)
+    return {"name": root["name"], "path": str(path), "version": f"{stat.st_mtime_ns}-{stat.st_size}", "units": "mm",
+            "prototypes": prototypes, "instances": instances, "tree": root}
 
 
 def _read(path: Path) -> Any:

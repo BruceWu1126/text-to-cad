@@ -142,14 +142,13 @@ def mesh_of(key: str, shape: Any) -> Any:
             return found
     found = mesh_shape(shape)
     if key:
-        size = sum(array.nbytes for array in (found.positions, found.normals, found.indices, found.edge_points))
         with _LOCK:
-            _MESHES[key] = found
-            _MESH_BYTES[0] += size
+            if key not in _MESHES:
+                _MESHES[key] = found
+                _MESH_BYTES[0] += found.nbytes
             while _MESH_BYTES[0] > _MESH_CAP and len(_MESHES) > 1:
                 _old, dropped = _MESHES.popitem(last=False)
-                _MESH_BYTES[0] -= sum(a.nbytes for a in (dropped.positions, dropped.normals, dropped.indices,
-                                                          dropped.edge_points))
+                _MESH_BYTES[0] -= dropped.nbytes
     return found
 
 
