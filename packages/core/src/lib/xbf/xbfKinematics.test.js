@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 
 import { createXbfScene } from "./xbfScene.js";
-import { xbfKinematics, xbfLinkPlacements, xbfPoseControls, xbfPosedMatrices, xbfPoseValues } from "./xbfKinematics.js";
+import { xbfKinematics, xbfLinkPlacements, xbfOtherWarnings, xbfPoseControls, xbfPosedMatrices, xbfPoseValues } from "./xbfKinematics.js";
 import { readXbmPart, xbmUnmeshedFaces } from "./xbm.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "hinge");
@@ -51,8 +51,20 @@ test("a pose naming a joint wrong, or a value out of range, is refused by name",
   assert.throws(() => xbfPoseValues(kinematics, { elbw: 1 }), /names no joint 'elbw'/);
   assert.throws(() => xbfPoseValues(kinematics, { elbow: 150 }), /'elbow' at 150 deg is outside its range \[-10, 120\]/);
   assert.throws(() => xbfPoseValues(kinematics, "folded"), /no configuration 'folded'/);
-  assert.throws(() => xbfLinkPlacements({ ...kinematics, loop: ["a", "b", "c"] }, { elbow: [0] }), /not a tree: pairs a, b, c close a loop/);
+  assert.throws(() => xbfPoseValues({ ...kinematics, loop: ["elbow", "b"] }, { elbow: 0 }),
+    /joint 'elbow' cannot be posed: pairs elbow, b close a loop/);
   assert.deepEqual(xbfPoseControls(kinematics), [{ id: "elbow", pair: "elbow", index: 0, label: "elbow", unit: "deg", min: -10, max: 120 }]);
+});
+
+test("a pair the engine kept with no value holds its links as built and refuses a pose by name", () => {
+  const kinematics = xbfKinematics(STRUCTURE);
+  const broken = { ...STRUCTURE, kinematics: { ...kinematics, asBuilt: {}, warnings: ["joint 'elbow' is kept with no value"],
+    pairs: kinematics.pairs.map(pair => ({ ...pair, inconsistent: "hinge/arm is not where it can put it" })) } };
+  const held = xbfKinematics(broken);
+  assert.throws(() => xbfPoseValues(held, { elbow: 5 }), /joint 'elbow' cannot be posed: hinge\/arm is not where it can put it/);
+  assert.deepEqual(xbfPoseControls(held), []);
+  near(place(xbfPosedMatrices(broken, xbfPoseValues(held))[ARM], [120, 10, 10]), armTip(30), "the arm as built");
+  assert.deepEqual(xbfOtherWarnings(held), []);
 });
 
 test("a structure the engine served posed is posed from where it stands", () => {

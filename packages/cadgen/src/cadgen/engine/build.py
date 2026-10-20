@@ -212,6 +212,9 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
     timings["collect"] = round(time.perf_counter() - clock, 4)
+    # What the joints' harvest found inconsistent: said, and the document written all the same.
+    if tree.mechanism is not None and tree.mechanism.warnings:
+        report["kinematics"] = {"warnings": list(tree.mechanism.warnings)}
     clock = time.perf_counter()
     named = 0
     skeletons: dict[str, dict[str, str]] = {}

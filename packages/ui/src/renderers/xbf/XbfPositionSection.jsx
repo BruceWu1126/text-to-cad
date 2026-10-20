@@ -1,8 +1,9 @@
 import { memo } from "react";
+import { TriangleAlert } from "lucide-react";
 import { cn } from "@text-to-cad/ui/utils";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
 import { TooltipHint } from "@text-to-cad/ui/primitives/tooltip";
-import { xbfPoseControls } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
+import { xbfOtherWarnings, xbfPoseControls, xbfUnposable } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import {
   FILE_SHEET_PRECISION_SLIDER_CLASSES, FileSheetSliderField, FileSheetStatusText, parseFileSheetNumberInput
@@ -42,21 +43,38 @@ const ValueRow = memo(function ValueRow({ control, value, onChange }) {
  *   `NO_PRESET_VALUE` set by hand.
  */
 export default function XbfPositionSection({ kinematics, values, preset, changed, onValues, onPreset, onReset, active = true }) {
-  const controls = kinematics?.loop?.length ? [] : xbfPoseControls(kinematics);
+  const controls = xbfPoseControls(kinematics);
+  const unposable = xbfUnposable(kinematics);
+  const others = xbfOtherWarnings(kinematics);
   const onChange = (control, next) => {
     const current = [...(values[control.pair] || [])];
     current[control.index] = next;
     onValues({ ...values, [control.pair]: current });
   };
+  // In the pairs' order: a pair's controls, or, where the engine found it cannot be posed, why.
+  const rows = (kinematics?.pairs || []).flatMap((pair) => {
+    if (unposable.has(pair.label)) {
+      return [<div key={`warning:${pair.label}`} className="px-2" data-xbf-unposable={pair.label} role="note"
+        aria-label={`${pair.label} cannot be posed`}>
+        <span className="block min-w-0 truncate text-tiny leading-4 text-muted-foreground">{pair.label}</span>
+        <TooltipHint content={unposable.get(pair.label)}>
+          <span className="flex min-w-0 items-start gap-1 text-micro leading-4 text-amber-600 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+            <span className="line-clamp-3">{`Cannot be posed: ${unposable.get(pair.label)}`}</span>
+          </span>
+        </TooltipHint>
+      </div>];
+    }
+    return controls.filter(control => control.pair === pair.label).map(control => <ValueRow key={control.id} control={control}
+      value={values[control.pair]?.[control.index] ?? 0} onChange={onChange} />);
+  });
   return <ToolPanel id="position" title="Position" label="Position controls" fit="details" changed={changed} hidden={!active}>
-    {kinematics?.loop?.length
-      ? <FileSheetStatusText className="py-2">{`Not a tree: pairs ${kinematics.loop.join(", ")} close a loop, which has no pose without a solver.`}</FileSheetStatusText>
-      : <div className="space-y-1.5 pb-1.5 pt-0.5" data-xbf-position="">
-        <KinematicsPoseRow poses={Object.keys(kinematics.configurations || {}).map(name => ({ value: name, label: name }))}
-          activeValue={preset} onSelect={onPreset} onReset={onReset} />
-        {controls.map(control => <ValueRow key={control.id} control={control} value={values[control.pair]?.[control.index] ?? 0}
-          onChange={onChange} />)}
-      </div>}
+    <div className="space-y-1.5 pb-1.5 pt-0.5" data-xbf-position="">
+      {controls.length ? <KinematicsPoseRow poses={Object.keys(kinematics.configurations || {}).map(name => ({ value: name, label: name }))}
+        activeValue={preset} onSelect={onPreset} onReset={onReset} /> : null}
+      {rows}
+      {others.map(text => <FileSheetStatusText key={text} className="text-amber-600 dark:text-amber-400">{text}</FileSheetStatusText>)}
+    </div>
   </ToolPanel>;
 }
 

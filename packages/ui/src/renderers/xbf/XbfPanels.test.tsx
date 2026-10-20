@@ -148,12 +148,19 @@ it('Position: a control per value of each pair within its limits, the configurat
   expect([pose().getAttribute('aria-label'), onPose.mock.lastCall![0], reset().disabled]).toEqual(['Pose: Default', { elbow: [30], slide: [0, 10] }, true]);
 });
 
-it('Position says a mechanism that closes a loop has no pose, and offers no controls', () => {
+it('Position shows, beside a pair the engine could not keep a value for, why it cannot be posed', () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-  render(<XbfPositionSection kinematics={{ ...kinematics, loop: ['elbow', 'slide'] }} values={{}} preset={DEFAULT_POSE_VALUE} changed={false}
+  const warned = { ...kinematics, asBuilt: { slide: [0, 10] },
+    pairs: kinematics.pairs.map(pair => (pair.label === 'elbow' ? { ...pair, inconsistent: 'rig/arm is not where it can put it' } : pair)),
+    warnings: ["joint 'elbow' is kept with no value and cannot be posed: rig/arm is not where it can put it",
+      "joint 'knee' on rig/leg matches the rigid joints 'knee' on rig/a and rig/b alike, so it pairs with neither"] };
+  render(<XbfPositionSection kinematics={warned} values={{ slide: [0, 10] }} preset={DEFAULT_POSE_VALUE} changed={false}
     onValues={() => {}} onPreset={() => {}} onReset={() => {}} />);
-  expect(screen.getByText(/Not a tree: pairs elbow, slide close a loop/)).toBeTruthy();
-  expect(screen.queryAllByRole('slider')).toEqual([]);
+  // The elbow's row says why; the slide keeps its controls; a warning no row says is listed under them.
+  expect(screen.getByRole('note', { name: 'elbow cannot be posed' }).textContent).toMatch(/Cannot be posed: rig\/arm is not where it can put it/);
+  expect(screen.getAllByRole('slider').map(thumb => thumb.getAttribute('aria-label'))).toEqual(['slide angle', 'slide position']);
+  expect(screen.getByText(/joint 'knee' on rig\/leg matches/)).toBeTruthy();
+  expect(screen.queryByText(/joint 'elbow' is kept/)).toBeNull();
 });
 
 it('an .xbf has its own renderer, prepared from its catalog entry', async () => {

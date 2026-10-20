@@ -5,7 +5,8 @@ records, axes at joint zero) to `author_joints`. Each mate becomes a pair of joi
 the mate, on the occurrences its `#parent`/`#child` refs label:
 
 - revolute: a `RevoluteJoint` on the parent about the mate's axis, with the mate's range, and a
-  `RigidJoint` on the child at the joint's own frame (`Plane(origin, z_dir=dir)`);
+  `RigidJoint` on the child at that joint's own frame (the plane build123d makes of the axis in
+  the parent's frame), so the as-built pose is joint zero;
 - fastened: a `RigidJoint` on each, at the child's own origin.
 
 Every frame is given in its part's own coordinates (the occurrences sit at different depths of the
@@ -73,7 +74,13 @@ def author_joints(arm, kinematics) -> dict[str, list[str]]:
             axis_frame = in_p(frame)
             bd.RevoluteJoint(name, p, axis=bd.Axis(axis_frame.position, axis_frame.to_axis().direction),
                              angular_range=tuple(row["limits"]["value"]))
-            bd.RigidJoint(name, c, in_c(frame))
+            # The child's frame is the revolute joint's own: the plane build123d makes of the axis in
+            # the PARENT's frame, whose X is that frame's default for the axis, not the world plane's.
+            # A frame built from the world datum instead turns about the axis by the angle between
+            # the two X's, so the as-built pose would be that angle, not joint zero, and outside a
+            # narrow range (elbowRoll's) no value of the pair.
+            joint_frame = p_world * p.joints[name].relative_axis.location
+            bd.RigidJoint(name, c, in_c(joint_frame))
             connect = lambda: p.joints[name].connect_to(c.joints[name], angle=0.0)  # noqa: E731
         else:
             frame = c_world

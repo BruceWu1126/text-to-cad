@@ -245,13 +245,13 @@ async function show(doc) {
   timing.scene = performance.now() - clock;
   current = structure;
   version = structure.version;
-  showPose(structure, byInstance);
   const triangles = loaded.reduce((sum, held) => sum + held.geometry.index.count / 3, 0);
   const unmeshed = loaded.reduce((sum, held) => sum + held.unmeshed, 0);
   statusLine.textContent = `${structure.prototypes.length} parts, ${structure.instances.length} instances, ` +
     `${Math.round(triangles).toLocaleString()} triangles` +
     (unmeshed ? ` · ${unmeshed} unmeshed face${unmeshed === 1 ? "" : "s"}` : "") +
     ` · ${Math.round(performance.now() - started)} ms`;
+  showPose(structure, byInstance);
   if (!fitted) {
     fit();
     fitted = true;
@@ -284,7 +284,12 @@ function linkPlacements(kinematics, values) {
   for (let progress = true; pending.length && progress;) {
     progress = false;
     pending = pending.filter((pair) => {
-      const [a, b] = pair.links, [one, two] = pair.frames.map(mat), moved = motion(pair.type, values[pair.label]);
+      const [a, b] = pair.links;
+      // A pair kept with no value (inconsistent) holds its links as built.
+      const held = pair.inconsistent || !values[pair.label];
+      const [one, two] = held ? [mat(kinematics.links[a].matrix).invert(), mat(kinematics.links[b].matrix).invert()]
+        : pair.frames.map(mat);
+      const moved = held ? new THREE.Matrix4() : motion(pair.type, values[pair.label]);
       if (found[a] && !found[b]) found[b] = found[a].clone().multiply(one).multiply(moved).multiply(two.invert());
       else if (found[b] && !found[a]) found[a] = found[b].clone().multiply(two).multiply(moved.invert()).multiply(one.invert());
       else if (!found[a]) return true;
@@ -304,7 +309,13 @@ function showPose(structure, byInstance) {
   const driven = new Map(kinematics.pairs.filter((pair) => pair.type === "gear" && pair.drives).map((pair) => [pair.drives[1], pair]));
   const key = JSON.stringify([kinematics.pairs, kinematics.configurations]);
   if (pose?.key !== key) pose = { key, values: structuredClone(asBuilt) };
-  const reference = kinematics.loop ? null : linkPlacements(kinematics, asBuilt);
+  const reference = linkPlacements(kinematics, asBuilt);
+  const warnings = kinematics.warnings || [];
+  if (warnings.length) {
+    statusLine.textContent += ` · ${warnings.length} kinematics warning${warnings.length === 1 ? "" : "s"}: ${warnings.join("; ")}`;
+  }
+  const unposable = new Map(kinematics.pairs.filter((pair) => pair.inconsistent).map((pair) => [pair.label, pair.inconsistent]));
+  for (const label of kinematics.loop || []) unposable.set(label, `pairs ${kinematics.loop.join(", ")} close a loop`);
   const apply = () => {
     for (const [label, gear] of driven) pose.values[label][0] = pose.values[gear.drives[0]][0] * gear.ratio;
     const now = linkPlacements(kinematics, pose.values);
@@ -320,10 +331,6 @@ function showPose(structure, byInstance) {
   const title = document.createElement("b");
   title.textContent = "Position";
   poseBox.append(title);
-  if (kinematics.loop) {
-    poseBox.append(` — not a tree: ${kinematics.loop.join(", ")} close a loop`);
-    return;
-  }
   const preset = document.createElement("select");
   preset.setAttribute("aria-label", "Configuration");
   for (const name of ["as built", ...Object.keys(kinematics.configurations)]) preset.add(new Option(name, name));
@@ -333,6 +340,12 @@ function showPose(structure, byInstance) {
   const sliders = [];
   for (const pair of kinematics.pairs) {
     if (pair.type === "gear" || driven.has(pair.label)) continue;
+    if (unposable.has(pair.label)) {
+      const note = document.createElement("label");
+      note.textContent = `${pair.label}: cannot be posed: ${unposable.get(pair.label)}`;
+      poseBox.append(note);
+      continue;
+    }
     for (let index = 0; index < COUNT[pair.type]; index += 1) {
       const unit = pair.units[index];
       let [min, max] = pair.limits[index];
