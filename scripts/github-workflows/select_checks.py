@@ -306,7 +306,8 @@ RULES: tuple[Rule, ...] = (
 
     # Read by the policy contracts alone (light, always) -- or by nothing a test runs: the
     # release scripts and workflows the contracts pin, the plugin manifests, configs and
-    # root prose, the deploy, and the sample models no test may read.
+    # root prose, the deploy, and the sample models no test may read (the xbf migration
+    # corpus, models-xbf/, too).
     Rule((
         "scripts/release/**", "scripts/install/**", "scripts/github-workflows/deploy-vercel-app.sh",
         "scripts/git-hooks/**", "scripts/bench/cadgen-performance/**", "scripts/bench/mesh-scoreboard/**",
@@ -318,7 +319,7 @@ RULES: tuple[Rule, ...] = (
         "*.mcp.json", "plugin.json", "mcp.json", "skills.sh.json",
         "README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "SPLIT_REPORT.md", "LICENSE", "docs/**",
         ".gitignore",
-        "models/**",
+        "models/**", "models-xbf/**",
     ), NOTHING),
 )
 
