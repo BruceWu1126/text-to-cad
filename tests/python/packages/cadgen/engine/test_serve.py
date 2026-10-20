@@ -71,7 +71,7 @@ class ServeTest(unittest.TestCase):
         self.assertEqual(len(structure["prototypes"]), 2, "the post placed twice is one prototype")
         post = structure["prototypes"][structure["instances"][0]["prototype"]]
         data = self.get(f"/api/doc/{self.ident}/part/{post['key']}")
-        self.assertEqual(data[:4], b"XBM1")
+        self.assertEqual(data[:4], b"XBM2")
         part = mesh.Mesh.from_bytes(data)
         self.assertEqual(part.positions.dtype, np.float32)
         self.assertEqual(part.indices.dtype, np.uint32)

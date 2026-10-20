@@ -44,7 +44,7 @@ def arm():
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer; binary STL, GLB and 3MF from the engine's tessellation |
-| `mesh.py` | per-part tessellation at a deflection relative to the part's size, and its wire format |
+| `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`) |
@@ -70,33 +70,62 @@ processes started with the server, each handed one part's shape as bytes.
 `inline` meshes one part at a time over the kernel's own threads. Python
 threads add nothing, because the kernel's mesher holds the interpreter's lock.
 
+## Mesh
+
+One tolerance, FreeCAD's default, configurable nowhere: a linear deflection of
+`(Lx + Ly + Lz) / 300 * 0.5` of the part's own bounding box (FreeCAD's
+Deviation of 0.5 %) and an angular deflection of 28.5 degrees, both absolute,
+with the kernel's face parallelism on. `BRepMesh_IncrementalMesh` is used as it
+is: no check before it, no second pass, no other tessellator. A face it leaves
+without triangles is left out and named: the part's structure lists it under
+`unmeshed` (ordinals) with `BRepCheck_Analyzer`'s verdict on that face under
+`unmeshedCheck` ("wire 1: SelfIntersectingWire"), and the rest of the part is
+drawn. A part is meshed as a topological copy of itself, so its mesh is a
+function of its geometry alone.
+
+Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
+2 tangent (two faces meeting at least G1), 3 seam (a face closing on itself),
+5 boundary (one face), 6 non-manifold (more than two). Degenerate edges are left
+out.
+
+What the kernel measures of an element is asked for, never extracted ahead:
+`GET /api/doc/<id>/part/<key>/face/<ordinal>` is its area, centroid, surface
+type, exact bounding box and `BRepCheck` verdict; `.../edge/<ordinal>` its
+length, curve type, class, faces and endpoints; `.../vertex/<ordinal>` its
+position.
+
 ## Wire format
 
 `GET /api/doc/<id>` returns the structure as JSON: prototypes (key, name,
-colour, `faceNames`, `edgeNames`, `faceColors` by ordinal), instances
-(prototype, path, a 4x4 world matrix, colour), the tree, and the document's
-version. The page polls the version, and the server reads the file again when
-its mtime changes.
+colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, and once meshed
+`unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
+colour), the tree, and the document's version. The page polls the version, and
+the server reads the file again when its mtime changes.
 
 `GET /api/doc/<id>/part/<key>` returns one part's buffer. A client reads it
-with typed-array views, without parsing. The 64-byte little-endian header is:
+with typed-array views, without parsing. The header grew from 64 to 80 bytes in
+`XBM2` (the vertex table's count and offset did not fit). The 80-byte
+little-endian header is:
 
 | Bytes | Field |
 | --- | --- |
-| 0-3 | magic `XBM1` |
-| 4-7 | format version (1) |
-| 8-27 | counts: vertices, indices, faces, edges, edge points (u32 each) |
-| 28-51 | byte offsets of the six arrays below (u32 each) |
-| 52-59 | linear and angular deflection (f32 each) |
-| 60-63 | reserved |
+| 0-3 | magic `XBM2` |
+| 4-7 | format version (2) |
+| 8-31 | counts: nodes, indices, faces, edges, edge points, vertices (u32 each) |
+| 32-59 | byte offsets of the seven arrays below (u32 each) |
+| 60-67 | linear and angular deflection (f32 each) |
+| 68-79 | reserved |
 
-Then the arrays, each 4-byte aligned: positions `f32[V*3]`, normals `f32[V*3]`,
-triangle indices `u32[I]`, the face table `u32[F*3]` (face ordinal, first
-index, index count), the edge table `u32[E*3]` (edge ordinal, first point,
-point count) and the edge polylines `f32[P*3]`. Ordinals are the part's
-`TopExp.MapShapes` ordinals, the same ones its element names use. Selecting a
-face reads a range of the index buffer, and selecting an edge reads a range of
-the polyline buffer.
+Then the arrays, each 4-byte aligned: positions `f32[N*3]`, surface normals
+`f32[N*3]`, triangle indices `u32[I]`, the face table `u32[F*3]` (face ordinal,
+first index, index count; an unmeshed face's count is 0), the edge table
+`u32[E*4]` (edge ordinal, first point, point count, class), the edge polylines
+`f32[P*3]`, and the vertex table `f32[X*4]` (vertex ordinal, x, y, z) of every
+vertex of the part. Ordinals are the part's `TopExp.MapShapes` ordinals, the
+same ones its element names use. Selecting a face reads a range of the index
+buffer, an edge a range of the polyline buffer, a vertex a row of the vertex
+table.
 
-`POST /api/doc/<id>/mesh?mode=inline|processes` meshes every part not held
-yet, in parallel, and returns the time it took.
+`POST /api/doc/<id>/mesh?mode=inline|processes[&drop=1]` meshes every part not
+held yet (with `drop=1`, every part again), in parallel, and returns the time it
+took, the bytes, the triangles and the unmeshed faces.

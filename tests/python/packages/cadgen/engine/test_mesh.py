@@ -1,0 +1,181 @@
+"""The mesh contract: FreeCAD's default tolerance, BRepMesh as it is, every edge classed
+from the B-rep, every vertex in the buffer, a face the mesher cannot mesh named with the
+kernel's verdict on it, and the facts of any element measured on request."""
+
+from __future__ import annotations
+
+import json
+import math
+import shutil
+import tempfile
+import textwrap
+import unittest
+import urllib.request
+from pathlib import Path
+
+import numpy as np
+
+from cadgen.engine import build as engine_build
+from cadgen.engine import mesh
+from cadgen.engine.serve import Server
+
+
+def classes(part: mesh.Mesh) -> dict[str, int]:
+    found: dict[str, int] = {}
+    for kind in part.edges[:, 3]:
+        name = mesh.CLASS_NAMES[int(kind)]
+        found[name] = found.get(name, 0) + 1
+    return found
+
+
+def bowtie_part():
+    """A box and, beside it, a planar face whose one wire crosses itself."""
+    import build123d as bd
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    polygon = BRepBuilderAPI_MakePolygon()
+    for x, y in ((0, 0), (1, 1), (1, 0), (0, 1)):
+        polygon.Add(gp_Pnt(x + 5, y, 0))
+    polygon.Close()
+    return bd.Compound([bd.Box(1, 1, 1), bd.Face(BRepBuilderAPI_MakeFace(polygon.Wire(), True).Face())])
+
+
+class MeshContractTest(unittest.TestCase):
+    def test_the_tolerance_is_freecads_default(self) -> None:
+        import build123d as bd
+
+        part = mesh.mesh_shape(bd.Box(10, 20, 30).wrapped)
+        self.assertAlmostEqual(part.linear, (10 + 20 + 30) / 300 * 0.5, places=6)
+        self.assertAlmostEqual(part.angular, math.radians(28.5), places=6)
+
+    def test_a_part_is_meshed_from_its_bytes_and_left_as_it_was(self) -> None:
+        import build123d as bd
+        from OCP.BRep import BRep_Tool
+        from OCP.TopLoc import TopLoc_Location
+
+        rounded = bd.fillet(bd.Box(4, 4, 4).edges(), 0.5)
+        live = mesh.mesh_shape(rounded.wrapped).to_bytes()
+        self.assertEqual(live, mesh.mesh_shape(mesh.shape_bytes(rounded.wrapped)).to_bytes())
+        self.assertTrue(all(BRep_Tool.Triangulation_s(face.wrapped, TopLoc_Location()) is None
+                            for face in rounded.faces()), "the caller's shape carries no triangulation")
+
+    def test_a_box_is_six_faces_twelve_feature_edges_and_eight_vertices(self) -> None:
+        import build123d as bd
+
+        part = mesh.Mesh.from_bytes(mesh.mesh_shape(bd.Box(1, 2, 3).wrapped).to_bytes())
+        self.assertEqual(part.faces[:, 0].tolist(), [1, 2, 3, 4, 5, 6])
+        self.assertEqual(classes(part), {"feature": 12})
+        self.assertEqual(part.edges[:, 0].tolist(), list(range(1, 13)))
+        # The face ranges tile the index buffer, in order.
+        self.assertTrue(np.array_equal(part.faces[1:, 1], np.cumsum(part.faces[:-1, 2])))
+        self.assertEqual(int(part.faces[:, 2].sum()), len(part.indices))
+        self.assertEqual(len(part.vertices), 8)
+        self.assertEqual(part.vertices[:, 0].tolist(), list(range(1, 9)))
+        corners = {tuple(row) for row in np.round(np.abs(part.vertices[:, 1:]), 6).tolist()}
+        self.assertEqual(corners, {(0.5, 1.0, 1.5)})
+        self.assertEqual(part.unmeshed, {})
+
+    def test_a_cylinder_has_one_seam_and_two_feature_circles(self) -> None:
+        import build123d as bd
+
+        part = mesh.mesh_shape(bd.Cylinder(1, 2).wrapped)
+        self.assertEqual(classes(part), {"feature": 2, "seam": 1})
+        self.assertEqual(len(part.vertices), 2)
+
+    def test_a_filleted_box_has_tangent_edges(self) -> None:
+        import build123d as bd
+
+        rounded = bd.fillet(bd.Box(4, 4, 4).edges().filter_by(bd.Axis.Z), 0.5)
+        found = classes(mesh.mesh_shape(rounded.wrapped))
+        self.assertEqual(found.get("tangent"), 8, found)  # each round meets two flat sides
+        self.assertEqual(found.get("feature"), 16, found)  # the top and bottom rims
+
+    def test_a_face_the_mesher_cannot_mesh_is_named_with_its_verdict(self) -> None:
+        part = mesh.mesh_shape(bowtie_part().wrapped)
+        self.assertEqual(sorted(part.unmeshed), [7])
+        self.assertIn("SelfIntersectingWire", part.unmeshed[7])
+        self.assertTrue(part.unmeshed[7].startswith("wire 1:"), part.unmeshed[7])
+        drawn = {int(o): int(c) for o, _first, c in part.faces}
+        self.assertEqual(drawn[7], 0, "the face is left out")
+        self.assertTrue(all(drawn[o] > 0 for o in range(1, 7)), "the rest of the part is drawn")
+        self.assertEqual(mesh.Mesh.from_bytes(part.to_bytes()).unmeshed.keys(), {7})
+
+
+MODEL = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def plate():
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace, BRepBuilderAPI_MakePolygon
+    from OCP.gp import gp_Pnt
+
+    polygon = BRepBuilderAPI_MakePolygon()
+    for x, y in ((0, 0), (1, 1), (1, 0), (0, 1)):
+        polygon.Add(gp_Pnt(x + 5, y, 0))
+    polygon.Close()
+    crossed = bd.Face(BRepBuilderAPI_MakeFace(polygon.Wire(), True).Face())
+    return bd.Compound([bd.Box(1, 2, 3), crossed], label="plate")
+"""
+
+
+class FactsTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.folder = Path(tempfile.mkdtemp(prefix="engine-mesh-")).resolve()
+        script = cls.folder / "plate.py"
+        script.write_text(textwrap.dedent(MODEL), encoding="utf-8")
+        reports = engine_build.build(script, ["plate"], cwd=cls.folder)
+        assert reports[-1]["ok"], reports
+        cls.server = Server(port=0, mesh_mode="inline")
+        cls.server.start()
+        cls.ident = cls.server.add(cls.folder / "plate.xbf")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.server.stop()
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def get(self, path: str) -> bytes:
+        with urllib.request.urlopen(self.server.url + path, timeout=120) as response:
+            return response.read()
+
+    def test_the_structure_names_the_unmeshed_face_and_why(self) -> None:
+        key = json.loads(self.get(f"/api/doc/{self.ident}"))["prototypes"][0]["key"]
+        self.get(f"/api/doc/{self.ident}/part/{key}")
+        prototype = json.loads(self.get(f"/api/doc/{self.ident}"))["prototypes"][0]
+        self.assertEqual(prototype["unmeshed"], [7])
+        self.assertIn("SelfIntersectingWire", prototype["unmeshedCheck"]["7"])
+        face = json.loads(self.get(f"/api/doc/{self.ident}/part/{key}/face/7"))
+        self.assertFalse(face["meshed"])
+        self.assertIn("SelfIntersectingWire", face["check"])
+
+    def test_facts_are_measured_on_request(self) -> None:
+        key = json.loads(self.get(f"/api/doc/{self.ident}"))["prototypes"][0]["key"]
+        part = mesh.Mesh.from_bytes(self.get(f"/api/doc/{self.ident}/part/{key}"))
+        faces = [json.loads(self.get(f"/api/doc/{self.ident}/part/{key}/face/{o}")) for o in range(1, 7)]
+        self.assertEqual(sorted(round(f["area"], 9) for f in faces), [2.0, 2.0, 3.0, 3.0, 6.0, 6.0])
+        self.assertEqual({f["surface"] for f in faces}, {"plane"})
+        self.assertTrue(all(f["check"] == "valid" and f["meshed"] for f in faces))
+        first = faces[0]
+        self.assertTrue(all(abs(a - b) < 1e-6 for a, b in zip(first["centroid"], np.mean(
+            [first["box"]["min"], first["box"]["max"]], axis=0))))
+        edges = [json.loads(self.get(f"/api/doc/{self.ident}/part/{key}/edge/{o}")) for o in range(1, 13)]
+        self.assertEqual(sorted(round(e["length"], 9) for e in edges), [1.0] * 4 + [2.0] * 4 + [3.0] * 4)
+        self.assertEqual({(e["curve"], e["class"]) for e in edges}, {("line", "feature")})
+        for edge in edges:
+            start, end = np.array(edge["endpoints"])
+            self.assertAlmostEqual(float(np.linalg.norm(end - start)), edge["length"], places=9)
+        # The vertex table and the kernel agree on where every vertex is.
+        for ordinal, x, y, z in part.vertices[:8]:
+            vertex = json.loads(self.get(f"/api/doc/{self.ident}/part/{key}/vertex/{int(ordinal)}"))
+            self.assertTrue(np.allclose(vertex["position"], [x, y, z], atol=1e-6))
+        with self.assertRaises(urllib.error.HTTPError) as missing:
+            self.get(f"/api/doc/{self.ident}/part/{key}/edge/999")
+        self.assertEqual(missing.exception.code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()
