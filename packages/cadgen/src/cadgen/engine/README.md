@@ -239,8 +239,11 @@ the namespaces as they are when the first body asks. A code object is read once
 per value of it (a module loaded again makes equal code objects), and a file's
 dynamic spots once per digest, in the worker's memory.
 
-Retention costs little. Measured on a 60,000-call model whose 14 bodies all ran,
-the logging added nothing measurable to the build (body 12.4–12.6 s, against
-12.7 s with retention off). The logs keep about a million more objects for the
-worker's collection after each build to walk, about 0.6 s. That collection runs
-after the answer, so only a build sent while it is still running waits for it.
+Measured on a 60,000-call model whose 14 bodies all ran, the logging added
+nothing measurable to the build (body 12.4–12.6 s, against 12.7 s with retention
+off). The logs do keep about a million more objects alive (2.6 million against
+1.6 million). The worker's cyclic collection after each build has to walk them.
+Measured with retention on, that collection takes 2.0–2.2 s on a 987-part model,
+about 1.3 s of which it also takes with retention off, and 0.7–0.8 s on a
+619-part model. It runs after the answer, so only a build sent while it is still
+running waits for it.
