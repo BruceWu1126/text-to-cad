@@ -314,6 +314,12 @@ class Server:
         with self.load_lock:
             return {str(doc.path): doc.version for doc in self.served.values()}
 
+    def served_keys(self) -> dict[str, list[str]]:
+        """Every served path and the keys of the parts the document served of it holds:
+        what a build of it changed is what these lack."""
+        with self.load_lock:
+            return {str(doc.path): sorted(doc.shapes) for doc in self.served.values()}
+
     def shape_keys(self) -> list[str]:
         """The keys of every part whose shape a served document holds."""
         with self.load_lock:

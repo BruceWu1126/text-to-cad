@@ -255,7 +255,8 @@ class Daemon:
                             # The worker sends each served document it builds back as a patch,
                             # with the meshes and shapes the server does not hold; until it has,
                             # the server does not read those files again.
-                            order.update(served=server.versions(), held=server.cache.keys(), shapes=server.shape_keys())
+                            order.update(served=server.versions(), held=server.cache.keys(), shapes=server.shape_keys(),
+                                         served_keys=server.served_keys())
                             worker.held.append(server.hold(list(order["served"])))
                         answer = worker.build(order, send)
                         answer["worker"] = {"pid": worker.pid, "fresh": fresh}
