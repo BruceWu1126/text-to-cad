@@ -23,6 +23,9 @@
 // host as for any family: the surface look (`setSurfaceLook`: Solid, Shaded, Parts, X-ray; Hidden
 // line's depth-only surfaces and Wireframe's none) and the edges the mode draws (`setEdgeLook`).
 
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { resolveCadEdgeSettings } from "../../common/cadInk.js";
 import { syncMaterialClipPlanes } from "../viewer/clipPlane.js";
 import { scheduleRuntimeRaycastBvh } from "../viewer/raycastBvh.js";
@@ -38,6 +41,8 @@ export const XBF_EDGE_LINES = Object.freeze(["feature", "tangent", "seam"]);
 export const XBF_PICK_PIXELS = Object.freeze({ vertex: 7, edge: 5 });
 const DEFAULT_SURFACE = 0xb8bcc4;
 const HIGHLIGHT_ORDER = 30;
+// A picked edge's width in drawing-buffer pixels: `cadInk.js`'s highlight thickness.
+const EDGE_HIGHLIGHT_PIXELS = resolveCadEdgeSettings().highlightThickness;
 
 /** An element's id: its instance, its kind and its ordinal (`i3/face/12`). An instance's is `i3`. */
 export function xbfElementId(instance, kind, ordinal) {
@@ -363,13 +368,14 @@ export function createXbfScene(THREE, document) {
     hovered: {
       face: new THREE.MeshBasicMaterial({ color: REFERENCE_HOVER_COLOR, transparent: true, opacity: 0.45, depthWrite: false,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4, side: THREE.DoubleSide }),
-      edge: new THREE.LineBasicMaterial({ color: REFERENCE_HOVER_COLOR, depthTest: false, transparent: true }),
+      // A picked edge is drawn as a STEP part's highlighted edge is: a screen-space line of its own width.
+      edge: new LineMaterial({ color: REFERENCE_HOVER_COLOR, linewidth: EDGE_HIGHLIGHT_PIXELS, depthTest: false, transparent: true }),
       vertex: new THREE.PointsMaterial({ color: REFERENCE_HOVER_COLOR, size: 9, sizeAttenuation: false, depthTest: false, transparent: true })
     },
     selected: {
       face: new THREE.MeshBasicMaterial({ color: REFERENCE_SELECTED_COLOR, transparent: true, opacity: 0.55, depthWrite: false,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4, side: THREE.DoubleSide }),
-      edge: new THREE.LineBasicMaterial({ color: REFERENCE_SELECTED_COLOR, depthTest: false, transparent: true }),
+      edge: new LineMaterial({ color: REFERENCE_SELECTED_COLOR, linewidth: EDGE_HIGHLIGHT_PIXELS, depthTest: false, transparent: true }),
       vertex: new THREE.PointsMaterial({ color: REFERENCE_SELECTED_COLOR, size: 10, sizeAttenuation: false, depthTest: false, transparent: true })
     }
   };
@@ -379,32 +385,33 @@ export function createXbfScene(THREE, document) {
     if (!entry || !parsed.kind) return null;
     const mesh = entry.surface.part.mesh;
     const paint = overlayMaterials[state][parsed.kind];
-    const geometry = new THREE.BufferGeometry();
     let object = null;
     if (parsed.kind === "face") {
       const row = xbmFaceRow(mesh, parsed.ordinal);
       if (row < 0 || !mesh.faces[row * 3 + 2]) return null;
+      // The part's own positions, and its index buffer's range for this face: a view, no copy.
+      const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", entry.surface.held.surface.getAttribute("position"));
       const first = mesh.faces[row * 3 + 1], count = mesh.faces[row * 3 + 2];
       geometry.setIndex(new THREE.BufferAttribute(mesh.indices.subarray(first, first + count), 1));
+      geometry.userData.xbfSharedPosition = true;
       object = new THREE.Mesh(geometry, paint);
     } else if (parsed.kind === "edge") {
       const row = xbmEdgeRow(mesh, parsed.ordinal);
       if (row < 0) return null;
       const first = mesh.edges[row * 4 + 1], count = mesh.edges[row * 4 + 2];
-      geometry.setAttribute("position", entry.surface.held.points);
-      const pairs = new Uint32Array(Math.max(count - 1, 0) * 2);
-      for (let at = 0; at + 1 < count; at += 1) { pairs[at * 2] = first + at; pairs[at * 2 + 1] = first + at + 1; }
-      geometry.setIndex(new THREE.BufferAttribute(pairs, 1));
-      object = new THREE.LineSegments(geometry, paint);
+      const points = mesh.edgePoints;
+      const pairs = new Float32Array(Math.max(count - 1, 0) * 6);
+      for (let at = 0; at + 1 < count; at += 1) pairs.set(points.subarray((first + at) * 3, (first + at + 2) * 3), at * 6);
+      const geometry = new LineSegmentsGeometry().setPositions(pairs);
+      object = new LineSegments2(geometry, paint);
     } else {
       const row = xbmVertexRow(mesh, parsed.ordinal);
       if (row < 0) return null;
+      const geometry = new THREE.BufferGeometry();
       geometry.setAttribute("position", new THREE.BufferAttribute(mesh.vertices.slice(row * 4 + 1, row * 4 + 4), 3));
       object = new THREE.Points(geometry, paint);
     }
-    // The part's buffers are the part's: only this overlay's own index or point is freed with it.
-    geometry.userData.xbfSharedPosition = parsed.kind !== "vertex";
     object.name = `${state} ${parsed.kind}`;
     object.renderOrder = HIGHLIGHT_ORDER + (state === "hovered" ? 1 : 0);
     object.raycast = () => {};
@@ -499,7 +506,8 @@ export function createXbfScene(THREE, document) {
       }
       const names = parsed.kind === "face" ? entry.prototype.faceNames : parsed.kind === "edge" ? entry.prototype.edgeNames : null;
       return { id, kind: parsed.kind, ordinal: parsed.ordinal, instance: parsed.instance, key: String(entry.prototype.key),
-        name: (names || {})[String(parsed.ordinal)] || "", edgeClass, path: entry.instance.path, partName: entry.prototype.name || "" };
+        name: (names || {})[String(parsed.ordinal)] || "", edgeClass, path: entry.instance.path, partName: entry.prototype.name || "",
+        matrix: entry.instance.matrix };
     },
     /** Light instances (ids `i3`): what the tree hovers and selects. */
     setHighlight({ hovered = [], selected = [] } = {}) {

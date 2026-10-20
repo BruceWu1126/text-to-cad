@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 
 import { isKitScene } from "../viewer/sceneContract.js";
-import { fetchXbfElementFacts, loadXbfDocument, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
+import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
 import { createXbfScene, parseXbfElementId, xbfElementId } from "./xbfScene.js";
 
@@ -228,4 +228,18 @@ test("a sibling draws the same geometry with its own objects; versions and facts
   await assert.rejects(fetchXbfElementFacts(URL_BASE, PLATE.key, "solid", 1, { fetch }), /face, an edge or a vertex/);
   scene.dispose();
   document.release();
+});
+
+test("an element's facts are read where its instance places it: points moved, lengths and areas kept", () => {
+  // The second peg: translated to (-12, 0, 8).
+  const matrix = STRUCTURE.instances[2].matrix;
+  const placed = placeXbfFacts({ kind: "face", area: 12, centroid: [0, 0, 6], box: { min: [-3, -3, 6], max: [3, 3, 6] } }, matrix);
+  assert.deepEqual(placed.centroid, [-12, 0, 14]);
+  assert.deepEqual(placed.box, { min: [-15, -3, 14], max: [-9, 3, 14] });
+  assert.equal(placed.area, 12);
+  assert.deepEqual(placeXbfFacts({ kind: "edge", length: 2, endpoints: [[1, 0, 0], [3, 0, 0]] }, matrix).endpoints, [[-11, 0, 8], [-9, 0, 8]]);
+  assert.deepEqual(placeXbfFacts({ kind: "vertex", position: [0, 0, 0] }, matrix).position, [-12, 0, 8]);
+  // A quarter turn about Z: a box is the box of its turned corners.
+  const turned = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  assert.deepEqual(placeXbfFacts({ box: { min: [0, 0, 0], max: [2, 1, 1] } }, turned).box, { min: [-1, 0, 0], max: [0, 2, 1] });
 });

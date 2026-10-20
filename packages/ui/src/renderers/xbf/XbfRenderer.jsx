@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MousePointer2 } from "lucide-react";
 import { scenePartCount, viewFeaturesForKind } from "@text-to-cad/core/common/viewSettings.js";
+import { parseCadRefSelector } from "@text-to-cad/core/lib/cadRefs.js";
 import { parseXbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 import { formatPromptReference } from "@text-to-cad/core/prompt";
 import RendererShell from "../kit/shell/RendererShell.jsx";
@@ -55,8 +56,8 @@ function XbfElementPick({ viewport, scene, enabled, onPick, onHover }) {
 function PreselectionLabel({ hover }) {
   if (!hover?.hit || !hover.pointer) return null;
   const { hit, pointer } = hover;
-  return <div className="pointer-events-none absolute z-20 max-w-80 rounded-md bg-background/95 px-1.5 py-0.5 text-micro text-foreground shadow-sm"
-    style={{ left: Math.min(pointer.x + 14, Math.max(pointer.width - 200, 0)), top: pointer.y + 16 }} data-xbf-preselection="">
+  return <div className="pointer-events-none absolute z-20 whitespace-nowrap rounded-md bg-background/95 px-1.5 py-0.5 text-micro text-foreground shadow-sm"
+    style={{ left: Math.min(pointer.x + 14, Math.max(pointer.width - 320, 0)), top: pointer.y + 16 }} data-xbf-preselection="">
     <span className="tabular-nums">{`${hit.partName || hit.path} · ${KIND_LABEL[hit.kind]} ${hit.ordinal}`}</span>
     {hit.name ? <span className="ml-1.5 text-muted-foreground">{hit.name}</span> : null}
   </div>;
@@ -153,31 +154,38 @@ function XbfSurface({ view, data }) {
   const handleHover = useCallback((hit, pointer) => setHover(hit ? { hit, pointer } : null), []);
   useEffect(() => { if (!selectActive) setHover(null); }, [selectActive]);
 
-  // What is picked, for Quick Edit: each element and each part as a reference into the document, by
-  // the name the document gives it where it has one (an element name outlives the ordinals an edit
-  // renumbers), and as a chip.
+  // What is picked, for Quick Edit: each part and element as a chip, and -- where the document's
+  // names spell a ref in the shared grammar (`cadRefs.js`: a part's label, `label/f:…`) -- as a
+  // reference into the document, by the name it gives it (an element name outlives the ordinals an
+  // edit renumbers). A name the grammar does not admit is a chip that copies its description.
   const resource = shell.frame.resource;
   const { references, chips } = useMemo(() => {
     if (!scene || resource?.kind !== "workspace-file") return { references: EMPTY, chips: EMPTY };
     const reference = selector => ({ resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } });
+    const refOf = (selector) => {
+      const parsed = selector ? parseCadRefSelector(selector) : null;
+      return parsed && parsed.selectorType !== "opaque" ? reference(parsed.canonical) : null;
+    };
+    const labelOf = id => String(scene.structure.instances[parseXbfElementId(id).instance]?.path || "").split("/").pop();
     const rows = [];
     for (const id of parts.selected) {
       const part = scene.describePart(id);
       if (!part) continue;
-      const selector = scene.structure.instances[parseXbfElementId(id).instance].path;
-      rows.push({ value: reference(selector), chip: { key: `part:${id}`, label: part.name, glyph: "solid", id,
-        copy: formatPromptReference(reference(selector)), card: null,
+      const value = refOf(labelOf(id));
+      rows.push({ value, chip: { key: `part:${id}`, label: part.name, glyph: "solid", id,
+        copy: value ? formatPromptReference(value) : scene.structure.instances[parseXbfElementId(id).instance].path, card: null,
         onRemove: () => parts.select(id, { multiSelect: true }), onHover: on => parts.hover(on ? id : "") } });
     }
     for (const id of elements) {
       const element = scene.describeElement(id);
       if (!element) continue;
-      const selector = `${element.path}#${element.name || `${element.kind}${element.ordinal}`}`;
-      rows.push({ value: reference(selector), chip: { key: `element:${id}`, label: element.name || `${KIND_LABEL[element.kind]} ${element.ordinal}`,
-        glyph: element.kind === "vertex" ? "vertex" : element.kind, id, copy: formatPromptReference(reference(selector)),
+      const value = element.name ? refOf(`${labelOf(id)}/${element.name}`) : null;
+      rows.push({ value, chip: { key: `element:${id}`, label: element.name || `${KIND_LABEL[element.kind]} ${element.ordinal}`,
+        glyph: element.kind, id, copy: value ? formatPromptReference(value)
+          : `${element.path} ${KIND_LABEL[element.kind]} ${element.ordinal}${element.name ? ` (${element.name})` : ""}`,
         card: <ElementCard element={element} />, onRemove: () => setChosen(current => current.filter(item => item !== id)), onHover: () => {} } });
     }
-    return { references: rows.map(row => row.value), chips: rows.map(row => row.chip) };
+    return { references: rows.map(row => row.value).filter(Boolean), chips: rows.map(row => row.chip) };
   }, [scene, resource, parts, elements]);
 
   // The panel reads the last element picked; the facts are the engine's.

@@ -169,6 +169,32 @@ export async function waitForXbfVersion(source, after, { wait = XBF_VERSION_WAIT
   return { version: String(answer?.version || ""), patch: answer?.patch || null };
 }
 
+const placePoint = (m, p) => [0, 1, 2].map(row => m[row] * p[0] + m[4 + row] * p[1] + m[8 + row] * p[2] + m[12 + row]);
+
+/**
+ * An element's facts (`fetchXbfElementFacts`, measured on the part's shape in its own frame) where
+ * the instance places them: its points (a centroid, an edge's ends, a vertex's position) through the
+ * instance's world matrix (column-major, the structure's), and a face's exact box as the box of its
+ * placed corners. Lengths and areas a placement does not change.
+ * @param {object} facts
+ * @param {number[]} matrix  The instance's 4x4 world matrix, column-major.
+ */
+export function placeXbfFacts(facts, matrix) {
+  if (!facts || !Array.isArray(matrix) || matrix.length !== 16) return facts;
+  const placed = { ...facts };
+  if (Array.isArray(facts.centroid)) placed.centroid = placePoint(matrix, facts.centroid);
+  if (Array.isArray(facts.position)) placed.position = placePoint(matrix, facts.position);
+  if (Array.isArray(facts.endpoints)) placed.endpoints = facts.endpoints.map(point => placePoint(matrix, point));
+  if (facts.box?.min && facts.box?.max) {
+    const corners = [];
+    for (const x of [facts.box.min[0], facts.box.max[0]]) for (const y of [facts.box.min[1], facts.box.max[1]]) {
+      for (const z of [facts.box.min[2], facts.box.max[2]]) corners.push(placePoint(matrix, [x, y, z]));
+    }
+    placed.box = { min: [0, 1, 2].map(axis => Math.min(...corners.map(c => c[axis]))), max: [0, 1, 2].map(axis => Math.max(...corners.map(c => c[axis]))) };
+  }
+  return placed;
+}
+
 /**
  * What the kernel measures of one element of a part, now: a face's area, centroid, surface type,
  * exact box and check; an edge's length, curve type, class, faces and endpoints; a vertex's

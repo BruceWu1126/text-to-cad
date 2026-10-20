@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchXbfElementFacts } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
+import { fetchXbfElementFacts, placeXbfFacts } from "@text-to-cad/core/lib/xbf/xbfDocument.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
 import { CoordValue, InfoRow, MonoValue, formatNumber } from "../kit/inspector/referenceRows.jsx";
 
@@ -45,7 +45,7 @@ function VertexFacts({ facts }) {
 
 /**
  * @param {{ element: { id: string, kind: "face" | "edge" | "vertex", ordinal: number, key: string, name: string,
- *   edgeClass: string, path: string } | null, source: string, version: string, active?: boolean }} props
+ *   edgeClass: string, path: string, matrix?: number[] } | null, source: string, version: string, active?: boolean }} props
  *   `element`: the picked element as the scene describes it (`describeElement`), or null (no panel). `source`: the
  *   document's API URL. `version`: the document's, so a rebuild measures it again.
  */
@@ -57,7 +57,8 @@ export default function XbfElementSection({ element, source, version, active = t
     const controller = new AbortController();
     setState({ id: element.id, facts: null, error: null });
     fetchXbfElementFacts(source, element.key, element.kind, element.ordinal, { signal: controller.signal })
-      .then(facts => setState({ id: element.id, facts, error: null }),
+      // Measured in the part's own frame; read where this instance places it, as the view shows it.
+      .then(facts => setState({ id: element.id, facts: placeXbfFacts(facts, element.matrix), error: null }),
         error => { if (!controller.signal.aborted) setState({ id: element.id, facts: null, error }); });
     return () => controller.abort();
     // The element by its id, the part by its key, again for a new version of the document.
