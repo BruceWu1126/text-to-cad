@@ -253,6 +253,26 @@ class RetentionTest(MemoCase):
         self.assertLessEqual(memo.stats()["entries"], 2 * memo.RUNS_KEPT + 1 + memo.RUNS_KEPT)
 
 
+class QueryTest(MemoCase):
+    def test_a_bounding_box_of_a_shape_the_memo_handed_back_is_not_measured_again(self) -> None:
+        from build123d import Pos, Solid, geometry
+
+        def model(length):
+            part = Pos(1, 2, 3) * (Solid.make_box(length, 4, 4) - Solid.make_cylinder(1, 10))
+            box = part.bounding_box()
+            return tuple(box.min) + tuple(box.max)
+
+        cold, _, _ = _run(model, 4.0)
+        measured = mock.patch.object(geometry.BRepBndLib, "AddOptimal_s", wraps=geometry.BRepBndLib.AddOptimal_s)
+        with measured as add:
+            warm, _, _ = _run(model, 4.0)
+            self.assertEqual(add.call_count, 0, "the same shape: its box is kept")
+            self.assertEqual(warm, cold)
+            edited, _, _ = _run(model, 5.0)
+            self.assertEqual(add.call_count, 1, "a new shape is measured")
+        self.assertAlmostEqual(edited[3] - edited[0], 5.0, places=5)
+
+
 class MakerTest(MemoCase):
     def test_a_maker_s_run_is_counted_as_the_model_s_call(self) -> None:
         from build123d import Solid

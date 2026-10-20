@@ -78,6 +78,13 @@ what a foreign wrapper embeds, and where a ledger row is indexed. The walk stops
 shape a root already holds, so registering a container of registered parts costs its
 direct children, not the parts' sub-shapes.
 
+**Queries.** A bounding box is no operation and no feature -- it makes no shape -- but a
+model asks for one of the same unchanged shapes on every build, and the precise box
+build123d takes by default costs milliseconds a shape. build123d measures the bare
+geometry (it clears any mesh first and takes no tolerance), so a box is a function of the
+TShape, its placement and the arguments: one of a TShape this process made is kept by
+those, with the effects applied to it so far, and answered again (``_bounding_box``).
+
 **History.** While a call from the model's code runs, the OCCT makers it runs record
 what they were given and what they made (``history``), and right after it the call's
 history is composed from them. The feature carries it, and so does the entry: a hit
@@ -304,6 +311,7 @@ def install() -> bool:
             setattr(importers, name, wrapped)
             if getattr(build123d, name, None) is original:
                 setattr(build123d, name, wrapped)
+        topology.Shape.bounding_box = _bounding_box(topology.Shape.bounding_box)
         kernel_history.install()
         # After the history's patches, which read these modules' classes: build123d keeps
         # the classes it imported, and a model importing one now is handed its subclass.
@@ -357,9 +365,56 @@ def uninstall() -> bool:
             maker = getattr(module, class_name)
             if getattr(maker, "__kernel_memo__", False):
                 setattr(module, class_name, maker.__kernel_memo_class__)
+        if getattr(topology.Shape.bounding_box, "__kernel_memo__", False):
+            topology.Shape.bounding_box = topology.Shape.bounding_box.__wrapped__
         kernel_history.uninstall()
         _installed = False
         return True
+
+
+# Bounding boxes asked of shapes this process made: (TShape, placement, orientation,
+# arguments, effects applied) to the box's corners, the least recently asked dropped.
+_BOXES: "OrderedDict[tuple, tuple]" = OrderedDict()
+_BOXES_HELD = 1 << 16
+
+
+def _bounding_box(function: Any) -> Any:
+    """``Shape.bounding_box`` answered from ``_BOXES`` for a shape the memo made (see
+    **Queries**); any other shape, or a box asked outside a run, is measured."""
+    @functools.wraps(function)
+    def bounding_box(self: Any, tolerance: float | None = None, optimal: bool = True) -> Any:
+        state = getattr(_LOCAL, "run", None)
+        wrapped = self.__dict__.get("_wrapped")
+        if state is None or wrapped is None:
+            return function(self, tolerance, optimal)
+        tshape = wrapped.TShape()
+        made = _made_of(tshape, state)
+        if made is None or not made.persistent():
+            return function(self, tolerance, optimal)
+        key = (tshape, _location_key(wrapped), int(wrapped.Orientation()), tolerance, bool(optimal),
+               tuple(effect.id for effect in made.effects))
+        with _LOCK:
+            corners = _BOXES.get(key)
+            if corners is not None:
+                _BOXES.move_to_end(key)
+        if corners is None:
+            box = function(self, tolerance, optimal)
+            corners = None if box.wrapped is None else box.wrapped.Get()
+            with _LOCK:
+                _BOXES[key] = corners if corners is not None else ()
+                while len(_BOXES) > _BOXES_HELD:
+                    _BOXES.popitem(last=False)
+            return box
+        from build123d.geometry import BoundBox
+        from OCP.Bnd import Bnd_Box
+
+        bnd = Bnd_Box()
+        if corners:
+            bnd.Update(*corners)
+        return BoundBox(bnd)
+
+    bounding_box.__kernel_memo__ = True
+    return bounding_box
 
 
 def _patch(cls: type, attr: str, label: str, kind: str) -> None:
@@ -637,6 +692,7 @@ def clear() -> None:
         _KEY_IDS.clear()
         _MAPS.clear()
         _ORDINALS.clear()
+        _BOXES.clear()
         _STATE.clear()
         _SUBS.clear()
 
