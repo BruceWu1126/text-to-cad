@@ -165,7 +165,7 @@ class BoundsTests(Fixture):
                     "max": [max(b[a] for b in expected_boxes) for a in range(3, 6)]}
         # Eight leaves of six prototypes: each call serializes each TShape once
         # for its key, whether the boxes come from a measurement or from RAM.
-        with mock.patch.object(cp, "_shape_brep_bytes", wraps=cp._shape_brep_bytes) as serialized:
+        with mock.patch.object(cp, "_raw_brep_bytes", wraps=cp._raw_brep_bytes) as serialized:
             self.assertEqual(cp._bbox_from_shape(compound), expected)
             self.assertEqual(cp._bbox_from_shape(compound), expected)
         self.assertEqual(serialized.call_count, 6 * 2)

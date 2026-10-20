@@ -272,7 +272,7 @@ def _leaf_bounds(shape: Any) -> dict[str, list[float]] | None:
         except TypeError:  # an unhashable native handle: digest this leaf alone
             tshape, digest = None, None
         if digest is None:
-            digest = hashlib.sha256(_shape_brep_bytes(untranslated)).hexdigest()
+            digest = hashlib.sha256(_raw_brep_bytes(untranslated)).hexdigest()
             if tshape is not None:
                 digests[tshape] = digest
         rotation = struct.pack("<12d", *(transform.Value(row, column)
@@ -334,11 +334,22 @@ def _occurrence_material(child: Any) -> dict[str, Any] | None:
 
 
 def _shape_brep_bytes(shape: Any) -> bytes:
-    """Location-stripped binary BREP of a shape (no triangulation/normals).
+    """The bytes a component is stored as and hashed by: the location-stripped
+    binary BREP (no triangulation/normals) of :func:`_canonical_shape`, so equal
+    geometry writes equal bytes whichever kernel objects -- a warm run's memo hits
+    or a cold run's fresh results -- carry it.
 
     Takes a build123d shape or a bare ``TopoDS_Shape``: a document's
-    prototypes (``store.build``) and a materialized child (``store.materialize``)
-    come through here too, and they hold kernel shapes, not wrappers."""
+    prototypes (``store.build``) come through here too, and they hold kernel
+    shapes, not wrappers."""
+    return _raw_brep_bytes(_canonical_shape(shape))
+
+
+def _raw_brep_bytes(shape: Any) -> bytes:
+    """The location-stripped binary BREP of a shape exactly as its objects stand:
+    what :func:`_shape_brep_bytes` writes of a canonical shape, and a digest of
+    geometry a process only compares with itself (a cache key, a check that held
+    geometry is unchanged) reads, with no canonical copy to make."""
     from OCP.BinTools import BinTools, BinTools_FormatVersion
     from OCP.TopLoc import TopLoc_Location
 
@@ -356,6 +367,280 @@ def _shape_brep_bytes(shape: Any) -> bytes:
         BinTools_FormatVersion.BinTools_FormatVersion_VERSION_4,
     )
     return stream.getvalue()
+
+
+_IDENTITY_MATRIX = (1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+
+def _canonical_shape(shape: Any) -> Any:
+    """An unplaced shape equal to ``shape`` whose BinTools bytes are a function of its
+    geometry alone: what :func:`_shape_brep_bytes` writes.
+
+    BinTools writes two things geometry does not decide. Its location table holds
+    one entry per transform *object* (``TopLoc_Datum3D``) a sub-shape's placement
+    chain or a representation names, and an edge's curve representations in the
+    order its list holds them. A warm run's kernel memo hands back the objects the
+    first run made, which point at that run's transform objects, while what it
+    computes again points at fresh ones of the same value; and a representation
+    a hit's replay appends lands at another place in the list than a cold run's.
+    So equal geometry could write different bytes. Here every transform object is
+    replaced by the first one met of its value (bit for bit), an identity transform
+    by no transform at all -- the same homomorphism on every placement and every
+    representation's location, so each lookup of a representation by its surface
+    and location still finds it -- and each edge's representations are ordered by
+    what they are: kind, then the surface (by the order the shape's faces first
+    name it), then the location's transform, and two on one surface at one
+    placement -- both written, the last one read kept -- by their curves and ranges.
+
+    Nothing reachable from ``shape`` is changed. A sub-shape this changes nothing
+    in, below or on is the shape's own (shared, as every TShape it holds, where its
+    flags say a parent may take it as it is); every other one is a copy
+    (``EmptyCopy``, which shares curves and surfaces) with its flags as they were.
+    An already canonical shape is therefore returned unplaced as it is. Should
+    merging equal transforms join sub-shapes the original kept apart (two
+    occurrences of one TShape at equal placements made by different objects), the
+    original numbering would not survive, so the shape is returned unplaced as it
+    is instead."""
+    from OCP.BRep import (
+        BRep_Builder, BRep_CurveOn2Surfaces, BRep_GCurve, BRep_PointOnCurve, BRep_PointOnCurveOnSurface,
+        BRep_PointOnSurface, BRep_TEdge, BRep_TFace, BRep_TVertex,
+    )
+    from OCP.BinTools import BinTools_Curve2dSet, BinTools_SurfaceSet
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+    from OCP.TopoDS import TopoDS_Iterator, TopoDS_Shape
+
+    root = getattr(shape, "wrapped", shape).Located(TopLoc_Location())
+    empty = TopLoc_Location()
+
+    def matrix(transform: Any) -> tuple[float, ...]:
+        return tuple(transform.Value(i, j) for i in range(1, 4) for j in range(1, 5))
+
+    # Per transform object: the canonical location standing for it, and whether that
+    # is the object itself.
+    by_value: dict[bytes, Any] = {}
+    by_datum: dict[Any, tuple[Any, bool]] = {}
+
+    def datum_location(datum: Any) -> tuple[Any, bool]:
+        found = by_datum.get(datum)
+        if found is None:
+            values = matrix(datum.Transformation())
+            key = struct.pack(">12d", *values)
+            canonical = by_value.get(key)
+            if canonical is not None:
+                found = (canonical, False)
+            elif values == _IDENTITY_MATRIX:
+                by_value[key] = empty
+                found = (empty, False)
+            else:
+                canonical = by_value[key] = TopLoc_Location(datum)
+                found = (canonical, True)
+            by_datum[datum] = found
+        return found
+
+    by_chain: dict[tuple, tuple[Any, bool]] = {}
+    # Each canonical location's transform, as a sort key: by the object's identity, which
+    # the memos here keep alive for the whole call.
+    placements: dict[int, bytes] = {id(empty): b""}
+
+    def placement_key(loc: Any) -> bytes:
+        found = placements.get(id(loc))
+        if found is None:
+            found = placements[id(loc)] = struct.pack(">12d", *matrix(loc.Transformation()))
+        return found
+
+    def location(loc: Any) -> tuple[Any, bool]:
+        """The canonical location for ``loc``, and whether it is ``loc`` unchanged."""
+        if loc.IsIdentity():
+            return empty, True
+        items = []
+        rest = loc
+        while not rest.IsIdentity():
+            items.append((rest.FirstDatum(), rest.FirstPower()))
+            rest = rest.NextLocation()
+        chain = tuple(items)
+        found = by_chain.get(chain)
+        if found is None:
+            # A location is NextLocation() * FirstDatum()^FirstPower(): rebuild it
+            # right to left, so its multiplication cancels what it cancelled.
+            canonical, same = empty, True
+            for datum, power in chain:
+                standing, itself = datum_location(datum)
+                canonical = standing.Powered(power).Multiplied(canonical)
+                same = same and itself
+            found = by_chain[chain] = (loc if same else canonical, same)
+        return found
+
+    surfaces: dict[Any, int] = {}
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(root, TopAbs_FACE, faces)
+    for index in range(1, faces.Extent() + 1):
+        surfaces.setdefault(faces.FindKey(index).TShape().Surface(), len(surfaces))
+    unnamed: dict[Any, bytes] = {}
+
+    def surface_key(surface: Any) -> tuple:
+        index = surfaces.get(surface)
+        if index is not None:
+            return (1, index)
+        # A surface no face of the shape lies on (a representation another shape's
+        # operation left on a shared edge): named by its own bytes.
+        found = unnamed.get(surface)
+        if found is None:
+            found = unnamed[surface] = geometry_bytes(BinTools_SurfaceSet(), surface)
+        return (2, found)
+
+    def geometry_bytes(table: Any, geometry: Any) -> bytes:
+        table.Add(geometry)
+        stream = io.BytesIO()
+        table.Write(stream)
+        return stream.getvalue()
+
+    def content_key(rep: Any) -> tuple:
+        """What tells apart two representations of one edge on one surface at one
+        placement -- which BinTools writes both of, and a reader keeps the last of: their
+        curves and ranges."""
+        curves = [rep.PCurve()] + ([rep.PCurve2()] if rep.IsCurveOnClosedSurface() else [])
+        return (rep.First(), rep.Last(), *(geometry_bytes(BinTools_Curve2dSet(), curve) for curve in curves))
+
+    def representation_key(rep: Any, placed: Any, placed2: Any) -> tuple:
+        if rep.IsCurve3D():
+            return (0, placement_key(placed))
+        if isinstance(rep, BRep_CurveOn2Surfaces):
+            return (3, surface_key(rep.Surface()), placement_key(placed),
+                    surface_key(rep.Surface2()), placement_key(placed2))
+        return (2 if rep.IsCurveOnClosedSurface() else 1, surface_key(rep.Surface()), placement_key(placed))
+
+    def drained(held: Any) -> list[Any]:
+        # A kernel list's own Python iteration costs milliseconds an item; taking
+        # the items off its front costs microseconds. ``held`` is a list of our own.
+        items = []
+        while not held.IsEmpty():
+            items.append(held.First())
+            held.RemoveFirst()
+        return items
+
+    builder = BRep_Builder()
+    copies: dict[Any, tuple[Any, bool]] = {}
+
+    def visit(tshape: Any, root: bool = False) -> tuple[Any, bool]:
+        """The canonical TShape for ``tshape``, and whether it is ``tshape`` itself."""
+        found = copies.get(tshape)
+        if found is not None:
+            return found
+        children = []
+        same = True
+        if not isinstance(tshape, BRep_TVertex):  # a vertex has no sub-shapes
+            iterator = TopoDS_Iterator(_unplaced(tshape), False, False)
+            while iterator.More():
+                child = iterator.Value()
+                canonical_tshape, kept = visit(child.TShape())
+                placed, unmoved = location(child.Location())
+                children.append((child, canonical_tshape, kept, placed, unmoved))
+                same = same and kept and unmoved
+                iterator.Next()
+        edge = vertex = None
+        if isinstance(tshape, BRep_TEdge):
+            # Read the original's representations (``Curves()`` is a copy of its list).
+            edge, originals = [], []
+            for rep in drained(tshape.Curves()):
+                if not isinstance(rep, (BRep_GCurve, BRep_CurveOn2Surfaces)):
+                    continue  # a polygon: EmptyCopy keeps none, and BinTools writes none here
+                originals.append(rep)
+                placed, unmoved = location(rep.Location())
+                placed2 = None
+                if isinstance(rep, BRep_CurveOn2Surfaces):
+                    placed2, unmoved2 = location(rep.Location2())
+                    unmoved = unmoved and unmoved2
+                edge.append((representation_key(rep, placed, placed2), placed, placed2))
+                same = same and unmoved
+            if len({key for key, _placed, _placed2 in edge}) < len(edge):
+                edge = [(key + content_key(rep), placed, placed2) if key[0] in (1, 2) else (key, placed, placed2)
+                        for rep, (key, placed, placed2) in zip(originals, edge)]
+            order = sorted(range(len(edge)), key=lambda index: edge[index][0])
+            same = same and order == list(range(len(edge)))
+        elif isinstance(tshape, BRep_TVertex):
+            vertex = []
+            for point in drained(tshape.Points()):
+                placed, unmoved = location(point.Location())
+                vertex.append((point, placed))
+                same = same and unmoved
+        elif isinstance(tshape, BRep_TFace):
+            face_location, unmoved = location(tshape.Location())
+            same = same and unmoved
+        # A parent that is a copy takes a kept TShape as it is only if that changes no
+        # flag of it: adding a child marks it no longer free. The root has no parent.
+        if same and (root or not tshape.Free()):
+            found = copies[tshape] = (tshape, True)
+            return found
+        fresh = tshape.EmptyCopy()
+        if edge is not None:
+            held = fresh.ChangeCurves()
+            held.Clear()
+            for index in order:
+                rep = originals[index]
+                _key, placed, placed2 = edge[index]
+                if placed2 is not None:
+                    # The one kind whose second location has no setter.
+                    rep = BRep_CurveOn2Surfaces(rep.Surface(), rep.Surface2(), placed, placed2, rep.Continuity())
+                else:
+                    rep = rep.Copy()  # shares its curves and surface with the original
+                    rep.Location(placed)
+                held.Append(rep)
+        elif vertex is not None:
+            held = fresh.ChangePoints()
+            held.Clear()
+            for point, placed in vertex:
+                if point.IsPointOnCurve():
+                    held.Append(BRep_PointOnCurve(point.Parameter(), point.Curve(), placed))
+                elif point.IsPointOnCurveOnSurface():
+                    held.Append(BRep_PointOnCurveOnSurface(point.Parameter(), point.PCurve(), point.Surface(), placed))
+                else:
+                    held.Append(BRep_PointOnSurface(point.Parameter(), point.Parameter2(), point.Surface(), placed))
+        elif isinstance(fresh, BRep_TFace):
+            fresh.Location(face_location)
+        parent = _unplaced(fresh)
+        for child, canonical_tshape, kept, placed, unmoved in children:
+            if kept and unmoved:
+                occurrence = child
+            else:
+                occurrence = TopoDS_Shape()
+                occurrence.TShape(canonical_tshape)
+                # Placed as the original is, scaled or mirrored included.
+                occurrence.Location(placed, False)
+                occurrence.Orientation(child.Orientation())
+            builder.Add(parent, occurrence)
+        fresh.Free(tshape.Free())
+        fresh.Modified(tshape.Modified())
+        fresh.Checked(tshape.Checked())
+        fresh.Orientable(tshape.Orientable())
+        fresh.Closed(tshape.Closed())
+        fresh.Infinite(tshape.Infinite())
+        fresh.Convex(tshape.Convex())
+        fresh.Locked(tshape.Locked())
+        found = copies[tshape] = (fresh, False)
+        return found
+
+    canonical_tshape, kept = visit(root.TShape(), root=True)
+    if kept:
+        return root
+    canonical = TopoDS_Shape()
+    canonical.TShape(canonical_tshape)
+    canonical.Orientation(root.Orientation())
+    before, after = TopTools_IndexedMapOfShape(), TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(root, before)
+    TopExp.MapShapes_s(canonical, after)
+    return canonical if before.Extent() == after.Extent() else root
+
+
+def _unplaced(tshape: Any) -> Any:
+    """A shape of ``tshape`` at no placement, forward."""
+    from OCP.TopoDS import TopoDS_Shape
+
+    shape = TopoDS_Shape()
+    shape.TShape(tshape)
+    return shape
 
 
 def _build123d_shape_from_topods(topo: Any) -> Any:
@@ -387,8 +672,12 @@ def _build123d_shape_from_topods(topo: Any) -> Any:
 # deliberate. An extractor, selector-table or mesher fix bumps the version of
 # that derived artifact (cadgen.store.parts.PART_VERSION) and never this
 # string. STORE.md "Identity and versions" records the rule. 4: a component
-# carries its construction key and lineage.
-GEOMETRY_SCHEME = "cadgen-geometry-input-v4"
+# carries its construction key and lineage. 5: its bytes are those of its
+# canonical shape (``_canonical_shape``: one transform object per distinct
+# transform, none for an identity, each edge's representations in a fixed
+# order), so a warm run's memo hits and a cold run write one component; the
+# same shapes now write different bytes, and stores re-key rather than mix.
+GEOMETRY_SCHEME = "cadgen-geometry-input-v5"
 GEOMETRY_CODECS = frozenset({"bintools-v4", "bintools-v3", "breptools-ascii-v3"})
 COMPONENT_KINDS = frozenset({"native", "eager-only"})
 _BREP_HEADERS = {
@@ -636,8 +925,9 @@ def _decode_brep(codec: str, payload: bytes, *, native: bool = False) -> Any:
     return NativeShape(shape) if native else _build123d_shape_from_topods(shape)
 
 def _encode_brep(shape: Any) -> dict[str, Any]:
-
-    original = _shape_brep_bytes(shape)
+    """Encode a canonical shape (:func:`_canonical_shape`): its bytes are
+    :func:`_shape_brep_bytes`'s of the shape it was made from."""
+    original = _raw_brep_bytes(shape)
     original_points = _point_signature(shape)
     try:
         private = _decode_brep("bintools-v4", original)
@@ -679,11 +969,12 @@ def prepare_geometry_component(shape: Any, *, face_colors: object = None,
     prepared component as ``lineage`` until it is published). Nothing here
     measures the shape's geometry for a name.
     """
+    canonical = _canonical_shape(shape)
     try:
-        encoded = _encode_brep(shape)
+        encoded = _encode_brep(canonical)
         kind = "native"
     except CodecFidelityError:
-        encoded = {"codec": "bintools-v4", "bytes": _shape_brep_bytes(shape),
+        encoded = {"codec": "bintools-v4", "bytes": _raw_brep_bytes(canonical),
                    "private_decoded_shape": None}
         kind = "eager-only"
     private = encoded["private_decoded_shape"]

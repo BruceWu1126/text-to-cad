@@ -322,6 +322,78 @@ class ImportedPublication(PublicationCacheCase):
         self.assert_built_as_cold((changed, changed_provenance), self.cold_build())
 
 
+# Two parts an edit changes while the memo hands back some of what made them: ``shaft``'s
+# first sections are hits placed by the first run's transform objects, its last one is
+# placed by fresh ones of the same value (an identity among them); ``marks``' profile edges
+# carry representations of a straight extrusion the edit changed and of a tapered one a hit
+# replays, and the two land on the edges in another order than a cold run puts them.
+REUSED = """\
+from cadgen import step
+from cadgen import build123d as bd
+
+LENGTH = 50.0
+RAISE = 0.18
+
+
+def section(x0, x1, diameter):
+    with bd.Locations(bd.Location(((x0 + x1) / 2.0, 0.0, 0.0))):
+        bd.Cylinder(radius=diameter / 2.0, height=x1 - x0, rotation=(0.0, 90.0, 0.0))
+
+
+@step
+def rig():
+    with bd.BuildPart() as built:
+        section(0.0, 10.0, 8.0)
+        section(10.0, 30.0, 12.0)
+        section(30.0, LENGTH, 8.0)
+    shaft = built.part
+    shaft.label = "shaft"
+    profile = bd.Rectangle(1.0, 3.0) + bd.Pos(2.0, 0) * bd.Rectangle(0.8, 3.0)
+    body = bd.extrude(profile, 0.3 + RAISE)
+    cap = bd.Pos(0, 0, 0.3 + RAISE) * bd.extrude(profile, 0.05, taper=45)
+    marks = body + cap
+    marks.label = "marks"
+    return bd.Compound(children=[shaft, bd.Pos(0, 20, 0) * marks], label="rig")
+"""
+
+
+class WarmBytesAreColdBytes(PublicationCacheCase):
+    """The bytes a component is stored as are a function of its geometry alone
+    (``component_package._canonical_shape``): after an edit, a warm rebuild writes each
+    component as a cold build of the edited source does, though the kernel objects that
+    carry its geometry are not the ones a cold run makes -- which transform objects its
+    placements name, and in which order its edges hold their representations."""
+
+    def test_a_warm_rebuild_writes_the_bytes_a_cold_build_writes(self) -> None:
+        from cadgen.store.objects import read_object
+        from cadgen.store.trees import get_tree
+
+        def components(record: dict) -> dict[str, bytes]:
+            tree = get_tree(record["tree"])
+            return {occurrence["name"]: read_object(tree["components"][occurrence["component"]]["brep"])
+                    for occurrence in tree["occurrences"]}
+
+        self.script.write_text(REUSED, encoding="utf-8")
+        self.cold()
+        self.store()
+        self.build()
+        self.script.write_text(REUSED.replace("LENGTH = 50.0", "LENGTH = 54.0")
+                               .replace("RAISE = 0.18", "RAISE = 0.20"), encoding="utf-8")
+        before = kernel_memo.stats()["hits"]
+        warm, warm_provenance, prepared = self.build()
+        self.assertGreater(kernel_memo.stats()["hits"], before, "the rebuild reuses what the edit left")
+        self.assertEqual(set(prepared), {"shaft", "marks"})
+        warm_bytes = components(warm)
+        cold, cold_provenance = self.cold_build()
+        cold_bytes = components(cold)
+        self.assertEqual(set(warm_bytes), {"shaft", "marks"})
+        for name in ("shaft", "marks"):
+            with self.subTest(part=name):
+                self.assertEqual(len(warm_bytes[name]), len(cold_bytes[name]))
+                self.assertTrue(warm_bytes[name] == cold_bytes[name], "warm bytes are cold bytes")
+        self.assert_built_as_cold((warm, warm_provenance), (cold, cold_provenance))
+
+
 # A parent placing child models a lib module builds: two placements of an assembly child,
 # three of a part child grouped, a leaf of its own, and a clip moving the group.
 PARTS = """\

@@ -145,7 +145,10 @@ everything else is a plain importable file.
 ### 5. Byte determinism is the writers' promise, not the kernel's
 
 cadgen's writers are pure: the same shapes give the same bytes, in every
-format — STEP (canonicalized NAUO ids and presentation-style ordering), meshes
+format — a component's BREP (written from its canonical shape: one transform
+object per distinct transform, each edge's representations in a fixed order,
+so which kernel objects carry equal geometry does not show), STEP
+(canonicalized NAUO ids and presentation-style ordering), meshes
 (the store's mesh of each component, serialized by one deterministic writer), DXF
 (geometry-ordered emitter). The geometry kernel, the mesher included, makes no
 such promise. Two runs of one model can differ in a last digit

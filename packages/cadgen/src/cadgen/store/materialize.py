@@ -199,7 +199,7 @@ def _geometry_digest(shape: Any, memo: dict | None = None, held: "HeldDigests | 
     from OCP.TopAbs import TopAbs_COMPOUND
     from OCP.TopLoc import TopLoc_Location
     from OCP.TopTools import TopTools_IndexedMapOfShape
-    from cadgen._internal.component_package import _shape_brep_bytes
+    from cadgen._internal.component_package import _raw_brep_bytes
 
     if memo is None:
         memo = {}
@@ -228,7 +228,7 @@ def _geometry_digest(shape: Any, memo: dict | None = None, held: "HeldDigests | 
             TopExp.MapShapes_s(private, shapes)
             for index in range(1, shapes.Extent() + 1):
                 shapes.FindKey(index).Checked(False)
-            result = hashlib.sha256(_shape_brep_bytes(private)).hexdigest()
+            result = hashlib.sha256(_raw_brep_bytes(private)).hexdigest()
         if trusted and result is not None:
             held.took(key, shape, result)
         memo[key] = result

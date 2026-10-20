@@ -256,9 +256,9 @@ The `.step` document, its sidecar and declared mesh files are
 A component's id (cid) is the first 16 hexadecimal characters of its
 `contentHash`, a hash of exactly these inputs
 (`component_package.geometry_component_hash`): the string `GEOMETRY_SCHEME`
-(currently `cadgen-geometry-input-v4`), the component's kind and codec, its
-BREP bytes, its intrinsic face colours, an eager-only component's pinned
-topology facts (§3), and the construction key and the lineage object its build
+(currently `cadgen-geometry-input-v5`), the component's kind and codec, its
+BREP bytes (its canonical shape's, below), its intrinsic face colours, an
+eager-only component's pinned topology facts (§3), and the construction key and the lineage object its build
 named it by (below; none for geometry no construction of a run made). That
 string is the **only** version on a component's identity. Everything derived
 from a component — its part (`PART_VERSION`, in its key), index payloads (their
@@ -269,6 +269,21 @@ never moves a cid.
 - Bump `GEOMETRY_SCHEME` only when the same inputs must map to a different
   tree: a codec or interpretation change. It re-keys every user's store, so
   it is rare and deliberate, and the reason goes in the commit and here.
+  v5: a component's bytes are written from its **canonical shape**
+  (`component_package._canonical_shape`), not from the kernel objects that
+  carry it. BinTools writes one location-table entry per transform object a
+  placement chain or a representation names, and an edge's curve
+  representations in the order its list holds them; a warm run's memo hits
+  name the first run's transform objects and its fresh results new ones of the
+  same value, and a replayed representation lands elsewhere in the list, so
+  equal geometry wrote different bytes and the store kept a duplicate of every
+  such component. The canonical shape is the shape with one transform object
+  per distinct transform, none for an identity, and each edge's
+  representations ordered by kind, surface and placement (two on one surface
+  at one placement by their curves), every sub-shape that changes a copy and
+  nothing of the shape itself touched; the same shapes now write different
+  bytes, so every cid re-keys. v4: a component carries its
+  construction key and lineage.
 - Bump `DOCUMENT_SCHEMA_VERSION` (`store/records.py`) when a document's same
   bytes must read back as a different tree over the same components: the
   names, hierarchy or placements the scene loader reads. Every document entry
@@ -489,7 +504,8 @@ address. An example (`arm`: a bar plus two placements of a `peg` model):
 ```
 
 - `components` are geometry this model created itself, keyed by component id
-  (`cid`, §2); each names its encoded `.brep` -- the exact unlocated BREP --
+  (`cid`, §2); each names its encoded `.brep` -- the exact unlocated BREP of
+  its canonical shape (§2, *Identity and versions*) --
   its declared codec and its intrinsic recipe, and, where a construction of the
   model's run made it, its `construction` key and its `lineage` object (§2):
   what its part is keyed by and what names its faces, edges and vertices. The
