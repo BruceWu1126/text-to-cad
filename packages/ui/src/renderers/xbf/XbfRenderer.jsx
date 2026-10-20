@@ -313,6 +313,8 @@ function XbfSurface({ view, data }) {
     parts: assembly && geometryFilter.includes("parts"), elements: openElements
   }), [geometryFilter, assembly, openElements]);
   const viewportRef = useRef(null);
+  // What the last press was made with (`XbfPick`): a finger's press reaches an edge from further off, as a STEP's.
+  const pointerTypeRef = useRef("");
   // A press's pick and a resting pointer's (an edge is taken from further away on a press), as one hit.
   const picker = useMemo(() => (scene ? {
     pick(ray) {
@@ -320,7 +322,7 @@ function XbfSurface({ view, data }) {
       const rect = viewportRef.current?.hostRef.current?.getBoundingClientRect?.();
       if (!camera || !rect?.width || mode === "none") return null;
       const view = { camera, width: rect.width, height: rect.height };
-      const press = scene.pickElement(ray, view, pickOptions);
+      const press = scene.pickElement(ray, view, { ...pickOptions, touch: pointerTypeRef.current === "touch" });
       const rest = scene.pickElement(ray, view, { ...pickOptions, hover: true });
       return press || rest ? { id: rest?.id || "", press, rest } : null;
     }
@@ -536,13 +538,24 @@ function XbfSurface({ view, data }) {
       return <>
         <XbfMeasureOverlay viewport={viewport} scene={scene} measure={measure} picking={measuring} preview={shell.previewing} />
         {handles ? <JointHandleOverlay handles={handles} layoutSeamRef={handleLayoutRef} {...viewport} /> : null}
-        <XbfPick viewport={viewport} scene={picker} enabled={picking} onPick={handlePick} onHover={handleHover} />
+        <XbfPick viewport={viewport} scene={picker} enabled={picking} onPick={handlePick} onHover={handleHover} pointerTypeRef={pointerTypeRef} />
       </>;
     }} />;
 }
 
-/** Select's pointer: taps and the resting pointer through the picker (`usePointerPick`). */
-function XbfPick({ viewport, scene, enabled, onPick, onHover }) {
+/**
+ * Select's pointer: taps and the resting pointer through the picker (`usePointerPick`), and what
+ * each press is made with (`pointerTypeRef`), heard before the pick's own listener hears it.
+ */
+function XbfPick({ viewport, scene, enabled, onPick, onHover, pointerTypeRef }) {
+  const { hostRef, viewerReadyTick } = viewport;
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!enabled || !host) return undefined;
+    const note = (event) => { pointerTypeRef.current = event.pointerType || ""; };
+    host.addEventListener("pointerdown", note, true);
+    return () => host.removeEventListener("pointerdown", note, true);
+  }, [enabled, hostRef, viewerReadyTick, pointerTypeRef]);
   usePointerPick({ viewport, scene, enabled, onPick, onHover, sameHit: (left, right) => (left?.rest?.id || "") === (right?.rest?.id || "") });
   return null;
 }
