@@ -308,6 +308,14 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (!file) return Promise.reject(new Error('Missing file'));
       return request('/__cad/robot', { file, signal, timeoutMs: 10_000, operation: 'robot' });
     },
+    engineDocument(file, { signal } = {}) {
+      // A cadgen engine document (`.xbf`) is served by the ENGINE, not by this server: the viewer
+      // asks the engine to serve it and answers where (`cadgen.viewer.xbf`), and the page reads
+      // its structure and part buffers from the engine directly. Starting the engine and reading
+      // a large document the first time can take a while; the server stays silent meanwhile.
+      if (!file) return Promise.reject(new Error('Missing file'));
+      return request('/__cad/xbf', { file, signal, timeoutMs: 120_000, operation: 'engine-document' });
+    },
     requestParts(body, { signal } = {}) {
       return request('/__cad/parts', {
         body, signal, method: 'POST', operation: 'parts',

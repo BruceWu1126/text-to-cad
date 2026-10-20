@@ -95,6 +95,15 @@ export interface CadDrawingPayload {
   [key: string]: unknown;
 }
 /**
+ * What `GET /__cad/xbf` answers: the engine serving a cadgen engine document (`engine`, its origin),
+ * the document's id there (`doc`) and its API URL (`url`, `<engine>/api/doc/<doc>`).
+ */
+export interface CadEngineDocument {
+  engine: string;
+  doc: string;
+  url: string;
+}
+/**
  * What `GET /__cad/robot` answers: a URDF, SDF or SRDF resolved by cadgen into the articulation
  * the page plays (`common/articulation.js`), the visuals it draws (each at its rest placement,
  * with its colour and the URL of the mesh it draws), and what the description says about its
@@ -262,6 +271,12 @@ export interface CadWorkspaceService {
   drawing(file: string, options?: CadRequestOptions): Promise<CadDrawingPayload>;
   /** `GET /__cad/robot`: a robot description resolved for the page (`cadgen.robot_payload`). */
   robot(file: string, options?: CadRequestOptions): Promise<CadRobotPayload>;
+  /**
+   * `GET /__cad/xbf`: where the cadgen engine serves an `.xbf` document, which the page then reads
+   * from the engine directly (`lib/xbf/xbfDocument.js`). A host without an engine leaves it out, and
+   * the xbf renderer says it cannot open the file.
+   */
+  engineDocument?(file: string, options?: CadRequestOptions): Promise<CadEngineDocument>;
   readonly resources: CadResourceProvider;
   /**
    * Each component's part row: its record, which cadgen derives in one job for a part the store
