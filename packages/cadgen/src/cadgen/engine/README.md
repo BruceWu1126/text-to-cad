@@ -37,6 +37,22 @@ def arm():
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap.
+5. **One file per model.** A model is one xbf, plus the exports it declares --
+   translations of that xbf, written after it. There is no second file of a
+   model: no sidecar, no manifest, no record of what a build did.
+6. **Provenance is served live, never written.** What made an element -- the
+   feature, its operation, the function, file and line of its call -- lives in
+   the trace of the worker that built the document, and is asked of it while it
+   lives (`made_by` on the facts endpoints, `cadgen xbf where`). A document
+   opened with no such worker has none to give, and says so (`made_by: null`).
+7. **Poses, never time.** The document carries kinematics -- where its parts
+   stand, how they may move -- and never time: no animation, no clip, no
+   keyframe, ever.
+8. **Names are the durable tie to code.** An element's name is spelled from the
+   function that made its feature and the author's name for that feature (the
+   target its result is assigned to, or a label), never from a line or a file:
+   moving code renames nothing, and the file holds no line to go stale. A line
+   is what the worker serves, now.
 
 ## Layout
 

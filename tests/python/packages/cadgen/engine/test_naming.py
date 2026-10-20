@@ -204,6 +204,18 @@ class AssignedNamesTest(NamingCase):
             self.assertNotEqual(before[kind], after[kind])
             self.assertEqual([name.replace("block.relief", "block.arch") for name in before[kind]], after[kind])
 
+    def test_a_name_holds_no_line_so_moving_the_code_renames_nothing(self) -> None:
+        # Names are the tie to code: the function and the author's name for the feature.
+        # Every line moves down and the build runs cold -- every call made again -- and
+        # every element keeps its name; the file holds no line and no script path.
+        before = self.derivations(self.names(BLOCK, insert="", relief="relief"))
+        memo.clear()
+        engine_build._PARTS.clear()
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_BODIES": "0"}):
+            after = self.derivations(self.names("# moved\n\n\n" + BLOCK, insert="", relief="relief"))
+        self.assertEqual(before, after)
+        self.assertNotIn(b"block.py", (self.folder / "block.xbf").read_bytes())
+
 
 class LabelTest(NamingCase):
     def test_a_label_names_the_feature_that_first_made_the_labelled_shape(self) -> None:
