@@ -451,7 +451,37 @@ SHOCK = """shock = bd.Pos(100, 0, -10) * bd.Box(10, 10, 30)
     parts.append(shock)"""
 
 
+TURNED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def bike():
+    # The pivot's part is turned: build123d makes the revolute's frame of the axis in that part's
+    # frame, so its X is not the X a plane of the world datum has.
+    frame = bd.Rot(0, 0, 30) * bd.Box(200, 40, 20)
+    frame.label = "frame"
+    engine = bd.Pos(60, 0, -40) * bd.Box(60, 30, 30)
+    engine.label = "engine"
+    point = (40, 0, -30)
+    bd.RevoluteJoint("pivot", frame, axis=bd.Axis(point, (0, 1, 0)), angular_range=(-5, 12))
+    bd.RigidJoint("pivot", engine, {at})
+    return bd.Compound(children=[frame, engine], label="bike")
+"""
+
+
 class InconsistencyTest(_Folder):
+    def test_a_child_frame_at_the_revolute_s_own_frame_is_joint_zero(self) -> None:
+        # A rigid frame made of the world datum turns about the axis from the revolute's own by the
+        # angle between their X's: outside a narrow range, no value of the pair, and a warning.
+        report = self.build("bike", TURNED.format(at="bd.Plane(origin=point, z_dir=(0, 1, 0)).location"))
+        self.assertIn("joint 'pivot' is kept with no value", " ".join(report["kinematics"]["warnings"]))
+        # At the revolute's own frame (its part's placement times its relative axis): joint zero.
+        report = self.build("bike", TURNED.format(at='frame.location * frame.joints["pivot"].relative_axis.location'))
+        self.assertNotIn("kinematics", report)
+        self.assertEqual(document.Loaded(self.folder / "bike.xbf").mechanism.as_built, {"pivot": (0.0,)})
+
     def test_a_rigid_joint_off_the_revolute_axis_builds_warns_and_its_joint_is_not_posed(self) -> None:
         report = self.build("bike", PIVOT.format(at="bd.Location((55, 0, -30))", extra="pass"))  # 15 mm off the axis
         path = self.folder / "bike.xbf"
