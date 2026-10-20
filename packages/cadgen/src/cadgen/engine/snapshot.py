@@ -17,6 +17,11 @@ The request is the snapshot contract's where it applies (``--display`` mode or J
 does not offer is refused by name before anything renders: ``display.exploded`` (a document's
 parts stand where it places them) and ``parts`` for a document that places a single part. Nothing
 is written but OUT.
+
+``--pose`` draws the document's mechanism at a configuration (its name) or at joint values (a JSON
+object, the rest as built): the engine serves the document at that pose, each link placed by its
+pairs from the ground, and the page draws what it is served. An unknown configuration or joint, a
+value out of range and a mechanism that is not a tree are refused by name before anything renders.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
-__all__ = ["SnapshotRefused", "add_parser", "run", "snapshot"]
+__all__ = ["SnapshotRefused", "add_parser", "parse_pose", "run", "snapshot"]
 
 PAGE_ORIGIN = "http://localhost"
 PAGE_URL = f"{PAGE_ORIGIN}/render.html"
@@ -128,6 +133,21 @@ def parse_camera(value: str | None) -> Any:
                           "azimuth:elevation pair or JSON object")
 
 
+def parse_pose(value: str | None) -> Any:
+    """``--pose``: a configuration's name, or ``{"<joint>": value}`` (JSON, or a JSON file of it)."""
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        raise SnapshotRefused("--pose names a configuration, or gives joint values as a JSON object")
+    if text.startswith("{") or (text.endswith(".json") and Path(text).is_file()):
+        parsed = _json_or_file(text, "--pose")
+        if not isinstance(parsed, dict):
+            raise SnapshotRefused("--pose is a configuration's name or a JSON object of joint values")
+        return parsed
+    return text
+
+
 def parse_size(width: int | None, height: int | None, profile: str | None) -> tuple[int, int]:
     if profile and (width or height):
         raise SnapshotRefused("--size-profile names a size; give it, or --width and --height, not both")
@@ -148,6 +168,23 @@ def parse_size(width: int | None, height: int | None, profile: str | None) -> tu
 def _get_json(url: str, *, method: str = "GET", timeout: float = 600.0) -> Any:
     with urlopen(Request(url, method=method), timeout=timeout) as answer:  # noqa: S310 - the engine, on loopback
         return json.loads(answer.read())
+
+
+def _posed(served: "_Served", pose: Any) -> tuple[str, dict[str, Any]]:
+    """The served document at ``pose``: its URL and the pose's values. What the pose names
+    wrong is refused by name, in the engine's words, before anything renders."""
+    from urllib.error import HTTPError
+
+    body = json.dumps({"pose": pose}).encode()
+    request = Request(f"{served.url}/pose", data=body, method="POST", headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(request, timeout=600.0) as answer:  # noqa: S310 - the engine, on loopback
+            found = json.loads(answer.read())
+    except HTTPError as error:
+        if error.code != 400:
+            raise
+        raise SnapshotRefused(f"--pose: {json.loads(error.read() or b'{}').get('error') or error}") from None
+    return f"{served.origin}/api/doc/{found['id']}", {"values": found["values"], "configuration": found["configuration"]}
 
 
 class _Served:
@@ -253,9 +290,12 @@ def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int]) -> tuple[
 
 
 def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None, camera: Any = None,
-             preview: bool = False, size: tuple[int, int] = DEFAULT_SIZE, daemon: bool = True) -> dict[str, Any]:
+             preview: bool = False, size: tuple[int, int] = DEFAULT_SIZE, daemon: bool = True,
+             pose: Any = None) -> dict[str, Any]:
     """Draw ``document`` (an ``.xbf``) into ``out`` (a ``.png``); returns what was drawn and how long
-    each stage took. Raises ``SnapshotRefused`` for a request it will not draw, before rendering."""
+    each stage took. ``pose``: a configuration's name or ``{joint: value}``, the engine placing each
+    link by its pairs from the ground; None draws the document as built. Raises
+    ``SnapshotRefused`` for a request it will not draw, before rendering."""
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
     if document.suffix.lower() != ".xbf":
@@ -271,8 +311,12 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     timings: dict[str, Any] = {}
     clock = time.perf_counter()
     served = _Served(document, daemon=daemon)
+    posed = None
     try:
-        structure = _get_json(served.url)
+        url = served.url
+        if pose is not None:
+            url, posed = _posed(served, pose)
+        structure = _get_json(url)
         timings["serveMs"] = round((time.perf_counter() - clock) * 1000)
         placed = len(structure.get("instances") or [])
         if display.get("mode") == "parts" and placed < 2 and not preview:
@@ -280,10 +324,10 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
                                   f"{placed} part{'' if placed == 1 else 's'}. Use solid.")
         # Every part meshed by the engine before the page asks, so the page's load is the bytes alone.
         clock = time.perf_counter()
-        meshed = _get_json(f"{served.url}/mesh", method="POST")
+        meshed = _get_json(f"{url}/mesh", method="POST")
         timings["meshMs"] = round((time.perf_counter() - clock) * 1000)
         unmeshed = {prototype.get("name") or prototype["key"]: prototype["unmeshed"]
-                    for prototype in _get_json(served.url)["prototypes"] if prototype.get("unmeshed")}
+                    for prototype in _get_json(url)["prototypes"] if prototype.get("unmeshed")}
         for name, faces in unmeshed.items():
             print(f"warning: {name}: the mesher left face{'s' if len(faces) > 1 else ''} "
                   f"{', '.join(map(str, faces))} without triangles, so the picture does not draw "
@@ -293,7 +337,7 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
             output["camera"] = camera
         job: dict[str, Any] = {
             "kind": "xbf", "mode": "view", "display": display, "outputs": [output],
-            "resolved": {"kind": "xbf", "url": served.url, "inputPath": str(document)},
+            "resolved": {"kind": "xbf", "url": url, "inputPath": str(document)},
         }
         if preview:
             job["preview"] = True
@@ -314,7 +358,7 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     return {"ok": True, "document": str(document), "output": str(out), "width": drawn.get("width"),
             "height": drawn.get("height"), "camera": drawn.get("camera"), "projection": drawn.get("projection"),
             "displayMode": display.get("mode", "solid"), "preview": preview, "parts": len(structure["prototypes"]),
-            "instances": placed, "unmeshed": unmeshed,
+            "instances": placed, "unmeshed": unmeshed, "pose": posed,
             # The engine's account of the meshing this snapshot asked for: none where it held every part.
             "mesh": {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")},
             "bytes": out.stat().st_size, "timings": timings}
@@ -334,6 +378,8 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
     parser.add_argument("--width", type=int)
     parser.add_argument("--height", type=int)
     parser.add_argument("--size-profile", choices=sorted(SIZE_PROFILES))
+    parser.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
+                                       "mechanism posed there; as built without it")
     parser.add_argument("--no-daemon", action="store_true", help="serve the document from this process")
     parser.add_argument("--json", action="store_true", help="print what was drawn and its timings as JSON")
     return parser
@@ -344,8 +390,9 @@ def run(args: argparse.Namespace) -> int:
         display = parse_display(args.display, args.grid)
         camera = parse_camera(args.camera)
         size = parse_size(args.width, args.height, args.size_profile)
+        pose = parse_pose(args.pose)
         report = snapshot(Path(args.document), Path(args.out), display=display, camera=camera, preview=args.preview,
-                          size=size, daemon=not args.no_daemon)
+                          size=size, daemon=not args.no_daemon, pose=pose)
     except SnapshotRefused as error:
         print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
         return 2

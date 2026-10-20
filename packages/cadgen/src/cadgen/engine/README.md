@@ -23,6 +23,25 @@ assembly, a material is every part's below it that has none: a whole-model defau
 Set materials on finished parts, after the last operation: an edit of one is then no
 kernel call.
 
+An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
+`LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
+`connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
+as-built configuration; `configuration(assembly, name, **values)` names another, by joint
+label. Connect parts before putting them in the compound that holds them.
+
+```python
+from cadgen.engine import configuration, xbf
+
+@xbf
+def hinge():
+    base, arm = bd.Box(100, 60, 20), bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
+    base.label, arm.label = "base", "arm"
+    bd.RevoluteJoint("elbow", base, axis=bd.Axis((40, 0, 20), (0, 1, 0)), angular_range=(-10, 120))
+    bd.RigidJoint("mount", arm)
+    base.joints["elbow"].connect_to(arm.joints["mount"], angle=30)   # as built: elbow 30
+    return configuration(bd.Compound(children=[base, arm], label="hinge"), "raised", elbow=90)
+```
+
 ## Laws
 
 1. **Nothing to disk.** The engine writes the files a model declares (the xbf,
@@ -37,7 +56,8 @@ kernel call.
    and instance, colours per part and per painted face, materials per part and
    per face given one (`XCAFDoc_Material`: name, description, density;
    `XCAFDoc_VisMaterial`: PBR), and element names on face and edge sub-shape
-   labels. STEP, GLB, STL and 3MF are translations of it.
+   labels, and an assembly's mechanism (links, pairs, ground, configurations: see
+   Kinematics). STEP, GLB, STL and 3MF are translations of it.
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
@@ -45,6 +65,9 @@ kernel call.
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap.
+5. **No animation, ever.** The document carries kinematics -- the mechanism and
+   its configurations, each a pose -- and never time. Nothing in the engine
+   keys, plays or bakes motion.
 
 ## Layout
 
@@ -52,6 +75,7 @@ kernel call.
 | --- | --- |
 | `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
@@ -67,9 +91,9 @@ kernel call.
 
 ```
 cadgen xbf build SCRIPT[::FUNCTION] ... [--json]   build in the script's warm worker
-cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F]
+cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview]
+cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf status | stop | daemon
 ```
@@ -116,6 +140,51 @@ stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildMo
 `parts` for a document that places one part are refused by name before any browser starts. A
 face the mesher left without triangles is named in a warning. Nothing is written but OUT.
 
+## Kinematics
+
+At document time the engine harvests every joint on every part of the result and every
+`connect_to` pairing into a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
+
+- **Links** are occurrences that move as one: two parts whose rigid joints are connected
+  are one link. The **ground** is every link no `connect_to` moved (the joint whose
+  `connect_to` is called stays put; the other's part moves), and every part no joint places.
+  A part below a jointed sub-assembly moves with it.
+- **Pairs**: a revolute joint is a `REVOLUTE_PAIR`, a linear one a `PRISMATIC_PAIR`, a
+  cylindrical one a `CYLINDRICAL_PAIR`, a ball a `SPHERICAL_PAIR`, each `_WITH_RANGE` where
+  its range is finite, named by the moving joint's label (a label two pairs share takes the
+  path of the part that holds it: `hand/left:knuckle`). Link 1 holds the moving joint, link 2
+  the rigid one. Its frames, `transform_item_1` and `transform_item_2`, are
+  AXIS2_PLACEMENT_3Ds in their links' frames (a link's frame: its first occurrence's
+  placement as built) that coincide at value 0; link 2 stands at
+  `link_1 · item_1 · M(v) · item_2⁻¹`, `M` a turn about Z, a slide along Z, both
+  (cylindrical: angle, then distance) or build123d's intrinsic X-Y-Z rotation (spherical).
+  Degrees and millimetres.
+- A **gear pair** drives one pair from another (`gear_ratio`, the second's value that times
+  the first's). build123d's joints cannot express a coupling, so no model authors one; the
+  document, its readers and every pose honour it.
+- **Configurations**: the as-built values and each named configuration, as pair values.
+
+A joint connected to a part the document does not hold where the joint put it (moved after
+`connect_to`, or connected after its compound was made), a linear joint connected to a
+revolute one (a pin in a slot, which no AP242 lower pair is), and a configuration naming a
+joint the assembly lacks or a value outside its range fail the build by name.
+
+The xbf holds the mechanism as a subtree under `Main():100`, found by the
+`TDataStd_UAttribute` of its GUID, of standard attributes only: `TDataStd_Name` on every
+label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes (named as
+the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
+`TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
+occurrence (`mechanism.py` draws the tree). **STEP carries none of it**: OCCT reads AP242
+kinematics but cannot write them, so every STEP, posed or not, is placements only.
+
+`--pose` on `cadgen xbf snapshot` and `cadgen xbf export` poses the mechanism at a
+configuration (its name) or at joint values (`'{"elbow": 45}'`, the rest as built): the
+engine places each link by composing its pairs from the ground down, exact forward
+kinematics, and draws or writes that (a posed STEP is written from the document's tree with
+every placement its own). No flag is as built. An unknown configuration or joint, a value out
+of range or a pair a gear drives, and a mechanism whose pairs close a loop (named, with the
+loop) are refused before anything renders or is written.
+
 ## Mesh
 
 One tolerance, FreeCAD's default, configurable nowhere: a linear deflection of
@@ -155,7 +224,15 @@ colour, `faceNames`, `edgeNames`, `faceColors` by ordinal, `material` and
 `faceMaterials` by ordinal -- each `{name, density, color, metallic, roughness,
 emissive, description}`, its colour the base colour it is drawn in, density in kg/m^3
 -- and once meshed `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
-colour), the tree, and the document's version.
+colour), the tree, the document's version, and for an assembly with joints `kinematics`: the
+links (name, the instances each moves, its frame as built), the pairs (label, type, the two
+links, the two frames as 4x4 matrices in their links' frames, limits and units per value; a
+gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `configurations`
+(name → joint → value: a number, or a list for a cylindrical or spherical pair), and `loop`
+(the pairs closing a loop, or null). A page poses the instances from it: each link's
+placement at the values over its placement as built, applied to its instances.
+`POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
+document served at that pose, its `kinematics.pose` the values it stands at.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
 `V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
 reaches it at once. The answer carries the patch's timings.

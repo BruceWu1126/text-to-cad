@@ -11,7 +11,12 @@ for each part already meshed the faces its mesher left without triangles
 documents, two versions of one document or ten instances share is meshed once;
 ``GET /api/doc/<id>/part/<key>/face|edge|vertex/<ordinal>`` is what the kernel measures
 of that element, now (``mesh.Topology``); ``POST /api/doc/<id>/mesh`` meshes every part
-not held yet, in parallel, and answers how long that took. ``/`` is a page that shows
+not held yet, in parallel, and answers how long that took. ``POST /api/doc/<id>/pose``
+with ``{"pose": NAME | {joint: value}}`` serves the document at that pose under an id of
+its own (``<id>~<digest>``): its structure's instances where the mechanism places them,
+every other route the document's; what the pose names wrong is refused by name (400).
+The structure carries the document's mechanism as ``kinematics`` (``mechanism.block``),
+from which a page poses it itself. ``/`` is a page that shows
 one (``page/``), with three.js served from a ``node_modules`` folder (``--three``, or the
 nearest one above the working directory).
 
@@ -264,6 +269,8 @@ class Server:
         self.generation = 0
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
+        # A document served at a pose (``POST /api/doc/<id>/pose``): its id, the document's and the pose.
+        self.poses: dict[str, tuple[str, Any]] = {}
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -551,16 +558,19 @@ class Server:
                     return self.file(handler, target)
             if parts[:2] == ["api", "docs"]:
                 return self.json(handler, self.listing())
-            if parts[:2] == ["api", "doc"] and len(parts) >= 3 and parts[2] in self.served:
+            ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
+            if parts[:2] == ["api", "doc"] and ident in self.served:
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
                     seconds = min(float((query.get("wait") or ["0"])[0] or 0), WAIT_LIMIT)
-                    doc = self.wait(parts[2], after, seconds)
+                    doc = self.wait(ident, after, seconds)
                     return self.json(handler, {"version": doc.version, "patch": doc.patch})
-                doc = self.document(parts[2])
+                doc = self.document(ident)
                 if len(parts) == 3:
                     self.prefetch(doc)  # a page is about to ask for every part
-                    return self.json(handler, self.structure(doc))
+                    return self.json(handler, self.posed(doc, pose))
+                if len(parts) == 4 and parts[3] == "pose" and method == "POST":
+                    return self.pose(handler, doc)
                 if len(parts) >= 5 and parts[3] == "part":
                     key = parts[4]
                     if key not in doc.shapes:
@@ -579,8 +589,40 @@ class Server:
             self.error(handler, 404, "not found")
         except (BrokenPipeError, ConnectionResetError):
             pass
+        except ValueError as error:  # a pose refused by name (``mechanism.KinematicsError``), a body not JSON
+            self.error(handler, 400, str(error))
         except Exception as error:  # noqa: BLE001 - a request's failure is its answer
             self.error(handler, 500, f"{type(error).__name__}: {error}")
+
+    def posed(self, doc: Served, pose: Any) -> dict[str, Any]:
+        """The document's structure, at ``pose`` where one is given: its instances where the
+        mechanism places them there (``mechanism.posed_structure``)."""
+        structure = self.structure(doc)
+        if pose is None:
+            return structure
+        from cadgen.engine.mechanism import posed_structure
+
+        return posed_structure(structure, pose)
+
+    def pose(self, handler: BaseHTTPRequestHandler, doc: Served) -> None:
+        """``POST /api/doc/<id>/pose`` with ``{"pose": NAME | {joint: value}}``: the document
+        served at that pose under an id of its own, its parts the document's. An unknown
+        configuration or joint, a value out of range and a mechanism that is not a tree are
+        refused by name (400) before the id exists."""
+        length = int(handler.headers.get("Content-Length") or 0)
+        try:
+            pose = json.loads(handler.rfile.read(length) or b"{}").get("pose")
+        except (json.JSONDecodeError, AttributeError):
+            raise ValueError("a pose request is {\"pose\": a configuration's name or {joint: value}}") from None
+        if not isinstance(pose, (str, dict)):
+            raise ValueError("a pose is a configuration's name or an object of joint values")
+        posed = self.posed(doc, pose)
+        if "kinematics" not in posed:
+            raise ValueError("the document has no joints to pose")
+        digest = hashlib.blake2b(json.dumps(pose, sort_keys=True).encode(), digest_size=6).hexdigest()
+        ident = f"{doc.ident}~{digest}"
+        self.poses[ident] = (doc.ident, pose)
+        self.json(handler, {"id": ident, "url": f"{self.url}/api/doc/{ident}", **posed["kinematics"]["pose"]})
 
     def part(self, handler: BaseHTTPRequestHandler, doc: Served, key: str) -> None:
         data = self.cache.get(key)

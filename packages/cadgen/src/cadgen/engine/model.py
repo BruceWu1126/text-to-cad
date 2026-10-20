@@ -24,7 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["Model", "Output", "glb", "paint", "read_step", "step", "stl", "threemf", "xbf", "models_in"]
+__all__ = ["Model", "Output", "configuration", "glb", "paint", "read_step", "step", "stl", "threemf", "xbf",
+           "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
 SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -187,6 +188,20 @@ def paint(shape: Any, faces: Any, color: Any) -> Any:
     else:
         shape.__dict__.pop(FACE_MATERIALS, None)
     return shape
+
+
+def configuration(assembly: Any, name: str, **values: Any) -> Any:
+    """Name a configuration of an assembly's mechanism: ``configuration(arm, "raised",
+    elbow=90)`` sets the joint labelled ``elbow`` to 90 degrees in the configuration
+    ``raised`` (a number per joint, or for a joint of several values a sequence: a
+    cylindrical joint's angle and position, a ball joint's three angles). The joints are
+    build123d's, placed with ``connect_to``; the values they were connected at are the
+    as-built configuration, and a joint a configuration does not name stays as built. The
+    document keeps every configuration (AP242's mechanism states); the viewer offers them
+    as presets, ``--pose NAME`` poses a snapshot or an export at one. Returns ``assembly``."""
+    from cadgen.engine import mechanism
+
+    return mechanism.configuration(assembly, name, **values)
 
 
 def _read_step(path: Any) -> Any:
