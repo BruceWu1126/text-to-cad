@@ -27,7 +27,9 @@ def arm():
 3. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, and element names on
-   face, edge and vertex sub-shape labels. STEP, GLB, STL and 3MF are translations of it.
+   face, edge and vertex sub-shape labels; its main label names what wrote it
+   (`cadgen.engine xbf/1 (cadgen <release>)`, `document.Loaded.writer`). No script
+   path and no code location is in it. STEP, GLB, STL and 3MF are translations of it.
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects

@@ -118,6 +118,12 @@ class BuildTest(EngineCase):
         self.assertTrue(any(";M:bracket.plate3" in name for name in bracket.face_names.values()))
         self.assertTrue(bracket.edge_names)
         self.assertEqual(len(bracket.key), 32)
+        # What wrote it is on the document's main label; where its code is, nowhere.
+        self.assertRegex(loaded.writer, r"^cadgen\.engine xbf/1 \(cadgen .+\)$")
+        raw = (self.folder / "out/frame.xbf").read_bytes()
+        self.assertNotIn(b"frame.py", raw)
+        self.assertNotIn(str(self.folder).encode(), raw)
+        self.assertIsNone(document.Loaded(self.folder / "out/frame.step").writer, "a STEP names no engine writer")
         # The STEP is a translation: names, and every face's element name.
         text = (self.folder / "out/frame.step").read_text(encoding="utf-8")
         self.assertIn("PRODUCT('frame'", text)

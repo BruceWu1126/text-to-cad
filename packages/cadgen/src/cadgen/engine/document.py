@@ -27,6 +27,7 @@ write reads the same way, with the XCAF reader.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import threading
@@ -40,6 +41,9 @@ __all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geomet
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
+# What wrote a document, on its main label: the engine's xbf format and cadgen's release.
+WRITER_GUID = "c49e4620-5730-422f-808f-c1e84d7bd163"
+WRITER = "cadgen.engine xbf/1 (cadgen {release})"
 _XCAF_LOCK = threading.RLock()
 # The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
 _MADE: list = []
@@ -304,6 +308,7 @@ def to_xcaf(tree: Tree) -> Any:
         XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 1.0, UnitsMethods_LengthUnit_Millimeter)
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
         colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(WRITER_GUID), TCollection_AsciiString(_writer()))
         key_guid = Standard_GUID(KEY_GUID)
         labels: dict[int, Any] = {}
         for prototype in tree.order:
@@ -578,6 +583,7 @@ class Loaded:
         stat = self.path.stat()
         self.version = (stat.st_mtime_ns, stat.st_size)
         self.doc = _read(self.path)
+        self.writer = _label_text(self.doc.Main(), WRITER_GUID)  # None for a file this engine did not write
         self.prototypes: list[Prototype] = []
         self.instances: list[Instance] = []
         self.name = self.path.stem
@@ -783,6 +789,24 @@ def _read(path: Path) -> Any:
         else:
             raise ValueError(f"not a document the engine reads: {path.name}")
     return doc
+
+
+@functools.cache
+def _writer() -> str:
+    from importlib import metadata
+
+    try:
+        return WRITER.format(release=metadata.version("cadgen"))
+    except metadata.PackageNotFoundError:
+        return WRITER.format(release="unknown")
+
+
+def _label_text(label: Any, guid: str) -> str | None:
+    from OCP.Standard import Standard_GUID
+    from OCP.TDataStd import TDataStd_AsciiString
+
+    found = TDataStd_AsciiString()
+    return found.Get().ToCString() if _find(label, found, Standard_GUID(guid)) else None
 
 
 def _find(label: Any, attribute: Any, guid: Any) -> bool:
