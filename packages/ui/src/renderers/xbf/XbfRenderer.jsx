@@ -13,7 +13,7 @@ import { usePointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useSceneSelection } from "../kit/tools/select/useSceneSelection.js";
 import { InfoRow, MonoValue } from "../kit/inspector/referenceRows.jsx";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
-import { xbfDrivenPairs, xbfPoseValues, xbfSamePose } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
+import { xbfDrivenPairs, xbfPosedMatrices, xbfPoseValues, xbfSamePose } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
 import XbfElementSection from "./XbfElementSection.jsx";
 import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE } from "./XbfPositionSection.jsx";
 import XbfTreeSection from "./XbfTreeSection.jsx";
@@ -220,8 +220,11 @@ function XbfSurface({ view, data }) {
     return { references: rows.map(row => row.value).filter(Boolean), chips: rows.map(row => row.chip) };
   }, [scene, resource, parts, elements]);
 
-  // The panel reads the last element picked; the facts are the engine's.
-  const lastElement = elements.length ? scene?.describeElement(elements.at(-1)) || null : null;
+  // The panel reads the last element picked; the facts are the engine's, placed where the pose puts
+  // its instance (worked out here: the scene is posed after this render, in an effect).
+  const posedMatrices = useMemo(() => (scene && poseValues ? xbfPosedMatrices(scene.structure, poseValues) : null), [scene, poseValues]);
+  const described = elements.length ? scene?.describeElement(elements.at(-1)) || null : null;
+  const lastElement = described && posedMatrices ? { ...described, matrix: posedMatrices[described.instance] } : described;
   const sidebarShown = !shell.previewing;
   const update = loaded.update;
   const unmeshed = scene?.unmeshed?.reduce((sum, row) => sum + row.faces.length, 0) || 0;
