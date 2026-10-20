@@ -176,3 +176,9 @@ the bodies that hold its result. The report's `memo` counts `bodies_run` and
 `bodies_skipped`. `CADGEN_ENGINE_BODIES=0` turns retention off and nothing else.
 A body must be a function of those bytes: a body that reads the clock, the
 environment or a file the engine does not read is not seen to change.
+
+Retention costs little. Measured on a 60,000-call model whose 14 bodies all ran,
+the logging added nothing measurable to the build (body 12.4–12.6 s, against
+12.7 s with retention off). The logs keep about a million more objects for the
+worker's collection after each build to walk, about 0.6 s. That collection runs
+after the answer, so only a build sent while it is still running waits for it.
