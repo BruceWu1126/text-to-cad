@@ -44,16 +44,17 @@ class _Written:
 
 @dataclass
 class _Named:
-    """What a build made of one part ``TShape``: its element names and the features they
-    stand for, its geometry key, the shape the document holds of it; the functions its
-    names come from, each with its skeleton then (``sources.skeleton``), and a number
-    that changes whenever its names do."""
+    """What a build made of one part ``TShape``: its element names, its geometry key, the
+    shape the document holds of it; the functions its names come from, each with its
+    skeleton then (``sources.skeleton``); a number that changes whenever its names do;
+    and the provenance of each feature its names hold (``made_by``)."""
 
     names: Any
     key: str
     shape: Any
     refs: dict[tuple[str, str], str | None]
     token: int
+    features: dict[str, dict[str, Any]]
 
 
 # Per part TShape, what a build made of it (``_Named``), the most recently used last.
@@ -62,6 +63,10 @@ _PARTS_HELD = 1 << 16
 _TOKENS = __import__("itertools").count(1)
 # Per model: the document this process last wrote, and each declared file as it left it.
 _WRITTEN: dict[str, _Written] = {}
+# Per xbf this process last built (its path, ``os.path.normcase``d): per part key, what
+# the build made of the part -- what ``made_by`` answers from. In memory only: provenance
+# is served while this process lives, never written.
+_BUILT: dict[str, dict[str, _Named]] = {}
 
 
 def _first_party_modules() -> list[str]:
@@ -204,14 +209,15 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     named = 0
     skeletons: dict[str, dict[str, str]] = {}
     tokens = []
+    built: dict[str, _Named] = {}
     for part in tree.parts:
         tshape = part.shape.TShape()
         cached = _PARTS.get(tshape)
         if cached is None:
-            names, refs = _names(run, part)
+            names, features, refs = _names(run, part)
             written_shape = document.direct(part.shape)
             cached = _PARTS[tshape] = _Named(names, document.geometry_key(written_shape), written_shape, refs,
-                                              next(_TOKENS))
+                                              next(_TOKENS), features)
             named += 1
             while len(_PARTS) > _PARTS_HELD:
                 _PARTS.popitem(last=False)
@@ -220,17 +226,21 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
             if not _current(cached.refs, skeletons):
                 # The same shape, but the code its names come from now names it otherwise
                 # (a variable or a function renamed, an assignment added): named again.
-                names, refs = _names(run, part)
+                names, features, refs = _names(run, part)
                 if names != cached.names:
                     cached.names, cached.token = names, next(_TOKENS)
-                cached.refs = refs
+                cached.refs, cached.features = refs, features
                 named += 1
         part.names, part.key, part.shape = cached.names, cached.key, cached.shape
         tokens.append(cached.token)
+        built[cached.key] = cached
     signature = (_signature(tree), tuple(tokens))
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)
     report["named"] = named
+    for kind, path in targets:
+        if kind == "xbf":
+            _BUILT[os.path.normcase(str(path))] = built
     key = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(key)
     stats = {str(path): _stat(path) for _kind, path in targets}
@@ -259,29 +269,67 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
 
 
-def _names(run: Any, part: Any) -> tuple[Any, dict[tuple[str, str], str | None]]:
-    """A part's element names and their provenance, from the run's history (None for a
-    part no feature named), and the functions those names come from, each with its
-    skeleton now. A part read from a file is named by its own product's elements."""
+def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tuple[str, str], str | None]]:
+    """A part's element names, from the run's history (None for a part no feature named);
+    per feature name they hold, its operation and the function, file and line of its
+    call; and the functions those names come from, each with its skeleton now. A part
+    read from a file is named by its own product's elements."""
     try:
         lineage, features = run.account(part.shape)
     except Exception:  # noqa: BLE001 - naming never fails a build
-        return None, {}
+        return None, {}, {}
     if lineage is None:
-        return None, {}
+        return None, {}, {}
     trace = run.trace
     provenance = {}
     refs: dict[tuple[str, str], str | None] = {}
     skeletons: dict[str, dict[str, str]] = {}
     for name, index in features.items():
         feature = trace.features[index]
-        provenance[name] = [feature.op, f"{feature.file}:{feature.line}"]
         ref = (trace.path_of(feature.file), feature.function)
+        provenance[name] = {"operation": feature.op, "function": feature.function, "file": ref[0],
+                            "line": feature.line}
         if ref not in refs:
             refs[ref] = _skeleton(ref, skeletons)
     return {"faces": lineage.get("faces") or [], "edges": lineage.get("edges") or [],
-            "vertices": lineage.get("vertices") or [],
-            "table": lineage.get("table") or {}, "features": provenance}, refs
+            "vertices": lineage.get("vertices") or [], "table": lineage.get("table") or {}}, provenance, refs
+
+
+_KINDS = {"face": "faces", "edge": "edges", "vertex": "vertices"}
+
+
+def made_by(path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
+    """What made element ``ordinal`` (1-based) of kind ``kind`` (face, edge, vertex) of
+    part ``key`` of the xbf at ``path``, as this process's last build of that xbf named
+    it: the element's name, the feature that made it (its last step's), that feature's
+    operation and the function, file and line of its call, and, where the name folds
+    part of its derivation, the derivation spelled out. None for a document this process
+    did not build, or an element its build gave no name."""
+    named = _BUILT.get(os.path.normcase(str(path)), {}).get(key)
+    if named is None or not named.names:
+        return None
+    texts = named.names.get(_KINDS[kind]) or []
+    name = texts[ordinal - 1] if 0 < ordinal <= len(texts) else None
+    if name is None:
+        return None
+    feature = _last_feature(name)
+    found = named.features.get(feature) or {}
+    answer = {"name": name, "feature": feature, "operation": found.get("operation"),
+              "function": found.get("function"), "file": found.get("file"), "line": found.get("line")}
+    spelled = _spelled(name, named.names.get("table") or {})
+    if spelled != name:
+        answer["derivation"] = spelled
+    return answer
+
+
+def _spelled(text: str, table: dict[str, str]) -> str:
+    """A name with every folded atom it holds spelled out, from its part's table."""
+    from cadgen.engine.kernel.trace import folded_atoms
+
+    for atom in folded_atoms(text):
+        if atom in table:
+            text = text.replace(atom, _spelled(table[atom], table))
+    return text
 
 
 def _skeleton(ref: tuple[str, str], skeletons: dict[str, dict[str, str]]) -> str | None:

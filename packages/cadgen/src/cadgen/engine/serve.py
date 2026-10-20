@@ -10,7 +10,10 @@ for each part already meshed the faces its mesher left without triangles
 (``mesh.Mesh.to_bytes``), held in memory by the part's geometry key, so a part that two
 documents, two versions of one document or ten instances share is meshed once;
 ``GET /api/doc/<id>/part/<key>/face|edge|vertex/<ordinal>`` is what the kernel measures
-of that element, now (``mesh.Topology``); ``POST /api/doc/<id>/mesh`` meshes every part
+of that element, now (``mesh.Topology``), and ``made_by``: the element's name, the feature
+that made it, its operation, and the function, file and line of that feature's call,
+asked of the worker that built the document (``provenance``) -- never read from a file, so
+a document served cold, with no live worker that built it, answers null; ``POST /api/doc/<id>/mesh`` meshes every part
 not held yet, in parallel, and answers how long that took. ``/`` is a page that shows
 one (``page/``), with three.js served from a ``node_modules`` folder (``--three``, or the
 nearest one above the working directory).
@@ -251,13 +254,15 @@ def _stat(path: Path) -> tuple | None:
 
 class Server:
     def __init__(self, port: int = 0, three: str | None = None, touch: Callable[[], None] = lambda: None,
-                 host: str = "127.0.0.1", mesh_mode: str | None = None) -> None:
+                 host: str = "127.0.0.1", mesh_mode: str | None = None,
+                 provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None) -> None:
         self.served: dict[str, Served] = {}
         self.idents: dict[Path, str] = {}
         self.cache = MeshCache()
         self.mesher = Mesher(mesh_mode)
         self.three = Path(three) if three else find_three()
         self.touch = touch
+        self.provenance = provenance
         self.load_lock = threading.RLock()
         self.held: dict[Path, int] = {}
         self.changed = threading.Condition()
@@ -598,7 +603,23 @@ class Server:
         if kind == "face":
             unmeshed = self.cache.unmeshed(key)
             found["meshed"] = None if unmeshed is None else ordinal not in unmeshed
+        found["made_by"] = self.made_by(doc, key, kind, ordinal)
         self.json(handler, found)
+
+    def made_by(self, doc: Served, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
+        """What made the element, from the worker that built the document (``provenance``),
+        when the name it gives is the one the served document holds: None for a document
+        no live worker built, or whose served version that worker's last build is not."""
+        if self.provenance is None:
+            return None
+        try:
+            found = self.provenance(str(doc.path), key, kind, ordinal)
+        except Exception:  # noqa: BLE001 - provenance never fails the facts
+            return None
+        prototype = next((p for p in doc.structure["prototypes"] if p["key"] == key), None)
+        if not found or prototype is None or prototype.get(f"{kind}Names", {}).get(str(ordinal)) != found.get("name"):
+            return None
+        return found
 
     # --- responses -------------------------------------------------------------------
 

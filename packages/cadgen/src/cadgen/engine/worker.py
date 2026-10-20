@@ -13,6 +13,12 @@ its exports -- one ``{"id", "done"}`` (the build's reports) or ``{"id", "failed"
 last ``{"id", "settled"}``. What the model prints goes to the worker's stderr, which the
 daemon passes on. The worker exits when its stdin closes.
 
+A ``{"id", "op": "where", "path", "key", "kind", "ordinal"}`` request asks what made one
+element of a document this worker built (``build.made_by``): it is answered at once,
+``{"id", "where": {...} | null}``, by the thread that reads the requests -- during a
+build too, from the last build that named the document -- so a page asking about an
+element never waits on a build.
+
 A patch is the document as the daemon serves it, made in this process from the tree the
 build saved (``document.tree_structure``), so the daemon never reads the file it was
 saved as: ``patch.path``, ``patch.structure``, ``patch.meshes`` -- ``[key, size,
@@ -39,7 +45,9 @@ from __future__ import annotations
 import gc
 import json
 import os
+import queue
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -113,23 +121,48 @@ def main() -> int:
     os.dup2(2, 1)  # the model's prints go where the daemon reads logs from
     sys.stdout = sys.stderr
 
+    lock = threading.Lock()
+
     def send(message: dict[str, Any], payload: bytes = b"") -> None:
         if payload:
             message = {**message, "bytes": len(payload)}
-        protocol.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
-        if payload:
-            protocol.write(payload)
-        protocol.flush()
+        with lock:  # a frame is whole: the build's thread and the reader's both send
+            protocol.write(json.dumps(message, separators=(",", ":")).encode() + b"\n")
+            if payload:
+                protocol.write(payload)
+            protocol.flush()
 
     from cadgen.engine import document
-    from cadgen.engine.build import BuildError, build
+    from cadgen.engine.build import BuildError, build, made_by
+
+    requests: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
+
+    def read() -> None:
+        """Every request as it comes: a ``where`` answered here and now, the rest queued
+        for the build loop."""
+        try:
+            for line in sys.stdin:
+                if not line.strip():
+                    continue
+                request = json.loads(line)
+                if request.get("op") == "where":
+                    try:
+                        found = made_by(request["path"], request["key"], request["kind"], int(request["ordinal"]))
+                    except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
+                        found = None
+                    send({"id": request.get("id"), "where": found})
+                else:
+                    requests.put(request)
+        finally:
+            requests.put(None)
 
     send({"ready": os.getpid()})
     gc.disable()
-    for line in sys.stdin:
-        if not line.strip():
-            continue
-        request = json.loads(line)
+    threading.Thread(target=read, daemon=True).start()
+    while True:
+        request = requests.get()
+        if request is None:
+            break
         ident = request.get("id")
         if request.get("op") != "build":
             send({"id": ident, "failed": f"unknown request {request.get('op')!r}"})

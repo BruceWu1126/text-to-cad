@@ -60,6 +60,7 @@ cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen xbf where DOC REF                    REF: PART/face N (edge, vertex), or an element name
 cadgen xbf status | stop | daemon
 ```
 
@@ -135,7 +136,19 @@ What the kernel measures of an element is asked for, never extracted ahead:
 `GET /api/doc/<id>/part/<key>/face/<ordinal>` is its area, centroid, surface
 type, exact bounding box and `BRepCheck` verdict; `.../edge/<ordinal>` its
 length, curve type, class, faces and endpoints; `.../vertex/<ordinal>` its
-position.
+position. Each also answers `made_by`: the element's name, the feature that made
+it (its name's last step), that feature's operation, the function, file and line
+of its call, and, for a name that folds its derivation, the derivation spelled
+out. It comes from the trace of the worker that built the document, asked over
+the worker's pipe (a `where` request, answered by the worker's reading thread,
+during a build too) and never from a file: a document served cold, with no live
+worker that built it (a daemon started again, `serve --foreground`), answers
+`made_by: null`, and so does an element the served version names otherwise than
+that worker's last build. The line is the call's in the run that named the part.
+`cadgen xbf where DOC REF` serves the document on demand and prints one
+element's facts and `made_by`; `REF` is `PART/face N` (`edge`, `vertex`), `PART`
+a part's or an instance's name as the structure spells it, or an element name
+in the viewer's ref grammar (`f:plate.relief.3`).
 
 ## Wire format
 
