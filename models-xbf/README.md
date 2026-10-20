@@ -8,7 +8,9 @@ into `models/` and this folder goes away. `models/` itself is untouched.
 Each model keeps the layout it had in `models/`: its sources in `src/`, and
 everything a build writes in `XBF/` beside them (the `.xbf` document, its
 `.xbf.json` sidecar, and the STEP, STL or 3MF its original declared). `XBF/` is
-gitignored; nothing else is written anywhere.
+gitignored; nothing else is written anywhere. `tom` also reads vendor STEP from a local,
+gitignored `tom/STEP/imported/` (its `src/README.md` says how to populate it) and builds from
+`tom/` with `src` on `PYTHONPATH`.
 
 ## Build and snapshot
 
@@ -55,6 +57,7 @@ The migration a user makes, and nothing more:
 | `qdd_actuator` | one file, 153 occurrences | a 102-part assembly in one body, modules as nested compounds; 54 build123d joints (rigid mounts, revolute drive train with ranges) |
 | `motorbike` | 21 child models + root | child models as sub-assemblies, a child placed twice, children built alone; revolute and rigid joints across children |
 | `moonwatch` | `case.py`, `movement.py` (+3 children) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
+| `tom` | tom-cad `main` (7f79c52): 119 files, 7 model bodies | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts) with 3MF export; `read_step` of a part and of an assembly (imported naming) |
 
 Each model's `src/README.md` says what was ported and what was dropped.
@@ -69,6 +72,7 @@ Each model's `src/README.md` says what was ported and what was dropped.
 | moonwatch case | 29 / 29 | 22.7 s | body re-runs, files rewritten (text sketch, below) |
 | moonwatch movement | 191 / 191 | 233 s (movement_base 135 s, chrono_works 77 s) | replayed |
 | examples (each) | 1-11 | 2.5 s | replayed; the fixture's root re-runs (joints) |
+| tom | 619 / 628 | 347 s (worker ~12 GB after) | 2.9 s, all 7 bodies replayed |
 
 Known engine gaps these surface: a shape that carries a build123d joint makes
 the compound holding it unkeyable, so a body that authors joints is never
