@@ -207,7 +207,16 @@ a cut appended to it after takes nothing over. A shape a model places or copies 
 build123d, with OCCT's `BRepBuilderAPI_Transform`, `_GTransform` or `_Copy`, is a feature
 like any other (`kernel/memo.py`, `_MAKER_FEATURES`): its elements are named from what
 the maker reports, or, where it reports nothing, from the shape it was given by ordinal
-when the two map one-to-one. A warm build that hands a part back unchanged keeps its names
+when the two map one-to-one.
+
+An element of a shape read from a file (`read_step`) is named within its own product,
+the part of the file it belongs to, however often the file places it: by the name the
+file gives it (`read.stepcaf.subshapes.name`; a STEP this engine wrote names every face,
+and those names come back as they were), else by its ordinal in the product
+(`f:<feature>.<ordinal>`), never by an ordinal across the file. A placement or a compound
+of a shape no name reaches never claims its elements as its own.
+
+A warm build that hands a part back unchanged keeps its names
 while the functions they come from assign the same targets; a rename names it again.
 
 ## Body retention

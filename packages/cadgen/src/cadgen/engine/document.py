@@ -510,6 +510,9 @@ def read_step_shape(path: Any) -> Any:
                 # A handle of its own on the product's geometry: a move places this
                 # occurrence, never the product's other placements.
                 node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
+                element_names = imported.names(referred, topods, held_names)  # what the file names its elements
+                if element_names:
+                    node.__dict__[imported.ELEMENT_NAMES] = element_names
             color = label_color(label) if referred is not label else None
             node.color = color or product_color
             node.label = (name_of(label) if referred is not label else "") or product_name
@@ -524,6 +527,12 @@ def read_step_shape(path: Any) -> Any:
     reader.SetNameMode(True)
     reader.SetColorMode(True)
     reader.SetLayerMode(True)
+    from OCP.Interface import Interface_Static
+
+    from cadgen.engine.kernel import imported
+
+    Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)  # the names the file gives elements
+    held_names: dict = {}
     if reader.ReadFile(os.fspath(path)) != IFSelect_RetDone:
         raise ValueError(f"cannot read the STEP file {path}")
     reader.Transfer(doc)

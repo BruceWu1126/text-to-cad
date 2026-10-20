@@ -96,6 +96,32 @@ def baked():
 """
 
 
+IMPORTS = """
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import read_step, step, xbf
+
+HERE = Path(__file__).parent
+
+
+@xbf
+@step
+def source():
+    plate = bd.Box(20, 10, 2) - bd.Cylinder(2, 10)
+    plate.label = "plate"
+    peg = bd.Pos(30, 0, 0) * bd.Cylinder(3, 8)
+    peg.label = "peg"
+    return bd.Compound(children=[plate, peg])
+
+
+@xbf
+def imported():
+    bought = read_step(HERE / "{file}")
+    return bd.Compound(children=[child.moved(bd.Location((0, 0, {lift}))) for child in bought.children])
+"""
+
+
 class NamingCase(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-naming-")).resolve()
@@ -226,6 +252,42 @@ class RawMakerTest(NamingCase):
 
         with mock.patch.object(memo, "_history", silent):
             self.assert_named_from_the_hub(self.parts(0))
+
+
+class ImportedNamesTest(NamingCase):
+    def parts(self, name: str, **fields: str) -> list[dict[str, list[str]]]:
+        found = []
+        for part in range(2):
+            found.append(self.names(IMPORTS, name=name, part=part, **fields))
+        return found
+
+    def test_an_imported_element_is_named_within_its_own_product(self) -> None:
+        import build123d as bd
+
+        plate = bd.Box(20, 10, 2) - bd.Cylinder(2, 10)
+        plate.label = "plate"
+        peg = bd.Pos(30, 0, 0) * bd.Cylinder(3, 8)
+        peg.label = "peg"
+        bd.export_step(bd.Compound(children=[plate, peg]), str(self.folder / "plain.step"))
+        first = self.parts("imported", file="plain.step", lift=0)
+        for names, faces in zip(first, (7, 3)):
+            # A file that names no element: each part's elements by their ordinals in its
+            # own product, 1 to its count -- never numbered across the file -- and the
+            # placements made of them claim none.
+            self.assertEqual(len(names["faces"]), faces)
+            ordinals = sorted(int(name.rsplit(".", 1)[1]) for name in names["faces"])
+            self.assertEqual(ordinals, list(range(1, faces + 1)), names["faces"])
+            self.assertTrue(all(name.startswith("f:imported.bought.") for name in names["faces"]), names["faces"])
+        # Placed elsewhere, each keeps every name.
+        engine_build._PARTS.clear()
+        self.assertEqual(self.parts("imported", file="plain.step", lift=7), first)
+
+    def test_an_imported_element_the_file_names_keeps_that_name(self) -> None:
+        # The engine's own STEP names every face: read back, each keeps its name.
+        written = self.parts("source", file="source.step", lift=0)
+        read = self.parts("imported", file="source.step", lift=0)
+        for source, imported in zip(written, read):
+            self.assertEqual(sorted(imported["faces"]), sorted(source["faces"]))
 
 
 if __name__ == "__main__":

@@ -260,8 +260,8 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[tuple[str, str], str | None]]:
     """A part's element names and their provenance, from the run's history (None for a
-    part no feature named, or one read whole from a file, whose elements are its own),
-    and the functions those names come from, each with its skeleton now."""
+    part no feature named), and the functions those names come from, each with its
+    skeleton now. A part read from a file is named by its own product's elements."""
     try:
         lineage, features = run.account(part.shape)
     except Exception:  # noqa: BLE001 - naming never fails a build
@@ -269,9 +269,6 @@ def _names(run: Any, part: Any) -> tuple[Any, dict[tuple[str, str], str | None]]
     if lineage is None:
         return None, {}
     trace = run.trace
-    made = features.get(lineage.get("made")) if lineage.get("made") else None
-    if made is not None and trace.features[made].op == "read_step":
-        return None, {}
     provenance = {}
     refs: dict[tuple[str, str], str | None] = {}
     skeletons: dict[str, dict[str, str]] = {}

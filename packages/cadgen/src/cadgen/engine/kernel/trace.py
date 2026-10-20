@@ -132,12 +132,27 @@ from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 
 from cadgen.engine.kernel.history import _map, _object_key, listed
+from cadgen.engine.kernel.imported import ELEMENT_NAMES
 from cadgen.engine.sources import assigned as _assigned_names
 
 # Every execution of an assignment statement a feature ran in, numbered process-wide: a
 # replayed body's features keep the executions of the run that recorded them, never one
 # of this run's.
 _EXECUTIONS = itertools.count(1)
+# The operations that read a file: what they make is named per product of the file
+# (``_read_structure``).
+_FILE_READS = frozenset({"read_step", "import_step", "import_brep"})
+# The operations that only place or hold the shapes they are given: an element of an
+# input no name reaches stays unnamed in what they return, never theirs.
+_PLACEMENTS = frozenset({"moved", "located", "compound", "copy", "deepcopy"})
+# An element name as the viewer's ref grammar admits it (``packages/core``'s ``cadRefs``:
+# ELEMENT_NAME_SOURCE): a kind, then an atom and its steps.
+_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_NUMBER = r"[1-9][0-9]*"
+_FEATURE_NAME = rf"{_SEGMENT}(?:\.{_SEGMENT})?"
+_ATOM = rf"{_FEATURE_NAME}(?:\.{_NUMBER}|~[0-9a-f]{{12}})"
+_STEP = rf";(?:(?:(?:M|MG[fev]|G[fev]|U)(?:{_NUMBER})?|L):{_FEATURE_NAME}(?:\+[fev]:{_ATOM})*|D{_NUMBER})"
+ELEMENT_NAME = re.compile(rf"[fev]:(?:[0-9a-f]{{12}}|{_ATOM}(?:{_STEP})*)")
 
 # A shape's map of one kind of its sub-shapes in its own frame, by TShape and orientation:
 # what naming asks of every result on every run. A TShape's sub-shapes never change once
@@ -259,6 +274,9 @@ class Feature:
     execution: int | None = None
     targets: tuple[str, ...] | None = None
     groups: tuple[int, ...] | None = field(default=None, repr=False)
+    # A file read's: per result position, what the file names that product's elements
+    # (``kernel.imported``), by kind and ordinal.
+    imported: dict[int, dict] = field(default_factory=dict, repr=False)
     # Per result, the source's naming context at a certified whole-body copy.
     # This is rebound for every run, including hits: histories contain ordinals,
     # never the feature indices of the run that first computed them.
@@ -306,6 +324,7 @@ class _Structure:
     ordinal, how)``, ``rank`` its number among the elements one step named alike;
     ``("u", candidates)`` from a parent, each ``(kind, ordinal, number)``; ``("l",
     lowers)`` from its lower elements, each ``(kind, ordinal)``; ``("m", number)`` made;
+    ``("n", atom)`` read from a file that names it (``_read_structure``);
     ``("c", position, kind, ordinal)`` in that result's frozen source context."""
 
     rules: list[list[list[tuple]] | None]
@@ -600,6 +619,12 @@ class Trace:
             handles=[handle for _shape, _index, handle in inputs],
             results=list(result_handles) if result_handles is not None else [handle_of(shape) for shape in results],
         )
+        if op in _FILE_READS:
+            # What the file names its products' elements, per result position.
+            for position, shape in enumerate(results):
+                found = getattr(shape, "__dict__", {}).get(ELEMENT_NAMES)
+                if found:
+                    feature.imported[position] = found
         assignment = frame[3] if len(frame) > 3 else None
         if assignment is not None:
             feature.execution = assignment[0]
@@ -1283,7 +1308,11 @@ class Trace:
 
     def _computed(self, index: int) -> _Structure:
         feature = self.features[index]
+        if feature.op in _FILE_READS and not any(handle is not None for handle in feature.handles):
+            self._identity_inputs.pop(index, None)
+            return _read_structure(feature)
         origins = feature.history.origins if feature.history is not None else {}
+        placement = feature.operation in _PLACEMENTS
         identity = self._identity(index)
         sames: dict[tuple[int, int], list[tuple | None]] = {}
 
@@ -1330,6 +1359,10 @@ class Trace:
                     if owner is not None:
                         j, source_ordinal = owner
                         rule = same(j, kind, source_ordinal)
+                        if rule is None and placement:
+                            # An input's element no name reaches: placing or holding it
+                            # makes it no element of this feature's.
+                            rule = ("x",)
                     if rule is None and partners:
                         rule = same(partners[0], kind, ordinal)
                     if rule is None and origins:
@@ -1624,6 +1657,8 @@ class _Renderer:
         self.namings[feature] = binding
         if rule[0] == "m":
             return f"{feature}.{rule[1]}", feature, 1 << binding
+        if rule[0] == "n":
+            return rule[1], feature, 1 << binding
         if rule[0] == "h":
             sources = []
             for (j, source_kind, _ordinal, how), origin in zip(rule[1], origins):
@@ -1726,7 +1761,8 @@ class _Renderer:
         pending = folded_atoms("\n".join(names))
         while pending:
             reached = pending.pop()
-            if reached not in closed:
+            if reached not in closed and reached in self.table:
+                # (An atom a read file's name folded is spelled in that file's own table.)
                 closed[reached] = self.table[reached]
                 if "~" in closed[reached]:
                     pending.extend(folded_atoms(closed[reached]))
@@ -1744,6 +1780,49 @@ def _features(text: str) -> list[str]:
         if ":" in head:
             found.append(head.split(":", 1)[1])
     return found
+
+
+def _read_structure(feature: Feature) -> _Structure:
+    """A file read's naming: every element of what it made is its own, named within its
+    own product -- the shape of a part of the file, however often the file places it --
+    never across the file. An element the file names (``Feature.imported``) is named so:
+    as it is, where the name is an element name of its kind (a file this engine wrote),
+    else as the name and its number among the product's elements the file names alike
+    (``f:TopFace.1``); every other element by its ordinal in the product
+    (``f:<feature>.<ordinal>``). An assembly of the file holds its products' elements, by
+    their names there. Results come products after the assemblies holding them, so they
+    are named from the last."""
+    rules: dict[Any, tuple] = {}
+    table: list[list[list[tuple]] | None] = [None] * len(feature.results)
+    for position in range(len(feature.results) - 1, -1, -1):
+        result = feature.results[position]
+        if result is None:
+            continue
+        named = feature.imported.get(position) or {}
+        kinds = []
+        for kind, topabs in enumerate(_TOPABS):
+            elements = _map(result, topabs)
+            texts = named.get(kind) or {}
+            alike: Counter = Counter()
+            held = []
+            for ordinal in range(1, elements.Extent() + 1):
+                tshape = elements.FindKey(ordinal).TShape()
+                rule = rules.get((kind, tshape))
+                if rule is None:
+                    text = texts.get(ordinal)
+                    if text is None:
+                        rule = ("m", ordinal)
+                    elif ELEMENT_NAME.fullmatch(text) and text[0] == _LETTER[kind]:
+                        rule = ("n", text[2:])
+                    else:
+                        word = identifier(text)
+                        alike[word] += 1
+                        rule = ("n", f"{word}.{alike[word]}")
+                    rules[(kind, tshape)] = rule
+                held.append(rule)
+            kinds.append(held)
+        table[position] = kinds
+    return _Structure(table)
 
 
 def _groups(results: list[Any], returned: list[Any], count: int) -> tuple[int, ...] | None:
