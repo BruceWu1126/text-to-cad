@@ -324,7 +324,11 @@ def check(face: Any) -> str:
             at += 1
             result = analyzer.Result(explorer.Current())
             if result is not None:
-                for text in dict.fromkeys(faults(result.Status()) + faults(result.StatusOnShape(face))):
+                # A seam is met twice, once per orientation, and the analyzer keeps a
+                # status in the face's context for one of them only: asked for the other,
+                # StatusOnShape raises.
+                on_face = faults(result.StatusOnShape(face)) if result.IsStatusOnShape(face) else []
+                for text in dict.fromkeys(faults(result.Status()) + on_face):
                     found.append(f"{label} {at}: {text}")
             explorer.Next()
     result = analyzer.Result(face)
