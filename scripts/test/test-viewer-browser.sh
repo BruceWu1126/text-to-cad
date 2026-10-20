@@ -63,6 +63,9 @@ CADGEN_DAEMON_SOCKET="$("$PYTHON" -c 'import os, sys, uuid; print(rf"\\.\pipe\ca
 export CADGEN_DAEMON_SOCKET CADGEN_DAEMON_IDLE_TIMEOUT=60
 # The model library every Viewer writes: the test's own, never the user's.
 export CADGEN_STATE_DIR="$project/state"
+# The engine that serves the .xbf fixture to the page: this test's own daemon, one part
+# meshed at a time, stopped on the way out.
+export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120
 export CADGEN_VIEWER_DIST="$RUNTIME"
 unset CADGEN_DAEMON_CHILD
 server_pid=""
@@ -107,6 +110,8 @@ PY
   fi
   "$PYTHON" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
     || echo "warning: the test's build daemon did not retire; it goes once idle" >&2
+  "$PYTHON" -m cadgen.engine stop >/dev/null 2>&1 \
+    || echo "warning: the test's engine daemon did not stop; it goes once idle" >&2
   rm -rf "$project" "$log"
 }
 trap cleanup EXIT
@@ -184,6 +189,28 @@ if ! (cd "$project" && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
         && mkdir -p .revision && mv hinge_grown.step .revision/hinge.step \
         && rm hinge.py hinge_grown.py) >"$log" 2>&1; then
   echo "FAIL: the hinge revision fixture did not build" >&2
+  sed 's/^/    /' "$log" >&2
+  exit 1
+fi
+
+# An engine document: a plate with a hole and a peg placed on it, built by the engine in this
+# process. Its script goes once it is built, as the hinge's does.
+cat > "$project/smoke_xbf.py" <<'XBF'
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf(out="smoke.xbf")
+def smoke():
+    plate = bd.Box(30, 20, 4) - bd.Cylinder(3, 10)
+    plate.label = "plate"
+    peg = bd.Pos(8, 0, 6) * bd.Cylinder(2, 8)
+    peg.label = "peg"
+    return bd.Compound(children=[plate, peg], label="smoke")
+XBF
+if ! (cd "$project" && "$PYTHON" -m cadgen.engine build --no-daemon smoke_xbf.py && rm smoke_xbf.py) >"$log" 2>&1 \
+   || [ ! -f "$project/smoke.xbf" ]; then
+  echo "FAIL: the engine document fixture did not build" >&2
   sed 's/^/    /' "$log" >&2
   exit 1
 fi
