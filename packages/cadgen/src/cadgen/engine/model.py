@@ -231,16 +231,32 @@ class BuildContext:
         self.stack: list[str] = []
         self.sources: dict[str, str] = {}
         self.resolved: dict[str, list] = {}
+        # The first-party modules the script's load imported (``build`` sets it), the
+        # build's symbol resolution, the time keys took and each body's fallbacks.
+        self.loaded: set[str] | None = None
+        self.symbols: Any = None
+        self.key_seconds = 0.0
+        self.fallbacks: dict[str, list[str]] = {}
 
     def source(self, model: Model) -> str:
-        """What a model's body is made of: its code's bytes (``sources.closure``) and the
-        engine's own, read once a build."""
-        key = str(model.script) + "::" + model.function.__module__
+        """What a model's body is made of: the symbols its function reaches, a module's
+        bytes where one cannot be followed (``sources.Symbols``), and the engine's own
+        code; worked out once a build."""
+        key = str(model.script) + "::" + model.name
         found = self.sources.get(key)
         if found is None:
-            from cadgen.engine.sources import closure
+            import time
 
-            found = self.sources[key] = closure(model.script, model.function.__module__, self.resolved) + _engine_version()
+            from cadgen.engine.sources import Symbols
+
+            started = time.perf_counter()
+            if self.symbols is None:
+                self.symbols = Symbols(self.resolved, self.loaded)
+            digest, reasons = self.symbols.key(model.function)
+            if reasons:
+                self.fallbacks[model.identity] = reasons
+            found = self.sources[key] = digest + _engine_version()
+            self.key_seconds += time.perf_counter() - started
         return found
 
     def __enter__(self) -> "BuildContext":

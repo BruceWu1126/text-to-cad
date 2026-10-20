@@ -208,5 +208,153 @@ class OrdinalTest(BodiesCase):
         self.assertLess(replayed["misses"], root_calls, "its unchanged calls hit")
 
 
+DIMENSIONS = '''
+"""Dimensions the parts share."""
+import build123d as bd
+
+WIDTH = 10.0
+HEIGHT = {height}
+SPARE = 1.0
+
+
+def plate(width):
+    """A plate."""
+    return bd.Box(width, 8, {thickness})
+
+
+def {spare}():
+    return SPARE
+'''
+
+HELPERS = """
+import build123d as bd
+from dimensions import plate
+
+
+def holed(width):
+    return plate(width) - bd.Cylinder(1, 10)
+"""
+
+BRACKET = """
+from cadgen.engine import xbf
+from dimensions import WIDTH
+from helpers import holed
+
+
+@xbf
+def bracket():
+    return holed(WIDTH)
+"""
+
+SPACER = """
+import build123d as bd
+from cadgen.engine import xbf
+import dimensions
+
+
+@xbf
+def spacer():
+    return bd.Box(dimensions.HEIGHT, 2, 2)
+"""
+
+PROBE = """
+import build123d as bd
+from cadgen.engine import xbf
+import dimensions
+
+WHICH = "HEI" + "GHT"
+
+
+@xbf
+def probe():
+    return bd.Box(getattr(dimensions, WHICH), 3, 3)
+"""
+
+ASSEMBLY = """
+import build123d as bd
+from cadgen.engine import xbf
+from bracket import bracket
+from spacer import spacer
+
+
+@xbf
+def assembly():
+    return bd.Compound(children=[bracket(), spacer().moved(bd.Location((30, 0, 0)))], label="assembly")
+"""
+
+
+class SymbolsCase(BodiesCase):
+    """A body is keyed by the symbols its code reaches: ``bracket`` reaches ``holed`` and,
+    through it, ``plate`` and ``WIDTH``; ``spacer`` reads ``HEIGHT`` off the module;
+    ``probe`` reads a name it computes, so its module falls back to its bytes."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.dimensions(height=4.0)
+        self.write("helpers.py", HELPERS)
+        self.write("bracket.py", BRACKET)
+        self.write("spacer.py", SPACER)
+        self.write("probe.py", PROBE)
+        self.write("assembly.py", ASSEMBLY)
+
+    def dimensions(self, height: float = 4.0, thickness: float = 3.0, spare: str = "spare") -> None:
+        self.write("dimensions.py", DIMENSIONS.format(height=height, thickness=thickness, spare=spare))
+
+    def assemble(self) -> tuple[int, int]:
+        report = engine_build.build(self.folder / "assembly.py", ["assembly"], cwd=self.folder)[-1]
+        self.assertTrue(report["ok"], report)
+        return _counts(report)
+
+    def probe(self) -> dict:
+        report = engine_build.build(self.folder / "probe.py", ["probe"], cwd=self.folder)[-1]
+        self.assertTrue(report["ok"], report)
+        return report
+
+
+class SymbolsTest(SymbolsCase):
+    def test_a_constant_edit_runs_the_bodies_that_read_it_and_replays_the_rest(self) -> None:
+        self.assertEqual(self.assemble(), (3, 0))
+        self.dimensions(height=5.0)
+        self.assertEqual(self.assemble(), (2, 1), "spacer reads HEIGHT and the assembly holds it; bracket replayed")
+
+    def test_an_edit_to_a_function_runs_every_body_that_reaches_it(self) -> None:
+        self.assemble()
+        self.dimensions(thickness=3.5)
+        # bracket calls holed, which calls plate: two steps away, still its code.
+        self.assertEqual(self.assemble(), (2, 1), "bracket and the assembly ran; spacer replayed")
+
+    def test_comments_blank_lines_and_docstrings_run_nothing(self) -> None:
+        self.assemble()
+        text = (self.folder / "dimensions.py").read_text(encoding="utf-8")
+        text = text.replace('"""Dimensions the parts share."""', '"""What the parts share."""\n\n# in millimetres')
+        text = text.replace('    """A plate."""', '    """A plate,\n    drilled by its callers."""\n    # flat')
+        self.write("dimensions.py", text)
+        self.write("helpers.py", "# helpers\n\n\n" + HELPERS.replace("def holed(width):", 'def holed(width):\n    """Holed."""'))
+        self.write("assembly.py", ASSEMBLY.replace("@xbf", "\n# the top\n@xbf"))
+        self.assertEqual(self.assemble(), (0, 3))
+
+    def test_a_computed_getattr_falls_back_to_its_module_s_bytes(self) -> None:
+        self.probe()
+        self.assertEqual(_counts(self.probe()), (0, 1))
+        self.dimensions(spare="extra")  # nothing the probe names, but its module's bytes
+        report = self.probe()
+        self.assertEqual(_counts(report), (1, 0))
+        reasons = report["retention"]["fallbacks"]["probe.py::probe"]
+        self.assertTrue(any("getattr with a computed name" in reason for reason in reasons), reasons)
+        # The assembly's bodies read nothing they cannot follow.
+        self.assemble()
+        self.dimensions(height=4.0, spare="other")
+        self.assertEqual(self.assemble(), (0, 3))
+
+    def test_renaming_runs_the_users_of_what_was_renamed_and_nothing_else(self) -> None:
+        self.assemble()
+        self.dimensions(spare="renamed")
+        self.assertEqual(self.assemble(), (0, 3), "nothing reaches the renamed function")
+        self.write("dimensions.py", DIMENSIONS.format(height=4.0, thickness=3.0, spare="renamed")
+                   .replace("def plate(", "def slab("))
+        self.write("helpers.py", HELPERS.replace("plate", "slab"))
+        self.assertEqual(self.assemble(), (2, 1), "bracket reaches it and the assembly holds bracket")
+
+
 if __name__ == "__main__":
     unittest.main()
