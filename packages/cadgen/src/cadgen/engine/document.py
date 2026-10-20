@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -555,7 +556,7 @@ def read_step_shape(path: Any) -> Any:
     from build123d.importers import topods_lut
 
     def name_of(label: Any) -> str:
-        text = _label_name(label)
+        text = step_name(_label_name(label))
         return "".join(ch for ch in text if unicodedata.category(ch)[0] != "C")  # as the file has it
 
     def as_color(rgba: Any) -> Any:
@@ -704,6 +705,7 @@ class Loaded:
         self.instance_paths: list[tuple[int, ...]] = []
         self.worlds: dict[tuple[int, ...], Any] = {}
         self.occurrences: dict[str, tuple[int, ...]] = {}
+        self.step = self.path.suffix.lower() in (".step", ".stp")
         self._walk()
         self.mechanism = None
         if self.path.suffix.lower() == ".xbf":
@@ -718,6 +720,8 @@ class Loaded:
 
         shapes = XCAFDoc_DocumentTool.ShapeTool_s(self.doc.Main())
         by_entry: dict[str, int] = {}
+        # A STEP's names as the file means them (``step_name``); an xbf's as the engine wrote them.
+        named = (lambda label: step_name(_label_name(label))) if self.step else _label_name
 
         def entry_of(label: Any) -> str:
             text = TCollection_AsciiString()
@@ -738,7 +742,7 @@ class Loaded:
                     referred = TDF_Label()
                     XCAFDoc_ShapeTool.GetReferredShape_s(component, referred)
                     placed = location.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(component))
-                    child_name = _label_name(component) or _label_name(referred) or f"{name}.{at}"
+                    child_name = named(component) or named(referred) or f"{name}.{at}"
                     child_color = _label_color(component) or color
                     node["children"].append(visit(referred, placed, path + [child_name], child_color, child_name,
                                                   occurrence + (at - 1,), entries + [entry_of(component)]))
@@ -761,7 +765,7 @@ class Loaded:
         roots = []
         for at in range(1, free.Length() + 1):
             label = free.Value(at)
-            name = _label_name(label) or f"{self.path.stem}{'' if free.Length() == 1 else at}"
+            name = named(label) or f"{self.path.stem}{'' if free.Length() == 1 else at}"
             roots.append(visit(label, _identity(), [name], None, name, () if free.Length() == 1 else (at - 1,),
                                [entry_of(label)]))
         if len(roots) == 1:
@@ -1012,6 +1016,16 @@ def _label_name(label: Any) -> str:
     return ""
 
 
+# OCCT's name for an occurrence its file left unnamed: the label it got (`=>[0:1:1:2]`).
+_PLACEHOLDER = re.compile(r"^=>\[[0-9:]*\]$")
+
+
+def step_name(text: str) -> str:
+    """A name as a STEP file means it: OCCT's placeholder for an unnamed occurrence
+    (``=>[0:1:1:2]``) is no name at all, so the product's name stands."""
+    return "" if _PLACEHOLDER.match(text) else text
+
+
 def _label_color(label: Any) -> tuple | None:
     from OCP.Quantity import Quantity_ColorRGBA
     from OCP.XCAFDoc import XCAFDoc_ColorGen, XCAFDoc_ColorSurf, XCAFDoc_ColorTool
@@ -1142,7 +1156,8 @@ def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -
                 name = _label_name(sub) if ordinal else ""
                 if name:
                     edge_names[ordinal] = name
-    return Prototype(index, local, _label_name(label) or f"part{index + 1}", _label_color(label), found_key,
+    name = step_name(_label_name(label)) if loaded.step else _label_name(label)
+    return Prototype(index, local, name or f"part{index + 1}", _label_color(label), found_key,
                      face_names, edge_names, face_colors, entry, _label_material(label), face_materials)
 
 

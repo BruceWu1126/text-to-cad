@@ -121,5 +121,36 @@ class ExportTest(unittest.TestCase):
             self.assertAlmostEqual(got, want, delta=1e-6)
 
 
+class StepNameTest(unittest.TestCase):
+    """A STEP's names read as the file means them: an occurrence OCCT left a placeholder name
+    (``=>[0:1:1:2]``) takes its product's, and a name escaped as ISO 10303-21 escapes it reads
+    as its text."""
+
+    def setUp(self) -> None:
+        import build123d as bd
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-step-names-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        board = bd.Box(4, 4, 1)
+        board.label = "Board"
+        boss = bd.Pos(10, 0, 0) * bd.Cylinder(1, 2)
+        boss.label = "凸台-拉伸4"
+        tree = document.collect(bd.Compound(children=[board, boss], label="hat"), "hat")
+        tree.root.components[0].name = "=>[0:1:1:2]"  # as OCCT names an occurrence its file left unnamed
+        self.step = self.folder / "hat.step"
+        exports.write_step(document.to_xcaf(tree), self.step)
+
+    def names(self, path: Path) -> tuple[list[str], list[str]]:
+        loaded = document.Loaded(path)
+        read = document.read_step_shape(path)
+        return [instance.path[-1] for instance in loaded.instances], [child.label for child in read.children]
+
+    def test_a_placeholder_occurrence_name_is_its_product_s(self) -> None:
+        self.assertIn("=>[0:1:1:2]", self.step.read_text(encoding="utf-8"))
+        paths, labels = self.names(self.step)
+        self.assertEqual(paths, ["Board", "凸台-拉伸4"])
+        self.assertEqual(labels, ["Board", "凸台-拉伸4"])
+
+
 if __name__ == "__main__":
     unittest.main()
