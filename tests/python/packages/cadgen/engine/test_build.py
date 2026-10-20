@@ -142,6 +142,10 @@ class BuildTest(EngineCase):
         read = document.read_step_shape(self.folder / "out/frame.step")
         self.assertEqual([child.label for child in read.children], ["bracket", "right", "rail"])
         self.assertTrue(read.children[0].wrapped.TShape() == read.children[1].wrapped.TShape())
+        # Each placed where the file places it: the second bracket 20 along y.
+        offset = read.children[1].center() - read.children[0].center()
+        self.assertAlmostEqual(offset.Y, 20.0, places=6)
+        self.assertAlmostEqual(abs(offset.X) + abs(offset.Z), 0.0, places=6)
 
     def test_a_warm_build_hits_and_rewrites_nothing(self) -> None:
         self.write()

@@ -46,7 +46,7 @@ class ServeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "rack.py"
         self.write(4)
-        self.server = Server(port=0)
+        self.server = Server(port=0, mesh_mode="inline")  # a test asks for the pool itself
         self.server.start()
         self.addCleanup(self.server.stop)
         self.ident = self.server.add(self.folder / "rack.xbf")

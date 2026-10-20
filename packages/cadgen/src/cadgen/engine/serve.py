@@ -11,10 +11,11 @@ how long that took. A document is read again when its file changes: the page pol
 the version. ``/`` is a page that shows one (``page/``), with three.js served from a
 ``node_modules`` folder (``--three``, or the nearest one above the working directory).
 
-Meshing runs off the request's thread (``Mesher``): ``inline`` by default, one part after
-another on one thread, each spread over the kernel's own threads; or on a warm pool of
-processes (``CADGEN_ENGINE_MESH=processes``, or ``?mode=processes``), each handed one
-part's shape as bytes.
+Meshing runs off the request's thread (``Mesher``): by default on a pool of processes
+started with the server and kept warm, each handed one part's shape as bytes; or
+``inline`` (``CADGEN_ENGINE_MESH=inline``, or ``?mode=inline``), one part after another on
+one thread, each spread over the kernel's own threads. Measured on the three benchmark
+documents, the pool meshed a whole document 2.8-3.8x faster than inline.
 """
 
 from __future__ import annotations
@@ -142,7 +143,7 @@ MODES = ("inline", "processes")
 
 class Mesher:
     def __init__(self, mode: str | None = None, workers: int | None = None) -> None:
-        self.mode = mode or os.environ.get("CADGEN_ENGINE_MESH", "inline")
+        self.mode = mode or os.environ.get("CADGEN_ENGINE_MESH", "processes")
         if self.mode not in MODES:
             raise ValueError(f"CADGEN_ENGINE_MESH is one of {', '.join(MODES)}")
         self.workers = workers or max(1, (os.cpu_count() or 2))

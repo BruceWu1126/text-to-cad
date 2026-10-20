@@ -440,7 +440,9 @@ def read_step_shape(path: Any) -> Any:
                 node = Compound()
                 node.children = build(referred)
             else:
-                node = topods_lut[type(topods)](topods)
+                # A handle of its own on the product's geometry: a move places this
+                # occurrence, never the product's other placements.
+                node = topods_lut[type(topods)](downcast(topods.Located(topods.Location())))
             color = label_color(label) if referred is not label else None
             node.color = color or product_color
             node.label = (name_of(label) if referred is not label else "") or product_name
