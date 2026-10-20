@@ -659,6 +659,7 @@ def run(script_path: Path | None = None) -> Iterator[_Run]:
         yield state
     finally:
         _LOCAL.run = previous
+        state.trace.release()
         if outermost:
             _sweep()
 

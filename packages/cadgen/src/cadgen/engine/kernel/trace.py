@@ -7,14 +7,24 @@ frame that called it (the file, relative to the model's folder, the line and
 the enclosing function) and the features that made the shapes it was given. A
 call with no first-party frame on the stack is cadgen's own and is not a
 feature; a call nested inside another feature's operation belongs to that
-feature. A feature is named within a part, among the features the part
-descends from -- those that made it and, transitively, whatever they were
-given -- in call order: ``<function>.<operation><count>``, the enclosing
-function, the operation (``extrude``, ``fillet``, ``cut``, a constructor's
-class in lower case) and how many of the part's features before it, this one
-included, that function's calls of that operation were: ``dial.extrude1``. So
-an edit elsewhere in the model -- another part's feature, a call no element of
-this part descends from -- renames nothing here. An author's label pins the
+feature. A feature is named by the author's name for its result, within a part,
+among the features the part descends from -- those that made it and, transitively,
+whatever they were given -- in call order. A call made by an assignment statement
+(``relief = body - hole``, ``self.body = ...``, each target of ``a, b = ...``; read
+from the source at the call's instruction, ``sources.assigned``) is that target's:
+the call whose result the statement stores is ``<function>.<target>`` (``dial.relief``),
+the calls the same run of the statement made before it ``<function>.<target>_<operation><n>``
+(``dial.relief_make_cylinder1``), and the n-th run of an assignment to one target in
+one function that the part descends from -- a reassignment, a loop -- is ``<target>``,
+then ``<target>2``, ``<target>3``... A call whose result is not assigned (a return
+expression, an argument of a call that is no assignment, an expression statement) is
+``<function>.<operation><count>``: the enclosing function, the operation (``extrude``,
+``fillet``, ``cut``, a constructor's class in lower case) and how many of the part's
+unassigned features before it, this one included, that function's calls of that
+operation were: ``dial.extrude1``. So an edit elsewhere in the model -- another
+part's feature, a call no element of this part descends from -- renames nothing here,
+an inserted statement renames only what it touches, and renaming a variable renames
+that feature's elements and nothing else. An author's label pins the
 name instead, in what is made of the labelled shape: a shape the model labels
 and hands to another construction names the feature that made it by that label
 (``lid``) in every part made from that call on that the feature is an ancestor
@@ -58,11 +68,11 @@ one alone falls to the passes, and to the feature. Nothing here measures geometr
 what a step says is what the kernel reported.
 
 An element's **name** is its kind and its derivation: the atom it
-starts from (the n-th element of its kind a feature made, ``dial.make_box1.6``) and a
-step per feature that made it out of another (``f:dial.make_box1.6;M:dial.cut1``,
+starts from (the n-th element of its kind a feature made, ``dial.plate.6``) and a
+step per feature that made it out of another (``f:dial.plate.6;M:dial.relief``,
 ``e:sk.make_rect1.2;Ge:part.extrude1``). A derivation longer than ``FOLD_LENGTH``
 characters is **folded** to the feature of its last step and a digest of it
-(``dial.cut1~5d1e0c2f9a3b``), and a further source that is not an atom is folded
+(``dial.relief~5d1e0c2f9a3b``), and a further source that is not an atom is folded
 whatever its length, so every name stays short; the component's lineage keeps what each
 folded atom stands for (its ``table``), every one its names or that table reach.
 Elements of one result a step made alike -- from the same sources, the same way: the
@@ -102,6 +112,7 @@ from __future__ import annotations
 import bisect
 import functools
 import hashlib
+import itertools
 import re
 import sys
 import weakref
@@ -118,6 +129,12 @@ from OCP.TopoDS import TopoDS
 from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape, TopTools_IndexedMapOfShape
 
 from cadgen.engine.kernel.history import _map, _object_key, listed
+from cadgen.engine.sources import assigned as _assigned_names
+
+# Every execution of an assignment statement a feature ran in, numbered process-wide: a
+# replayed body's features keep the executions of the run that recorded them, never one
+# of this run's.
+_EXECUTIONS = itertools.count(1)
 
 # A shape's map of one kind of its sub-shapes in its own frame, by TShape and orientation:
 # what naming asks of every result on every run. A TShape's sub-shapes never change once
@@ -233,12 +250,18 @@ class Feature:
     # What the makers the call ran report of its results (``kernel_history.History``),
     # with the structures of its naming kept in it; None where it could not be composed.
     history: Any = field(default=None, repr=False)
+    # The assignment statement the call ran in (``Trace.frame``): which execution of it,
+    # the names it assigns (one, or a tuple target's each) and, for a tuple target given
+    # as many shapes, the target each result position belongs to.
+    execution: int | None = None
+    targets: tuple[str, ...] | None = None
+    groups: tuple[int, ...] | None = field(default=None, repr=False)
     # Per result, the source's naming context at a certified whole-body copy.
     # This is rebound for every run, including hits: histories contain ordinals,
     # never the feature indices of the run that first computed them.
     copies: dict[int, "_CopyContext"] = field(default_factory=dict, repr=False)
     # Functions of the feature alone, computed once: the operation as its name spells
-    # it, the name without its count (``<function>.<operation>``, as written) -- every
+    # it, the unassigned name without its count (``<function>.<operation>``) -- every
     # part's naming reads them for each feature it descends from -- and, on first use,
     # the first position at which each TShape was returned.
     operation: str = field(init=False, repr=False)
@@ -248,6 +271,11 @@ class Feature:
     def __post_init__(self) -> None:
         self.operation = operation_name(self.op)
         self.stem = f"{identifier(self.function)}.{self.operation}"
+
+    @property
+    def target(self) -> str | None:
+        """The name the feature's assignment gives it, its targets joined for a tuple."""
+        return None if self.targets is None else "_".join(self.targets)
 
     def position_of(self, tshape: Any) -> int | None:
         """The first position among the results at which ``tshape`` was returned, or None."""
@@ -360,6 +388,7 @@ class Trace:
         self.features: list[Feature] = []
         self._first_party: dict[str, str] = {}
         self._display: dict[str, str] = {}
+        self._paths: dict[str, str] = {}
         # _object_key(shape) -> (weakref, feature index): the feature that returned each
         # live result object. A dead reference, or a recycled key, answers nothing.
         self._by_object: dict[int, tuple[weakref.ref, int]] = {}
@@ -376,6 +405,20 @@ class Trace:
         self._copy_labels: dict[str, int] = {}
         self._stems: dict[str, int] = {}
         self._labelled: dict[str, list[int]] = {}
+        # Per model frame making calls, the assignment it is executing (``_execution``):
+        # the frame, the statement, the instruction, the frame it called and the
+        # execution's number. Held only while the run records (``release``).
+        self._executing: dict[int, tuple] = {}
+        self._executing_bound = 64
+        # Built from the features once naming asks (``_assignments``): per assignment
+        # execution and target, its features in order; its head, the last of them -- the
+        # call whose result the statement assigns --; per ``<function>.<target>``, the heads
+        # as bits by index; and per feature that is no head, its number among its
+        # execution's features of its operation.
+        self._assigned_count = -1
+        self._heads: dict[tuple[int, str], int] = {}
+        self._target_stems: dict[str, int] = {}
+        self._within: dict[int, int] = {}
         # Per run: where each input came from (``_source``), the structure each feature is
         # named by and what it was computed from (``_skey``), the element each element that is
         # an input's resolves to (``_origin``), and maps of results in their own frames.
@@ -390,23 +433,98 @@ class Trace:
 
     # --- recording ---------------------------------------------------------------------
 
-    def frame(self) -> tuple[str, int, str] | None:
+    def frame(self) -> tuple[str, int, str, tuple | None] | None:
         """The innermost first-party frame of the current stack: ``(file, line,
-        function)``, the file relative to the model's folder; None when the
-        call is cadgen's own (one of its internal frames comes first) or no
-        model code is on the stack."""
+        function, assignment)``, the file relative to the model's folder, and the
+        assignment the call runs in (``_execution``: which execution of the statement and
+        the names it assigns), or None; None when the call is cadgen's own (one of its
+        internal frames comes first) or no model code is on the stack."""
         frame = sys._getframe(1)
+        below = None
         while frame is not None:
             filename = frame.f_code.co_filename
             verdict = self._first_party.get(filename)
             if verdict is None:
                 verdict = self._first_party[filename] = _classify(filename)
             if verdict == "model":
-                return self._display_path(filename), frame.f_lineno, frame.f_code.co_name
+                return (self._display_path(filename), frame.f_lineno, frame.f_code.co_name,
+                        self._execution(frame, below))
             if verdict == "own":
                 return None
+            below = frame
             frame = frame.f_back
         return None
+
+    def _execution(self, frame: Any, below: Any) -> tuple[int, tuple[str, ...]] | None:
+        """The assignment ``frame`` is executing as it calls ``below``: ``(execution,
+        names)``, or None where the statement assigns nothing (``sources.assigned``). An
+        execution is one run of the statement: the calls a frame makes from one statement
+        while its instruction only moves forward -- or stays in one call of the same frame,
+        which a constructor making several shapes is -- are one; a statement run again (a
+        loop) is the next."""
+        offset = frame.f_lasti
+        found = _assigned_names(frame.f_code, offset)
+        if found is None:
+            return None
+        statement, names = found
+        held = self._executing.get(id(frame))
+        if held is not None and held[0] is frame and held[1] == statement and (
+                held[2] < offset or (held[2] == offset and held[3] is below)):
+            execution = held[4]
+        else:
+            execution = next(_EXECUTIONS)
+        self._executing[id(frame)] = (frame, statement, offset, below, execution)
+        if len(self._executing) > self._executing_bound:
+            # Only the frames still on the stack can call again.
+            live = set()
+            current = frame
+            while current is not None:
+                live.add(id(current))
+                current = current.f_back
+            self._executing = {key: value for key, value in self._executing.items() if key in live}
+            self._executing_bound = max(64, 2 * len(self._executing))
+        return execution, names
+
+    def release(self) -> None:
+        """The run recorded its last call: let go of the frames it held."""
+        self._executing = {}
+
+    def _assignments(self) -> None:
+        """The tables naming reads of the features assignments name, built once the run's
+        features are all recorded (and again if more were)."""
+        if self._assigned_count == len(self.features):
+            return
+        members: dict[tuple[int, str], list[int]] = {}
+        for feature in self.features:
+            if feature.execution is not None:
+                members.setdefault((feature.execution, feature.target), []).append(feature.index)
+        heads: dict[tuple[int, str], int] = {}
+        stems: dict[str, int] = {}
+        within: dict[int, int] = {}
+        for key, indices in members.items():
+            # The call whose result the statement stores: its last, or what that only wraps
+            # or places (build123d wraps every part it makes in a compound of one).
+            head = self.unwrapped(indices[-1])
+            if head not in indices:
+                head = indices[-1]
+            heads[key] = head
+            feature = self.features[head]
+            function = identifier(feature.function)
+            names = [feature.target]
+            if feature.groups is not None:
+                names.extend(feature.targets)
+            for name in names:
+                stem = f"{function}.{name}"
+                stems[stem] = stems.get(stem, 0) | (1 << head)
+            counts: Counter = Counter()
+            for index in indices:
+                if index == head:
+                    continue
+                operation = self.features[index].operation
+                counts[operation] += 1
+                within[index] = counts[operation]
+        self._heads, self._target_stems, self._within = heads, stems, within
+        self._assigned_count = len(self.features)
 
     def _display_path(self, filename: str) -> str:
         shown = self._display.get(filename)
@@ -419,7 +537,16 @@ class Trace:
                 except (ValueError, OSError):
                     shown = path.as_posix()
             self._display[filename] = shown
+            self._paths[shown] = filename
         return shown
+
+    def path_of(self, shown: str) -> str | None:
+        """The file a feature's ``file`` (as shown, relative to the model's folder) is --
+        also a replayed feature's, which another run's trace showed."""
+        found = self._paths.get(shown)
+        if found is None and self.model_dir is not None and not Path(shown).is_absolute():
+            found = str(self.model_dir / shown)
+        return found if found is not None else shown
 
     def feature_of(self, shape: Any) -> int | None:
         """The feature that returned this very object, or None."""
@@ -459,13 +586,19 @@ class Trace:
         feature that made it. A replayed call (a model body the memo did not run) gives
         the labels its inputs had and the handles of its results when it was recorded:
         the objects are the same, their state since then may not be."""
-        file, line, function = frame
+        file, line, function = frame[:3]
         feature = Feature(
             index=len(self.features), op=op, file=file, line=line, function=function,
             inputs=[index for _shape, index, _handle in inputs],
             handles=[handle for _shape, _index, handle in inputs],
             results=list(result_handles) if result_handles is not None else [handle_of(shape) for shape in results],
         )
+        assignment = frame[3] if len(frame) > 3 else None
+        if assignment is not None:
+            feature.execution = assignment[0]
+            feature.targets = tuple(identifier(name) for name in assignment[1])
+            if len(feature.targets) > 1:
+                feature.groups = _groups(results, made, len(feature.targets))
         self.features.append(feature)
         ancestors = 1 << feature.index
         copied_inputs = 0
@@ -484,7 +617,10 @@ class Trace:
                     copied_inputs |= self._copy_ancestors[given]
         self._ancestors.append(ancestors)
         self._copy_ancestors.append(copied_inputs)
-        self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
+        if feature.execution is None:
+            # Only the calls an assignment does not name count in ``<operation><count>``:
+            # a statement added that assigns renumbers none of them.
+            self._stems[feature.stem] = self._stems.get(feature.stem, 0) | (1 << feature.index)
         for j, ((shape, index, _handle), context) in enumerate(zip(inputs, contexts)):
             if index is not None:
                 label = labels[j] if labels is not None else getattr(shape, "__dict__", {}).get("label")
@@ -1102,7 +1238,9 @@ class Trace:
                 found = sames[(j, kind)] = self._sames(index, j, kind, identity.count(j, kind))
             return found[ordinal - 1]
 
-        made = [TopTools_IndexedMapOfShape() for _kind in _TOPABS]
+        # What the feature made, numbered per kind in the order of its results -- per target,
+        # for a tuple assignment's (``Feature.groups``), each named by its own.
+        made_by_group: dict[int, list[Any]] = {}
         rules: list[list[list[tuple]] | None] = []
         for position, result in enumerate(feature.results):
             if result is None:
@@ -1146,6 +1284,10 @@ class Trace:
                 if by_history:
                     _ranked(held)
             _passes(result, maps, table)
+            group = feature.groups[position] if feature.groups is not None else 0
+            made = made_by_group.get(group)
+            if made is None:
+                made = made_by_group[group] = [TopTools_IndexedMapOfShape() for _kind in _TOPABS]
             for kind in range(3):
                 held, find, add = table[kind], maps[kind].FindKey, made[kind].Add
                 for ordinal, rule in enumerate(held, 1):
@@ -1211,8 +1353,9 @@ class _Names:
     """The names of the features one part descends from (``ancestors``, bits by index),
     each computed when first asked: counted among them in call order -- a label pinned
     by the time the part was made (by feature ``made_at``, the last of its own), the first
-    of the part's features to claim it keeping it, else ``<function>.<operation><count>``,
-    every feature counting in its stem. ``body`` is the feature that made the part's body,
+    of the part's features to claim it keeping it, else its assignment's target
+    (``_name``), else ``<function>.<operation><count>``, every unassigned feature counting
+    in its stem. ``body`` is the feature that made the part's body,
     whose own label names the occurrence and pins nothing here: identical constructions
     labelled apart are one part, named alike. A label pinned later -- set on a shape after
     it was given to the construction that made this part -- renames nothing here."""
@@ -1247,6 +1390,23 @@ class _Names:
             name = self.found[index] = self._name(index)
         return name
 
+    def at(self, index: int, position: int) -> str | None:
+        """Feature ``index``'s name for what it made at result ``position``: its name
+        (``get``), but a tuple assignment's own target for each shape it returned."""
+        if index not in self:
+            return None
+        feature = self.trace.features[index]
+        if feature.groups is None or index in self.overrides or position >= len(feature.groups):
+            return self.get(index)
+        name = self.get(index)
+        if name is None or self._labelled_name(index) is not None:
+            return name
+        self.trace._assignments()
+        if self.trace._heads.get((feature.execution, feature.target)) != index:
+            return name
+        function = identifier(feature.function)
+        return f"{function}.{self._counted(index, feature.targets[feature.groups[position]], function)}"
+
     def binding(self, index: int) -> int:
         return self.overrides[index][1] if index in self.overrides else index
 
@@ -1278,15 +1438,38 @@ class _Names:
             return context.label, claim[0]
         return None
 
+    def _labelled_name(self, index: int) -> str | None:
+        label = self.trace.features[index].label
+        if label is not None and self._pins(index) and self._claimer(label) == (index, -1):
+            return label
+        return None
+
     def _name(self, index: int) -> str:
+        """A label that pins it; else ``<function>.<target>`` for the call whose result an
+        assignment stores, and ``<function>.<target>_<operation><n>`` for the calls the same
+        execution of that statement made before it; else ``<function>.<operation><count>``."""
         trace = self.trace
         feature = trace.features[index]
-        label = feature.label
-        if label is not None and self._pins(index):
-            if self._claimer(label) == (index, -1):
-                return label
+        label = self._labelled_name(index)
+        if label is not None:
+            return label
+        if feature.execution is not None:
+            trace._assignments()
+            head = trace._heads[(feature.execution, feature.target)]
+            function = identifier(feature.function)
+            base = self._counted(head, feature.target, function)
+            if index == head:
+                return f"{function}.{base}"
+            return f"{function}.{base}_{feature.operation}{trace._within[index]}"
         stem = feature.stem
         return f"{stem}{(self.ancestors & trace._stems[stem] & ((2 << index) - 1)).bit_count()}"
+
+    def _counted(self, head: int, target: str, function: str) -> str:
+        """``target`` as the n-th assignment to it in ``function`` that this part descends
+        from, head ``head`` the n-th: the first as it is, then ``target2``, ``target3``..."""
+        stem = self.trace._target_stems.get(f"{function}.{target}", 0)
+        count = (self.ancestors & stem & ((1 << head) - 1)).bit_count() + 1
+        return target if count == 1 else f"{target}{count}"
 
     def _pins(self, index: int) -> bool:
         feature = self.trace.features[index]
@@ -1377,7 +1560,7 @@ class _Renderer:
             rendered = renderer.rendered(source)
             self._copied[renderer] = None
             return rendered
-        feature = self.names.get(index)
+        feature = self.names.at(index, node[1])
         if feature is None or rule[0] in ("x", "s"):
             return None
         binding = self.names.binding(index)
@@ -1504,6 +1687,23 @@ def _features(text: str) -> list[str]:
         if ":" in head:
             found.append(head.split(":", 1)[1])
     return found
+
+
+def _groups(results: list[Any], returned: list[Any], count: int) -> tuple[int, ...] | None:
+    """Per result position, which of the ``count`` shapes a call returned it is or holds,
+    when it returned that many: each target of a tuple assignment names its own; None
+    otherwise."""
+    if len(returned) != count:
+        return None
+    starts = {_object_key(shape): k for k, shape in enumerate(returned)}
+    found = []
+    current = 0
+    for shape in results:
+        k = starts.get(_object_key(shape))
+        if k is not None and returned[k] is shape:
+            current = k
+        found.append(current)
+    return tuple(found)
 
 
 def _ranked(rules: list[tuple | None]) -> None:

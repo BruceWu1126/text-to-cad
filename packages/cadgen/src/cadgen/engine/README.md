@@ -181,6 +181,28 @@ table.
 held yet (with `drop=1`, every part again), in parallel, and returns the time it
 took, the bytes, the triangles and the unmeshed faces.
 
+## Element names
+
+Every face, edge and vertex of a part is named as FreeCAD's topological naming names
+it: by the feature history that made it, so it keeps its name unless that history
+changed (`kernel/trace.py`). A name is its kind and its derivation: the atom it
+starts from, the n-th element of its kind a feature made, and a step per feature that
+made it out of another (`f:plate.body.3;M:plate.relief`: face 3 of the box, modified
+by the relief cut). A long derivation folds to its last feature and a digest
+(`f:plate.relief~5d1e0c2f9a3b`); the sidecar's `table` spells it out.
+
+A feature is the author's name for its result. A call whose result an assignment
+stores is `<function>.<target>` (`relief = body - hole` in `plate` is `plate.relief`;
+`self.body = ...` is `body`; each target of `a, b = ...` names its own); the calls the
+same statement made on the way are `<function>.<target>_<operation><n>`
+(`plate.relief_make_cylinder1`); the second assignment to one target in one function is
+`<target>2`, then `<target>3`. A call whose result is not assigned (a return
+expression, an expression statement) is `<function>.<operation><count>`
+(`peg.make_cylinder1`), counted among the part's unassigned calls. So inserting a
+feature renames only what it touches, and renaming a variable renames that feature's
+elements and nothing else. A warm build that hands a part back unchanged keeps its names
+while the functions they come from assign the same targets; a rename names it again.
+
 ## Body retention
 
 A model body is one coarse entry above its calls, kept in the worker's memory
