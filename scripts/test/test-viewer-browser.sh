@@ -183,9 +183,21 @@ if ! grep -q 'bd.Box(156, 4, 4)' "$project/hinge_grown.py" \
   exit 1
 fi
 
+# A model's build returns before its daemon's save of the STEP has landed: wait
+# for the file itself (a save lands whole, by rename) before moving it.
+wait_for_file() {
+  for _ in $(seq 1 600); do
+    [ -f "$1" ] && return 0
+    sleep 0.1
+  done
+  echo "the build's save of $1 did not land within 60s" >&2
+  return 1
+}
+
 # The served project holds artifacts only: a model script beside them would
 # enter the catalog as a buildable entry and change what the gates see.
 if ! (cd "$project" && "$PYTHON" hinge.py && "$PYTHON" hinge_grown.py \
+        && wait_for_file hinge.step && wait_for_file hinge_grown.step \
         && mkdir -p .revision && mv hinge_grown.step .revision/hinge.step \
         && rm hinge.py hinge_grown.py) >"$log" 2>&1; then
   echo "FAIL: the hinge revision fixture did not build" >&2
