@@ -29,7 +29,7 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from center_stand import center_stand
 from engine import engine
@@ -82,7 +82,6 @@ def _rigid_mate(fixed_part, fixed_name, moving_part, moving_name, location):
 
 
 @xbf(out="../XBF/motorbike.xbf")
-@step(out="../XBF/motorbike.step")
 def motorbike():
     fx, fy, fz = S.FRONT_SIGNAL_POS
     rx, ry, rz = S.REAR_SIGNAL_POS

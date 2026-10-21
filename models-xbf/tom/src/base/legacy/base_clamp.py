@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from lib.diag import say
 
-from cadgen.engine import xbf, step
+from cadgen.engine import xbf
 
 from dataclasses import dataclass
 import math
@@ -1326,10 +1326,7 @@ def build_bracket() -> build123d.Solid:
     return bracket
 
 
-# Mesh export retired with the flat STL/ folder (2026-09-17); the generator stays.
-# @stl(out='../../../STL/base_clamp.stl')
 @xbf(out='../../../XBF/base_link/legacy/base_clamp.xbf')
-@step(out='../../../XBF/base_link/legacy/base_clamp.step')
 def base_clamp():
     # Floor-up presentation. The bracket is AUTHORED on its side -- the saddle plane is a Y level,
     # which is the frame every layout constant, the flat pattern and build_dxf() live in -- but the

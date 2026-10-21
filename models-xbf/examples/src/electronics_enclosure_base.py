@@ -23,7 +23,7 @@ STANDOFF_LOCATIONS = (
 
 
 @xbf(out="../XBF/electronics_enclosure_base.xbf")
-@step(out="../XBF/electronics_enclosure_base.step")
+@step(out="../XBF/electronics_enclosure_base.step")  # electronics_enclosure_base_import reads it
 def electronics_enclosure_base():
     """Return a single solid open-top electronics enclosure base in millimeters."""
     inner_length = OUTER_LENGTH - 2.0 * WALL_THICKNESS

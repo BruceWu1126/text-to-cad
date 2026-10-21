@@ -5,7 +5,7 @@ crown at +X (see `lib/spec.py`).
 """
 
 import build123d as bd
-from cadgen.engine import paint, step, xbf
+from cadgen.engine import paint, xbf
 
 from lib import case as C
 from lib import materials as M
@@ -24,7 +24,6 @@ def _grained_top(ring):
 
 
 @xbf(out="../XBF/case.xbf")
-@step(out="../XBF/case.step")
 def case():
     parts = M.apply_materials(C.build_case_parts(), "case")
     # A face finish: the bezel ring is polished steel, its grained top annulus satin.

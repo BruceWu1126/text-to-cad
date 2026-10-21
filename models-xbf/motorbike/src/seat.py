@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import bodywork as B
 
 
 @xbf(out="../XBF/seat.xbf")
-@step(out="../XBF/seat.step")
 def seat():
     built = B.build_seat()
     if isinstance(built, list):

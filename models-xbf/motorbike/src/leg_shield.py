@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import bodywork as B
 
 
 @xbf(out="../XBF/leg_shield.xbf")
-@step(out="../XBF/leg_shield.step")
 def leg_shield():
     built = B.build_leg_shield()
     if isinstance(built, list):

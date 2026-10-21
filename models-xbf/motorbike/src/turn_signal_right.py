@@ -8,14 +8,13 @@ placed with `Pos` — exactly as it links `turn_signal_left.py`.
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import spec as S
 from lib import trim as T
 
 
 @xbf(out="../XBF/turn_signal_right.xbf")
-@step(out="../XBF/turn_signal_right.step")
 def turn_signal_right():
     x, y, z = S.FRONT_SIGNAL_POS
     return bd.Compound(children=T.build_turn_signal((x, -y, z), -1.0), label="turn_signal")

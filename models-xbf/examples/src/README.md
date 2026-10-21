@@ -4,12 +4,13 @@ Four scripts from `models/examples/src`, ported to `cadgen.engine`:
 
 | Script | Artifacts | What it is |
 | --- | --- | --- |
-| `l_bracket.py` | `XBF/l_bracket.xbf`, `.step` | L-bracket with gussets and a filleted transition (`lib/part_common.safe_fillet`) |
+| `l_bracket.py` | `XBF/l_bracket.xbf` | L-bracket with gussets and a filleted transition (`lib/part_common.safe_fillet`) |
 | `electronics_enclosure_base.py` | `XBF/electronics_enclosure_base.xbf`, `.step` | Open-top enclosure with rounded corners and standoffs |
-| `basic_shape_mating_test_fixture.py` | `XBF/basic_shape_mating_test_fixture.xbf`, `.step`, `.3mf` | Seven parts and a sub-assembly seated on a base plate by build123d joints |
+| `basic_shape_mating_test_fixture.py` | `XBF/basic_shape_mating_test_fixture.xbf`, `.step` | Seven parts and a sub-assembly seated on a base plate by build123d joints |
 | `electronics_enclosure_base_import.py` | `XBF/electronics_enclosure_base_import.xbf`, `XBF/basic_shape_mating_test_fixture_import.xbf` | The two STEPs above read back with `read_step` |
 
-Build from this folder, the import last (it reads the others' STEP outputs):
+Each model declares its xbf alone, except the two the import reads, which keep
+the `@step` it needs. Build from this folder, the import last (it reads those STEP outputs):
 
 ```
 python -m cadgen.engine build l_bracket.py electronics_enclosure_base.py basic_shape_mating_test_fixture.py

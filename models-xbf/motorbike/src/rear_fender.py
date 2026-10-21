@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import bodywork as B
 
 
 @xbf(out="../XBF/rear_fender.xbf")
-@step(out="../XBF/rear_fender.step")
 def rear_fender():
     built = B.build_rear_fender()
     if isinstance(built, list):

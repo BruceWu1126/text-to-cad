@@ -1,10 +1,8 @@
-from cadgen.engine import materials, step, stl, xbf
+from cadgen.engine import materials, xbf
 from lib.tray_geometry import tray
 
 
 @xbf(out="../XBF/injection.xbf")
-@step(out="../XBF/injection.step")
-@stl(out="../XBF/injection.stl")
 def injection():
     part = tray("injection")
     # moulded: ABS, the common injection-moulding resin

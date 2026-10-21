@@ -2,7 +2,7 @@
 
 | Script            | Artifact                                   | Description                                                   |
 |-------------------|--------------------------------------------|---------------------------------------------------------------|
-| qdd_actuator.py   | XBF/qdd_actuator.xbf, XBF/qdd_actuator.step | Quasi-direct-drive actuator, 4.5:1 planetary, 153 occurrences |
+| qdd_actuator.py   | XBF/qdd_actuator.xbf                       | Quasi-direct-drive actuator, 4.5:1 planetary, 153 occurrences |
 
 Build from this folder: `python -m cadgen.engine build qdd_actuator.py::qdd_actuator`.
 

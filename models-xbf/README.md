@@ -7,7 +7,9 @@ into `models/` and this folder goes away. `models/` itself is untouched.
 
 Each model keeps the layout it had in `models/`: its sources in `src/`, and
 everything a build writes in `XBF/` beside them (the `.xbf` document, its
-`.xbf.json` sidecar, and the STEP, STL or 3MF its original declared). `XBF/` is
+`.xbf.json` sidecar). A model declares its xbf and no export (but the two STEPs another
+example reads: see the port, below): STEP, GLB, STL and 3MF are
+translations of the xbf, written on demand by `cadgen xbf export`. `XBF/` is
 gitignored; nothing else is written anywhere. `tom` also reads vendor STEP from a local,
 gitignored `tom/STEP/imported/` (its `src/README.md` says how to populate it) and builds from
 `tom/` with `src` on `PYTHONPATH`.
@@ -33,11 +35,13 @@ document in the browser.
 
 The migration a user makes, and nothing more:
 
-- `from cadgen import step` -> `from cadgen.engine import xbf, step, ...`;
+- `from cadgen import step` -> `from cadgen.engine import xbf, ...`;
   cadgen's build123d proxy -> `import build123d as bd`.
-- `@step(out="../STEP/x.step", ...)` -> `@xbf(out="../XBF/x.xbf")`, with
-  `@step`/`@stl`/`@threemf` stacked only where the original declared one.
-  Decorators take `out=` and nothing else.
+- `@step(out="../STEP/x.step", ...)` -> `@xbf(out="../XBF/x.xbf")`, and nothing
+  else: the original's `@step`/`@stl`/`@threemf` are dropped (`cadgen xbf export`
+  writes any of them from the xbf). The one exception is a file another model
+  reads: the two examples `electronics_enclosure_base_import.py` reads keep their
+  `@step`. Decorators take `out=` and nothing else.
 - `materials=` finishes -> `Material` values set on the parts
   (`part.material = ...`) and `paint(part, faces, material)` for a face finish.
 - Mates (`AssemblyHelper` frames, `KINEMATICS` revolute/fastened) -> build123d
@@ -53,12 +57,12 @@ The migration a user makes, and nothing more:
 
 | Model | Source | What it exercises |
 | --- | --- | --- |
-| `dfm-process-comparison` | 5 single-part trays | per-part catalogue materials (PLA, aluminium, ABS) and their STEP export; STL export; lofts, fillets, drafted cones |
+| `dfm-process-comparison` | 5 single-part trays | per-part catalogue materials (PLA, aluminium, ABS); lofts, fillets, drafted cones |
 | `qdd_actuator` | one file, 153 occurrences | a 102-part assembly in one body, modules as nested compounds; 54 build123d joints (rigid mounts, revolute drive train with ranges) |
 | `motorbike` | 21 child models + root | child models as sub-assemblies, a child placed twice, children built alone; revolute and rigid joints across children |
 | `moonwatch` | `case.py`, `movement.py` (+3 children) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
 | `tom` | tom-cad `main` (7f79c52): 119 files, 7 model bodies | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
-| `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts) with 3MF export; `read_step` of a part and of an assembly (imported naming) |
+| `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming) |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 

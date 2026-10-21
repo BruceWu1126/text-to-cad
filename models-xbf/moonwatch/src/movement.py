@@ -7,7 +7,7 @@ import chrono_works
 import keyless_works
 import movement_base
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 # Composition is by FUNCTION: importing a sibling model links it (import never
 # builds), and calling it inside this body runs it in the same build as a
@@ -16,7 +16,6 @@ from cadgen.engine import step, xbf
 
 
 @xbf(out="../XBF/movement.xbf")
-@step(out="../XBF/movement.step")
 def movement():
     children = []
 

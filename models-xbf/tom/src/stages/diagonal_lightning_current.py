@@ -8,7 +8,7 @@ its floor meets the base carrier without relocating any joint.
 from pathlib import Path
 import math
 import build123d as b
-from cadgen.engine import xbf, step
+from cadgen.engine import xbf
 from lib.booleans import as_single_shape as one
 from lib.corner_rules import SMALL, MEDIUM, LARGE, XL, XXL
 from lib.tapered_solid_links import box, prism, finish
@@ -200,7 +200,6 @@ def make_diagonal_links(lower_floor=LOWER_FLOOR,*,lower_root=-20.775,upper_rise=
 
 
 @xbf(out='../../XBF/stages/diagonal_lightning_current.xbf')
-@step(out='../../XBF/stages/diagonal_lightning_current.step')
 def diagonal_lightning_current():
     return b.Compound(children=make_diagonal_links(),label='diagonal_lightning_current')
 

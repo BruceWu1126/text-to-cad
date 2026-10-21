@@ -1,11 +1,10 @@
 # motorbike models
 
-Every `.py` directly under `src/` is a model (`@xbf` + the `@step` the
-original declared, both into `../XBF/`). Shared code lives in `src/lib/` and is
+Every `.py` directly under `src/` is a model (`@xbf`, into `../XBF/`). Shared code lives in `src/lib/` and is
 never a model. The assembly composes its children by CALLING the sibling models
 (`frame()`, `seat()`, …): each child runs in the assembly's build as a
 sub-assembly, and a child called twice is one prototype placed twice. A child
-built on its own writes its own xbf and STEP.
+built on its own writes its own xbf.
 
 | Script               | Artifact                  | Description                                              |
 |----------------------|---------------------------|----------------------------------------------------------|

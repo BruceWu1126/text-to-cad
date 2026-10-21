@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import drivetrain as B
 
 
 @xbf(out="../XBF/engine.xbf")
-@step(out="../XBF/engine.step")
 def engine():
     built = B.build_engine()
     if isinstance(built, list):

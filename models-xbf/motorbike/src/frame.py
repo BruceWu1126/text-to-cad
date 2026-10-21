@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import chassis as B
 
 
 @xbf(out="../XBF/frame.xbf")
-@step(out="../XBF/frame.step")
 def frame():
     built = B.build_frame()
     if isinstance(built, list):
