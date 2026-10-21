@@ -17,9 +17,8 @@ of the tree moves its child groups radially out of its parent's centre (the asse
 along their longest axis, overlapping siblings are pushed further out along their own ray, and the
 levels play over overlapping windows of the 0..1 amount, each smoothstepped. An offset of 1e-6 or
 less is none. The arithmetic is the JavaScript's, in its order, and ``Math.hypot`` is V8's
-(``js_hypot``), so the same records give the same doubles. ``packages/core/src/lib/xbf/__fixtures__/
-explode.json``, made once by the viewer's own code, holds both renderers to one layout: its test
-here (``test_render_explode.py``) and ``xbfExplode.test.js`` there.
+(``js_hypot``), so the same records give the same doubles. One golden made by the viewer's own scene
+(``@text-to-cad/core``'s ``lib/xbf/__fixtures__/explode.json``) holds both renderers to one layout.
 """
 
 from __future__ import annotations
@@ -234,43 +233,40 @@ def _radial(node: _Node, child: _Node, level: int, concentric: list[int]) -> lis
     return _scale(direction, magnitude)
 
 
-def _shifted(bounds: Bounds, vector: list[float] | None) -> Bounds:
-    if not vector:
-        return bounds
-    low, high = bounds
-    return ((low[0] + vector[0], low[1] + vector[1], low[2] + vector[2]),
-            (high[0] + vector[0], high[1] + vector[1], high[2] + vector[2]))
-
-
-def _overlap(a: Bounds, b: Bounds) -> list[float] | None:
-    extents = []
-    for axis in range(3):
-        overlap = min(a[1][axis], b[1][axis]) - max(a[0][axis], b[0][axis])
-        if overlap <= 0:
-            return None
-        extents.append(overlap)
-    return extents
-
-
 def _relax(node: _Node, vectors: dict[int, list[float] | None]) -> None:
-    """Siblings that still overlap: the outer mover pushed out along its own ray until they clear."""
+    """Siblings that still overlap: the outer mover pushed out along its own ray until they clear.
+
+    ``relaxSiblingOverlaps``'s sweep, pair after pair in its order, each push seen by the pairs
+    after it. Which pairs of a row overlap is asked of numpy for the whole row at once (the same
+    additions, minimums and subtractions, so the same doubles), and asked again after a push moves
+    the row's own child: a flat document of hundreds of instances is hundreds of thousands of pairs
+    a pass."""
     children = node.children
-    if len(children) < 2:
+    count = len(children)
+    if count < 2:
         return
     gap = max(node.radius * SEPARATION_MARGIN, EPSILON)
+    moving = np.array([bool(vectors.get(id(child))) for child in children])
+    shift = np.array([vectors.get(id(child)) or (0.0, 0.0, 0.0) for child in children], np.float64)
+    rest_low = np.array([child.bounds[0] for child in children], np.float64)
+    rest_high = np.array([child.bounds[1] for child in children], np.float64)
+    low, high = rest_low + shift, rest_high + shift  # each box where its vector moves it
     for _pass in range(MAX_SEPARATION_PASSES):
         pushed = False
-        for i in range(len(children)):
-            for j in range(i + 1, len(children)):
+        for i in range(count - 1):
+            after = i + 1
+            while after < count:
+                overlaps = np.minimum(high[i], high[after:]) - np.maximum(low[i], low[after:])
+                found = np.flatnonzero((overlaps > 0).all(1) & (moving[i] | moving[after:]))
+                if not len(found):
+                    break
+                j = after + int(found[0])
+                overlap = [float(value) for value in overlaps[found[0]]]
+                after = j + 1
                 a, b = children[i], children[j]
                 va, vb = vectors.get(id(a)), vectors.get(id(b))
-                if not va and not vb:
-                    continue
-                overlap = _overlap(_shifted(a.bounds, va), _shifted(b.bounds, vb))
-                if not overlap:
-                    continue
-                target = b if not va else (a if not vb else (a if js_hypot(*va) >= js_hypot(*vb) else b))
-                vector = vectors[id(target)]
+                target = j if not va else (i if not vb else (i if js_hypot(*va) >= js_hypot(*vb) else j))
+                vector = vectors[id(children[target])]
                 length = js_hypot(*vector)
                 if length <= EPSILON:
                     continue
@@ -282,7 +278,9 @@ def _relax(node: _Node, vectors: dict[int, list[float] | None]) -> None:
                 if not math.isfinite(travel):
                     continue
                 push = _scale(unit, travel)
-                vectors[id(target)] = [vector[0] + push[0], vector[1] + push[1], vector[2] + push[2]]
+                moved = [vector[0] + push[0], vector[1] + push[1], vector[2] + push[2]]
+                vectors[id(children[target])] = moved
+                low[target], high[target] = rest_low[target] + moved, rest_high[target] + moved
                 pushed = True
         if not pushed:
             return
