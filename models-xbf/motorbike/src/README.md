@@ -41,7 +41,7 @@ artifact is generated.
 
 | Module          | Role                                                                 |
 |-----------------|----------------------------------------------------------------------|
-| `lib/spec.py`   | **Single source of truth**: coordinates, palette, every hardpoint     |
+| `lib/spec.py`   | **Single source of truth**: coordinates, palette, materials, every hardpoint |
 | `lib/lib.py`    | Geometry vocabulary: revolved bands, lofts, swept tubes, coils        |
 | `lib/wheels.py` | `build_front_wheel` / `build_rear_wheel`                              |
 | `lib/chassis.py`| `build_frame` / `build_center_stand`                                  |
@@ -64,6 +64,29 @@ Imports need no setup — `src/` is on `sys.path` because the script lives there
 from lib import spec as S
 from lib import chassis as B
 ```
+
+## Materials
+
+Every part is painted with `lib.paint(shape, name, *details, color=, material=)`:
+its label, its palette colour and its material, one of the `lib/spec.py`
+materials beside the palette. Each is a catalogue entry in the finish the part
+wears (`materials.steel_1018.but(...)`), with `color=None`, so the palette is
+the colour that shows and the material adds the finish:
+
+| Parts | Material | Finish |
+| --- | --- | --- |
+| frame, fork, stand, handlebar, damper | Steel 1018 | gloss black paint: metallic 0, coat |
+| leg shield, steering cover, under-seat body, fenders | ABS | painted, clear coat |
+| seat | `Leather` (the project's own, 860 kg/m^3) | soft sheen coat |
+| tires / grips | NBR 70A / TPU 95A | catalogue |
+| cast rims, engine case, CVT and crank covers, drum hub | Aluminum 6061-T6 | as cast: roughness 0.6, no grain |
+| brake levers | Aluminum 6061-T6 | catalogue (machined) |
+| exhaust, headlight shell, signal housings, mirror shells | Stainless 304 | polished: roughness 0.1, no grain |
+| axles, damper rod / brake disc | Steel 4140 | hard chrome, roughness 0.12 / ground, 0.3 |
+| shock spring | Spring steel 1095 | yellow powder coat: metallic 0, coat |
+| tail-light housing | ABS | catalogue |
+| headlight lens / tail and signal lenses | Polycarbonate / Acrylic (PMMA) | catalogue: transmissive, the palette's tint and alpha |
+| mirror glass | Glass, soda-lime | silvered: metallic, roughness 0.03, no transmission |
 
 ## Joints (`motorbike.py` only)
 
