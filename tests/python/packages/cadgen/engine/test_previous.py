@@ -24,13 +24,15 @@ import build123d as bd
 from cadgen.engine import read_step, xbf
 
 HERE = Path(__file__).resolve().parent
+# A set of strings: its order is another in every process.
+NAMES = {{"peg", "pin", "dowel", "stud", "post", "spigot"}}
 
 
 @xbf
 def peg():
     size = json.loads((HERE / "peg.json").read_text())["size"]
     peg = bd.Box(size, size, {peg})
-    peg.label = "peg"
+    peg.label = "peg" if "peg" in NAMES else "part"
     return peg
 
 
@@ -112,6 +114,22 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(again["cache"], {"used": True, "from": "memory"})
         self.assertNotIn("read", again["timings"])
         self.assertEqual(self.xbf.stat().st_mtime_ns, written)
+
+    def test_another_process_takes_the_file_whatever_its_hash_seed(self) -> None:
+        import subprocess
+        import sys
+
+        self.source()
+        code = ("import json, sys; from pathlib import Path; from cadgen.engine import build; "
+                "print(json.dumps(build.build(Path(sys.argv[1]), ['kit'], cwd=Path(sys.argv[1]).parent)[0]))")
+        found = []
+        for seed in ("1", "2"):
+            done = subprocess.run([sys.executable, "-c", code, str(self.script)], capture_output=True, text=True,
+                                  env={**os.environ, "PYTHONHASHSEED": seed})
+            self.assertEqual(done.returncode, 0, done.stderr)
+            found.append(json.loads(done.stdout.strip().splitlines()[-1]))
+        self.assertEqual(found[0]["cache"]["reason"], "no file yet")
+        self.assertEqual(found[1]["cache"], {"used": True, "from": "file"})
 
     def test_an_edit_after_a_restart_writes_the_cold_bytes(self) -> None:
         self.cold()
