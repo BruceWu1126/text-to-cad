@@ -26,6 +26,7 @@ LABEL_BACKGROUND = (15, 23, 42, 0.92)
 OFFSET, OVERSHOOT, ARROW_LENGTH, ARROW_WIDTH = 24.0, 5.0, 8.0, 3.5
 LINE, WITNESS, RING, RING_STROKE = 2.6, 1.6, 4.0, 2.0
 LABEL_PADDING_X, LABEL_PADDING_Y, LABEL_MARGIN, LABEL_RADIUS = 6.0, 3.0, 4.0, 5.0
+LABEL_FACE = (600, 8)  # MEASURE_DIMENSION_LABEL_FONT: 600 8px, the UI face
 
 
 def layout(start: tuple[float, float], end: tuple[float, float]) -> dict[str, Any] | None:
@@ -210,7 +211,7 @@ def paint_measurements(frame: np.ndarray, marks: list[dict[str, Any]], project: 
         label = str(mark.get("label") or "").strip()
         if not label:
             continue
-        face = text_face(600, 8)
+        face = text_face(*LABEL_FACE)
         chip_w, chip_h = face.width(label) + LABEL_PADDING_X * 2, 11 + LABEL_PADDING_Y * 2
         x = min(max(found["label"][0] - chip_w / 2, LABEL_MARGIN), max(LABEL_MARGIN, bounds[0] - chip_w - LABEL_MARGIN))
         y = min(max(found["label"][1] - chip_h / 2, LABEL_MARGIN), max(LABEL_MARGIN, bounds[1] - chip_h - LABEL_MARGIN))

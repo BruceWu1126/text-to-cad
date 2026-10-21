@@ -179,6 +179,7 @@ class Scene:
         self.structures: list[Any] = []  # presentations made below AIS: the text quads
         self.text_quads: list[tuple[np.ndarray, str]] = []  # their world corners and colours
         self.screen_marks: list[dict[str, Any]] = []  # painted over the frame: Measure's
+        self.fonts: set[str] = set()  # the faces the words of the frame were set in (text.face_source)
         self.stage: list[Any] = []  # Preview's studio: its floor and the floor's shadow
         self.studio = False
         self.staged = b""  # the placements its shadow was baked for
@@ -530,6 +531,7 @@ class Scene:
         self.structures = []
         self.text_quads = []
         self.screen_marks = []
+        self.fonts = set()
 
     def _pixel_size(self, point: np.ndarray) -> float:
         """World millimetres per output pixel at ``point`` for the camera framed."""
@@ -606,9 +608,10 @@ class Scene:
         from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
         from OCP.gp import gp_Pnt, gp_Pnt2d
 
-        from cadgen.engine.render.text import text_canvas
+        from cadgen.engine.render.text import TEXT_SCALE, face, text_canvas
 
         picture = text_canvas(mark.get("text", ""), float(mark.get("fontPx", 14)), mark["color"])
+        self.fonts.add(face(500, float(mark.get("fontPx", 14)) * TEXT_SCALE).name)
         height, width = picture.shape[:2]
         pixmap = Image_PixMap()
         pixmap.InitZero(Image_Format.Image_Format_RGBA, width, height)
@@ -675,7 +678,12 @@ class Scene:
     def measure(self, marks: list[dict[str, Any]]) -> None:
         """The snapshot job's ``measurements``, painted over the finished frame as the snapshot
         page paints them on its 2D canvas (``overlay.py``): in screen space, over everything."""
+        from cadgen.engine.render.overlay import LABEL_FACE
+        from cadgen.engine.render.text import face
+
         self.screen_marks = list(marks)
+        if any(str(mark.get("label") or "").strip() for mark in marks):
+            self.fonts.add(face(*LABEL_FACE).name)
 
     # --- preview ------------------------------------------------------------------------------
 
@@ -1262,7 +1270,10 @@ def main(argv: list[str] | None = None) -> int:
         timings["frame+encode"] = scene.save(Path(args.out))
     timings["total_in_process"] = time.perf_counter() - started
     if args.json:
-        print(json.dumps({k: round(v, 4) for k, v in timings.items()}))
+        report: dict[str, Any] = {k: round(v, 4) for k, v in timings.items()}
+        if scene.fonts:
+            report["font"] = ", ".join(sorted(scene.fonts))  # the face the words were set in
+        print(json.dumps(report))
     else:
         print(f"wrote {args.out} in {timings['total_in_process']:.2f}s")
     return 0

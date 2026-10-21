@@ -298,7 +298,8 @@ class Held:
                       "displayMode": display.get("mode", "solid"), "preview": still.preview,
                       "parts": len(self.structure["prototypes"]), "instances": len(shown["instances"]),
                       "unmeshed": unmeshed, "pose": posed, "exploded": exploded_amount(display) or None,
-                      "renderer": "occt", "timings": timings}
+                      "renderer": "occt", **({"font": ", ".join(sorted(scene.fonts))} if scene.fonts else {}),
+                      "timings": timings}
 
 
 def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes, dict[str, Any]]:
