@@ -938,6 +938,7 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
     if status != PCDM_StoreStatus.PCDM_SS_OK or not temporary.exists():
         temporary.unlink(missing_ok=True)
         raise OSError(f"could not save {path}: {status}")
+    _fix_date(temporary)
     size = temporary.stat().st_size
     if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
         temporary.unlink()
@@ -947,6 +948,27 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)
     return True, size
+
+
+# The creation date the BinXCAF storage driver writes in the file's info section, the
+# day of the save (``Storage_Schema::ICreationDate``, ``%m/%d/%Y``: always ten bytes,
+# after its little-endian length), which no API sets. The file is a function of the code
+# and the geometry alone, so the written date is this one, put over it in place.
+WRITTEN_DATE = b"01/01/2000"
+_HEADER_DATE = re.compile(rb"\x0a\x00\x00\x00(\d\d/\d\d/\d\d\d\d)")
+_INFO_BYTES = 1024
+
+
+def _fix_date(path: Path) -> None:
+    """Put ``WRITTEN_DATE`` over the saved file's creation date, in place: the same
+    length, so no other byte moves."""
+    with open(path, "r+b") as handle:
+        found = _HEADER_DATE.search(handle.read(_INFO_BYTES))
+        if found is None:
+            raise OSError(f"{path} has no BinXCAF creation date in its info section")
+        if found.group(1) != WRITTEN_DATE:
+            handle.seek(found.start(1))
+            handle.write(WRITTEN_DATE)
 
 
 def _free_shapes(doc: Any) -> list[Any]:

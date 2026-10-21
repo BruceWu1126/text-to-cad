@@ -130,6 +130,9 @@ build orders by label (a colour's, a material's, a part's placements) are put ba
 in that order. The mechanism is written again only when a joint, a configuration
 or an occurrence it names changed. So the file a patch writes is the cold build's,
 byte for byte, and the document the worker serves is the one it wrote.
+Nor does the day: the creation date the BinXCAF driver writes in the file's
+header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
+place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. The daemon starts on demand and exits after an idle hour
 (`CADGEN_ENGINE_IDLE` seconds). `CADGEN_ENGINE_DIR` moves its socket and lock.

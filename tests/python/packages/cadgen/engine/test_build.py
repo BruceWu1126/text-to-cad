@@ -416,5 +416,52 @@ class PatchTest(EngineCase):
         self.assertEqual(len(read["kinematics"]["pairs"]), 2, "each right body's hinge")
 
 
+BLOCK = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def block():
+    return bd.Box(3, 2, 1) - bd.Cylinder(0.5, 2)
+"""
+
+COLD = """
+import sys
+from pathlib import Path
+from cadgen.engine import build
+folder = Path(sys.argv[1])
+reports = build.build(folder / "block.py", ["block"], cwd=folder)
+sys.exit(0 if all(report["ok"] for report in reports) else 1)
+"""
+
+
+class DateTest(unittest.TestCase):
+    """The file is a function of the code and the geometry alone: the creation date the
+    BinXCAF driver writes is a constant (``document.WRITTEN_DATE``), whatever the day."""
+
+    def test_two_cold_builds_a_day_apart_write_the_same_bytes(self) -> None:
+        import shutil
+        import subprocess
+        import sys
+
+        files = []
+        # Twenty-six hours apart: the two processes' local dates always differ.
+        for zone in ("Etc/GMT+12", "Etc/GMT-14"):
+            folder = Path(tempfile.mkdtemp(prefix="engine-date-")).resolve()
+            self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+            (folder / "block.py").write_text(textwrap.dedent(BLOCK), encoding="utf-8")
+            done = subprocess.run([sys.executable, "-c", COLD, str(folder)], env={**os.environ, "TZ": zone},
+                                  capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            files.append(folder / "block.xbf")
+        first, second = (path.read_bytes() for path in files)
+        self.assertEqual(first, second)
+        self.assertIn(b"\x0a\x00\x00\x00" + document.WRITTEN_DATE, first[:1024])
+        loaded = document.load(files[0])
+        self.assertEqual(len(loaded.prototypes), 1)
+        self.assertEqual(len(loaded.prototypes[0].face_names), 7, "the block's six faces and its bore")
+
+
 if __name__ == "__main__":
     unittest.main()
