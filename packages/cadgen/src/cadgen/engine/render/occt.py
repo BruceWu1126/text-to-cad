@@ -23,7 +23,8 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
   parts' colours; ``--annotation`` and ``--measurements``: the snapshot job's ``annotation`` and
   ``measurements`` data, drawn as polylines and labels.
 - ``--preview``: physically based raster (PBR, an image-based environment, a key light with
-  shadows, a floor); ``--path-trace N``: OCCT's path tracer, N samples.
+  shadows on a floor that runs past the frame, the backdrop the floor's own colour as drawn, so
+  the two meet without an edge); ``--path-trace N``: OCCT's path tracer, N samples.
 """
 
 from __future__ import annotations
@@ -61,6 +62,10 @@ PADDING = 0.04
 # window that draws a label at about half its pixel height in an off-screen frame of the asked size.
 TEXT_SCALE = float(os.environ.get("OCCT_TEXT_SCALE", 2.0))
 FOCAL_LENGTH = 50.0  # the view's default camera.focalLength (viewSettings.js), on three's 35 mm film gauge
+# Preview's studio: the environment's horizon grey (sRGB, as its cube map holds it), which is the
+# floor's colour too; and how far the floor runs, in model diagonals each way.
+HORIZON = (0.70, 0.71, 0.73)
+FLOOR_REACH = 200.0
 
 
 def vertical_fov(aspect: float, focal_length: float = FOCAL_LENGTH) -> float:
@@ -553,17 +558,79 @@ class Scene:
 
     # --- preview ------------------------------------------------------------------------------
 
+    def _floor(self) -> Any:
+        """Preview's floor: a plane under the model at rest, ``FLOOR_REACH`` model diagonals each
+        way, so it runs past the frame of every camera (a perspective view meets it at its horizon).
+        It is the environment's horizon grey, rough and unreflective (no Fresnel: one colour from any
+        angle), its back culled (from below there is no floor), and infinite to the view: the key
+        light's shadow frame is fitted to the model alone, not to the floor."""
+        from OCP.AIS import AIS_Shape
+        from OCP.Graphic3d import (Graphic3d_BSDF, Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial,
+                                   Graphic3d_PBRMaterial, Graphic3d_TypeOfBackfacingModel)
+        from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_sRGB
+
+        from cadgen.engine.render.shapes import craft, read
+
+        low, high = self.rest_bounds()
+        diagonal = float(np.linalg.norm(high - low)) or 1.0
+        cx, cy, z = (low[0] + high[0]) / 2, (low[1] + high[1]) / 2, float(low[2]) - diagonal * 1e-4
+        half = diagonal * FLOOR_REACH
+        nodes = np.array([[cx - half, cy - half, z], [cx + half, cy - half, z], [cx + half, cy + half, z],
+                          [cx - half, cy + half, z]])
+        floor = AIS_Shape(read(craft([(nodes, np.array([[0, 1, 2], [0, 2, 3]]), np.tile([0.0, 0.0, 1.0], (4, 1)))], {})))
+        # The environment's bytes are sRGB, so its horizon is this grey as the environment shows it.
+        grey = Quantity_Color(*HORIZON, Quantity_TOC_sRGB)
+        pbr = Graphic3d_PBRMaterial()
+        pbr.SetColor(Quantity_ColorRGBA(grey, 1.0))
+        pbr.SetMetallic(0.0)
+        pbr.SetRoughness(1.0)
+        pbr.SetIOR(1.0)  # no reflectance head on, and at full roughness none at a grazing angle either
+        material = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial.Graphic3d_NameOfMaterial_UserDefined)
+        material.SetPBRMaterial(pbr)
+        material.SetColor(grey)
+        material.SetSpecularColor(_color((0.0, 0.0, 0.0)))
+        material.SetBSDF(Graphic3d_BSDF.CreateMetallicRoughness_s(pbr))
+        floor.SetMaterial(material)
+        floor.SetColor(grey)
+        floor.Attributes().ShadingAspect().Aspect().SetFaceCulling(
+            Graphic3d_TypeOfBackfacingModel.Graphic3d_TypeOfBackfacingModel_BackCulled)
+        self.canvas.context.Display(floor, 1, -1, False)
+        floor.SetInfiniteState(True)
+        return floor
+
+    def _floor_colour(self) -> Any:
+        """The floor as drawn: a tiny orthographic frame straight down on a floor point far from
+        the model, on the light's side (no shadow reaches it), the camera put back after. One
+        colour, as the floor is one colour from any angle."""
+        from OCP.Graphic3d import Graphic3d_Camera
+        from OCP.Image import Image_AlienPixMap
+        from OCP.gp import gp_Dir, gp_Pnt
+
+        low, high = self.rest_bounds()
+        diagonal = float(np.linalg.norm(high - low)) or 1.0
+        away = -np.array([0.5, 0.7]) / np.linalg.norm([0.5, 0.7]) * diagonal * 20  # against the key light
+        point = ((low[0] + high[0]) / 2 + away[0], (low[1] + high[1]) / 2 + away[1], float(low[2]))
+        camera = self.canvas.view.Camera()
+        kept = Graphic3d_Camera(camera)
+        camera.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Orthographic)
+        camera.SetEyeAndCenter(gp_Pnt(point[0], point[1], point[2] + diagonal), gp_Pnt(*point))
+        camera.SetUp(gp_Dir(0, 1, 0))
+        camera.SetScale(diagonal * 0.01)
+        image = Image_AlienPixMap()
+        self.canvas.view.ToPixMap(image, 8, 8)
+        found = image.PixelColor(4, 4).GetRGB()  # the pixel's own sRGB bytes, unconverted
+        camera.Copy(kept)
+        return "#%02x%02x%02x" % tuple(int(round(value * 255)) for value in (found.Red(), found.Green(), found.Blue()))
+
     def preview_look(self, path_trace: int = 0) -> float:
         """Preview's photographic look: PBR raster under an image-based environment, a key light
-        casting shadows and a floor; or OCCT's path tracer."""
-        from OCP.AIS import AIS_Shape
-        from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-        from OCP.Graphic3d import (Graphic3d_BSDF, Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial,
-                                   Graphic3d_PBRMaterial, Graphic3d_RenderingMode, Graphic3d_ToneMappingMethod,
+        casting shadows on a floor, and a backdrop of the floor's own colour as drawn, so floor and
+        backdrop meet without an edge; or OCCT's path tracer."""
+        from OCP.Graphic3d import (Graphic3d_BSDF, Graphic3d_RenderingMode, Graphic3d_ToneMappingMethod,
                                    Graphic3d_TypeOfShadingModel)
-        from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
+        from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
         from OCP.V3d import V3d_AmbientLight, V3d_DirectionalLight
-        from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+        from OCP.gp import gp_Dir
 
         clock = time.perf_counter()
         viewer, view = self.canvas.viewer, self.canvas.view
@@ -580,24 +647,8 @@ class Scene:
         viewer.SetLightOn(key)
         viewer.AddLight(ambient)
         viewer.SetLightOn(ambient)
-        low, high = self.rest_bounds()
-        radius = float(max(high[0] - low[0], high[1] - low[1])) * 1.6
-        floor = AIS_Shape(BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt((low[0] + high[0]) / 2, (low[1] + high[1]) / 2,
-                                                                 float(low[2]) - radius * 0.0015),
-                                                          gp_Dir(0, 0, 1)), radius, radius * 0.001).Shape())
-        material = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial.Graphic3d_NameOfMaterial_Plastified)
-        grey = _color((0.86, 0.87, 0.88))
-        pbr = Graphic3d_PBRMaterial()
-        pbr.SetColor(Quantity_ColorRGBA(grey, 1.0))
-        pbr.SetMetallic(0.0)
-        pbr.SetRoughness(0.7)
-        material.SetPBRMaterial(pbr)
-        material.SetColor(grey)
-        material.SetBSDF(Graphic3d_BSDF.CreateMetallicRoughness_s(pbr))
-        floor.SetMaterial(material)
-        floor.SetColor(grey)
-        self.canvas.context.Display(floor, 1, -1, False)
-        self.overlays.append(floor)
+        self.lights = [key, ambient]
+        self.overlays.append(self._floor())
         view.SetBackgroundColor(_color((0.93, 0.93, 0.94)))
         view.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Pbr)
         params = view.ChangeRenderingParams()
@@ -630,12 +681,15 @@ class Scene:
             view.SetBackgroundCubeMap(cubemap, True, False)
             view.SetImageBasedLighting(True)
             view.Redraw()  # bakes the environment's lighting from the cube map
-            from OCP.Aspect import Aspect_GradientFillMethod
-
-            view.SetBgGradientColors(_color("#f7f7f7"), _color("#d9d9db"),
-                                     Aspect_GradientFillMethod.Aspect_GradientFillMethod_Vertical, False)
             params.PbrEnvPow2Size = 9
             params.PbrEnvSpecMapNbLevels = 8
+            from OCP.Aspect import Aspect_GradientFillMethod
+
+            # The backdrop (in place of the cube map, which only lights) is the floor as drawn:
+            # where the two meet -- a perspective view's horizon, a level view's edge-on floor --
+            # there is nothing to see.
+            backdrop = _color(self._floor_colour())
+            view.SetBgGradientColors(backdrop, backdrop, Aspect_GradientFillMethod.Aspect_GradientFillMethod_Vertical, False)
         return time.perf_counter() - clock
 
     def path_trace(self, out: Path, samples: int) -> float:
@@ -682,7 +736,7 @@ def _studio_environment(size: int = 64) -> Any:
         v = np.stack(face, -1)
         v /= np.linalg.norm(v, axis=-1, keepdims=True)
         z = v[..., 2]
-        sky, horizon, floor = np.array([0.92, 0.94, 0.97]), np.array([0.70, 0.71, 0.73]), np.array([0.25, 0.25, 0.26])
+        sky, horizon, floor = np.array([0.92, 0.94, 0.97]), np.array(HORIZON), np.array([0.25, 0.25, 0.26])
         w = np.clip(z, 0, 1)[..., None] ** 0.6
         c = np.where(z[..., None] > 0, horizon * (1 - w) + sky * w,
                      horizon * np.clip(1 + z * 4, 0, 1)[..., None] + floor * np.clip(-z * 4, 0, 1)[..., None])
