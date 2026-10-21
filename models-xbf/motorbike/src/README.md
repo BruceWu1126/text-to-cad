@@ -80,8 +80,11 @@ carry the ranges the old typed mates declared:
 
 Every other mount is a `RigidJoint` pair: handlebar, front fender and mirrors
 on the fork and bar; exhaust on the engine; apron, shroud, body, seat, fenders,
-lamps and signals on the frame and bodywork; the rear shock rigidly on both the
-frame lug and the engine boss.
+lamps and signals on the frame and bodywork; the rear shock by its upper eye on
+the frame lug only. Its lower eye on the engine boss is not jointed: a second
+rigid mount would close a loop through the shock and weld the engine to the
+frame, so `engine_pivot` could not move. The old kinematics left the shock
+unmated for the same reason; it stays put while the engine swings.
 
 Not ported: the old `KINEMATICS` presets (`ride`, `turned_left`, `stand_down`,
 `bump`): build123d joints have no poses.
