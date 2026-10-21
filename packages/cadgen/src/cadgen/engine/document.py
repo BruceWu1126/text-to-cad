@@ -391,10 +391,71 @@ def _name(label: Any, text: str) -> None:
     TDataStd_Name.Set_s(label, TCollection_ExtendedString(text, True))
 
 
+# A material's fields XCAF's own attributes have no place for, written on its
+# ``XCAFDoc_Material`` label as one ``TDataStd_NamedData`` named as the schema names them: text,
+# reals, ``isotropic`` an integer and ``transmission_color`` an array of reals; a field at its
+# default is not written, so a material of a name and a density has no such attribute.
+_EXTRA_TEXT = ("family", "standard", "source")
+_EXTRA_REALS = ("young_modulus", "poisson_ratio", "yield_strength", "ultimate_strength", "thermal_expansion",
+                "thermal_conductivity", "specific_heat", "anisotropy", "anisotropy_rotation", "transmission",
+                "transmission_depth", "coat", "coat_roughness", "emissive_strength")
+_EXTRA_DEFAULTS = {"anisotropy": 0.0, "anisotropy_rotation": 0.0, "transmission": 0.0, "coat": 0.0,
+                   "coat_roughness": 0.0, "emissive_strength": 1.0}
+
+
+def _write_extra(label: Any, material: Any) -> None:
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_NamedData
+
+    from cadgen.engine.mechanism import _reals
+
+    text = lambda value: TCollection_ExtendedString(value, True)  # noqa: E731
+    texts = [(key, getattr(material, key)) for key in _EXTRA_TEXT if getattr(material, key) is not None]
+    reals = [(key, getattr(material, key)) for key in _EXTRA_REALS
+             if getattr(material, key) is not None and getattr(material, key) != _EXTRA_DEFAULTS.get(key)]
+    if not (texts or reals or not material.isotropic or material.transmission_color is not None):
+        return
+    data = TDataStd_NamedData.Set_s(label)
+    for key, value in texts:
+        data.SetString(text(key), text(value))
+    for key, value in reals:
+        data.SetReal(text(key), float(value))
+    if not material.isotropic:
+        data.SetInteger(text("isotropic"), 0)
+    if material.transmission_color is not None:
+        data.SetArrayOfReals(text("transmission_color"), _reals(material.transmission_color))
+
+
+def _read_extra(label: Any) -> dict[str, Any]:
+    """The fields ``_write_extra`` wrote on a material's label."""
+    from OCP.TCollection import TCollection_ExtendedString
+    from OCP.TDataStd import TDataStd_NamedData
+
+    data = TDataStd_NamedData()
+    if not _find(label, data, TDataStd_NamedData.GetID_s()):
+        return {}
+    text = lambda value: TCollection_ExtendedString(value, True)  # noqa: E731
+    found: dict[str, Any] = {}
+    for key in _EXTRA_TEXT:
+        if data.HasString(text(key)):
+            found[key] = data.GetString(text(key)).ToExtString()
+    for key in _EXTRA_REALS:
+        if data.HasReal(text(key)):
+            found[key] = data.GetReal(text(key))
+    if data.HasInteger(text("isotropic")):
+        found["isotropic"] = bool(data.GetInteger(text("isotropic")))
+    if data.HasArrayOfReals(text("transmission_color")):
+        values = data.GetArrayOfReals(text("transmission_color"))
+        found["transmission_color"] = tuple(values.Value(at) for at in range(values.Lower(), values.Upper() + 1))
+    return found
+
+
 class _Materials:
     """A document's materials, each written once: an ``XCAFDoc_Material`` per material
-    (density in g/cm^3, the kernel's unit, which its STEP writer writes with its unit),
-    an ``XCAFDoc_VisMaterial`` per material and base colour."""
+    (name, description, density in g/cm^3 -- the kernel's unit, which its STEP writer writes
+    with its unit -- and every other physical field and look field XCAF has no place for, as
+    ``_write_extra``), an ``XCAFDoc_VisMaterial`` per material and base colour (PBR: base
+    colour and alpha, metallic, roughness, emissive, IOR)."""
 
     def __init__(self, doc: Any) -> None:
         from OCP.XCAFDoc import XCAFDoc_DocumentTool
@@ -418,6 +479,7 @@ class _Materials:
                 TCollection_HAsciiString(material.name), TCollection_HAsciiString(material.description or ""),
                 (material.density or 0.0) / 1000.0, TCollection_HAsciiString("density"),
                 TCollection_HAsciiString("MASS_DENSITY_MEASURE"))
+            _write_extra(found, material)
         return found
 
     def visual_label(self, look: tuple) -> Any:
@@ -436,6 +498,7 @@ class _Materials:
             pbr.Metallic = material.metallic
             pbr.Roughness = material.roughness
             pbr.EmissiveFactor = gp_Vec3f(*(material.emissive or (0.0, 0.0, 0.0)))
+            pbr.RefractionIndex = material.ior
             pbr.IsDefined = True
             made = XCAFDoc_VisMaterial()
             made.SetPbrMaterial(pbr)
@@ -1433,7 +1496,7 @@ def as_read(material: Any, rgba: tuple) -> Any:
     """``material`` as a document read back gives it: drawn in ``rgba`` (the base colour
     as read), its PBR factors (metallic, roughness, emissive, IOR) as 32-bit floats, its density
     through the kernel's g/cm^3, no emissive where it is black, no description where it is
-    empty; every other field as it is."""
+    empty; every other field as it is (``_write_extra`` keeps doubles)."""
     emissive = tuple(_f32(value) for value in (material.emissive or (0.0, 0.0, 0.0)))
     return material.but(density=round(material.density / 1000.0 * 1000.0, 6) if material.density else None,
                         color=rgba, metallic=_f32(material.metallic), roughness=_f32(material.roughness),
@@ -1479,7 +1542,8 @@ def material_from_json(value: dict[str, Any] | None) -> Any:
 
 def _label_material(label: Any) -> Any:
     """The material a label was given, as ``as_read`` describes it, or None: its
-    ``XCAFDoc_Material`` (name, description, density) and its ``XCAFDoc_VisMaterial`` (PBR), either alone too -- a STEP the engine did
+    ``XCAFDoc_Material`` (name, description, density, and the rest ``_write_extra`` wrote
+    beside it) and its ``XCAFDoc_VisMaterial`` (PBR), either alone too -- a STEP the engine did
     not write has no PBR, and is drawn in the label's colour."""
     from OCP.TDataStd import TDataStd_TreeNode
     from OCP.XCAFDoc import XCAFDoc, XCAFDoc_Material, XCAFDoc_VisMaterialTool
@@ -1497,6 +1561,7 @@ def _label_material(label: Any) -> Any:
             name = physical.GetName().ToCString() if physical.GetName() is not None else ""
             description = physical.GetDescription().ToCString() if physical.GetDescription() is not None else ""
             density = round(physical.GetDensity() * 1000.0, 6) or None
+            extra = _read_extra(held)
     visual = XCAFDoc_VisMaterialTool.GetShapeMaterial_s(label)
     pbr = visual.PbrMaterial() if visual is not None and visual.HasPbrMaterial() else None
     ior = 1.5

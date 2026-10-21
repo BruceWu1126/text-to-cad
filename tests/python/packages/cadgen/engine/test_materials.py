@@ -47,6 +47,14 @@ def plate():
     return root
 """
 
+# Every field away from its default.
+FULL = Material("Full", 1234.5, family="composite", standard="X-1", description="every field", source="the test",
+                young_modulus=1.5e9, poisson_ratio=0.31, yield_strength=2.5e7, ultimate_strength=3.5e7,
+                thermal_expansion=-1.25e-6, thermal_conductivity=0.75, specific_heat=1100.5, isotropic=False,
+                color=(0.25, 0.5, 0.75, 0.8), metallic=0.3, roughness=0.6, ior=1.45, anisotropy=0.4,
+                anisotropy_rotation=0.7, transmission=0.5, transmission_color=(0.9, 0.8, 0.7),
+                transmission_depth=0.02, coat=0.6, coat_roughness=0.15, emissive=(0.1, 0.2, 0.3), emissive_strength=2.5)
+
 def _glb_json(path: Path) -> dict:
     data = path.read_bytes()
     magic, version, length = struct.unpack_from("<4sII", data, 0)
@@ -165,9 +173,7 @@ class MaterialDocumentTest(unittest.TestCase):
         self.build()
         body = self.prototypes()["body"]
         steel = materials.steel
-        self.assertEqual((body.material.name, body.material.density), (steel.name, steel.density))
-        self.assertEqual((body.material.metallic, body.material.roughness), (steel.metallic, steel.roughness))
-        self.assertEqual(body.material.color, steel.color)
+        self.assertEqual(body.material, document.as_read(steel, steel.color), "every field as written")
         self.assertEqual(body.color, steel.color, "a reader of colours alone sees the material's")
         glow, bare = body.face_materials.values()
         self.assertEqual((glow.name, glow.density, glow.description), ("Glow", 1500.0, "a lit plastic"))
@@ -185,6 +191,26 @@ class MaterialDocumentTest(unittest.TestCase):
         self.assertEqual({m["name"] for m in entry["faceMaterials"].values()}, {"Glow", "Bare"})
         self.assertEqual(entry["faceMaterials"][next(k for k, m in entry["faceMaterials"].items()
                                                      if m["name"] == "Glow")]["emissive"], [0.5, 0.25, 0.0])
+
+    def test_every_field_round_trips_through_the_xbf_and_the_structure(self) -> None:
+        self.build(pin=f"FULL = {FULL!r}\n    pin.material = FULL\n"
+                       "    paint(pin, pin.faces()[0], FULL.but(name='Full face', coat=0.0))")
+        pin = self.prototypes()["pin"]
+        self.assertEqual(pin.material, document.as_read(FULL, pin.color))
+        [face] = pin.face_materials.values()
+        self.assertEqual(face, document.as_read(FULL.but(name="Full face", coat=0.0), face.color))
+        # Read back: the physical fields exactly, the PBR factors as 32-bit floats.
+        for field in ("density", "family", "standard", "source", "young_modulus", "poisson_ratio", "yield_strength",
+                      "ultimate_strength", "thermal_expansion", "thermal_conductivity", "specific_heat", "isotropic",
+                      "anisotropy", "anisotropy_rotation", "transmission", "transmission_color", "transmission_depth",
+                      "coat", "coat_roughness", "emissive_strength", "description"):
+            self.assertEqual(getattr(pin.material, field), getattr(FULL, field), field)
+        for field in ("metallic", "roughness", "ior"):
+            self.assertAlmostEqual(getattr(pin.material, field), getattr(FULL, field), places=6)
+        self.assertEqual(pin.color, (0.25, 0.5, 0.75, 0.8))
+        # And a STEP, which carries a material's name and density alone.
+        step = self.prototypes("plate.step")["pin"].material
+        self.assertEqual((step.name, step.density, step.family, step.coat), ("Full", 1234.5, None, 0.0))
 
     def test_an_assembly_s_material_is_every_part_s_below_it_that_has_none(self) -> None:
         self.build(pin="pin.material = materials.brass")
