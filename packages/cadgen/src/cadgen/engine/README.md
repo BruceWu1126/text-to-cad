@@ -223,6 +223,36 @@ every placement its own). No flag is as built. An unknown configuration or joint
 of range, a pair a gear drives, a pair kept inconsistent and a pair of a loop are refused by
 name before anything renders or is written.
 
+## Placements
+
+A part used ten times is one prototype placed ten times, in the worker's memory as in the
+document, as FreeCAD's `App::Link` places one. build123d places a shape by deep-copying it
+-- `moved`, `located`, `copy.copy`, and the transforms, which deep-copy before they replace
+the copy's geometry -- and its deep copy runs `BRepBuilderAPI_Copy` on every node, so each
+placement of a vendor assembly was a whole new B-rep. Under the memo a deep copy makes new
+objects of the same classes, each with its own label, colour, material, paints, joints and
+children, and each a new handle on the SAME `TShape` (`kernel/memo.py`, `_sharing`); so
+does `copy.deepcopy(shape)` in a model. A model that wants a B-rep of its own copies it
+with `BRepBuilderAPI_Copy`.
+
+build123d's own operations never change a shape they are given in place. `ShapeFix_Shape`
+does (it fixes the sub-shapes it is handed): run by a model on a shape a placement shares,
+it is given a copy of that shape first, a `copy` feature of the model's, and the other
+placements stay as they were (counted: the memo's `copied_on_write`). A `BRep_Builder` a
+model drives itself on a placed shape is not seen: it changes every placement.
+
+A file read again in one build from the same site -- a helper reading a screw for each
+place it goes -- is decoded once: the read hands back the first read's tree again, new
+objects on the same TShapes. A read from another site is another feature, named apart, and
+decoded apart: one B-rep carries one set of names.
+
+The document keys a part by its TShape, orientation, paints and materials
+(`document.collect`), then merges parts of one geometry key whose elements are named alike
+and which hold the same colour, paints and materials (`document.merge`): a helper building
+the same bracket for each place it goes is one prototype too. Placements painted or given
+materials apart are prototypes apart, the second its own topology over the same geometry
+(`document._apart`: the shape tool holds one label per shape).
+
 ## Mesh
 
 One tolerance, FreeCAD's default, configurable nowhere: a linear deflection of
@@ -366,10 +396,13 @@ build123d, with OCCT's `BRepBuilderAPI_Transform`, `_GTransform` or `_Copy`,
 `ShapeFix_Shape`, `ShapeUpgrade_UnifySameDomain` or `BRepFilletAPI_MakeFillet`, is a
 feature like any other (`kernel/memo.py`, `_MAKER_FEATURES`): its elements are named
 from what the maker reports, or, where it reports nothing, from the shape it was given
-by ordinal when the two map one-to-one. So are the parts build123d's `moved` copies
-while placing an assembly: a copy the makers left unaccounted is matched to its
-original in the assembly by ordinal, and a part a later compound is built from those
-copies is named in the copy that holds it.
+by ordinal when the two map one-to-one. A placement copies nothing (**Placements**): a
+placed part is its prototype and has its prototype's names, whichever placement the
+model labelled. A label on one of several shapes a feature made -- one part of a file
+read -- names what is made of that shape alone, never what is made of its siblings; and
+placements of one shape labelled apart name their occurrences and pin none of those
+labels on the shape they share, where one placement's label would rename what is made of
+every other.
 
 An element of a shape read from a file (`read_step`) is named within its own product,
 the part of the file it belongs to, however often the file places it: by the name the
