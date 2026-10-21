@@ -1,6 +1,6 @@
 """PROTOTYPE: an engine document drawn by OCCT's own OpenGL renderer, from the engine's meshes.
 
-``python -m cadgen.engine.render.occt DOC.xbf OUT.png [--display MODE|JSON] [--camera C] [--grid]
+``python -m cadgen.engine.render.occt DOC.xbf OUT.png [--display MODE|JSON] [--camera C|JSON] [--grid]
 [--preview] [--pose NAME|JSON] [--explode AMOUNT] [--annotation FILE] [--measurements FILE]
 [--path-trace N] [--mesh-cache DIR] [--width W --height H] [--json]``
 
@@ -17,7 +17,8 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
   behind them), wireframe (every edge).
 - Camera as the snapshot page's (``renderMeshScene.js``): a preset's or ``az:el``'s direction,
   orthographic with the tight frame (every placed vertex projected, padding 0.04), or perspective
-  (``display.camera.projection``, 48 degrees, the same tight fit).
+  (``display.camera.projection``, 48 degrees, the same tight fit); or a prompt view's camera
+  (``{position, target, up, orthographicHalfHeight}``, JSON or a file), placed as it is.
 - ``--pose``: the engine's forward kinematics (``mechanism.posed_structure``); ``--explode``: the
   viewer's own explode layout (``explode.py``); ``display.clip``: an OCCT clip plane, capped in the
   parts' colours; ``--annotation`` and ``--measurements``: the snapshot job's ``annotation`` and
@@ -353,11 +354,47 @@ class Scene:
                 chunks.append(positions.astype(float) @ m[:3, :3].T + m[:3, 3])
         return np.concatenate(chunks)
 
-    def frame(self, camera: str = "iso", projection: str = "orthographic", focal_length: float = FOCAL_LENGTH) -> dict[str, Any]:
-        """The snapshot page's framing: the direction a preset or ``az:el`` names, then the tight
-        frame on every placed vertex (orthographic), or the perspective fit on the same points."""
+    def _pinned(self, camera: dict[str, Any], projection: str, focal_length: float) -> dict[str, Any]:
+        """A camera as a prompt's view holds it (``{position, target, up, orthographicHalfHeight}``,
+        ``annotation/views.js``), placed as it is, the way the snapshot page places one
+        (``fitOrthographicCamera``: the half-height the vertical half-extent, no fit, no padding)."""
         from OCP.gp import gp_Dir, gp_Pnt
         from OCP.Graphic3d import Graphic3d_Camera
+
+        eye, target = np.array(camera["position"], float), np.array(camera["target"], float)
+        up = np.array(camera.get("up") or (0.0, 0.0, 1.0), float)
+        d = (eye - target) / (np.linalg.norm(eye - target) or 1.0)
+        right = np.cross(-d, up)
+        right /= np.linalg.norm(right) or 1.0
+        screen_up = np.cross(right, -d)
+        aspect = self.canvas.width / self.canvas.height
+        cam = self.canvas.view.Camera()
+        scale = None
+        if projection == "perspective":
+            cam.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Perspective)
+            cam.SetFOVy(vertical_fov(aspect, focal_length))
+        else:
+            cam.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Orthographic)
+            scale = 2 * float(camera["orthographicHalfHeight"]) / float(camera.get("zoom") or 1.0)
+        cam.SetEyeAndCenter(gp_Pnt(*eye), gp_Pnt(*target))
+        cam.SetUp(gp_Dir(*screen_up))
+        if scale is not None:
+            cam.SetScale(scale)
+        self.canvas.view.ZFitAll(1.0)
+        self.camera = {"fov": vertical_fov(aspect, focal_length), "direction": d, "up": screen_up, "right": right,
+                       "eye": eye, "target": target, "projection": projection, "scale": scale}
+        return self.camera
+
+    def frame(self, camera: str | dict[str, Any] = "iso", projection: str = "orthographic",
+              focal_length: float = FOCAL_LENGTH) -> dict[str, Any]:
+        """The snapshot page's framing: the direction a preset or ``az:el`` names, then the tight
+        frame on every placed vertex (orthographic), or the perspective fit on the same points;
+        or a prompt view's own camera, placed as it is (``_pinned``)."""
+        from OCP.gp import gp_Dir, gp_Pnt
+        from OCP.Graphic3d import Graphic3d_Camera
+
+        if isinstance(camera, dict):
+            return self._pinned(camera, projection, focal_length)
 
         d, up = direction_of(camera)
         forward = -d
@@ -919,7 +956,10 @@ def main(argv: list[str] | None = None) -> int:
     timings["present"] = scene.show(display, preview=args.preview or bool(args.path_trace))
     camera = display.get("camera") or {}
     projection = camera.get("projection") or ("perspective" if args.preview or args.path_trace else "orthographic")
-    scene.frame(args.camera, projection)
+    camera_arg = _json_arg(args.camera)
+    if isinstance(camera_arg, dict) and "camera" in camera_arg and "position" not in camera_arg:
+        camera_arg = camera_arg["camera"]  # a prompt's view: its camera
+    scene.frame(camera_arg, projection)
     if display.get("grid") or args.grid:
         scene.grid(True)
     if args.annotation:
