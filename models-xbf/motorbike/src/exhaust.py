@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import drivetrain as B
 
 
-@xbf(out="../XBF/exhaust.xbf")
+@memo
 def exhaust():
     built = B.build_exhaust()
     if isinstance(built, list):

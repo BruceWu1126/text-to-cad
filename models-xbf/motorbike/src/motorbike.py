@@ -1,8 +1,11 @@
-"""Full motorbike assembly: every part model composed by CALLING it.
+"""Full motorbike assembly: the one model here, every part composed by CALLING it.
 
-Children are sibling models: calling one inside this body builds it in the same
-run, as a sub-assembly of this one. Every child authors its parts in the BIKE
-frame (see `lib/spec.py`), so the assembly composes at identity and still
+Each part is a `@memo` function in a sibling file: called inside this body it
+runs in the same build, as a sub-assembly of this one, and a later build whose
+edit does not reach it replays it from the worker's memory instead of running
+it. A part writes no file of its own: the bike is one xbf. Every part is
+authored in the BIKE frame (see `lib/spec.py`), so the assembly composes at
+identity and still
 records the functional relationships as native build123d joints on
 world-coincident datum frames:
 
@@ -17,10 +20,11 @@ Each revolute joint carries the range the old typed mate declared. The old
 `KINEMATICS` poses (ride, stand_down, turned_left, bump) have no build123d
 equivalent and are not ported.
 
-Two children are instanced twice: `turn_signal_left()` is the front-left signal
-and, PLACED with `Pos`, the rear-left one; `turn_signal_right()` the same on the
-right. The right-hand signals and mirror are the left models' mirror images —
-new geometry, not a placement — so each is its own model built from the same
+Two parts are instanced twice: `turn_signal_left()` is the front-left signal
+and, PLACED with `Pos`, the rear-left one (a second call in one build is a new
+placement of the first's result); `turn_signal_right()` the same on the
+right. The right-hand signals and mirror are the left parts' mirror images —
+new geometry, not a placement — so each is its own function built from the same
 `lib/trim.py` factory, and the assembly links all four signals and both mirrors.
 
 OCCURRENCE ORDER IS FROZEN — top to bottom below.

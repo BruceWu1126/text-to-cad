@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import frontend as B
 
 
-@xbf(out="../XBF/front_fork.xbf")
+@memo
 def front_fork():
     built = B.build_front_fork()
     if isinstance(built, list):

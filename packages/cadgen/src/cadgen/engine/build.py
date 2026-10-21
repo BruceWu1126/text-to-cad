@@ -78,6 +78,9 @@ _WRITTEN: dict[str, _Written] = {}
 # the build made of the part -- what ``made_by`` answers from. In memory only: provenance
 # is served while this process lives, never written.
 _BUILT: dict[str, dict[str, _Named]] = {}
+# Per model, the functions its last run in this process ran or replayed, apart from their
+# arguments: a model calling one a verification found impure is not taken from its file.
+_FAMILIES: dict[str, frozenset[str]] = {}
 
 
 def _first_party_modules() -> list[str]:
@@ -124,10 +127,16 @@ def _model_traceback(error: BaseException) -> str:
 
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None) -> list[dict[str, Any]]:
+          cwd: Path | None = None, verify: bool = False) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model. Raises BuildError for a script or function that is not there; a body that
-    raises is its model's report (``ok`` false, ``error`` the model's traceback)."""
+    raises is its model's report (``ok`` false, ``error`` the model's traceback).
+
+    ``verify``: every body the memo would replay -- a model's, a ``@memo`` call's -- runs
+    instead, and its fresh result is compared with the logged one; the report's
+    ``verify`` names each body checked and how it went, and a function whose result
+    differs runs on every call for the worker's life (``memo.always``)."""
+    from cadgen.engine import previous
     from cadgen.engine.kernel import determinism, memo
     from cadgen.engine.model import BuildContext, models_in
 
@@ -141,6 +150,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     started = time.perf_counter()
     results: list[tuple[Any, Any, float]] = []
     with memo.run(script) as run, BuildContext() as context:
+        run.verify = verify
         try:
             module = load_script(script)
         except Exception as error:  # noqa: BLE001 - the model's own error, reported
@@ -156,7 +166,13 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                                  + (f"; it defines {', '.join(by_name)}" if by_name else "; it defines none"))
             models = [by_name[name] for name in functions]
         elif not models:
-            raise BuildError(f"{shown} defines no model")
+            from cadgen.engine.model import Memo
+
+            marked = [value.name for value in vars(module).values()
+                      if isinstance(value, Memo) and value.script == script]
+            raise BuildError(f"{shown} defines no model" + (
+                f"; {', '.join(marked)} {'is a @memo function' if len(marked) == 1 else 'are @memo functions'}: "
+                "a model calls it, and it writes no file" if marked else ""))
         for model in models:
             body_started = time.perf_counter()
             tally = dict(run.tally)
@@ -164,7 +180,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             run.reads.clear()
             run.unread.clear()
             try:
-                verdict, previous_report = _previous(model, context, shown, log)
+                verdict, previous_report = (({"used": False, "reason": "verifying"}, None) if verify
+                                            else _previous(model, context, shown, log))
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
                 verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
             if previous_report is not None:
@@ -207,6 +224,10 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity},
                             "bodies": _statuses(run, f"{model.script}::{model.name}"), "cache": verdict})
+            if verify:
+                reports[-1]["verify"] = _verified(run, f"{model.script}::{model.name}")
+            _FAMILIES[f"{model.script}::{model.name}"] = frozenset(
+                _family(body) for body in previous.closure(run.keys, f"{model.script}::{model.name}"))
             context.timings.clear()
     load_seconds = loaded - started
     for report, (model, result, body) in zip(reports, results):
@@ -319,6 +340,26 @@ def _statuses(run: Any, name: str) -> dict[str, str]:
     return {_identity(body): run.statuses.get(body, "run") for body in previous.closure(run.keys, name)}
 
 
+def _verified(run: Any, name: str) -> dict[str, Any]:
+    """A verifying build's finding for one model: each body of it the memo would have
+    replayed, ``same``, ``differs: why``, or ``follows`` the bodies it called that differ;
+    the mismatches (those that differ themselves); every function marked to run always."""
+    from cadgen.engine import previous
+    from cadgen.engine.kernel import memo
+
+    checked = {_identity(body): run.verified[body] for body in previous.closure(run.keys, name)
+               if body in run.verified}
+    return {"checked": checked,
+            "mismatches": sorted(body for body, found in checked.items() if found.startswith("differs")),
+            "always_run": sorted(_identity(body) for body in memo.always())}
+
+
+def _family(name: str) -> str:
+    """A body's function, apart from the arguments a ``@memo`` call's name holds."""
+    script, _, function = name.rpartition("::")
+    return f"{script}::{function.partition('(')[0]}"
+
+
 def _identity(name: str) -> str:
     script, _, function = name.rpartition("::")
     return f"{Path(script).name}::{function}"
@@ -343,6 +384,10 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     source = context.source(model)
     if memo.replayable(name, source):
         return {"used": False, "reason": "replayed from memory"}, None
+    always = memo.always()
+    impure = sorted(_identity(family) for family in _FAMILIES.get(name, ()) if family in always)
+    if impure:
+        return {"used": False, "reason": f"it calls {', '.join(impure)}, which a verification found impure"}, None
     stats = {str(path): _stat(path) for _kind, path in targets}
     remembered = _WRITTEN.get(name)
     where = "memory"

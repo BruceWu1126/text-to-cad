@@ -5,7 +5,7 @@ yoke roll sweep; full-arm collision envelopes remain a separate constraint.
 """
 from dataclasses import asdict
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 from lib.mates import revolute
 from stages.tom2_side_mounted_elbow import tom2_side_mounted_elbow,preview_kinematics
 from lib.symmetric_horn_yoke import make_yoke,PITCH,ROLL,T,WEB_X,AXIS_OFFSET,AXIS_SPACING_REDUCTION
@@ -164,7 +164,7 @@ def horn_bolt(name,joint,index,roll=False):
     return part
 
 
-@xbf(out='../../XBF/stages/tom2_symmetric_yokes.xbf')
+@memo
 def tom2_symmetric_yokes():
     source=tom2_side_mounted_elbow();groups=stages();common=make_yoke()
     replacements={}

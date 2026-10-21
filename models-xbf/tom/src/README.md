@@ -7,11 +7,12 @@ pitch, elbow roll, wrist pitch, wrist yaw and the gripper jaw.
 
 ```text
 src/
-  tom.py            production root -> XBF/tom.xbf, XBF/tom.step
-  stages/           rev4 derivation chain, child models (alone: -> XBF/stages/)
-  base/             common_base_plate (child model), legacy/base_clamp (rev3 clamp datums)
-  camera/           camera_payload (child model): Innomaker U20CAM + M2 screws/nuts
-  common/           gripper_frame (child model of the tom2 stage)
+  tom.py            the model -> XBF/tom.xbf (`cadgen xbf export` writes the STEP)
+  stages/           rev4 derivation chain: tom2, tom2_side_mounted_elbow, tom2_symmetric_yokes
+                    are @memo stages tom calls; the other stages are plain functions
+  base/             common_base_plate (@memo part), legacy/base_clamp (rev3 clamp datums)
+  camera/           camera_payload (@memo part): Innomaker U20CAM + M2 screws/nuts
+  common/           gripper_frame (@memo part of the tom2 stage)
   end_effector/     gripper datums and the servo6 gripper/camera factories the stages use
   hardware/         screws, nuts, standoffs (read pinned STEP/imported/hardware)
   purchased/        readers for pinned vendor STEP (servo, Pi 5, HAT, camera)
@@ -51,9 +52,17 @@ holds most of 20 GB; a second build of the unchanged model replays from the work
 
 ## What the port changed
 
-- `from cadgen import ...` -> `build123d`, `cadgen.engine` (`xbf`, `read_step`);
-  `@step(out='…/STEP/x.step', kinematics=…, animation=…)` -> `@xbf(out='…/XBF/x.xbf')`
-  alone (`cadgen xbf export` writes the STEP from it).
+- `from cadgen import ...` -> `build123d`, `cadgen.engine` (`xbf`, `memo`, `read_step`);
+  `@step(out='…/STEP/x.step', kinematics=…, animation=…)` -> `@xbf(out='../XBF/tom.xbf')`
+  on `tom` alone (`cadgen xbf export` writes the STEP from it). The six functions `tom`
+  reaches that were their own models -- the stages `tom2`, `tom2_side_mounted_elbow` and
+  `tom2_symmetric_yokes`, and the parts `gripper_frame`, `camera_payload` and
+  `common_base_plate` -- are `@memo`: one xbf, and an edit to the root (its layout
+  layers in `lib/`) replays the whole stage chain. The stages `tom` does not call
+  (`tom2_500mm`, `tom2_600mm_solid`, `diagonal_lightning_current`, `legacy/base_clamp`)
+  are plain functions: their helpers are what the root reads. The `purchased/` and
+  `hardware/` readers stay plain: each is one `read_step`, which the kernel memo already
+  holds.
 - Mates: the revision layers compute the arm's kinematics as typed mates, which the build
   also reads as data (`lib/joint_zero.py` poses the arm at joint zero by their axes;
   `lib/joint_limits.py` audits their ranges). `cadgen.revolute`/`fastened` are replaced by the

@@ -49,18 +49,28 @@ The migration a user makes, and nothing more:
   up when it does. Couplings and poses have no build123d equivalent and are
   dropped.
 - Animation (`animation=`, `cadgen.clip`) -> removed: the xbf has no animation.
-- A child model called from another body is a sub-assembly of that build, and
-  keeps its own `@xbf(out=...)` for when it is built alone.
+- A model is one output file: `@xbf` marks the dfm trays, the examples, the
+  moonwatch `case` and `movement`, `qdd_actuator`, `motorbike` and `tom`, and
+  nothing else. What a model is built from -- an assembly's parts, a derivation's
+  stages, a group of parts -- is a `@memo` function: called in the model's body it
+  is a sub-assembly of that build, it writes no file, and a later build whose edit
+  does not reach it replays it instead of running it. `@memo` sits where an edit
+  elsewhere leaves the function unchanged and its work is worth skipping, on
+  functions that return an assigned result (a `@memo` function names what its
+  `return` statement makes in itself, so one returning `a - b` would rename those
+  elements). Helpers called many times with varying arguments stay plain: the
+  kernel memo covers their calls. `cadgen xbf build --verify` checks every
+  replayed call against a fresh run.
 
 ## The models
 
 | Model | Source | What it exercises |
 | --- | --- | --- |
 | `dfm-process-comparison` | 5 single-part trays | per-part catalogue materials (PLA, aluminium, ABS); lofts, fillets, drafted cones |
-| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly in one body, modules as nested compounds; 54 build123d joints (rigid mounts, revolute drive train with ranges) |
-| `motorbike` | 21 child models + root | child models as sub-assemblies, a child placed twice, children built alone; revolute and rigid joints across children |
-| `moonwatch` | `case.py`, `movement.py` (+3 children) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
-| `tom` | tom-cad `main` (7f79c52): 119 files, 7 model bodies | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
+| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; 7 `@memo` makers (stator, rotor, bearings, sensor, boards, screws) replayed while an edit elsewhere runs the root; 54 build123d joints (rigid mounts, revolute drive train with ranges) |
+| `motorbike` | 21 `@memo` parts + one model | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts |
+| `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers, 19 `@memo` part groups) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
+| `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
 
 Each model's `src/README.md` says what was ported and what was dropped.
@@ -76,6 +86,12 @@ Each model's `src/README.md` says what was ported and what was dropped.
 | moonwatch movement | 191 / 191 | 233 s (movement_base 135 s, chrono_works 77 s) | replayed |
 | examples (each) | 1-11 | 2.5 s | replayed; the fixture's root re-runs (joints) |
 | tom | 619 / 628 | 347 s (worker ~12 GB after) | 2.9 s, all 7 bodies replayed |
+
+Since 2026-10-21 the nested models are `@memo` functions: the same bodies (plus the
+movement's 19 part groups and qdd's 7 makers), the same element names in every
+document, one xbf per model. `--verify` finds one function whose fresh run differs from
+its logged one: tom's `tom2_symmetric_yokes` (47 misses on a second run, an
+intermediate yoke's geometry; the arm tom writes is unchanged).
 
 Known engine gaps these surface: a shape that carries a build123d joint makes
 the compound holding it unkeyable, so a body that authors joints is never

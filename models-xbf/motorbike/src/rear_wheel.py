@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import wheels as W
 
 
-@xbf(out="../XBF/rear_wheel.xbf")
+@memo
 def rear_wheel():
     return bd.Compound(children=W.build_rear_wheel(), label="rear_wheel")
 

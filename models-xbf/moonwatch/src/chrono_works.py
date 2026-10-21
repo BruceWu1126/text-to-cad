@@ -7,12 +7,12 @@ bridges; the hour recorder lives on the dial side (z < -1.5).
 """
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import mvt_chrono as C
 
 
-@xbf(out="../XBF/chrono_works.xbf")
+@memo
 def chrono_works():
     return bd.Compound(children=C.build_chrono(), label="chronograph_works")
 

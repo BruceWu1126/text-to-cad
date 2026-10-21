@@ -1,21 +1,21 @@
 """Left turn signal: one amber signal, authored at the front-left position.
 
-The assembly links this model twice — front-left as returned, rear-left
+The assembly places this part twice — front-left as returned, rear-left
 placed with `Pos`. The right-hand signals are `turn_signal_right.py`: a
-reflection is new geometry, so the right side is its own model from the same
+reflection is new geometry, so the right side is its own function from the same
 `lib/trim.py` factory.
 """
 
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import spec as S
 from lib import trim as T
 
 
-@xbf(out="../XBF/turn_signal_left.xbf")
+@memo
 def turn_signal_left():
     x, y, z = S.FRONT_SIGNAL_POS
     return bd.Compound(children=T.build_turn_signal((x, y, z), 1.0), label="turn_signal")

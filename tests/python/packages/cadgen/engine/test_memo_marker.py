@@ -1,0 +1,298 @@
+"""``@memo``: a function the engine replays instead of executing when what it is made of --
+its code, the symbols it uses, the files it reads, its arguments -- is what it was; a call
+it cannot key runs and is reported; ``--verify`` runs every replayable call again and
+marks a function whose result differs."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from cadgen.engine import build as engine_build
+from cadgen.engine import document
+from cadgen.engine.kernel import memo
+
+SHARED = """
+WIDTH = {width}
+"""
+
+PARTS = """
+import os
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import memo
+from shared import WIDTH
+
+HERE = Path(__file__).resolve().parent
+
+
+def _note(name):
+    with open(HERE / "calls.log", "a") as handle:  # an output: not one of its inputs
+        handle.write(name + "\\n")
+
+
+@memo
+def plate(length, holes=2):
+    _note("plate")
+    body = bd.Box(length, WIDTH, {thickness})
+    for i in range(holes):
+        body = body - bd.Pos(i * 3, 0, 0) * bd.Cylinder(1, 5)
+    return body
+
+
+@memo
+def tagged():
+    _note("tagged")
+    height = float((HERE / "height.txt").read_text())
+    part = bd.Box(4, 4, height)
+    return part
+
+
+@memo
+def offset(shape, by):
+    _note("offset")
+    moved = shape.moved(bd.Location((0, 0, by)))
+    return {{"moved": moved}}
+
+
+@memo
+def faces(shape):
+    _note("faces")
+    return len(shape.faces())
+
+
+@memo
+def through(make):
+    _note("through")
+    made = make()
+    return made
+
+
+@memo
+def jitter():
+    _note("jitter")
+    # An input the engine cannot see: a lookup, not an open.
+    grown = bd.Box(2, 2, 1 + os.stat(HERE / "size.bin").st_size)
+    return grown
+"""
+
+ROOT = """
+import build123d as bd
+from cadgen.engine import xbf
+from parts import faces, jitter, offset, plate, tagged, through
+
+HOLE = {hole}
+
+
+@xbf
+def root():
+    a = plate({length})
+    a.label = "a"
+    again = plate({length}).moved(bd.Location((0, 30, 0)))
+    again.label = "again"
+    b = tagged()
+    b.label = "b"
+    c = offset(a, 5.0)["moved"]
+    c.label = "c"
+    n = faces(a)
+    d = through(lambda: bd.Box(1, 1, n))
+    d.label = "d"
+    j = jitter()
+    j.label = "j"
+    e = bd.Box(2, 2, 2) - bd.Cylinder(HOLE, 5)
+    e.label = "e"
+    return bd.Compound(children=[a, again, b, c, d, j, e], label="root")
+"""
+
+STAGES = """
+import build123d as bd
+{import_line}
+
+
+{marker}
+def stage_one(size):
+    body = bd.Box(size, size, 6)
+    body = bd.fillet(body.edges().filter_by(bd.Axis.Z), 1)
+    return body
+
+
+{marker}
+def stage_two(base, depth):
+    cut = base - bd.Pos(0, 0, 3) * bd.Cylinder(2, depth)
+    cut = bd.chamfer(cut.edges().group_by(bd.Axis.Z)[-1], 0.3)
+    return cut
+
+
+@xbf
+def staged():
+    one = stage_one(12)
+    two = stage_two(one, 4).moved(bd.Location((20, 0, 0)))
+    one.label, two.label = "one", "two"
+    spare = bd.Box({spare}, 1, 1).moved(bd.Location((0, 20, 0)))
+    spare.label = "spare"
+    return bd.Compound(children=[one, two, spare], label="staged")
+"""
+
+
+class MemoCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.restart()
+        self.addCleanup(self.restart)
+        patch = mock.patch.dict(os.environ)
+        patch.start()
+        self.addCleanup(patch.stop)
+        os.environ.pop("CADGEN_ENGINE_BODIES", None)
+        os.environ.pop("CADGEN_ENGINE_MEMO", None)
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-memo-marker-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.write("shared.py", SHARED.format(width=10))
+        self.write("parts.py", PARTS.format(thickness=2))
+        self.write("root.py", ROOT.format(hole=1.0, length=20))
+        self.write("height.txt", "3")
+        self.write("size.bin", "x")
+
+    def restart(self) -> None:
+        """What a new worker holds: nothing."""
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+
+    def write(self, name: str, text: str) -> None:
+        path = self.folder / name
+        path.write_text(textwrap.dedent(text), encoding="utf-8")
+        os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def build(self, script: str = "root.py", *, verify: bool = False) -> dict:
+        report = engine_build.build(self.folder / script, None, cwd=self.folder, verify=verify)[-1]
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def calls(self) -> list[str]:
+        """The functions that ran since the last call, in order (the log they append to)."""
+        path = self.folder / "calls.log"
+        found = path.read_text(encoding="utf-8").split() if path.exists() else []
+        path.unlink(missing_ok=True)
+        return found
+
+    def statuses(self, report: dict) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for name, status in report["bodies"].items():
+            found.setdefault(name.split("(")[0], []).append(status)
+        return found
+
+
+class MemoTest(MemoCase):
+    def test_an_unchanged_function_is_replayed_and_an_unkeyable_call_runs_and_is_reported(self) -> None:
+        self.build()
+        self.assertEqual(self.calls(), ["plate", "tagged", "offset", "faces", "through", "jitter"],
+                         "a second call with the same arguments places the first's result: plate ran once")
+        self.write("root.py", ROOT.format(hole=1.25, length=20))
+        report = self.build()
+        self.assertEqual(self.calls(), ["faces", "through"], "only the calls the memo cannot replay ran")
+        statuses = self.statuses(report)
+        self.assertEqual(statuses["root.py::root"], ["run"])
+        for name in ("parts.py::plate", "parts.py::tagged", "parts.py::offset", "parts.py::jitter"):
+            self.assertEqual(statuses[name], ["replayed"], name)
+        fallbacks = report["retention"]["fallbacks"]
+        self.assertIn("callable argument", " ".join(fallbacks["parts.py::through"]))
+        self.assertIn("returned int, not geometry", " ".join(fallbacks["parts.py::faces"]))
+
+    def test_an_argument_code_symbol_or_file_change_runs_the_function(self) -> None:
+        self.build()
+        self.calls()
+        self.write("root.py", ROOT.format(hole=1.0, length=21))
+        self.build()
+        self.assertEqual(self.calls(), ["plate", "offset", "faces", "through"], "an argument changed")
+        self.write("parts.py", PARTS.format(thickness=3))
+        self.build()
+        self.assertEqual(self.calls(), ["plate", "offset", "faces", "through"], "plate's code changed")
+        self.write("shared.py", SHARED.format(width=11))
+        self.build()
+        self.assertEqual(self.calls(), ["plate", "offset", "faces", "through"], "a symbol plate uses changed")
+        self.write("height.txt", "5")
+        self.build()
+        self.assertEqual(self.calls(), ["tagged", "faces", "through"], "a file tagged reads changed")
+
+    def test_a_method_is_refused_at_decoration(self) -> None:
+        from cadgen.engine import memo as marker
+
+        with self.assertRaisesRegex(TypeError, "a method is not markable"):
+            class Kit:  # noqa: F841 - refused before the class exists
+                @marker
+                def part(self, size):
+                    return size
+        with self.assertRaisesRegex(TypeError, "takes no arguments"):
+            marker(out="x.xbf")
+
+    def test_verify_catches_an_impure_function_and_marks_it(self) -> None:
+        self.build()
+        self.write("size.bin", "xx")  # what jitter reads, unseen: its replay is stale
+        self.write("root.py", ROOT.format(hole=1.25, length=20))
+        self.build()
+        self.calls()
+        report = self.build(verify=True)
+        found = report["verify"]
+        self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
+        self.assertIn("other geometry", found["checked"]["parts.py::jitter"])
+        self.assertEqual(found["checked"]["root.py::root"], "follows parts.py::jitter",
+                         "the root holds jitter's result: it differs with it, and is not marked")
+        plate = [found["checked"][name] for name in found["checked"] if name.startswith("parts.py::plate(")]
+        self.assertEqual(plate, ["same"], "a call with arguments is named by them: plate(<digest>)")
+        self.assertEqual(found["always_run"], ["parts.py::jitter"])
+        self.assertEqual(self.calls(), ["plate", "tagged", "offset", "faces", "through", "jitter"],
+                         "a verifying build runs everything the memo would replay")
+        report = self.build()
+        self.assertEqual(self.calls(), ["faces", "through", "jitter"],
+                         "marked, jitter runs on every build, and so does the root that calls it")
+        self.assertEqual(self.statuses(report)["parts.py::jitter"], ["run"])
+        self.assertEqual(report["cache"]["reason"], "it calls parts.py::jitter, which a verification found impure")
+
+    def test_the_restart_cache_folds_a_memo_function_into_the_model_key(self) -> None:
+        self.build()
+        self.restart()
+        report = self.build()
+        self.assertEqual(report["cache"], {"used": True, "from": "file"})
+        self.assertEqual(report["memo"]["bodies_loaded"], 6)
+        self.write("parts.py", PARTS.format(thickness=3))
+        self.restart()
+        report = self.build()
+        self.assertEqual(report["cache"]["reason"], "its code changed")
+
+
+class MemoNamesTest(MemoCase):
+    def stage(self, marker: str, spare: float = 1.0) -> None:
+        imports = "from cadgen.engine import memo, xbf" if marker else "from cadgen.engine import xbf"
+        self.write("staged.py", STAGES.format(import_line=imports, marker=marker, spare=spare))
+
+    def names(self) -> dict:
+        loaded = document.load(self.folder / "staged.xbf")
+        return {p.name: (dict(p.face_names), dict(p.edge_names), dict(p.vertex_names)) for p in loaded.prototypes}
+
+    def test_names_are_the_same_with_and_without_memo_and_when_replayed(self) -> None:
+        self.stage("")
+        self.build("staged.py")
+        plain = self.names()
+        self.assertTrue(plain["two"][0], "the second stage's faces are named")
+        self.restart()
+        self.stage("@memo")
+        self.build("staged.py")
+        self.assertEqual(self.names(), plain)
+        # The root edited, both stages replayed: the same names again.
+        self.stage("@memo", spare=2.0)
+        report = self.build("staged.py")
+        self.assertEqual(self.statuses(report), {"staged.py::staged": ["run"], "staged.py::stage_one": ["replayed"],
+                                                 "staged.py::stage_two": ["replayed"]})
+        found = self.names()
+        self.assertEqual({name: found[name] for name in ("one", "two")}, {name: plain[name] for name in ("one", "two")})
+
+
+if __name__ == "__main__":
+    unittest.main()

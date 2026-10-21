@@ -1,6 +1,6 @@
 """``cadgen xbf``: build models, export documents, serve them.
 
-    cadgen xbf build SCRIPT[::FUNCTION] ...   build in the warm worker of each script
+    cadgen xbf build SCRIPT[::FUNCTION] ... [--verify]   build in the warm worker of each script
     cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
     cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON] [--json]
@@ -34,6 +34,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     build.add_argument("targets", nargs="+", metavar="SCRIPT[::FUNCTION]")
     build.add_argument("--no-daemon", action="store_true", help="build in this process (cold, no worker kept)")
     build.add_argument("--json", action="store_true", help="print each model's report as JSON")
+    build.add_argument("--verify", action="store_true",
+                       help="run every function the engine would replay and compare its result with the logged one")
     export = verbs.add_parser("export", help="translate a document to STEP, GLB, STL or 3MF")
     export.add_argument("document", help="an .xbf (or a STEP)")
     for kind in ("step", "glb", "stl", "threemf"):
@@ -98,7 +100,16 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
     return (f"built {report['model']}{worker} in {wall:.2f}s: body {timings.get('body', 0):.2f}s, "
             f"{memo.get('hits', 0)} hits, {memo.get('misses', 0)} misses, {memo.get('uncached', 0)} uncached"
             + (f"; {', '.join(shown)}" if shown else "")
-            + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ())))
+            + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
+            + _verified(report.get("verify")))
+
+
+def _verified(found: dict[str, Any] | None) -> str:
+    if found is None:
+        return ""
+    lines = [f"\n  verify: {len(found['checked'])} replayable bodies run again, {len(found['mismatches'])} differ"]
+    lines += [f"\n    {name}: {found['checked'][name]}; it now runs on every build" for name in found["mismatches"]]
+    return "".join(lines)
 
 
 def _build(args: argparse.Namespace) -> int:
@@ -110,7 +121,7 @@ def _build(args: argparse.Namespace) -> int:
 
             try:
                 reports = build(script, functions, log=lambda text: print(f"  {text}", file=sys.stderr),
-                                cwd=Path.cwd())
+                                cwd=Path.cwd(), verify=args.verify)
             except BuildError as error:
                 print(f"cadgen xbf build: {error}", file=sys.stderr)
                 failed = True
@@ -124,7 +135,7 @@ def _build(args: argparse.Namespace) -> int:
                 print(text if message.get("stream") == "model" else f"  {text}", file=sys.stderr)
 
             answer = request({"op": "build", "script": str(script), "functions": functions, "cwd": os.getcwd(),
-                              "env": dict(os.environ)}, log)
+                              "env": dict(os.environ), "verify": args.verify}, log)
             if answer is None or "failed" in answer:
                 print(f"cadgen xbf build: {(answer or {}).get('failed', 'no daemon')}", file=sys.stderr)
                 failed = True

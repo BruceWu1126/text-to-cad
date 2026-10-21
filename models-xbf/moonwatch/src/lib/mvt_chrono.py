@@ -39,6 +39,7 @@ from __future__ import annotations
 import math
 
 import build123d as bd
+from cadgen.engine import memo
 
 from lib import spec as S
 from lib import finishing as F
@@ -356,6 +357,7 @@ def _gilt_wheel(teeth, tip_r, pos, z_band, mesh_toward, frac=0.08,
 # 1. Column wheel — lower ratchet star, 7 polished columns, cap, blued screw
 # ---------------------------------------------------------------------------
 
+@memo
 def _column_wheel_parts():
     parts = []
 
@@ -418,6 +420,7 @@ def _column_wheel_parts():
 # 2. Chronograph runner — gilt fine-tooth wheel, heart cam, extended arbor
 # ---------------------------------------------------------------------------
 
+@memo
 def _runner_parts():
     parts = []
     wheel = _gilt_wheel(72, RUNNER_TIP_R, (0.0, 0.0), WHEEL_Z,
@@ -454,6 +457,7 @@ def _runner_parts():
 # 3. Minute recorder — 30-tooth wheel, heart cam, polished jumper + spring
 # ---------------------------------------------------------------------------
 
+@memo
 def _minute_recorder_parts():
     parts = []
     # tooth phase: the jumper nose azimuth must land in a tooth GAP (a tooth
@@ -525,6 +529,7 @@ def _minute_recorder_parts():
 # 4. Hour recorder — dial side: 24-tooth wheel, heart cam, friction spring
 # ---------------------------------------------------------------------------
 
+@memo
 def _hour_recorder_parts():
     parts = []
     wheel = _gilt_wheel(S.HOUR_RECORDER_TEETH, HOUR_REC_TIP_R,
@@ -560,6 +565,7 @@ def _hour_recorder_parts():
     return parts
 
 
+@memo
 def _clutch_parts():
     """Lateral clutch: driving wheel on the fourth-wheel axis, long swinging
     clutch arm pivoted concentric with it, swinging intermediate (coupling)
@@ -630,6 +636,7 @@ def _clutch_parts():
     return parts
 
 
+@memo
 def _hammer_parts():
     """Hammer yoke: one sculptural mirror-polished two-arm lever striking
     BOTH heart cams simultaneously (reset-complete pose: flat faces on the
@@ -667,6 +674,7 @@ def _hammer_parts():
     return parts
 
 
+@memo
 def _operating_parts():
     """Operating lever from the 2-o'clock pusher region to the column-wheel
     star: pusher pad, pivot on the barrel bridge, beak resting in the star
@@ -710,6 +718,7 @@ def _operating_parts():
     return parts
 
 
+@memo
 def _reset_parts():
     """Reset lever from the 4-o'clock pusher region to the hammer tail
     (nose 0.05 off the tail: reset just completed), + return spring."""
@@ -738,6 +747,7 @@ def _reset_parts():
     return parts
 
 
+@memo
 def _brake_parts():
     """Brake (blocking) lever: pad against the runner rim (brake ON at
     rest), pivoted on the barrel bridge, + its return-spring blade."""
@@ -788,6 +798,7 @@ def _trim_skins(shadow, screw_xy, z1):
     return out or None
 
 
+@memo
 def _chrono_bridge_parts():
     """Chronograph bridge + coupling cock: the striped copper layer capping
     the chrono train's upper pivots (plan constants above). Built with

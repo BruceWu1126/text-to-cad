@@ -14,7 +14,9 @@ edit cost what it changed; the document is written to ``arm.xbf`` beside the scr
 and the declared exports after it. ``cadgen xbf serve arm.xbf`` shows it. Nothing but
 those files is written: every cache lives in a process's memory.
 
-A part's material is a value set on the shape: ``part.material = materials.aluminium``
+A function worth replaying on a later build -- an assembly's part, a derivation's stage --
+is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it
+instead of running it. A part's material is a value set on the shape: ``part.material = materials.aluminium``
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
 ``connect_to``; ``configuration(assembly, name, **values)`` names a configuration of it.
 Importing this package imports no kernel: the names below load on first use.
@@ -24,7 +26,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "paint", "read_step", "step", "stl", "threemf", "xbf"]
+__all__ = ["Material", "configuration", "glb", "materials", "memo", "paint", "read_step", "step", "stl", "threemf",
+           "xbf"]
 
 
 def __getattr__(name: str) -> Any:
