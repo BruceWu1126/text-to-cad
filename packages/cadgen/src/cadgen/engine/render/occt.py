@@ -41,6 +41,7 @@ import numpy as np
 
 from cadgen.engine.mesh import Mesh
 from cadgen.engine.render.context import Canvas
+from cadgen.engine.render.look import LOOK
 from cadgen.engine.render.shapes import LINES, part_shapes
 
 MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
@@ -49,10 +50,11 @@ PRESETS = {
     "left": ((-1, 0, 0), (0, 0, 1)), "top": ((0, 0, 1), (0, 1, 0)), "bottom": ((0, 0, -1), (0, 1, 0)),
     "iso": ((1, -1, 0.8), (0, 0, 1)),
 }
-BACKGROUND = "#f0f4f9"
-EDGE = {"feature": "#253443", "tangent": "#667788", "seam": "#495b6c"}
-DEFAULT_FILL = "#b6c4ce"
-PARTS = ("#b6c4ce", "#f4a7a7", "#f8c77e", "#f7e38d", "#b9e88f", "#8fe3c0", "#92d7f5", "#a9b8ff", "#c7a8ff", "#f2a7d9")
+# The regular modes' numbers are the look's (``look.py``), which the viewer draws by too.
+BACKGROUND = LOOK.backdrop
+EDGE = dict(LOOK.edge_colours)
+DEFAULT_FILL = LOOK.fill
+PARTS = LOOK.palette
 REFERENCE_HEIGHT = 900  # an annotation's ink is as heavy against the picture as on a viewer this tall
 PADDING = 0.04
 # OCCT sizes a label's font in points of the window's backing store; on a Retina screen's hidden
@@ -164,10 +166,8 @@ class Scene:
         view = self.canvas.view
         viewer = self.canvas.viewer
         white = Quantity_Color(1, 1, 1, Quantity_TOC_RGB)
-        self.lights = [V3d_AmbientLight(white), V3d_DirectionalLight(gp_Dir(-0.35, 0.55, -1.0), white),
-                       V3d_DirectionalLight(gp_Dir(0.6, 0.2, -0.3), white)]
-        for light, intensity in zip(self.lights, (float(os.environ.get("OCCT_AMB", 0.5)), float(os.environ.get("OCCT_KEY", 0.45)),
-                                                  float(os.environ.get("OCCT_FILL", 0.12)))):
+        self.lights = [V3d_AmbientLight(white), *(V3d_DirectionalLight(gp_Dir(*light.direction), white) for light in LOOK.lights)]
+        for light, intensity in zip(self.lights, (LOOK.ambient, *(light.radiance for light in LOOK.lights))):
             light.SetIntensity(intensity)
             viewer.AddLight(light)
             viewer.SetLightOn(light)
@@ -190,8 +190,8 @@ class Scene:
         material.SetColor(color)
         material.SetAmbientColor(color)
         material.SetDiffuseColor(color)
-        material.SetSpecularColor(_color((0.08, 0.08, 0.08)))
-        material.SetShininess(0.35)
+        material.SetSpecularColor(_color((LOOK.specular,) * 3))
+        material.SetShininess(LOOK.shininess)
         pbr = Graphic3d_PBRMaterial()
         pbr.SetColor(Quantity_ColorRGBA(color, 1.0))
         pbr.SetMetallic(0.0)
@@ -218,7 +218,7 @@ class Scene:
             source.SetColor(_color(BACKGROUND))
             aspect.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
         elif look == "xray":
-            source.SetTransparency(0.78)
+            source.SetTransparency(1 - LOOK.mode("xray").opacity)
         self.sources[key] = source
         return source
 
@@ -230,7 +230,7 @@ class Scene:
 
             found = AIS_Shape(self.parts[index].edges[line])
             found.SetColor(_color(EDGE[line]))
-            found.SetWidth(1.0)
+            found.SetWidth(LOOK.edge_width)
             self.sources[key] = found
         return found
 
@@ -420,14 +420,14 @@ class Scene:
             return
         low, high = self.rest_bounds()
         size = float(max(high[:2] - low[:2]))
-        step = 10 ** math.floor(math.log10(max(size / 4, 1e-6)))
+        step = 10 ** math.floor(math.log10(max(size / LOOK.grid.cells, 1e-6)))
         viewer.SetPrivilegedPlane(gp_Ax3(gp_Pnt(0, 0, float(low[2])), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)))
         viewer.SetRectangularGridValues(0, 0, step, step, 0)
-        viewer.SetRectangularGridGraphicValues(size * 1.5, size * 1.5, 0)
+        viewer.SetRectangularGridGraphicValues(size * LOOK.grid.extent, size * LOOK.grid.extent, 0)
         viewer.SetGridEcho(False)
         viewer.ActivateGrid(Aspect_GridType.Aspect_GT_Rectangular, Aspect_GridDrawMode.Aspect_GDM_Lines)
         grid = viewer.Grid()
-        grid.SetColors(_color("#4ea8cc"), _color("#4ea8cc"))
+        grid.SetColors(_color(LOOK.grid.colour), _color(LOOK.grid.colour))
 
     def explode(self, amount: float) -> float:
         from cadgen.engine.render.explode import offsets
