@@ -554,6 +554,24 @@ class Topology:
         return {"kind": "vertex", "ordinal": ordinal, "position": _point(BRep_Tool.Pnt_s(vertex)),
                 "tolerance": BRep_Tool.Tolerance_s(vertex)}
 
+    def volume(self) -> dict[str, Any]:
+        """The part's volume in cubic millimetres, of its solids (``BRepGProp``), and how many it
+        has: a part of faces or wires alone has none, and no volume to weigh."""
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+        from OCP.TopAbs import TopAbs_SOLID
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        solids = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(self.shape, TopAbs_SOLID, solids)
+        total = 0.0
+        for at in range(1, solids.Extent() + 1):
+            props = GProp_GProps()
+            BRepGProp.VolumeProperties_s(solids.FindKey(at), props)
+            total += abs(props.Mass())
+        return {"volume": total, "solids": solids.Extent()}
+
 
 # --- extraction ----------------------------------------------------------------------------
 

@@ -822,21 +822,31 @@ export function createXbfScene(THREE, document) {
     },
     /**
      * What a chip's card measures of instances (ids `i3`): the box they make where they stand
-     * now, and their volume from their triangles (approximate, as a STEP's is). Null for none.
+     * now, their volume from their triangles (approximate, as a STEP's is), and their mass in kg,
+     * each volume by its material's density -- null when none has a material, `unweighed` the
+     * instances without one. Null for none.
      */
     measureParts(ids) {
       const box = new THREE.Box3();
       let volume = 0;
-      let found = false;
+      let mass = 0;
+      let parts = 0;
+      let unweighed = 0;
       for (const index of indicesOf(ids)) {
         const entry = instances[index];
         const placed = instanceBox(entry);
         if (placed) box.union(placed);
-        volume += entry.surface.held.volume ??= xbfMeshVolume(entry.surface.part.mesh);
-        found = true;
+        const own = entry.surface.held.volume ??= xbfMeshVolume(entry.surface.part.mesh);
+        volume += own;
+        parts += 1;
+        // Its mass: the volume (mm³) times its material's density (kg/m³).
+        const density = finite(entry.prototype.material?.density, 0);
+        if (density > 0) mass += own * 1e-9 * density;
+        else unweighed += 1;
       }
-      if (!found) return null;
-      return { size: box.isEmpty() ? null : box.getSize(new THREE.Vector3()).toArray(), volume };
+      if (!parts) return null;
+      return { size: box.isEmpty() ? null : box.getSize(new THREE.Vector3()).toArray(), volume,
+        mass: unweighed < parts ? mass : null, unweighed };
     },
     /** An element as a chip names it: its kind and ordinal, its class, its name, its part. */
     describeElement(id) {

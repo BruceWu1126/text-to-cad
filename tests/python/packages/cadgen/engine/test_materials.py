@@ -16,11 +16,13 @@ import tempfile
 import textwrap
 import time
 import unittest
+import urllib.request
 from pathlib import Path
 
 from cadgen.engine import Material, materials
 from cadgen.engine import build as engine_build
-from cadgen.engine import document, export
+from cadgen.engine import cli, document, export
+from cadgen.engine.serve import Server
 
 MODEL = """
 import build123d as bd
@@ -370,6 +372,37 @@ class MaterialFixtureTest(unittest.TestCase):
             anisotropic = any("KHR_materials_anisotropy" in look.get("extensions", {}) for look in looks)
             for primitive in mesh["primitives"]:
                 self.assertEqual("TANGENT" in primitive["attributes"], anisotropic, mesh["name"])
+
+    def test_a_part_and_an_assembly_are_weighed_by_their_materials(self) -> None:
+        server = Server(port=0, mesh_mode="inline")
+        server.start()
+        self.addCleanup(server.stop)
+        ident = server.add(self.xbf)
+
+        def volume(key: str) -> float:
+            with urllib.request.urlopen(f"{server.url}/api/doc/{ident}/part/{key}/volume", timeout=120) as answer:
+                return json.loads(answer.read())["volume"]
+
+        volumes = {p["key"]: volume(p["key"]) for p in self.structure["prototypes"]}
+        self.assertAlmostEqual(volumes[self.prototype("block")["key"]], 27000.0, places=6)
+        block = cli.weighed(self.structure, cli.placements(self.structure, "block"), volumes, "block")
+        self.assertEqual((block["part"], block["material"], block["parts"]), ("block", materials.steel_1018.name, 1))
+        self.assertAlmostEqual(block["mass"], 27000e-9 * 7870.0)
+        whole = cli.weighed(self.structure, cli.placements(self.structure, "bench"), volumes, "bench")
+        expected = sum(volumes[self.structure["prototypes"][i["prototype"]]["key"]] * 1e-9
+                       * self.structure["prototypes"][i["prototype"]]["material"]["density"]
+                       for i in self.structure["instances"])
+        self.assertEqual(whole["parts"], 6)
+        self.assertAlmostEqual(whole["mass"], expected)
+        self.assertEqual(whole["unweighed"], [])
+        unweighed = json.loads(json.dumps(self.structure))
+        self.prototype_of(unweighed, "block")["material"] = None
+        found = cli.weighed(unweighed, cli.placements(unweighed, "block"), volumes, "block")
+        self.assertEqual((found["mass"], found["material"], found["unweighed"]), (None, None, ["bench/block"]))
+
+    @staticmethod
+    def prototype_of(structure: dict, name: str) -> dict:
+        return next(p for p in structure["prototypes"] if p["name"] == name)
 
 
 if __name__ == "__main__":

@@ -199,10 +199,15 @@ test("a document's materials: a physical material per look, kept in the shaded l
   }
   scene.setSurfaceLook(LOOK);
   assert.equal(plate.material[0].metalness, 1, "and Solid again");
+  // Its mass: the mesh volume by the density, the peg's glass too; a part with none says so.
+  const one = scene.measureParts(["i0"]);
+  assert.ok(Math.abs(one.mass - one.volume * 1e-9 * 2700) < 1e-12);
+  assert.equal(one.unweighed, 0);
   scene.dispose();
   document.release();
   const plain = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
   const unmade = createXbfScene(THREE, plain);
+  assert.deepEqual([unmade.measureParts(["i0", "i1"]).mass, unmade.measureParts(["i0", "i1"]).unweighed], [null, 2]);
   unmade.setReflection(studio);
   unmade.setSurfaceLook(LOOK);
   const surface = unmade.object3D.children[0].children[0].children.find(child => child.isMesh).material[0];

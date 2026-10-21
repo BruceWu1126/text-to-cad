@@ -9,7 +9,7 @@ import { isXbfAssemblyId } from "./xbfTree.js";
 // What is selected in an engine document, as Quick Edit's chips -- a STEP's
 // (`step/components/workbench/StepReferenceSection.js`, copied in shape: one again at the
 // renderers' migration): a part or subassembly a chip of its own, its card its part count (a
-// subassembly's), size and volume; faces and edges a chip for each kind on each part -- "base ·
+// subassembly's), size, volume and mass; faces and edges a chip for each kind on each part -- "base ·
 // face 3" alone, "base · 6 faces" for several -- its card the key measurements, which the engine
 // measures on the exact shape when the element is picked (`fetchXbfElementFacts`).
 //
@@ -51,13 +51,29 @@ function MeasurementRows({ rows }) {
   return rows.map(([label, value, unit]) => <InfoRow key={label} label={label}><MonoValue>{`${formatNumber(value)} ${unit}`}</MonoValue></InfoRow>);
 }
 
-/** A part's or subassembly's card: how many parts (a subassembly's), its size, its volume. */
+/**
+ * What a part or subassembly weighs, as its card says it: its parts' volumes by their materials'
+ * densities in kg (`measureParts`), "no material" where none has one, and how many have none
+ * where only some do.
+ */
+export function xbfMassText(measured) {
+  if (!measured) return "";
+  if (measured.mass === null || measured.mass === undefined) return "no material";
+  const kg = Number(measured.mass);
+  const text = `${formatNumber(kg, kg >= 10 ? 2 : kg >= 0.01 ? 3 : 6)} kg`;
+  return measured.unweighed > 0 ? `${text} · ${measured.unweighed} without material` : text;
+}
+
+/** A part's or subassembly's card: how many parts (a subassembly's), its size, its volume, its mass. */
 function PartDetail({ assembly, parts, measured }) {
   return <>
     {assembly && parts > 0 ? <InfoRow label="Parts"><MonoValue>{formatNumber(parts, 0)}</MonoValue></InfoRow> : null}
     {measured?.size ? <InfoRow label="Size" title="XYZ bounding size"><MonoValue>{measured.size.map(value => formatNumber(value)).join(" × ")} mm</MonoValue></InfoRow> : null}
     {measured?.volume ? <InfoRow label="Volume" title="Approximate mesh volume">
       <MonoValue>{formatNumber(measured.volume, measured.volume >= 100 ? 0 : 2)} mm³</MonoValue>
+    </InfoRow> : null}
+    {measured?.volume ? <InfoRow label="Mass" title="Approximate mesh volume × the material's density">
+      <MonoValue>{xbfMassText(measured)}</MonoValue>
     </InfoRow> : null}
   </>;
 }

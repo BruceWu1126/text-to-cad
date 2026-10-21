@@ -9,7 +9,7 @@ import XbfPositionSection, { DEFAULT_POSE_VALUE, NO_PRESET_VALUE } from '../../.
 import XbfModelTree from '../../../dist/renderers/xbf/XbfModelTree.js';
 import { SelectModeMenu as XbfSelectModeMenu, XBF_SELECT_DEFAULT } from '../../../dist/renderers/xbf/XbfSelectionModes.js';
 import { presentXbfTree, xbfPickFrontier } from '../../../dist/renderers/xbf/xbfTree.js';
-import { useXbfSelectionChips, xbfMeasurementRows } from '../../../dist/renderers/xbf/xbfChips.js';
+import { useXbfSelectionChips, xbfMassText, xbfMeasurementRows } from '../../../dist/renderers/xbf/xbfChips.js';
 import { selectGeometryMode, treeShape } from '../../../dist/renderers/xbf/xbfSelectionFilter.js';
 import { xbfModelMenu, xbfPartMenu } from '../../../dist/renderers/xbf/xbfMenus.js';
 import { assemblyPartMenuEntries } from '../../../dist/renderers/xbf/xbfMenuItems.js';
@@ -270,6 +270,25 @@ it("Quick Edit's chips name a selection as a STEP's do: a part or subassembly it
     'arm_1 · 2 faces|face|{"name":"arm_1","kind":"face","count":2}',
     'pin · edge 2|edge|{"name":"pin","kind":"edge","number":"2"}',
   ]);
+});
+
+function Card({ id, measured }: { id: string, measured: object }) {
+  const tree = presentXbfTree(structure);
+  const scene = { structure, describePart: (part: string) => ({ name: part }), describeElement: () => null, measureParts: () => measured };
+  const { chips } = useXbfSelectionChips({ scene, tree, resource: null, selectedIds: [id], facts: new Map(), onRemove: () => {}, onHover: () => {} });
+  return <div>{chips[0].card}</div>;
+}
+
+it("a part's card weighs it by its material, and an assembly's sums its parts", () => {
+  expect(xbfMassText({ volume: 1000, mass: 1000e-9 * 7870, unweighed: 0 })).toBe('0.00787 kg');
+  expect(xbfMassText({ volume: 1000, mass: 12.3456, unweighed: 0 })).toBe('12.35 kg');
+  expect(xbfMassText({ volume: 1000, mass: null, unweighed: 1 })).toBe('no material');
+  render(<Card id="i3" measured={{ size: [10, 20, 30], volume: 600, mass: null, unweighed: 1 }} />);
+  expect(screen.getByText('Mass')).toBeTruthy();
+  expect(screen.getByText('no material')).toBeTruthy();
+  cleanup();
+  render(<Card id="n0.0" measured={{ size: [10, 20, 30], volume: 6000, mass: 1.234, unweighed: 1 }} />);
+  expect(screen.getByText('1.234 kg · 1 without material')).toBeTruthy();
 });
 
 it("the menus are a STEP's: a part's offers Copy Reference, Select, Isolate, Hide others, Hide, the tree's expansion and the framing", () => {
