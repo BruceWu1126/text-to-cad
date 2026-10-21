@@ -32,18 +32,18 @@ metallic/roughness and the old finish name as the description:
 
 | Old finish | Material |
 | --- | --- |
-| brushed_steel, case_mirror_polish, polished_steel, satin_steel | catalogue `stainless_steel` (X5CrNi18-10) |
-| blued_screw, grained_lever | catalogue `steel` (Steel-Generic) |
-| brass_part, gilt_wheel, copper_plate, anglage_mirror | catalogue `brass` (Copper-464) |
-| bezel_anodized | catalogue `aluminium` |
-| glass | catalogue `glass` |
+| brushed_steel, case_mirror_polish, polished_steel, satin_steel | catalogue `stainless_steel` (Stainless 304) |
+| blued_screw, grained_lever | catalogue `steel` (Steel 1018) |
+| brass_part, gilt_wheel, copper_plate, anglage_mirror | catalogue `brass` (Brass C360) |
+| bezel_anodized | catalogue `aluminium` (Aluminum 6061-T6) |
+| glass | catalogue `glass` (Glass, soda-lime: transmissive) |
 | glass_back | `Sapphire`, 3980 kg/m^3 |
 | ruby_jewel | `Ruby`, 3980 kg/m^3 |
 | rubber | `NBR`, 1000 kg/m^3 |
 | matte_print | `Matte Print`, no density |
 
 Every finish has `color=None`, so parts keep their authored colours; the old
-clearcoat factors have no `Material` field and are dropped. One face finish is
+clearcoat factors were dropped in the conversion, which predates `Material.coat`. One face finish is
 painted: the bezel ring is polished steel and its snailed top annulus satin
 (`paint(ring, faces, FINISHES["satin_steel"])` in `case.py`). The
 chronograph works had no assignments and still have none.
