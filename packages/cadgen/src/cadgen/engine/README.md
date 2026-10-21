@@ -206,6 +206,18 @@ moment the engine has it. Every answer names a loopback page's origin as an allo
 (`access.py`: `localhost`, `127.0.0.1`, `[::1]`, any port); a page from anywhere else gets no
 such header and its browser keeps the answer from it.
 
+**The look.** The regular display modes draw a document as OCCT's raster draws it, one frozen
+record (`render/look.py`) that the OCCT prototype (`render/occt.py`) draws by too: each face's
+colour, linear, squared (OCCT's ASPECT material: the part's colour times itself), lit by an
+ambient 0.5 and two white directional lights at radiance 1 (a key travelling (-0.35, 0.55, -1),
+a fill (0.6, 0.2, -0.3)) with a faint Phong highlight (0.08, exponent 44.8), and no environment,
+exposure or tone curve: the sum is clamped and sRGB-encoded. Edges are unlit in their class's ink,
+1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's are the backdrop's colour. The engine
+serves the record as `GET /api/look`; the page reads it once per engine, beside the document, and
+the document's scene brings it as its own lighting and surface rule (the bundled
+`@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
+up in place of the theme's. Preview is drawn as any file's is.
+
 `cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
 cadgen's snapshot page (the package's built `_runtime/browser`, read as files) with one job for
@@ -607,6 +619,8 @@ gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `con
 placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.
+`GET /api/look` is the look the regular display modes are drawn in (**The viewer and the
+snapshot**), the same for every document.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
 `V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
 reaches it at once. The answer carries the patch's timings.
