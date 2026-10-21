@@ -167,6 +167,28 @@ class SnapshotTest(unittest.TestCase):
         self.drawn(folder / "stand.png", (200, 150))
         self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()), ["stand.png", "stand.py"])
 
+    def test_a_model_taken_from_its_file_is_drawn_from_that_file(self) -> None:
+        from cadgen.engine import api
+        from cadgen.engine.kernel import memo
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-taken-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        script = folder / "stand.py"
+        script.write_text(textwrap.dedent(MODEL), encoding="utf-8")
+        self.assertTrue(engine_build.build(script, ["stand"], cwd=folder)[-1]["ok"])
+        xbf = folder / "XBF" / "stand.xbf"
+        written = xbf.stat().st_mtime_ns
+        # A fresh process: nothing held, so the build takes the model's xbf whole from its file.
+        for held in (engine_build._WRITTEN, engine_build._PARTS, engine_build._BUILT):
+            held.clear()
+        memo.clear()
+        self.addCleanup(memo.clear)
+        drawn = api.snapshot(f"{script}::stand", folder / "stand.png", camera="iso", width=200, height=150,
+                             daemon=False)
+        self.assertEqual((drawn.width, drawn.height), (200, 150))
+        self.drawn(folder / "stand.png", (200, 150))
+        self.assertEqual(xbf.stat().st_mtime_ns, written, "taken, not written again")
+
 
 class AccessTest(unittest.TestCase):
     """The page that reads a document from the engine is the viewer's or the snapshot's, on this

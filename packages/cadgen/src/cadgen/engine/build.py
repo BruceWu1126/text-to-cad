@@ -638,8 +638,10 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
                             "reads": {}},
               "children": {}, "bodies": {model.identity: "loaded"}, "cache": {"used": True, "from": where},
               "timings": timings,
-              "files": {str(path): {"written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
-                        for _kind, path in targets}}
+              # Each file's row as a build's has it, its kind too: what reads the report for the
+              # document (an export, a snapshot) finds the taken xbf by it and reads that file.
+              "files": {str(path): {"kind": kind, "written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
+                        for kind, path in targets}}
     return report["cache"], report
 
 
