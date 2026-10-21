@@ -48,7 +48,7 @@ class _Written:
     stats: dict[str, tuple | None]
     # The document as written, kept in memory: the next build patches it (``document.Kept``).
     kept: Any = None
-    # The model's key the file holds (``previous.record``), or None.
+    # The build closure the file holds (``previous.manifest``, as text), or None.
     record: str | None = None
     # Per derived file this process wrote: the document's signature and the kind it was
     # written with, and its stat as written. The same three again: the file is kept.
@@ -267,6 +267,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
         loaded = time.perf_counter()
         context.loaded = set(_first_party_modules())
+        context.base = script.parent if code is None else Path(cwd or Path.cwd())
         models = models_in(vars(module), script)
         if functions:
             by_name = {model.name: model for model in models}
@@ -357,7 +358,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             continue
         report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
         try:
-            _finish(model, result, run, report, log, plans[model.name])
+            _finish(model, result, run, report, log, plans[model.name], context)
         except Exception as error:  # noqa: BLE001 - a file that cannot be written is the build's error
             report["ok"] = False
             report["error"] = "".join(traceback.format_exception_only(type(error), error)).rstrip()
@@ -373,7 +374,7 @@ def _shown(script: Path, cwd: Path | None) -> str:
 
 
 def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None],
-            plan: list | None = None) -> None:
+            plan: list | None = None, context: Any = None) -> None:
     from cadgen.engine import document
 
     timings = report["timings"]
@@ -382,10 +383,12 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
-    if xbf is not None:
+    if xbf is not None and context is not None:
         from cadgen.engine import previous
 
-        tree.key = previous.record(run.keys, f"{model.script}::{model.name}", Path(xbf).parent)
+        modules, unkeyable = context.modules(model)
+        tree.closure = previous.text(previous.manifest(run.keys, f"{model.script}::{model.name}", Path(xbf).parent,
+                                                       model, modules, unkeyable))
     timings["collect"] = round(time.perf_counter() - clock, 4)
     # What the joints' harvest found inconsistent: said, and the document written all the same.
     if tree.mechanism is not None and tree.mechanism.warnings:
@@ -420,7 +423,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         tokens.append(cached.token)
         built[cached.key] = cached
     document.merge(tree)
-    signature = (_signature(tree), tuple(tokens), tree.key)
+    signature = (_signature(tree), tuple(tokens), tree.closure)
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)
     report["named"] = named
@@ -493,7 +496,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
             written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),
                                          "bytes": size}
             log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(target.path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
-    _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.key,
+    _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
 
@@ -600,14 +603,15 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
         if text is None:
             return {"used": False, "reason": "the file holds no key"}, None
     found = json.loads(text)
-    try:
-        now = previous.current(found, source, xbf.parent)
-    except Exception as error:  # noqa: BLE001 - a file it read that reads no more: the body runs
-        return {"used": False, "reason": f"an input cannot be read: {error}"}, None
+    if found.get("key") is None:
+        return {"used": False, "reason": "the file holds no key"}, None
+    modules, _unkeyable = context.modules(model)
+    now, changes = previous.again(found, model, xbf.parent, modules)
     keyed = time.perf_counter()
     if now != found["key"]:
-        changed = "its code changed" if previous.code_key(source) != found["code"] else "a file it reads changed"
-        return {"used": False, "reason": changed}, None
+        changes = changes or ["its closure changed"]
+        shown_changes = changes[:3] + ([f"{len(changes) - 3} more"] if len(changes) > 3 else [])
+        return {"used": False, "reason": ", ".join(shown_changes), "changed": changes}, None
     timings = {"key": round(keyed - clock, 4)}
     if where == "file":
         # Taken only once it reads whole, written by this engine, holding the record its head showed.
@@ -618,7 +622,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
             return {"used": False, "reason": f"the file does not read: {error}"}, None
         del doc
         if held != (document._writer(), text):
-            return {"used": False, "reason": "the file does not hold the key its head shows"}, None
+            return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
     log(f"took {os.path.relpath(xbf)}: its key is the model's ({found['bodies']} bodies), nothing ran")

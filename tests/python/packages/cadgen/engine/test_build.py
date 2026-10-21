@@ -3,6 +3,8 @@ again, and the law that nothing but the declared files is written."""
 
 from __future__ import annotations
 
+import json
+
 import os
 import re
 import tempfile
@@ -120,10 +122,12 @@ class BuildTest(EngineCase):
         self.assertTrue(any(re.search(r"bracket\.plate_[a-p]{6}", name) for name in bracket.face_names.values()))
         self.assertTrue(bracket.edge_names)
         self.assertEqual(len(bracket.key), 32)
-        # What wrote it is on the document's main label; where its code is, nowhere.
+        # What wrote it is on the document's main label; where its code is, in its build closure
+        # alone, relative to the document; no absolute path anywhere.
         self.assertRegex(loaded.writer, r"^cadgen\.engine xbf/1 \(cadgen .+\)$")
         raw = (self.folder / "out/frame.xbf").read_bytes()
-        self.assertNotIn(b"frame.py", raw)
+        self.assertEqual(loaded.closure["source"]["path"], "../frame.py")
+        self.assertNotIn(b"frame.py", raw.replace(json.dumps(loaded.closure, separators=(",", ":")).encode(), b""))
         self.assertNotIn(str(self.folder).encode(), raw)
         self.assertIsNone(document.Loaded(self.folder / "out/frame.step").writer, "a STEP names no engine writer")
         # The STEP is a translation: names, and every face's element name.

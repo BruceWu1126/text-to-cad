@@ -60,9 +60,9 @@ KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
 # What wrote a document, on its main label: the engine's xbf format and cadgen's release.
 WRITER_GUID = "c49e4620-5730-422f-808f-c1e84d7bd163"
 WRITER = "cadgen.engine xbf/1 (cadgen {release})"
-# The model's key, on its main label beside the writer: a digest of what its body is made
-# of (``previous``) and the files it read, named relative to the document's folder.
-KEY_RECORD_GUID = "2f6c9d1e-8a43-4b7e-b5d0-7e1a3c9f4b62"
+# The model's build closure, on its main label beside the writer (``previous``): its engine,
+# libraries, source, modules and inputs as pointers and digests, and the key over them.
+CLOSURE_GUID = "2f6c9d1e-8a43-4b7e-b5d0-7e1a3c9f4b62"
 _XCAF_LOCK = threading.RLock()
 # The last document ``to_xcaf`` made and its tree; per path, the tree last saved there.
 _MADE: list = []
@@ -123,8 +123,9 @@ class Tree:
     parts: list[Part]
     signature: tuple
     mechanism: Any = None
-    # The model's key (``previous.record``), written on the main label; None for none.
-    key: str | None = None
+    # The model's build closure (``previous.manifest``, as text), written on the main label;
+    # None for none.
+    closure: str | None = None
 
 
 def _identity() -> Any:
@@ -541,8 +542,8 @@ class Kept:
         # The last conversion: how many prototypes it converted, and whether it patched.
         self.converted = 0
         self.patched = False
-        # The model's key the document holds (``Tree.key``).
-        self.key: str | None = None
+        # The build closure the document holds (``Tree.closure``).
+        self.closure: str | None = None
 
 
 def to_xcaf(tree: Tree, kept: Kept | None = None) -> Any:
@@ -713,9 +714,9 @@ def _convert(tree: Tree, records: list[_Record], kept: Kept) -> Any:
     converter = _Converter(doc, kept, patching=False)
     converter.materials = kept.materials = _Materials(doc)
     TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(WRITER_GUID), TCollection_AsciiString(_writer()))
-    if tree.key is not None:
-        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(KEY_RECORD_GUID), TCollection_AsciiString(tree.key))
-    kept.key = tree.key
+    if tree.closure is not None:
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(CLOSURE_GUID), TCollection_AsciiString(tree.closure))
+    kept.closure = tree.closure
     labels: list = []
     for at, (prototype, record) in enumerate(zip(tree.order, records)):
         if isinstance(prototype, Part):
@@ -758,15 +759,15 @@ def _patch(kept: Kept, tree: Tree, records: list[_Record]) -> Any:
     converter = _Converter(doc, kept, patching=True)
     labels = [converter.label(at) for at in range(min(len(records), len(old)))] + [None] * (len(records) - len(old))
     kept.converted, kept.patched = len(dirty), True
-    if (tree.key is None) != (kept.key is None):
+    if (tree.closure is None) != (kept.closure is None):
         return None  # the main label's attributes in a cold conversion's order: made whole
-    if tree.key != kept.key:
+    if tree.closure != kept.closure:
         from OCP.Standard import Standard_GUID
         from OCP.TCollection import TCollection_AsciiString
         from OCP.TDataStd import TDataStd_AsciiString
 
-        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(KEY_RECORD_GUID), TCollection_AsciiString(tree.key))
-        kept.key = tree.key
+        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(CLOSURE_GUID), TCollection_AsciiString(tree.closure))
+        kept.closure = tree.closure
     if not dirty and not gone and tables == kept.tables and converter.mechanism(tree, labels) == kept.mechanism:
         return doc
     # The references a label makes, ordered by their labels' places: each colour's,
@@ -1267,6 +1268,15 @@ class Loaded:
         else:
             self.tree = {"name": self.path.stem, "children": roots}
 
+    @property
+    def closure(self) -> dict[str, Any] | None:
+        """The build closure an xbf this engine wrote holds (``previous``): its engine,
+        libraries, source, modules, inputs and key; None for a document with none."""
+        import json
+
+        found = _label_text(self.doc.Main(), CLOSURE_GUID)
+        return json.loads(found) if found else None
+
     def structure(self) -> dict[str, Any]:
         """The document as the page reads it (``serve``): its prototypes, its instances
         and its tree, with every name and colour, and its mechanism (``kinematics``,
@@ -1455,12 +1465,9 @@ def _read(path: Path) -> Any:
 
 @functools.cache
 def _writer() -> str:
-    from importlib import metadata
+    from cadgen.engine.previous import version
 
-    try:
-        return WRITER.format(release=metadata.version("cadgen"))
-    except metadata.PackageNotFoundError:
-        return WRITER.format(release="unknown")
+    return WRITER.format(release=version())
 
 
 def _label_text(label: Any, guid: str) -> str | None:

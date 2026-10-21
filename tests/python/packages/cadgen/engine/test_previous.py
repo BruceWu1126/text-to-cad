@@ -137,7 +137,8 @@ class PreviousTest(unittest.TestCase):
         self.restart()
         self.source(peg=12)
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "its code changed")
+        self.assertEqual(report["cache"]["reason"], "../kit.py changed")
+        self.assertEqual(report["cache"]["changed"], ["../kit.py changed"])
         self.assertEqual(report["bodies"], {"kit.py::kit": "run", "kit.py::peg": "run", "kit.py::cap": "run"})
         edited = self.xbf.read_bytes()
         self.assertEqual(edited, self.cold(peg=12))
@@ -170,7 +171,8 @@ class PreviousTest(unittest.TestCase):
 
                 bd.export_step(bd.Cylinder(3, 5), str(self.folder / "inputs" / "cap.step"))
             report = self.kit()
-            self.assertEqual(report["cache"]["reason"], "a file it reads changed", change)
+            named = {"json": "../peg.json", "root": "../kit.json", "step": "../inputs/cap.step"}[change]
+            self.assertEqual(report["cache"]["reason"], f"{named} changed", change)
             self.assertTrue(report["files"][str(self.xbf)]["written"])
         gone = self.folder / "peg.json"
         gone.unlink()
@@ -183,11 +185,13 @@ class PreviousTest(unittest.TestCase):
         text = self.xbf.read_bytes()
         writer, found = previous.scan(self.xbf)
         record = json.loads(found)
-        # Relative to the document's folder: XBF/ beside the script.
-        self.assertEqual(record["inputs"], [["read", "../peg.json"], ["file", "../inputs/cap.step"],
-                                            ["read", "../kit.json"]])
+        # Relative to the document's folder: XBF/ beside the script; digests, never contents.
+        self.assertEqual([row[:2] for row in record["inputs"]], [["read", "../peg.json"], ["file", "../inputs/cap.step"],
+                                                                 ["read", "../kit.json"]])
+        self.assertTrue(all(len(row[2]) == 64 for row in record["inputs"]))
+        self.assertEqual(record["source"], {"kind": "script", "path": "../kit.py", "function": "kit", "commit": None})
         self.assertNotIn(str(self.folder).encode(), text)
-        self.assertNotIn(b"kit.py", text)
+        self.assertNotIn(b"thickness", text, "no source text")
         self.assertEqual(writer, document._writer())
 
     def test_another_engines_file_is_built_again(self) -> None:
@@ -207,8 +211,10 @@ class PreviousTest(unittest.TestCase):
         self.xbf.unlink()
         self.assertEqual(self.kit()["cache"]["reason"], "no file yet")
         self.assertEqual(self.xbf.read_bytes(), first)
-        # Its head whole, the rest gone: the record shows, the document does not read.
-        head = first[: len(first) // 2]
+        # Its head whole, the rest gone: the closure shows, the document does not read. (Cut
+        # at a third: OCCT's reader aborts the process on some cuts of a shape section
+        # rather than failing, an uncaught Standard_NullObject -- measured at a half of this one.)
+        head = first[: len(first) // 3]
         self.xbf.write_bytes(head)
         self.restart()
         report = self.kit()
@@ -239,6 +245,176 @@ class PreviousTest(unittest.TestCase):
         # Provenance is the worker's that built it: a taken document has none to give.
         key = again.prototypes[0].key
         self.assertIsNone(engine_build.made_by(str(self.xbf), key, "face", 1))
+
+
+HELPER = """
+# The plate's dimensions{comment}
+WIDTH = {width}
+
+
+def unused():
+    return {unused}
+"""
+
+PLATE = """
+import json
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import xbf
+
+import dims
+
+HERE = Path(__file__).resolve().parent
+
+
+@xbf
+def plate():
+    try:
+        depth = json.loads((HERE / "depth.json").read_text())["depth"]
+    except FileNotFoundError:
+        depth = 10
+    plate = bd.Box(dims.WIDTH, depth, 2)
+    plate.label = "plate"
+    return plate
+"""
+
+
+class ClosureTest(unittest.TestCase):
+    """The closure an xbf carries: pointers and digests, every field read back; what a restart
+    names when it differs; the code it was built from, packaged and built again."""
+
+    def setUp(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-closure-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "plate.py"
+        self.xbf = self.folder / "XBF/plate.xbf"
+        self.script.write_text(textwrap.dedent(PLATE), encoding="utf-8")
+        self.helper()
+        (self.folder / "depth.json").write_text(json.dumps({"depth": 6}), encoding="utf-8")
+        self.restart()
+        self.addCleanup(self.restart)
+        memo.install()
+
+    def restart(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+
+    def helper(self, width: float = 20, comment: str = "", unused: int = 1) -> None:
+        path = self.folder / "dims.py"
+        path.write_text(textwrap.dedent(HELPER.format(width=width, comment=comment, unused=unused)), encoding="utf-8")
+        os.utime(path, ns=(time.time_ns(), time.time_ns()))
+
+    def plate(self, restart: bool = True) -> dict:
+        if restart:
+            self.restart()
+        (report,) = engine_build.build(self.script, ["plate"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def test_the_closure_round_trips_every_field(self) -> None:
+        from cadgen.engine import api
+
+        self.plate()
+        record = previous.of(self.xbf)
+        self.assertEqual(list(record), ["schema", "engine", "libs", "source", "modules", "inputs", "bodies", "key"])
+        self.assertEqual(record["schema"], "cadgen.engine closure/1")
+        version = (Path(__file__).resolve().parents[5] / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(record["engine"]["release"], f"cadgen {version}", "the release VERSION stamps")
+        self.assertEqual((record["engine"]["format"], len(record["engine"]["digest"])), ("xbf/1", 32))
+        self.assertEqual(set(record["libs"]), {"build123d", "OCP", "numpy"})
+        self.assertEqual(record["source"], {"kind": "script", "path": "../plate.py", "function": "plate",
+                                            "commit": None})
+        self.assertEqual([path for path, _digest in record["modules"]], ["../dims.py", "../plate.py"])
+        self.assertEqual([row[:2] for row in record["inputs"]], [["read", "../depth.json"]])
+        self.assertEqual(record["bodies"], 1)
+        self.assertEqual(record["key"], previous.key(record))
+        # The same record, whole, through every door that reads it.
+        self.assertEqual(document.Loaded(self.xbf).closure, record)
+        self.assertEqual(api.where(self.xbf), record)
+        self.assertIn(b"cadgen " + version.encode(), self.xbf.read_bytes()[:4096])
+
+    def test_a_comment_changes_no_module_and_a_code_edit_names_its_module(self) -> None:
+        self.plate()
+        before = dict(map(tuple, previous.of(self.xbf)["modules"]))
+        # A comment, and an edit to a function the model does not reach: nothing it is made of.
+        self.helper(comment=", in millimetres", unused=2)
+        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+        self.helper(width=24)
+        report = self.plate()
+        self.assertEqual(report["cache"]["changed"], ["../dims.py changed"])
+        after = dict(map(tuple, previous.of(self.xbf)["modules"]))
+        self.assertEqual({path for path in before if before[path] != after[path]}, {"../dims.py"})
+
+    def test_an_input_edit_names_its_file_and_a_missing_one_builds_cleanly(self) -> None:
+        self.plate()
+        (self.folder / "depth.json").write_text(json.dumps({"depth": 7}), encoding="utf-8")
+        self.assertEqual(self.plate()["cache"]["changed"], ["../depth.json changed"])
+        (self.folder / "depth.json").unlink()
+        report = self.plate()
+        self.assertEqual(report["cache"]["changed"], ["../depth.json is missing"])
+        self.assertTrue(report["files"][str(self.xbf)]["written"])
+        # Found missing is an input too: the next restart takes the file.
+        self.assertEqual(previous.of(self.xbf)["inputs"][0][2], None)
+        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+
+    def test_the_commit_is_recorded_in_a_repository(self) -> None:
+        import subprocess
+
+        git = ["git", "-C", str(self.folder), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        for args in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "fixture"]):
+            subprocess.run([*git, *args], check=True, capture_output=True)
+        head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True).stdout.strip()
+        self.plate()
+        self.assertEqual(previous.of(self.xbf)["source"]["commit"], head)
+        # A commit names where the code was; it is no part of the key.
+        (self.folder / "notes.txt").write_text("x", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-q", "-m", "notes"], check=True, capture_output=True)
+        self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
+
+    def test_code_names_its_digest_never_its_text(self) -> None:
+        code = "import build123d as bd\nresult = bd.Box(3, 4, 5)\n"
+        out = self.folder / "code.xbf"
+        (report,) = engine_build.build(engine_build.code_script("block", self.folder), ["block"], cwd=self.folder,
+                                       code=code, outputs={"xbf": {"out": str(out)}})
+        self.assertTrue(report["ok"], report)
+        record = previous.of(out)
+        self.assertEqual((record["source"]["kind"], record["source"]["name"]), ("code", "block"))
+        self.assertEqual(len(record["source"]["digest"]), 32)
+        self.assertEqual(record["modules"], [])
+        self.assertNotIn(b"bd.Box", out.read_bytes())
+
+    def test_a_cadz_extracted_and_built_is_the_same_bytes(self) -> None:
+        import subprocess
+        import sys
+        import zipfile
+
+        from cadgen.engine import api
+
+        self.plate()
+        original = self.xbf.read_bytes()
+        package = self.folder / "plate.cadz"
+        (written,) = api.export(self.xbf, package, daemon=False)
+        self.assertEqual(written.kind, "cadz")
+        with zipfile.ZipFile(package) as archive:
+            self.assertEqual(sorted(archive.namelist()), ["XBF/plate.xbf", "depth.json", "dims.py", "plate.py"])
+            other = self.folder / "elsewhere"
+            archive.extractall(other)
+        (other / "XBF/plate.xbf").unlink()
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "plate.py", "--no-daemon"], cwd=other,
+                              capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual((other / "XBF/plate.xbf").read_bytes(), original)
+        api.export(self.xbf, package, inputs=False, daemon=False)
+        with zipfile.ZipFile(package) as archive:
+            self.assertNotIn("depth.json", archive.namelist())
 
 
 if __name__ == "__main__":

@@ -510,6 +510,8 @@ class BuildContext:
         # The first-party modules the script's load imported (``build`` sets it), the
         # build's symbol resolution, the time keys took and each body's fallbacks.
         self.loaded: set[str] | None = None
+        # The build's folder: the script's, or the working folder of code (``build`` sets it).
+        self.base: Path | None = None
         self.symbols: Any = None
         self.key_seconds = 0.0
         self.fallbacks: dict[str, list[str]] = {}
@@ -527,13 +529,18 @@ class BuildContext:
 
             started = time.perf_counter()
             if self.symbols is None:
-                self.symbols = Symbols(self.resolved, self.loaded)
+                self.symbols = Symbols(self.resolved, self.loaded, self.base)
             digest, reasons = self.symbols.key(model.function)
             if reasons:
                 self.fallbacks[model.identity] = reasons
             found = self.sources[key] = digest + _engine_version()
             self.key_seconds += time.perf_counter() - started
         return found
+
+    def modules(self, model: Model) -> tuple[dict[str, str], bool]:
+        """A model's closure by file (``sources.Symbols.modules``), worked out with its key."""
+        self.source(model)
+        return self.symbols.modules(model.function)
 
     def __enter__(self) -> "BuildContext":
         self.previous = getattr(_CONTEXT, "build", None)

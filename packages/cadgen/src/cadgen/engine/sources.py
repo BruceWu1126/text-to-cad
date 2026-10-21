@@ -47,7 +47,7 @@ from collections import OrderedDict
 from pathlib import Path, PurePath
 from typing import Any
 
-__all__ = ["Symbols", "assigned", "closure", "digest", "returning", "skeleton"]
+__all__ = ["Symbols", "assigned", "closure", "closure_files", "digest", "returning", "skeleton"]
 
 _HELD = 4096
 # (device, inode, size, mtime) -> the file's digest; digest -> the imports its source makes.
@@ -138,6 +138,15 @@ def closure(path: Path, module: str, resolved: dict[str, list] | None = None) ->
     """The digest of a body's code: the file it is defined in (as module ``module``) and
     every first-party module it imports, transitively, by path and bytes. ``resolved``
     keeps what each module name resolved to, for the bodies of one build to share."""
+    seen = closure_files(path, module, resolved)
+    hasher = hashlib.sha256()
+    for file in sorted(seen):
+        hasher.update(f"{file}\0{seen[file]}\n".encode())
+    return hasher.hexdigest()
+
+
+def closure_files(path: Path, module: str, resolved: dict[str, list] | None = None) -> dict[Path, str]:
+    """``closure``'s files, each with the digest of its bytes."""
     resolved = {} if resolved is None else resolved
     seen: dict[Path, str] = {}
     pending = [(module, Path(path).resolve())]
@@ -160,10 +169,7 @@ def closure(path: Path, module: str, resolved: dict[str, list] | None = None) ->
                 if found is None:
                     found = resolved[candidate] = _files(candidate)
                 pending.extend(found)
-    hasher = hashlib.sha256()
-    for file in sorted(seen):
-        hasher.update(f"{file}\0{seen[file]}\n".encode())
-    return hasher.hexdigest()
+    return seen
 
 
 # --- symbols -------------------------------------------------------------------------------
@@ -651,13 +657,19 @@ class _Node:
     and each global binding its code reads), the functions and classes it reaches, and the
     modules that fall back to their bytes, each with the reason."""
 
-    __slots__ = ("pairs", "children", "fallbacks", "content")
+    __slots__ = ("pairs", "children", "fallbacks", "content", "owners")
 
     def __init__(self) -> None:
         self.pairs: set[tuple] = set()
         self.children: list[Any] = []
         self.fallbacks: list[tuple[tuple[str, Path], str]] = []
         self.content = ""
+        # Per pair, the module whose binding or code it is: what a build closure lists it under.
+        self.owners: dict[tuple, str | None] = {}
+
+    def add(self, pair: tuple, owner: str | None) -> None:
+        self.pairs.add(pair)
+        self.owners.setdefault(pair, owner)
 
 
 class Symbols:
@@ -667,8 +679,12 @@ class Symbols:
     imported: a module a function imports inside itself is followed by value only if the
     load imported it (otherwise whether it is in memory would depend on which bodies ran)."""
 
-    def __init__(self, resolved: dict[str, list] | None = None, loaded: set[str] | None = None) -> None:
+    def __init__(self, resolved: dict[str, list] | None = None, loaded: set[str] | None = None,
+                 base: Path | None = None) -> None:
         self.resolved = {} if resolved is None else resolved
+        # The build's folder (the script's): a path value inside it counts relative to it, so
+        # a model moved with its folder keeps its key.
+        self.base = None if base is None else str(Path(base).resolve())
         self.loaded = set(sys.modules) if loaded is None else loaded
         self._nodes: dict[int, _Node] = {}
         self._held: list[Any] = []
@@ -676,13 +692,19 @@ class Symbols:
         self._first_party_modules: dict[str, bool] = {}
         self._closures: dict[tuple[str, Path], str] = {}
         self._stars: dict[str, str | None] = {}
+        self._reached: dict[int, tuple] = {}
 
     # --- the key -------------------------------------------------------------------------
 
-    def key(self, function: Any) -> tuple[str, list[str]]:
-        """A body's key and, sorted, the reasons any module of its reach fell back to its
-        bytes (or, where no module holds what cannot be keyed, why it always runs)."""
+    def _reach(self, function: Any) -> tuple[set[tuple], dict[tuple, str | None], dict[tuple[str, Path], str]]:
+        """What a body's function reaches: its ``(symbol, hash)`` pairs, the module each
+        pair is owned by, and the modules that fall back to their bytes, with why. Once a
+        build per function."""
+        found = self._reached.get(id(function))
+        if found is not None:
+            return found
         pairs: set[tuple] = set()
+        owners: dict[tuple, str | None] = {}
         fallbacks: dict[tuple[str, Path], str] = {}
         seen: set[int] = set()
         pending = [function]
@@ -693,9 +715,19 @@ class Symbols:
             seen.add(id(obj))
             node = self._node(obj)
             pairs |= node.pairs
+            for pair, owner in node.owners.items():
+                owners.setdefault(pair, owner)
             for target, reason in node.fallbacks:
                 fallbacks.setdefault(target, reason)
             pending.extend(node.children)
+        self._held.append(function)
+        found = self._reached[id(function)] = (pairs, owners, fallbacks)
+        return found
+
+    def key(self, function: Any) -> tuple[str, list[str]]:
+        """A body's key and, sorted, the reasons any module of its reach fell back to its
+        bytes (or, where no module holds what cannot be keyed, why it always runs)."""
+        pairs, _owners, fallbacks = self._reach(function)
         rows = sorted(repr(pair) for pair in pairs)
         for target in sorted(fallbacks):
             found = self._closures.get(target)
@@ -705,6 +737,49 @@ class Symbols:
         reasons = sorted(f"{target[0]}: {reason}" for target, reason in fallbacks.items())
         reasons += sorted(f"always runs: {pair[1]}" for pair in pairs if pair[0] == "unkeyable")
         return hashlib.sha256("\n".join(rows).encode()).hexdigest(), reasons
+
+    def modules(self, function: Any) -> tuple[dict[str, str], bool]:
+        """A body's closure by file: per first-party module file the script's load imported
+        or the body reaches, a digest of what the body reaches in it -- its functions' code
+        objects (no lines, no docstrings), its classes, the values its bindings hold -- and,
+        for a module that falls back, each file of its import closure by its bytes. A module
+        the load imported and the body does not reach holds nothing (the empty digest). And
+        whether anything the body reaches cannot be keyed (it always runs). The files
+        partition the key (``key``): the key is the same exactly when every file's digest is."""
+        from cadgen.engine.kernel.trace import first_party_file
+
+        pairs, owners, fallbacks = self._reach(function)
+        root = self._module_file(getattr(function, "__module__", None)) or str(
+            Path(function.__code__.co_filename).resolve())
+        buckets: dict[str, list[str]] = {}
+        for name in self.loaded:
+            file = self._module_file(name)
+            if file is not None:
+                buckets.setdefault(file, [])
+        unkeyable = False
+        for pair in pairs:
+            if pair[0] == "unkeyable":
+                unkeyable = True
+            file = self._module_file(owners.get(pair)) or root
+            buckets.setdefault(file, []).append(repr(pair))
+        for target in sorted(fallbacks):
+            for file, file_digest in closure_files(target[1], target[0], self.resolved).items():
+                buckets.setdefault(str(file), []).append(f"bytes {file_digest}")
+        found = {}
+        for file, rows in buckets.items():
+            if file in MEMORY or not first_party_file(file):
+                continue  # code built from text: its source's digest is the build's
+            found[file] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()[:32]
+        return found, unkeyable
+
+    def _module_file(self, name: str | None) -> str | None:
+        """The file a first-party module was loaded from, or None."""
+        if not name or not self._first_party_module(name):
+            return None
+        file = getattr(sys.modules.get(name), "__file__", None)
+        if not file:
+            return None
+        return str(file) if str(file) in MEMORY else str(Path(file).resolve())
 
     # --- what is first-party ---------------------------------------------------------------
 
@@ -750,7 +825,7 @@ class Symbols:
     def _fallback(self, node: _Node, module: str | None, reason: str, filename: str | None = None) -> None:
         target = self._module_target(module, filename)
         if target is None:
-            node.pairs.add(("unkeyable", f"{module}: {reason}", next(_UNKEYABLE)))
+            node.add(("unkeyable", f"{module}: {reason}", next(_UNKEYABLE)), module)
         else:
             node.fallbacks.append((target, reason))
 
@@ -798,7 +873,7 @@ class Symbols:
             parts.append(name + "=" + self._value(value, node, module, f"{where}: closure variable {name}",
                                                   code.co_filename))
         node.content = _hash(parts)
-        node.pairs.add((where, node.content))
+        node.add((where, node.content), module)
         if first_party_file(code.co_filename):
             path = Path(code.co_filename)
             spots = _facts(path, digest(path))[0]
@@ -822,7 +897,7 @@ class Symbols:
             if name not in _CLASS_SKIPPED:
                 parts.append(f"{name}=" + self._value(value, node, cls.__module__, f"{where}.{name}"))
         node.content = _hash(parts)
-        node.pairs.add((where, node.content))
+        node.add((where, node.content), cls.__module__)
 
     # --- bindings --------------------------------------------------------------------------
 
@@ -856,7 +931,8 @@ class Symbols:
             # The module itself, not an attribute read off it.
             self._module_value(value, path, node, where, info, {local} if local else set())
             return
-        node.pairs.add((path, self._value(value, node, holder, f"{where} reads {path}")))
+        node.add((path, self._value(value, node, holder, f"{where} reads {path}")),
+                 namespace.get("__name__") if holder == "builtins" else holder)
 
     def _module_value(self, module: types.ModuleType, path: str, node: _Node, where: str, info: _Code | None,
                       locals_: set[str]) -> None:
@@ -869,7 +945,7 @@ class Symbols:
                     self._bind(module.__dict__, chain, node, where)
         else:
             self._fallback(node, module.__name__, f"{where} holds module {module.__name__} as a value")
-        node.pairs.add((path, "module:" + module.__name__))
+        node.add((path, "module:" + module.__name__), module.__name__)
 
     def _loaded(self, name: str) -> types.ModuleType | None:
         """A module the script's load imported (what a function imports when it runs is in
@@ -1004,7 +1080,10 @@ class Symbols:
             # A library's wrapper of a function (``functools.cache``): what it wraps.
             return f"wrapped:{_identity(kind)}:" + self._canonical(value.__wrapped__, node, where, depth)
         if isinstance(value, PurePath):
-            return f"path:{kind.__name__}:{value}"
+            text = str(value)
+            if self.base is not None and value.is_absolute() and (text + os.sep).startswith(self.base + os.sep):
+                text = "@" + text[len(self.base):].replace(os.sep, "/")
+            return f"path:{kind.__name__}:{text}"
         if kind is types.SimpleNamespace:
             return "namespace:" + self._canonical(dict(vars(value)), node, where, depth)
         top = module.split(".")[0]
