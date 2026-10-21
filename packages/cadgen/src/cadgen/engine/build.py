@@ -50,7 +50,7 @@ class _Written:
     kept: Any = None
     # The model's key the file holds (``previous.record``), or None.
     record: str | None = None
-    # Per derived file this process wrote: the document's signature and the options it was
+    # Per derived file this process wrote: the document's signature and the kind it was
     # written with, and its stat as written. The same three again: the file is kept.
     files: dict[str, tuple] | None = None
     # The tree the kept document was made from: what a derived file is translated from.
@@ -204,24 +204,22 @@ def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, A
         sys.modules.pop(module_name, None)
         raise
     model = Model(module.__dict__[name])
-    model.outputs = [Output(kind, given["out"], tuple((option, value) for option, value in given.items()
-                                                       if option != "out" and value is not None))
-                     for kind, given in (outputs or {}).items()]
+    model.outputs = [Output(kind, given["out"]) for kind, given in (outputs or {}).items()]
     module.__dict__[name] = model
     return module
 
 
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, pose: Any = None,
-          part: str | None = None, code: str | None = None, verify: bool = False) -> list[dict[str, Any]]:
+          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, code: str | None = None,
+          verify: bool = False) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model. Raises BuildError for a script or function that is not there; a body that
     raises is its model's report (``ok`` false, ``error`` the model's traceback).
 
     ``outputs`` selects and overrides the files written (``Model.plan``): ``{kind: {"out":
-    path or None, option: value}}``, the kinds ``xbf``, ``step``, ``glb``, ``stl``,
-    ``threemf``, ``snapshot``; None writes what the decorators declare. ``pose`` and
-    ``part`` apply to every derived file whose verb takes them. ``code`` builds source text
+    path or None}}``, the kinds ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``; None writes
+    what the decorators declare. Every file shows the model as its joints place it: a pose
+    or a part is the ``export`` verb's, never a build's. ``code`` builds source text
     instead of a script: ``script`` is then ``code_script(name, cwd)`` and ``functions`` the
     one name; the code has no decorators, its files are the ``outputs`` alone, each with
     its path.
@@ -254,10 +252,9 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     started = time.perf_counter()
     results: list[tuple[Any, Any, float]] = []
     plans: dict[str, list] = {}
-    # A request that names its own files, or a pose or a part, is written as it asks: the
-    # previous document is not taken in place of the run (its files say nothing of options).
-    overridden = pose is not None or part is not None or (code is None and any(
-        kind != "xbf" or given for kind, given in (outputs or {}).items()))
+    # A request that names its own files is written as it asks: the previous document is not
+    # taken in place of the run (it says nothing of files the model does not declare).
+    overridden = code is None and any(kind != "xbf" or given for kind, given in (outputs or {}).items())
     with memo.run(script) as run, BuildContext() as context:
         run.verify = verify
         try:
@@ -291,7 +288,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                              f"build one (SCRIPT::MODEL) to give its file a path")
         for model in models:
             try:
-                plans[model.name] = model.plan(outputs, pose=pose, part=part, cwd=cwd)
+                plans[model.name] = model.plan(outputs, cwd=cwd)
             except (TypeError, ValueError) as error:
                 raise BuildError(f"{shown}::{model.name}: {error}") from None
         for model in models:
@@ -434,17 +431,12 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
 
 
-def _options(target: Any) -> str:
-    return json.dumps(target.options, sort_keys=True, default=repr)
-
-
 def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str, Any],
            log: Callable[[str], None]) -> None:
     """The model's files: the xbf first -- saved, and the viewer woken with it, before any
     derived file is written -- then each derived file, translated from the document
-    (``export.translate``; a snapshot drawn of it). A file whose document, options and
-    stat are what this process left is kept, not rewritten; the xbf is not rewritten when
-    its bytes are the file's."""
+    (``export.translate``). A file whose document and stat are what this process left is
+    kept, not rewritten; the xbf is not rewritten when its bytes are the file's."""
     from cadgen.engine import document
 
     timings = report["timings"]
@@ -460,7 +452,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
             return False
         if target.kind == "xbf":
             return remembered.stats.get(str(target.path)) == stat
-        return files.get(str(target.path)) == (signature, _options(target), stat)
+        return files.get(str(target.path)) == (signature, target.kind, stat)
 
     stale = [target for target in plan if not current(target)]
     written: dict[str, Any] = {}
@@ -493,14 +485,9 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
 
                 if source is None:
                     source = export.Source.built(doc, tree, xbf)
-                if target.kind == "snapshot":
-                    from cadgen.engine import snapshot
-
-                    size = snapshot.draw(source, target.path, **target.options)["bytes"]
-                else:
-                    size = export.translate(source, target.kind, target.path, **target.options)
+                size = export.translate(source, target.kind, target.path)
                 fresh = True
-                files[str(target.path)] = (signature, _options(target), _stat(target.path))
+                files[str(target.path)] = (signature, target.kind, _stat(target.path))
             seconds = time.perf_counter() - clock
             timings[target.kind] = round(seconds, 4)
             written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),

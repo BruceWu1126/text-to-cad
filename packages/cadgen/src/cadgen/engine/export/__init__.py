@@ -1,6 +1,6 @@
 """Exports: a document translated to a file. One writer, one document, two triggers.
 
-``translate(document, kind, path, *, pose=None, part=None, animate=None)`` writes one
+``translate(document, kind, path, *, pose=None, part=None)`` writes one
 file of ``kind`` (``KINDS``: ``xbf``, ``step``, ``glb``, ``stl``, ``threemf``) from a
 document: a ``Source`` -- the document a build made, held in the worker's memory
 (``Source.built``), or one read from an ``.xbf`` or a ``.step`` (``Source.read``). A
@@ -13,7 +13,8 @@ name in the document's tree) writes that subtree alone, as a document of its own
 root at the subtree's frame. Meshes are never sources: there is no B-rep in them. An xbf
 is written from a STEP (read into a document first), or from an xbf with ``part`` (a
 sub-assembly extracted); a posed xbf is refused, since a pose is a request, never a
-document. ``animate`` is reserved for GLB motion and takes nothing yet.
+document. A GLB carries every motion the document defines as a glTF animation of the same
+name, baked by forward kinematics (``export/motion.py``); STEP, STL and 3MF ignore motions.
 
 Every file is written to a temporary file beside its target and moved over it.
 
@@ -345,8 +346,7 @@ def _subtree(structure: dict[str, Any], part: str) -> tuple[dict[str, Any], tupl
 # --- the one call ------------------------------------------------------------------------------
 
 
-def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, part: str | None = None,
-              animate: Any = None) -> int:
+def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, part: str | None = None) -> int:
     """Write ``document`` (a ``Source``, or the path of an ``.xbf``/``.step``) to ``path``
     as ``kind`` (from the suffix when None); returns the file's size."""
     path = Path(path)
@@ -355,8 +355,6 @@ def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, p
         raise ExportRefused(f"no export {kind!r}; the kinds are {', '.join(KINDS)}")
     if path.suffix.lower() not in KINDS[kind].suffixes:
         raise ExportRefused(f"{path.name}: a {kind} export ends in {' or '.join(KINDS[kind].suffixes)}")
-    if animate is not None:
-        raise ExportRefused("GLB animation is not built yet: animate takes nothing")
     source = document if isinstance(document, Source) else Source.read(document)
     if kind == "xbf":
         if pose is not None:

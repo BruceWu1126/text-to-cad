@@ -266,8 +266,6 @@ class ExportTest(unittest.TestCase):
             translate(self.folder / "board.glb", None, self.folder / "back.step")
         with self.assertRaisesRegex(ExportRefused, "an export is one of"):
             translate(self.xbf, None, self.folder / "board.obj")
-        with self.assertRaisesRegex(ExportRefused, "animation"):
-            translate(self.xbf, None, self.folder / "moving.glb", animate={"flap": (0, 90)})
 
     def test_a_step_becomes_an_xbf(self) -> None:
         out = self.folder / "from-step.xbf"
@@ -344,26 +342,37 @@ class BuildFilesTest(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         self.assertEqual(self.files(), {"solo.py", "solo.step"})
 
-    def test_a_decorator_takes_its_verbs_options_and_nothing_else(self) -> None:
-        from cadgen.engine.model import glb, snapshot, step, xbf
+    def test_a_decorator_takes_out_alone_and_a_file_shows_the_joints_pose(self) -> None:
+        import cadgen.engine
+        from cadgen.engine import model
+        from cadgen.engine.model import glb, step, xbf
 
-        with self.assertRaisesRegex(TypeError, "takes no material"):
+        with self.assertRaisesRegex(TypeError, "takes out alone, not material"):
             step("a.step", material="steel")
-        with self.assertRaisesRegex(TypeError, "takes no out2"):
+        with self.assertRaisesRegex(TypeError, "takes out alone, not pose"):
+            step("a.step", pose="open")
+        with self.assertRaisesRegex(TypeError, "takes out alone, not out2"):
             xbf(out2="a.xbf")
-        with self.assertRaisesRegex(ValueError, "must end in .png"):
-            snapshot("a.jpg")
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(TypeError, "takes out alone, not animate"):
             glb("a.glb", animate={"flap": (0, 90)})
-        script = self.write("hinged.py", BOARD.format(lift=6).replace('@step("board.step")',
-                                                                      '@step("open.step", pose="open", part="hinge")'))
-        [report] = engine_build.build(script, ["board"], cwd=self.folder, outputs={"step": {}})
+        self.assertFalse(hasattr(model, "snapshot"), "a picture is the snapshot verb's, never a declaration")
+        self.assertNotIn("snapshot", cadgen.engine.__all__)
+        # As built is where the joints connect the parts: lid at 30 degrees in every file.
+        script = self.write("hinged.py", BOARD.format(lift=6).replace("connect_to(lid.joints[\"mount\"], angle=0)",
+                                                                      "connect_to(lid.joints[\"mount\"], angle=30)"))
+        [report] = engine_build.build(script, ["board"], cwd=self.folder, outputs={"xbf": {}, "step": {}})
         self.assertTrue(report["ok"], report)
-        read = document.Loaded(self.folder / "open.step")
-        self.assertEqual(read.name, "hinge")
-        lid = next(i for i in read.instances if i.path[-1] == "lid")
-        self.assertNotEqual([round(v, 6) for v in lid.matrix[:12]], [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0],
-                            "the decorator's pose is the file's")
+        built = document.Loaded(self.folder / "XBF/board.xbf").structure()
+        self.assertEqual(built["kinematics"]["asBuilt"], {"flap": 30.0})
+        self.assertIn("open", built["kinematics"]["configurations"], "a configuration names a preset")
+
+        def lid(structure: dict) -> list[float]:
+            return [round(v, 6) for v in next(i for i in structure["instances"] if i["path"].endswith("/lid"))["matrix"]]
+
+        self.assertEqual(lid(document.Loaded(self.folder / "board.step").structure()), lid(built),
+                         "the STEP shows the lid where its joint put it, not at a configuration")
+        with self.assertRaisesRegex(engine_build.BuildError, "takes no pose"):
+            engine_build.build(script, ["board"], cwd=self.folder, outputs={"step": {"pose": "open"}})
 
     def test_an_export_from_a_script_builds_it_then_writes(self) -> None:
         script = self.write("board.py", BOARD.format(lift=6))

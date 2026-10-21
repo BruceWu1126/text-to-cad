@@ -341,7 +341,8 @@ class Daemon:
         op = request.get("op")
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
-                     "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd")}
+                     "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
+                     "draw": request.get("draw")}
             return self._call(request, order, send)
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "code": request["name"],
@@ -359,7 +360,6 @@ class Daemon:
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
                                  "cwd": request.get("cwd"), "outputs": request.get("outputs"),
-                                 "pose": request.get("pose"), "part": request.get("part"),
                                  "code": request.get("code"), "verify": bool(request.get("verify")),
                                  "acknowledged": True}
                         server = self.server

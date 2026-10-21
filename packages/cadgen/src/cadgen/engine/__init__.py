@@ -20,7 +20,9 @@ A function worth replaying on a later build -- an assembly's part, a derivation'
 is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it
 instead of running it. A part's material is a value set on the shape: ``part.material = materials.aluminium``
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
-``connect_to``; ``configuration(assembly, name, **values)`` names a configuration of it.
+``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
+**values)`` names a configuration of it and ``motion(assembly, name, ...)`` a motion, which a
+GLB export bakes into a clip.
 Importing this package imports no kernel: the names below load on first use.
 """
 
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "memo", "paint", "read_step", "snapshot", "step", "stl",
+__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "step", "stl",
            "threemf", "xbf"]
 
 

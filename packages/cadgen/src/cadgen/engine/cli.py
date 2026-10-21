@@ -3,8 +3,7 @@ the functions of ``api``.
 
     cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
     cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
-        [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--snapshot [F]]
-        [--pose NAME|JSON] [--part NAME] [--json] [--no-daemon] [--verify]
+        [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
     cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME]
     cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--camera PRESET|az:el] [--grid] [--preview]
         [--pose NAME|JSON] [--width N] [--height N] [--size-profile P] [--json]
@@ -25,8 +24,8 @@ from typing import Any
 
 __all__ = ["build_parser", "elements", "main"]
 
-FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "snapshot")
-_SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "snapshot": ".png"}
+FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf")
+_SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
 
 
 def build_parser(prog: str = "cadgen xbf") -> argparse.ArgumentParser:
@@ -46,13 +45,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
         build.add_argument(f"--{kind}", nargs="?", const=True, metavar="F",
                            help=f"write the {kind} (at F, else where the model declares it); any of these flags "
                                 "selects the files a script writes")
-    build.add_argument("--pose", help="a configuration's name, or joint values as JSON: every derived file posed there")
-    build.add_argument("--part", help="an occurrence's path or a node's name: every derived file of that subtree")
     build.add_argument("--no-daemon", action="store_true", help="build in this process (cold, no worker kept)")
     build.add_argument("--json", action="store_true", help="print each model's report as JSON")
     build.add_argument("--verify", action="store_true",
                        help="run every function the engine would replay and compare its result with the logged one")
-    export = verbs.add_parser("export", help="write a document to STEP, GLB, STL, 3MF or xbf files, by suffix")
+    export = verbs.add_parser("export", help="write a document to STEP, GLB, STL, 3MF or xbf files, by suffix; a GLB "
+                                             "carries the document's motions as clips")
     export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or SCRIPT.py::MODEL (built first)")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl or .3mf")
@@ -125,7 +123,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
         shown = ", ".join(f"{count} {status}" for status, count in counted.items()) or "none"
         stages = ", ".join(f"{name} {timings[name]:.2f}s" for name in ("body", "names", "document", "xbf", "step",
-                                                                        "glb", "stl", "threemf", "snapshot")
+                                                                        "glb", "stl", "threemf")
                            if timings.get(name))
         line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
                 f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
@@ -162,11 +160,6 @@ def _build(args: argparse.Namespace) -> int:
     from cadgen.engine import api
 
     flags = _file_flags(args)
-    try:
-        pose = _pose(args.pose)
-    except ValueError as error:
-        print(f"cadgen xbf build: {error}", file=sys.stderr)
-        return 2
     code = args.code
     if code is not None and args.targets:
         print("cadgen xbf build: give scripts or --code, not both", file=sys.stderr)
@@ -192,8 +185,7 @@ def _build(args: argparse.Namespace) -> int:
     failed = False
     for target, extra in jobs:
         try:
-            found = api.build(target, **extra, **flags, pose=pose, part=args.part, verify=args.verify, log=log,
-                              daemon=not args.no_daemon)
+            found = api.build(target, **extra, **flags, verify=args.verify, log=log, daemon=not args.no_daemon)
         except api.EngineError as error:
             print(f"cadgen xbf build: {error}", file=sys.stderr)
             failed = True

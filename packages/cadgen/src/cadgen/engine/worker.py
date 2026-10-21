@@ -141,7 +141,10 @@ class Patcher:
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
     """An ``export`` request: the document -- a script's model built first, code this worker
     built, or a file (the document this worker last built of it while the file is as the
-    build left it, else read) -- written to each destination. Answers what was written."""
+    build left it, else read) -- written to each destination, and drawn into ``draw``'s
+    PNG where the request has one (``{"out", option: value}``, the snapshot verb's: a
+    model's picture is drawn from the document in this worker's memory). Answers what was
+    written."""
     from cadgen.engine import build as engine_build
     from cadgen.engine import export
 
@@ -184,7 +187,17 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         seconds = time.perf_counter() - clock
         files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
                       "seconds": round(seconds, 4)})
-    return {"reports": built, "files": files}
+    drawn = None
+    if request.get("draw"):
+        from cadgen.engine import snapshot
+
+        options = dict(request["draw"])
+        out = Path(options.pop("out"))
+        clock = time.perf_counter()
+        drawn = snapshot.draw(source, out, **options)
+        files.append({"path": str(out), "kind": "png", "bytes": drawn["bytes"],
+                      "seconds": round(time.perf_counter() - clock, 4)})
+    return {"reports": built, "files": files, "drawn": drawn}
 
 
 def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
@@ -289,8 +302,8 @@ def main() -> int:
             script = Path(request["script"])
             reports = build(script, request.get("functions") or None,
                             log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
-                            outputs=request.get("outputs"), pose=request.get("pose"), part=request.get("part"),
-                            code=request.get("code"), verify=bool(request.get("verify")))
+                            outputs=request.get("outputs"), code=request.get("code"),
+                            verify=bool(request.get("verify")))
             patcher.finish(reports)
             send({"id": ident, "done": reports})
         except BuildError as error:

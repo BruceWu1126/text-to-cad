@@ -1,17 +1,16 @@
 """Models: the decorators, a model's identity, and what calling one does.
 
 A model is a parameterless function that returns a build123d shape, decorated with
-``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl``,
-``@threemf`` and ``@snapshot``. Its identity is ``script.py::function``. ``@xbf(out=None)``
-makes the function a model, its document at ``out`` (``XBF/<function>.xbf`` beside the
-script by default): its only argument. A derived-file decorator IS its verb, run on the
-built document: it takes ``out`` (``<function><suffix>`` beside the script by default) and
-exactly the options the verb takes -- ``@step(out, pose=None, part=None)``, ``@glb(out,
-pose=None, part=None, animate=None)``, ``@stl``/``@threemf`` as ``@step``, and
-``@snapshot(out, display=, camera=, grid=, preview=, pose=, width=, height=)``. A model's
-material, colours, joints and configurations are written in its body, never in a
-decorator. The outputs are kept in the order the decorators are written, top to bottom,
-and the xbf, when declared, is always written first.
+``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl`` and
+``@threemf``. Its identity is ``script.py::function``. Every decorator takes ``out`` and
+nothing else: ``@xbf(out=None)`` makes the function a model, its document at ``out``
+(``XBF/<function>.xbf`` beside the script by default); a derived-file decorator declares a
+translation of the built document at ``out`` (``<function><suffix>`` beside the script by
+default). Everything else is the model's code: its material, colours, joints, the pose
+its joints are connected at (the pose every file shows), its configurations and its
+motions (``configuration``, ``motion``). A picture is the ``snapshot`` verb's, never a
+declaration. The outputs are kept in the order the decorators are written, top to
+bottom, and the xbf, when declared, is always written first.
 
 The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
 ``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
@@ -38,20 +37,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "glb", "memo", "paint", "read_step",
-           "snapshot", "step", "stl", "threemf", "xbf", "models_in"]
+__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "glb", "memo", "motion", "paint",
+           "read_step", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
-SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "snapshot": ".png"}
-_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",),
-             "snapshot": (".png",)}
-# The options each decorator takes: exactly its verb's. The xbf takes none but ``out``.
-OPTIONS: dict[str, tuple[str, ...]] = {
-    "xbf": (), "step": ("pose", "part"), "glb": ("pose", "part", "animate"), "stl": ("pose", "part"),
-    "threemf": ("pose", "part"),
-    "snapshot": ("display", "camera", "grid", "preview", "pose", "width", "height"),
-}
-KINDS = tuple(OPTIONS)
+SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
+_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",)}
+KINDS = tuple(SUFFIXES)
 # Where a model's xbf is when its decorator names none: this folder beside the script.
 XBF_FOLDER = "XBF"
 
@@ -60,21 +52,18 @@ _CONTEXT = threading.local()
 
 @dataclass(frozen=True)
 class Output:
-    """One file a model declares: its kind, the path its decorator gave, if any, and the
-    options it gave (``(name, value)`` pairs, the verb's)."""
+    """One file a model declares: its kind and the path its decorator gave, if any."""
 
     kind: str
     out: str | None
-    options: tuple[tuple[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
 class Target:
-    """One file a build writes: its kind, its path, and the options its writer runs with."""
+    """One file a build writes: its kind and its path."""
 
     kind: str
     path: Path
-    options: dict[str, Any]
 
 
 def check_output(kind: str, out: Any, where: str) -> None:
@@ -135,15 +124,12 @@ class Model:
         ``<function><suffix>``) beside the script."""
         return [(target.kind, target.path) for target in self.plan()]
 
-    def plan(self, outputs: dict[str, dict[str, Any]] | None = None, *, pose: Any = None,
-             part: str | None = None, cwd: Path | None = None) -> list[Target]:
+    def plan(self, outputs: dict[str, dict[str, Any]] | None = None, *, cwd: Path | None = None) -> list[Target]:
         """The files a build of this model writes, the xbf first. ``outputs`` (``{kind:
-        {"out": path or None, option: value}}``) selects and overrides: only the kinds it
-        names are written, each at its path (relative to ``cwd``), else the declared one,
-        else the default, with the declared options under the ones it gives; a kind given
-        None is written only where the model declares it, and ``{}`` writes nothing.
-        ``outputs`` None is what the decorators declare. ``pose`` and ``part`` apply to every
-        file whose verb takes them."""
+        {"out": path or None}}``) selects and overrides: only the kinds it names are
+        written, each at its path (relative to ``cwd``), else the declared one, else the
+        default; a kind given None is written only where the model declares it, and ``{}``
+        writes nothing. ``outputs`` None is what the decorators declare."""
         declared = {output.kind: output for output in self.outputs}
         if outputs is not None:
             unknown = sorted(set(outputs) - set(KINDS))
@@ -157,43 +143,37 @@ class Model:
         found = []
         for kind in sorted(order, key=lambda kind: kind != "xbf"):
             output = declared.get(kind)
-            options = dict(output.options) if output is not None else {}
             given = dict((outputs or {}).get(kind) or {})
             out = given.pop("out", None)
-            unknown = sorted(set(given) - set(OPTIONS[kind]))
-            if unknown:
-                raise ValueError(f"{kind} takes no {', '.join(unknown)}; it takes out"
-                                 + "".join(f", {name}" for name in OPTIONS[kind]))
-            options.update({name: value for name, value in given.items() if value is not None})
-            for name, value in (("pose", pose), ("part", part)):
-                if value is not None and name in OPTIONS[kind]:
-                    options[name] = value
+            if given:
+                raise ValueError(f"{kind} takes no {', '.join(sorted(given))}; it takes out alone")
             if out is not None:
                 check_output(kind, out, f"--{kind}")
                 path = Path(out)
                 path = Path(_normalized(path if path.is_absolute() else (cwd or Path.cwd()) / path))
             else:
                 path = self._path(kind, output.out if output is not None else None)
-            found.append(Target(kind, path, options))
+            found.append(Target(kind, path))
         return found
 
     # --- the verbs, through the daemon (``cadgen.engine.api``) -----------------------------
 
     def build(self, **flags: Any) -> Any:
         """Build this model (``cadgen xbf build script.py::model``); ``flags`` are the
-        build's (``xbf=``, ``step=``, ..., ``pose=``, ``part=``)."""
+        build's (``xbf=``, ``step=``, ...)."""
         from cadgen.engine import api
 
         return api.build(self, **flags)
 
-    def export(self, *destinations: Any, pose: Any = None, part: str | None = None, animate: Any = None) -> Any:
+    def export(self, *destinations: Any, pose: Any = None, part: str | None = None) -> Any:
         """Build this model, then write its document to each destination (by suffix)."""
         from cadgen.engine import api
 
-        return api.export(self, *destinations, pose=pose, part=part, animate=animate)
+        return api.export(self, *destinations, pose=pose, part=part)
 
     def snapshot(self, out: Any, **options: Any) -> Any:
-        """Build this model, then draw its document into ``out`` (a ``.png``) as the viewer does."""
+        """Build this model, then draw its document, from the worker's memory, into ``out``
+        (a ``.png``) as the viewer does; ``options`` are the ``snapshot`` verb's."""
         from cadgen.engine import api
 
         return api.snapshot(self, out, **options)
@@ -237,28 +217,20 @@ def _run_as_program(script: Path) -> None:
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
-    names = OPTIONS[kind]
-
     def decorate(function: Any = None, out: Any = None, **options: Any) -> Any:
         if isinstance(function, (str, os.PathLike)):
             function, out = None, function  # ``@step("arm.step")``
-        unknown = sorted(set(options) - set(names))
-        if unknown:
-            raise TypeError(f"@{kind} takes no {', '.join(unknown)}; it takes out"
-                            + "".join(f", {name}" for name in names)
-                            + (". A model's material, colours and joints are written in its body." if kind != "xbf"
-                               else " alone. A model's material, colours and joints are written in its body."))
+        if options:
+            raise TypeError(f"@{kind} takes out alone, not {', '.join(sorted(options))}: a model's material, "
+                            "colours, joints, pose, configurations and motions are written in its body")
         check_output(kind, out, f"@{kind}(out=...)")
-        if options.get("animate") is not None:
-            raise NotImplementedError("@glb(animate=...): GLB animation is not built yet")
-        given = tuple((name, options[name]) for name in names if options.get(name) is not None)
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             # Decorators apply bottom-up: inserting at the front keeps source order.
-            model.outputs.insert(0, Output(kind, None if out is None else os.fspath(out), given))
+            model.outputs.insert(0, Output(kind, None if out is None else os.fspath(out)))
             return model
 
         if function is None:
@@ -274,9 +246,9 @@ def _decorator(kind: str) -> Callable[..., Any]:
                             "``XBF/<function>.xbf`` beside the script). The function takes no parameters and "
                             "returns a build123d shape.")
     else:
-        decorate.__doc__ = (f"Declare a file derived from a model's document: ``@{kind}``, ``@{kind}(\"path"
-                            f"{SUFFIXES[kind]}\")`` or ``@{kind}(out=..., {', '.join(f'{n}=...' for n in names)})``"
-                            f" -- the {kind} verb run on the built document, with its options.")
+        decorate.__doc__ = (f"Declare a file derived from a model's document: ``@{kind}`` or ``@{kind}(\"path"
+                            f"{SUFFIXES[kind]}\")`` -- its only argument; the file shows the model as its "
+                            "joints place it.")
     return decorate
 
 
@@ -285,7 +257,6 @@ step = _decorator("step")
 glb = _decorator("glb")
 stl = _decorator("stl")
 threemf = _decorator("threemf")
-snapshot = _decorator("snapshot")
 
 
 # --- @memo: a function worth replaying -------------------------------------------------
