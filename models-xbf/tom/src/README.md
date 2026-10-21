@@ -22,20 +22,46 @@ src/
 
 ## The vendor inputs (not committed)
 
-The model reads 536 MB of vendor and recovered STEP from `STEP/imported/`, resolved
+The model reads 139 MB of vendor and recovered STEP and xbf from `STEP/imported/`, resolved
 relative to this model's folder (`Path(__file__).resolve().parents[2] / "STEP" /
 "imported"`, `VENDOR_DIR`). They are tom-cad's read-only data and are never committed
-here (`models-xbf/tom/STEP/` is gitignored). Before the first build, put a copy beside
+here (`models-xbf/tom/STEP/` is gitignored; tom-cad's copy is 536 MB). Before the first build, put a copy beside
 `src/`, from `models-xbf/tom`:
 
 ```
 mkdir -p STEP
 cp -c -R /path/to/tom-cad/STEP/imported STEP/imported   # an APFS clone; plain cp -R elsewhere
-chmod -R a-w STEP/imported                               # read-only, as in tom-cad
 ```
 
 (tom-cad keeps them in Git LFS: check it out with LFS so the files are the STEP data, not
-pointers. A symlink to tom-cad's folder works too.)
+pointers.) Then extract the parts of Tom rev3 the build uses into the copy
+(`STEP/imported/parts/`, below; a copy, not a symlink to tom-cad's folder, which this would
+write into), and make it read-only as in tom-cad: `chmod -R a-w STEP/imported`.
+
+### Tom rev3's parts
+
+`stages/tom2.py` derives rev4 from Tom rev3's production arm,
+`recovered/tom_rev3/tom.step` (354 MB). It does not read that file: the eight occurrences it
+uses are extracted once, each to `STEP/imported/parts/<occurrence>.xbf`, and read with
+`read_xbf` into one dict, `rev3`, so their elements are named `arm_with_inline_wrist.rev3.N`
+and a servo's details stay one prototype across the parts that carry a servo. From
+`models-xbf/tom/STEP/imported` (the first command parses the STEP, about 40 s; the rest
+reuse the daemon's read):
+
+```
+for p in base_link/shoulder_yaw_servo base_link/m8_thumbscrew shoulder_yaw_assembly \
+         shoulder_pitch_assembly/shoulder_pitch_assembly_screws upper_arm_assembly \
+         elbow_assembly forearm_assembly gripper/gripper_screws; do
+  cadgen xbf export recovered/tom_rev3/tom.step parts/${p##*/}.xbf --part $p
+done
+```
+
+Every one of them stands at the arm's origin in `tom.step`, so `--part` (which writes a
+subtree at its own frame) leaves its parts where they were. What the stage never used is
+never read: the Pi HAT stack, its carrier and hardware, the shoulder pitch yoke, the
+gripper's frame, servo and claws, and the camera assembly. The stage still reads the arm's
+kinematics sidecar, `recovered/tom_rev3/tom.step.json`. `parts/README.md` lists the same
+commands one per line.
 
 ## Build
 
@@ -47,8 +73,9 @@ PYTHONPATH=<cadgen>/src:src python -m cadgen.engine build src/tom.py::tom
 PYTHONPATH=<cadgen>/src:src python -m cadgen.engine snapshot XBF/tom.xbf tom.png
 ```
 
-The xbf lands in `XBF/` beside `src/`. A cold build takes minutes and its worker
-holds most of 20 GB; a second build of the unchanged model replays from the worker's memory.
+The xbf lands in `XBF/` beside `src/`. A cold build takes under two minutes (107 s on
+2026-10-21) and its worker holds about 1.9 GB after; a second build of the unchanged model
+replays from the worker's memory (1 s), and a restarted daemon takes the file whole (6 s).
 
 ## What the port changed
 
