@@ -110,14 +110,16 @@ export function xbfLookRig(look) {
 
 /**
  * What a surface wears in the regular modes under the look (`../viewer/surfaceLook.js`): its
- * colour raised to the look's power, ungraded and untinted; and, where the document gave it no
- * finish of its own (or the mode replaces it: a fill, X-ray), a dielectric with the Phong
- * highlight's GGX lobe (`xbfLookHighlight`), no clear coat, no environment and no lift.
+ * colour raised to the look's power, ungraded and untinted, as a dielectric with the Phong
+ * highlight's GGX lobe (`xbfLookHighlight`), no clear coat, no environment and no lift. OCCT's
+ * Phong draws no material's finish, so neither does the look: a part's metal, glass or coat (and
+ * its glow) is drawn in Preview, its colour here.
  */
 export function xbfLookSurface(look) {
   const highlight = xbfLookHighlight(look.specular, look.shininess);
   return Object.freeze({
     colorPower: look.colourPower,
+    finishes: false,
     materialSettings: Object.freeze({
       saturation: 1, contrast: 1, brightness: 1, tintStrength: 0,
       roughness: highlight.roughness, metalness: 0, specularIntensity: highlight.specularIntensity,

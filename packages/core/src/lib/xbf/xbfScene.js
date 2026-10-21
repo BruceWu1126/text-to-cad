@@ -788,17 +788,17 @@ export function createXbfScene(THREE, document) {
     triangleCount,
     /** The lighting of the regular modes (`sceneContract.js`): the engine's look's (`xbfLookRig`). */
     rig,
-    // A part or face the document gave a material keeps its finish in the shaded modes and in
-    // Preview; every other surface wears the look's finish over its colour, as a STEP's does. In
-    // the regular modes every colour follows the engine's look (its power, ungraded) and the
-    // finish of a surface without one is the look's (`xbfLookSurface`); photographic Render's look
-    // (`authored`) is worn as any scene wears it.
+    // In the regular modes every surface wears the engine's look (`xbfLookSurface`): its colour by
+    // the look's power, ungraded, and the look's plain finish, a material's finish and glow left to
+    // Preview. Under photographic Render's look (`authored`) a part or face the document gave a
+    // material keeps its finish, and every other surface wears the look's finish over its colour.
     setSurfaceLook(next) {
       if (disposed) return;
       const regular = Boolean(next && lookSurface) && next.authored !== true;
       lastLook = next ? { ...next, authored: false } : null;
       if (regular) {
         lastLook.colorPower = lookSurface.colorPower;
+        lastLook.finishes = lookSurface.finishes;
         lastLook.materialSettings = { ...next.materialSettings, ...lookSurface.materialSettings };
       }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";

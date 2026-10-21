@@ -17,9 +17,11 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 //     authored: boolean,    true: keep each material's own finish, sidedness and
 //                           source colours (photographic Render)
 //     surface: { style: "shaded" | "flat", opacity },
-//     colorPower?: number } each surface's colour, linear, raised to this power (1, as
+//     colorPower?: number,  each surface's colour, linear, raised to this power (1, as
 //                           written, unless a scene's own look says otherwise:
 //                           `lib/xbf/xbfLook.js`)
+//     finishes?: boolean }  false: no surface keeps a finish or a glow its file authored
+//                           (a scene's own look that draws none: `lib/xbf/xbfLook.js`)
 //
 // A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
 // scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
@@ -134,6 +136,7 @@ export function createSurfaceLook(THREE, root) {
     const flat = look?.surface?.style === "flat";
     const opacityScale = look?.surface ? clamp01(look.surface.opacity, 1) : 1;
     const power = Number(look?.colorPower) > 0 ? Number(look.colorPower) : 1;
+    const finishes = look?.finishes !== false;
     for (const entry of slots) {
       const { lit, authored } = entry;
       const sourceColored = lit.userData?.cadSourceColor !== false;
@@ -159,7 +162,7 @@ export function createSurfaceLook(THREE, root) {
       } else if (!authoredLook) {
         target = entry.inspect ||= inspectStandIn(THREE, lit);
         const finish = lit.userData?.cadAuthoredFinish === true;
-        if (finish && !forceFill && opacityScale >= 0.999) {
+        if (finish && finishes && !forceFill && opacityScale >= 0.999) {
           // A finish the file authored, kept, reflecting the environment it is handed.
           for (const key of FINISH_KEYS) target[key] = lit[key];
           target.attenuationColor.copy(lit.attenuationColor);
@@ -179,8 +182,8 @@ export function createSurfaceLook(THREE, root) {
           target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
         }
         // The viewer lifts its surfaces by a trace of their own colour. A part that
-        // authored a glow of its own keeps it.
-        if (!authored.glows) {
+        // authored a glow of its own keeps it, where the look keeps finishes.
+        if (!authored.glows || !finishes) {
           target.emissive.copy(color);
           target.emissiveIntensity = clamp01(settings.emissiveIntensity);
         }

@@ -212,11 +212,12 @@ colour, linear, squared (OCCT's ASPECT material: the part's colour times itself)
 ambient 0.5 and two white directional lights at radiance 1 (a key travelling (-0.35, 0.55, -1),
 a fill (0.6, 0.2, -0.3)) with a faint Phong highlight (0.08, exponent 44.8), and no environment,
 exposure or tone curve: the sum is clamped and sRGB-encoded. Edges are unlit in their class's ink,
-1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's are the backdrop's colour. The engine
-serves the record as `GET /api/look`; the page reads it once per engine, beside the document, and
-the document's scene brings it as its own lighting and surface rule (the bundled
-`@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
-up in place of the theme's. Preview is drawn as any file's is.
+1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's are the backdrop's colour. Phong draws
+no material's finish, so the look has none: a metal, a glass, a coat or a glow is drawn in Preview,
+its colour in the regular modes. The engine serves the record as `GET /api/look`; the page reads
+it once per engine, beside the document, and the document's scene brings it as its own lighting
+and surface rule (the bundled `@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's
+viewport and the snapshot page put up in place of the theme's. Preview is drawn as any file's is.
 
 `cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
@@ -481,10 +482,10 @@ other field in one `TDataStd_NamedData` on the material's label, named as the sc
 32-bit floats. A material change converts the prototypes it is on; a cold and a warm build write
 the same bytes. The structure serves every field of each part's and each painted face's material;
 a GLB writes the look as glTF's extensions (the volume's thickness the part's, the smallest extent
-of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in the
-shaded modes and Preview -- the shaded modes reflecting the studio's neutral environment on those
-surfaces alone, so a part with no material is drawn as ever -- and the theme's finish in X-ray and
-Parts. A part's chip card and `cadgen where` weigh it: volume by density, summed over an assembly.
+of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in
+Preview; its regular modes draw the material's colour in the engine's look, which draws no finish
+(**The viewer and the snapshot**). A part's chip card and `cadgen where` weigh it: volume by
+density, summed over an assembly.
 
 ## Imports
 
