@@ -234,7 +234,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(json.loads(unchanged.stdout.strip().splitlines()[-1])["meshed"], 0)
 
     def where(self, ref: str) -> dict:
-        found = self.cli("where", "XBF/block.xbf", ref)
+        found = subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
+                               env=self.env, capture_output=True, text=True, timeout=300)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
