@@ -9,6 +9,12 @@ Four scripts from `models/examples/src`, ported to `cadgen.engine`:
 | `basic_shape_mating_test_fixture.py` | `XBF/basic_shape_mating_test_fixture.xbf` | Seven parts and a sub-assembly seated on a base plate by build123d joints |
 | `electronics_enclosure_base_import.py` | `XBF/electronics_enclosure_base_import.xbf`, `XBF/basic_shape_mating_test_fixture_import.xbf` | `STEP/electronics_enclosure_base.step` and `STEP/basic_shape_mating_test_fixture.step` read back with `read_step` |
 
+Materials: the L-bracket is Steel 1018 and the enclosure ABS, each drawn in the
+catalogue's colour (neither authored one); the fixture takes one material on its
+assembly, which every part below it takes: bead-blasted Aluminum 6061-T6,
+anodised in each part's own colour (`color=None`). The imports read the STEP
+inputs as they are, without materials.
+
 Each model declares its xbf alone. The import reads fixed STEP inputs committed in
 `../STEP/`, exported once from the enclosure and the fixture; no model writes them
 (re-export one with `cadgen xbf export ../XBF/NAME.xbf ../STEP/NAME.step`).

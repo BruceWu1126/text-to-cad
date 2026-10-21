@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import sqrt
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import materials, xbf
 
 
 # Units: millimeters.
@@ -282,10 +282,14 @@ def basic_shape_mating_test_fixture():
           prism, "bottom_vertex", bd.Location((0.0, 0.0, -PRISM_HEIGHT / 2.0)),
           offset=-PRISM_COLLISION_DEPTH)
 
-    return bd.Compound(
+    fixture = bd.Compound(
         children=[base, peg, block, cone, sphere, prism, cube_top_subassembly],
         label="basic_shape_mating_test_fixture",
     )
+    # One material for every part: bead-blasted aluminium anodised in each part's own colour.
+    fixture.material = materials.aluminium_6061.but(
+        color=None, roughness=0.6, anisotropy=0.0, description="Bead-blasted 6061-T6, colour-anodised")
+    return fixture
 
 
 if __name__ == "__main__":

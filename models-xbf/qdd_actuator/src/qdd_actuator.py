@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import Material, materials, xbf
 
 # ---------------------------------------------------------------------------
 # Gear stage parameters (module-1.0 concept teeth, trapezoidal with backlash)
@@ -301,6 +301,43 @@ RUBBER = (0.04, 0.04, 0.04)
 TITANIUM = (0.60, 0.59, 0.64)
 GAUGE_GOLD = (0.85, 0.72, 0.35)
 TUBE_BLACK = (0.32, 0.33, 0.35)  # dark gunmetal, reads against the cover
+
+# ---------------------------------------------------------------------------
+# Concept materials: what each part is made of, in the finish its colour above
+# names. Catalogue entries (the project's own where the catalogue has none),
+# each with color=None, so the palette stays the colour that shows and the
+# material adds the finish.
+# ---------------------------------------------------------------------------
+ANODIZED_AL = materials.aluminium_6061.but(  # housing, retainer, rear cover: bead-blasted, anodised
+    color=None, roughness=0.6, anisotropy=0.0, description="Bead-blasted 6061-T6, hard-anodised")
+MACHINED_AL = materials.aluminium_7075.but(color=None)  # carrier, output flange: stressed, machined
+TUBE_AL = materials.aluminium_6063.but(  # hollow-shaft cable tube
+    color=None, roughness=0.45, anisotropy=0.0, description="Extruded tube, dark anodised")
+SCREW_STEEL = materials.steel_4140.but(  # socket-head screws, 12.9
+    color=None, roughness=0.55, description="Alloy steel, black oxide")
+GEAR_STEEL = materials.steel_4140.but(color=None, roughness=0.3, description="Hardened and ground gear steel")
+BEARING_STEEL = materials.steel_4140.but(  # races, balls, rollers
+    color=None, roughness=0.12, description="Through-hardened bearing steel, ground")
+LAMINATION_STEEL = materials.steel_1018.but(  # stator stack
+    color=None, roughness=0.5, coat=0.3, coat_roughness=0.3, description="Laminated electrical steel, varnished")
+ROTOR_STEEL = materials.steel_1018.but(color=None, description="Rotor bell and back iron")
+MAGNET_WIRE = materials.copper_c110.but(  # windings
+    color=None, roughness=0.25, coat=1.0, coat_roughness=0.1, description="Enamelled magnet wire")
+NDFEB = materials.neodymium.but(color=None)  # rotor magnets, the pole colours above
+FERRITE_MAGNET = Material(  # encoder magnet ring
+    "Ferrite magnet", 4900, family="other", source="typical: sintered strontium ferrite",
+    description="Diametric encoder magnet ring", roughness=0.7)
+FR4_BOARD = materials.fr4.but(color=None)  # driver and encoder boards, under solder mask
+IC_PACKAGE = materials.abs.but(color=None)  # FETs, MCU, encoder IC
+CAPACITOR_AL = materials.aluminium_5052.but(color=None, description="Drawn aluminium capacitor can")
+CONNECTOR_NYLON = materials.nylon_pa6.but(color=None)  # connector bodies
+COLLAR_STEEL = materials.steel_1018.but(color=None, description="Connector coupling nut")
+O_RING_NBR = materials.nbr_70a.but(color=None)
+CONTACT_BRASS = materials.brass_c360.but(color=None, roughness=0.2, description="Gold-plated contacts")
+FLEXURE_TI = materials.titanium_grade5.but(color=None)  # torque-sensing flexure
+GAUGE_FOIL = Material(  # strain gauges
+    "Polyimide film", 1420, family="plastic", source="typical: polyimide (Kapton HN) film",
+    description="Foil strain gauge on a polyimide carrier", roughness=0.3, coat=0.5, coat_roughness=0.1)
 
 # ---------------------------------------------------------------------------
 # Consistency checks (concept-level fit, not tolerance engineering)
@@ -757,11 +794,13 @@ def _turns(deg_per_turn: float) -> tuple[float, float]:
 # world-coincident, so each connection places a part where it was authored.
 
 
-def _label(shape, name: str, *details: object, color=None):
-    """``name:detail`` and a colour on the shape (the old ``asm.add``/``feature``)."""
+def _label(shape, name: str, *details: object, color=None, material=None):
+    """``name:detail``, a colour and a material on the shape (the old ``asm.add``/``feature``)."""
     shape.label = ":".join(str(token) for token in (name, *details))
     if color is not None:
         shape.color = color
+    if material is not None:
+        shape.material = material
     return shape
 
 
@@ -797,38 +836,38 @@ def build_actuator(explode: float = 0.0) -> bd.Compound:
     """
     children = []
 
-    housing = _label(make_housing(), "housing", color=AL_BODY)
-    retainer = _label(make_front_retainer(), "front_retainer", color=AL_RETAINER)
-    cover = _label(make_rear_cover(), "rear_cover", color=AL_COVER)
+    housing = _label(make_housing(), "housing", color=AL_BODY, material=ANODIZED_AL)
+    retainer = _label(make_front_retainer(), "front_retainer", color=AL_RETAINER, material=ANODIZED_AL)
+    cover = _label(make_rear_cover(), "rear_cover", color=AL_COVER, material=ANODIZED_AL)
     children += [housing, retainer, cover]
 
     screws = make_retainer_screws()
-    retainer_screws = _label(bd.Compound(children=screws), "retainer_screws", color=BLACK_OXIDE)
+    retainer_screws = _label(bd.Compound(children=screws), "retainer_screws", color=BLACK_OXIDE, material=SCREW_STEEL)
     children.append(retainer_screws)
 
     connectors = {}
     for kind in CONNECTOR_ANGLES:
         body, collar, o_ring, pins = make_connector(kind)
-        _label(body, "connector_body", kind, color=PLASTIC_BLACK)
-        _label(collar, "connector_collar", kind, color=GUNMETAL)
-        _label(o_ring, "connector_o_ring", kind, color=RUBBER)
-        _label(pins, "connector_pins", kind, color=PIN_GOLD)
+        _label(body, "connector_body", kind, color=PLASTIC_BLACK, material=CONNECTOR_NYLON)
+        _label(collar, "connector_collar", kind, color=GUNMETAL, material=COLLAR_STEEL)
+        _label(o_ring, "connector_o_ring", kind, color=RUBBER, material=O_RING_NBR)
+        _label(pins, "connector_pins", kind, color=PIN_GOLD, material=CONTACT_BRASS)
         connectors[kind] = _module("connector", [body, collar, o_ring, pins], kind)
         children.append(connectors[kind])
 
     drv = make_driver_pcb()
-    _label(drv["board"], "driver_board", color=PCB_GREEN)
+    _label(drv["board"], "driver_board", color=PCB_GREEN, material=FR4_BOARD)
     for i, fet in enumerate(drv["fets"], start=1):
-        _label(fet, "fet", f"q{i}", color=IC_BLACK)
+        _label(fet, "fet", f"q{i}", color=IC_BLACK, material=IC_PACKAGE)
     for i, cap in enumerate(drv["caps"], start=1):
-        _label(cap, "bus_capacitor", f"c{i}", color=CAP_GRAY)
-    _label(drv["mcu"], "mcu", color=IC_BLACK)
+        _label(cap, "bus_capacitor", f"c{i}", color=CAP_GRAY, material=CAPACITOR_AL)
+    _label(drv["mcu"], "mcu", color=IC_BLACK, material=IC_PACKAGE)
     driver_pcb = _module("driver_pcb", [drv["board"], *drv["fets"], *drv["caps"], drv["mcu"]])
     children.append(driver_pcb)
 
     enc = make_encoder_pcb()
-    _label(enc["board"], "encoder_board", color=PCB_GREEN)
-    _label(enc["chip"], "encoder_ic", color=IC_BLACK)
+    _label(enc["board"], "encoder_board", color=PCB_GREEN, material=FR4_BOARD)
+    _label(enc["chip"], "encoder_ic", color=IC_BLACK, material=IC_PACKAGE)
     encoder_pcb = _module("encoder_pcb", [enc["board"], enc["chip"]])
     children.append(encoder_pcb)
 
@@ -836,19 +875,20 @@ def build_actuator(explode: float = 0.0) -> bd.Compound:
         _tube_z(ENC_MAGNET_R[1], ENC_MAGNET_R[0], ENC_MAGNET_Z),
         "encoder_magnet_ring",
         color=FERRITE,
+        material=FERRITE_MAGNET,
     )
     children.append(enc_magnet)
 
     st = make_stator()
-    _label(st["stack"], "lamination_stack", color=LAMINATION)
-    winding_compound = _label(bd.Compound(children=st["windings"]), "windings", color=COPPER)
+    _label(st["stack"], "lamination_stack", color=LAMINATION, material=LAMINATION_STEEL)
+    winding_compound = _label(bd.Compound(children=st["windings"]), "windings", color=COPPER, material=MAGNET_WIRE)
     stator = _module("stator", [st["stack"], winding_compound])
     children.append(stator)
 
     rt = make_rotor()
-    _label(rt["body"], "rotor_bell", color=ROTOR_DARK)
-    mag_n = _label(bd.Compound(children=rt["magnets_north"]), "magnets_north", color=MAGNET_N)
-    mag_s = _label(bd.Compound(children=rt["magnets_south"]), "magnets_south", color=MAGNET_S)
+    _label(rt["body"], "rotor_bell", color=ROTOR_DARK, material=ROTOR_STEEL)
+    mag_n = _label(bd.Compound(children=rt["magnets_north"]), "magnets_north", color=MAGNET_N, material=NDFEB)
+    mag_s = _label(bd.Compound(children=rt["magnets_south"]), "magnets_south", color=MAGNET_S, material=NDFEB)
     rotor = _module("rotor", [rt["body"], mag_n, mag_s])
     children.append(rotor)
 
@@ -857,43 +897,43 @@ def build_actuator(explode: float = 0.0) -> bd.Compound:
     balls_by_side = {}
     for name, z in (("rear", ROTOR_BRG_REAR_Z), ("front", ROTOR_BRG_FRONT_Z)):
         brg = make_ball_bearing(z)
-        races[name] = _label(brg["inner"], "inner_race", name, color=STEEL_POLISHED)
-        _label(brg["outer"], "outer_race", name, color=STEEL_POLISHED)
-        balls = _label(bd.Compound(children=brg["balls"]), "balls", name, color=STEEL_ROLLER)
+        races[name] = _label(brg["inner"], "inner_race", name, color=STEEL_POLISHED, material=BEARING_STEEL)
+        _label(brg["outer"], "outer_race", name, color=STEEL_POLISHED, material=BEARING_STEEL)
+        balls = _label(bd.Compound(children=brg["balls"]), "balls", name, color=STEEL_ROLLER, material=BEARING_STEEL)
         balls_by_side[name] = balls
         bearings[name] = _module("rotor_bearing", [brg["inner"], brg["outer"], balls], name)
         children.append(bearings[name])
 
-    sun = _label(make_sun_gear(), "sun_gear", color=STEEL)
-    ring = _label(bd.Pos(0, 0, GEAR_Z[0]) * _internal_ring_gear(), "ring_gear", color=STEEL)
+    sun = _label(make_sun_gear(), "sun_gear", color=STEEL, material=GEAR_STEEL)
+    ring = _label(bd.Pos(0, 0, GEAR_Z[0]) * _internal_ring_gear(), "ring_gear", color=STEEL, material=GEAR_STEEL)
     children += [sun, ring]
 
     planet_proto = make_planet_gear()
     planets = []
     for i, psi in enumerate(PLANET_ANGLES_DEG, start=1):
         planet = planet_location(psi) * planet_proto
-        planets.append(_label(planet, "planet_gear", f"p{i}", color=STEEL))
+        planets.append(_label(planet, "planet_gear", f"p{i}", color=STEEL, material=GEAR_STEEL))
     children += planets
 
-    carrier = _label(make_carrier(), "planet_carrier", color=AL_BRIGHT)
+    carrier = _label(make_carrier(), "planet_carrier", color=AL_BRIGHT, material=MACHINED_AL)
     children.append(carrier)
 
     xr = make_cross_roller_bearing()
-    inner_ring = _label(xr["inner"], "inner_ring", color=STEEL_RACE)
-    _label(xr["outer"], "outer_ring", color=STEEL_RACE)
-    rollers = _label(bd.Compound(children=xr["rollers"]), "rollers", color=STEEL_ROLLER)
+    inner_ring = _label(xr["inner"], "inner_ring", color=STEEL_RACE, material=BEARING_STEEL)
+    _label(xr["outer"], "outer_ring", color=STEEL_RACE, material=BEARING_STEEL)
+    rollers = _label(bd.Compound(children=xr["rollers"]), "rollers", color=STEEL_ROLLER, material=BEARING_STEEL)
     xroller = _module("cross_roller_bearing", [xr["inner"], xr["outer"], rollers])
     children.append(xroller)
 
     ts = make_torque_sensor()
-    _label(ts["flexure"], "flexure_disc", color=TITANIUM)
+    _label(ts["flexure"], "flexure_disc", color=TITANIUM, material=FLEXURE_TI)
     for i, gauge in enumerate(ts["gauges"], start=1):
-        _label(gauge, "strain_gauge", f"g{i}", color=GAUGE_GOLD)
+        _label(gauge, "strain_gauge", f"g{i}", color=GAUGE_GOLD, material=GAUGE_FOIL)
     torque_sensor = _module("torque_sensor", [ts["flexure"], *ts["gauges"]])
     children.append(torque_sensor)
 
-    flange = _label(make_output_flange(), "output_flange", color=AL_BRIGHT)
-    tube = _label(make_cable_tube(), "cable_tube", color=TUBE_BLACK)
+    flange = _label(make_output_flange(), "output_flange", color=AL_BRIGHT, material=MACHINED_AL)
+    tube = _label(make_cable_tube(), "cable_tube", color=TUBE_BLACK, material=TUBE_AL)
     children += [flange, tube]
 
     by_name = {

@@ -33,10 +33,13 @@ __all__ = [
 ]
 
 
-def paint(shape, name, *details, color):
-    """Assign native label + color metadata (``name:detail``) and return the shape."""
+def paint(shape, name, *details, color, material):
+    """Assign native label + color metadata (``name:detail``) and the part's
+    material (a ``spec`` finish: its colour None, so ``color`` shows), and return
+    the shape."""
     shape.label = ":".join("_".join(str(token).replace(":", "_").split()) for token in (name, *details))
     shape.color = bd.Color(*color)
+    shape.material = material
     return shape
 
 
@@ -70,8 +73,8 @@ def tube(points, od):
     return bd.sweep(section, path)
 
 
-def paint_tube(points, od, name, *details, color):
-    return paint(tube(points, od), name, *details, color=color)
+def paint_tube(points, od, name, *details, color, material):
+    return paint(tube(points, od), name, *details, color=color, material=material)
 
 
 def _radial_plane(axle, angle_deg):

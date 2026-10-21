@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen.engine import materials, xbf
 import build123d as bd
 
 from lib.part_common import safe_fillet
@@ -100,6 +100,7 @@ def l_bracket():
     part = bracket.part
     part = safe_fillet(part, _transition_edges(part), radius=TRANSITION_FILLET)
     part.label = "l_bracket_gussets_two_hole_directions"
+    part.material = materials.steel_1018  # mild steel, its colour the catalogue's
     return part
 
 

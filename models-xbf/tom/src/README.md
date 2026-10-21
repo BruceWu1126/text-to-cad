@@ -107,8 +107,11 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
   (`lib/showcase_keys.json`) are removed; the engine has no animation. The pinned occurrence
   ids and their check stay (`lib/tom_showcase.py`).
 - Materials: `lib/materials.py`'s finishes are `Material` values set on the parts at the end
-  of the build (`apply_materials`): the 5052 sheet (catalogue aluminium), brass standoffs,
-  304 stainless nuts and black-oxide screws, matched by the finish colours the parts already
-  carry. Board finishes are defined but, as before, assigned to nothing.
+  of the build (`apply_materials`), each the catalogue's entry in its finish's look (`.but`):
+  the sheet is Aluminum 5052-H32, the standoffs Brass C360, the nuts Stainless 304 and the
+  12.9 black-oxide screws Steel 4140, matched by the finish colours the parts already carry.
+  The vendor boards (the camera's PCB, the bus-servo driver HAT's) take the board finish, FR4,
+  by the labels their files give them; the other board finishes are defined but assigned to
+  nothing, as before.
 - `cadgen.color.srgb` -> `lib/color.py`; `cadgen.flatten` -> a copy in `lib/flatten.py`
   (only `lib/flat_project.py` imports it).

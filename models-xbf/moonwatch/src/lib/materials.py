@@ -2,12 +2,18 @@
 
 The original authored named PBR "finishes" (`materials=` on the decorator,
 assigned by leaf label). Here each finish is a `cadgen.engine.Material` set on
-the part itself: the catalogue's name and density where a catalogue material is
-the metal or glass in question, with the finish's own metallic/roughness and its
-old name as the description; otherwise a `Material` of its own. Every finish
-keeps `color=None`, so a part stays the colour its builder authored (the STEP
-document remained the source of base colour then too). The old clearcoat
-factors have no field in `Material` and are dropped.
+the part itself: the catalogue's entry for the metal, glass or rubber in
+question, in the finish's look (`.but(...)`), or a `Material` of the
+project's own where the catalogue has none (sapphire, ruby, print ink). A
+finish keeps the original's metallic, roughness and clearcoat (`coat`,
+`coat_roughness`) and its old name as the description, and takes the look
+fields its name implies: brushed, satin and grained steel are anisotropic
+along their grain, a mirror polish is at most 0.1 rough, a polish has no
+grain, and the crystal, the sapphire back and the jewels transmit light at
+their index (sapphire and ruby, corundum, at 1.77), tinted by the part's own
+colour. Every finish keeps `color=None`, so a part stays the colour its
+builder authored (the STEP document remained the source of base colour then
+too).
 
 Assignments use unique authored leaf labels, so factory edits cannot silently
 retarget a finish through occurrence order.
@@ -15,35 +21,54 @@ retarget a finish through occurrence order.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
-from cadgen.engine import Material
-from cadgen.engine import materials as catalogue
+from cadgen.engine import Material, materials
 
 
-def _finish(base: Material, description: str, metallic: float, roughness: float) -> Material:
-    """A catalogue material in one finish: its name and density, the finish's look."""
-    return replace(base, color=None, metallic=metallic, roughness=roughness, description=description)
+def _finish(base: Material, description: str, **look) -> Material:
+    """A catalogue material in one finish: its name and physical values, the finish's
+    look, the part's own colour."""
+    return base.but(color=None, description=description, **look)
 
+
+# Corundum, the stone of a jewel and of a sapphire crystal: 3980 kg/m^3, index 1.77.
+SAPPHIRE = Material("Sapphire", 3980.0, family="glass", standard="synthetic corundum, Al2O3",
+                    description="Glass Back", roughness=0.03, ior=1.77, transmission=1.0,
+                    coat=0.02, coat_roughness=0.05)
+RUBY = Material("Ruby", 3980.0, family="other", standard="synthetic corundum, Al2O3:Cr",
+                description="Ruby Jewel (synthetic corundum)", roughness=0.05, ior=1.77,
+                transmission=0.8, coat=1.0, coat_roughness=0.03)
+PRINT_INK = Material("Matte Print", family="other", description="printed ink, no density", roughness=0.85)
 
 FINISHES = {
-    # old finish name: material (catalogue entry or own)
-    "anglage_mirror": _finish(catalogue.brass, "Anglage Mirror", 0.9, 0.14),
-    "bezel_anodized": _finish(catalogue.aluminium, "Bezel Anodized", 0.35, 0.5),
-    "blued_screw": _finish(catalogue.steel, "Blued Screw", 0.9, 0.14),
-    "brass_part": _finish(catalogue.brass, "Brass Part", 0.9, 0.38),
-    "brushed_steel": _finish(catalogue.stainless_steel, "Brushed Steel", 0.9, 0.5),
-    "case_mirror_polish": _finish(catalogue.stainless_steel, "Case Mirror Polish", 0.95, 0.08),
-    "copper_plate": _finish(catalogue.brass, "Copper Plate", 0.9, 0.34),  # copper-plated brass bridges
-    "gilt_wheel": _finish(catalogue.brass, "Gilt Wheel", 0.95, 0.24),  # gilded brass wheels
-    "glass": _finish(catalogue.glass, "Glass", 0.0, 0.05),
-    "glass_back": Material("Sapphire", 3980.0, metallic=0.0, roughness=0.03, description="Glass Back"),
-    "grained_lever": _finish(catalogue.steel, "Grained Lever", 0.95, 0.34),
-    "matte_print": Material("Matte Print", metallic=0.0, roughness=0.85, description="printed ink, no density"),
-    "polished_steel": _finish(catalogue.stainless_steel, "Polished Steel", 0.92, 0.12),
-    "rubber": Material("NBR", 1000.0, metallic=0.0, roughness=0.9, description="Rubber (nitrile gaskets)"),
-    "ruby_jewel": Material("Ruby", 3980.0, metallic=0.0, roughness=0.05, description="Ruby Jewel (synthetic corundum)"),
-    "satin_steel": _finish(catalogue.stainless_steel, "Satin Steel", 0.95, 0.3),
+    # old finish name: material (a catalogue entry in the finish, or the project's own)
+    "anglage_mirror": _finish(materials.brass_c360, "Anglage Mirror", metallic=0.9, roughness=0.1,
+                              coat=0.2, coat_roughness=0.08),
+    "bezel_anodized": _finish(materials.aluminium_6061, "Bezel Anodized", metallic=0.35, roughness=0.5,
+                              anisotropy=0.0, coat=0.2, coat_roughness=0.3),
+    "blued_screw": _finish(materials.steel_1018, "Blued Screw", metallic=0.9, roughness=0.14,
+                           coat=0.25, coat_roughness=0.08),
+    "brass_part": _finish(materials.brass_c360, "Brass Part", metallic=0.9, roughness=0.38),
+    "brushed_steel": _finish(materials.stainless_316, "Brushed Steel", metallic=0.9, roughness=0.5,
+                             anisotropy=0.5),
+    "case_mirror_polish": _finish(materials.stainless_316, "Case Mirror Polish", metallic=0.95, roughness=0.08,
+                                  anisotropy=0.0, coat=0.3, coat_roughness=0.05),
+    # copper-plated brass bridges
+    "copper_plate": _finish(materials.brass_c360, "Copper Plate", metallic=0.9, roughness=0.34,
+                            coat=0.08, coat_roughness=0.3),
+    # gilded brass wheels
+    "gilt_wheel": _finish(materials.brass_c360, "Gilt Wheel", metallic=0.95, roughness=0.24,
+                          coat=0.1, coat_roughness=0.15),
+    "glass": _finish(materials.glass, "Glass", roughness=0.05, coat=0.3, coat_roughness=0.05),
+    "glass_back": SAPPHIRE,
+    "grained_lever": _finish(materials.steel_1018, "Grained Lever", metallic=0.95, roughness=0.34,
+                             anisotropy=0.5, coat=0.08, coat_roughness=0.2),
+    "matte_print": PRINT_INK,
+    "polished_steel": _finish(materials.stainless_304, "Polished Steel", metallic=0.92, roughness=0.12,
+                              anisotropy=0.0, coat=0.25, coat_roughness=0.08),
+    "rubber": _finish(materials.nbr_70a, "Rubber (nitrile gaskets)"),
+    "ruby_jewel": RUBY,
+    "satin_steel": _finish(materials.stainless_304, "Satin Steel", metallic=0.95, roughness=0.3,
+                           anisotropy=0.4, coat=0.1, coat_roughness=0.2),
 }
 
 MODEL_MATERIAL_ASSIGNMENTS = {
@@ -104,8 +129,8 @@ MODEL_MATERIAL_ASSIGNMENTS = {
                      "#escape_wheel", "#balance_wheel", *[f"#timing_screw:{i}" for i in range(16)]],
          "material": "gilt_wheel"},
         {"targets": ["#click", "#click_spring", "#pallet_fork"], "material": "grained_lever"},
-        {"targets": ["#stud_holder", "#shock_bezel", "#shock_lyre_spring", "#regulator",
-                     "#barrel_arbor", "#center_pinion", "#third_pinion", "#fourth_pinion",
+        {"targets": ["#stud_holder", "#shock_bezel", "#balance_lower_shock_ring", "#shock_lyre_spring",
+                     "#regulator", "#barrel_arbor", "#center_pinion", "#third_pinion", "#fourth_pinion",
                      "#escape_pinion", "#crown_wheel", "#crown_wheel_core", "#pallet_arbor",
                      "#balance_staff"],
          "material": "polished_steel"},
@@ -117,6 +142,44 @@ MODEL_MATERIAL_ASSIGNMENTS = {
                      "#balance_lower_cap_jewel", "#impulse_jewel"],
          "material": "ruby_jewel"},
         {"targets": ["#mainspring", "#hairspring", "#hairspring_stud"], "material": "satin_steel"},
+    ],
+    # The original's chronograph works had no assignments: its finishes by the same rules
+    # as the base's, from what each part's colour says it is.
+    "chrono_works": [
+        {"targets": ["#chrono_bridge:anglage:0", "#chrono_bridge:anglage:1", "#coupling_bridge:anglage"],
+         "material": "anglage_mirror"},
+        {"targets": ["#screw:column_wheel", "#screw:minute_jumper", "#screw:minute_jumper_spring",
+                     "#screw:coupling_wheel", "#screw:clutch_spring", "#screw:hammer",
+                     "#screw:operating_lever", "#screw:operating_spring", "#screw:reset_lever",
+                     "#screw:reset_spring", "#screw:brake_lever", "#screw:brake_spring",
+                     "#screw:chrono_bridge:east", "#screw:chrono_bridge:south",
+                     "#screw:chrono_bridge:west", "#screw:coupling_bridge"],
+         "material": "blued_screw"},
+        {"targets": ["#chaton:chrono_runner", "#chaton:minute_recorder", "#chaton:coupling"],
+         "material": "brass_part"},
+        {"targets": ["#chrono_bridge", "#coupling_bridge",
+                     *[f"#chrono_bridge:stripe_shadow:{i}" for i in range(6)],
+                     *[f"#coupling_bridge:stripe_shadow:{i}" for i in range(3)]],
+         "material": "copper_plate"},
+        {"targets": ["#chrono_runner_wheel", "#minute_recorder_wheel", "#hour_recorder_wheel",
+                     "#clutch_driving_wheel", "#coupling_wheel"],
+         "material": "gilt_wheel"},
+        {"targets": ["#column_wheel", "#minute_jumper", "#clutch_arm", "#operating_lever",
+                     "#reset_lever", "#brake_lever"],
+         "material": "grained_lever"},
+        {"targets": ["#column_wheel_cap", "#chrono_runner_heart_cam", "#minute_recorder_heart_cam",
+                     "#hour_recorder_heart_cam", "#hammer_yoke", "#chrono_runner_arbor",
+                     "#clutch_driving_arbor", "#minute_recorder_post", "#hour_recorder_post",
+                     "#stud:minute_jumper", "#stud:minute_jumper_spring", "#stud:coupling_wheel",
+                     "#stud:clutch_spring", "#stud:hammer", "#stud:operating_lever",
+                     "#stud:operating_spring", "#stud:reset_lever", "#stud:reset_spring",
+                     "#stud:brake_lever", "#stud:brake_spring"],
+         "material": "polished_steel"},
+        {"targets": ["#bridge_jewel:chrono_runner", "#bridge_jewel:minute_recorder", "#bridge_jewel:coupling"],
+         "material": "ruby_jewel"},
+        {"targets": ["#minute_jumper_spring", "#hour_recorder_friction_spring", "#clutch_spring",
+                     "#operating_spring", "#reset_spring", "#brake_spring"],
+         "material": "satin_steel"},
     ],
 }
 
