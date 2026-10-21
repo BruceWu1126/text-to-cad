@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 __all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "glb", "memo", "motion", "paint",
-           "read_step", "step", "stl", "threemf", "xbf", "models_in"]
+           "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
 SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -425,8 +425,8 @@ _READ_STEP: Callable[[Any], Any] | None = None
 
 def read_step(path: Any) -> Any:
     """A STEP file as a build123d shape: a compound tree of its assembly, every part and
-    group labelled and coloured as the file has them. Parsed once per worker and held:
-    a later build's read of the same bytes is the memo's hit, the same objects."""
+    group labelled, coloured and given its material as the file has them. Parsed once per
+    worker and held: a later build's read of the same bytes is the memo's hit, the same objects."""
     global _READ_STEP
     if _READ_STEP is None:
         from cadgen.engine.kernel.memo import wrap_function
@@ -435,6 +435,33 @@ def read_step(path: Any) -> Any:
     import os
 
     return _READ_STEP(os.fspath(path))
+
+
+def _read_xbf(path: Any) -> Any:
+    from cadgen.engine.document import read_xbf_shape
+
+    return read_xbf_shape(path)
+
+
+_READ_XBF: Callable[[Any], Any] | None = None
+
+
+def read_xbf(path: Any) -> Any:
+    """An engine document (``.xbf``) as a build123d shape: a copy of its geometry, as
+    ``read_step`` gives a STEP's -- a compound tree of its assembly, every part and group
+    named, coloured and given its materials (painted faces too) as the document has them,
+    each element named as the document names it. Its mechanism and configurations are not
+    imported: a part is a part. Read once per worker and held, keyed by the file's bytes, as
+    ``read_step`` is. The fast way to bring a vendor STEP in: convert it once (``cadgen xbf
+    export vendor.step vendor.xbf``) and read the xbf."""
+    global _READ_XBF
+    if _READ_XBF is None:
+        from cadgen.engine.kernel.memo import wrap_function
+
+        _READ_XBF = wrap_function("read_xbf", _read_xbf)
+    import os
+
+    return _READ_XBF(os.fspath(path))
 
 
 # --- a build's context -------------------------------------------------------------------
