@@ -4,11 +4,11 @@ The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
 
 | Script            | Artifact                                  | Description                                                     |
 |-------------------|-------------------------------------------|-----------------------------------------------------------------|
-| case.py           | XBF/case.xbf, XBF/case.step               | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
-| movement.py       | XBF/movement.xbf, XBF/movement.step       | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
-| movement_base.py  | XBF/movement_base.xbf, .step (built alone) | Main plate, barrel, going train, bridges, escapement, balance  |
-| keyless_works.py  | XBF/keyless_works.xbf, .step (built alone) | Stem, winding/sliding pinions, setting lever, yoke, motion works |
-| chrono_works.py   | XBF/chrono_works.xbf, .step (built alone)  | Column wheel, levers, lateral clutch, runners, hammers          |
+| case.py           | XBF/case.xbf                              | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
+| movement.py       | XBF/movement.xbf                          | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
+| movement_base.py  | XBF/movement_base.xbf (built alone)       | Main plate, barrel, going train, bridges, escapement, balance  |
+| keyless_works.py  | XBF/keyless_works.xbf (built alone)       | Stem, winding/sliding pinions, setting lever, yoke, motion works |
+| chrono_works.py   | XBF/chrono_works.xbf (built alone)        | Column wheel, levers, lateral clutch, runners, hammers          |
 
 Build from this folder: `python -m cadgen.engine build case.py movement.py`.
 

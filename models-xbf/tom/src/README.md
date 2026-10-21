@@ -46,14 +46,14 @@ PYTHONPATH=<cadgen>/src:src python -m cadgen.engine build src/tom.py::tom
 PYTHONPATH=<cadgen>/src:src python -m cadgen.engine snapshot XBF/tom.xbf tom.png
 ```
 
-The xbf and STEP land in `XBF/` beside `src/`. A cold build takes minutes and its worker
+The xbf lands in `XBF/` beside `src/`. A cold build takes minutes and its worker
 holds most of 20 GB; a second build of the unchanged model replays from the worker's memory.
 
 ## What the port changed
 
-- `from cadgen import ...` -> `build123d`, `cadgen.engine` (`xbf`, `step`, `read_step`);
-  `@step(out='…/STEP/x.step', kinematics=…, animation=…)` -> `@xbf(out='…/XBF/x.xbf')` +
-  `@step(out='…/XBF/x.step')`.
+- `from cadgen import ...` -> `build123d`, `cadgen.engine` (`xbf`, `read_step`);
+  `@step(out='…/STEP/x.step', kinematics=…, animation=…)` -> `@xbf(out='…/XBF/x.xbf')`
+  alone (`cadgen xbf export` writes the STEP from it).
 - Mates: the revision layers compute the arm's kinematics as typed mates, which the build
   also reads as data (`lib/joint_zero.py` poses the arm at joint zero by their axes;
   `lib/joint_limits.py` audits their ranges). `cadgen.revolute`/`fastened` are replaced by the

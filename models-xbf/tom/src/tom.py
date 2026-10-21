@@ -10,7 +10,7 @@ materials (lib.materials).
 """
 import sys
 
-from cadgen.engine import xbf, step
+from cadgen.engine import xbf
 from stages.tom2_symmetric_yokes import tom2_symmetric_yokes
 from lib.current_arm_parts import configuration,build_current_arm
 from lib.current_arm_stock import component_stock
@@ -32,7 +32,6 @@ KINEMATICS=kinematics()
 
 # The occurrence ids the old showcase clips addressed are still pinned and checked below.
 @xbf(out='../XBF/tom.xbf')
-@step(out='../XBF/tom.step')
 def tom():
     # Imported stock is read once. The stock recipe retains vendor BREP and
     # combines layout transforms without building intermediate native arms.

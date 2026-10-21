@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import frontend as B
 
 
 @xbf(out="../XBF/front_fork.xbf")
-@step(out="../XBF/front_fork.step")
 def front_fork():
     built = B.build_front_fork()
     if isinstance(built, list):

@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 # ---------------------------------------------------------------------------
 # Gear stage parameters (module-1.0 concept teeth, trapezoidal with backlash)
@@ -275,7 +275,7 @@ PLANET_EXPLODE_RADIAL = 14.0
 # ---------------------------------------------------------------------------
 # Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
 # Shape.color setter builds the Color on assignment, and a module-level
-# bd.Color(...) would import the CAD kernel before the @step freshness gate.
+# bd.Color(...) would import the CAD kernel before the @xbf freshness gate.
 AL_BODY = (0.13, 0.135, 0.15)  # black-anodized housing
 AL_COVER = (0.115, 0.12, 0.13)  # black-anodized rear cover
 AL_BRIGHT = (0.78, 0.79, 0.81)  # machined aluminum (flange, carrier)
@@ -996,7 +996,6 @@ def _connect(housing, retainer, cover, retainer_screws, connectors, driver_pcb, 
 
 
 @xbf(out="../XBF/qdd_actuator.xbf")
-@step(out="../XBF/qdd_actuator.step")
 def qdd_actuator():
     return build_actuator(explode=0.0)
 

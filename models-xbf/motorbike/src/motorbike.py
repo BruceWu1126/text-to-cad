@@ -29,7 +29,7 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from center_stand import center_stand
 from engine import engine
@@ -82,7 +82,6 @@ def _rigid_mate(fixed_part, fixed_name, moving_part, moving_name, location):
 
 
 @xbf(out="../XBF/motorbike.xbf")
-@step(out="../XBF/motorbike.step")
 def motorbike():
     fx, fy, fz = S.FRONT_SIGNAL_POS
     rx, ry, rz = S.REAR_SIGNAL_POS
@@ -160,10 +159,11 @@ def motorbike():
 
     _rigid_mate(motor, "exhaust_port", pipe, "head_flange", bd.Location(S.EXHAUST_FLANGE))
 
-    # The shock's two eyes tie the frame to the swinging engine: a closed loop
-    # (the old kinematics left it unmated); here both ends are rigid mounts.
+    # The shock's two eyes tie the frame to the swinging engine: a closed loop,
+    # which the old kinematics left unmated (the shock stays put while the
+    # engine swings). Only its upper eye is mounted, to the frame: a rigid
+    # lower eye too would weld the engine to the frame and lock engine_pivot.
     _rigid_mate(chassis, "shock_upper_lug", shock, "upper_eye", bd.Location(S.SHOCK_UPPER))
-    _rigid_mate(motor, "shock_lower_boss", shock, "lower_eye", bd.Location(S.SHOCK_LOWER))
 
     seat_frame_at = bd.Location((-480.0, 0.0, 560.0))
     _rigid_mate(chassis, "seat_frame_mount", body, "frame_mount", seat_frame_at)

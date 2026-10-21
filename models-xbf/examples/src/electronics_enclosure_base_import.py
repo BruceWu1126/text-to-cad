@@ -5,15 +5,16 @@ the STEP that `electronics_enclosure_base.py` writes beside it and drew it. The
 engine has no drawing decorator, so what is kept is the read: the enclosure's
 STEP as a document of its own, and the mating fixture's STEP (an assembly) the
 same way, which exercises the names and colours an imported tree keeps.
-Build the two source models first: these read their STEP outputs.
+Both are fixed inputs committed in `../STEP/`, exported once from the two
+source models; no model writes them.
 """
 
 from pathlib import Path
 
 from cadgen.engine import read_step, xbf
 
-ENCLOSURE_STEP = Path(__file__).parent / "../XBF/electronics_enclosure_base.step"
-FIXTURE_STEP = Path(__file__).parent / "../XBF/basic_shape_mating_test_fixture.step"
+ENCLOSURE_STEP = Path(__file__).parent / "../STEP/electronics_enclosure_base.step"
+FIXTURE_STEP = Path(__file__).parent / "../STEP/basic_shape_mating_test_fixture.step"
 
 
 @xbf(out="../XBF/electronics_enclosure_base_import.xbf")

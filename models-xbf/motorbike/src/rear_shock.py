@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 from lib import drivetrain as B
 
 
 @xbf(out="../XBF/rear_shock.xbf")
-@step(out="../XBF/rear_shock.step")
 def rear_shock():
     built = B.build_rear_shock()
     if isinstance(built, list):

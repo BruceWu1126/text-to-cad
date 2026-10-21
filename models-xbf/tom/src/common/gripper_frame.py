@@ -1,7 +1,7 @@
 """The canonical gripper frame: one centered part at both the gripper and the
 shoulder-yaw mount. Supersedes the end-for-end template in end_effector/."""
 import build123d as bd
-from cadgen.engine import xbf, step, read_step
+from cadgen.engine import xbf, read_step
 from lib import sheet_rule_scs as scs
 from lib.materials import ALUMINUM_5052_COLOR
 from lib.booleans import as_single_shape
@@ -76,7 +76,6 @@ def centered_frame(legacy):
 
 
 @xbf(out='../../XBF/common/gripper_frame.xbf')
-@step(out='../../XBF/common/gripper_frame.step')
 def gripper_frame():
     return centered_frame(mirrored_frame(read_step(INPUTS/'gripper.step').children[0]))
 

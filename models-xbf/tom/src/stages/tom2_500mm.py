@@ -6,7 +6,7 @@ The original symmetric-yoke model remains the comparison configuration.
 from dataclasses import asdict
 from functools import cache
 import build123d as bd
-from cadgen.engine import xbf, step
+from cadgen.engine import xbf
 from lib.mates import revolute
 from stages.tom2_symmetric_yokes import tom2_symmetric_yokes,kinematics as original_kinematics
 from lib.booleans import as_single_shape
@@ -80,7 +80,6 @@ def build_model(finisher=finish_link):
     result=visit(source);result.label='tom2_500mm';return result
 
 @xbf(out='../../XBF/stages/tom2_500mm.xbf')
-@step(out='../../XBF/stages/tom2_500mm.step')
 def tom2_500mm():
     return build_model()
 

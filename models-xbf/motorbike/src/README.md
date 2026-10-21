@@ -1,11 +1,10 @@
 # motorbike models
 
-Every `.py` directly under `src/` is a model (`@xbf` + the `@step` the
-original declared, both into `../XBF/`). Shared code lives in `src/lib/` and is
+Every `.py` directly under `src/` is a model (`@xbf`, into `../XBF/`). Shared code lives in `src/lib/` and is
 never a model. The assembly composes its children by CALLING the sibling models
 (`frame()`, `seat()`, …): each child runs in the assembly's build as a
 sub-assembly, and a child called twice is one prototype placed twice. A child
-built on its own writes its own xbf and STEP.
+built on its own writes its own xbf.
 
 | Script               | Artifact                  | Description                                              |
 |----------------------|---------------------------|----------------------------------------------------------|
@@ -80,8 +79,11 @@ carry the ranges the old typed mates declared:
 
 Every other mount is a `RigidJoint` pair: handlebar, front fender and mirrors
 on the fork and bar; exhaust on the engine; apron, shroud, body, seat, fenders,
-lamps and signals on the frame and bodywork; the rear shock rigidly on both the
-frame lug and the engine boss.
+lamps and signals on the frame and bodywork; the rear shock by its upper eye on
+the frame lug only. Its lower eye on the engine boss is not jointed: a second
+rigid mount would close a loop through the shock and weld the engine to the
+frame, so `engine_pivot` could not move. The old kinematics left the shock
+unmated for the same reason; it stays put while the engine swings.
 
 Not ported: the old `KINEMATICS` presets (`ride`, `turned_left`, `stand_down`,
 `bump`): build123d joints have no poses.
