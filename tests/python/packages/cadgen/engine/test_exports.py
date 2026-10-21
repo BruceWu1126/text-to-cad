@@ -22,7 +22,7 @@ from xml.etree import ElementTree
 
 import numpy as np
 
-from cadgen.engine import api, document, export, mesh
+from cadgen.engine import api, document, export, materials, mesh
 from cadgen.engine import build as engine_build
 from cadgen.engine.export import ExportRefused, Source, translate
 
@@ -179,8 +179,8 @@ class ExportTest(unittest.TestCase):
         looks = [gltf["materials"][primitive["material"]] for primitive in plate["primitives"]]
         self.assertEqual(len(looks), 3, "the part's own look, a painted colour and a painted material")
         by_name = {look.get("name"): look for look in looks}
-        self.assertEqual(by_name["Aluminum Generic"]["pbrMetallicRoughness"]["metallicFactor"], 1.0)
-        self.assertIn("Steel-Generic", by_name)
+        self.assertEqual(by_name[materials.aluminium.name]["pbrMetallicRoughness"]["metallicFactor"], 1.0)
+        self.assertIn(materials.steel.name, by_name)
         self.assertIn([1.0, 0.0, 0.0, 1.0], [look["pbrMetallicRoughness"]["baseColorFactor"] for look in looks])
         rack = next(node for node in placed if node["name"] == "rack/peg0")
         self.assertEqual(rack["matrix"][12:15], [-10.0, 0.0, 6.0])
@@ -193,14 +193,14 @@ class ExportTest(unittest.TestCase):
         with zipfile.ZipFile(self.folder / "board.3mf") as archive:
             model = ElementTree.fromstring(archive.read("3D/3dmodel.model"))
         core = "{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}"
-        materials = "{http://schemas.microsoft.com/3dmanufacturing/material/2015/02}"
+        extension = "{http://schemas.microsoft.com/3dmanufacturing/material/2015/02}"
         objects = model.findall(f"{core}resources/{core}object")
         self.assertEqual(sorted(entry.get("name") for entry in objects), ["base", "lid", "peg0", "plate"])
         self.assertEqual(len(model.findall(f"{core}build/{core}item")), 6)
         bases = model.findall(f"{core}resources/{core}basematerials/{core}base")
-        metallic = model.findall(f"{core}resources/{materials}pbmetallicdisplayproperties/{materials}pbmetallic")
+        metallic = model.findall(f"{core}resources/{extension}pbmetallicdisplayproperties/{extension}pbmetallic")
         self.assertEqual(len(metallic), len(bases), "one display property per base material")
-        self.assertIn("Aluminum Generic", [base.get("name") for base in bases])
+        self.assertIn(materials.aluminium.name, [base.get("name") for base in bases])
         plate = next(entry for entry in objects if entry.get("name") == "plate")
         painted = [t for t in plate.iter(f"{core}triangle") if t.get("p1") is not None]
         self.assertEqual(len(painted), 4, "the two painted faces' triangles name their own looks")

@@ -1431,30 +1431,56 @@ def _f32(value: float) -> float:
 
 def as_read(material: Any, rgba: tuple) -> Any:
     """``material`` as a document read back gives it: drawn in ``rgba`` (the base colour
-    as read), its PBR factors as 32-bit floats, its density through the kernel's g/cm^3,
-    no emissive where it is black, no description where it is empty."""
-    from cadgen.engine.materials import Material
-
+    as read), its PBR factors (metallic, roughness, emissive, IOR) as 32-bit floats, its density
+    through the kernel's g/cm^3, no emissive where it is black, no description where it is
+    empty; every other field as it is."""
     emissive = tuple(_f32(value) for value in (material.emissive or (0.0, 0.0, 0.0)))
-    return Material(material.name, round(material.density / 1000.0 * 1000.0, 6) if material.density else None,
-                    rgba, _f32(material.metallic), _f32(material.roughness), emissive if any(emissive) else None,
-                    material.description or None)
+    return material.but(density=round(material.density / 1000.0 * 1000.0, 6) if material.density else None,
+                        color=rgba, metallic=_f32(material.metallic), roughness=_f32(material.roughness),
+                        ior=_f32(material.ior), emissive=emissive if any(emissive) else None,
+                        description=material.description or None)
+
+
+# A material's fields as the structure carries them, by the structure's names: what the page draws.
+_JSON_FIELDS = (("name", "name"), ("density", "density"), ("color", "color"), ("metallic", "metallic"),
+                ("roughness", "roughness"), ("emissive", "emissive"), ("description", "description"))
 
 
 def material_json(material: Any) -> dict[str, Any] | None:
-    """A material as the structure carries it."""
+    """A material as the structure carries it: its name, density, look's colour (the base colour
+    it is drawn in), metallic, roughness and emissive (black where it has none), and description."""
     if material is None:
         return None
-    return {"name": material.name, "density": material.density, "color": list(material.color or DEFAULT_COLOR),
-            "metallic": material.metallic, "roughness": material.roughness,
-            "emissive": list(material.emissive or (0.0, 0.0, 0.0)), "description": material.description}
+    found: dict[str, Any] = {}
+    for field, key in _JSON_FIELDS:
+        value = getattr(material, field)
+        if field == "color":
+            value = value or DEFAULT_COLOR
+        elif field == "emissive":
+            value = value or (0.0, 0.0, 0.0)
+        found[key] = list(value) if isinstance(value, tuple) else value
+    return found
+
+
+def material_from_json(value: dict[str, Any] | None) -> Any:
+    """The ``Material`` of ``material_json``'s answer (a black ``emissive`` is none); None for None."""
+    if not value:
+        return None
+    from cadgen.engine.materials import Material
+
+    fields = {field: value[key] for field, key in _JSON_FIELDS if value.get(key) is not None}
+    for field in ("color", "transmission_color", "emissive"):
+        if field in fields:
+            fields[field] = tuple(fields[field])
+    if not any(fields.get("emissive") or ()):
+        fields.pop("emissive", None)
+    return Material(**fields)
 
 
 def _label_material(label: Any) -> Any:
     """The material a label was given, as ``as_read`` describes it, or None: its
-    ``XCAFDoc_Material`` (name, description, density) and its ``XCAFDoc_VisMaterial``
-    (PBR), either alone too -- a STEP the engine did not write has no PBR, and is drawn
-    in the label's colour."""
+    ``XCAFDoc_Material`` (name, description, density) and its ``XCAFDoc_VisMaterial`` (PBR), either alone too -- a STEP the engine did
+    not write has no PBR, and is drawn in the label's colour."""
     from OCP.TDataStd import TDataStd_TreeNode
     from OCP.XCAFDoc import XCAFDoc, XCAFDoc_Material, XCAFDoc_VisMaterialTool
 
@@ -1462,15 +1488,18 @@ def _label_material(label: Any) -> Any:
 
     name = description = ""
     density = None
+    extra: dict[str, Any] = {}
     node = TDataStd_TreeNode()
     if _find(label, node, XCAFDoc.MaterialRefGUID_s()) and node.HasFather():
         physical = XCAFDoc_Material()
-        if _find(node.Father().Label(), physical, XCAFDoc_Material.GetID_s()):
+        held = node.Father().Label()
+        if _find(held, physical, XCAFDoc_Material.GetID_s()):
             name = physical.GetName().ToCString() if physical.GetName() is not None else ""
             description = physical.GetDescription().ToCString() if physical.GetDescription() is not None else ""
             density = round(physical.GetDensity() * 1000.0, 6) or None
     visual = XCAFDoc_VisMaterialTool.GetShapeMaterial_s(label)
     pbr = visual.PbrMaterial() if visual is not None and visual.HasPbrMaterial() else None
+    ior = 1.5
     if pbr is not None:
         if not name:
             raw = visual.RawName()
@@ -1480,13 +1509,13 @@ def _label_material(label: Any) -> Any:
         rgba = (round(rgb.Red(), 6), round(rgb.Green(), 6), round(rgb.Blue(), 6), round(base.Alpha(), 6))
         glow = pbr.EmissiveFactor
         emissive = (_f32(glow.x()), _f32(glow.y()), _f32(glow.z()))
-        metallic, roughness = _f32(pbr.Metallic), _f32(pbr.Roughness)
+        metallic, roughness, ior = _f32(pbr.Metallic), _f32(pbr.Roughness), _f32(pbr.RefractionIndex)
     elif name:
         rgba, emissive, metallic, roughness = _label_color(label), (0.0, 0.0, 0.0), 0.0, 0.5
     else:
         return None
-    return Material(name or "material", density, rgba, metallic, roughness, emissive if any(emissive) else None,
-                    description or None)
+    return Material(name or "material", density, color=rgba, metallic=metallic, roughness=roughness, ior=ior,
+                    emissive=emissive if any(emissive) else None, description=description or None, **extra)
 
 
 def _prototype(index: int, label: Any, shape: Any, entry: str, loaded: Loaded) -> Prototype:

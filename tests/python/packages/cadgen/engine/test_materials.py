@@ -1,11 +1,14 @@
-"""Materials: the value and its catalogue, a part's and a face's material in the xbf and
-read back, an assembly's material taken by the parts below it, STEP's name and density,
-GLB's PBR materials, and a material-only edit -- no kernel call, the xbf rewritten,
-every geometry key as it was."""
+"""Materials: the value and its catalogue (lookup, aliases, a miss), a part's and a face's
+material in the xbf and read back field for field, an assembly's material taken by the parts
+below it, STEP's name and density, GLB's PBR materials and their extensions, the look the
+structure serves, what a part and an assembly weigh, and a material-only edit -- no kernel
+call, the xbf rewritten, every geometry key as it was."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import math
 import os
 import shutil
 import struct
@@ -44,7 +47,6 @@ def plate():
     return root
 """
 
-
 def _glb_json(path: Path) -> dict:
     data = path.read_bytes()
     magic, version, length = struct.unpack_from("<4sII", data, 0)
@@ -58,26 +60,89 @@ class MaterialValueTest(unittest.TestCase):
     def test_fields_are_validated_by_name(self) -> None:
         made = Material("Thing", 1000, color=(1, 0, 0))
         self.assertEqual(made.color, (1.0, 0.0, 0.0, 1.0))
-        self.assertEqual((made.metallic, made.roughness, made.emissive), (0.0, 0.5, None))
+        self.assertEqual((made.metallic, made.roughness, made.emissive, made.ior, made.emissive_strength),
+                         (0.0, 0.5, None, 1.5, 1.0))
+        self.assertEqual((made.family, made.young_modulus, made.isotropic), (None, None, True), "unknown, not guessed")
         for fields, named in (({"name": ""}, "name"), ({"density": -1}, "density"), ({"density": "x"}, "density"),
                               ({"color": (1, 0)}, "color"), ({"color": (2, 0, 0)}, "color"), ({"color": "red"}, "color"),
                               ({"metallic": 1.5}, "metallic"), ({"roughness": -0.1}, "roughness"),
-                              ({"emissive": (1, 1, 1, 1)}, "emissive"), ({"description": 3}, "description")):
+                              ({"emissive": (1, 1, 1, 1)}, "emissive"), ({"description": 3}, "description"),
+                              ({"family": "cheese"}, "family"), ({"young_modulus": 0}, "young_modulus"),
+                              ({"poisson_ratio": 0.7}, "poisson_ratio"), ({"isotropic": 1}, "isotropic"),
+                              ({"ior": 0.5}, "ior"), ({"anisotropy": 2}, "anisotropy"),
+                              ({"transmission": -1}, "transmission"), ({"transmission_color": (1, 1)}, "transmission_color"),
+                              ({"transmission_depth": 0}, "transmission_depth"), ({"coat": 1.2}, "coat"),
+                              ({"coat_roughness": 9}, "coat_roughness"), ({"emissive_strength": -1}, "emissive_strength"),
+                              ({"thermal_expansion": math.inf}, "thermal_expansion"), ({"specific_heat": -2}, "specific_heat")):
             with self.subTest(fields=fields), self.assertRaisesRegex(ValueError, f"Material {named}"):
                 Material(**{"name": "Thing", **fields})
         with self.assertRaises(Exception):
             made.name = "Other"  # a frozen value
+        with self.assertRaises(TypeError):
+            Material("Thing", 1000, (1, 0, 0))  # past the density, every field by name
 
-    def test_the_catalogue_s_entries_are_valid_and_distinct(self) -> None:
+    def test_but_copies_with_changes_and_mass_weighs_a_volume(self) -> None:
+        polished = materials.steel_1018.but(roughness=0.2, description="polished")
+        self.assertEqual((polished.roughness, polished.description, polished.density), (0.2, "polished", 7870.0))
+        self.assertEqual(materials.steel_1018.roughness, 0.4, "the entry is unchanged")
+        with self.assertRaisesRegex(ValueError, "Material roughness"):
+            materials.steel_1018.but(roughness=3)
+        self.assertAlmostEqual(materials.aluminium_6061.mass(1e-3), 2.7)
+        self.assertIsNone(Material("Ink").mass(1.0))
+
+    def test_the_catalogue_s_entries_are_valid_distinct_and_sourced(self) -> None:
         entries = list(materials.CATALOGUE.values())
-        self.assertGreaterEqual(len(entries), 12)
+        self.assertEqual(len(entries), 44)
         for entry in entries:
-            self.assertIsInstance(entry, Material)
-            self.assertIsNotNone(entry.density)
-            self.assertIsNotNone(entry.color)
+            with self.subTest(entry=entry.name):
+                self.assertIn(entry.family, materials.FAMILIES)
+                self.assertIsNotNone(entry.density)
+                self.assertIsNotNone(entry.color)
+                self.assertTrue(entry.source and entry.standard and entry.description)
+                if entry.family == "metal":
+                    self.assertEqual(entry.metallic, 1.0)
+                else:
+                    self.assertEqual(entry.metallic, 0.0)
         self.assertEqual(len({entry.name for entry in entries}), len(entries))
         self.assertEqual(len(set(entries)), len(entries))
-        self.assertIs(materials.aluminium, materials.CATALOGUE["aluminium"])
+        self.assertEqual(materials.neodymium.young_modulus, None, "a magnet's density, nothing structural")
+        self.assertFalse(materials.carbon_fibre_laminate.isotropic)
+        self.assertFalse(materials.plywood_birch.isotropic)
+        self.assertGreater(materials.glass.transmission, 0)
+        self.assertGreater(materials.stainless_304.anisotropy, 0)
+        grouped = materials.names()
+        self.assertEqual(sum(map(len, grouped.values())), len(entries))
+        for family, names in grouped.items():
+            self.assertEqual([entry.name for entry in materials.by(family=family)], names)
+        with self.assertRaisesRegex(TypeError, "no field colour"):
+            materials.by(colour="red")
+
+    def test_lookup_takes_names_attributes_and_aliases_in_any_case(self) -> None:
+        for spelling in ("6061", "6061-T6", "al 6061", "Aluminum 6061-T6", "ALUMINIUM_6061", "aluminium"):
+            with self.subTest(spelling=spelling):
+                self.assertIs(materials(spelling), materials.aluminium_6061)
+        self.assertIs(materials("steel"), materials.steel_1018)
+        self.assertIs(materials("Delrin"), materials.acetal_pom)
+        self.assertIs(materials("glass, soda-lime"), materials.glass_soda_lime)
+        # The earlier attribute names still resolve.
+        for old, entry in (("aluminium", "aluminium_6061"), ("steel", "steel_1018"), ("stainless_steel", "stainless_304"),
+                           ("brass", "brass_c360"), ("copper", "copper_c110"), ("titanium", "titanium_grade5"),
+                           ("nylon", "nylon_pa12"), ("acrylic", "acrylic_pmma"), ("glass", "glass_soda_lime"),
+                           ("abs_plastic", "abs"), ("acetal", "acetal_pom"), ("pla", "pla"), ("polycarbonate", "polycarbonate")):
+            self.assertIs(getattr(materials, old), getattr(materials, entry))
+        with self.assertRaises(LookupError) as raised:
+            materials("alumnium 6016")
+        message = str(raised.exception)
+        self.assertIn("'alumnium 6016'", message)
+        self.assertEqual(message.split("nearest: ")[1].count(", "), 2, "three names")
+        self.assertIn("Aluminum 6061-T6", message)
+
+    def test_the_module_is_the_catalogue(self) -> None:
+        import cadgen.engine.materials as module
+
+        self.assertIs(module, materials)
+        self.assertIs(module("pla"), materials.pla)
+        self.assertIs(module.Material, Material)
 
 
 class MaterialDocumentTest(unittest.TestCase):
@@ -140,26 +205,6 @@ class MaterialDocumentTest(unittest.TestCase):
         self.assertEqual((found["pin"].material.name, found["pin"].material.density),
                          (materials.aluminium.name, materials.aluminium.density))
         self.assertEqual(found["pin"].color, materials.aluminium.color)
-
-    def test_glb_has_pbr_materials_from_the_document(self) -> None:
-        self.build()
-        loaded = document.Loaded(self.folder / "XBF/plate.xbf")
-        path = self.folder / "plate.glb"
-        export.translate(loaded.path, "glb", path)  # ``cadgen xbf export``: the xbf alone
-        gltf = _glb_json(path)
-        by_name = {entry.get("name"): entry for entry in gltf["materials"]}
-        self.assertEqual(set(by_name), {materials.steel.name, materials.aluminium.name, "Glow", "Bare"})
-        for entry in gltf["materials"]:
-            pbr = entry["pbrMetallicRoughness"]
-            self.assertEqual(len(pbr["baseColorFactor"]), 4)
-            self.assertIn(entry["alphaMode"], ("OPAQUE", "BLEND"))
-            self.assertTrue(0 <= pbr["metallicFactor"] <= 1 and 0 <= pbr["roughnessFactor"] <= 1)
-        steel = by_name[materials.steel.name]["pbrMetallicRoughness"]
-        self.assertEqual((steel["metallicFactor"], steel["roughnessFactor"]), (1.0, 0.45))
-        self.assertEqual(by_name["Glow"]["emissiveFactor"], [0.5, 0.25, 0.0])
-        self.assertEqual(by_name["Glow"]["pbrMetallicRoughness"]["roughnessFactor"], 0.75)
-        used = {primitive["material"] for mesh in gltf["meshes"] for primitive in mesh["primitives"]}
-        self.assertEqual(used, set(range(len(gltf["materials"]))))
 
     def test_a_material_only_edit_calls_no_kernel_rewrites_the_xbf_and_keeps_every_key(self) -> None:
         self.build()

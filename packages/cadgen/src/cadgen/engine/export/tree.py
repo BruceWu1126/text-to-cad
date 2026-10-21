@@ -24,15 +24,9 @@ __all__ = ["tree_of", "write_xbf"]
 
 
 def _material(value: Any) -> Any:
-    if not value:
-        return None
-    from cadgen.engine.materials import Material
+    from cadgen.engine.document import material_from_json
 
-    emissive = tuple(value.get("emissive") or (0.0, 0.0, 0.0))
-    return Material(value["name"], value.get("density"), tuple(value["color"]) if value.get("color") else None,
-                    float(value.get("metallic") or 0.0), float(value.get("roughness") if value.get("roughness")
-                                                             is not None else 0.5),
-                    emissive if any(emissive) else None, value.get("description") or None)
+    return material_from_json(value)
 
 
 def _names(prototype: dict[str, Any]) -> dict[str, Any]:
