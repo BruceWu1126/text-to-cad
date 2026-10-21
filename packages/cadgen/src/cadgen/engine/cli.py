@@ -128,6 +128,8 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                 f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
         if (report.get("cache") or {}).get("changed"):
             line += f"\n  rebuilt: {report['cache']['reason']}"
+    if report.get("retired"):
+        files.append(f"retired: {report['retired']}")
     return (line + "".join(f"\n  {text}" for text in files)
             + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
             + _verified(report.get("verify")))
