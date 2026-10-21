@@ -7,11 +7,22 @@ import { createGlbAnimationRuntime, disposeGlbAnimationRuntime, setGlbAnimationT
 import { createAnimationClock } from "../kit/tools/playbar/animationClock.js";
 import { playbackFrameTime, usePlaybackFrames } from "../kit/tools/playbar/usePlaybackFrames.js";
 
+/**
+ * Whether a clip loops on its own: a cadgen engine GLB says so per animation in
+ * `extras.cadgen.loop` (null plays once; "loop" and "pingpong", whose clip is the way out and
+ * back, repeat), which three's loader hands over as the clip's `userData`; any other file loops.
+ */
+export function clipLoops(clip) {
+  const cadgen = clip?.userData?.cadgen;
+  return cadgen && Object.prototype.hasOwnProperty.call(cadgen, "loop") ? cadgen.loop != null : true;
+}
+
 function clipRows(document) {
   return (document?.clips || []).map((clip, index) => ({
     id: `glb:${index}`,
     label: String(clip.name || `Clip ${index + 1}`),
     duration: Math.max(Number(clip.duration) || 0, 0.001),
+    loops: clipLoops(clip),
     clip
   }));
 }
@@ -46,15 +57,17 @@ export function useGlbAnimation(document, requestRender) {
     setState(next);
   }, []);
   // At rest for every document, before anything (an Autoplay) plays it.
+  // Each clip opens at its own Loop (`clipLoops`).
   useLayoutEffect(() => {
     clock.resetAnimationClock();
-    update({ ...REST, activeClipId: clips[0]?.id || "" });
+    update({ ...REST, activeClipId: clips[0]?.id || "", loopEnabled: clips[0]?.loops ?? REST.loopEnabled });
   }, [document, clips, clock, update]);
 
   const onClipSelect = useCallback((id) => {
-    if (!clips.some((clip) => clip.id === id)) return;
+    const chosen = clips.find((clip) => clip.id === id);
+    if (!chosen) return;
     clock.resetAnimationClock();
-    update({ activeClipId: id, enabled: true, playing: false, elapsedSec: 0 });
+    update({ activeClipId: id, enabled: true, playing: false, elapsedSec: 0, loopEnabled: chosen.loops });
   }, [clips, clock, update]);
   const onPlayToggle = useCallback(() => {
     if (!activeClip) return;
@@ -85,8 +98,9 @@ export function useGlbAnimation(document, requestRender) {
   }, [clock]);
   const resetPlayback = useCallback(() => {
     onRelease();
-    update({ speed: REST.speed, loopEnabled: REST.loopEnabled });
-  }, [onRelease, update]);
+    const current = clips.find((clip) => clip.id === stateRef.current.activeClipId) || clips[0];
+    update({ speed: REST.speed, loopEnabled: current?.loops ?? REST.loopEnabled });
+  }, [clips, onRelease, update]);
   const restorePlayback = useCallback((saved) => {
     const clip = clips.find((candidate) => candidate.id === saved?.activeClipId);
     if (!clip) return;

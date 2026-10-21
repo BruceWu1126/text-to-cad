@@ -3,8 +3,9 @@ Viewer draws it. SRC is an ``.xbf`` or a ``.step`` (a document), or a ``.glb``, 
 ``.3mf`` (a mesh file).
 
 A document is served by the engine (the daemon, so its meshes are the ones the viewer and
-every build share, or ``--no-daemon`` a server in this process; a build's own document, which
-``@snapshot`` and ``--snapshot`` draw, from the worker's memory over its one mesh cache) and
+every build share, or ``--no-daemon`` a server in this process; a model's own document, which
+``Model.snapshot`` and ``cadgen.snapshot(model, ...)`` draw, from its worker's memory over its one
+mesh cache) and
 meshed there. A mesh file is meshed by nobody: the page reads its bytes and draws them with the
 mesh renderers the viewer's GLB and mesh tabs call (``headlessScene.js``'s mesh families). A headless
 browser opens the snapshot page of cadgen's browser runtime -- ``render.html`` and
@@ -351,7 +352,7 @@ def _png(result: dict[str, Any], out: Path, timings: dict[str, Any]) -> dict[str
 
 def options(display: Any = None, camera: Any = None, grid: bool = False, width: int | None = None,
             height: int | None = None, size_profile: str | None = None) -> tuple[dict[str, Any], Any, tuple[int, int]]:
-    """A snapshot's options as a decorator or a function gives them -- ``display`` a mode, a
+    """A snapshot's options as a function gives them -- ``display`` a mode, a
     JSON text or the display object -- checked as the verb checks its flags."""
     if isinstance(display, dict):
         display = json.dumps(display)
@@ -361,11 +362,12 @@ def options(display: Any = None, camera: Any = None, grid: bool = False, width: 
 
 
 def draw(source: Any, out: Path, *, display: Any = None, camera: Any = None, grid: bool = False,
-         preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None) -> dict[str, Any]:
+         preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+         size_profile: str | None = None) -> dict[str, Any]:
     """A build's document (an ``export.Source``, in this process's memory) drawn into ``out``:
-    the ``@snapshot`` file and ``--snapshot``. Served from memory over the process's mesh
+    a model's picture (``Model.snapshot``). Served from memory over the process's mesh
     cache, so nothing the build meshed is meshed again."""
-    shown, framed, size = options(display, camera, grid, width, height)
+    shown, framed, size = options(display, camera, grid, width, height, size_profile)
     path = source.path or Path(out).with_suffix(".xbf")
     return snapshot(path, Path(out), display=shown, camera=framed, preview=preview, size=size, pose=pose,
                     source=source)
@@ -449,7 +451,8 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
 def add_parser(verbs: Any) -> argparse.ArgumentParser:
     """The ``snapshot`` verb of ``cadgen xbf``."""
     parser = verbs.add_parser("snapshot", help="draw a document as the CAD Viewer does, into a PNG")
-    parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step) or a mesh file (.glb, .stl, .3mf)")
+    parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step), a mesh file (.glb, .stl, .3mf), or "
+                                                        "SCRIPT.py::MODEL (built first, drawn from its worker)")
     parser.add_argument("out", metavar="OUT.png", help="the .png to write")
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe) or the display "
                                           "JSON object (mode, grid, appearance, camera, clip), or a JSON file of it")
@@ -468,6 +471,8 @@ def add_parser(verbs: Any) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> int:
+    if "::" in args.document or args.document.endswith(".py"):
+        return _run_model(args)
     try:
         display = parse_display(args.display, args.grid)
         camera = parse_camera(args.camera)
@@ -490,15 +495,23 @@ def run(args: argparse.Namespace) -> int:
     return 0
 
 
-class _Verb(type(sys)):
-    """This module is also the ``@snapshot`` decorator (``model.snapshot``): imported, its name in
-    ``cadgen.engine`` is this module, and a model's ``from cadgen.engine import snapshot`` must
-    still declare a snapshot."""
+def _run_model(args: argparse.Namespace) -> int:
+    """``cadgen xbf snapshot SCRIPT.py::MODEL OUT.png``: the model built in its worker, its
+    document drawn from that worker's memory (``api.snapshot``)."""
+    from cadgen.engine import api
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        from cadgen.engine.model import snapshot as decorate
-
-        return decorate(*args, **kwargs)
-
-
-sys.modules[__name__].__class__ = _Verb
+    try:
+        drawn = api.snapshot(args.document, args.out, display=args.display, camera=args.camera, grid=args.grid,
+                             preview=args.preview, pose=args.pose, width=args.width, height=args.height,
+                             size_profile=args.size_profile, daemon=not args.no_daemon)
+    except (SnapshotRefused, ValueError) as error:
+        print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
+        return 2
+    except api.EngineError as error:
+        print(f"cadgen xbf snapshot: {error}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(drawn.report))
+    else:
+        print(f"wrote {args.out} ({drawn.width}x{drawn.height}) in {drawn.report['timings']['totalMs'] / 1000:.2f}s")
+    return 0

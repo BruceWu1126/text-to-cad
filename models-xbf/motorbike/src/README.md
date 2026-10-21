@@ -87,5 +87,10 @@ rigid mount would close a loop through the shock and weld the engine to the
 frame, so `engine_pivot` could not move. The old kinematics left the shock
 unmated for the same reason; it stays put while the engine swings.
 
+One motion is in the model's code: `steer`, `head_tube_axis` swept from -20 to
+20 degrees over 2 s and back (`motion(bike, "steer", sweep=..., duration=2,
+loop="pingpong")`). The xbf keeps it as a definition; `cadgen xbf export
+../XBF/motorbike.xbf bike.glb` bakes it into a glTF clip named `steer`.
+
 Not ported: the old `KINEMATICS` presets (`ride`, `turned_left`, `stand_down`,
-`bump`): build123d joints have no poses.
+`bump`); each would be a `configuration(...)` in the body.

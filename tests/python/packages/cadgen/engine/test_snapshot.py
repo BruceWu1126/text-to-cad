@@ -152,24 +152,20 @@ class SnapshotTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, "is a mesh and has none"):
             snapshot(self.folder / "stand.glb", self.folder / "posed.png", pose="raised", daemon=False)
 
-    def test_a_build_draws_its_snapshot_from_the_meshes_it_holds(self) -> None:
-        from unittest import mock
-
-        from cadgen.engine import serve
+    def test_a_model_is_drawn_from_its_worker_and_nothing_else_is_written(self) -> None:
+        from cadgen.engine import api
 
         folder = Path(tempfile.mkdtemp(prefix="engine-drawn-")).resolve()
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
         script = folder / "stand.py"
-        script.write_text(textwrap.dedent(MODEL).replace(
-            "@xbf\ndef stand", '@xbf\n@glb\n@snapshot("stand.png", display="xray", camera="iso", width=200, height=150)'
-                               "\ndef stand").replace("import paint, xbf", "import glb, paint, snapshot, xbf"),
-            encoding="utf-8")
-        # The GLB meshed every part into the process's cache; the picture draws those.
-        with mock.patch.object(serve, "_timed", side_effect=AssertionError("meshed again")):
-            [report] = engine_build.build(script, ["stand"], cwd=folder)
-        self.assertTrue(report["ok"], report)
-        self.assertEqual([Path(path).name for path in report["files"]], ["stand.xbf", "stand.glb", "stand.png"])
+        # No @xbf: the picture is drawn from the document the worker holds, and no file but it is written.
+        script.write_text(textwrap.dedent(MODEL).replace("@xbf\ndef stand", "@glb\ndef stand")
+                          .replace("import paint, xbf", "import glb, paint, xbf"), encoding="utf-8")
+        drawn = api.snapshot(f"{script}::stand", folder / "stand.png", display="xray", camera="iso", width=200,
+                             height=150, daemon=False)
+        self.assertEqual((drawn.width, drawn.height), (200, 150))
         self.drawn(folder / "stand.png", (200, 150))
+        self.assertEqual(sorted(path.name for path in folder.rglob("*") if path.is_file()), ["stand.png", "stand.py"])
 
 
 class AccessTest(unittest.TestCase):

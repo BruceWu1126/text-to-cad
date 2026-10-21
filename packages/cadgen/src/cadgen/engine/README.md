@@ -10,7 +10,7 @@ import build123d as bd
 from cadgen.engine import xbf, step
 
 @xbf                      # XBF/arm.xbf beside the script; @xbf(out="path.xbf") to choose
-@step("arm.step")         # also @glb, @stl, @threemf, @snapshot; stacked or alone
+@step("arm.step")         # also @glb, @stl, @threemf; stacked or alone; out= is every decorator's only argument
 def arm():
     return bd.Box(10, 20, 30)
 ```
@@ -45,9 +45,11 @@ material the first one's description.
 An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
-as-built configuration; `configuration(assembly, name, **values)` names another, by joint
-label. Connect parts before putting them in the compound that holds them; where `connect_to`
-cannot place them (a nested assembly), give the two joints one label where the parts stand.
+as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
+**values)` names another, by joint label, and never moves the build; `motion(assembly, name,
+...)` names a motion (**Motions**). Connect parts before putting them in the compound that holds
+them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
+where the parts stand.
 
 ```python
 from cadgen.engine import configuration, xbf
@@ -100,10 +102,12 @@ def hinge():
    the trace of the worker that built the document, and is asked of it while it
    lives (`made_by` on the facts endpoints, `cadgen xbf where`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
-7. **Poses, never time.** The document carries kinematics -- the mechanism and
-   its configurations, each a pose: where its parts stand, how they may move --
-   and never time: no animation, no clip, no keyframe, ever. Nothing in the
-   engine keys, plays or bakes motion.
+7. **Poses and motion definitions, never frames.** The document carries
+   kinematics -- the mechanism, its configurations (each a pose: where its parts
+   stand) and its motions (each a definition: waypoints, an ease, a loop) -- and
+   the document holds poses and motion definitions, never baked frames or clips.
+   A GLB export is the one place a motion is baked, into a clip of the GLB; the
+   engine plays nothing.
 8. **Names are the durable tie to code.** An element's name is spelled from the
    function that made its feature and the author's name for that feature (the
    target its result is assigned to, or a label), never from a line or a file:
@@ -114,18 +118,18 @@ def hinge():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators and their options; `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
-| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
 | `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
+| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; also the `@snapshot` decorator's name |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -135,8 +139,7 @@ def hinge():
 ```
 cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
 cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
-    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--snapshot [F]]
-    [--pose NAME|JSON] [--part NAME] [--json] [--no-daemon] [--verify]
+    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
 cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-daemon]
 cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
@@ -204,14 +207,16 @@ face the mesher left without triangles is named in a warning. Nothing is written
 
 `SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
 bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
-`headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. A build's own
-picture (`@snapshot`, `--snapshot`) is drawn from the document in the worker's memory, served by
-a server of the worker's over its one mesh cache: what the build meshed is not meshed again.
+`headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. `SRC` may be a script's model too
+(`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its
+worker and drawn from the document that worker holds, served by a server of the worker's over its
+one mesh cache, whether or not the model declares an xbf; nothing but OUT is written. A picture is
+never a declaration: no decorator and no build flag draws one.
 
 ## Exports
 
 The xbf is the model's result; STEP, GLB, STL and 3MF are exports of a document, and an xbf
-can be one too. One writer, `export.translate(document, kind, path, pose=, part=, animate=)`,
+can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,
 writes every one, whether a decorator declares the file or `cadgen xbf export` asks for it: the
 same document and the same options write the same bytes. Every file is written beside its
 target and moved over it.
@@ -230,7 +235,8 @@ target and moved over it.
   roughness, emissive: a material reads back matte), a face's material (the face keeps its
   colour), the mechanism and its configurations, and the model's key and provenance.
 - **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
-  look (a paint is a primitive of its own); **3MF**: an object per prototype, a build item per
+  look (a paint is a primitive of its own), and every motion of the document an animation of
+  the same name (below); **3MF**: an object per prototype, a build item per
   placement, looks through the materials extension (base materials, `pbmetallic` display
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
@@ -240,21 +246,39 @@ target and moved over it.
   document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
   of it (the links wholly inside, the pairs between them, their configurations). Every assembly
   of a posed or parted document is an assembly of its own placement.
-- `animate` (GLB motion) is reserved: it takes nothing yet.
+- `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
+  declared.
 
-**Decorators.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf` beside the
-script): its only argument. A derived-file decorator is its verb run on the built document, and
-takes `out` (`<function><suffix>` beside the script) and exactly that verb's options:
-`@step(out, pose=, part=)`, `@glb(out, pose=, part=, animate=)`, `@stl` and `@threemf` as
-`@step`, `@snapshot(out, display=, camera=, grid=, preview=, pose=, width=, height=)`. Nothing
-else: a model's material, colours, joints and configurations are written in its body. A child
-model's files are written only when it is built as a target. A model with no `@xbf` writes its
-derived files and nothing else.
+**Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
+CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
+accessor (`export/motion.py`). The keys start at the motion's waypoints (a pingpong's way back
+too: its clip is twice the duration) and the halfway point between each two; at a key every
+moving placement is where forward kinematics through the mechanism (gears included) puts it,
+its in- and out-tangents the one-sided derivatives there, so a step's speed may jump at a
+waypoint. A step is halved while at any eighth of it the Hermite strays from the true forward
+kinematics by more than 1e-3 of the model's size (the diagonal of what the GLB places) in a
+placement's origin or 1e-3 radian in its rotation, at most 4,097 keys. A moved placement's node
+stands by translation and rotation, every other by its matrix; the animation's
+`extras.cadgen` holds the loop (None, `loop`, `pingpong`) and the duration. STEP, STL and 3MF
+ignore motions, and neither `export` nor `@glb` takes an argument for them. On the corpus's
+motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° pingpong sweep of the head
+tube over 2 s, a 4 s clip) bakes to 5 keys on 15 placements, within 1.26 mm and 2.1e-4 rad of
+forward kinematics at eight points inside every step.
+
+**Decorators carry only `out`.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf`
+beside the script); `@step(out=None)`, `@glb`, `@stl` and `@threemf` declare translations of
+the built document (`<function><suffix>` beside the script). No decorator takes anything else:
+a model's material, colours, joints, the pose its joints connect its parts at, its
+configurations and its motions are written in its body. Every declared file shows the model as
+built: where its joints' `connect_to` placed the parts. A model that wants a second pose on
+every build is a second model function with other joint values. A child model's files are
+written only when it is built as a target. A model with no `@xbf` writes its derived files and
+nothing else.
 
 **Build flags** are additive and select and override on a script: no flag writes what the
 decorators declare; `--xbf` alone writes the xbf alone; `--xbf --step out.step --glb` the xbf,
 the STEP at `out.step` and the GLB where the model declares it (or its default). A flag with a
-path builds one model. `--pose` and `--part` apply to every derived file whose verb takes them.
+path builds one model.
 A build whose request names its own files is not taken from the previous document (its files
 say nothing of the options they were written with); the memo replays it as ever. The xbf is
 saved first and the viewer woken with it: the worker waits for the daemon to hold the patch
@@ -271,8 +295,8 @@ as any model has.
 **Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
 `cadgen.where`): one per command, each through the daemon. `build(target)` returns a `Report`,
 `build(code=...)` a `Built` (`.files`, `.report`, `.document` and `.shape` asked of the worker
-that holds them, `.export(...)`); `export(source, *destinations)` a list of `Written`;
-`snapshot(source, out, ...)` a `Drawn`. A `Model` builds, exports and draws itself the same way
+that holds them, `.export(...)`); `export(source, *destinations, pose=, part=)` a list of
+`Written`; `snapshot(source, out, ...)` a `Drawn`. A `Model` builds, exports and draws itself the same way
 (`.build()`, `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only.
 
 ## Kinematics
@@ -306,6 +330,8 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   the first's). build123d's joints cannot express a coupling, so no model authors one; the
   document, its readers and every pose honour it.
 - **Configurations**: the as-built values and each named configuration, as pair values.
+- **Motions**: each named motion, as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE`: its
+  segments' times (`t_parameter`) and states (a configuration it names, or pair values).
 
 **Geometry is never held hostage by a mechanism.** What the harvest finds inconsistent is a
 warning, said by name, and the document is written all the same: a pair whose part stands
@@ -326,7 +352,8 @@ The xbf holds the mechanism as a subtree under `Main():100`, found by the
 label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes (named as
 the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
 `TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
-occurrence (`mechanism.py` draws the tree). **STEP carries none of it**: OCCT reads AP242
+occurrence (`mechanism.py` draws the tree); a motion's ease and loop are `cadgen_ease` and
+`cadgen_loop` strings in its `NamedData`, AP242 having no such attribute. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen xbf snapshot` and `cadgen xbf export` poses the mechanism at a
@@ -336,6 +363,39 @@ kinematics, and draws or writes that (a posed STEP is written from the document'
 every placement its own). No flag is as built. An unknown configuration or joint, a value out
 of range, a pair a gear drives, a pair kept inconsistent and a pair of a loop are refused by
 name before anything renders or is written.
+
+## Motions
+
+A motion is a definition in the model's code, beside its configurations:
+
+```python
+from cadgen.engine import configuration, motion
+
+configuration(arm, "folded", shoulder=0, elbow=0)
+configuration(arm, "reach", shoulder=45, elbow=90)
+motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])          # waypoints, eased
+motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
+```
+
+`motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None, ease="cubic",
+loop=None)` takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a
+configuration's name or `{joint: value}`, the rest as built; the last time is the duration), a
+sweep `{joint: (from, to)}` with `duration` (two waypoints), or a callable `t -> {joint: value}`
+with `duration`. `ease` is `cubic` (each step eased in and out, resting at every waypoint),
+`linear` or `spline` (a cubic Hermite through the waypoints, each one's slope its neighbours'
+secant); `loop` is None, `"loop"` or `"pingpong"`. A motion never moves the build.
+
+The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
+samples, eased `spline`: eight equal steps over its duration, each step halved while the
+samples' spline strays from the function by more than the tolerance at a quarter, half or three
+quarters of it -- 1e-3 radian for an angle, 1e-3 of the model's size (its bounding box's
+diagonal, from the B-rep's geometry) for a distance -- at most 4,097 samples. The same code
+samples at the same times, so the file is a function of the code. A motion naming a
+configuration or a joint its assembly lacks fails the build by name; one setting a value its
+pair cannot take, or moving a pair kept inconsistent or closing a loop, is left out and warned.
+A warm build that changes only a motion rewrites the mechanism's subtree and converts no
+prototype; the file is the cold build's bytes.
 
 ## Placements
 
@@ -425,8 +485,9 @@ colour), the tree, the document's version, and for an assembly with joints `kine
 links (name, the instances each moves, its frame as built), the pairs (label, type, the two
 links, the two frames as 4x4 matrices in their links' frames, limits and units per value; a
 gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `configurations`
-(name → joint → value: a number, or a list for a cylindrical or spherical pair), and `loop`
-(the pairs closing a loop, or null). A page poses the instances from it: each link's
+(name → joint → value: a number, or a list for a cylindrical or spherical pair), `motions`
+(name → `{duration, ease, loop, keys}`, each key `{t, configuration}` or `{t, values}`), and
+`loop` (the pairs closing a loop, or null). A page poses the instances from it: each link's
 placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.

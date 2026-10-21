@@ -9,6 +9,13 @@ the colour is not opaque; a part without a material is a matte one of its colour
 placement whose own colour is not its part's is drawn by a second mesh of the same
 accessors in that colour. The placements are in the document's millimetres, Z up; the
 root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do.
+
+Every motion of the document is an animation of the same name (``export/motion.py``):
+CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
+key time accessor, the motion's loop in the animation's ``extras`` (``{"cadgen": {"loop":
+None | "loop" | "pingpong", "duration": seconds}}``; a pingpong clip is the way out and the way
+back). A placement any motion moves stands by translation and rotation, as glTF asks of an
+animated node; every other one by its matrix.
 """
 
 from __future__ import annotations
@@ -21,7 +28,7 @@ from typing import Any
 
 import numpy as np
 
-from cadgen.engine.export.mesh import groups, meshes
+from cadgen.engine.export.mesh import groups, meshes, placed_points
 
 __all__ = ["write"]
 
@@ -45,11 +52,14 @@ def write(view: Any, path: Path) -> None:
     def add(array: np.ndarray, target: int, kind: str, component: int) -> int:
         while len(blob) % 4:
             blob.append(0)
-        views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": array.nbytes, "target": target})
+        view_entry = {"buffer": 0, "byteOffset": len(blob), "byteLength": array.nbytes}
+        if target is not None:
+            view_entry["target"] = target
+        views.append(view_entry)
         blob.extend(array.tobytes())
         accessor: dict[str, Any] = {"bufferView": len(views) - 1, "componentType": component,
                                     "count": int(array.shape[0]), "type": kind}
-        if kind == "VEC3":
+        if kind == "VEC3" and target is not None:
             accessor["min"] = array.min(axis=0).tolist() if len(array) else [0, 0, 0]
             accessor["max"] = array.max(axis=0).tolist() if len(array) else [0, 0, 0]
         accessors.append(accessor)
@@ -105,6 +115,8 @@ def write(view: Any, path: Path) -> None:
         return found
 
     nodes: list[dict] = [{"name": view.name, "rotation": list(ROTATION), "scale": list(SCALE), "children": []}]
+    node_of: dict[int, int] = {}  # instance index -> node
+    shown: list[Any] = []
     for placed in view.placements:
         own = held[placed.prototype]
         color = placed.color if placed.color is not None and placed.color != _tuple(
@@ -115,10 +127,15 @@ def write(view: Any, path: Path) -> None:
         nodes.append({"name": "/".join(placed.path[1:]) or placed.path[-1], "mesh": index,
                       "matrix": [float(value) for value in placed.matrix.T.ravel()]})
         nodes[0]["children"].append(len(nodes) - 1)
+        node_of[placed.instance] = len(nodes) - 1
+        shown.append(placed)
+    animations = _animations(view, held, shown, node_of, nodes, add, accessors)
     document = {"asset": {"version": "2.0", "generator": "cadgen engine"}, "scene": 0,
                 "scenes": [{"name": view.name, "nodes": [0]}], "nodes": nodes, "meshes": gltf_meshes,
                 "materials": materials, "accessors": accessors, "bufferViews": views,
                 "buffers": [{"byteLength": len(blob)}]}
+    if animations:
+        document["animations"] = animations
     text = json.dumps(document, separators=(",", ":")).encode()
     text += b" " * (-len(text) % 4)
     while len(blob) % 4:
@@ -129,6 +146,58 @@ def write(view: Any, path: Path) -> None:
         handle.write(text)
         handle.write(struct.pack("<II", len(blob), BIN_CHUNK))
         handle.write(bytes(blob))
+
+
+def _size(held: dict[int, Any], shown: list[Any]) -> float:
+    """The model's size: the diagonal of every placed mesh's box, in millimetres."""
+    low, high = np.full(3, np.inf), np.full(3, -np.inf)
+    boxes: dict[int, np.ndarray] = {}
+    for placed in shown:
+        corners = boxes.get(placed.prototype)
+        if corners is None:
+            points = np.asarray(held[placed.prototype].positions, dtype=np.float32).reshape(-1, 3)
+            least, most = points.min(axis=0), points.max(axis=0)
+            corners = boxes[placed.prototype] = np.array(
+                [[(least, most)[i][0], (least, most)[j][1], (least, most)[k][2]]
+                 for i in (0, 1) for j in (0, 1) for k in (0, 1)], dtype=np.float32)
+        moved = placed_points(corners, placed.matrix)
+        low, high = np.minimum(low, moved.min(axis=0)), np.maximum(high, moved.max(axis=0))
+    return float(np.linalg.norm(high - low)) if np.all(np.isfinite(low)) else 1.0
+
+
+def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict[int, int], nodes: list[dict],
+                add: Any, accessors: list[dict]) -> list[dict]:
+    """Every motion baked into an animation (see the module docstring); the nodes it moves
+    are given translation and rotation in place of their matrices."""
+    if not node_of or not (view.source.structure.get("kinematics") or {}).get("motions"):
+        return []
+    from cadgen.engine.export.motion import clips, quaternion
+
+    baked = clips(view, list(node_of), _size(held, shown))
+    animated = sorted({index for clip in baked for index in clip.instances})
+    rest = {placed.instance: placed.matrix for placed in shown}
+    for index in animated:
+        node = nodes[node_of[index]]
+        matrix = np.asarray(rest[index], dtype=float)
+        node.pop("matrix")
+        node["translation"] = [float(value) for value in matrix[:3, 3]]
+        node["rotation"] = [float(value) for value in quaternion(matrix)]
+    found = []
+    for clip in baked:
+        if not clip.instances:
+            continue
+        times = add(np.ascontiguousarray(clip.times, "<f4"), None, "SCALAR", 5126)
+        accessors[times]["min"] = [float(np.float32(clip.times[0]))]
+        accessors[times]["max"] = [float(np.float32(clip.times[-1]))]
+        samplers, channels = [], []
+        for index, translations, rotations in zip(clip.instances, clip.translations, clip.rotations):
+            for path, rows, kind in (("translation", translations, "VEC3"), ("rotation", rotations, "VEC4")):
+                values = add(np.ascontiguousarray(rows.reshape(-1, rows.shape[-1]), "<f4"), None, kind, 5126)
+                samplers.append({"input": times, "interpolation": "CUBICSPLINE", "output": values})
+                channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[index], "path": path}})
+        found.append({"name": clip.name, "channels": channels, "samplers": samplers,
+                      "extras": {"cadgen": {"loop": clip.loop, "duration": clip.duration}}})
+    return found
 
 
 def _tuple(value: Any) -> tuple | None:
