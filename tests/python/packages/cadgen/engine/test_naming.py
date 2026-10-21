@@ -489,5 +489,70 @@ class VertexNamesTest(NamingCase):
         self.assertEqual(document.tree_structure(document.saved(path), path)["prototypes"][0]["vertexNames"], read)
 
 
+# Pieces of one shape handed on in an order the process picks: the string hash, which
+# PYTHONHASHSEED sets, stands in for the heap, which orders a boolean's or a text's pieces.
+SHUFFLED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+SPOTS = sorted([(0, 0), (3, 0), (6, 1), (9, 0), (12, 2)], key=lambda spot: hash(str(spot)))
+
+
+@xbf
+def grid():
+    cell = bd.Rectangle(1, 2)
+    sk = bd.Sketch() + [bd.Pos(*spot) * cell for spot in SPOTS]
+    return bd.extrude(sk, amount=1)
+"""
+
+
+class RunOrderTest(unittest.TestCase):
+    def test_two_cold_builds_name_every_element_alike_whatever_order_the_pieces_come_in(self) -> None:
+        import subprocess
+        import sys
+
+        from OCP.BRep import BRep_Tool
+        from OCP.BRepGProp import BRepGProp
+        from OCP.GProp import GProp_GProps
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+        from OCP.TopExp import TopExp
+        from OCP.TopoDS import TopoDS
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-run-order-")).resolve()
+        self.addCleanup(lambda: shutil.rmtree(folder, ignore_errors=True))
+        (folder / "grid.py").write_text(textwrap.dedent(SHUFFLED), encoding="utf-8")
+        src = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
+
+        def where(element, kind) -> tuple:
+            if kind == TopAbs_VERTEX:
+                return tuple(round(value, 4) for value in BRep_Tool.Pnt_s(TopoDS.Vertex_s(element)).Coord())
+            props = GProp_GProps()
+            (BRepGProp.SurfaceProperties_s if kind == TopAbs_FACE else BRepGProp.LinearProperties_s)(element, props)
+            return tuple(round(value, 4) for value in props.CentreOfMass().Coord())
+
+        def named(seed: str) -> dict:
+            # A cold build in a process of its own: no daemon, no memo carried over.
+            env = {**os.environ, "PYTHONPATH": str(src), "PYTHONHASHSEED": seed,
+                   "CADGEN_ENGINE_DIR": str(folder / "engine")}
+            done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "grid.py", "--no-daemon", "--json"],
+                                  cwd=folder, env=env, capture_output=True, text=True, timeout=300)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            prototype = document.load(folder / "grid.xbf").prototypes[0]
+            found = {}
+            for kind, names in ((TopAbs_FACE, prototype.face_names), (TopAbs_EDGE, prototype.edge_names),
+                                (TopAbs_VERTEX, prototype.vertex_names)):
+                elements = TopTools_IndexedMapOfShape()
+                TopExp.MapShapes_s(prototype.shape, kind, elements)
+                for ordinal, name in names.items():
+                    found[(int(kind), where(elements.FindKey(ordinal), kind))] = name
+            return found
+
+        # Seeds 1 and 2 hand the cells over in different orders; each element keeps its name.
+        first, second = named("1"), named("2")
+        self.assertEqual(len(first), 5 * (6 + 12 + 8))
+        self.assertEqual(first, second)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -387,7 +387,11 @@ named by the caller's assignment the result flows into, as the calls that statem
 made on the way (`plate.plate_cfjpgj_make_cylinder1`), through further helpers that
 return it too. A call whose result is assigned nowhere (a return expression of the
 model, an expression statement) is `<function>.<operation><count>` (`plate.fuse1`),
-counted among the part's unassigned calls. So inserting a feature renames only what it
+counted among the part's unassigned calls. Nothing is counted in an order OCCT picks: calls
+given pieces of the same features' results (a loop over a sketch's faces) count by where
+their pieces are, a compound's own elements are numbered piece by piece in that order, and
+elements still named alike take `;D2`, `;D3` in it -- OCCT hands a boolean's or a text's
+pieces back in an order the heap sets, so two cold builds would otherwise name them apart. So inserting a feature renames only what it
 touches, and renaming a variable renames that feature's elements and nothing else. An author's `label` on a shape handed to a later construction
 names, in what that construction makes, the feature that first made the labelled shape
 (back along what each feature was made of, to where the shape stops being one chain):
