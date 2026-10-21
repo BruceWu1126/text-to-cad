@@ -53,17 +53,28 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable
 
+# How long a build waits for the daemon to say it holds a patch before it writes its
+# derived files: the viewer is woken first, unless the daemon is too slow to say so.
+PATCH_WAIT = 30.0
+# The daemon's word that it holds the patch of a path (``{"op": "patched", "path"}``).
+_PATCHED: dict[str, threading.Event] = {}
+
+
 class Patcher:
     """One build's patches (see the module docstring): ``saved`` is called the moment the
-    build has put an xbf in place; ``finish`` remembers the build's keys."""
+    build has put an xbf in place, and returns once the daemon holds the patch -- so the
+    viewer's version has moved before any derived file is written; ``finish`` remembers
+    the build's keys."""
 
-    def __init__(self, request: dict[str, Any], send: Callable[[dict[str, Any], bytes], None]) -> None:
+    def __init__(self, request: dict[str, Any], send: Callable[[dict[str, Any], bytes], None], *,
+                 acknowledged: bool = False) -> None:
         self.served = {Path(path).resolve(): version for path, version in (request.get("served") or {}).items()}
         self.held = set(request.get("held") or [])
         self.served_keys = {Path(path).resolve(): set(keys) for path, keys in (request.get("served_keys") or {}).items()}
         self.meshed = 0
         self.have = set(request.get("shapes") or [])
         self.send = send
+        self.acknowledged = acknowledged
 
     def saved(self, path: Path, tree: Any) -> None:
         try:
@@ -72,8 +83,9 @@ class Patcher:
             traceback.print_exc()
 
     def _patch(self, path: Path, tree: Any) -> None:
-        from cadgen.engine import document
+        from cadgen.engine.export import structure_of
         from cadgen.engine.mesh import mesh_shape, shape_bytes
+        from cadgen.engine.serve import MESHES
 
         if path not in self.served:
             return
@@ -81,7 +93,7 @@ class Patcher:
         if self.served[path] == f"{stat.st_mtime_ns}-{stat.st_size}":
             return  # the daemon serves this very file
         clock = time.perf_counter()
-        structure = document.tree_structure(tree, path)
+        structure = structure_of(tree, path)
         made = time.perf_counter()
         meshes, buffers, shapes, data = [], [], [], []
         parts = {}
@@ -94,20 +106,31 @@ class Patcher:
                 continue
             shape = shape_bytes(part.shape)
             if fresh:
-                found = mesh_shape(shape, parallel=True)
-                buffers.append(found.to_bytes())
-                meshes.append([key, len(buffers[-1]), {str(o): text for o, text in found.unmeshed.items()}])
+                # The process's one mesh cache: a part this worker meshed for an export is
+                # not meshed again for the viewer, nor the other way round.
+                buffer = MESHES.get(key)
+                if buffer is None:
+                    found = mesh_shape(shape, parallel=True)
+                    buffer = found.to_bytes()
+                    MESHES.put(key, buffer, found.unmeshed)
+                    self.meshed += 1
+                buffers.append(buffer)
+                meshes.append([key, len(buffer), {str(o): text for o, text in (MESHES.unmeshed(key) or {}).items()}])
                 self.held.add(key)
-                self.meshed += 1
             if key not in self.have:
                 data.append(shape)
                 shapes.append([key, len(shape)])
                 self.have.add(key)
         done = time.perf_counter()
         self.served[path] = structure["version"]
+        waiting = _PATCHED.setdefault(str(path), threading.Event()) if self.acknowledged else None
+        if waiting is not None:
+            waiting.clear()
         self.send({"patch": {"path": str(path), "structure": structure, "meshes": meshes, "shapes": shapes,
                              "timings": {"structure": round(made - clock, 4), "mesh": round(done - made, 4),
                                          "sent": time.time()}}}, b"".join(buffers + data))
+        if waiting is not None:
+            waiting.wait(PATCH_WAIT)  # the viewer's version moves before a derived file is written
 
     def finish(self, reports: list[dict[str, Any]]) -> None:
         """Each report says how many parts this build meshed."""
@@ -115,8 +138,72 @@ class Patcher:
             report["meshed"] = self.meshed
 
 
+def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
+    """An ``export`` request: the document -- a script's model built first, code this worker
+    built, or a file (the document this worker last built of it while the file is as the
+    build left it, else read) -- written to each destination. Answers what was written."""
+    from cadgen.engine import build as engine_build
+    from cadgen.engine import export
+
+    source_spec = request["source"]
+    built: list[dict[str, Any]] = []
+    if "script" in source_spec and "code" not in source_spec:
+        script = Path(source_spec["script"])
+        function = source_spec.get("function")
+        # Built with the document it declares and nothing else: the exports are this request's.
+        reports = engine_build.build(script, [function] if function else None, outputs={"xbf": None}, log=log,
+                                     cwd=Path(request["cwd"]) if request.get("cwd") else None)
+        if len(reports) != 1:
+            raise engine_build.BuildError(f"{script.name} defines {len(reports)} models: name one (SCRIPT::MODEL)")
+        built = reports
+        if not reports[0].get("ok"):
+            return {"reports": reports, "files": []}
+        function = reports[0]["model"].rpartition("::")[2]
+        source = engine_build.held(script.resolve(), function)
+        if source is None:
+            xbf = next((path for path, row in reports[0]["files"].items() if row.get("kind") == "xbf"), None)
+            if xbf is None:
+                raise engine_build.BuildError(f"{script.name}::{function}: the build left no document")
+            source = export.Source.read(xbf)
+    elif "code" in source_spec:
+        source = engine_build.held(Path(source_spec["script"]), source_spec["code"])
+        if source is None:
+            raise engine_build.BuildError(f"no code named {source_spec['code']!r} is built in this worker")
+    else:
+        path = Path(source_spec["path"])
+        source = engine_build.held(path=path)
+        if source is None:
+            clock = time.perf_counter()
+            source = export.Source.read(path)
+            log(f"read {path.name} in {time.perf_counter() - clock:.2f}s")
+    files = []
+    for destination in request["destinations"]:
+        clock = time.perf_counter()
+        target = Path(destination)
+        size = export.translate(source, None, target, pose=request.get("pose"), part=request.get("part"))
+        seconds = time.perf_counter() - clock
+        files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
+                      "seconds": round(seconds, 4)})
+    return {"reports": built, "files": files}
+
+
+def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+    """A ``result`` request: the document code this worker built, as its structure and each
+    part's shape bytes (``[key, size]`` in ``shapes``, the bytes after the line in order)."""
+    from cadgen.engine import build as engine_build
+
+    source = engine_build.held(Path(request["script"]), request["code"])
+    if source is None:
+        raise engine_build.BuildError(f"no code named {request['code']!r} is built in this worker")
+    keys = [prototype["key"] for prototype in source.structure["prototypes"]]
+    data = [source.shape_data(key) for key in keys]
+    return {"structure": source.structure, "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, \
+        b"".join(data)
+
+
 def main() -> int:
     sys.dont_write_bytecode = True
+    os.environ["CADGEN_ENGINE_WORKER"] = "1"
     protocol = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)  # the model's prints go where the daemon reads logs from
     sys.stdout = sys.stderr
@@ -145,7 +232,9 @@ def main() -> int:
                 if not line.strip():
                     continue
                 request = json.loads(line)
-                if request.get("op") == "where":
+                if request.get("op") == "patched":
+                    _PATCHED.setdefault(str(request.get("path")), threading.Event()).set()
+                elif request.get("op") == "where":
                     try:
                         found = made_by(request["path"], request["key"], request["kind"], int(request["ordinal"]))
                     except Exception:  # noqa: BLE001 - a question it cannot answer is answered with nothing
@@ -164,19 +253,44 @@ def main() -> int:
         if request is None:
             break
         ident = request.get("id")
-        if request.get("op") != "build":
-            send({"id": ident, "failed": f"unknown request {request.get('op')!r}"})
-            send({"id": ident, "settled": True})
+        op = request.get("op")
+        if op in ("export", "result"):
+            try:
+                cwd = request.get("cwd")
+                if cwd:
+                    os.chdir(cwd)
+                if op == "export":
+                    send({"id": ident, "done": _export(request, lambda text: send({"id": ident, "log": text}))})
+                else:
+                    answer, payload = _result(request)
+                    send({"id": ident, "done": answer}, payload)
+            except (BuildError, ValueError, OSError) as error:
+                send({"id": ident, "failed": str(error)})
+            except BaseException as error:  # noqa: BLE001 - the worker answers every request
+                send({"id": ident, "failed": "".join(traceback.format_exception(type(error), error,
+                                                                                error.__traceback__))})
+                if isinstance(error, (KeyboardInterrupt, SystemExit)):
+                    return 1
+            finally:
+                send({"id": ident, "settled": True, "op": op})
+            gc.collect()
             continue
-        patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload))
+        if op != "build":
+            send({"id": ident, "failed": f"unknown request {op!r}"})
+            send({"id": ident, "settled": True, "op": op})
+            continue
+        patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload),
+                          acknowledged=bool(request.get("acknowledged")))
         document.SAVED_LISTENERS.append(patcher.saved)
         try:
             cwd = request.get("cwd")
             if cwd:
                 os.chdir(cwd)
-            reports = build(Path(request["script"]), request.get("functions") or None,
+            script = Path(request["script"])
+            reports = build(script, request.get("functions") or None,
                             log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
-                            verify=bool(request.get("verify")))
+                            outputs=request.get("outputs"), pose=request.get("pose"), part=request.get("part"),
+                            code=request.get("code"), verify=bool(request.get("verify")))
             patcher.finish(reports)
             send({"id": ident, "done": reports})
         except BuildError as error:

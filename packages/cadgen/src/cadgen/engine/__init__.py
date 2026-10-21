@@ -5,14 +5,16 @@ A model is a parameterless function returning a build123d shape::
     from cadgen.engine import xbf, step
 
     @xbf
-    @step(out="arm.step")
+    @step("arm.step")
     def arm():
         ...
 
-``cadgen xbf build arm.py::arm`` runs it in a warm worker whose kernel memo makes an
-edit cost what it changed; the document is written to ``arm.xbf`` beside the script,
-and the declared exports after it. ``cadgen xbf serve arm.xbf`` shows it. Nothing but
-those files is written: every cache lives in a process's memory.
+``cadgen xbf build arm.py::arm`` (or ``python arm.py``) runs it in a warm worker whose
+kernel memo makes an edit cost what it changed; the document is written to
+``XBF/arm.xbf`` beside the script, and the derived files it declares after it, each a
+translation of that document (``cadgen xbf export``). ``cadgen xbf serve XBF/arm.xbf``
+shows it. Nothing but those files is written: every cache lives in a process's memory.
+The verbs as functions are ``cadgen.engine.api`` (``cadgen.build``, ``cadgen.export``, ...).
 
 A function worth replaying on a later build -- an assembly's part, a derivation's stage --
 is marked ``@memo``: it writes no file, and a build whose edit does not reach it replays it
@@ -26,8 +28,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "memo", "paint", "read_step", "step", "stl", "threemf",
-           "xbf"]
+__all__ = ["Material", "configuration", "glb", "materials", "memo", "paint", "read_step", "snapshot", "step", "stl",
+           "threemf", "xbf"]
 
 
 def __getattr__(name: str) -> Any:

@@ -1,10 +1,23 @@
 """Models: the decorators, a model's identity, and what calling one does.
 
 A model is a parameterless function that returns a build123d shape, decorated with
-``@xbf`` and any of ``@step``, ``@glb``, ``@stl``, ``@threemf``. Its identity is
-``script.py::function``. Each decorator names one output the model declares; the
-outputs are kept in the order the decorators are written, top to bottom, and the
-xbf, when declared, is always written first.
+``@xbf`` and any of the derived-file decorators ``@step``, ``@glb``, ``@stl``,
+``@threemf`` and ``@snapshot``. Its identity is ``script.py::function``. ``@xbf(out=None)``
+makes the function a model, its document at ``out`` (``XBF/<function>.xbf`` beside the
+script by default): its only argument. A derived-file decorator IS its verb, run on the
+built document: it takes ``out`` (``<function><suffix>`` beside the script by default) and
+exactly the options the verb takes -- ``@step(out, pose=None, part=None)``, ``@glb(out,
+pose=None, part=None, animate=None)``, ``@stl``/``@threemf`` as ``@step``, and
+``@snapshot(out, display=, camera=, grid=, preview=, pose=, width=, height=)``. A model's
+material, colours, joints and configurations are written in its body, never in a
+decorator. The outputs are kept in the order the decorators are written, top to bottom,
+and the xbf, when declared, is always written first.
+
+The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
+``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
+Run as a program (``python model.py [flags]``), a model script asks the daemon to build
+it, as ``cadgen xbf build model.py [flags]`` does: the script's own process builds
+nothing, and exits with the build's status.
 
 Called inside a build, a model is a child: its body runs in the same run, with the
 same memo, and its result is a sub-assembly of whatever the caller makes of it,
@@ -19,27 +32,59 @@ from __future__ import annotations
 
 import functools
 import inspect
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["Memo", "Model", "Output", "configuration", "glb", "memo", "paint", "read_step", "step", "stl", "threemf",
-           "xbf", "models_in"]
+__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "glb", "memo", "paint", "read_step",
+           "snapshot", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
-SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
-_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",)}
+SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "snapshot": ".png"}
+_ACCEPTED = {"xbf": (".xbf",), "step": (".step", ".stp"), "glb": (".glb",), "stl": (".stl",), "threemf": (".3mf",),
+             "snapshot": (".png",)}
+# The options each decorator takes: exactly its verb's. The xbf takes none but ``out``.
+OPTIONS: dict[str, tuple[str, ...]] = {
+    "xbf": (), "step": ("pose", "part"), "glb": ("pose", "part", "animate"), "stl": ("pose", "part"),
+    "threemf": ("pose", "part"),
+    "snapshot": ("display", "camera", "grid", "preview", "pose", "width", "height"),
+}
+KINDS = tuple(OPTIONS)
+# Where a model's xbf is when its decorator names none: this folder beside the script.
+XBF_FOLDER = "XBF"
 
 _CONTEXT = threading.local()
 
 
 @dataclass(frozen=True)
 class Output:
-    """One file a model declares: its kind and the path its decorator gave, if any."""
+    """One file a model declares: its kind, the path its decorator gave, if any, and the
+    options it gave (``(name, value)`` pairs, the verb's)."""
 
     kind: str
     out: str | None
+    options: tuple[tuple[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class Target:
+    """One file a build writes: its kind, its path, and the options its writer runs with."""
+
+    kind: str
+    path: Path
+    options: dict[str, Any]
+
+
+def check_output(kind: str, out: Any, where: str) -> None:
+    """A path a decorator or a flag gives for ``kind``: a string ending in the kind's suffix."""
+    if out is None:
+        return
+    if not isinstance(out, (str, os.PathLike)) or not os.fspath(out):
+        raise TypeError(f"{where} takes a path")
+    if Path(out).suffix.lower() not in _ACCEPTED[kind]:
+        raise ValueError(f"{where}: the file must end in {' or '.join(_ACCEPTED[kind])}, not {os.fspath(out)!r}")
 
 
 class Model:
@@ -59,6 +104,8 @@ class Model:
         self.script = Path(source).resolve()
         self.outputs: list[Output] = []
         self.__xbf_model__ = True
+        if getattr(function, "__module__", None) == "__main__":
+            _run_as_program(self.script)
 
     @property
     def identity(self) -> str:
@@ -73,39 +120,145 @@ class Model:
             return self.function()
         return build.child(self)
 
+    def _path(self, kind: str, out: Any) -> Path:
+        if out is None:
+            out = Path(XBF_FOLDER) / f"{self.name}.xbf" if kind == "xbf" else Path(self.name + SUFFIXES[kind])
+        path = Path(out)
+        if not path.is_absolute():
+            path = self.script.parent / path
+        return Path(_normalized(path))
+
     def targets(self) -> list[tuple[str, Path]]:
-        """Each declared output as ``(kind, path)``, the xbf first, then the exports in the
-        order the decorators are written; a relative path is relative to the script's
-        folder, and an output with no path is ``<function><suffix>`` beside the script."""
+        """Each declared output as ``(kind, path)``, the xbf first, then the derived files
+        in the order the decorators are written; a relative path is relative to the
+        script's folder, and an output with no path is its default (``XBF/<function>.xbf``,
+        ``<function><suffix>``) beside the script."""
+        return [(target.kind, target.path) for target in self.plan()]
+
+    def plan(self, outputs: dict[str, dict[str, Any]] | None = None, *, pose: Any = None,
+             part: str | None = None, cwd: Path | None = None) -> list[Target]:
+        """The files a build of this model writes, the xbf first. ``outputs`` (``{kind:
+        {"out": path or None, option: value}}``) selects and overrides: only the kinds it
+        names are written, each at its path (relative to ``cwd``), else the declared one,
+        else the default, with the declared options under the ones it gives; a kind given
+        None is written only where the model declares it, and ``{}`` writes nothing.
+        ``outputs`` None is what the decorators declare. ``pose`` and ``part`` apply to every
+        file whose verb takes them."""
+        declared = {output.kind: output for output in self.outputs}
+        if outputs is not None:
+            unknown = sorted(set(outputs) - set(KINDS))
+            if unknown:
+                raise ValueError(f"no output kind {', '.join(unknown)}; the kinds are {', '.join(KINDS)}")
+            # A kind given None is written only where the model declares it.
+            order = [output.kind for output in self.outputs if output.kind in outputs]
+            order += [kind for kind in KINDS if outputs.get(kind) is not None and kind not in order]
+        else:
+            order = [output.kind for output in self.outputs]
         found = []
-        for output in sorted(self.outputs, key=lambda output: output.kind != "xbf"):
-            path = Path(output.out) if output.out is not None else Path(self.name + SUFFIXES[output.kind])
-            if not path.is_absolute():
-                path = self.script.parent / path
-            found.append((output.kind, Path(_normalized(path))))
+        for kind in sorted(order, key=lambda kind: kind != "xbf"):
+            output = declared.get(kind)
+            options = dict(output.options) if output is not None else {}
+            given = dict((outputs or {}).get(kind) or {})
+            out = given.pop("out", None)
+            unknown = sorted(set(given) - set(OPTIONS[kind]))
+            if unknown:
+                raise ValueError(f"{kind} takes no {', '.join(unknown)}; it takes out"
+                                 + "".join(f", {name}" for name in OPTIONS[kind]))
+            options.update({name: value for name, value in given.items() if value is not None})
+            for name, value in (("pose", pose), ("part", part)):
+                if value is not None and name in OPTIONS[kind]:
+                    options[name] = value
+            if out is not None:
+                check_output(kind, out, f"--{kind}")
+                path = Path(out)
+                path = Path(_normalized(path if path.is_absolute() else (cwd or Path.cwd()) / path))
+            else:
+                path = self._path(kind, output.out if output is not None else None)
+            found.append(Target(kind, path, options))
         return found
+
+    # --- the verbs, through the daemon (``cadgen.engine.api``) -----------------------------
+
+    def build(self, **flags: Any) -> Any:
+        """Build this model (``cadgen xbf build script.py::model``); ``flags`` are the
+        build's (``xbf=``, ``step=``, ..., ``pose=``, ``part=``)."""
+        from cadgen.engine import api
+
+        return api.build(self, **flags)
+
+    def export(self, *destinations: Any, pose: Any = None, part: str | None = None, animate: Any = None) -> Any:
+        """Build this model, then write its document to each destination (by suffix)."""
+        from cadgen.engine import api
+
+        return api.export(self, *destinations, pose=pose, part=part, animate=animate)
+
+    def snapshot(self, out: Any, **options: Any) -> Any:
+        """Build this model, then draw its document into ``out`` (a ``.png``) as the viewer does."""
+        from cadgen.engine import api
+
+        return api.snapshot(self, out, **options)
+
+    @property
+    def document(self) -> Any:
+        """The model's built document, read-only (``document.Loaded``): its xbf as built
+        last. A model that declares no xbf has no document on disk to read."""
+        from cadgen.engine import document
+
+        found = next((target.path for target in self.plan() if target.kind == "xbf"), None)
+        if found is None:
+            raise AttributeError(f"model {self.identity} declares no @xbf: it has no document to read")
+        if not found.is_file():
+            raise FileNotFoundError(f"model {self.identity} is not built yet: {found} is missing (.build() it)")
+        return document.load(found)
 
 
 def _normalized(path: Path) -> str:
-    import os
-
     return os.path.normpath(os.path.abspath(path))
 
 
+def _run_as_program(script: Path) -> None:
+    """``python model.py [flags]``: the daemon builds the script, as ``cadgen xbf build
+    model.py [flags]`` does (``::name`` in the flags selects a model), and this process
+    exits with the build's status, building nothing itself."""
+    if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
+        return
+    import sys
+
+    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
+    if argv0 != Path(script).resolve():
+        return  # the script was not run as a program (``python -c``, an embedding)
+    _run_as_program.running = True  # type: ignore[attr-defined]
+    from cadgen.engine.cli import main
+
+    args = [f"{script}{arg}" if arg.startswith("::") else arg for arg in sys.argv[1:]]
+    targets = [arg for arg in args if arg.startswith(f"{script}::")]
+    rest = [arg for arg in args if arg not in targets]
+    raise SystemExit(main(["build", *(targets or [str(script)]), *rest], prog=f"python {Path(script).name}"))
+
+
 def _decorator(kind: str) -> Callable[..., Any]:
-    def decorate(function: Any = None, *, out: str | None = None) -> Any:
-        if out is not None:
-            if not isinstance(out, str) or not out:
-                raise TypeError(f"@{kind}(out=...) takes a path")
-            if Path(out).suffix.lower() not in _ACCEPTED[kind]:
-                raise ValueError(f"@{kind}(out={out!r}): the file must end in {' or '.join(_ACCEPTED[kind])}")
+    names = OPTIONS[kind]
+
+    def decorate(function: Any = None, out: Any = None, **options: Any) -> Any:
+        if isinstance(function, (str, os.PathLike)):
+            function, out = None, function  # ``@step("arm.step")``
+        unknown = sorted(set(options) - set(names))
+        if unknown:
+            raise TypeError(f"@{kind} takes no {', '.join(unknown)}; it takes out"
+                            + "".join(f", {name}" for name in names)
+                            + (". A model's material, colours and joints are written in its body." if kind != "xbf"
+                               else " alone. A model's material, colours and joints are written in its body."))
+        check_output(kind, out, f"@{kind}(out=...)")
+        if options.get("animate") is not None:
+            raise NotImplementedError("@glb(animate=...): GLB animation is not built yet")
+        given = tuple((name, options[name]) for name in names if options.get(name) is not None)
 
         def apply(target: Any) -> Model:
             model = target if isinstance(target, Model) else Model(target)
             if any(output.kind == kind for output in model.outputs):
                 raise TypeError(f"model {model.name!r} declares @{kind} twice")
             # Decorators apply bottom-up: inserting at the front keeps source order.
-            model.outputs.insert(0, Output(kind, out))
+            model.outputs.insert(0, Output(kind, None if out is None else os.fspath(out), given))
             return model
 
         if function is None:
@@ -116,8 +269,14 @@ def _decorator(kind: str) -> Callable[..., Any]:
 
     decorate.__name__ = kind
     decorate.__qualname__ = kind
-    decorate.__doc__ = (f"Declare a model's {kind} output: ``@{kind}`` or ``@{kind}(out=\"path{SUFFIXES[kind]}\")``. "
-                        "The function takes no parameters and returns a build123d shape.")
+    if kind == "xbf":
+        decorate.__doc__ = ("Make a function a model: ``@xbf`` or ``@xbf(out=\"path.xbf\")`` (default "
+                            "``XBF/<function>.xbf`` beside the script). The function takes no parameters and "
+                            "returns a build123d shape.")
+    else:
+        decorate.__doc__ = (f"Declare a file derived from a model's document: ``@{kind}``, ``@{kind}(\"path"
+                            f"{SUFFIXES[kind]}\")`` or ``@{kind}(out=..., {', '.join(f'{n}=...' for n in names)})``"
+                            f" -- the {kind} verb run on the built document, with its options.")
     return decorate
 
 
@@ -126,6 +285,7 @@ step = _decorator("step")
 glb = _decorator("glb")
 stl = _decorator("stl")
 threemf = _decorator("threemf")
+snapshot = _decorator("snapshot")
 
 
 # --- @memo: a function worth replaying -------------------------------------------------

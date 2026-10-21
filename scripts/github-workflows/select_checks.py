@@ -185,7 +185,8 @@ def _mcp_change(path: str) -> Select:
 
 
 # The engine (cadgen.engine) is a leaf too: nothing in cadgen imports it but the CLI's
-# command table, by name. A change to it reaches its own suite, the cadgen tests that name
+# command table and the package root's lazy verbs (``cadgen.build``, ...), by name. A
+# change to it reaches its own suite, the cadgen tests that name
 # it or read all of cadgen, and the wheel it ships in.
 ENGINE_CODE = (f"{CADGEN_SRC}/engine/**",)
 _NAMES_ENGINE = r"cadgen\.engine|[\"']xbf[\"' ]"

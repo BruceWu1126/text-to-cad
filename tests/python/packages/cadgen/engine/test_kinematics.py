@@ -139,7 +139,7 @@ class _Folder(unittest.TestCase):
 class HingeTest(_Folder):
     def test_a_hinge_round_trips_through_the_xbf(self) -> None:
         self.hinge()
-        path = self.folder / "hinge.xbf"
+        path = self.folder / "XBF/hinge.xbf"
         loaded = document.Loaded(path)
         found = loaded.mechanism
         self.assertIsNotNone(found, "the document holds the mechanism")
@@ -178,15 +178,15 @@ class HingeTest(_Folder):
     def test_an_edit_of_a_joint_rewrites_the_xbf(self) -> None:
         self.hinge()
         report = self.hinge(flat="elbow=-5")
-        self.assertTrue(report["files"][str(self.folder / "hinge.xbf")]["written"])
-        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.configurations["flat"], {"elbow": (-5.0,)})
+        self.assertTrue(report["files"][str(self.folder / "XBF/hinge.xbf")]["written"])
+        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {"elbow": (-5.0,)})
 
     def test_poses_by_name_and_by_value_place_the_arm_where_the_closed_form_says(self) -> None:
         self.hinge()
-        path = str(self.folder / "hinge.xbf")
+        path = str(self.folder / "XBF/hinge.xbf")
         for pose, q in (("raised", 90.0), ('{"elbow": 45}', 45.0), ("flat", 0.0)):
             out = self.folder / f"posed-{q:g}.step"
-            code, _out, err = _run("export", path, "--step", str(out), "--pose", pose)
+            code, _out, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
             self.assertEqual(code, 0, err)
             posed = document.Loaded(out)
             self.assertTrue(_has_point(_vertices(posed, "arm"), _arm_tip(q)), pose)
@@ -201,7 +201,7 @@ class HingeTest(_Folder):
         self.assertNotIn("MECHANISM", (self.folder / "hinge.step").read_text(encoding="utf-8", errors="replace"))
         # A mesh export at a pose: the arm's node placed as the pair places it.
         glb = self.folder / "posed.glb"
-        self.assertEqual(_run("export", path, "--glb", str(glb), "--pose", "raised")[0], 0)
+        self.assertEqual(_run("export", path, str(glb), "--no-daemon", "--pose", "raised")[0], 0)
         data = glb.read_bytes()
         length = int.from_bytes(data[12:16], "little")
         nodes = json.loads(data[20:20 + length])["nodes"]
@@ -210,11 +210,11 @@ class HingeTest(_Folder):
 
     def test_what_a_pose_names_wrong_is_refused_by_name_before_anything_is_written(self) -> None:
         self.hinge()
-        path = str(self.folder / "hinge.xbf")
+        path = str(self.folder / "XBF/hinge.xbf")
         out = self.folder / "refused.step"
         for pose, words in (('{"elbw": 10}', ["'elbw'", "elbow"]), ('{"elbow": 150}', ["'elbow'", "150", "[-10, 120]"]),
                             ("folded", ["'folded'", "flat, raised"]), ('{"elbow": [1, 2]}', ["'elbow'", "a number"])):
-            code, _out, err = _run("export", path, "--step", str(out), "--pose", pose)
+            code, _out, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
             self.assertEqual(code, 2, pose)
             for word in words:
                 self.assertIn(word, err, pose)
@@ -228,7 +228,7 @@ class HingeTest(_Folder):
         report = self.hinge(flat="elbow=200")
         self.assertIn("'elbow' at 200 deg is outside its range [-10, 120] deg: the value is left out",
                       " ".join(report["kinematics"]["warnings"]))
-        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.configurations["flat"], {})
+        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {})
 
     def test_a_part_moved_after_it_was_connected_warns_and_its_joint_is_not_posed(self) -> None:
         # Connected after the compound holding the arm was made: the document places the arm
@@ -236,7 +236,7 @@ class HingeTest(_Folder):
         report = self.hinge(connect="pass", after=CONNECT)
         self.assertIn("joint 'elbow' is kept with no value and cannot be posed: hinge/arm is not where it can put it",
                       " ".join(report["kinematics"]["warnings"]))
-        self.assertTrue(report["files"][str(self.folder / "hinge.xbf")]["written"])
+        self.assertTrue(report["files"][str(self.folder / "XBF/hinge.xbf")]["written"])
 
     def test_a_snapshot_draws_a_pose_and_refuses_a_bad_one_before_it_renders(self) -> None:
         from cadgen.engine.snapshot import SnapshotRefused, snapshot
@@ -246,7 +246,7 @@ class HingeTest(_Folder):
         os.environ["CADGEN_ENGINE_MESH"] = "inline"  # one part at a time on this thread: no pool
         self.addCleanup(lambda: os.environ.pop("CADGEN_ENGINE_MESH") if previous is None
                         else os.environ.__setitem__("CADGEN_ENGINE_MESH", previous))
-        path = self.folder / "hinge.xbf"
+        path = self.folder / "XBF/hinge.xbf"
         out = self.folder / "kept.png"
         out.write_bytes(b"before")
         for pose, words in (({"elbw": 1}, "names no joint 'elbw'"), ({"elbow": 150}, "'elbow' at 150 deg is outside"),
@@ -265,7 +265,7 @@ class HingeTest(_Folder):
         server = Server(port=0, mesh_mode="inline")
         server.start()
         self.addCleanup(server.stop)
-        ident = server.add(self.folder / "hinge.xbf")
+        ident = server.add(self.folder / "XBF/hinge.xbf")
 
         def call(path: str, body: dict | None = None) -> dict:
             data = None if body is None else json.dumps(body).encode()
@@ -295,7 +295,7 @@ class JointMemoTest(_Folder):
         warm = self.hinge()
         self.assertEqual((warm["memo"]["uncached"], warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]),
                          (0, 0, 1), warm["memo"])
-        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.as_built, {"elbow": (30.0,)})
+        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.as_built, {"elbow": (30.0,)})
         # A joint unconnected keys too.
         lone = """
             import build123d as bd
@@ -312,7 +312,7 @@ class JointMemoTest(_Folder):
         # The angle connected at is the joint's: an edit of it misses, and the arm moves.
         moved = self.hinge(connect=CONNECT.replace("angle=30", "angle=60"))
         self.assertEqual(moved["memo"]["bodies_run"], 1)
-        loaded = document.Loaded(self.folder / "hinge.xbf")
+        loaded = document.Loaded(self.folder / "XBF/hinge.xbf")
         self.assertEqual(loaded.mechanism.as_built, {"elbow": (60.0,)})
         self.assertTrue(_has_point(_vertices(loaded, "arm"), _arm_tip(60)))
         # A range keys the joint: an edit of it alone, which moves nothing, is no hit of the old
@@ -320,7 +320,7 @@ class JointMemoTest(_Folder):
         source = HINGE.format(connect="base = base.moved(bd.Location()); " + CONNECT, after="pass", flat="elbow=0")
         self.build("hinge", source)
         self.build("hinge", source.replace("(-10, 120)", "(-20, 100)"))
-        self.assertEqual(document.Loaded(self.folder / "hinge.xbf").mechanism.pairs[0].limits, ((-20.0, 100.0),))
+        self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.pairs[0].limits, ((-20.0, 100.0),))
 
     def test_each_placement_of_a_child_holds_its_own_joints(self) -> None:
         self.build("pegs", """
@@ -387,7 +387,7 @@ SPARE = """spare = bd.Pos(0, 0, -40) * bd.Box(5, 5, 5)
 class NestedTest(_Folder):
     def test_joints_in_a_nested_assembly_pair_by_label_and_pose_exactly(self) -> None:
         self.build("nested", NESTED.format(extra="pass"))
-        path = self.folder / "nested.xbf"
+        path = self.folder / "XBF/nested.xbf"
         loaded = document.Loaded(path)
         found = loaded.mechanism
         # The pair is the two joints labelled `elbow`; its value is the placement's, the arm unmoved.
@@ -400,7 +400,7 @@ class NestedTest(_Folder):
                          document.tree_structure(document.saved(path), path)["kinematics"])
         for pose, q in (('{"elbow": 90}', 90.0), ('{"elbow": -10}', -10.0)):
             out = self.folder / "posed.step"
-            code, _out, err = _run("export", str(path), "--step", str(out), "--pose", pose)
+            code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
             self.assertEqual(code, 0, err)
             self.assertTrue(_has_point(_vertices(document.Loaded(out), "arm"), _arm_tip(q)), pose)
 
@@ -409,14 +409,14 @@ class NestedTest(_Folder):
         report = self.build("nested", NESTED.format(extra=SPARE))
         self.assertIn("joint 'elbow' on nested/base matches the rigid joints 'elbow'",
                       " ".join(report["kinematics"]["warnings"]))
-        kinematics = document.Loaded(self.folder / "nested.xbf").structure()["kinematics"]
+        kinematics = document.Loaded(self.folder / "XBF/nested.xbf").structure()["kinematics"]
         self.assertEqual((kinematics["pairs"], len(kinematics["warnings"])), ([], 1))
 
     def test_connect_to_wins_over_a_label(self) -> None:
         # The hinge connects `elbow` to the arm's `mount`; a spare's rigid `elbow` pairs with nothing.
         self.hinge(connect=CONNECT + "; " + SPARE.replace("\n    ", "; ").replace("more.append(spare)", "pass"),
                    after='root = bd.Compound(children=[base, arm, spare], label="hinge")')
-        loaded = document.Loaded(self.folder / "hinge.xbf")
+        loaded = document.Loaded(self.folder / "XBF/hinge.xbf")
         self.assertEqual([(pair.label, pair.links) for pair in loaded.mechanism.pairs], [("elbow", (0, 1))])
         self.assertEqual([link["instances"] for link in loaded.structure()["kinematics"]["links"]], [[0, 2], [1]])
 
@@ -480,11 +480,11 @@ class InconsistencyTest(_Folder):
         # At the revolute's own frame (its part's placement times its relative axis): joint zero.
         report = self.build("bike", TURNED.format(at='frame.location * frame.joints["pivot"].relative_axis.location'))
         self.assertNotIn("kinematics", report)
-        self.assertEqual(document.Loaded(self.folder / "bike.xbf").mechanism.as_built, {"pivot": (0.0,)})
+        self.assertEqual(document.Loaded(self.folder / "XBF/bike.xbf").mechanism.as_built, {"pivot": (0.0,)})
 
     def test_a_rigid_joint_off_the_revolute_axis_builds_warns_and_its_joint_is_not_posed(self) -> None:
         report = self.build("bike", PIVOT.format(at="bd.Location((55, 0, -30))", extra="pass"))  # 15 mm off the axis
-        path = self.folder / "bike.xbf"
+        path = self.folder / "XBF/bike.xbf"
         self.assertTrue(report["files"][str(path)]["written"], "the geometry is written")
         (warning,) = report["kinematics"]["warnings"]
         self.assertIn("joint 'pivot' is kept with no value and cannot be posed: bike/engine is not where it can put it",
@@ -497,16 +497,16 @@ class InconsistencyTest(_Folder):
         self.assertEqual(kinematics["pairs"][0]["inconsistent"], pair.inconsistent)
         self.assertEqual(kinematics, document.tree_structure(document.saved(path), path)["kinematics"])
         out = self.folder / "posed.step"
-        code, _out, err = _run("export", str(path), "--step", str(out), "--pose", '{"pivot": 5}')
+        code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", '{"pivot": 5}')
         self.assertEqual(code, 2)
         self.assertIn("joint 'pivot' cannot be posed: bike/engine is not where it can put it", err)
         self.assertFalse(out.exists())
-        self.assertEqual(_run("export", str(path), "--step", str(out))[0], 0, "as built, it exports")
+        self.assertEqual(_run("export", str(path), str(out), "--no-daemon")[0], 0, "as built, it exports")
 
     def test_two_unmoved_parts_with_a_revolute_between_them_are_two_links(self) -> None:
         report = self.build("bike", PIVOT.format(at=ON_AXIS, extra="pass"))
         self.assertNotIn("kinematics", report)
-        found = document.Loaded(self.folder / "bike.xbf").mechanism
+        found = document.Loaded(self.folder / "XBF/bike.xbf").mechanism
         self.assertEqual([(link.name, link.members) for link in found.links], [("frame", [(0,)]), ("engine", [(1,)])])
         self.assertEqual(found.as_built, {"pivot": (0.0,)})
         self.assertEqual(found.warnings, [])
@@ -516,7 +516,7 @@ class InconsistencyTest(_Folder):
         (warning,) = report["kinematics"]["warnings"]
         self.assertIn("joint 'pivot' is kept with no value and cannot be posed: it joins bike/frame to bike/engine, "
                       "which rigid joints make one link with 1 other parts (the unmoved ground)", warning)
-        loaded = document.Loaded(self.folder / "bike.xbf")
+        loaded = document.Loaded(self.folder / "XBF/bike.xbf")
         self.assertEqual([link.members for link in loaded.mechanism.links], [[(0,), (1,), (2,)]])
         self.assertIsNone(loaded.structure()["kinematics"]["loop"])
 
@@ -524,7 +524,7 @@ class InconsistencyTest(_Folder):
 class ChainTest(_Folder):
     def test_a_chain_of_rigid_prismatic_and_revolute_joints_makes_its_links(self) -> None:
         self.build("lift", CHAIN)
-        loaded = document.Loaded(self.folder / "lift.xbf")
+        loaded = document.Loaded(self.folder / "XBF/lift.xbf")
         found = loaded.mechanism
         # The base is the ground; the clamp is rigidly joined to the carriage: one link, which the
         # lift moves, and the wrist turns the arm on it.
@@ -579,7 +579,7 @@ class GearTest(_Folder):
         tree = document.collect(bd.Compound(children=[base, *arms], label="gears"), "gears")
         # build123d's joints cannot say a coupling: the gear pair is put in the mechanism here.
         tree.mechanism.pairs.append(mechanism.Pair("mesh", "gear", (1, 2), None, (), ratio=-2.0))
-        path = self.folder / "gears.xbf"
+        path = self.folder / "XBF/gears.xbf"
         document.save(document.to_xcaf(tree), path, compare=False)
         loaded = document.Loaded(path)
         gear = loaded.mechanism.pairs[-1]

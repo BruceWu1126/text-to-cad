@@ -62,7 +62,7 @@ class PreviousTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-previous-")).resolve()
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "kit.py"
-        self.xbf = self.folder / "kit.xbf"
+        self.xbf = self.folder / "XBF/kit.xbf"
         (self.folder / "inputs").mkdir()
         bd.export_step(bd.Cylinder(3, 4), str(self.folder / "inputs" / "cap.step"))
         (self.folder / "peg.json").write_text(json.dumps({"size": 4}), encoding="utf-8")
@@ -183,7 +183,9 @@ class PreviousTest(unittest.TestCase):
         text = self.xbf.read_bytes()
         writer, found = previous.scan(self.xbf)
         record = json.loads(found)
-        self.assertEqual(record["inputs"], [["read", "peg.json"], ["file", "inputs/cap.step"], ["read", "kit.json"]])
+        # Relative to the document's folder: XBF/ beside the script.
+        self.assertEqual(record["inputs"], [["read", "../peg.json"], ["file", "../inputs/cap.step"],
+                                            ["read", "../kit.json"]])
         self.assertNotIn(str(self.folder).encode(), text)
         self.assertNotIn(b"kit.py", text)
         self.assertEqual(writer, document._writer())
@@ -219,7 +221,7 @@ class PreviousTest(unittest.TestCase):
         import sys
 
         out = self.folder / name
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), "--step", str(out)],
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "export", str(self.xbf), str(out), "--no-daemon"],
                               cwd=self.folder, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         # The STEP header's time stamp is the second it was written: masked.

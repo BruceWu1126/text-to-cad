@@ -52,8 +52,8 @@ class SnapshotTest(unittest.TestCase):
         script.write_text(textwrap.dedent(MODEL), encoding="utf-8")
         reports = engine_build.build(script, None, cwd=cls.folder)
         assert all(report["ok"] for report in reports), reports
-        cls.document = cls.folder / "stand.xbf"
-        cls.single = cls.folder / "peg.xbf"
+        cls.document = cls.folder / "XBF/stand.xbf"
+        cls.single = cls.folder / "XBF/peg.xbf"
         # One part at a time on this process's thread: the test asks for no pool.
         cls.mesh = os.environ.get("CADGEN_ENGINE_MESH")
         os.environ["CADGEN_ENGINE_MESH"] = "inline"
@@ -128,6 +128,50 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(out.read_bytes(), b"before")
 
 
+    def drawn(self, path: Path, size: tuple[int, int]) -> None:
+        """A picture of something: the size asked, and more than a backdrop."""
+        from PIL import Image
+
+        with Image.open(path) as image:
+            self.assertEqual(image.size, size)
+            data = image.convert("RGB").tobytes()
+        pixels = [tuple(data[at:at + 3]) for at in range(0, len(data), 3)]
+        backdrop = max(set(pixels), key=pixels.count)
+        self.assertGreater(len([pixel for pixel in pixels if pixel != backdrop]), len(pixels) // 20)
+
+    def test_a_mesh_file_is_drawn_by_the_viewer_s_mesh_renderers(self) -> None:
+        from cadgen.engine.export import translate
+
+        for suffix in (".glb", ".stl", ".3mf"):
+            mesh = self.folder / f"stand{suffix}"
+            translate(self.document, None, mesh)
+            out = self.folder / f"mesh-{suffix[1:]}.png"
+            report = snapshot(mesh, out, camera=parse_camera("iso"), size=(240, 180), daemon=False)
+            self.assertEqual((report["width"], report["height"]), (240, 180), suffix)
+            self.drawn(out, (240, 180))
+        with self.assertRaisesRegex(SnapshotRefused, "is a mesh and has none"):
+            snapshot(self.folder / "stand.glb", self.folder / "posed.png", pose="raised", daemon=False)
+
+    def test_a_build_draws_its_snapshot_from_the_meshes_it_holds(self) -> None:
+        from unittest import mock
+
+        from cadgen.engine import serve
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-drawn-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        script = folder / "stand.py"
+        script.write_text(textwrap.dedent(MODEL).replace(
+            "@xbf\ndef stand", '@xbf\n@glb\n@snapshot("stand.png", display="xray", camera="iso", width=200, height=150)'
+                               "\ndef stand").replace("import paint, xbf", "import glb, paint, snapshot, xbf"),
+            encoding="utf-8")
+        # The GLB meshed every part into the process's cache; the picture draws those.
+        with mock.patch.object(serve, "_timed", side_effect=AssertionError("meshed again")):
+            [report] = engine_build.build(script, ["stand"], cwd=folder)
+        self.assertTrue(report["ok"], report)
+        self.assertEqual([Path(path).name for path in report["files"]], ["stand.xbf", "stand.glb", "stand.png"])
+        self.drawn(folder / "stand.png", (200, 150))
+
+
 class AccessTest(unittest.TestCase):
     """The page that reads a document from the engine is the viewer's or the snapshot's, on this
     machine: those origins are named as allowed readers, and no other is."""
@@ -144,7 +188,7 @@ class AccessTest(unittest.TestCase):
         server = Server(port=0, mesh_mode="inline")
         server.start()
         self.addCleanup(server.stop)
-        url = f"{server.url}/api/doc/{server.add(folder / 'peg.xbf')}"
+        url = f"{server.url}/api/doc/{server.add(folder / 'XBF' / 'peg.xbf')}"
 
         def allowed(origin: str) -> str | None:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"Origin": origin}), timeout=60) as answer:

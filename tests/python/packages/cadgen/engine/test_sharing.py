@@ -261,7 +261,7 @@ class DocumentTest(unittest.TestCase):
 
     def test_a_part_placed_three_times_is_one_prototype_and_its_names(self) -> None:
         self.build("placed")
-        loaded = document.load(self.folder / "placed.xbf")
+        loaded = document.load(self.folder / "XBF/placed.xbf")
         self.assertEqual(len(loaded.prototypes), 2, "the plate and the peg, each placed three times")
         self.assertEqual([instance.prototype for instance in loaded.instances], [0, 1] * 3)
         names = self.names(loaded)
@@ -272,23 +272,23 @@ class DocumentTest(unittest.TestCase):
 
     def test_a_cold_and_a_warm_document_are_the_same_bytes(self) -> None:
         self.build()
-        cold = {name: (self.folder / f"{name}.xbf").read_bytes() for name in ("placed", "painted", "built", "screws")}
+        cold = {name: (self.folder / f"XBF/{name}.xbf").read_bytes() for name in ("placed", "painted", "built", "screws")}
         for name in cold:
-            (self.folder / f"{name}.xbf").unlink()
+            (self.folder / f"XBF/{name}.xbf").unlink()
         self.build()
-        warm = {name: (self.folder / f"{name}.xbf").read_bytes() for name in cold}
+        warm = {name: (self.folder / f"XBF/{name}.xbf").read_bytes() for name in cold}
         self.assertEqual(warm, cold)
         memo.clear()
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
         for name in cold:
-            (self.folder / f"{name}.xbf").unlink()
+            (self.folder / f"XBF/{name}.xbf").unlink()
         self.build()
-        self.assertEqual({name: (self.folder / f"{name}.xbf").read_bytes() for name in cold}, cold)
+        self.assertEqual({name: (self.folder / f"XBF/{name}.xbf").read_bytes() for name in cold}, cold)
 
     def test_placements_painted_apart_are_prototypes_apart(self) -> None:
         self.build("painted")
-        loaded = document.load(self.folder / "painted.xbf")
+        loaded = document.load(self.folder / "XBF/painted.xbf")
         prototypes = [loaded.prototypes[instance.prototype] for instance in loaded.instances]
         self.assertEqual([instance.prototype for instance in loaded.instances], [0, 1, 2, 2],
                          "bare, red and blue are three; the second blue is the first blue placed again")
@@ -307,7 +307,7 @@ class DocumentTest(unittest.TestCase):
 
     def test_two_labelled_placements_are_named_as_their_prototype_and_rename_nothing(self) -> None:
         self.build("labelled")
-        loaded = document.load(self.folder / "labelled.xbf")
+        loaded = document.load(self.folder / "XBF/labelled.xbf")
         names = self.names(loaded)
         for placed in ("labelled/stand/left/plate", "labelled/stand/right/plate"):
             self.assertEqual(names[placed], names["labelled/bracket/plate"], placed)
@@ -321,7 +321,7 @@ class DocumentTest(unittest.TestCase):
 
     def test_a_label_on_one_part_of_a_read_names_nothing_made_of_another(self) -> None:
         self.build("kit")
-        loaded = document.load(self.folder / "kit.xbf")
+        loaded = document.load(self.folder / "XBF/kit.xbf")
         grown = loaded.prototypes[loaded.instances[-1].prototype]
         faces = list(grown.face_names.values())
         # The second part's own name in the file names what is made of it; the first's label, nothing of it.
@@ -331,7 +331,7 @@ class DocumentTest(unittest.TestCase):
     def test_one_geometry_made_twice_and_named_alike_is_one_prototype(self) -> None:
         report = self.build("built")["built"]
         self.assertEqual(report["parts"], 2)
-        loaded = document.load(self.folder / "built.xbf")
+        loaded = document.load(self.folder / "XBF/built.xbf")
         self.assertEqual([instance.prototype for instance in loaded.instances], [0, 0, 1])
         first, other = loaded.prototypes
         self.assertEqual(first.key, other.key, "one geometry")
@@ -342,13 +342,13 @@ class DocumentTest(unittest.TestCase):
         before = memo.stats()["shared_reads"]
         report = self.build("screws")["screws"]
         self.assertEqual(memo.stats()["shared_reads"] - before, 1, report)
-        loaded = document.load(self.folder / "screws.xbf")
+        loaded = document.load(self.folder / "XBF/screws.xbf")
         self.assertEqual([instance.prototype for instance in loaded.instances], [0, 0, 1],
                          "the helper's two reads are one part; the read of another site is its own")
         self.assertNotEqual(loaded.prototypes[0].face_names, loaded.prototypes[1].face_names)
         warm = self.build("screws")["screws"]
         self.assertEqual(warm["memo"]["misses"], 0)
-        self.assertEqual([i.prototype for i in document.load(self.folder / "screws.xbf").instances], [0, 0, 1])
+        self.assertEqual([i.prototype for i in document.load(self.folder / "XBF/screws.xbf").instances], [0, 0, 1])
 
 
 if __name__ == "__main__":

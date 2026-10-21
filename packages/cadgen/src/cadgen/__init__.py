@@ -110,6 +110,13 @@ def __getattr__(name: str):
         from cadgen.progress import report, track
 
         return {"report": report, "track": track}[name]
+    if name in {"build", "export", "snapshot", "serve", "where"}:
+        # The engine's verbs as functions (cadgen.engine.api), one per `cadgen xbf` command,
+        # each through the engine's daemon. Served without advertising them in __all__ while
+        # the engine is in its isolation round.
+        from cadgen.engine import api
+
+        return getattr(api, name)
     if name == "__version__":
         return _resolve_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -138,6 +145,13 @@ if TYPE_CHECKING:
         StepScene,
         Occurrence,
         Selection,
+    )
+    from cadgen.engine.api import (
+        build as build,
+        export as export,
+        serve as serve,
+        snapshot as snapshot,
+        where as where,
     )
 
 

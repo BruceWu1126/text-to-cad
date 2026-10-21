@@ -255,6 +255,34 @@ class MemoTest(MemoCase):
         self.assertEqual(self.statuses(report)["parts.py::jitter"], ["run"])
         self.assertEqual(report["cache"]["reason"], "it calls parts.py::jitter, which a verification found impure")
 
+    def test_the_cli_s_verify_reaches_the_build_through_the_api(self) -> None:
+        import contextlib
+        import io
+        import json
+
+        from cadgen.engine import api, cli
+
+        self.build()
+        self.write("size.bin", "xx")
+        self.write("root.py", ROOT.format(hole=1.25, length=20))
+        self.build()
+        here = Path.cwd()
+        os.chdir(self.folder)
+        self.addCleanup(os.chdir, here)
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(io.StringIO()):
+            status = cli.main(["build", "root.py", "--no-daemon", "--verify", "--json"])
+        self.assertEqual(status, 0)
+        found = json.loads(printed.getvalue().splitlines()[-1])["verify"]
+        self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
+        # Through the daemon, the request carries it to the worker's build.
+        asked = []
+        with mock.patch.object(api, "_ask", side_effect=lambda message, _log: asked.append(message) or
+                               {"done": [], "worker": {}}):
+            cli.main(["build", "root.py", "--verify"])
+            cli.main(["build", "root.py"])
+        self.assertEqual([message["verify"] for message in asked], [True, False])
+
     def test_the_restart_cache_folds_a_memo_function_into_the_model_key(self) -> None:
         self.build()
         self.restart()
@@ -273,7 +301,7 @@ class MemoNamesTest(MemoCase):
         self.write("staged.py", STAGES.format(import_line=imports, marker=marker, spare=spare))
 
     def names(self) -> dict:
-        loaded = document.load(self.folder / "staged.xbf")
+        loaded = document.load(self.folder / "XBF" / "staged.xbf")
         return {p.name: (dict(p.face_names), dict(p.edge_names), dict(p.vertex_names)) for p in loaded.prototypes}
 
     def test_names_are_the_same_with_and_without_memo_and_when_replayed(self) -> None:

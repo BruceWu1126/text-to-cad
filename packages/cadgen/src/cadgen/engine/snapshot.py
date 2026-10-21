@@ -1,8 +1,12 @@
-"""``cadgen xbf snapshot DOC OUT.png``: a picture of an engine document, drawn as the CAD
-Viewer draws it.
+"""``cadgen xbf snapshot SRC OUT.png``: a picture of a document or a mesh file, drawn as the CAD
+Viewer draws it. SRC is an ``.xbf`` or a ``.step`` (a document), or a ``.glb``, ``.stl`` or
+``.3mf`` (a mesh file).
 
-The document is served by the engine (the daemon, so its meshes are the ones the viewer and
-every build share, or ``--no-daemon`` a server in this process) and meshed there. A headless
+A document is served by the engine (the daemon, so its meshes are the ones the viewer and
+every build share, or ``--no-daemon`` a server in this process; a build's own document, which
+``@snapshot`` and ``--snapshot`` draw, from the worker's memory over its one mesh cache) and
+meshed there. A mesh file is meshed by nobody: the page reads its bytes and draws them with the
+mesh renderers the viewer's GLB and mesh tabs call (``headlessScene.js``'s mesh families). A headless
 browser opens the snapshot page of cadgen's browser runtime -- ``render.html`` and
 ``snapshot-render.js`` in the package's built ``_runtime/browser``, read as files, never
 imported -- and hands it one render job for the ``xbf`` family. The page reads the structure and
@@ -35,10 +39,10 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
-__all__ = ["SnapshotRefused", "add_parser", "parse_pose", "run", "snapshot"]
+__all__ = ["SnapshotRefused", "add_parser", "draw", "options", "parse_pose", "run", "snapshot"]
 
 PAGE_ORIGIN = "http://localhost"
 PAGE_URL = f"{PAGE_ORIGIN}/render.html"
@@ -191,9 +195,19 @@ class _Served:
     """The document as an engine serves it: its API URL, and how to let go of a server this
     process started."""
 
-    def __init__(self, path: Path, *, daemon: bool) -> None:
+    def __init__(self, path: Path, *, daemon: bool, source: Any = None) -> None:
         self.server = None
-        if daemon:
+        if source is not None:
+            # A build's document, held in this process: served from memory by a server of its
+            # own over the process's one mesh cache, so what the build meshed is drawn as it is.
+            from cadgen.engine.serve import MESHES, Server
+
+            self.server = Server(port=0, mesh_mode="inline", cache=MESHES)
+            self.server.start()
+            shapes = {prototype["key"]: source.shape_data(prototype["key"])
+                      for prototype in source.structure["prototypes"]}
+            origin, ident = self.server.url, self.server.put(path, source.structure, shapes)
+        elif daemon:
             from cadgen.engine.client import request
 
             answer = request({"op": "serve", "path": str(path)})
@@ -250,12 +264,14 @@ def _launch(playwright: Any) -> Any:
     return playwright.chromium.launch(headless=True, args=args)
 
 
-def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int]) -> tuple[dict[str, Any], dict[str, int]]:
+def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int],
+            extra: dict[str, Path] | None = None) -> tuple[dict[str, Any], dict[str, int]]:
     from playwright.sync_api import sync_playwright
 
     timings: dict[str, int] = {}
     started = time.perf_counter()
-    files = {"/render.html": runtime / "render.html", "/snapshot-render.js": runtime / "snapshot-render.js"}
+    files = {"/render.html": runtime / "render.html", "/snapshot-render.js": runtime / "snapshot-render.js",
+             **(extra or {})}
 
     def route(handle: Any) -> None:
         path = urlparse(handle.request.url).path
@@ -263,7 +279,8 @@ def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int]) -> tuple[
         if found is None:
             handle.fulfill(status=404, content_type="text/plain", body="not found")
             return
-        kind = "text/html" if path.endswith(".html") else "text/javascript"
+        kind = ("text/html" if path.endswith(".html") else "text/javascript" if path.endswith(".js")
+                else "application/octet-stream")
         handle.fulfill(status=200, content_type=kind, body=found.read_bytes(), headers={"cache-control": "no-store"})
 
     with sync_playwright() as playwright:
@@ -289,28 +306,101 @@ def _render(job: dict[str, Any], runtime: Path, size: tuple[int, int]) -> tuple[
 # --- the verb ------------------------------------------------------------------------------
 
 
+DOCUMENTS = (".xbf", ".step", ".stp")
+# A mesh file and the family the snapshot page draws it with (``headlessScene.js``).
+MESH_KINDS = {".glb": "glb", ".stl": "stl", ".3mf": "3mf"}
+
+
+def _mesh_file(document: Path, out: Path, display: dict[str, Any], camera: Any, preview: bool,
+               size: tuple[int, int], started: float) -> dict[str, Any]:
+    """A GLB, STL or 3MF drawn by the shared mesh renderers of the snapshot page: the page
+    reads the file's bytes as the viewer's mesh renderer does, no engine in between."""
+    kind = MESH_KINDS[document.suffix.lower()]
+    route = f"/file/{quote(document.name)}"
+    output: dict[str, Any] = {"path": str(out), "width": size[0], "height": size[1]}
+    if camera is not None:
+        output["camera"] = camera
+    job: dict[str, Any] = {"kind": kind, "mode": "view", "display": display, "outputs": [output],
+                           "resolved": {"kind": kind, "url": route, "inputPath": str(document)}}
+    if preview:
+        job["preview"] = True
+    result, timings = _render(job, _runtime(), size, {route: document})
+    drawn = _png(result, out, timings)
+    timings["totalMs"] = round((time.perf_counter() - started) * 1000)
+    return {"ok": True, "document": str(document), "output": str(out), "width": drawn.get("width"),
+            "height": drawn.get("height"), "camera": drawn.get("camera"), "projection": drawn.get("projection"),
+            "displayMode": display.get("mode", "solid"), "preview": preview, "pose": None,
+            "bytes": out.stat().st_size, "timings": timings}
+
+
+def _png(result: dict[str, Any], out: Path, timings: dict[str, Any]) -> dict[str, Any]:
+    """The page's picture written to ``out``: beside it first, then moved over it."""
+    stages = result.get("stageTimings") or {}
+    for name in ("loadSourceMs", "buildModelMs", "prepareViewportMs", "captureMs"):
+        if name in stages:
+            timings[name] = stages[name]
+    drawn = (result.get("outputs") or [{}])[0]
+    head, _sep, data = str(drawn.get("dataUrl") or "").partition(",")
+    if not head.startswith("data:image/png;base64"):
+        raise RuntimeError("the snapshot page returned no PNG")
+    temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
+    temporary.write_bytes(base64.b64decode(data))
+    os.replace(temporary, out)
+    return drawn
+
+
+def options(display: Any = None, camera: Any = None, grid: bool = False, width: int | None = None,
+            height: int | None = None, size_profile: str | None = None) -> tuple[dict[str, Any], Any, tuple[int, int]]:
+    """A snapshot's options as a decorator or a function gives them -- ``display`` a mode, a
+    JSON text or the display object -- checked as the verb checks its flags."""
+    if isinstance(display, dict):
+        display = json.dumps(display)
+    return (parse_display(display, bool(grid)), parse_camera(camera if camera is None or isinstance(camera, str)
+                                                              else json.dumps(camera)),
+            parse_size(width, height, size_profile))
+
+
+def draw(source: Any, out: Path, *, display: Any = None, camera: Any = None, grid: bool = False,
+         preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None) -> dict[str, Any]:
+    """A build's document (an ``export.Source``, in this process's memory) drawn into ``out``:
+    the ``@snapshot`` file and ``--snapshot``. Served from memory over the process's mesh
+    cache, so nothing the build meshed is meshed again."""
+    shown, framed, size = options(display, camera, grid, width, height)
+    path = source.path or Path(out).with_suffix(".xbf")
+    return snapshot(path, Path(out), display=shown, camera=framed, preview=preview, size=size, pose=pose,
+                    source=source)
+
+
 def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None, camera: Any = None,
              preview: bool = False, size: tuple[int, int] = DEFAULT_SIZE, daemon: bool = True,
-             pose: Any = None) -> dict[str, Any]:
-    """Draw ``document`` (an ``.xbf``) into ``out`` (a ``.png``); returns what was drawn and how long
-    each stage took. ``pose``: a configuration's name or ``{joint: value}``, the engine placing each
-    link by its pairs from the ground; None draws the document as built. Raises
-    ``SnapshotRefused`` for a request it will not draw, before rendering."""
+             pose: Any = None, source: Any = None) -> dict[str, Any]:
+    """Draw ``document`` -- an ``.xbf`` or a ``.step`` the engine serves and meshes, or a mesh
+    file (``.glb``, ``.stl``, ``.3mf``) the page reads itself -- into ``out`` (a ``.png``);
+    returns what was drawn and how long each stage took. ``pose``: a configuration's name or
+    ``{joint: value}``, the engine placing each link by its pairs from the ground; None draws
+    the document as built; a mesh has no mechanism to pose. ``source``: the document is a
+    build's, held in this process (``draw``). Raises ``SnapshotRefused`` for a request it
+    will not draw, before rendering."""
     started = time.perf_counter()
     document, out = Path(document).resolve(), Path(out).resolve()
-    if document.suffix.lower() != ".xbf":
-        raise SnapshotRefused(f"{document.name} is not an engine document (.xbf)")
-    if not document.is_file():
+    suffix = document.suffix.lower()
+    if suffix not in DOCUMENTS and suffix not in MESH_KINDS:
+        raise SnapshotRefused(f"{document.name} is neither a document (.xbf, .step) nor a mesh (.glb, .stl, .3mf)")
+    if source is None and not document.is_file():
         raise SnapshotRefused(f"no document {document}")
     if out.suffix.lower() != ".png":
         raise SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
     if not out.parent.is_dir():
-        raise SnapshotRefused(f"no folder {out.parent} to write {out.name} into")
+        out.parent.mkdir(parents=True, exist_ok=True)
     display = dict(display or {})
+    if suffix in MESH_KINDS:
+        if pose is not None:
+            raise SnapshotRefused(f"--pose poses a document's mechanism; {document.name} is a mesh and has none")
+        return _mesh_file(document, out, display, camera, preview, size, started)
     runtime = _runtime()
     timings: dict[str, Any] = {}
     clock = time.perf_counter()
-    served = _Served(document, daemon=daemon)
+    served = _Served(document, daemon=daemon, source=source)
     posed = None
     try:
         url = served.url
@@ -345,15 +435,7 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
     finally:
         served.close()
     timings.update(page)
-    stages = result.get("stageTimings") or {}
-    for name in ("loadSourceMs", "buildModelMs", "prepareViewportMs", "captureMs"):
-        if name in stages:
-            timings[name] = stages[name]
-    drawn = (result.get("outputs") or [{}])[0]
-    head, _sep, data = str(drawn.get("dataUrl") or "").partition(",")
-    if not head.startswith("data:image/png;base64"):
-        raise RuntimeError("the snapshot page returned no PNG")
-    out.write_bytes(base64.b64decode(data))
+    drawn = _png(result, out, timings)
     timings["totalMs"] = round((time.perf_counter() - started) * 1000)
     return {"ok": True, "document": str(document), "output": str(out), "width": drawn.get("width"),
             "height": drawn.get("height"), "camera": drawn.get("camera"), "projection": drawn.get("projection"),
@@ -367,8 +449,8 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
 def add_parser(verbs: Any) -> argparse.ArgumentParser:
     """The ``snapshot`` verb of ``cadgen xbf``."""
     parser = verbs.add_parser("snapshot", help="draw a document as the CAD Viewer does, into a PNG")
-    parser.add_argument("document", help="an .xbf")
-    parser.add_argument("out", help="the .png to write")
+    parser.add_argument("document", metavar="SRC", help="a document (.xbf, .step) or a mesh file (.glb, .stl, .3mf)")
+    parser.add_argument("out", metavar="OUT.png", help="the .png to write")
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe) or the display "
                                           "JSON object (mode, grid, appearance, camera, clip), or a JSON file of it")
     parser.add_argument("--grid", action="store_true", help="draw the measuring grid")
@@ -406,3 +488,17 @@ def run(args: argparse.Namespace) -> int:
         print(f"wrote {args.out} ({report['width']}x{report['height']}, {report['displayMode']}"
               f"{', preview' if report['preview'] else ''}) in {timings['totalMs'] / 1000:.2f}s")
     return 0
+
+
+class _Verb(type(sys)):
+    """This module is also the ``@snapshot`` decorator (``model.snapshot``): imported, its name in
+    ``cadgen.engine`` is this module, and a model's ``from cadgen.engine import snapshot`` must
+    still declare a snapshot."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        from cadgen.engine.model import snapshot as decorate
+
+        return decorate(*args, **kwargs)
+
+
+sys.modules[__name__].__class__ = _Verb

@@ -50,6 +50,11 @@ class _Written:
     kept: Any = None
     # The model's key the file holds (``previous.record``), or None.
     record: str | None = None
+    # Per derived file this process wrote: the document's signature and the options it was
+    # written with, and its stat as written. The same three again: the file is kept.
+    files: dict[str, tuple] | None = None
+    # The tree the kept document was made from: what a derived file is translated from.
+    tree: Any = None
 
 
 @dataclass
@@ -126,11 +131,100 @@ def _model_traceback(error: BaseException) -> str:
     return "".join(lines).rstrip()
 
 
+def code_script(name: str, cwd: Path) -> Path:
+    """The path code built from source text is known by (``--code``): never a file on disk,
+    a name in the working folder's ``(code)`` folder, ``<name>.py``."""
+    return Path(cwd).resolve() / CODE_FOLDER / f"{name}.py"
+
+
+CODE_FOLDER = "(code)"
+_CODE_NAME = __import__("re").compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def code_source(name: str, code: str) -> str:
+    """Code's source as the module it is run as: a function ``name`` whose body is the code,
+    ending in ``return result``. Every line is indented once, but the lines inside a string
+    that spans lines, whose text the code's own. The code assigns its final shape to
+    ``result``; code that does not is refused by name."""
+    import ast
+    import io
+    import tokenize
+
+    if not _CODE_NAME.fullmatch(name or ""):
+        raise BuildError(f"--name {name!r} is no Python identifier")
+    try:
+        tree = ast.parse(code, filename="<code>")
+    except SyntaxError as error:
+        raise BuildError(f"the code does not parse: {error}") from None
+    assigned = any(isinstance(node, ast.Name) and node.id == "result" and isinstance(node.ctx, ast.Store)
+                   for node in ast.walk(tree))
+    if not assigned:
+        raise BuildError("the code assigns no `result`: code assigns its final shape to `result`")
+    inside: set[int] = set()
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(code).readline):
+            if token.type == tokenize.STRING and token.end[0] > token.start[0]:
+                inside.update(range(token.start[0] + 1, token.end[0] + 1))
+    except (tokenize.TokenError, IndentationError):
+        pass
+    lines = code.splitlines()
+    body = [line if number in inside or not line.strip() else "    " + line
+            for number, line in enumerate(lines, start=1)]
+    return f"def {name}():\n" + "\n".join(body) + "\n    return result\n"
+
+
+def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, Any]] | None) -> Any:
+    """Code built from source text, as a fresh module held in memory only: its function
+    ``name`` a model whose outputs are the flags' (``outputs``). Its source is kept where the
+    engine's readers find a file's (``sources.MEMORY``, ``linecache``), never on disk."""
+    import linecache
+    import types
+
+    from cadgen.engine import sources
+    from cadgen.engine.model import Model, Output
+
+    text = code_source(name, code)
+    sys.dont_write_bytecode = True
+    for module_name in _first_party_modules():
+        sys.modules.pop(module_name, None)
+    importlib.invalidate_caches()
+    for folder in (str(script.parent.parent),):
+        if folder in sys.path:
+            sys.path.remove(folder)
+        sys.path.insert(0, folder)
+    sources.MEMORY[str(script)] = text.encode("utf-8")
+    linecache.cache[str(script)] = (len(text), None, text.splitlines(True), str(script))
+    module_name = f"_cadgen_code_{name}"
+    module = types.ModuleType(module_name)
+    module.__file__ = str(script)
+    sys.modules[module_name] = module
+    try:
+        exec(compile(text, str(script), "exec"), module.__dict__)  # noqa: S102 - the author's code, as a script runs
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    model = Model(module.__dict__[name])
+    model.outputs = [Output(kind, given["out"], tuple((option, value) for option, value in given.items()
+                                                       if option != "out" and value is not None))
+                     for kind, given in (outputs or {}).items()]
+    module.__dict__[name] = model
+    return module
+
+
 def build(script: Path, functions: list[str] | None = None, *, log: Callable[[str], None] = lambda _line: None,
-          cwd: Path | None = None, verify: bool = False) -> list[dict[str, Any]]:
+          cwd: Path | None = None, outputs: dict[str, dict[str, Any]] | None = None, pose: Any = None,
+          part: str | None = None, code: str | None = None, verify: bool = False) -> list[dict[str, Any]]:
     """Build the script's models (``functions``, or every model it defines); one report
     per model. Raises BuildError for a script or function that is not there; a body that
     raises is its model's report (``ok`` false, ``error`` the model's traceback).
+
+    ``outputs`` selects and overrides the files written (``Model.plan``): ``{kind: {"out":
+    path or None, option: value}}``, the kinds ``xbf``, ``step``, ``glb``, ``stl``,
+    ``threemf``, ``snapshot``; None writes what the decorators declare. ``pose`` and
+    ``part`` apply to every derived file whose verb takes them. ``code`` builds source text
+    instead of a script: ``script`` is then ``code_script(name, cwd)`` and ``functions`` the
+    one name; the code has no decorators, its files are the ``outputs`` alone, each with
+    its path.
 
     ``verify``: every body the memo would replay -- a model's, a ``@memo`` call's -- runs
     instead, and its fresh result is compared with the logged one; the report's
@@ -140,19 +234,38 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     from cadgen.engine.kernel import determinism, memo
     from cadgen.engine.model import BuildContext, models_in
 
-    script = Path(script).resolve()
-    if not script.is_file():
+    script = Path(script).resolve() if code is None else Path(script)
+    if code is None and not script.is_file():
         raise BuildError(f"no script {script}")
+    if code is not None:
+        missing = [kind for kind, given in (outputs or {}).items() if not (given or {}).get("out")]
+        if missing:
+            raise BuildError(f"code has no decorators: --{missing[0]} takes the file's path")
+        if not functions or len(functions) != 1:
+            raise BuildError("code is one model: name it with --name")
+        # Code has no decorators: its flags are its declarations, each path from the working folder.
+        base = Path(cwd or Path.cwd())
+        outputs = {kind: {**given, "out": os.path.normpath(os.path.abspath(base / given["out"]))}
+                   for kind, given in (outputs or {}).items()}
     determinism.install()
     memo.install()
-    shown = _shown(script, cwd)
+    shown = _shown(script, cwd) if code is None else "<code>"
     reports: list[dict[str, Any]] = []
     started = time.perf_counter()
     results: list[tuple[Any, Any, float]] = []
+    plans: dict[str, list] = {}
+    # A request that names its own files, or a pose or a part, is written as it asks: the
+    # previous document is not taken in place of the run (its files say nothing of options).
+    overridden = pose is not None or part is not None or (code is None and any(
+        kind != "xbf" or given for kind, given in (outputs or {}).items()))
     with memo.run(script) as run, BuildContext() as context:
         run.verify = verify
         try:
-            module = load_script(script)
+            module = load_script(script) if code is None else load_code(script, functions[0], code, outputs)
+            if code is not None:
+                outputs = None  # its flags are its model's declarations now
+        except BuildError:
+            raise
         except Exception as error:  # noqa: BLE001 - the model's own error, reported
             return [{"ok": False, "model": f"{shown}", "error": _model_traceback(error)}]
         loaded = time.perf_counter()
@@ -173,6 +286,14 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             raise BuildError(f"{shown} defines no model" + (
                 f"; {', '.join(marked)} {'is a @memo function' if len(marked) == 1 else 'are @memo functions'}: "
                 "a model calls it, and it writes no file" if marked else ""))
+        if len(models) > 1 and any((given or {}).get("out") for given in (outputs or {}).values()):
+            raise BuildError(f"{shown} defines {len(models)} models and a flag names one file: "
+                             f"build one (SCRIPT::MODEL) to give its file a path")
+        for model in models:
+            try:
+                plans[model.name] = model.plan(outputs, pose=pose, part=part, cwd=cwd)
+            except (TypeError, ValueError) as error:
+                raise BuildError(f"{shown}::{model.name}: {error}") from None
         for model in models:
             body_started = time.perf_counter()
             tally = dict(run.tally)
@@ -180,8 +301,12 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             run.reads.clear()
             run.unread.clear()
             try:
-                verdict, previous_report = (({"used": False, "reason": "verifying"}, None) if verify
-                                            else _previous(model, context, shown, log))
+                if verify:
+                    verdict, previous_report = {"used": False, "reason": "verifying"}, None
+                elif overridden:
+                    verdict, previous_report = {"used": False, "reason": "the request names its own files"}, None
+                else:
+                    verdict, previous_report = _previous(model, context, shown, log)
             except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
                 verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
             if previous_report is not None:
@@ -235,7 +360,7 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             continue
         report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
         try:
-            _finish(model, result, run, report, log)
+            _finish(model, result, run, report, log, plans[model.name])
         except Exception as error:  # noqa: BLE001 - a file that cannot be written is the build's error
             report["ok"] = False
             report["error"] = "".join(traceback.format_exception_only(type(error), error)).rstrip()
@@ -250,11 +375,13 @@ def _shown(script: Path, cwd: Path | None) -> str:
         return str(script)
 
 
-def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None]) -> None:
-    from cadgen.engine import document, exports
+def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Callable[[str], None],
+            plan: list | None = None) -> None:
+    from cadgen.engine import document
 
     timings = report["timings"]
-    targets = model.targets()
+    plan = plan if plan is not None else model.plan()
+    targets = [(target.kind, target.path) for target in plan]
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
@@ -303,34 +430,111 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     for kind, path in targets:
         if kind == "xbf":
             _BUILT[os.path.normcase(str(path))] = built
+    _write(model, plan, tree, signature, report, log)
+    timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
+
+
+def _options(target: Any) -> str:
+    return json.dumps(target.options, sort_keys=True, default=repr)
+
+
+def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str, Any],
+           log: Callable[[str], None]) -> None:
+    """The model's files: the xbf first -- saved, and the viewer woken with it, before any
+    derived file is written -- then each derived file, translated from the document
+    (``export.translate``; a snapshot drawn of it). A file whose document, options and
+    stat are what this process left is kept, not rewritten; the xbf is not rewritten when
+    its bytes are the file's."""
+    from cadgen.engine import document
+
+    timings = report["timings"]
     key = f"{model.script}::{model.name}"
     remembered = _WRITTEN.get(key)
-    stats = {str(path): _stat(path) for _kind, path in targets}
+    stats = {str(target.path): _stat(target.path) for target in plan}
+    files = dict((remembered.files or {}) if remembered is not None else {})
+    same = remembered is not None and remembered.signature == signature
+
+    def current(target: Any) -> bool:
+        stat = stats[str(target.path)]
+        if not same or stat is None:
+            return False
+        if target.kind == "xbf":
+            return remembered.stats.get(str(target.path)) == stat
+        return files.get(str(target.path)) == (signature, _options(target), stat)
+
+    stale = [target for target in plan if not current(target)]
     written: dict[str, Any] = {}
-    if remembered is not None and remembered.signature == signature and remembered.stats == stats:
-        for _kind, path in targets:
-            written[str(path)] = {"written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
-    else:
+    for target in plan:
+        if target not in stale:
+            written[str(target.path)] = {"kind": target.kind, "written": False, "seconds": 0.0,
+                                         "bytes": stats[str(target.path)][1]}
+    kept = remembered.kept if remembered is not None and remembered.kept is not None else None
+    # The document is made again when it changed, when its xbf is written, or when none is
+    # held: a build always leaves its document in memory, for the exports asked of it later.
+    if not same or kept is None or kept.doc is None or any(target.kind == "xbf" for target in stale):
         clock = time.perf_counter()
-        kept = remembered.kept if remembered is not None and remembered.kept is not None else document.Kept()
+        kept = kept if kept is not None else document.Kept()
         doc = document.to_xcaf(tree, kept)
         timings["document"] = round(time.perf_counter() - clock, 4)
         report["converted"] = {"prototypes": len(tree.order), "converted": kept.converted, "patched": kept.patched}
-        for kind, path in targets:
+    else:
+        doc = kept.doc
+    if stale:
+        xbf = next((target.path for target in plan if target.kind == "xbf"), None)
+        source = None
+        for target in stale:
             clock = time.perf_counter()
-            if kind == "xbf":
-                # A fresh process compares what it made with the file: the same bytes
-                # are not written again.
-                fresh, size = document.save(doc, path, compare=remembered is None)
+            if target.kind == "xbf":
+                # A fresh process compares what it made with the file: the same bytes are not
+                # written again. A save tells the viewer before the build goes on (``worker``).
+                fresh, size = document.save(doc, target.path, compare=remembered is None)
             else:
-                fresh, size = True, exports.write(kind, doc, tree, path)
+                from cadgen.engine import export
+
+                if source is None:
+                    source = export.Source.built(doc, tree, xbf)
+                if target.kind == "snapshot":
+                    from cadgen.engine import snapshot
+
+                    size = snapshot.draw(source, target.path, **target.options)["bytes"]
+                else:
+                    size = export.translate(source, target.kind, target.path, **target.options)
+                fresh = True
+                files[str(target.path)] = (signature, _options(target), _stat(target.path))
             seconds = time.perf_counter() - clock
-            timings[kind] = round(seconds, 4)
-            written[str(path)] = {"written": fresh, "seconds": round(seconds, 4), "bytes": size}
-            log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
-        _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets}, kept, tree.key)
-    report["files"] = written
-    timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
+            timings[target.kind] = round(seconds, 4)
+            written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),
+                                         "bytes": size}
+            log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(target.path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
+    _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.key,
+                             files, tree)
+    report["files"] = {str(target.path): written[str(target.path)] for target in plan}
+
+
+def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:
+    """The document this process last built, as an ``export.Source``: model ``name`` of
+    ``script`` (any of its models when ``name`` is None and it has one), or the model whose
+    xbf is ``path`` while the file is as the build left it. None when it holds none."""
+    from cadgen.engine import export
+
+    found = []
+    for key, written in _WRITTEN.items():
+        if written.kept is None or written.kept.doc is None or written.tree is None:
+            continue
+        model_script, _sep, function = key.rpartition("::")
+        xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
+        if path is not None:
+            if xbf is None or os.path.normcase(str(xbf)) != os.path.normcase(str(Path(path).resolve())):
+                continue
+            if _stat(xbf) != written.stats.get(str(xbf)):
+                continue
+        elif script is not None and (Path(model_script) != Path(script) or (name is not None and function != name)):
+            continue
+        found.append((written, xbf))
+    if len(found) != 1:
+        return None
+    written, xbf = found[0]
+    return export.Source.built(written.kept.doc, written.tree, xbf)
 
 
 def _statuses(run: Any, name: str) -> dict[str, str]:

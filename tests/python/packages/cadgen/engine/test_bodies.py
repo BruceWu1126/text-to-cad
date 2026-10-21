@@ -127,7 +127,7 @@ class BodiesCase(unittest.TestCase):
         return report
 
     def document(self) -> tuple[bytes, dict]:
-        path = self.folder / "root.xbf"
+        path = self.folder / "XBF/root.xbf"
         loaded = document.load(path)
         return path.read_bytes(), {p.name: (dict(p.face_names), dict(p.edge_names)) for p in loaded.prototypes}
 
@@ -143,7 +143,7 @@ class RetentionTest(BodiesCase):
         memo.clear()
         engine_build._WRITTEN.clear()
         engine_build._PARTS.clear()
-        (self.folder / "root.xbf").unlink()
+        (self.folder / "XBF/root.xbf").unlink()
         self.assertEqual(_counts(self.build()), (4, 0))
         ran = self.document()
         self.assertEqual(replayed[1], ran[1], "every element name")
@@ -176,7 +176,7 @@ class RetentionTest(BodiesCase):
         report = self.build()
         self.assertEqual(_counts(report), (1, 3))
         self.assertEqual(report["named"], 1, "only the newly cut plate: the replayed child's part is the run's own")
-        structure = document.load(self.folder / "root.xbf").structure()
+        structure = document.load(self.folder / "XBF/root.xbf").structure()
         by_path = {i["path"]: i["prototype"] for i in structure["instances"]}
         self.assertEqual(by_path["root/left"], by_path["root/two"])
         self.assertNotEqual(by_path["root/left"], by_path["root/plate"])
@@ -438,7 +438,7 @@ class ReadTracingTest(unittest.TestCase):
         from OCP.BRepBndLib import BRepBndLib
 
         bounds = Bnd_Box()
-        BRepBndLib.Add_s(document.load(self.folder / f"{model}.xbf").prototypes[0].shape, bounds)
+        BRepBndLib.Add_s(document.load(self.folder / f"XBF/{model}.xbf").prototypes[0].shape, bounds)
         return bounds.CornerMax().X() - bounds.CornerMin().X()
 
     def test_a_body_that_loads_a_file_replays_on_a_no_op(self) -> None:

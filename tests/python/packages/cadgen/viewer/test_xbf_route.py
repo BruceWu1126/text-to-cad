@@ -54,7 +54,7 @@ class XbfRouteTest(unittest.TestCase):
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "--no-daemon", "block.py"], cwd=cls.base,
                               env=env, capture_output=True, text=True, timeout=300)
         assert done.returncode == 0, done.stderr
-        cls.document = cls.base / "block.xbf"
+        cls.document = cls.base / "XBF" / "block.xbf"
         cls.app = create_cad_app(host="127.0.0.1", port=0, dist_dir="")
         cls.server = handler_module.serve(cls.app, "127.0.0.1", 0)
         cls.port = cls.server.server_address[1]

@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
-           "posed_tree", "read_step_shape", "save", "to_xcaf", "unchecked"]
+           "read_step_shape", "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
@@ -1322,8 +1322,13 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
-    path = Path(path).resolve()
-    stat = path.stat()
+    # A document no file holds yet (code built with no --xbf) has the version "0-0".
+    path = Path(path).resolve() if path is not None else None
+    try:
+        stat = path.stat() if path is not None else None
+    except OSError:
+        stat = None
+    version = f"{stat.st_mtime_ns}-{stat.st_size}" if stat is not None else "0-0"
     prototypes: list[dict[str, Any]] = []
     instances: list[dict[str, Any]] = []
     index_of: dict[int, int] = {}
@@ -1399,7 +1404,7 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
         return {"name": name, "prototype": index, "instance": len(instances) - 1}
 
     root = visit(tree.root, _identity(), [tree.root.name], None, tree.root.name)
-    found = {"name": root["name"], "path": str(path), "version": f"{stat.st_mtime_ns}-{stat.st_size}", "units": "mm",
+    found = {"name": root["name"], "path": str(path) if path is not None else "", "version": version, "units": "mm",
              "prototypes": prototypes, "instances": instances, "tree": root}
     if tree.mechanism is not None:
         from cadgen.engine import mechanism
@@ -1407,60 +1412,6 @@ def tree_structure(tree: Tree, path: Path) -> dict[str, Any]:
         found["kinematics"] = mechanism.block(tree.mechanism, paths,
                                               lambda at: _matrix(mechanism._occurrence(tree, at)[0]))
     return found
-
-
-def posed_tree(loaded: "Loaded", matrices: list[list[float]]) -> Tree:
-    """A loaded document as a tree whose part instances stand at ``matrices`` (4x4,
-    column-major, one per instance): what a posed STEP is written from. Every placement of
-    an assembly is an assembly of its own here, so two placements of one sub-assembly can
-    stand two ways; names, colours, materials and element names are the document's."""
-    import numpy as np
-    from OCP.gp import gp_Trsf
-    from OCP.TopLoc import TopLoc_Location
-
-    from cadgen.engine.mechanism import _from_column, _numpy
-
-    def located(matrix: Any) -> Any:
-        trsf = gp_Trsf()
-        trsf.SetValues(*(float(matrix[row, column]) for row in range(3) for column in range(4)))
-        return TopLoc_Location(trsf)
-
-    def world(path: tuple[int, ...]) -> Any:
-        found = loaded.worlds.get(path)
-        return np.eye(4) if found is None else _numpy(found)
-
-    parts = []
-    for prototype in loaded.prototypes:
-        names = {kind: [given.get(ordinal) for ordinal in range(1, max(given, default=0) + 1)]
-                 for kind, given in (("faces", prototype.face_names), ("edges", prototype.edge_names))}
-        parts.append(Part(prototype.shape, prototype.name, prototype.color, dict(prototype.face_colors),
-                          prototype.key, names, material=prototype.material,
-                          face_materials=dict(prototype.face_materials)))
-    order: list = list(parts)
-
-    def leaf(node: dict[str, Any], parent: tuple[int, ...]) -> Component:
-        instance = loaded.instances[node["instance"]]
-        local = np.linalg.inv(world(parent)) @ _from_column(matrices[node["instance"]])
-        return Component(parts[node["prototype"]], located(local), node["name"], instance.color)
-
-    def assembly(node: dict[str, Any], path: tuple[int, ...]) -> Assembly:
-        made = Assembly(node["name"])
-        for at, child in enumerate(node["children"]):
-            if "children" in child:
-                below = assembly(child, path + (at,))
-                local = np.linalg.inv(world(path)) @ world(path + (at,))
-                made.components.append(Component(below, located(local), child["name"], None))
-            else:
-                made.components.append(leaf(child, path))
-        order.append(made)
-        return made
-
-    if "children" in loaded.tree:
-        root = assembly(loaded.tree, ())
-    else:
-        root = Assembly(loaded.tree["name"], [leaf(loaded.tree, ())])
-        order.append(root)
-    return Tree(root, order, parts, ("posed",))
 
 
 def _read(path: Path) -> Any:
