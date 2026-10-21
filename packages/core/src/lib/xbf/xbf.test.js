@@ -168,7 +168,7 @@ test("a look's parameters: a colour alone without a material, the material's who
   assert.equal("transmission" in lacquer, false);
 });
 
-test("a document's materials: a physical material per look, worn in Preview; the regular modes draw the engine's plain surface", async () => {
+test("a document's materials: a physical material per look, kept in the shaded looks, the engine's plain one in X-ray and Parts", async () => {
   const structure = structuredClone(STRUCTURE);
   structure.prototypes[0].material = BRUSHED;
   structure.prototypes[0].faceMaterials = { 2: LACQUER };
@@ -187,28 +187,24 @@ test("a document's materials: a physical material per look, worn in Preview; the
   assert.ok(Math.abs(pegOne.material.thickness - Math.min(pegBox.x, pegBox.y, pegBox.z)) < 1e-6, "as thick as the part");
   assert.equal(plate.geometry.getAttribute("tangent")?.itemSize, 4, "an anisotropic look brushes along tangents");
   assert.equal(pegOne.geometry.getAttribute("tangent"), undefined);
-  // Preview: the finish kept, reflecting the environment the host hands the scene (the studio's own
-  // under Render, which hands none), the lacquer's glow too.
+  // Solid: the finish kept, reflecting the environment the host hands the scene.
   const studio = new THREE.Texture();
   scene.setReflection(studio);
-  scene.setSurfaceLook({ ...LOOK, authored: true });
-  let [worn, coat] = plate.material;
+  scene.setSurfaceLook(LOOK);
+  let [worn] = plate.material;
   assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap, worn.envMapIntensity],
     [1, 0.35, 0.3, studio, XBF_REFLECTION_INTENSITY]);
-  assert.deepEqual([coat.clearcoat, coat.emissiveIntensity], [1, 2]);
   assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [1, studio]);
-  // Solid, X-ray and Parts: the engine's look draws no finish, as OCCT's Phong draws none: the
-  // look's plain surface over the material's colour, no coat, no glow, nothing reflected.
-  for (const look of [LOOK, { ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
+  // X-ray and Parts: the engine's look's finish, as any other surface's.
+  for (const look of [{ ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
     { ...LOOK, materialSettings: { ...LOOK.materialSettings, overrideSourceColors: true } }]) {
     scene.setSurfaceLook(look);
-    [worn, coat] = plate.material;
+    [worn] = plate.material;
     assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap], [0, PLAIN.roughness, 0, null]);
-    assert.deepEqual([coat.clearcoat, coat.emissiveIntensity], [0, 0]);
     assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [0, null]);
   }
-  scene.setSurfaceLook({ ...LOOK, authored: true });
-  assert.equal(plate.material[0].metalness, 1, "and Preview's again");
+  scene.setSurfaceLook(LOOK);
+  assert.equal(plate.material[0].metalness, 1, "and Solid again");
   // Its mass: the mesh volume by the density, the peg's glass too; a part with none says so.
   const one = scene.measureParts(["i0"]);
   assert.ok(Math.abs(one.mass - one.volume * 1e-9 * 2700) < 1e-12);
