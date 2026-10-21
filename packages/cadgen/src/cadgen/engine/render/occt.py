@@ -71,7 +71,6 @@ FLOOR_REACH = 200.0
 def vertical_fov(aspect: float, focal_length: float = FOCAL_LENGTH) -> float:
     """three's ``PerspectiveCamera.setFocalLength``: the film's height is the gauge over the aspect."""
     return math.degrees(2 * math.atan(0.5 * (35.0 / max(aspect, 1.0)) / focal_length))
-SOURCE = Path(__file__).resolve().parents[6]  # the repository (for the viewer's explode layout)
 
 
 def _color(value: Any) -> Any:
@@ -485,7 +484,8 @@ class Scene:
         from cadgen.engine.render.explode import offsets
 
         clock = time.perf_counter()
-        self.offsets = offsets(self.structure, self.boxes, self.matrices, amount, SOURCE) if amount > 0 else {}
+        self.offsets = offsets(self.structure, [self.meshes[p["key"]] for p in self.prototypes], self.matrices,
+                               amount) if amount > 0 else {}
         return time.perf_counter() - clock
 
     def clear_overlays(self) -> None:
