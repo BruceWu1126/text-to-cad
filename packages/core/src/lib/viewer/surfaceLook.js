@@ -12,10 +12,14 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 // A look is plain data:
 //   { materialSettings,     resolved display material settings
 //                           (`resolveDisplayMaterialSettings`): fills, colour
-//                           grading and the finish channels
+//                           grading and the finish channels (a `specularIntensity`
+//                           among them replaces the authored one)
 //     authored: boolean,    true: keep each material's own finish, sidedness and
 //                           source colours (photographic Render)
-//     surface: { style: "shaded" | "flat", opacity } }
+//     surface: { style: "shaded" | "flat", opacity },
+//     colorPower?: number } each surface's colour, linear, raised to this power (1, as
+//                           written, unless a scene's own look says otherwise:
+//                           `lib/xbf/xbfLook.js`)
 //
 // A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
 // scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
@@ -67,6 +71,9 @@ function plainFinish(THREE) {
   plain.dispose();
   return found;
 }
+
+// How strongly an authored material answers light specularly (a standard one: three's default).
+const authoredSpecular = (material) => (material.isMeshPhysicalMaterial ? material.specularIntensity : 1);
 
 function inspectStandIn(THREE, authored) {
   if (authored.isMeshPhysicalMaterial) return authored.clone();
@@ -126,14 +133,16 @@ export function createSurfaceLook(THREE, root) {
     const forceFill = Boolean(look) && settings.overrideSourceColors === true;
     const flat = look?.surface?.style === "flat";
     const opacityScale = look?.surface ? clamp01(look.surface.opacity, 1) : 1;
+    const power = Number(look?.colorPower) > 0 ? Number(look.colorPower) : 1;
     for (const entry of slots) {
       const { lit, authored } = entry;
       const sourceColored = lit.userData?.cadSourceColor !== false;
       const filled = forceFill || (!authoredLook && !sourceColored);
       const fillIndex = settings.cycleColors === true ? entry.fillIndex : 0;
-      const color = filled ? resolveMaterialFillBaseColor(THREE, settings, fillIndex)
+      let color = filled ? resolveMaterialFillBaseColor(THREE, settings, fillIndex)
         : authoredLook || authored.vertexColors ? authored.color
           : shapeSourceColor(THREE, authored.color, settings);
+      if (power !== 1) color = new THREE.Color(color.r ** power, color.g ** power, color.b ** power);
       const opacity = clamp01(authored.opacity * opacityScale, 1);
       const next = {
         map: forceFill ? null : authored.map,
@@ -154,6 +163,7 @@ export function createSurfaceLook(THREE, root) {
           // A finish the file authored, kept, reflecting the environment it is handed.
           for (const key of FINISH_KEYS) target[key] = lit[key];
           target.attenuationColor.copy(lit.attenuationColor);
+          target.specularIntensity = authoredSpecular(lit);
           // With none handed to it (photographic Render), the scene's own environment, in full.
           if (target.envMap !== reflection.texture) { target.envMap = reflection.texture; target.needsUpdate = true; }
           target.envMapIntensity = reflection.texture ? reflection.intensity : 1;
@@ -165,6 +175,7 @@ export function createSurfaceLook(THREE, root) {
             if (target.envMap) { target.envMap = null; target.needsUpdate = true; }
           }
           for (const key of ["roughness", "metalness", "clearcoat", "clearcoatRoughness"]) target[key] = clamp01(settings[key]);
+          target.specularIntensity = settings.specularIntensity === undefined ? authoredSpecular(lit) : clamp01(settings.specularIntensity);
           target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
         }
         // The viewer lifts its surfaces by a trace of their own colour. A part that

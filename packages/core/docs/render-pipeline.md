@@ -28,7 +28,9 @@ The stages keep ownership narrow:
   document read by `loadXbfDocument` from the engine that serves it: one geometry per
   prototype over its XBM2 buffer's own typed-array views, one placed group per instance, CAD
   edges by class from the edge table, faces, edges and vertices picked by ordinal; the
-  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`). Each returns the scene contract of
+  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`; its
+  regular modes are drawn in the engine's look, `GET /api/look`, read beside the document:
+  `lib/xbf/xbfLook.js`). Each returns the scene contract of
   `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
   second scene of the same file with its own objects, materials and look over the first's
   geometry (`lib/render/sharedGeometry.js`), which the viewer's Preview draws beside
@@ -37,7 +39,10 @@ The stages keep ownership narrow:
   has its own links and pose, and its own vertex colours. Ownership is
   [resource-ownership §1](resource-ownership.md#1-shared-ownership-and-disposal).
 - `renderModel` owns renderer, scene, camera, lighting, background, floor,
-  framing, resizing, and render loop concerns.
+  framing, resizing, and render loop concerns. A scene that brings its own lighting (the
+  contract's `rig`: an engine document's, its engine's look) is lit by it outside Render in place
+  of the theme's lights, its tone curve three's `CustomToneMapping` (`lib/viewer/sceneRig.js`, which
+  the viewer's viewport puts up the same way); every other scene keeps the theme's rig.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
 
 The CAD skill's Python snapshot CLI remains responsible for job parsing, path

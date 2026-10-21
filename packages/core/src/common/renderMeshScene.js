@@ -31,6 +31,7 @@ import {
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
+import { applySceneRig } from "../lib/viewer/sceneRig.js";
 import {
   applyExplodedViewProgress,
   clearExplodedViewRecords,
@@ -654,7 +655,10 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     }
     return resource;
   });
-  if (!context.sceneSettings.view.lighting.enabled) applyLighting(
+  // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`) is lit by it outside
+  // Render, in place of the theme's rig, as the viewer's viewport lights it (`sceneRig.js`).
+  const sceneRig = !photographicConfiguration && model.scene?.rig ? applySceneRig(THREE, { scene, renderer }, model.scene.rig) : null;
+  if (!sceneRig && !context.sceneSettings.view.lighting.enabled) applyLighting(
     scene,
     context.theme,
     model.bounds || context.bounds,
@@ -713,6 +717,7 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       viewport.sceneClip?.dispose();
       model.dispose?.();
       scene.remove?.(model.root);
+      sceneRig?.dispose();
       if (studioRuntime) disposePhotographicStudio(studioRuntime);
       if (scene.environment === environmentResource?.texture) scene.environment = null;
       if (scene.background === environmentResource?.texture) scene.background = null;

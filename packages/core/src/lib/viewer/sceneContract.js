@@ -2,8 +2,9 @@
 // (`@text-to-cad/ui` renderers/kit) and the snapshot CLI's headless stage
 // (`common/headlessScene.js`). It is deliberately tiny, so neither reaches into a
 // scene: the host adopts `object3D`, frames `restBounds` (else `bounds`), hands over
-// the surface look it resolved, and the scene's OWNER calls `dispose()` (a host only
-// detaches). Everything else about a scene is its family's business.
+// the surface look it resolved, lights it with its own `rig` where it brings one, and the
+// scene's OWNER calls `dispose()` (a host only detaches). Everything else about a scene is
+// its family's business.
 //
 // One builder per family makes these scenes, and both hosts call the same one: the
 // viewer and a snapshot cannot draw a family differently, because there is only one
@@ -18,6 +19,13 @@
  *   fills, colour grading), whether photographic Render keeps what was authored, and the
  *   Surfaces section's style and opacity. `resolveSceneSurfaceLook` (`common/sceneSettings.js`)
  *   is the one place a look is resolved from display settings.
+ *
+ * @typedef {{ id: string, ambient: { color: string, intensity: number },
+ *   lights: { name: string, towards: [number, number, number], color: string, intensity: number }[],
+ *   environment: number, exposure: number, toneCurve: string }} SceneRig
+ *   A scene's own lighting, in three's units (`sceneRig.js`): an ambient light, directional lights
+ *   shining from `towards` (world frame) that cast no shadow, the scene's environment intensity,
+ *   the renderer's exposure and a tone curve of `SCENE_RIG_TONE_CURVES`.
  *
  * @typedef {object} KitScene
  * @property {import("three").Object3D} object3D  What the host adopts under its model group.
@@ -34,6 +42,12 @@
  *   surfaces do not all take shadows (unlit or see-through ones) implements it and applies its own rule.
  * @property {boolean} [keepsAuthoredFinish]  The scene shows authored finishes in Inspect too,
  *   so Inspect gives it a small neutral environment to reflect.
+ * @property {SceneRig | null} [rig]  The lighting the scene is drawn under in the regular display
+ *   modes, in place of the theme's: a scene drawn as its source's own renderer draws it (an engine
+ *   document: `lib/xbf/xbfLook.js`). Outside Preview's Render the host hides the theme's lights and
+ *   puts this up instead (`sceneRig.js`, `applySceneRig`): its lights, its exposure, its tone curve
+ *   as three's `CustomToneMapping` and its environment intensity; Render lights every scene alike.
+ *   Absent or null: the theme's rig, as ever.
  * @property {(texture: import("three").Texture | null) => void} [setReflection]  The scene keeps
  *   authored finishes on some surfaces only, and reflects an environment on those alone: outside
  *   photographic Render the host hands it the studio's neutral environment (Preview's, at its

@@ -26,6 +26,9 @@
 // The display modes are the shared view settings' (`common/viewSettings.js`), resolved by the
 // host as for any family: the surface look (`setSurfaceLook`: Solid, Shaded, Parts, X-ray; Hidden
 // line's depth-only surfaces and Wireframe's none) and the edges the mode draws (`setEdgeLook`).
+// They are drawn as the engine draws them (`xbfLook.js`, the look the engine serves beside the
+// document): the scene brings its own `rig`, which the stage lights it with in place of the
+// theme's, and its surfaces wear the look's colour rule and finish.
 // Selection is drawn as a STEP's is: a lit part blended toward the highlight with its edges in
 // it (`setHighlight`), a picked face filled and outlined and a picked edge drawn heavy in the
 // highlight colour (`setElementHighlight`), an isolated part's neighbours dimmed (`setFocusedParts`).
@@ -44,6 +47,7 @@ import { createSceneExplode } from "../viewer/sceneExplode.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
+import { xbfLookRig, xbfLookSurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS_NAMES, xbfEdgeLine, xbmFaceRow, xbmEdgeRow, xbmTriangleFaceRows } from "./xbm.js";
 import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
@@ -354,6 +358,10 @@ export function xbfMeshVolume(mesh) {
 export function createXbfScene(THREE, document) {
   const { structure } = document;
   const prototypes = structure.prototypes;
+  // How the engine draws the regular modes: the rig a stage lights this scene with there, and what
+  // its surfaces wear there. A document read without the engine's look is drawn under the theme's.
+  const rig = document.look ? xbfLookRig(document.look) : null;
+  const lookSurface = document.look ? xbfLookSurface(document.look) : null;
   const root = new THREE.Group();
   root.name = "xbf-document";
   const ownedGeometries = [];
@@ -778,11 +786,21 @@ export function createXbfScene(THREE, document) {
     /** Faces the mesher left without triangles, by prototype: reported, not drawn. */
     unmeshed,
     triangleCount,
+    /** The lighting of the regular modes (`sceneContract.js`): the engine's look's (`xbfLookRig`). */
+    rig,
     // A part or face the document gave a material keeps its finish in the shaded modes and in
-    // Preview; every other surface wears the look's finish over its colour, as a STEP's does.
+    // Preview; every other surface wears the look's finish over its colour, as a STEP's does. In
+    // the regular modes every colour follows the engine's look (its power, ungraded) and the
+    // finish of a surface without one is the look's (`xbfLookSurface`); photographic Render's look
+    // (`authored`) is worn as any scene wears it.
     setSurfaceLook(next) {
       if (disposed) return;
+      const regular = Boolean(next && lookSurface) && next.authored !== true;
       lastLook = next ? { ...next, authored: false } : null;
+      if (regular) {
+        lastLook.colorPower = lookSurface.colorPower;
+        lastLook.materialSettings = { ...next.materialSettings, ...lookSurface.materialSettings };
+      }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";
       applySurfaces();
     },
