@@ -111,12 +111,19 @@ def direction_of(camera: str) -> tuple[np.ndarray, np.ndarray]:
     return d / np.linalg.norm(d), np.array(up, float)
 
 
+def prototype_shapes(prototype: dict[str, Any], mesh: Mesh) -> Any:
+    """A prototype's faces by its paints and its edges by class (``shapes.part_shapes``)."""
+    groups = {int(k): tuple(v) for k, v in (prototype.get("faceColors") or {}).items()}
+    return part_shapes(mesh, groups, None)
+
+
 class Scene:
     """A document on a canvas: its parts as shapes, one presentation per part and look, an
-    instance a connected object of it."""
+    instance a connected object of it. ``parts``: each prototype's ``prototype_shapes`` already
+    made, by index (a warm renderer's, ``service.py``), else made here."""
 
     def __init__(self, path: Path, buffers: dict[str, bytes], *, size: tuple[int, int] = (1600, 1200),
-                 structure: dict[str, Any] | None = None, pose: Any = None) -> None:
+                 structure: dict[str, Any] | None = None, pose: Any = None, parts: list[Any] | None = None) -> None:
         self.timings: dict[str, float] = {}
         clock = time.perf_counter()
         self.path = Path(path)
@@ -137,10 +144,8 @@ class Scene:
         clock = time.perf_counter()
         self.prototypes = structure["prototypes"]
         self.meshes = {p["key"]: Mesh.from_bytes(buffers[p["key"]]) for p in self.prototypes}
-        self.parts = []
-        for prototype in self.prototypes:
-            groups = {int(k): tuple(v) for k, v in (prototype.get("faceColors") or {}).items()}
-            self.parts.append(part_shapes(self.meshes[prototype["key"]], groups, None))
+        self.parts = list(parts) if parts is not None else [prototype_shapes(p, self.meshes[p["key"]])
+                                                            for p in self.prototypes]
         self.timings["shapes"] = time.perf_counter() - clock
         self.matrices = [_matrix(instance["matrix"]) for instance in structure["instances"]]
         self.rest = [_matrix(instance["matrix"]) for instance in self.rest_structure["instances"]]
@@ -488,10 +493,12 @@ class Scene:
                                amount) if amount > 0 else {}
         return time.perf_counter() - clock
 
-    def clear_overlays(self) -> None:
+    def clear_overlays(self, keep: Any = ()) -> None:
+        """Every overlay gone but ``keep``'s (what is shown for good: Preview's floor)."""
         for shown in self.overlays:
-            self.canvas.context.Remove(shown, False)
-        self.overlays = []
+            if not any(shown is kept for kept in keep):
+                self.canvas.context.Remove(shown, False)
+        self.overlays = [shown for shown in self.overlays if any(shown is kept for kept in keep)]
         for structure in self.structures:
             structure.Erase()
             structure.Remove()
@@ -842,7 +849,12 @@ class Scene:
             cover = np.clip((ratio * weight).sum(-1) / np.maximum(weight.sum(-1), 1e-9), 0, 1)[:, None]
             drawn[touched] = np.rint((ink * cover + under * (1 - cover)) * 255).astype(np.uint8)
 
-    def save(self, out: Path) -> float:
+    def painter(self) -> Any:
+        """What paints over the finished frame (sRGB bytes, in place): the text marks as three lays
+        them, then Measure's marks; None when there is nothing to paint."""
+        if not (self.text_quads or self.screen_marks):
+            return None
+
         def paint(frame: np.ndarray) -> None:
             if self.text_quads:
                 self._relay_text(frame)
@@ -850,7 +862,10 @@ class Scene:
                 from cadgen.engine.render.overlay import paint_measurements
 
                 paint_measurements(frame, self.screen_marks, self.project)
-        return self.canvas.save(str(out), paint if self.text_quads or self.screen_marks else None)
+        return paint
+
+    def save(self, out: Path) -> float:
+        return self.canvas.save(str(out), self.painter())
 
 
 _ENVIRONMENT = None

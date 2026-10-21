@@ -3,7 +3,9 @@
 It holds a warm worker per model script (``worker``) and hands each build to its
 script's worker, one build at a time per worker, builds of different scripts at once.
 It also serves documents over HTTP (``serve``), holding each loaded document and its
-parts' tessellations in its memory.
+parts' tessellations in its memory, and draws them (``draw``): each served document a
+snapshot asks for gets a render process of its own (``render/service.py``), started on its
+first picture, sent every version the document is patched to, gone with the daemon.
 
 Its only files are the operating system's coordination: a Unix socket and a lock in
 ``tempfile.gettempdir()/cadgen-engine`` (on Windows, a localhost TCP port and a token,
@@ -255,6 +257,8 @@ class Daemon:
         # Per xbf a build wrote (its path, ``os.path.normcase``d), the worker that built
         # it last: the one that holds its provenance (``provenance``).
         self.builders: dict[str, Worker] = {}
+        self.renders = None  # the served documents' render processes (``render.service.Renders``)
+        self.serving = threading.Lock()
 
     def touch(self) -> None:
         self.last = time.monotonic()
@@ -284,10 +288,24 @@ class Daemon:
         return worker.where(resolved, key, kind, ordinal)
 
     def patched(self, header: dict[str, Any], payload: bytes, arrived: float) -> None:
-        """A worker's document for a served path, put in place of the one served."""
+        """A worker's document for a served path, put in place of the one served, and sent on to
+        its render process when it has one."""
         server = self.server
         if server is not None:
             server.patch(header, payload, arrived)
+            if self.renders is not None and header.get("path"):
+                self.renders.patched(Path(header["path"]))
+
+    def serve(self, request: dict[str, Any]) -> Any:
+        """The daemon's server, started on the first request that needs one."""
+        from cadgen.engine.serve import MESHES, Server
+
+        with self.serving:
+            if self.server is None:
+                self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
+                                     provenance=self.provenance, cache=MESHES)
+                self.server.start()
+            return self.server
 
     def settled(self, worker: Worker, every: bool = False) -> None:
         """A worker is done with a build's documents (``every``: it is gone): their files
@@ -399,30 +417,55 @@ class Daemon:
                     self.busy -= 1
                 self.touch()
         elif op == "serve":
-            from cadgen.engine.serve import MESHES, Server
-
-            if self.server is None:
-                self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
-                                     provenance=self.provenance, cache=MESHES)
-                self.server.start()
+            server = self.serve(request)
             try:
-                ident = self.server.add(Path(request["path"]))
+                ident = server.add(Path(request["path"]))
             except Exception as error:  # noqa: BLE001
                 send({"failed": f"cannot serve {request['path']}: {error}"})
                 return
-            send({"ok": True, "url": f"{self.server.url}/?doc={ident}", "port": self.server.port})
+            send({"ok": True, "url": f"{server.url}/?doc={ident}", "port": server.port})
+        elif op == "draw":
+            self.draw(request, send)
         elif op == "status":
             with self.workers_lock:
                 workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive() and not w.retired,
                             "busy": w.lock.locked()} for w in self.workers.values()]
             send({"ok": True, "pid": os.getpid(), "workers": workers, "idle": round(time.monotonic() - self.last, 1),
                   "serving": None if self.server is None else {"url": self.server.url,
-                                                               "documents": self.server.listing()}})
+                                                               "documents": self.server.listing()},
+                  "renders": [] if self.renders is None else self.renders.status()})
         elif op == "stop":
             send({"ok": True})
             self.stopping.set()
         else:
             send({"failed": f"unknown request {op!r}"})
+
+    def draw(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
+        """A picture of a document (``{"op": "draw", "path", "still"}``, a ``snapshot.Still``):
+        served, meshed by the daemon's pool, drawn by its render process; answered with the PNG
+        (base64) and what was drawn, or refused by name."""
+        from cadgen.engine.render.service import Refused, Renders, answer_png
+
+        with self.busy_lock:
+            self.busy += 1
+        try:
+            server = self.serve(request)
+            with self.serving:
+                if self.renders is None:
+                    self.renders = Renders(server)
+            try:
+                data, report = self.renders.draw(Path(request["path"]), request["still"])
+            except Refused as error:
+                send({"refused": str(error)})
+                return
+            except Exception as error:  # noqa: BLE001 - a picture that could not be drawn is the answer
+                send({"failed": f"{type(error).__name__}: {error}"})
+                return
+            send({"ok": True, "report": report, "png": answer_png(data)})
+        finally:
+            with self.busy_lock:
+                self.busy -= 1
+            self.touch()
 
     def watch(self) -> None:
         while not self.stopping.wait(min(30.0, max(self.idle / 10, 0.2))):
@@ -434,6 +477,8 @@ class Daemon:
             for worker in self.workers.values():
                 worker.stop()
             self.workers.clear()
+        if self.renders is not None:
+            self.renders.stop()
         if self.server is not None:
             self.server.stop()
 

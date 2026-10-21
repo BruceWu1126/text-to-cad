@@ -134,7 +134,8 @@ def hinge():
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory; `CADGEN_SNAPSHOT_RENDERER=occt` draws a document with `render/` |
+| `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), and `cadgen where` (`where_main`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -181,7 +182,8 @@ previous files stay. The daemon starts on demand and exits after an idle hour
 `CADGEN_ENGINE_WORKER_RSS_MB` after a build (default: a quarter of the machine's memory,
 at least 2 GiB; `0` for no cap) is retired: the report says so (`retired`), the worker
 exits once it has answered, and the next build is a fresh worker's -- a restart, which
-takes the xbf whole when its closure is unchanged (**Build closure**). `CADGEN_ENGINE_DIR` moves its socket and lock.
+takes the xbf whole when its closure is unchanged (**Build closure**). A render process (**The viewer and the
+snapshot**) is held to the same cap after each picture. `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
 processes started with the server, each handed one part's shape as bytes,
