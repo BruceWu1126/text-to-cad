@@ -87,7 +87,7 @@ same pipe, even while a build runs."""
 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,
-                 on_settled: Callable[..., None] = lambda _worker, _every=False: None) -> None:
+                 on_settled: Callable[..., None] = lambda _worker, _every=False: None, cwd: str | None = None) -> None:
         self.script = script
         self.environment = environment
         env = dict(environment)
@@ -96,9 +96,10 @@ same pipe, even while a build runs."""
         if root not in path.split(os.pathsep):
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env["CADGEN_ENGINE_WORKER"] = "1"
         self.process = subprocess.Popen([sys.executable, "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                                        cwd=str(Path(script).parent))
+                                        cwd=cwd or str(Path(script).parent))
         self.lock = threading.Lock()
         self.writing = threading.Lock()  # one request line at a time on the worker's stdin
         self.asked: dict[str, "queue.Queue[Any]"] = {}
@@ -145,13 +146,21 @@ same pipe, even while a build runs."""
                         self.on_patch(message["patch"], payload, arrived)
                     except Exception:  # noqa: BLE001 - a document that cannot be patched is read from its file
                         pass
+                    try:
+                        # Held (or not): the build goes on to its derived files.
+                        self._write({"op": "patched", "path": message["patch"].get("path")})
+                    except (OSError, ValueError):
+                        pass
                 elif "settled" in message:
-                    self.on_settled(self)
+                    if message.get("op", "build") == "build":
+                        self.on_settled(self)
                 elif "where" in message:
                     waiting = self.asked.pop(str(message.get("id")), None)
                     if waiting is not None:
                         waiting.put(message["where"])
                 else:
+                    if payload:
+                        message["payload"] = payload
                     self.answers.put(message)
         except (OSError, ValueError, EOFError):
             pass
@@ -241,7 +250,9 @@ class Daemon:
     def touch(self) -> None:
         self.last = time.monotonic()
 
-    def worker(self, script: str, environment: dict[str, str]) -> Worker:
+    def worker(self, script: str, environment: dict[str, str], cwd: str | None = None) -> Worker:
+        """The warm worker of a script (by its path), of code (``code::<name>``) or of the
+        documents no worker built (``documents``), started when none is alive."""
         key = os.path.normcase(script)
         relevant = {name: environment.get(name, "") for name in ("PYTHONPATH", "PATH", "VIRTUAL_ENV")}
         with self.workers_lock:
@@ -250,7 +261,7 @@ class Daemon:
                 return found
             if found is not None:
                 found.stop()
-            found = self.workers[key] = Worker(script, environment, self.patched, self.settled)
+            found = self.workers[key] = Worker(script, environment, self.patched, self.settled, cwd=cwd)
             return found
 
     def provenance(self, path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
@@ -278,20 +289,78 @@ class Daemon:
             for paths in held:
                 self.server.release(paths)
 
+    def _routed(self, request: dict[str, Any]) -> tuple[str, str | None]:
+        """The worker a request goes to (its key) and the folder that worker starts in."""
+        if request.get("code") is not None or "code" in (request.get("source") or {}):
+            name = request.get("name") or (request.get("source") or {}).get("code") or "model"
+            return f"code::{name}", request.get("cwd")
+        source = request.get("source") or {}
+        if "path" in source:
+            builder = self.builders.get(os.path.normcase(str(Path(source["path"]).resolve())))
+            if builder is not None and builder.alive():
+                return builder.script, None
+            return "documents", request.get("cwd")
+        return request.get("script") or source["script"], None
+
+    def _call(self, request: dict[str, Any], order: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
+        """An export or a result asked of the worker the request routes to; its answer sent."""
+        with self.busy_lock:
+            self.busy += 1
+        try:
+            key, cwd = self._routed(request)
+            for attempt in (1, 2):
+                try:
+                    worker = self.worker(key, request.get("env") or {}, cwd)
+                    answer = worker.build(order, send)
+                    payload = answer.pop("payload", b"")
+                    if payload:
+                        import base64
+
+                        answer["payload"] = base64.b64encode(payload).decode("ascii")
+                    done = answer.get("done")
+                    # An export from a script built it first: that worker holds the xbf now.
+                    for row in (done.get("reports") or []) if isinstance(done, dict) else []:
+                        for path in row.get("files") or {}:
+                            if path.endswith(".xbf"):
+                                self.builders[os.path.normcase(path)] = worker
+                    send(answer)
+                    return
+                except WorkerGone as error:
+                    with self.workers_lock:
+                        self.workers.pop(os.path.normcase(key), None)
+                    if attempt == 2 or "during the build" in str(error):
+                        send({"failed": str(error)})
+                        return
+        finally:
+            with self.busy_lock:
+                self.busy -= 1
+            self.touch()
+
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
+        if op == "export":
+            order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
+                     "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd")}
+            return self._call(request, order, send)
+        if op == "result":
+            order = {"id": 1, "op": "result", "script": request["script"], "code": request["name"],
+                     "cwd": request.get("cwd")}
+            return self._call({**request, "code": request["name"]}, order, send)
         if op == "build":
             with self.busy_lock:
                 self.busy += 1
             try:
                 script = request["script"]
+                key, cwd = self._routed(request)
                 for attempt in (1, 2):
                     try:
-                        worker = self.worker(script, request.get("env") or {})
+                        worker = self.worker(key, request.get("env") or {}, cwd)
                         fresh = worker.builds == 0
                         order = {"id": 1, "op": "build", "script": script, "functions": request.get("functions"),
-                                 "cwd": request.get("cwd")}
+                                 "cwd": request.get("cwd"), "outputs": request.get("outputs"),
+                                 "pose": request.get("pose"), "part": request.get("part"),
+                                 "code": request.get("code"), "acknowledged": True}
                         server = self.server
                         if server is not None:
                             # The worker sends each served document it builds back as a patch,
@@ -310,7 +379,7 @@ class Daemon:
                         return
                     except WorkerGone as error:
                         with self.workers_lock:
-                            self.workers.pop(os.path.normcase(script), None)
+                            self.workers.pop(os.path.normcase(key), None)
                         if attempt == 2 or "during the build" in str(error):
                             send({"failed": str(error)})
                             return
@@ -319,11 +388,11 @@ class Daemon:
                     self.busy -= 1
                 self.touch()
         elif op == "serve":
-            from cadgen.engine.serve import Server
+            from cadgen.engine.serve import MESHES, Server
 
             if self.server is None:
                 self.server = Server(port=int(request.get("port") or 0), three=request.get("three"), touch=self.touch,
-                                     provenance=self.provenance)
+                                     provenance=self.provenance, cache=MESHES)
                 self.server.start()
             try:
                 ident = self.server.add(Path(request["path"]))
