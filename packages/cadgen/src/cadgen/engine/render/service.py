@@ -76,7 +76,7 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
     from OCP.Graphic3d import Graphic3d_Camera
     from OCP.gp import gp_Dir, gp_Pnt
 
-    from cadgen.engine.render.occt import PRESETS, vertical_fov
+    from cadgen.engine.render.occt import PRESETS, occt_fov, occt_scale, vertical_fov
 
     def vector(name: str) -> np.ndarray | None:
         value = spec.get(name)
@@ -114,7 +114,7 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
         camera.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Perspective)
         # three's zoom narrows the field of view.
         fov = float(np.degrees(2 * np.arctan(np.tan(np.radians(fov / 2)) / zoom)))
-        camera.SetFOVy(fov)
+        camera.SetFOVy(occt_fov(fov, aspect))  # OCCT's spans the width when taller than wide
         if position is not None:
             eye = position
         else:
@@ -138,9 +138,8 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
         middle = right * (xs.max() + xs.min()) / 2 + screen_up * (ys.max() + ys.min()) / 2
         target = middle + d * float(target @ d)
         eye = target + d * radius * 4
-        # OCCT's scale is the height of the view, or its width when the picture is taller than wide.
         scale = 2 * half
-        camera.SetScale(scale if aspect >= 1 else scale * aspect)
+        camera.SetScale(occt_scale(scale, aspect))
     camera.SetEyeAndCenter(gp_Pnt(*map(float, eye)), gp_Pnt(*map(float, target)))
     camera.SetUp(gp_Dir(*map(float, screen_up)))
     scene.canvas.view.ZFitAll(1.0)

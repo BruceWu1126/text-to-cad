@@ -262,6 +262,42 @@ class HeldTest(unittest.TestCase):
         np.testing.assert_allclose(middle, (160, 120), atol=0.5)
         np.testing.assert_allclose(top, (160, 0), atol=0.5)
 
+    def test_every_segment_of_a_zigzag_stroke_is_drawn(self) -> None:
+        """A stroke's segments each at the stroke's width, however sharp its turns (a strip with one
+        side per point folded every other segment of a zigzag away)."""
+        points = np.stack([np.linspace(-15, 15, 7), np.where(np.arange(7) % 2, 8.0, -8.0), np.full(7, 2.05)], 1)
+        zigzag = {"units": "mm", "parts": {}, "marks": [{"id": "z", "kind": "stroke", "part": "i1", "color": "#ff00ff",
+                                                         "width": 6, "points": points.ravel().tolist()}]}
+        found = pixels(self.draw((640, 480), display={"mode": "solid"}, annotation=zigzag)[0])
+        scene = self.held.scenes[False]
+        placement = scene.placement(1)
+        line = scene.project(points @ placement[:3, :3].T + placement[:3, 3])
+        ink = np.abs(found - np.array([255, 0, 255])).max(-1) < 60
+        for index, (start, end) in enumerate(zip(line[:-1], line[1:])):
+            for share in np.linspace(0.2, 0.8, 7):
+                x, y = np.rint(start + (end - start) * share).astype(int)
+                self.assertTrue(ink[y - 1:y + 2, x - 1:x + 2].any(), f"segment {index}, {share:.0%} along")
+
+    def test_a_portrait_still_is_framed_as_the_page_frames_it(self) -> None:
+        """Taller than wide, OCCT spans its scale and its field of view across the width: a preset,
+        a fitted camera and a view's own camera each keep the page's framing, the wide bench's
+        width at the tight frame's padded edge (4% in from each side), not inside it."""
+        size = (90, 160)
+        for projection in ("orthographic", "perspective"):
+            for camera in ("iso", {"preset": "iso"}):
+                with self.subTest(projection=projection, camera=camera):
+                    self.draw(size, display={"mode": "solid", "camera": {"projection": projection}}, camera=camera)
+                    scene = self.held.scenes[False]
+                    found = scene.project(scene.placed_points()) / np.array(size) * 2 - 1
+                    self.assertAlmostEqual(float(np.abs(found[:, 0]).max()), 0.92, delta=0.01)
+                    self.assertLess(float(np.abs(found[:, 1]).max()), 0.92)
+        view = {"position": [140, -110, 90], "target": [40, 0, 0], "up": [0, 0, 1], "orthographicHalfHeight": 30}
+        self.draw(size, display={"mode": "solid"}, camera=view, exact=True)
+        scene = self.held.scenes[False]
+        middle, top = scene.project(np.array([view["target"], np.array(view["target"]) + scene.camera["up"] * 30]))
+        np.testing.assert_allclose(middle, (45, 80), atol=0.5)
+        np.testing.assert_allclose(top, (45, 0), atol=0.5)
+
     def test_what_the_document_does_not_offer_is_refused_by_name(self) -> None:
         with self.assertRaisesRegex(SnapshotRefused, "--pose: .*no configuration 'shut'"):
             self.draw(display={}, pose="shut")

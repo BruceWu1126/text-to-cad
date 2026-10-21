@@ -86,6 +86,18 @@ KEY_DIRECTION = (-0.35, -1.0, 1.5)
 SHADOW_TEXELS = 160
 
 
+def occt_scale(height: float, aspect: float) -> float:
+    """OCCT's orthographic scale for a view ``height`` tall: the scale is the view's height, or its
+    width when the picture is taller than wide."""
+    return height if aspect >= 1 else height * aspect
+
+
+def occt_fov(fov: float, aspect: float) -> float:
+    """OCCT's field of view for a vertical one of ``fov`` degrees: like its scale, OCCT's field of
+    view spans the width when the picture is taller than wide."""
+    return fov if aspect >= 1 else math.degrees(2 * math.atan(math.tan(math.radians(fov) / 2) * aspect))
+
+
 def vertical_fov(aspect: float, focal_length: float = FOCAL_LENGTH) -> float:
     """three's ``PerspectiveCamera.setFocalLength``: the film's height is the gauge over the aspect."""
     return math.degrees(2 * math.atan(0.5 * (35.0 / max(aspect, 1.0)) / focal_length))
@@ -395,17 +407,18 @@ class Scene:
         screen_up = np.cross(right, -d)
         aspect = self.canvas.width / self.canvas.height
         cam = self.canvas.view.Camera()
+        cam.SetAspect(aspect)  # the picture's, so what projects through the camera lands where it is drawn
         scale = None
         if projection == "perspective":
             cam.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Perspective)
-            cam.SetFOVy(vertical_fov(aspect, focal_length))
+            cam.SetFOVy(occt_fov(vertical_fov(aspect, focal_length), aspect))
         else:
             cam.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Orthographic)
             scale = 2 * float(camera["orthographicHalfHeight"]) / float(camera.get("zoom") or 1.0)
         cam.SetEyeAndCenter(gp_Pnt(*eye), gp_Pnt(*target))
         cam.SetUp(gp_Dir(*screen_up))
         if scale is not None:
-            cam.SetScale(scale)
+            cam.SetScale(occt_scale(scale, aspect))
         self.canvas.view.ZFitAll(1.0)
         self.camera = {"fov": vertical_fov(aspect, focal_length), "direction": d, "up": screen_up, "right": right,
                        "eye": eye, "target": target, "projection": projection, "scale": scale}
@@ -447,10 +460,11 @@ class Scene:
         centre = (low + high) / 2
         radius = float(np.linalg.norm(high - low)) / 2 or 1.0
         cam = self.canvas.view.Camera()
+        cam.SetAspect(aspect)  # the picture's, so what projects through the camera lands where it is drawn
         if projection == "perspective":
             cam.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Perspective)
             fov = vertical_fov(aspect, focal_length)
-            cam.SetFOVy(fov)
+            cam.SetFOVy(occt_fov(fov, aspect))
             vertical = math.tan(math.radians(fov / 2)) * safe
             horizontal = vertical * aspect
             relative = points - centre
@@ -471,7 +485,7 @@ class Scene:
         cam.SetEyeAndCenter(gp_Pnt(*eye), gp_Pnt(*target))
         cam.SetUp(gp_Dir(*screen_up))
         if scale is not None:
-            cam.SetScale(scale)
+            cam.SetScale(occt_scale(scale, aspect))
         self.canvas.view.ZFitAll(1.0)
         self.camera = {"fov": vertical_fov(aspect, focal_length), "direction": d, "up": screen_up, "right": right, "eye": eye, "target": target,
                        "projection": projection, "scale": scale}
@@ -541,38 +555,56 @@ class Scene:
         depth = float(np.dot(np.asarray(point) - camera["eye"], -camera["direction"]))
         return 2 * depth * math.tan(math.radians(camera["fov"] / 2)) / self.canvas.height
 
-    def _ribbon(self, points: np.ndarray, color: str, width: float, closed: bool = False) -> None:
-        """A polyline ``width`` pixels wide, as the viewer's screen-space lines are: a strip of
-        triangles facing the camera (a core-profile GL context draws GL lines one pixel wide)."""
+    def _ribbon(self, points: np.ndarray, color: str, width: float, closed: bool = False,
+                widths: Any = None) -> None:
+        """A polyline ``width`` pixels wide, as the viewer's screen-space lines are (three's
+        ``Line2``): each segment its own quad facing the camera, as wide as the line at its two ends
+        (``widths``: the pen's share of the width at each point), each point a disc of that width, so
+        segments meet round however sharp the turn (a core-profile GL context draws GL lines one
+        pixel wide)."""
         from OCP.AIS import AIS_Shape
         from OCP.Graphic3d import Graphic3d_TypeOfShadingModel, Graphic3d_ZLayerId_Top
 
         from cadgen.engine.render.shapes import craft, read
 
         points = np.asarray(points, float)
+        shares = np.ones(len(points)) if widths is None or len(widths) != len(points) else np.asarray(widths, float)
         if closed:
-            points = np.vstack([points, points[:1]])
-        view = self.camera["direction"]
-        tangents = np.gradient(points, axis=0)
-        sides = np.cross(tangents, view)
+            points, shares = np.vstack([points, points[:1]]), np.append(shares, shares[:1])
+        view = np.asarray(self.camera["direction"], float)
+        right, up = np.asarray(self.camera["right"], float), np.asarray(self.camera["up"], float)
+        half = np.array([self._pixel_size(p) * width / 2 for p in points]) * shares
+        steps = points[1:] - points[:-1]
+        sides = np.cross(steps, view)
         sides /= np.maximum(np.linalg.norm(sides, axis=1, keepdims=True), 1e-12)
-        half = np.array([self._pixel_size(p) * width / 2 for p in points])[:, None]
-        nodes = np.empty((2 * len(points), 3))
-        nodes[0::2], nodes[1::2] = points + sides * half, points - sides * half
-        count = len(points) - 1
-        a = np.arange(count) * 2
-        triangles = np.concatenate([np.stack([a, a + 1, a + 2], 1), np.stack([a + 1, a + 3, a + 2], 1)])
-        compound = read(craft([(nodes, triangles, None)], {}))
+        count = len(steps)
+        quads = np.empty((4 * count, 3))
+        quads[0::4], quads[1::4] = points[:-1] + sides * half[:-1, None], points[:-1] - sides * half[:-1, None]
+        quads[2::4], quads[3::4] = points[1:] + sides * half[1:, None], points[1:] - sides * half[1:, None]
+        a = np.arange(count) * 4
+        triangles = [np.stack([a, a + 1, a + 2], 1), np.stack([a + 1, a + 3, a + 2], 1)]
+        rim = 16
+        turn = np.linspace(0, 2 * math.pi, rim, endpoint=False)
+        ring = np.cos(turn)[:, None] * right + np.sin(turn)[:, None] * up
+        discs = (points[:, None, :] + ring[None] * half[:, None, None]).reshape(-1, 3)
+        centres = len(quads) + len(discs) + np.arange(len(points))
+        first = len(quads) + np.arange(len(points))[:, None] * rim
+        k = np.arange(rim)[None, :]
+        triangles.append(np.stack([np.repeat(centres, rim), (first + k).ravel(), (first + (k + 1) % rim).ravel()], 1))
+        nodes = np.vstack([quads, discs, points])
+        compound = read(craft([(nodes, np.concatenate(triangles), None)], {}))
         shown = AIS_Shape(compound)
         shown.SetColor(_color(color))
-        shown.Attributes().ShadingAspect().Aspect().SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
+        aspect = shown.Attributes().ShadingAspect().Aspect()
+        aspect.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
         self.canvas.context.Display(shown, 1, -1, False)
         self.canvas.context.SetZLayer(shown, Graphic3d_ZLayerId_Top)
         self.overlays.append(shown)
 
-    def _polyline(self, points: np.ndarray, color: str, width: float, closed: bool = False) -> None:
+    def _polyline(self, points: np.ndarray, color: str, width: float, closed: bool = False,
+                  widths: Any = None) -> None:
         if width > 1.5 and getattr(self, "camera", None) is not None:
-            self._ribbon(points, color, width, closed)
+            self._ribbon(points, color, width, closed, widths)
             return
         from OCP.AIS import AIS_Shape
         from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon
@@ -668,7 +700,7 @@ class Scene:
             world = points @ matrix[:3, :3].T + matrix[:3, 3]
             placed_marks.append(world)
             if mark["kind"] == "stroke":
-                self._polyline(world, mark["color"], mark.get("width", 2) * scale, bool(mark.get("closed")))
+                self._polyline(world, mark["color"], mark.get("width", 2) * scale, bool(mark.get("closed")), mark.get("widths"))
             elif mark["kind"] == "area":
                 self._polyline(world[:mark.get("outline", len(world))], mark["color"], 1.5 * scale, True)
             elif len(world) == 4:
