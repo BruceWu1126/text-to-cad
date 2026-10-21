@@ -142,6 +142,11 @@ class MeshCache:
                 self.size -= len(dropped)
 
 
+# The process's one mesh cache: the daemon's server serves from it, and in a worker the
+# build's patch, its exports and a snapshot it draws all take a part's buffer from it.
+MESHES = MeshCache()
+
+
 # --- the pools ---------------------------------------------------------------------------
 #
 # The kernel's mesher holds the interpreter's lock for the whole of a call (measured: ten
@@ -262,10 +267,13 @@ def _stat(path: Path) -> tuple | None:
 class Server:
     def __init__(self, port: int = 0, three: str | None = None, touch: Callable[[], None] = lambda: None,
                  host: str = "127.0.0.1", mesh_mode: str | None = None,
-                 provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None) -> None:
+                 provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None,
+                 cache: MeshCache | None = None) -> None:
         self.served: dict[str, Served] = {}
         self.idents: dict[Path, str] = {}
-        self.cache = MeshCache()
+        # The daemon's server and a worker's snapshot serve from the process's one cache
+        # (``MESHES``); a server of its own (a test's) holds its own.
+        self.cache = cache if cache is not None else MeshCache()
         self.mesher = Mesher(mesh_mode)
         self.three = Path(three) if three else find_three()
         self.touch = touch
@@ -319,6 +327,18 @@ class Server:
             if ident not in self.served:
                 self.served[ident] = self._read(ident, path)  # a document that cannot be read is the caller's error
                 self.idents[path] = ident
+        return ident
+
+    def put(self, path: Path, structure: dict[str, Any], shapes: dict[str, Any]) -> str:
+        """Serve a document held in memory (a build's, which a worker draws): its structure
+        and each part's shape (or shape bytes) by key. No file is read for it."""
+        path = Path(path).resolve()
+        ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
+        with self.load_lock:
+            self.served[ident] = Served(ident, path, structure, _stat(path), dict(shapes),
+                                        {p["key"]: p["name"] for p in structure["prototypes"]})
+            self.idents[path] = ident
+        self._changed()
         return ident
 
     def listing(self) -> list[dict[str, str]]:
