@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["Model", "Output", "configuration", "glb", "paint", "read_step", "step", "stl", "threemf", "xbf",
-           "models_in"]
+__all__ = ["Memo", "Model", "Output", "configuration", "glb", "memo", "paint", "read_step", "step", "stl", "threemf",
+           "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
 SUFFIXES = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -126,6 +126,63 @@ step = _decorator("step")
 glb = _decorator("glb")
 stl = _decorator("stl")
 threemf = _decorator("threemf")
+
+
+# --- @memo: a function worth replaying -------------------------------------------------
+
+
+class Memo:
+    """A function marked ``@memo``: one the engine may replay instead of executing.
+
+    Called inside a build, a call is a body (``kernel/memo.py``, ``body``): keyed by the
+    code it reaches (``sources.Symbols``, as a model's body is), the files it reads, and
+    its arguments by value (``memo.call_key``), its kernel calls logged, and on a later
+    build with the same key replayed without running -- the trace, so every element name,
+    is what a run leaves. A second call with the same arguments in one build is a new
+    placement of the first's result, as a child model's is. A call whose arguments cannot
+    be keyed, or that returns no geometry, runs every time, and the build's report says
+    which function and why (``retention.fallbacks``). Called outside a build, it is its
+    function. It writes no file and declares none."""
+
+    def __init__(self, function: Callable[..., Any]) -> None:
+        if not inspect.isfunction(function):
+            raise TypeError("@memo takes a function")
+        parameters = list(inspect.signature(function).parameters)
+        if parameters and parameters[0] in ("self", "cls"):
+            raise TypeError(f"@memo on {function.__qualname__!r}: a method is not markable (its first parameter "
+                            f"is {parameters[0]}); mark a function of the values it needs")
+        functools.update_wrapper(self, function)
+        self.function = function
+        self.name = function.__qualname__
+        source = inspect.getsourcefile(function) or inspect.getfile(function)
+        self.script = Path(source).resolve()
+        self.__xbf_memo__ = True
+
+    @property
+    def identity(self) -> str:
+        return f"{self.script.name}::{self.name}"
+
+    def __repr__(self) -> str:
+        return f"<memo {self.identity}>"
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        build = getattr(_CONTEXT, "build", None)
+        if build is None:
+            return self.function(*args, **kwargs)
+        return build.memo(self, args, kwargs)
+
+
+def memo(function: Any = None, /, **options: Any) -> Any:
+    """Mark a function worth replaying: ``@memo``, bare. Its arguments are keyed by value
+    (plain values, build123d's value types, materials, shapes the engine made); it returns
+    geometry (a shape, or a tuple, list or dict of shapes); it writes nothing outside
+    itself. ``cadgen xbf build --verify`` runs every call the engine would replay and
+    compares what it makes with what was logged."""
+    if options or function is None:
+        raise TypeError("@memo takes no arguments: write @memo")
+    if isinstance(function, Model):
+        raise TypeError(f"@memo on model {function.name!r}: a model is already replayed; @memo marks a function")
+    return Memo(function)
 
 
 def models_in(namespace: dict[str, Any], script: Path) -> list[Model]:
@@ -376,6 +433,60 @@ class BuildContext:
         if not made.__dict__.get("label"):
             made.label = model.name
         return made
+
+    def memo(self, marked: Memo, args: tuple, kwargs: dict) -> Any:
+        """A ``@memo`` call: a body named by the function and its arguments' digest, run or
+        replayed (``memo.body``); the same call again in this build a new placement of its
+        result. Arguments the memo cannot key, or a result that is no geometry, run it on
+        every call, and the report's fallbacks say why."""
+        import time
+
+        from cadgen.engine.kernel import memo as kernel
+
+        family = str(marked.script) + "::" + marked.name
+        try:
+            digest, inputs = kernel.call_key(args, kwargs)
+        except kernel.Unkeyable as error:
+            self._fallback(marked, f"runs on every call: {error}")
+            return marked.function(*args, **kwargs)
+        name = f"{family}({digest})" if args or kwargs else family
+        found = self.results.get(name)
+        if found is not None:
+            kernel.used(name)  # the calling body's replay needs this one's run
+            return _placement(found[1])
+        if name in self.stack:
+            raise RecursionError(f"{marked.identity} calls itself with the same arguments")
+        self.stack.append(name)
+        started = time.perf_counter()
+        try:
+            with kernel.scope(name):
+                result = kernel.body(name, lambda: self.source(marked), lambda: marked.function(*args, **kwargs),
+                                     inputs=inputs, family=family)
+        finally:
+            self.stack.pop()
+        self.timings[marked.identity] = self.timings.get(marked.identity, 0.0) + time.perf_counter() - started
+        if not kernel.geometric(result):
+            kernel.direct(name)
+            self._fallback(marked, f"runs on every call: it returned {type(result).__name__}, not geometry "
+                                   "(a shape, or a tuple, list or dict of shapes)")
+            return result
+        self.results[name] = (result, _placement(result))
+        return result
+
+    def _fallback(self, marked: Memo, reason: str) -> None:
+        reasons = self.fallbacks.setdefault(marked.identity, [])
+        if reason not in reasons:
+            reasons.append(reason)
+        self.timings.setdefault(marked.identity, 0.0)
+
+
+def _placement(value: Any) -> Any:
+    """A new placement of a ``@memo`` result: ``instance`` of each shape it holds."""
+    if isinstance(value, (list, tuple)):
+        return type(value)(_placement(item) for item in value)
+    if isinstance(value, dict):
+        return {name: _placement(item) for name, item in value.items()}
+    return instance(value)
 
 
 def check_result(model: Model, result: Any) -> None:

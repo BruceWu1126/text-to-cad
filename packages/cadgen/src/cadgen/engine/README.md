@@ -15,6 +15,22 @@ def arm():
     return bd.Box(10, 20, 30)
 ```
 
+A function worth skipping on a later build is marked `@memo` (**Memo functions**): an
+assembly's parts, a stage of a long derivation. It writes no file; the model that calls
+it does.
+
+```python
+from cadgen.engine import memo, xbf
+
+@memo
+def wheel(radius, spokes=5):     # replayed, not run, while what it is made of is unchanged
+    ...
+
+@xbf
+def bike():
+    return bd.Compound(children=[wheel(300), wheel(300).moved(bd.Pos(1200, 0, 0))], label="bike")
+```
+
 A part's material is set on the shape, as its colour is: `part.material =
 materials.aluminium` (a catalogue of common engineering materials, names and densities
 from FreeCAD's material cards), or `Material("name", density, color=..., metallic=...,
@@ -98,7 +114,7 @@ def hinge():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
+| `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `paint` |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
@@ -116,7 +132,7 @@ def hinge():
 ## CLI
 
 ```
-cadgen xbf build SCRIPT[::FUNCTION] ... [--json]   build in the script's warm worker
+cadgen xbf build SCRIPT[::FUNCTION] ... [--json] [--verify]   build in the script's warm worker
 cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
@@ -437,9 +453,16 @@ of a shape no name reaches never claims its elements as its own.
 A warm build that hands a part back unchanged keeps its names
 while the functions they come from assign the same targets; a rename names it again.
 
+A child model or a `@memo` function names what its `return` statement makes in itself
+(`stage.cut1`), never by its caller's assignment as a plain helper's return is: the engine
+calls it, and a replay cannot follow the caller. So marking a helper that returns a
+construction unassigned (`return body - holes`) renames those elements once; marking one
+that returns an assigned name (`return body`) renames nothing.
+
 ## Body retention
 
-A model body is one coarse entry above its calls, kept in the worker's memory
+A body -- a model's, or a `@memo` call's (**Memo functions**), whose key also holds its
+arguments -- is one coarse entry above its calls, kept in the worker's memory
 (`kernel/memo.py`, `body`). Its key is what it is made of:
 
 - the symbols its function reaches (`sources.py`, `Symbols`): the global names
@@ -526,6 +549,47 @@ running waits for it.
 The read hook costs nothing measurable: on a small model, built in-process, a
 no-op took a median 50–51 ms and an edit 0.89–0.95 s with the hook, against
 51 ms and 0.89 s with no hook installed.
+
+## Memo functions
+
+`@memo`, bare, marks a function the engine may replay instead of executing (`model.py`,
+`Memo`). A call of one inside a build is a body (**Body retention**), named by the
+function and a digest of its arguments (`parts.py::wheel(3f2a…)`, the report's `bodies`):
+its code is keyed as a model body's is, its kernel calls are logged, and a later build
+with the same key replays it -- the same live objects, its features recorded again, so
+names and provenance are what a run leaves. A second call with the same arguments in one
+build is a new placement of the first's result, as a child model's is. It declares and
+writes no file. Outside a build it is its function. Its contract:
+
+- **Arguments by value**, snapshotted at the call (`memo.call_key`): None, bools,
+  numbers, strings and bytes, tuples, lists and dicts of them (in order, at most
+  `memo.ARGUMENT_VALUES` values), enums and paths; build123d's value types (`Location`,
+  `Vector`, `Axis`, `Plane`, `Color`, `Rotation`) and a `Material`; a shape this process's
+  operations made, by its memo key, and a replay needs that very TShape again. A call
+  given anything else -- a callable, an arbitrary object, a shape made past the engine,
+  too many values -- runs every time, as a plain call of its caller.
+- **Geometry back**: a shape, or a tuple, list or dict whose leaves are shapes. A call
+  returning anything else runs every time it is called (its log stays, for the bodies
+  that called it).
+- **No methods**: `@memo` on a function whose first parameter is `self` or `cls` raises
+  at decoration.
+- **Pure**, the author's part: it reads only what its key holds -- its arguments, the
+  code and values it reaches, the files it opens -- and writes nothing outside itself. A
+  module global it sets for another function to read, a cache it fills on a shared
+  object, an argument it mutates: none of it is seen, and a replay leaves it undone.
+
+Each call that runs every time is named in the report's `retention.fallbacks` with why.
+The restart key (**Previous document**) folds a `@memo` function's code in as it folds a
+child model's.
+
+`cadgen xbf build --verify` runs every body the memo would replay -- a model's and every
+`@memo` call's -- and compares each fresh result with the logged one: per shape its
+class, label, colour, paints, material and placement, and each leaf's geometry (the same
+TShape, else the same binary BRep digest). The report's `verify` gives each body checked
+as `same`, `differs: <where>`, or `follows <function>` for one whose result holds a body
+that differs. A function whose result differs is marked to run on every call for the
+worker's life (`memo.always()`), the bodies that call it with it, and a model that calls it
+is not taken from its file. A verifying build does not ask the previous document.
 
 ## Previous document
 

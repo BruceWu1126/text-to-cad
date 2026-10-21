@@ -175,7 +175,8 @@ def main() -> int:
             if cwd:
                 os.chdir(cwd)
             reports = build(Path(request["script"]), request.get("functions") or None,
-                            log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None)
+                            log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
+                            verify=bool(request.get("verify")))
             patcher.finish(reports)
             send({"id": ident, "done": reports})
         except BuildError as error:

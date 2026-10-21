@@ -831,6 +831,11 @@ class _Run:
         self.placed: set = set()
         # Per file key and site, the read of this build that decoded it (``_read_again``).
         self.decoded: dict[tuple, _Entry] = {}
+        # A verifying build (``body``): every body the memo would replay runs, and its fresh
+        # result is compared with the logged one; per body, how that went.
+        self.verify = False
+        self.verified: dict[str, str] = {}
+        self.marked: list[str] = []
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -972,6 +977,7 @@ def clear() -> None:
         _MEMO.clear()
         _MARKS.clear()
         _BODIES.clear()
+        _ALWAYS.clear()
         _REGISTRY.clear()
         _LEDGER.clear()
         _KEY_IDS.clear()
@@ -1017,24 +1023,40 @@ class _BodyLog:
 
 class _Body:
     """A model body's last run in this process: what its caller said it is made of, its
-    log, its result as it returned it, and the last outermost run that used it."""
+    log, its result as it returned it, and the last outermost run that used it; the
+    TShapes of the shapes it was given (``inputs``, a ``@memo`` call's), and whether a call
+    of it may be replayed (``direct``: false for a ``@memo`` function that returned no
+    geometry, whose log is kept only for the bodies that called it)."""
 
-    __slots__ = ("name", "source", "log", "snapshot", "generation")
+    __slots__ = ("name", "source", "log", "snapshot", "generation", "inputs", "direct")
 
-    def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int) -> None:
+    def __init__(self, name: str, source: str, log: _BodyLog, snapshot: Any, generation: int,
+                 inputs: tuple = ()) -> None:
         self.name, self.source, self.log, self.snapshot, self.generation = name, source, log, snapshot, generation
+        self.inputs, self.direct = inputs, True
 
 
 # Per model body, by its caller's name for it: the body's last run, kept while one of the
 # last ``RUNS_KEPT`` outermost runs used it (``_sweep``).
 _BODIES: dict[str, _Body] = {}
+# Per function a verifying build found impure (``body``'s ``family``): it runs on every
+# call for the worker's life, and so do the bodies that call it. With why.
+_ALWAYS: dict[str, str] = {}
 
 
-def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> Any:
+def body(name: str, source: Callable[[], str], function: Callable[[], Any], *, inputs: tuple = (),
+         family: str | None = None) -> Any:
     """Run a model body, or replay its last run (**Bodies**). ``name`` is the body's
     identity, ``source()`` a digest of the code it is made of (asked only when bodies are
     kept); the files it reads through the memo are held to their bytes here. Outside a
-    run, or with hits off, it is called."""
+    run, or with hits off, it is called. ``inputs`` are the TShapes of the shapes a
+    ``@memo`` call was given: a replay needs the very ones the logged run had. ``family``
+    is the function's identity apart from its arguments: what a verification that finds
+    it impure marks to run always (``_ALWAYS``).
+
+    A verifying run (``_Run.verify``) runs a body it would replay and compares the fresh
+    result's geometry with the logged one (``_geometry``): a body whose result differs is
+    named in ``_Run.verified`` and its function marked."""
     state = getattr(_LOCAL, "run", None)
     if state is None or not enabled():
         return function()
@@ -1046,16 +1068,22 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
             _STATS["bodies_run"] += 1
             state.tally["bodies_run"] += 1
     source = source()
+    family = name if family is None else family
     record = _BODIES.get(name)
-    if record is not None and record.source == source and _replayable(record):
-        state.done.discard(name)
-        result = _replay(record, state)
-        if state.bodies:
-            parent = state.bodies[-1]
-            parent.events.append(("body", record))
-            parent.checks.extend(record.log.checks)
-            parent.children.append(name)
-        return result
+    logged = None
+    if (record is not None and record.source == source and record.direct and record.inputs == inputs
+            and family not in _ALWAYS and _replayable(record)):
+        if not state.verify:
+            state.done.discard(name)
+            result = _replay(record, state)
+            if state.bodies:
+                parent = state.bodies[-1]
+                parent.events.append(("body", record))
+                parent.checks.extend(record.log.checks)
+                parent.children.append(name)
+            return result
+        logged = _logged_geometry(record.snapshot)
+    marked = len(state.marked)
     log = _BodyLog()
     state.done.add(name)
     state.bodies.append(log)
@@ -1077,8 +1105,22 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         state.unread[name] = list(dict.fromkeys(log.unread))
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
+    if logged is not None:
+        differs = _differs(logged, _geometry(result))
+        if not differs:
+            state.verified[name] = "same"
+        elif len(state.marked) > marked:
+            # A body it called differed: that one is marked, and this one runs with it.
+            state.verified[name] = "follows " + ", ".join(
+                os.path.basename(script) + "::" + function
+                for script, _, function in (found.rpartition("::") for found in state.marked[marked:]))
+        else:
+            state.verified[name] = "differs: " + differs
+            _ALWAYS[family] = differs
+            state.marked.append(family)
     snapshot = None
-    if log.retainable and state.tally["uncached"] == uncached and _STATS["errors"] == errors:
+    if (log.retainable and state.tally["uncached"] == uncached and _STATS["errors"] == errors
+            and family not in _ALWAYS):
         try:
             snapshot = _snapshot(result)
         except _Unkeyable:
@@ -1087,7 +1129,7 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         if snapshot is None:
             _BODIES.pop(name, None)
         else:
-            _BODIES[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0)
+            _BODIES[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0, inputs)
     if state.bodies:
         parent = state.bodies[-1]
         # Its checks are the caller's too, kept or not: the caller's key says all it read.
@@ -1100,6 +1142,170 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         else:
             parent.events.append(("body", _BODIES[name]))
     return result
+
+
+def direct(name: str) -> None:
+    """The body just run returned what a call of it cannot be replayed to (a ``@memo``
+    function's result that is no geometry): its log stays, for the bodies that called it,
+    but a call of it runs."""
+    record = _BODIES.get(name)
+    if record is not None:
+        record.direct = False
+
+
+def always() -> dict[str, str]:
+    """The functions a verification found impure, each with why: they run on every call."""
+    return dict(_ALWAYS)
+
+
+# --- a ``@memo`` call's arguments ------------------------------------------------------------
+
+Unkeyable = _Unkeyable
+# The most values a ``@memo`` call's arguments may hold, counted through its containers:
+# past it the call is not keyed, and runs.
+ARGUMENT_VALUES = 10_000
+# build123d's value types, keyed by value (``_normalize``).
+_VALUE_TYPES = frozenset({"Location", "Vector", "Axis", "Plane", "Color", "Rotation", "Pos", "Rot", "Matrix"})
+
+
+def call_key(args: tuple, kwargs: dict) -> tuple[str, tuple]:
+    """A ``@memo`` call's arguments as a digest, snapshotted now, and the TShapes of the
+    shapes among them (what a replay must be given again). Plain values -- None, bools,
+    numbers, strings, and tuples, lists and dicts of them -- by value, in order; an enum,
+    a ``Path``; build123d's value types (``Location``, ``Vector``, ``Axis``, ``Plane``,
+    ``Color``...) and a ``Material`` by value; a shape this process's operations made by
+    its key (``_shape_key``). Anything else -- a callable, an arbitrary object, a shape
+    made outside the memo, more than ``ARGUMENT_VALUES`` values -- raises ``Unkeyable``
+    with why: the call runs."""
+    state = getattr(_LOCAL, "run", None)
+    if state is None:
+        raise _Unkeyable("no build is running")
+    budget = [ARGUMENT_VALUES]
+    tshapes: list = []
+    key = (tuple(_argument(value, state, budget, tshapes) for value in args),
+           tuple((name, _argument(value, state, budget, tshapes)) for name, value in sorted(kwargs.items())))
+    return hashlib.blake2b(repr(key).encode(), digest_size=10).hexdigest(), tuple(tshapes)
+
+
+def _argument(value: Any, state: _Run, budget: list[int], tshapes: list) -> Any:
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise _Unkeyable(f"its arguments hold more than {ARGUMENT_VALUES} values")
+    kind = type(value)
+    if value is None or kind in (bool, int, float, str, bytes):
+        return (kind.__name__, _normalize(value, state))
+    if kind is tuple or kind is list:
+        return (kind.__name__, tuple(_argument(item, state, budget, tshapes) for item in value))
+    if kind is dict:
+        return ("dict", tuple((_argument(name, state, budget, tshapes), _argument(item, state, budget, tshapes))
+                              for name, item in value.items()))
+    if isinstance(value, (enum.Enum, Path)):
+        return _normalize(value, state)
+    if isinstance(value, _build123d().Shape):
+        try:
+            found = _normalize(value, state)
+        except _Unkeyable as error:
+            raise _Unkeyable(f"a shape argument the memo cannot key ({error})") from None
+        tshapes.extend(_wrapped(shape).TShape() for shape in _result_shapes(value) if _wrapped(shape) is not None)
+        return found
+    module = kind.__module__ or ""
+    if (module.startswith("build123d") and kind.__name__ in _VALUE_TYPES) or (
+            module == "cadgen.engine.materials" and kind.__name__ == "Material"):
+        return _normalize(value, state)
+    what = "a callable" if callable(value) else "an object"
+    raise _Unkeyable(f"{what} argument ({module}.{kind.__qualname__}): not a value the memo keys")
+
+
+def geometric(value: Any) -> bool:
+    """Whether a result is geometry: a shape, or a tuple, list or dict whose leaves are."""
+    if isinstance(value, _build123d().Shape):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(geometric(item) for item in value)
+    if isinstance(value, dict):
+        return all(geometric(item) for item in value.values())
+    return False
+
+
+def _geometry(value: Any) -> Any:
+    """What a verification compares of a result: per shape its class, label, colour, paints,
+    material, placement and orientation, and its children or, for a leaf, its shape."""
+    Shape = _build123d().Shape
+    if isinstance(value, Shape):
+        attrs = value.__dict__
+        return _shape_geometry(type(value).__name__, attrs, attrs.get("_wrapped"),
+                               [_geometry(child) for child in attrs.get("_NodeMixin__children") or ()])
+    if isinstance(value, (list, tuple)):
+        return (type(value).__name__, tuple(_geometry(item) for item in value))
+    if isinstance(value, dict):
+        return ("dict", tuple((repr(name), _geometry(item)) for name, item in value.items()))
+    return ("value", repr(value))
+
+
+def _logged_geometry(snapshot: Any) -> Any:
+    """``_geometry`` of a body's logged result, read off its snapshot: restoring it would
+    change live objects the fresh run is about to be handed (a child's result the body
+    relabelled, moved or regrouped)."""
+    if isinstance(snapshot, _ShapeState):
+        return _shape_geometry(type(snapshot.obj).__name__, snapshot.attrs, snapshot.wrapped,
+                               [_logged_geometry(child) for child in snapshot.children or ()])
+    if isinstance(snapshot, _Sequence):
+        return (snapshot.container.__name__, tuple(_logged_geometry(item) for item in snapshot.items))
+    if isinstance(snapshot, _Mapping):
+        return ("dict", tuple((repr(name), _logged_geometry(item)) for name, item in snapshot.items))
+    return ("value", repr(snapshot.value))
+
+
+def _shape_geometry(kind: str, attrs: dict, wrapped: Any, children: list) -> tuple:
+    color = attrs.get("_color")
+    head = (kind, attrs.get("label"), None if color is None else tuple(color),
+            repr(sorted((attrs.get(FACE_COLORS) or {}).items())), repr(attrs.get("material")),
+            repr(sorted(dict(attrs.get(FACE_MATERIALS) or {}).items())),
+            None if wrapped is None else (_location_key(wrapped), int(wrapped.Orientation())))
+    if children:
+        return ("shape", head, tuple(children))
+    from OCP.TopLoc import TopLoc_Location
+
+    return ("shape", head, None if wrapped is None else _Leaf(wrapped.Located(TopLoc_Location())))
+
+
+class _Leaf:
+    """A leaf shape a verification compares: the same TShape is the same geometry; another
+    is compared by its binary BRep's digest (``document.geometry_key``)."""
+
+    __slots__ = ("shape",)
+
+    def __init__(self, shape: Any) -> None:
+        self.shape = shape
+
+    def same(self, other: "_Leaf") -> bool:
+        if self.shape.TShape() == other.shape.TShape():
+            return True
+        from cadgen.engine.document import geometry_key
+
+        return geometry_key(self.shape) == geometry_key(other.shape)
+
+
+def _differs(logged: Any, fresh: Any, where: str = "the result") -> str | None:
+    """Where a fresh result's geometry (``_geometry``) is not the logged one's, or None."""
+    if type(logged) is not type(fresh):
+        return f"{where} is another kind of value"
+    if isinstance(logged, _Leaf):
+        return None if logged.same(fresh) else f"{where} has other geometry"
+    if not isinstance(logged, tuple):
+        return None if logged == fresh else f"{where} differs"
+    if len(logged) != len(fresh):
+        return f"{where} holds another number of items"
+    if len(logged) == 3 and logged[0] == "shape":
+        name = logged[1][1] or logged[1][0]
+        if logged[1] != fresh[1]:
+            return f"{where} ({name}) has another label, colour, material or placement"
+        return _differs(logged[2], fresh[2], f"{where} > {name}")
+    for a, b in zip(logged, fresh):
+        found = _differs(a, b, where)
+        if found:
+            return found
+    return None
 
 
 def used(name: str) -> None:
@@ -2956,6 +3162,20 @@ class _Sequence:
         return self.container(item.fresh(memo) for item in self.items)
 
 
+class _Mapping:
+    __slots__ = ("items",)
+
+    def __init__(self, items: list) -> None:
+        self.items = items
+
+    def restore(self) -> Any:
+        return {name: item.restore() for name, item in self.items}
+
+    def fresh(self, memo: dict | None = None) -> Any:
+        memo = {} if memo is None else memo
+        return {name: item.fresh(memo) for name, item in self.items}
+
+
 class _Literal:
     __slots__ = ("value",)
 
@@ -2990,6 +3210,8 @@ def _snapshot(value: Any) -> Any:
         return _ShapeState(value)
     if isinstance(value, (list, tuple)):
         return _Sequence(type(value), [_snapshot(item) for item in value])
+    if type(value) is dict:
+        return _Mapping([(name, _snapshot(item)) for name, item in value.items()])
     if value is None or isinstance(value, (bool, int, float, str, bytes)):
         return _Literal(value)
     raise _Unkeyable(f"a result that cannot be kept: {type(value).__name__}")
