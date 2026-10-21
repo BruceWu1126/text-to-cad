@@ -28,6 +28,13 @@ An assembly whose parts carry build123d joints carries its mechanism too: links,
 pairs, the ground, the as-built configuration and the named ones, as a subtree of
 standard attributes beside the XCAF tools (``mechanism``).
 
+A model's document is kept in memory between builds (``Kept``) and a warm build patches
+it rather than converting every prototype again (``to_xcaf``): each shape label holds the
+prototype at its place in the order, and a cold conversion makes the same labels at the
+same tags, so a label whose prototype did not change is kept as it is and the rest are
+made again where a cold conversion would make them. The patched document saves to the
+cold one's bytes.
+
 Read back (``Loaded``), a document is its prototypes, its instances with their world
 placements, what each prototype's elements are named, and its mechanism; a STEP the
 engine did not write reads the same way, with the XCAF reader.
@@ -45,8 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-__all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge", "posed_tree",
-           "read_step_shape", "save", "to_xcaf", "unchecked"]
+__all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
+           "posed_tree", "read_step_shape", "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
@@ -392,6 +399,11 @@ class _Materials:
         self.visual_labels: dict[tuple, Any] = {}
 
     def set(self, label: Any, material: Any, rgba: tuple) -> None:
+        self.physical.SetMaterial(label, self.physical_label(material))
+        self.visual.SetShapeMaterial(label, self.visual_label((material, tuple(rgba))))
+
+    def physical_label(self, material: Any) -> Any:
+        """The label of ``material``'s ``XCAFDoc_Material``, made at its first use."""
         from OCP.TCollection import TCollection_HAsciiString
 
         found = self.physical_labels.get(material)
@@ -400,15 +412,19 @@ class _Materials:
                 TCollection_HAsciiString(material.name), TCollection_HAsciiString(material.description or ""),
                 (material.density or 0.0) / 1000.0, TCollection_HAsciiString("density"),
                 TCollection_HAsciiString("MASS_DENSITY_MEASURE"))
-        self.physical.SetMaterial(label, found)
-        key = (material, tuple(rgba))
-        visual = self.visual_labels.get(key)
-        if visual is None:
+        return found
+
+    def visual_label(self, look: tuple) -> Any:
+        """The label of the ``XCAFDoc_VisMaterial`` of ``look``, a material and the base colour
+        it is drawn in, made at its first use."""
+        found = self.visual_labels.get(look)
+        if found is None:
             from OCP.gp import gp_Vec3f
             from OCP.Graphic3d import Graphic3d_AlphaMode_Blend, Graphic3d_AlphaMode_Opaque
             from OCP.TCollection import TCollection_AsciiString
             from OCP.XCAFDoc import XCAFDoc_VisMaterial, XCAFDoc_VisMaterialPBR
 
+            material, rgba = look
             pbr = XCAFDoc_VisMaterialPBR()
             pbr.BaseColor = _quantity(rgba)
             pbr.Metallic = material.metallic
@@ -418,106 +434,468 @@ class _Materials:
             made = XCAFDoc_VisMaterial()
             made.SetPbrMaterial(pbr)
             made.SetAlphaMode(Graphic3d_AlphaMode_Blend if rgba[3] < 1.0 else Graphic3d_AlphaMode_Opaque, 0.5)
-            visual = self.visual_labels[key] = self.visual.AddMaterial(made, TCollection_AsciiString(material.name))
-        self.visual.SetShapeMaterial(label, visual)
+            found = self.visual_labels[look] = self.visual.AddMaterial(made, TCollection_AsciiString(material.name))
+        return found
 
 
-def to_xcaf(tree: Tree) -> Any:
-    """The XCAF document of a tree whose parts are named (``Part.names``) and keyed."""
+@dataclass
+class _Record:
+    """What one shape label of a kept document holds: the prototype at its place in the
+    tree's order, as the label was converted from it. Two records are the same when the
+    label a cold conversion makes of the one is the label already made of the other."""
+
+    values: tuple  # compared with ==
+    shape: Any = None  # a part's shape, compared with IsEqual (the same TShape, placement and orientation)
+    names: Any = None  # a part's element names, by identity, else by value
+    children: tuple = ()  # an assembly's components' prototypes, by their place in the order
+    locations: tuple = ()  # and their placements, compared with IsEqual (the same datums)
+    colours: tuple = ()  # the colours its labels are given, in the order a conversion gives them,
+    physical: tuple = ()  # its physical materials,
+    visual: tuple = ()  # and its looks: (material, base colour)
+
+    def same(self, other: "_Record") -> bool:
+        if self.values != other.values or self.children != other.children:
+            return False
+        if (self.shape is None) != (other.shape is None) or (self.shape is not None
+                                                             and not self.shape.IsEqual(other.shape)):
+            return False
+        if self.names is not other.names and self.names != other.names:
+            return False
+        return len(self.locations) == len(other.locations) and all(
+            mine.IsEqual(theirs) for mine, theirs in zip(self.locations, other.locations))
+
+
+def _records(tree: Tree) -> list[_Record]:
+    """Each prototype of the tree's order as its label holds it (``_Record``)."""
+    index = {id(prototype): at for at, prototype in enumerate(tree.order)}
+    labelled: set = set()  # the TShapes an earlier part's label holds
+    found = []
+    for prototype in tree.order:
+        if isinstance(prototype, Part):
+            tshape = prototype.shape.TShape()
+            apart = tshape in labelled
+            labelled.add(tshape)
+            painted = tuple(sorted(prototype.face_colors.items()))
+            given = tuple(sorted(prototype.face_materials.items(), key=lambda item: item[0]))
+            base = prototype.color or DEFAULT_COLOR
+            found.append(_Record(
+                ("part", apart, prototype.name, prototype.color, prototype.material, painted, given, prototype.key),
+                shape=prototype.shape, names=prototype.names,
+                colours=((prototype.color,) if prototype.color is not None else ())
+                + tuple(rgba for _, rgba in painted),
+                physical=((prototype.material,) if prototype.material is not None else ())
+                + tuple(material for _, material in given),
+                visual=(((prototype.material, tuple(base)),) if prototype.material is not None else ())
+                + tuple((material, tuple(prototype.face_colors.get(ordinal) or DEFAULT_COLOR))
+                        for ordinal, material in given)))
+        else:
+            written = tuple(_component_color(component) for component in prototype.components)
+            found.append(_Record(
+                ("assembly", prototype.name, tuple((component.name, color) for component, color
+                                                   in zip(prototype.components, written))),
+                children=tuple(index[id(component.prototype)] for component in prototype.components),
+                locations=tuple(component.location for component in prototype.components),
+                colours=tuple(color for color in written if color is not None)))
+    return found
+
+
+def _component_color(component: Component) -> tuple | None:
+    """The colour a component's label is given: its own where it differs from its part's."""
+    held = component.prototype
+    if component.color is None or (isinstance(held, Part) and held.color == component.color):
+        return None
+    return component.color
+
+
+def _tables(records: list[_Record]) -> tuple[list, list, list]:
+    """The colours, physical materials and looks a cold conversion of these records makes
+    labels of, in the order it makes them: each at its first use."""
+    colours: dict = {}
+    physical: dict = {}
+    visual: dict = {}
+    for record in records:
+        for table, values in ((colours, record.colours), (physical, record.physical), (visual, record.visual)):
+            for value in values:
+                table.setdefault(value, None)
+    return list(colours), list(physical), list(visual)
+
+
+class Kept:
+    """A model's XCAF document kept in memory from one build to the next, with what each
+    of its shape labels holds (``_Record``): a warm build patches it (``to_xcaf``)."""
+
+    def __init__(self) -> None:
+        self.doc: Any = None
+        self.records: list[_Record] = []
+        self.tables: tuple | None = None
+        self.materials: "_Materials | None" = None
+        self.mechanism: tuple | None = None
+        # The tags of the main label's children a conversion gives attributes: what a reader
+        # of the document adds beside them (the STEP writer its GD&T tool) is cleared.
+        self.tools: set[int] = set()
+        # The last conversion: how many prototypes it converted, and whether it patched.
+        self.converted = 0
+        self.patched = False
+
+
+def to_xcaf(tree: Tree, kept: Kept | None = None) -> Any:
+    """The XCAF document of a tree whose parts are named (``Part.names``) and keyed.
+
+    With ``kept``, a document held from the model's last build, the document is that one,
+    patched: a prototype whose label holds what a cold conversion would make of it keeps its
+    label untouched; every other label at its place in the order is cleared and made again
+    (its name, colours, materials, element names, components), each at the tag a cold
+    conversion gives it, and the references a cold conversion orders by its labels'
+    places (a colour's, a material's, a part's placements) put back in that order; the
+    mechanism is written again when it or the occurrences it names changed. So the patched
+    document is the cold one, label for label, and saves to its bytes. A change to which
+    colours or materials the document holds, or their order, converts it whole; so does a
+    patch the kernel does not take as planned."""
+    with _XCAF_LOCK:
+        from OCP.XCAFDoc import XCAFDoc_ShapeTool
+
+        XCAFDoc_ShapeTool.SetAutoNaming_s(False)
+        records = _records(tree)
+        doc = None
+        if kept is not None and kept.doc is not None:
+            try:
+                doc = _patch(kept, tree, records)
+            except Exception:  # noqa: BLE001 - a patch that fails leaves a document only a whole conversion mends
+                doc = None
+            if doc is None:
+                kept.doc = None
+        if doc is None:
+            kept = kept if kept is not None else Kept()
+            doc = _convert(tree, records, kept)
+        _MADE[:] = [doc, tree]
+        return doc
+
+
+class _Unplanned(Exception):
+    """The kernel did not take a patch as planned (a label at another tag than a cold
+    conversion's): the document is converted whole."""
+
+
+class _Converter:
+    """Labels made of prototypes, as a cold conversion makes them; ``patching``, at the tag
+    a cold conversion gives each, checked."""
+
+    def __init__(self, doc: Any, kept: Kept, patching: bool) -> None:
+        from OCP.Standard import Standard_GUID
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+        self.doc = doc
+        self.shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
+        self.colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
+        self.materials = kept.materials
+        self.patching = patching
+        self.key_guid = Standard_GUID(KEY_GUID)
+
+    def label(self, at: int) -> Any:
+        return self.shapes.Label().FindChild(at + 1, False)
+
+    def _placed(self, label: Any, at: int) -> None:
+        if self.patching and (label.Tag() != at + 1 or not label.Father().IsEqual(self.shapes.Label())):
+            raise _Unplanned(f"prototype {at + 1} landed at {_entry(label)}")
+
+    def part(self, at: int, prototype: Part, record: _Record) -> Any:
+        from OCP.TCollection import TCollection_AsciiString
+        from OCP.TDataStd import TDataStd_AsciiString
+        from OCP.TDF import TDF_Label
+        from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
+        from OCP.TopExp import TopExp
+        from OCP.TopTools import TopTools_IndexedMapOfShape
+        from OCP.XCAFDoc import XCAFDoc_ColorSurf
+
+        shapes, colors, materials = self.shapes, self.colors, self.materials
+        # Parts of one geometry painted or given materials apart share a TShape, and the
+        # shape tool hands a shape it holds its first label again: the second is added as its
+        # own topology on the same geometry (``_apart``).
+        shape = _apart(prototype.shape) if record.values[1] else prototype.shape
+        label = shapes.AddShape(shape, False, False)
+        self._placed(label, at)
+        _name(label, prototype.name)
+        if prototype.color is not None:
+            colors.SetColor(label, _quantity(prototype.color), XCAFDoc_ColorSurf)
+        if prototype.material is not None:
+            materials.set(label, prototype.material, prototype.color or DEFAULT_COLOR)
+        if prototype.key:
+            TDataStd_AsciiString.Set_s(label, self.key_guid, TCollection_AsciiString(prototype.key))
+        faces = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
+        face_names = (prototype.names or {}).get("faces") or []
+        painted = prototype.face_colors
+        for ordinal in range(1, faces.Extent() + 1):
+            text = face_names[ordinal - 1] if ordinal <= len(face_names) else None
+            rgba = painted.get(ordinal)
+            given = prototype.face_materials.get(ordinal)
+            if text is None and rgba is None and given is None:
+                continue
+            sub = TDF_Label()
+            if not shapes.AddSubShape(label, faces.FindKey(ordinal), sub) and sub.IsNull():
+                continue
+            if text is not None:
+                _name(sub, text)
+            if rgba is not None:
+                colors.SetColor(sub, _quantity(rgba), XCAFDoc_ColorSurf)
+            if given is not None:
+                materials.set(sub, given, rgba or DEFAULT_COLOR)
+        for kind, topabs in (("edges", TopAbs_EDGE), ("vertices", TopAbs_VERTEX)):  # vertices: naming
+            edge_names = (prototype.names or {}).get(kind) or []
+            if not any(text is not None for text in edge_names):
+                continue
+            edges = TopTools_IndexedMapOfShape()
+            TopExp.MapShapes_s(shape, topabs, edges)
+            for ordinal in range(1, min(edges.Extent(), len(edge_names)) + 1):
+                text = edge_names[ordinal - 1]
+                if text is None:
+                    continue
+                sub = TDF_Label()
+                if shapes.AddSubShape(label, edges.FindKey(ordinal), sub) or not sub.IsNull():
+                    _name(sub, text)
+        return label
+
+    def assembly(self, at: int, prototype: Assembly, record: _Record, labels: list) -> Any:
+        from OCP.XCAFDoc import XCAFDoc_ColorSurf
+
+        label = self.shapes.NewShape()
+        self._placed(label, at)
+        _name(label, prototype.name)
+        for place, (component, child) in enumerate(zip(prototype.components, record.children), 1):
+            placed = self.shapes.AddComponent(label, labels[child], component.location)
+            if self.patching and placed.Tag() != place:
+                raise _Unplanned(f"component {place} of prototype {at + 1} landed at {_entry(placed)}")
+            _name(placed, component.name)
+            color = _component_color(component)
+            if color is not None:
+                self.colors.SetColor(placed, _quantity(color), XCAFDoc_ColorSurf)
+        return label
+
+    def mechanism(self, tree: Tree, labels: list) -> tuple | None:
+        """The mechanism's record: its signature and the entries of the occurrences it names."""
+        if tree.mechanism is None:
+            return None
+        entries = tuple(tuple(_entry(label) for label in self.occurrence(tree, labels, path))
+                        for link in tree.mechanism.links for path in link.members)
+        return tree.mechanism.signature(), entries
+
+    @staticmethod
+    def occurrence(tree: Tree, labels: list, path: tuple[int, ...]) -> list:
+        """An occurrence's labels: the root's, then each component's down to it."""
+        order = {id(prototype): at for at, prototype in enumerate(tree.order)}
+        found, node = [labels[order[id(tree.root)]]], tree.root
+        for at in path:
+            found.append(labels[order[id(node)]].FindChild(at + 1, False))
+            node = node.components[at].prototype
+        return found
+
+
+def _convert(tree: Tree, records: list[_Record], kept: Kept) -> Any:
+    """The document made whole, and kept (``Kept``)."""
     from OCP.Standard import Standard_GUID
     from OCP.TCollection import TCollection_AsciiString
     from OCP.TDataStd import TDataStd_AsciiString
-    from OCP.TDF import TDF_Label
-    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_VERTEX
-    from OCP.TopExp import TopExp
-    from OCP.TopTools import TopTools_IndexedMapOfShape
     from OCP.UnitsMethods import UnitsMethods_LengthUnit_Millimeter
-    from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+    from OCP.XCAFDoc import XCAFDoc_DocumentTool
 
-    with _XCAF_LOCK:
-        XCAFDoc_ShapeTool.SetAutoNaming_s(False)
-        doc = _new_document()
-        XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 1.0, UnitsMethods_LengthUnit_Millimeter)
-        shapes = XCAFDoc_DocumentTool.ShapeTool_s(doc.Main())
-        colors = XCAFDoc_DocumentTool.ColorTool_s(doc.Main())
-        materials = _Materials(doc)
-        TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(WRITER_GUID), TCollection_AsciiString(_writer()))
-        key_guid = Standard_GUID(KEY_GUID)
-        labels: dict[int, Any] = {}
-        placements: dict[int, list] = {}  # each assembly's component labels, in order
-        labelled: set = set()  # the TShapes a part's label holds already
-        for prototype in tree.order:
-            if isinstance(prototype, Part):
-                # Parts of one geometry painted or given materials apart share a TShape, and
-                # the shape tool hands a shape it holds its first label again: the second is
-                # added as its own topology on the same geometry (``_apart``).
-                shape = prototype.shape if prototype.shape.TShape() not in labelled else _apart(prototype.shape)
-                labelled.add(prototype.shape.TShape())
-                label = shapes.AddShape(shape, False, False)
-                _name(label, prototype.name)
-                if prototype.color is not None:
-                    colors.SetColor(label, _quantity(prototype.color), XCAFDoc_ColorSurf)
-                if prototype.material is not None:
-                    materials.set(label, prototype.material, prototype.color or DEFAULT_COLOR)
-                if prototype.key:
-                    TDataStd_AsciiString.Set_s(label, key_guid, TCollection_AsciiString(prototype.key))
-                faces = TopTools_IndexedMapOfShape()
-                TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
-                face_names = (prototype.names or {}).get("faces") or []
-                painted = prototype.face_colors
-                for ordinal in range(1, faces.Extent() + 1):
-                    text = face_names[ordinal - 1] if ordinal <= len(face_names) else None
-                    rgba = painted.get(ordinal)
-                    given = prototype.face_materials.get(ordinal)
-                    if text is None and rgba is None and given is None:
-                        continue
-                    sub = TDF_Label()
-                    if not shapes.AddSubShape(label, faces.FindKey(ordinal), sub) and sub.IsNull():
-                        continue
-                    if text is not None:
-                        _name(sub, text)
-                    if rgba is not None:
-                        colors.SetColor(sub, _quantity(rgba), XCAFDoc_ColorSurf)
-                    if given is not None:
-                        materials.set(sub, given, rgba or DEFAULT_COLOR)
-                for kind, topabs in (("edges", TopAbs_EDGE), ("vertices", TopAbs_VERTEX)):  # vertices: naming
-                    edge_names = (prototype.names or {}).get(kind) or []
-                    if not any(text is not None for text in edge_names):
-                        continue
-                    edges = TopTools_IndexedMapOfShape()
-                    TopExp.MapShapes_s(shape, topabs, edges)
-                    for ordinal in range(1, min(edges.Extent(), len(edge_names)) + 1):
-                        text = edge_names[ordinal - 1]
-                        if text is None:
-                            continue
-                        sub = TDF_Label()
-                        if shapes.AddSubShape(label, edges.FindKey(ordinal), sub) or not sub.IsNull():
-                            _name(sub, text)
-            else:
-                label = shapes.NewShape()
-                _name(label, prototype.name)
-                for component in prototype.components:
-                    placed = shapes.AddComponent(label, labels[id(component.prototype)], component.location)
-                    _name(placed, component.name)
-                    placements.setdefault(id(prototype), []).append(placed)
-                    held = component.prototype
-                    if component.color is not None and not (isinstance(held, Part) and held.color == component.color):
-                        colors.SetColor(placed, _quantity(component.color), XCAFDoc_ColorSurf)
-            labels[id(prototype)] = label
-        shapes.UpdateAssemblies()
-        if tree.mechanism is not None:
-            from cadgen.engine import mechanism
+    from cadgen.engine import mechanism
 
-            def occurrence(path: tuple[int, ...]) -> list:
-                found, node = [labels[id(tree.root)]], tree.root
-                for at in path:
-                    found.append(placements[id(node)][at])
-                    node = node.components[at].prototype
-                return found
+    doc = _new_document()
+    XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 1.0, UnitsMethods_LengthUnit_Millimeter)
+    kept.materials = None
+    converter = _Converter(doc, kept, patching=False)
+    converter.materials = kept.materials = _Materials(doc)
+    TDataStd_AsciiString.Set_s(doc.Main(), Standard_GUID(WRITER_GUID), TCollection_AsciiString(_writer()))
+    labels: list = []
+    for at, (prototype, record) in enumerate(zip(tree.order, records)):
+        if isinstance(prototype, Part):
+            labels.append(converter.part(at, prototype, record))
+        else:
+            labels.append(converter.assembly(at, prototype, record, labels))
+    converter.shapes.UpdateAssemblies()
+    kept.mechanism = converter.mechanism(tree, labels)
+    if tree.mechanism is not None:
+        mechanism.write(doc, tree.mechanism, lambda path: converter.occurrence(tree, labels, path))
+    kept.doc, kept.records, kept.tables = doc, records, _tables(records)
+    kept.tools = {tag for tag in _held_children(doc.Main()) if tag != mechanism.TAG}
+    kept.converted, kept.patched = len(records), False
+    return doc
 
-            mechanism.write(doc, tree.mechanism, occurrence)
-        _MADE[:] = [doc, tree]
+
+def _patch(kept: Kept, tree: Tree, records: list[_Record]) -> Any:
+    """The kept document patched to ``tree`` (see ``to_xcaf``), or None where only a whole
+    conversion makes the cold document."""
+    from OCP.TDF import TDF_Label, TDF_TagSource
+    from OCP.XCAFDoc import XCAFDoc, XCAFDoc_ColorSurf
+
+    from cadgen.engine import mechanism
+
+    tables = _tables(records)
+    old = kept.records
+    dirty: list[int] = []
+    marked: set[int] = set()
+    for at, record in enumerate(records):
+        # An assembly placing a prototype made again is made again: its components hold
+        # their prototypes' shapes.
+        if at >= len(old) or not record.same(old[at]) or any(child in marked for child in record.children):
+            dirty.append(at)
+            marked.add(at)
+    gone = list(range(len(records), len(old)))
+    doc = kept.doc
+    for tag in _held_children(doc.Main()):
+        if tag not in kept.tools and tag != mechanism.TAG:
+            doc.Main().FindChild(tag, False).ForgetAllAttributes(True)
+    converter = _Converter(doc, kept, patching=True)
+    labels = [converter.label(at) for at in range(min(len(records), len(old)))] + [None] * (len(records) - len(old))
+    kept.converted, kept.patched = len(dirty), True
+    if not dirty and not gone and tables == kept.tables and converter.mechanism(tree, labels) == kept.mechanism:
         return doc
+    # The references a label makes, ordered by their labels' places: each colour's,
+    # material's and look's, and each part's placements.
+    colours: set = set()
+    physical: set = set()
+    visual: set = set()
+    placed: set[int] = set()
+    for at in dirty + gone:
+        for record in ([old[at]] if at < len(old) else []) + ([records[at]] if at < len(records) else []):
+            colours.update(record.colours)
+            physical.update(record.physical)
+            visual.update(record.visual)
+            placed.update(record.children)
+        if at < len(old):  # a place past the old order's holds nothing
+            converter.label(at).ForgetAllAttributes(True)
+    if tables != kept.tables:
+        _renumber(converter, kept, tables)
+    tags = TDF_TagSource.Set_s(converter.shapes.Label())
+    for at in dirty:
+        # The tag before this prototype's: the shape tool makes its label at the next one.
+        tags.Set(at)
+        prototype = tree.order[at]
+        if isinstance(prototype, Part):
+            labels[at] = converter.part(at, prototype, records[at])
+        else:
+            labels[at] = converter.assembly(at, prototype, records[at], labels)
+    tags.Set(len(records))
+    converter.shapes.UpdateAssemblies()
+    for rgba in colours:
+        found = TDF_Label()
+        if converter.colors.FindColor(_quantity(rgba), found):
+            _reorder(found, XCAFDoc.ColorRefGUID_s(XCAFDoc_ColorSurf), descending=True)
+    for material in physical:
+        _reorder(kept.materials.physical_labels[material], XCAFDoc.MaterialRefGUID_s(), descending=False)
+    for look in visual:
+        _reorder(kept.materials.visual_labels[look], XCAFDoc.VisMaterialRefGUID_s(), descending=True)
+    for at in placed:
+        if at < len(records) and at not in marked:
+            _reorder(labels[at], XCAFDoc.ShapeRefGUID_s(), descending=False)
+    record = converter.mechanism(tree, labels)
+    if record != kept.mechanism:
+        doc.Main().FindChild(mechanism.TAG, True).ForgetAllAttributes(True)
+        if tree.mechanism is not None:
+            mechanism.write(doc, tree.mechanism, lambda path: converter.occurrence(tree, labels, path))
+    kept.records, kept.mechanism, kept.tables = records, record, tables
+    return doc
+
+
+def _renumber(converter: _Converter, kept: Kept, tables: tuple[list, list, list]) -> None:
+    """The colours, materials and looks the document holds made again as ``tables`` lists
+    them, each label at the tag a cold conversion gives it, and every reference the
+    document's kept labels make to one put back on it in a cold conversion's order."""
+    from OCP.TDataStd import TDataStd_TreeNode
+    from OCP.TDF import TDF_TagSource
+    from OCP.XCAFDoc import XCAFDoc, XCAFDoc_ColorSurf
+
+    materials = kept.materials
+    kinds = (
+        (converter.colors.Label(), XCAFDoc.ColorRefGUID_s(XCAFDoc_ColorSurf), True, None,
+         lambda rgba: converter.colors.AddColor(_quantity(rgba))),
+        (materials.physical.Label(), XCAFDoc.MaterialRefGUID_s(), False, materials.physical_labels,
+         materials.physical_label),
+        (materials.visual.Label(), XCAFDoc.VisMaterialRefGUID_s(), True, materials.visual_labels,
+         materials.visual_label),
+    )
+    for (tool, guid, descending, held, make), old, new in zip(kinds, kept.tables, tables):
+        if old == new:
+            continue
+        if len(_held_children(tool)) != len(old):
+            raise _Unplanned("the document holds other colours or materials than its records")
+        referrers: dict = {}
+        for at, value in enumerate(old):
+            label = tool.FindChild(at + 1, False)
+            node = TDataStd_TreeNode()
+            if _find(label, node, guid) and node.HasFirst():
+                child = node.First()
+                while True:
+                    referrers.setdefault(value, []).append(child)
+                    if not child.HasNext():
+                        break
+                    child = child.Next()
+                for child in referrers[value]:
+                    child.Remove()  # from its father while that lives: forgetting it leaves no link
+            label.ForgetAllAttributes(True)
+        if held is not None:
+            held.clear()
+        if new:
+            TDF_TagSource.Set_s(tool).Set(0)
+        else:
+            tool.ForgetAttribute(TDF_TagSource.GetID_s())  # a cold conversion made no label here
+        for at, value in enumerate(new):
+            label = make(value)
+            if label.Tag() != at + 1:
+                raise _Unplanned(f"table entry {at + 1} landed at {_entry(label)}")
+            children = referrers.get(value)
+            if children:
+                father = TDataStd_TreeNode.Set_s(label, guid)
+                for child in sorted(children, key=lambda node: _place(node.Label()), reverse=descending):
+                    child.Remove()
+                    father.Append(child)
+
+
+def _held_children(label: Any) -> list[int]:
+    """The tags of ``label``'s children that hold an attribute, or have a child that does."""
+    from OCP.TDF import TDF_ChildIterator
+
+    found = []
+    children = TDF_ChildIterator(label, False)
+    while children.More():
+        child = children.Value()
+        if child.HasAttribute() or _held_children(child):
+            found.append(child.Tag())
+        children.Next()
+    return found
+
+
+def _place(label: Any) -> tuple[int, ...]:
+    """A label's place in the document: its entry's tags."""
+    return tuple(int(tag) for tag in _entry(label).split(":"))
+
+
+def _reorder(label: Any, guid: Any, descending: bool) -> None:
+    """The references of tree ``guid`` to ``label`` in the order a cold conversion leaves
+    them: by their labels' places, ``descending`` where the kernel puts each new one first."""
+    from OCP.TDataStd import TDataStd_TreeNode
+
+    if not label.IsAttribute(guid):
+        return
+    # The label's own node: ``FindAttribute`` hands back a copy of it, which a child appended
+    # to would take for its father.
+    node = TDataStd_TreeNode.Set_s(label, guid)
+    if not node.HasFirst():
+        return
+    children = []
+    child = node.First()
+    while True:
+        children.append((_place(child.Label()), child))
+        if not child.HasNext():
+            break
+        child = child.Next()
+    wanted = sorted(children, key=lambda item: item[0], reverse=descending)
+    if [place for place, _ in wanted] == [place for place, _ in children]:
+        return
+    for _, child in wanted:
+        child.Remove()
+    for _, child in wanted:
+        node.Append(child)
 
 
 def _apart(shape: Any) -> Any:

@@ -10,10 +10,11 @@ those files and nothing else. A model whose body raises reports the error with t
 model's own frames and leaves its files as they were.
 
 What this process remembers between builds is in memory only: per part ``TShape``,
-its element names and its geometry key; per output path, the document it last wrote.
-A part a warm build hands back unchanged (the memo's hit is the same object) is
-neither named nor keyed again, and a document whose every part, placement, name and
-colour is what the file already holds is not rebuilt or rewritten.
+its element names and its geometry key; per model, the document it last wrote, kept
+(``document.Kept``). A part a warm build hands back unchanged (the memo's hit is the same
+object) is neither named nor keyed again; a document whose every part, placement, name
+and colour is what the file already holds is not touched or rewritten; and any other
+document is the kept one patched, only its changed prototypes made again.
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ class BuildError(Exception):
 class _Written:
     signature: tuple
     stats: dict[str, tuple | None]
+    # The document as written, kept in memory: the next build patches it (``document.Kept``).
+    kept: Any = None
 
 
 @dataclass
@@ -61,7 +64,8 @@ class _Named:
 _PARTS: "OrderedDict[Any, _Named]" = OrderedDict()
 _PARTS_HELD = 1 << 16
 _TOKENS = __import__("itertools").count(1)
-# Per model: the document this process last wrote, and each declared file as it left it.
+# Per model: the document this process last wrote, kept to be patched by the next build,
+# and each declared file as it left it.
 _WRITTEN: dict[str, _Written] = {}
 # Per xbf this process last built (its path, ``os.path.normcase``d): per part key, what
 # the build made of the part -- what ``made_by`` answers from. In memory only: provenance
@@ -261,8 +265,10 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
             written[str(path)] = {"written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
     else:
         clock = time.perf_counter()
-        doc = document.to_xcaf(tree)
+        kept = remembered.kept if remembered is not None and remembered.kept is not None else document.Kept()
+        doc = document.to_xcaf(tree, kept)
         timings["document"] = round(time.perf_counter() - clock, 4)
+        report["converted"] = {"prototypes": len(tree.order), "converted": kept.converted, "patched": kept.patched}
         for kind, path in targets:
             clock = time.perf_counter()
             if kind == "xbf":
@@ -275,7 +281,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
             timings[kind] = round(seconds, 4)
             written[str(path)] = {"written": fresh, "seconds": round(seconds, 4), "bytes": size}
             log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
-        _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets})
+        _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets}, kept)
     report["files"] = written
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
 
