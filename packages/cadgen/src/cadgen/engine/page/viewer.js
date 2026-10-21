@@ -134,17 +134,39 @@ function faceAt(faces, at) {
 
 const materials = new Map(); // look -> one material, shared by every instance of that look
 
+// Every look field the structure serves for a material (``document.material_json``).
+const LOOK = ["metallic", "roughness", "ior", "anisotropy", "anisotropyRotation", "transmission", "transmissionColor",
+              "transmissionDepth", "coat", "coatRoughness", "emissive", "emissiveStrength"];
+const number = (value, fallback) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
+
 /** The material of one look: a colour and, where the document gives one, a material's
- * PBR factors (metallic, roughness, emissive); without one, the engine's matte default. */
-function material(rgba, pbr) {
-  const name = (rgba ? rgba.join(",") : "default") + (pbr ? `|${pbr.metallic},${pbr.roughness},${pbr.emissive}` : "");
+ * whole look as glTF carries it -- metallic, roughness, IOR, anisotropy and its rotation,
+ * transmission (through ``thickness`` millimetres, attenuated by its colour over its depth in
+ * metres), clear coat and its roughness, emission and its strength; without one, the
+ * engine's matte default. */
+function material(rgba, pbr, thickness = 0) {
+  const look = pbr ? LOOK.map((field) => pbr[field] ?? null) : null;
+  const name = JSON.stringify([rgba || null, look, look && number(pbr.transmission, 0) > 0 ? thickness : null]);
   let found = materials.get(name);
   if (!found) {
-    found = new THREE.MeshStandardMaterial({ color: linearColor(rgba, 0xb8bcc4), roughness: 0.55, metalness: 0.05 });
-    if (pbr) {
-      found.metalness = pbr.metallic;
-      found.roughness = pbr.roughness;
-      found.emissive = linearColor(pbr.emissive, 0x000000);
+    if (!pbr) {
+      found = new THREE.MeshStandardMaterial({ color: linearColor(rgba, 0xb8bcc4), roughness: 0.55, metalness: 0.05 });
+    } else {
+      found = new THREE.MeshPhysicalMaterial({
+        color: linearColor(rgba, 0xb8bcc4), metalness: number(pbr.metallic, 0), roughness: number(pbr.roughness, 0.5),
+        ior: number(pbr.ior, 1.5), anisotropy: number(pbr.anisotropy, 0),
+        anisotropyRotation: number(pbr.anisotropyRotation, 0), clearcoat: number(pbr.coat, 0),
+        clearcoatRoughness: number(pbr.coatRoughness, 0), emissive: linearColor(pbr.emissive, 0x000000),
+        emissiveIntensity: number(pbr.emissiveStrength, 1),
+      });
+      if (number(pbr.transmission, 0) > 0) {
+        found.transmission = pbr.transmission;
+        found.thickness = Math.max(thickness, 0);
+        if (number(pbr.transmissionDepth, 0) > 0) {
+          found.attenuationDistance = pbr.transmissionDepth * 1000;
+          found.attenuationColor = linearColor(pbr.transmissionColor || [1, 1, 1], 0xffffff);
+        }
+      }
     }
     if (rgba && rgba[3] < 1) {
       found.transparent = true;
@@ -162,7 +184,14 @@ function materialOf(held, prototype, rgba) {
   const pbr = prototype.material;
   const painted = Object.entries(prototype.faceColors || {});
   const given = prototype.faceMaterials || {};
-  if (!painted.length) return material(rgba, pbr);
+  // A transmissive look's volume is as thick as its part: the smallest extent of its box.
+  const box = held.geometry.boundingBox;
+  const thickness = box && !box.isEmpty() ? Math.min(...box.getSize(new THREE.Vector3()).toArray()) : 0;
+  // An anisotropic look needs a tangent: one perpendicular to each normal will do.
+  if ([pbr, ...Object.values(given)].some((look) => number(look?.anisotropy, 0) > 0) && !held.geometry.attributes.tangent) {
+    held.geometry.setAttribute("tangent", new THREE.BufferAttribute(tangents(held.buffer.normals), 4));
+  }
+  if (!painted.length) return material(rgba, pbr, thickness);
   const signature = JSON.stringify([painted, given]);
   if (held.paintsFor !== signature) {
     held.paintsFor = signature;
@@ -186,7 +215,23 @@ function materialOf(held, prototype, rgba) {
       held.geometry.addGroup(held.buffer.faces[row + 1], held.buffer.faces[row + 2], at);
     }
   }
-  return [material(rgba, pbr), ...held.paints.map(([paint, look]) => material(paint, look || pbr))];
+  return [material(rgba, pbr, thickness),
+          ...held.paints.map(([paint, look]) => material(paint, look || pbr, thickness))];
+}
+
+/** A unit tangent per normal, perpendicular to it (w = 1). */
+function tangents(normals) {
+  const found = new Float32Array((normals.length / 3) * 4);
+  for (let at = 0, to = 0; at + 2 < normals.length; at += 3, to += 4) {
+    const x = normals[at], y = normals[at + 1], z = normals[at + 2];
+    let tx = y, ty = -x, tz = 0;
+    if (Math.hypot(tx, ty) < 1e-3) { tx = 0; ty = z; tz = -y; }
+    const length = Math.hypot(tx, ty, tz);
+    if (length > 0) { found[to] = tx / length; found[to + 1] = ty / length; found[to + 2] = tz / length; }
+    else found[to] = 1;
+    found[to + 3] = 1;
+  }
+  return found;
 }
 
 // The objects on screen by what places them -- part, path, colour and placement -- so a
