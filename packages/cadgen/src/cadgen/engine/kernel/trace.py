@@ -76,7 +76,7 @@ results from its inputs' names, in this order:
 5. **Made.** An element still unnamed is the feature's own: its number among the
    elements of its kind the feature made, in the order of its results, as every
    element of a primitive is -- a result holding several pieces (a compound) taken
-   piece by piece in the order of where they are (``_leaves``), not as OCCT held them.
+   piece by piece in the order of where they are (``_in_place_order``), not as OCCT held them.
 
 An element passed on unchanged from a shape no feature made (a shape built outside the
 patched surface) has no name here and names nothing: it is no parent
@@ -465,10 +465,11 @@ class Trace:
         # execution and target, its features in order; its head, the last of them -- the
         # call whose result the statement assigns --; per ``<function>.<target>``, the heads
         # as bits by index; and per feature that is no head, its number among its
-        # execution's features of its operation.
+        # execution's features of its operation (``_number``, counted once asked).
         self._assigned_count = -1
         self._heads: dict[tuple[int, str], int] = {}
         self._target_stems: dict[str, int] = {}
+        self._members: dict[tuple[int, str], list[int]] = {}
         self._within: dict[int, int] = {}
         # Per unassigned feature with siblings (``_counting_order``), its class; and per
         # feature whose place it was asked, where the shapes it was given are.
@@ -583,7 +584,6 @@ class Trace:
                 members.setdefault((feature.execution, feature.target), []).append(feature.index)
         heads: dict[tuple[int, str], int] = {}
         stems: dict[str, int] = {}
-        within: dict[int, int] = {}
         for key, indices in members.items():
             # The call whose result the statement stores: its last, or what that only wraps
             # or places (build123d wraps every part it makes in a compound of one).
@@ -599,13 +599,6 @@ class Trace:
             for name in names:
                 stem = f"{function}.{name}"
                 stems[stem] = stems.get(stem, 0) | (1 << head)
-            by_operation: dict[str, list[int]] = {}
-            for index in indices:
-                if index != head:
-                    by_operation.setdefault(self.features[index].operation, []).append(index)
-            for members in by_operation.values():
-                for number, index in enumerate(self._counting_order(members), 1):
-                    within[index] = number
         # The unassigned calls of one stem made of the same features' results: the classes
         # of siblings ``_Names._name`` counts in their geometric order.
         classes: dict[tuple, list[int]] = {}
@@ -613,12 +606,30 @@ class Trace:
             if feature.execution is None and feature.inputs:
                 classes.setdefault((feature.stem, tuple(feature.inputs)), []).append(feature.index)
         siblings: dict[int, tuple[int, ...]] = {}
-        for members in classes.values():
-            if len(members) > 1 and not self._alike(members):
-                for index in members:
-                    siblings[index] = tuple(members)
-        self._heads, self._target_stems, self._within, self._siblings = heads, stems, within, siblings
+        for held in classes.values():
+            if len(held) > 1 and not self._alike(held):
+                for index in held:
+                    siblings[index] = tuple(held)
+        self._heads, self._target_stems, self._siblings = heads, stems, siblings
+        self._members, self._within = members, {}
         self._assigned_count = len(self.features)
+
+    def _number(self, index: int) -> int:
+        """Feature ``index``'s number among its execution's features of its operation, the
+        head left out (``_counting_order``): counted the first time naming asks, for that
+        execution and operation alone -- placing siblings reads their geometry, which a part
+        no one names (a warm build's replayed parts) never needs."""
+        found = self._within.get(index)
+        if found is None:
+            feature = self.features[index]
+            key = (feature.execution, feature.target)
+            head = self._heads[key]
+            members = [member for member in self._members[key]
+                       if member != head and self.features[member].operation == feature.operation]
+            for number, member in enumerate(self._counting_order(members), 1):
+                self._within[member] = number
+            found = self._within[index]
+        return found
 
     def _counting_order(self, members: list[int]) -> list[int]:
         """``members`` (calls of one operation counted together, in call order) in the order
@@ -1480,7 +1491,7 @@ class Trace:
             return found[ordinal - 1]
 
         # What the feature made, numbered per kind in the order of its results, each result's
-        # pieces in the order of where they are (``_leaves``) -- per target, for a tuple
+        # pieces in the order of where they are (``_in_place_order``) -- per target, for a tuple
         # assignment's (``Feature.groups``), each named by its own.
         made_by_group: dict[int, list[Any]] = {}
         rules: list[list[list[tuple]] | None] = []
@@ -1541,7 +1552,7 @@ class Trace:
                     continue
                 if leaves is _MISSING:
                     leaves = _leaves(result)
-                for ordinal in _in_place_order(leaves, maps[kind], _TOPABS[kind]):
+                for ordinal in _in_place_order(leaves, maps[kind], _TOPABS[kind], held):
                     if held[ordinal - 1] is None:
                         held[ordinal - 1] = ("m", add(find(ordinal)))
             rules.append(table)
@@ -1720,7 +1731,7 @@ class _Names:
             base = self._counted(head, feature.target, function)
             if index == head:
                 return f"{function}.{base}"
-            return f"{function}.{base}_{feature.operation}{trace._within[index]}"
+            return f"{function}.{base}_{feature.operation}{trace._number(index)}"
         stem = feature.stem
         trace._assignments()
         place = index
@@ -2290,7 +2301,38 @@ def _relative(element: Any, shape: Any) -> Any:
 def _place(shape: Any) -> tuple:
     """Where a shape is, from its geometry alone: its type, and the size and centre of its
     faces (area), else its edges (length), else its first vertex, rounded as positions are.
-    Tolerances, the heap and the order of its sub-shapes play no part."""
+    Tolerances, the heap and the order of its sub-shapes play no part. Measured once per
+    TShape in its own frame (``_PLACES``) and carried to the shape's placement."""
+    tshape = shape.TShape()
+    found = _PLACES.get(tshape)
+    if found is None:
+        found = _PLACES[tshape] = _own_place(shape.Located(TopLoc_Location()))
+        while len(_PLACES) > _PLACES_HELD:
+            _PLACES.popitem(last=False)
+    else:
+        _PLACES.move_to_end(tshape)
+    dimension, size, centre = found
+    if centre is None:
+        return (int(shape.ShapeType()),)
+    location = shape.Location()
+    if not location.IsIdentity():
+        transform = location.Transformation()
+        centre = centre.Transformed(transform)
+        size *= abs(transform.ScaleFactor()) ** dimension
+    return (int(shape.ShapeType()), int(round(size / _POSITION_QUANTUM)),
+            *(int(round(value / _POSITION_QUANTUM)) for value in centre.Coord()))
+
+
+# Where each TShape is in its own frame (``_place``): the dimension its size is measured
+# in, the size and the centre, unrounded. A TShape's geometry never changes once built,
+# and placed prototypes and a warm build's replayed shapes hand naming the same TShapes
+# again, so the integral over its faces is taken once per process, the least recently
+# asked dropped past the bound.
+_PLACES: "OrderedDict[Any, tuple]" = OrderedDict()
+_PLACES_HELD = 1 << 16
+
+
+def _own_place(shape: Any) -> tuple:
     from OCP.BRep import BRep_Tool
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
@@ -2298,63 +2340,95 @@ def _place(shape: Any) -> tuple:
     props = GProp_GProps()
     if TopExp_Explorer(shape, TopAbs_FACE).More():
         BRepGProp.SurfaceProperties_s(shape, props)
+        dimension = 2
     elif TopExp_Explorer(shape, TopAbs_EDGE).More():
         BRepGProp.LinearProperties_s(shape, props)
+        dimension = 1
     else:
         explorer = TopExp_Explorer(shape, TopAbs_VERTEX)
         if not explorer.More():
-            return (int(shape.ShapeType()),)
-        point = BRep_Tool.Pnt_s(TopoDS.Vertex_s(explorer.Current()))
-        return (int(shape.ShapeType()), 0, *(int(round(value / _POSITION_QUANTUM)) for value in point.Coord()))
-    centre = props.CentreOfMass()
-    return (int(shape.ShapeType()), int(round(props.Mass() / _POSITION_QUANTUM)),
-            *(int(round(value / _POSITION_QUANTUM)) for value in centre.Coord()))
+            return 0, 0.0, None
+        return 0, 0.0, BRep_Tool.Pnt_s(TopoDS.Vertex_s(explorer.Current()))
+    return dimension, props.Mass(), props.CentreOfMass()
 
 
-def _leaves(shape: Any) -> list[Any] | None:
-    """The shapes a compound holds, through the compounds it holds, each compound's in the
-    order of where they are (``_place``), then as held; None for a shape that holds fewer
-    than two. OCCT hands some makers' pieces back in an order that depends on the heap
-    (a text's glyph faces), so a compound's order is no function of the code; where its
-    pieces are is."""
+def _leaves(shape: Any) -> tuple | None:
+    """The shapes a compound holds, through the compounds it holds, as a tree -- a leaf, or
+    ``(compound, children)`` --; None for a shape that holds fewer than two. Ordered by
+    where they are only as far as a kind's made elements ask (``_in_place_order``)."""
     from OCP.TopAbs import TopAbs_COMPOUND
     from OCP.TopoDS import TopoDS_Iterator
 
-    found: list[Any] = []
-    pending = [shape]
-    while pending:
-        current = pending.pop()
+    count = 0
+
+    def tree(current: Any) -> Any:
+        nonlocal count
         if current.ShapeType() != TopAbs_COMPOUND:
-            found.append(current)
-            continue
+            count += 1
+            return current
         children = []
         iterator = TopoDS_Iterator(current)
         while iterator.More():
-            children.append(iterator.Value())
+            children.append(tree(iterator.Value()))
             iterator.Next()
-        if len(children) > 1:
-            children = [child for _key, child in sorted(
-                ((_place(child), at), child) for at, child in enumerate(children))]
-        pending.extend(reversed(children))
-    return found if len(found) > 1 else None
+        return current, children
+
+    found = tree(shape)
+    return found if count > 1 else None
 
 
-def _in_place_order(leaves: list[Any] | None, elements: Any, topabs: Any) -> Any:
-    """The ordinals of ``elements`` (a result's map of one kind) in the order the result's
-    pieces (``leaves``) hold them, each piece's in its own order; the result's order where
-    it is one piece."""
+def _in_place_order(leaves: tuple | None, elements: Any, topabs: Any, held: list) -> Any:
+    """The ordinals of ``elements`` (a result's map of one kind) not yet named (None in
+    ``held``) in the order the result's pieces (``leaves``) hold them, each piece's in its
+    own order, the pieces of each compound in the order of where they are (``_place``),
+    then as held; the result's order where it is one piece. OCCT hands some makers' pieces
+    back in an order that depends on the heap (a text's glyph faces), so a compound's order
+    is no function of the code; where its pieces are is. Only the pieces holding such an
+    element are placed, and only where a compound holds two of them."""
     if leaves is None:
         return range(1, elements.Extent() + 1)
+    find = elements.FindIndex
+    # Per piece holding an element not yet named, those elements' ordinals in its order;
+    # each node holding such a piece.
+    holds: dict[int, list[int]] = {}
+    relevant: set[int] = set()
+
+    def gather(node: Any) -> bool:
+        if isinstance(node, tuple):
+            found = False
+            for child in node[1]:
+                found = gather(child) or found
+        else:
+            mapped = _map(node, topabs)
+            ordinals = [ordinal for ordinal in (find(mapped.FindKey(at)) for at in range(1, mapped.Extent() + 1))
+                        if ordinal and held[ordinal - 1] is None]
+            if ordinals:
+                holds[id(node)] = ordinals
+            found = bool(ordinals)
+        if found:
+            relevant.add(id(node))
+        return found
+
     order: list[int] = []
     seen: set[int] = set()
-    for leaf in leaves:
-        held = _map(leaf, topabs)
-        for at in range(1, held.Extent() + 1):
-            ordinal = elements.FindIndex(held.FindKey(at))
-            if ordinal and ordinal not in seen:
-                seen.add(ordinal)
-                order.append(ordinal)
-    order.extend(ordinal for ordinal in range(1, elements.Extent() + 1) if ordinal not in seen)
+
+    def walk(node: Any) -> None:
+        if not isinstance(node, tuple):
+            for ordinal in holds[id(node)]:
+                if ordinal not in seen:
+                    seen.add(ordinal)
+                    order.append(ordinal)
+            return
+        children = [(at, child) for at, child in enumerate(node[1]) if id(child) in relevant]
+        if len(children) > 1:
+            children.sort(key=lambda pair: (_place(pair[1][0] if isinstance(pair[1], tuple) else pair[1]), pair[0]))
+        for _at, child in children:
+            walk(child)
+
+    if gather(leaves):
+        walk(leaves)
+    order.extend(ordinal for ordinal in range(1, elements.Extent() + 1)
+                 if ordinal not in seen and held[ordinal - 1] is None)
     return order
 
 
