@@ -7,12 +7,14 @@ document. A material per look: PBR metallic-roughness, its base colour the part'
 the paint's), metallic, roughness and emissive from the part's material, ``BLEND`` where
 the colour is not opaque; a part without a material is a matte one of its colour. A
 placement whose own colour is not its part's is drawn by a second mesh of the same
-accessors in that colour. Millimetres, as the document's.
+accessors in that colour. The placements are in the document's millimetres, Z up; the
+root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import struct
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,10 @@ MAGIC = 0x46546C67
 VERSION = 2
 JSON_CHUNK = 0x4E4F534A
 BIN_CHUNK = 0x004E4942
+# The document's Z-up millimetres as glTF's Y-up metres, on the root node: -90 degrees
+# about X, then 0.001. The placements below it stay in the document's millimetres.
+ROTATION = (-math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))
+SCALE = (0.001, 0.001, 0.001)
 
 
 def write(view: Any, path: Path) -> None:
@@ -98,7 +104,7 @@ def write(view: Any, path: Path) -> None:
         found = mesh_at[key] = len(gltf_meshes) - 1
         return found
 
-    nodes: list[dict] = [{"name": view.name, "children": []}]
+    nodes: list[dict] = [{"name": view.name, "rotation": list(ROTATION), "scale": list(SCALE), "children": []}]
     for placed in view.placements:
         own = held[placed.prototype]
         color = placed.color if placed.color is not None and placed.color != _tuple(

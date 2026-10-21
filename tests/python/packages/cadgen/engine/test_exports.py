@@ -184,6 +184,10 @@ class ExportTest(unittest.TestCase):
         self.assertIn([1.0, 0.0, 0.0, 1.0], [look["pbrMetallicRoughness"]["baseColorFactor"] for look in looks])
         rack = next(node for node in placed if node["name"] == "rack/peg0")
         self.assertEqual(rack["matrix"][12:15], [-10.0, 0.0, 6.0])
+        # The root shows the document's Z-up millimetres in glTF's Y-up metres.
+        root = gltf["nodes"][gltf["scenes"][0]["nodes"][0]]
+        self.assertEqual(root["scale"], [0.001, 0.001, 0.001])
+        np.testing.assert_allclose(root["rotation"], [-0.5 ** 0.5, 0, 0, 0.5 ** 0.5])
 
     def test_3mf_holds_an_object_per_part_an_item_per_placement_and_its_looks(self) -> None:
         with zipfile.ZipFile(self.folder / "board.3mf") as archive:

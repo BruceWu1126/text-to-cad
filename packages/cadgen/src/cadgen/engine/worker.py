@@ -184,7 +184,6 @@ def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, An
         seconds = time.perf_counter() - clock
         files.append({"path": str(target), "kind": export.kind_of(target), "bytes": size,
                       "seconds": round(seconds, 4)})
-        log(f"wrote {target.name} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
     return {"reports": built, "files": files}
 
 
