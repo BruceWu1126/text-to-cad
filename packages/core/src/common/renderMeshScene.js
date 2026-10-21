@@ -604,6 +604,7 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
   const scene = new THREE.Scene();
   let disposed = false;
   let environmentResource = null;
+  let reflectionResource = null;
   let backgroundTexture = null;
   const photographicConfiguration = context.sceneSettings.render.configuration || null;
   const studioConfiguration = photographicConfiguration && normalizeBoolean(job.output?.transparent, false)
@@ -645,6 +646,12 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     }
     environmentResource = resource;
     scene.environment = resource?.texture || null;
+    // A family scene that keeps authored finishes on some surfaces alone reflects the studio's
+    // neutral environment on those, as the viewer's viewport hands it (`setReflection`).
+    if (model.scene?.setReflection && !context.sceneSettings.view.lighting.enabled) {
+      reflectionResource = createEnvironmentResource(renderer, {}, { size: context.quality.environmentMapSize });
+      model.scene.setReflection(reflectionResource.texture);
+    }
     return resource;
   });
   if (!context.sceneSettings.view.lighting.enabled) applyLighting(
@@ -711,6 +718,8 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       if (scene.background === environmentResource?.texture) scene.background = null;
       disposeEnvironmentResource(environmentResource);
       environmentResource = null;
+      disposeEnvironmentResource(reflectionResource);
+      reflectionResource = null;
       disposeSnapshotSceneResources(scene, model.root, [backgroundTexture]);
       backgroundTexture = null;
       renderer.dispose?.();

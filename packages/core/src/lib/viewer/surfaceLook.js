@@ -17,6 +17,11 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 //                           source colours (photographic Render)
 //     surface: { style: "shaded" | "flat", opacity } }
 //
+// A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
+// scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
+// reflecting the environment `setReflection` hands it; in every other look (a fill, X-ray, Flat)
+// it wears the look's finish like any other surface.
+//
 // Colour modes are the material settings' own: `overrideSourceColors` paints every
 // part with a fill (one colour, or the palette cycled per mesh: in traversal
 // order, or at the place a mesh names in `userData.cadFillIndex`); otherwise a
@@ -50,6 +55,19 @@ function readAuthored(material) {
 // Inspect wears a physical stand-in that starts as the authored material, maps
 // included, and the authored material itself is only ever touched by settings
 // that apply to it (colour mode, opacity) and is always written back in full.
+// What an authored finish is beyond a colour: what its stand-in copies from it in a shaded
+// look, and resets to a plain surface's in any other.
+const FINISH_KEYS = Object.freeze(["roughness", "metalness", "clearcoat", "clearcoatRoughness", "ior", "anisotropy",
+  "anisotropyRotation", "transmission", "thickness", "attenuationDistance"]);
+
+function plainFinish(THREE) {
+  const plain = new THREE.MeshPhysicalMaterial();
+  const found = Object.fromEntries(FINISH_KEYS.map(key => [key, plain[key]]));
+  found.attenuationColor = plain.attenuationColor.clone();
+  plain.dispose();
+  return found;
+}
+
 function inspectStandIn(THREE, authored) {
   if (authored.isMeshPhysicalMaterial) return authored.clone();
   const material = new THREE.MeshPhysicalMaterial();
@@ -65,10 +83,13 @@ function inspectStandIn(THREE, authored) {
  * Textures stay with whoever authored them. Clip's planes (`setClipPlanes`) cut every material under
  * `root`, the stand-ins a later look puts on included.
  *
- * @returns {{ apply(look: object | null): void, setClipPlanes(planes: object[]): void, dispose(): void, meshCount: number }}
+ * @returns {{ apply(look: object | null): void, setReflection(texture: object | null, intensity?: number): void,
+ *   setClipPlanes(planes: object[]): void, dispose(): void, meshCount: number }}
  */
 export function createSurfaceLook(THREE, root) {
   let clipPlanes = [];
+  let reflection = { texture: null, intensity: 0 };
+  let plain = null;
   const slots = [];
   const seen = new Set();
   const owned = new Set();
@@ -128,8 +149,24 @@ export function createSurfaceLook(THREE, root) {
         target = entry.unlit ||= new THREE.MeshBasicMaterial({ name: lit.name });
       } else if (!authoredLook) {
         target = entry.inspect ||= inspectStandIn(THREE, lit);
-        for (const key of ["roughness", "metalness", "clearcoat", "clearcoatRoughness"]) target[key] = clamp01(settings[key]);
-        target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
+        const finish = lit.userData?.cadAuthoredFinish === true;
+        if (finish && !forceFill && opacityScale >= 0.999) {
+          // A finish the file authored, kept, reflecting the environment it is handed.
+          for (const key of FINISH_KEYS) target[key] = lit[key];
+          target.attenuationColor.copy(lit.attenuationColor);
+          // With none handed to it (photographic Render), the scene's own environment, in full.
+          if (target.envMap !== reflection.texture) { target.envMap = reflection.texture; target.needsUpdate = true; }
+          target.envMapIntensity = reflection.texture ? reflection.intensity : 1;
+        } else {
+          if (finish) {
+            plain ||= plainFinish(THREE);
+            for (const key of FINISH_KEYS) target[key] = plain[key];
+            target.attenuationColor.copy(plain.attenuationColor);
+            if (target.envMap) { target.envMap = null; target.needsUpdate = true; }
+          }
+          for (const key of ["roughness", "metalness", "clearcoat", "clearcoatRoughness"]) target[key] = clamp01(settings[key]);
+          target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
+        }
         // The viewer lifts its surfaces by a trace of their own colour. A part that
         // authored a glow of its own keeps it.
         if (!authored.glows) {
@@ -150,6 +187,13 @@ export function createSurfaceLook(THREE, root) {
 
   return {
     apply,
+    /**
+     * The environment an authored finish reflects in a shaded look, and how strongly; null for
+     * none. Takes effect at the next `apply`.
+     */
+    setReflection(texture, intensity = 1) {
+      reflection = { texture: texture || null, intensity: Math.max(Number(intensity) || 0, 0) };
+    },
     setClipPlanes(planes) {
       clipPlanes = Array.isArray(planes) ? planes : [];
       // The caps' own stencils are cut by the planes they cap (`sectionCaps.js`).
