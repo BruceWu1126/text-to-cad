@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import sqrt
 
 import build123d as bd
-from cadgen.engine import step, xbf
+from cadgen.engine import xbf
 
 
 # Units: millimeters.
@@ -245,7 +245,6 @@ def _mate(fixed, fixed_frame: str, fixed_at: bd.Location, moving, moving_frame: 
 
 
 @xbf(out="../XBF/basic_shape_mating_test_fixture.xbf")
-@step(out="../XBF/basic_shape_mating_test_fixture.step")  # electronics_enclosure_base_import reads it
 def basic_shape_mating_test_fixture():
     base = _make_base()
     peg = _make_peg()
