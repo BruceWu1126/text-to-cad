@@ -153,10 +153,14 @@ def part_shapes(mesh: Mesh, group_of: dict[int, Any] | None = None, default: Any
             groups.append((positions, triangles, normals))
             keys.append(default)
     else:
-        per_triangle = np.repeat(np.array([painted.get(int(o), default) for o in faces[:, 0]], dtype=object),
+        # Each group by a number of its own: a group is a colour (an RGBA tuple), which numpy
+        # would compare element by element against an array of them.
+        order = [default, *sorted({*painted.values()} - {default}, key=str)]
+        number = {key: at for at, key in enumerate(order)}
+        per_triangle = np.repeat(np.array([number[painted.get(int(o), default)] for o in faces[:, 0]], np.int64),
                                  faces[:, 2] // 3)
-        for key in [default, *sorted({*painted.values()} - {default}, key=str)]:
-            chosen = triangles[per_triangle == key]
+        for key in order:
+            chosen = triangles[per_triangle == number[key]]
             if not len(chosen):
                 continue
             used, inverse = np.unique(chosen, return_inverse=True)
