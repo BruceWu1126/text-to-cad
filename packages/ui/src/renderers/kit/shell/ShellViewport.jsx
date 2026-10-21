@@ -832,6 +832,34 @@ const ShellViewport = forwardRef(function ShellViewport({
     scene?.keepsAuthoredFinish, renderMode, studioSceneTick, viewerReadyTick, viewerTheme, normalizedThemeSettings.background
   ]);
 
+  // An authored finish's reflection outside photographic Render: the studio's neutral
+  // environment at its default lighting, handed to a scene that keeps authored finishes on some
+  // surfaces alone (`setReflection`, `sceneContract.js`). The scene's own environment stays as the
+  // look above left it, so every other surface is lit as it always was. Under Render the scene
+  // is lit by the studio's environment as a whole, and takes none of its own.
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime?.renderer || typeof scene?.setReflection !== "function") return undefined;
+    if (photographicLighting && renderConfiguration) {
+      scene.setReflection(null);
+      runtime.requestRender?.();
+      return undefined;
+    }
+    let cancelled = false;
+    let resource = null;
+    loadStudioScene().then((studio) => {
+      if (cancelled) return;
+      resource = studio.createEnvironmentResource(runtime.renderer, {}, { size: renderEnvironmentMapSize });
+      scene.setReflection(resource.texture);
+      runtime.requestRender?.();
+    }, (reflectionError) => console.error("Failed to prepare the reflection environment", reflectionError));
+    return () => {
+      cancelled = true;
+      scene.setReflection(null);
+      resource?.dispose();
+    };
+  }, [scene, photographicLighting, renderConfiguration, renderEnvironmentMapSize, viewerReadyTick]);
+
   // Preview's orbit.
   useEffect(() => {
     const runtime = runtimeRef.current;

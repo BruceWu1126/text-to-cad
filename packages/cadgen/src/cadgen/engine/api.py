@@ -361,12 +361,14 @@ def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
 
 def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
     """What made one element of a document, and what the kernel measures of it: ``ref`` is
-    ``PART/face N`` (``edge``, ``vertex``) or an element name (``f:...``). Without ``ref``, the
-    build closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs
-    and key, read from the file alone."""
+    ``PART/face N`` (``edge``, ``vertex``) or an element name (``f:...``). A part or an assembly
+    (its name or path) answers its volume and its mass: each part's volume times its material's
+    density, summed (``cli.weighed``). Without ``ref``, the build closure the xbf holds
+    (``previous``): its engine, libraries, source, modules, inputs and key, read from the file
+    alone."""
     import urllib.request
 
-    from cadgen.engine.cli import elements
+    from cadgen.engine.cli import elements, placements, weighed
 
     path = Path(os.fspath(source)).resolve()
     if not path.is_file():
@@ -387,6 +389,10 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
             return json.loads(response.read())
 
     structure = get("")
+    held = placements(structure, ref)
+    if held:
+        keys = {structure["prototypes"][i["prototype"]]["key"] for i in held}
+        return weighed(structure, held, {key: get(f"/part/{key}/volume")["volume"] for key in sorted(keys)}, ref)
     found = []
     for prototype, kind, ordinal in elements(structure, ref):
         facts = get(f"/part/{prototype['key']}/{kind}/{ordinal}")

@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from cadgen.engine import build as engine_build
-from cadgen.engine import document
+from cadgen.engine import document, materials
 from cadgen.engine.model import Model, step, stl, xbf
 
 MODEL = """
@@ -408,12 +408,17 @@ class PatchTest(EngineCase):
         # Aluminium is the cap's too, and now comes first: the materials are numbered anew.
         self.assertEqual(self.patched(pin="aluminium")["converted"]["converted"], 3)
         pin = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "pin")
-        self.assertEqual(pin.material.name, "Aluminum Generic")
+        self.assertEqual(pin.material.name, materials.aluminium.name)
         self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium"))
         self.patched(pin="aluminium", top="0.9, 0.9, 0.1")
         plate = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "plate")
         self.assertIn((0.9, 0.9, 0.1, 1.0), plate.face_colors.values())
         self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium", top="0.9, 0.9, 0.1"))
+        # A field the file keeps beside XCAF's own (a coat) converts it too.
+        self.patched(pin="aluminium.but(coat=0.5)", top="0.9, 0.9, 0.1")
+        pin = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "pin")
+        self.assertEqual(pin.material.coat, 0.5)
+        self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium.but(coat=0.5)", top="0.9, 0.9, 0.1"))
 
     def test_the_served_document_is_the_written_one(self) -> None:
         import json

@@ -34,6 +34,11 @@
  *   surfaces do not all take shadows (unlit or see-through ones) implements it and applies its own rule.
  * @property {boolean} [keepsAuthoredFinish]  The scene shows authored finishes in Inspect too,
  *   so Inspect gives it a small neutral environment to reflect.
+ * @property {(texture: import("three").Texture | null) => void} [setReflection]  The scene keeps
+ *   authored finishes on some surfaces only, and reflects an environment on those alone: outside
+ *   photographic Render the host hands it the studio's neutral environment (Preview's, at its
+ *   default lighting) and leaves the scene's own environment unset, so every other surface is lit
+ *   as it always was; under Render, null, the scene lit by the studio's environment as a whole.
  * @property {(ray: import("three").Ray) => ({ id: string, point: import("three").Vector3 } | null)} [pick]
  *   Only scenes that select.
  * @property {boolean} [complete]  `false` while `restBounds` may still GROW: a large model published

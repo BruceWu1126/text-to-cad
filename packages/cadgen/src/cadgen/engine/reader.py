@@ -193,14 +193,9 @@ def describe(doc: Any, step: bool) -> tuple[dict[str, Any], list[Any], list[Any]
 
 
 def _material(found: dict[str, Any] | None) -> Any:
-    from cadgen.engine.materials import Material
+    from cadgen.engine.document import material_from_json
 
-    if found is None:
-        return None
-    emissive = tuple(found.get("emissive") or ())
-    return Material(found["name"], found.get("density"), tuple(found["color"]) if found.get("color") else None,
-                    found.get("metallic", 0.0), found.get("roughness", 0.5), emissive if any(emissive) else None,
-                    found.get("description"))
+    return material_from_json(found)
 
 
 def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) -> Any:

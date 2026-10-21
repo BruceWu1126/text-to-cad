@@ -15,7 +15,8 @@ that made it, its operation, and the function, file and line of that feature's c
 asked of the worker that built the document (``provenance``) -- never read from a file, so
 a document served cold, with no live worker that built it, answers null;
 ``GET /api/doc/<id>/part/<key>/groups`` is how a pick of one face or edge grows (each face's
-tangent group, each edge's chain: ``mesh.Topology.groups``); ``POST /api/doc/<id>/mesh`` meshes every part
+tangent group, each edge's chain: ``mesh.Topology.groups``); ``.../volume`` the part's volume
+in cubic millimetres, what its mass is weighed from (``mesh.Topology.volume``); ``POST /api/doc/<id>/mesh`` meshes every part
 not held yet, in parallel, and answers how long that took. ``POST /api/doc/<id>/pose``
 with ``{"pose": NAME | {joint: value}}`` serves the document at that pose under an id of
 its own (``<id>~<digest>``): its structure's instances where the mechanism places them,
@@ -608,6 +609,8 @@ class Server:
                         return self.fact(handler, doc, key, parts[5], int(parts[6]))
                     if len(parts) == 6 and parts[5] == "groups":
                         return self.json(handler, self.topology(key, self.shape_of(doc, key)).groups())
+                    if len(parts) == 6 and parts[5] == "volume":
+                        return self.json(handler, self.topology(key, self.shape_of(doc, key)).volume())
                 if len(parts) == 4 and parts[3] == "mesh" and method == "POST":
                     mode = (query.get("mode") or [None])[0]
                     if mode is not None and mode not in MODES:

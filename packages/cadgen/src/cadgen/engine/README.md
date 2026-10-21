@@ -32,12 +32,11 @@ def bike():
 ```
 
 A part's material is set on the shape, as its colour is: `part.material =
-materials.aluminium` (a catalogue of common engineering materials, names and densities
-from FreeCAD's material cards), or `Material("name", density, color=..., metallic=...,
-roughness=...)` for any other. `paint(part, faces, material)` gives faces one. On an
-assembly, a material is every part's below it that has none: a whole-model default.
-Set materials on finished parts, after the last operation: an edit of one is then no
-kernel call. Two limits of OCCT's STEP writer show in a STEP export: it names the density
+materials.aluminium_6061` (or `materials("6061")`: a catalogue of common engineering
+materials, **Materials**), or a `Material(...)` constant of the project's own for any other.
+`paint(part, faces, material)` gives faces one. On an assembly, a material is every part's
+below it that has none: a whole-model default. Set materials on finished parts, after the
+last operation: an edit of one is then no kernel call. Two limits of OCCT's STEP writer show in a STEP export: it names the density
 unit gram³·cm² (the exponents wrong, the number right: the reader gives the density back as
 written), and it writes materials sharing a name as one entity, so a STEP gives every such
 material the first one's description.
@@ -83,8 +82,9 @@ def hinge():
 4. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
-   per face given one (`XCAFDoc_Material`: name, description, density;
-   `XCAFDoc_VisMaterial`: PBR), element names on face, edge and vertex sub-shape
+   per face given one (`XCAFDoc_Material`: name, description, density, and one
+   `TDataStd_NamedData` beside it for the rest; `XCAFDoc_VisMaterial`: PBR), element names
+   on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
    Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
    <release>)`, `document.Loaded.writer`) and holds the model's build closure
@@ -124,7 +124,7 @@ def hinge():
 | --- | --- |
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
-| `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
+| `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
@@ -150,7 +150,8 @@ cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--p
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf status | stop | daemon
-cadgen where DOC [REF]                      the build closure; with REF: PART/face N (edge, vertex), or an element name
+cadgen where DOC [REF]                      the build closure; with REF: PART/face N (edge, vertex), an element name,
+                                            or a part or an assembly: its volume and mass
 ```
 
 These are the commands as invoked today: `where` is the first verb at the top level, and
@@ -243,12 +244,15 @@ target and moved over it.
   part and per painted face, material names and densities, element names on face, edge and
   vertex sub-shape labels. Read back through the engine's own reader, the instance tree, every
   name (on the same elements: the reader numbers edges and vertices in its own order), colours
-  and materials' names and densities are the xbf's. OCCT's writer drops the PBR look (metallic,
-  roughness, emissive: a material reads back matte), a face's material (the face keeps its
-  colour), the mechanism and its configurations, and the model's key and provenance.
+  and materials' names and densities are the xbf's. OCCT's writer drops the look (metallic,
+  roughness, emissive and the rest: a material reads back matte), every physical field but the
+  density, a face's material (the face keeps its colour), the mechanism and its configurations,
+  and the model's key and provenance.
 - **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
-  look (a paint is a primitive of its own), and every motion of the document an animation of
-  the same name (below); **3MF**: an object per prototype, a build item per
+  look (a paint is a primitive of its own) with an extension for each part of the look past
+  metallic-roughness (`KHR_materials_ior`, `_transmission`, `_volume`, `_clearcoat`,
+  `_anisotropy`, `_emissive_strength`; **Materials**), and every motion of the document an
+  animation of the same name (below); **3MF**: an object per prototype, a build item per
   placement, looks through the materials extension (base materials, `pbmetallic` display
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
@@ -417,6 +421,59 @@ pair cannot take, or moving a pair kept inconsistent or closing a loop, is left 
 A warm build that changes only a motion rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
+## Materials
+
+A `Material` (`materials.py`) is frozen and SI, and a field it does not know is `None`, never a
+guess. Its physical half: `name` (what the catalogue looks it up by), `family` (`metal`,
+`plastic`, `elastomer`, `composite`, `wood`, `glass` or `other`), `standard` (the designation:
+`UNS A96061`), `description`, `source` (where its numbers came from), `density` kg/m³,
+`young_modulus` Pa, `poisson_ratio`, `yield_strength` and `ultimate_strength` Pa,
+`thermal_expansion` 1/K, `thermal_conductivity` W/(m·K), `specific_heat` J/(kg·K), and
+`isotropic` (False for a laminate or a ply). Its look is a strict subset of OpenPBR, cut to what
+glTF carries: `color` (linear RGBA, alpha its opacity), `metallic`, `roughness`, `ior` (1.5),
+`anisotropy` and `anisotropy_rotation` (radians), `transmission`, `transmission_color` and
+`transmission_depth` (metres), `coat` and `coat_roughness`, `emissive` (RGB) and
+`emissive_strength` (1). Each look parameter is one glTF field; the module's docstring is the
+contract that maps OpenPBR, the `Material`, glTF and Blender's Principled BSDF onto one another.
+Every field is checked as it is made, by name (0-1 ranges, positive physical values). `but(**changes)`
+is a copy with changes; `mass(volume_m3)` is kilograms, or None without a density.
+
+The catalogue is one object, the module itself: `materials("6061")` looks an entry up in any
+case by its name, its attribute or an alias (`"6061-T6"`, `"al 6061"`, `"steel"`, `"delrin"`),
+and a miss raises `LookupError` naming the three nearest; `materials.aluminium_6061` is an
+entry; `materials.names()` is every name by family and `materials.by(family="metal")` the
+entries a field selects. There is nothing to register: a project's own materials are
+`Material(...)` constants in its own module, and `materials.steel_1018.but(roughness=0.2)` a
+variant. Its 44 entries:
+
+| Family | Entries |
+| --- | --- |
+| metals | Aluminum 6061-T6, 5052-H32, 6063-T5, 7075-T6; Steel 1018, A36, S235JR, 4140; Spring steel 1095; Stainless 304, 316, 17-4 PH; Brass C360, C260; Copper C110; Titanium Ti-6Al-4V; Zinc ZA-8; Neodymium magnet N42 (a density, nothing structural) |
+| printing plastics | PLA, PETG, ABS, ASA, Nylon PA12, Nylon PA6-CF, TPU 95A (an elastomer), Polycarbonate, SLA resin |
+| engineering plastics | Acetal (POM), Acrylic (PMMA), PTFE, PEEK, HDPE, UHMW-PE, Nylon PA6, Polypropylene |
+| sheet, composites, wood | FR4, Carbon fibre laminate and Birch plywood (both not isotropic), MDF, Hardboard |
+| elastomers, other | Silicone 50A, NBR 70A, EPDM foam, Glass (soda-lime) |
+
+`aluminium`, `steel`, `stainless_steel`, `brass`, `copper`, `titanium`, `nylon`, `acrylic`,
+`glass`, `abs_plastic` and `acetal` are short names for the common choice. The seed values were
+taken once from public material cards (FreeCAD's) and typical datasheets, as a starting point;
+each entry's `source` names which. The looks are the engine's own: metals metallic with
+roughness by finish (polished 0.2, machined 0.35-0.45, cast 0.6), brushed aluminium and
+stainless anisotropic, plastics dielectric, glass and the clear plastics transmissive, rubber
+rough.
+
+In the file a material is XCAF's own `XCAFDoc_Material` (name, description, density) and
+`XCAFDoc_VisMaterial` (PBR: colour and alpha, metallic, roughness, emissive, IOR), and every
+other field in one `TDataStd_NamedData` on the material's label, named as the schema names it
+(none for a material of a name and a density). Read back it is the material, its PBR factors as
+32-bit floats. A material change converts the prototypes it is on; a cold and a warm build write
+the same bytes. The structure serves every field of each part's and each painted face's material;
+a GLB writes the look as glTF's extensions (the volume's thickness the part's, the smallest extent
+of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in the
+shaded modes and Preview -- the shaded modes reflecting the studio's neutral environment on those
+surfaces alone, so a part with no material is drawn as ever -- and the theme's finish in X-ray and
+Parts. A part's chip card and `cadgen where` weigh it: volume by density, summed over an assembly.
+
 ## Imports
 
 `read_step(path)` reads a `.step`/`.stp`, `read_xbf(path)` an engine document; both copy the
@@ -527,14 +584,18 @@ that worker's last build. The line is the call's in the run that named the part.
 `cadgen where DOC REF` serves the document on demand and prints one
 element's facts and `made_by`; `REF` is `PART/face N` (`edge`, `vertex`), `PART`
 a part's or an instance's name as the structure spells it, or an element name
-in the viewer's ref grammar (`f:plate.relief.3`).
+in the viewer's ref grammar (`f:plate.relief.3`). A `REF` that names a part or an assembly
+(its name, or its path: `kit/arm`, the document's name for all of it) answers what it weighs:
+each part's volume, measured on its solids (`.../part/<key>/volume`), times its material's
+density, summed -- `{ref, parts, volume (mm³), mass (kg, null when no part has a material),
+unweighed (the parts without one)}`, and for one part its material and density.
 
 ## Wire format
 
 `GET /api/doc/<id>` returns the structure as JSON: prototypes (key, name,
 colour, `faceNames`, `edgeNames`, `vertexNames`, `faceColors` by ordinal, `material` and
-`faceMaterials` by ordinal -- each `{name, density, color, metallic, roughness,
-emissive, description}`, its colour the base colour it is drawn in, density in kg/m^3
+`faceMaterials` by ordinal -- each every field of the `Material`, named in camelCase
+(`youngModulus`, `transmissionColor`, ...), its colour the base colour it is drawn in, SI
 -- and once meshed `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
 colour), the tree, the document's version, and for an assembly with joints `kinematics`: the
 links (name, the instances each moves, its frame as built), the pairs (label, type, the two

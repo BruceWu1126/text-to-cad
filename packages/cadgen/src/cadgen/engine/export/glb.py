@@ -5,7 +5,12 @@ primitive per look (a painted face's colour or material is a primitive of its ow
 a node per placement, named by the placement's path, under one root node named by the
 document. A material per look: PBR metallic-roughness, its base colour the part's (or
 the paint's), metallic, roughness and emissive from the part's material, ``BLEND`` where
-the colour is not opaque; a part without a material is a matte one of its colour. A
+the colour is not opaque, and the rest of the material's look through glTF's material
+extensions: ``KHR_materials_ior``, ``_transmission`` with ``_volume`` (its thickness the part's,
+the smallest extent of its box; its attenuation the material's transmission colour and depth),
+``_clearcoat``, ``_anisotropy`` (along a tangent the mesh carries for it: ``tangents``) and
+``_emissive_strength``, each where the look is not glTF's default; a part without a material
+is a matte one of its colour. A
 placement whose own colour is not its part's is drawn by a second mesh of the same
 accessors in that colour. The placements are in the document's millimetres, Z up; the
 root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do.
@@ -67,22 +72,19 @@ def write(view: Any, path: Path) -> None:
 
     materials: list[dict] = []
     material_at: dict[tuple, int] = {}
+    used: set[str] = set()
 
-    def material(look: tuple) -> int:
-        found = material_at.get(look)
+    def material(look: tuple, thickness: float) -> int:
+        rgba, held = look
+        given = dict(held) if held is not None else None
+        # A transmissive look's volume is as thick as the part it is on (``KHR_materials_volume``).
+        key = (look, thickness if given is not None and given.get("transmission") else None)
+        found = material_at.get(key)
         if found is None:
-            rgba, given = look
-            entry: dict[str, Any] = {"pbrMetallicRoughness": {
-                "baseColorFactor": list(rgba),
-                "metallicFactor": given[2] if given is not None else 0.0,
-                "roughnessFactor": given[3] if given is not None else 0.6},
-                "doubleSided": False, "alphaMode": "BLEND" if rgba[3] < 1.0 else "OPAQUE"}
-            if given is not None:
-                entry["name"] = given[0]
-                if any(given[4]):
-                    entry["emissiveFactor"] = list(given[4])
+            entry = _material(rgba, given, thickness)
+            used.update(entry.get("extensions", {}))
             materials.append(entry)
-            found = material_at[look] = len(materials) - 1
+            found = material_at[key] = len(materials) - 1
         return found
 
     gltf_meshes: list[dict] = []
@@ -102,14 +104,22 @@ def write(view: Any, path: Path) -> None:
             shared[index] = (add(np.ascontiguousarray(mesh.positions, "<f4"), 34962, "VEC3", 5126),
                              add(np.ascontiguousarray(mesh.normals, "<f4"), 34962, "VEC3", 5126), {})
         positions, normals, spans = shared[index]
+        looks = groups(mesh, prototype, color)
+        attributes = {"POSITION": positions, "NORMAL": normals}
+        if any(look[1] is not None and dict(look[1]).get("anisotropy") for look, _ in looks):
+            # An anisotropic look runs along the mesh's tangents, which nothing else gives it.
+            if "tangents" not in spans:
+                spans["tangents"] = add(np.ascontiguousarray(tangents(mesh.normals), "<f4"), 34962, "VEC4", 5126)
+            attributes["TANGENT"] = spans["tangents"]
+        thickness = _thickness(mesh)
         primitives = []
-        for look, indices in groups(mesh, prototype, color):
+        for look, indices in looks:
             span = indices.tobytes()
             accessor = spans.get(span)
             if accessor is None:
                 accessor = spans[span] = add(np.ascontiguousarray(indices, "<u4"), 34963, "SCALAR", 5125)
-            primitives.append({"attributes": {"POSITION": positions, "NORMAL": normals}, "indices": accessor,
-                               "material": material(look)})
+            primitives.append({"attributes": dict(attributes), "indices": accessor,
+                               "material": material(look, thickness)})
         gltf_meshes.append({"name": prototype["name"], "primitives": primitives})
         found = mesh_at[key] = len(gltf_meshes) - 1
         return found
@@ -136,6 +146,8 @@ def write(view: Any, path: Path) -> None:
                 "buffers": [{"byteLength": len(blob)}]}
     if animations:
         document["animations"] = animations
+    if used:
+        document["extensionsUsed"] = sorted(used)
     text = json.dumps(document, separators=(",", ":")).encode()
     text += b" " * (-len(text) % 4)
     while len(blob) % 4:
@@ -146,6 +158,62 @@ def write(view: Any, path: Path) -> None:
         handle.write(text)
         handle.write(struct.pack("<II", len(blob), BIN_CHUNK))
         handle.write(bytes(blob))
+
+
+def _material(rgba: tuple, given: dict[str, Any] | None, thickness: float) -> dict[str, Any]:
+    """A look as a glTF material: PBR metallic-roughness and an extension for each part of the
+    look past it (``materials``' table), each written only where it is not glTF's default."""
+    entry: dict[str, Any] = {"pbrMetallicRoughness": {
+        "baseColorFactor": list(rgba),
+        "metallicFactor": given["metallic"] if given is not None else 0.0,
+        "roughnessFactor": given["roughness"] if given is not None else 0.6},
+        "doubleSided": False, "alphaMode": "BLEND" if rgba[3] < 1.0 else "OPAQUE"}
+    if given is None:
+        return entry
+    entry["name"] = given["name"]
+    extensions: dict[str, Any] = {}
+    if any(given.get("emissive") or ()):
+        entry["emissiveFactor"] = list(given["emissive"])
+        if given.get("emissiveStrength", 1.0) != 1.0:
+            extensions["KHR_materials_emissive_strength"] = {"emissiveStrength": given["emissiveStrength"]}
+    if given.get("ior", 1.5) != 1.5:
+        extensions["KHR_materials_ior"] = {"ior": given["ior"]}
+    if given.get("transmission"):
+        extensions["KHR_materials_transmission"] = {"transmissionFactor": given["transmission"]}
+        volume: dict[str, Any] = {"thicknessFactor": thickness}
+        if given.get("transmissionDepth") is not None:
+            # Metres: the root node's scale makes the scene's units metres.
+            volume["attenuationDistance"] = given["transmissionDepth"]
+            volume["attenuationColor"] = list(given.get("transmissionColor") or (1.0, 1.0, 1.0))
+        extensions["KHR_materials_volume"] = volume
+    if given.get("coat"):
+        extensions["KHR_materials_clearcoat"] = {"clearcoatFactor": given["coat"],
+                                                 "clearcoatRoughnessFactor": given.get("coatRoughness", 0.0)}
+    if given.get("anisotropy"):
+        extensions["KHR_materials_anisotropy"] = {"anisotropyStrength": given["anisotropy"],
+                                                  "anisotropyRotation": given.get("anisotropyRotation", 0.0)}
+    if extensions:
+        entry["extensions"] = extensions
+    return entry
+
+
+def _thickness(mesh: Any) -> float:
+    """A part's thickness for its volume: the smallest extent of its box, in its millimetres."""
+    points = np.asarray(mesh.positions, dtype=np.float32).reshape(-1, 3)
+    return float(np.min(points.max(axis=0) - points.min(axis=0))) if len(points) else 0.0
+
+
+def tangents(normals: Any) -> np.ndarray:
+    """A tangent per vertex for an anisotropic look, which has no UVs to take one from: across
+    the normal around the part's Z axis (round faces brushed around it), along its Y where the
+    normal is Z itself; ``w`` 1. The viewer's scene draws the same."""
+    normal = np.asarray(normals, dtype=np.float32).reshape(-1, 3)
+    tangent = np.cross(normal, np.array([0.0, 0.0, 1.0], dtype=np.float32))
+    flat = np.linalg.norm(tangent, axis=1) < 1e-3
+    tangent[flat] = np.cross(normal[flat], np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    length = np.linalg.norm(tangent, axis=1, keepdims=True)
+    tangent = np.where(length > 0, tangent / np.maximum(length, 1e-12), np.array([1.0, 0.0, 0.0], dtype=np.float32))
+    return np.hstack([tangent, np.ones((len(tangent), 1), dtype=np.float32)]).astype(np.float32)
 
 
 def _size(held: dict[int, Any], shown: list[Any]) -> float:

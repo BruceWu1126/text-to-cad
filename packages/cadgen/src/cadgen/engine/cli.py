@@ -286,14 +286,63 @@ def elements(structure: dict[str, Any], ref: str) -> list[tuple[dict[str, Any], 
             for ordinal, text in prototype.get(f"{kind}Names", {}).items() if text == ref]
 
 
+def placements(structure: dict[str, Any], ref: str) -> list[dict[str, Any]]:
+    """The instances ``ref`` names as a part or an assembly: those at the path it names or
+    below it (``kit/arm``), those of the prototype of that name, or every one for the
+    document's own name; none for an element's ref."""
+    ref = ref.strip().strip("/")
+    instances = structure["instances"]
+    if ref == structure["name"]:
+        return list(instances)
+    found = [i for i in instances if i["path"] == ref or i["path"].startswith(ref + "/")]
+    if not found:
+        named = {at for at, p in enumerate(structure["prototypes"]) if p["name"] == ref}
+        found = [i for i in instances if i["prototype"] in named]
+    if not found:  # a path below the root, given without the root's name
+        found = [i for i in instances if i["path"].partition("/")[2] == ref
+                 or i["path"].partition("/")[2].startswith(ref + "/")]
+    return found
+
+
+def weighed(structure: dict[str, Any], held: list[dict[str, Any]], volumes: dict[str, float],
+            ref: str) -> dict[str, Any]:
+    """What ``held`` (``placements``) weighs: each instance's volume (its prototype's, mm^3, by
+    key in ``volumes``) times its material's density, in kg, summed; ``mass`` None when no part
+    of it has a material with a density, and the parts that have none listed by path."""
+    prototypes = structure["prototypes"]
+    total_volume = 0.0
+    mass = 0.0
+    weighed_any = False
+    unweighed = []
+    for instance in held:
+        prototype = prototypes[instance["prototype"]]
+        volume = volumes[prototype["key"]]
+        total_volume += volume
+        density = (prototype.get("material") or {}).get("density")
+        if density is None:
+            unweighed.append(instance["path"])
+            continue
+        mass += volume * 1e-9 * density
+        weighed_any = True
+    found: dict[str, Any] = {"ref": ref, "parts": len(held), "volume": total_volume,
+                             "mass": mass if weighed_any else None, "unweighed": unweighed}
+    if len(held) == 1:
+        material = prototypes[held[0]["prototype"]].get("material")
+        found.update(part=prototypes[held[0]["prototype"]]["name"], path=held[0]["path"],
+                     material=material["name"] if material else None,
+                     density=material.get("density") if material else None)
+    return found
+
+
 def where_parser(prog: str = "cadgen where") -> argparse.ArgumentParser:
     """``cadgen where``'s parser: a document, and an element of it or none."""
     parser = argparse.ArgumentParser(prog=prog, description="A document's build closure (its source, modules, inputs "
                                                             "and key), or what made one element of it.")
     parser.add_argument("document", help="an .xbf")
     parser.add_argument("ref", nargs="?", help="PART/face N (or edge, vertex), PART a part's or an instance's name (or "
-                                               "the document's, for a document of one part); or an element name "
-                                               "(f:..., e:..., v:...). Without it: the build closure")
+                                               "the document's, for a document of one part); an element name "
+                                               "(f:..., e:..., v:...); or a part or an assembly (its name or path): "
+                                               "its volume and mass. Without it: the build closure")
     return parser
 
 

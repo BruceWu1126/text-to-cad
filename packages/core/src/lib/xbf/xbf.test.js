@@ -13,7 +13,8 @@ import * as THREE from "three";
 import { isKitScene } from "../viewer/sceneContract.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
-import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline } from "./xbfScene.js";
+import { XBF_REFLECTION_INTENSITY, createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline,
+  xbfLookParameters } from "./xbfScene.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "bracket");
 const STRUCTURE = JSON.parse(fs.readFileSync(path.join(FIXTURE, "structure.json"), "utf8"));
@@ -136,6 +137,83 @@ test("the scene: a group per instance over one geometry per prototype, colours, 
   assert.deepEqual(scene.bounds.max.map(Math.round), [20, 10, 14]);
   scene.dispose();
   document.release();
+});
+
+// Materials as the structure serves them (`cadgen.engine.document.material_json`).
+const MATERIAL = Object.freeze({ density: null, metallic: 0, roughness: 0.5, ior: 1.5, anisotropy: 0, anisotropyRotation: 0,
+  transmission: 0, transmissionColor: null, transmissionDepth: null, coat: 0, coatRoughness: 0, emissive: [0, 0, 0],
+  emissiveStrength: 1 });
+const BRUSHED = { ...MATERIAL, name: "Aluminum 6061-T6", density: 2700, color: [0.91, 0.92, 0.92, 1], metallic: 1, roughness: 0.35,
+  anisotropy: 0.3, anisotropyRotation: 0.5 };
+const LACQUER = { ...MATERIAL, name: "Red lacquer", color: [0.6, 0.02, 0.02, 1], roughness: 0.4, coat: 1, coatRoughness: 0.05,
+  emissive: [0.2, 0, 0], emissiveStrength: 2 };
+const GLASS = { ...MATERIAL, name: "Glass, soda-lime", density: 2520, color: [1, 1, 1, 1], roughness: 0.02, ior: 1.52, transmission: 1,
+  transmissionColor: [0.82, 0.93, 0.87], transmissionDepth: 0.05 };
+
+test("a look's parameters: a colour alone without a material, the material's whole look with one", () => {
+  assert.deepEqual(Object.keys(xbfLookParameters(THREE, [1, 0, 0, 0.5])).sort(), ["color", "depthWrite", "opacity", "transparent"],
+    "a part with no material is drawn as every part was before materials");
+  const glass = xbfLookParameters(THREE, GLASS.color, GLASS, 3);
+  assert.deepEqual([glass.transmission, glass.thickness, glass.ior, glass.attenuationDistance], [1, 3, 1.52, 50],
+    "transmission through the part's thickness; the depth's metres as millimetres");
+  assert.equal(glass.attenuationColor.getHex(), new THREE.Color().setRGB(0.82, 0.93, 0.87, THREE.LinearSRGBColorSpace).getHex());
+  const lacquer = xbfLookParameters(THREE, LACQUER.color, LACQUER);
+  assert.deepEqual([lacquer.clearcoat, lacquer.clearcoatRoughness, lacquer.emissiveIntensity, lacquer.metalness], [1, 0.05, 2, 0]);
+  assert.equal("transmission" in lacquer, false);
+});
+
+test("a document's materials: a physical material per look, kept in the shaded looks, plain in X-ray and Parts", async () => {
+  const structure = structuredClone(STRUCTURE);
+  structure.prototypes[0].material = BRUSHED;
+  structure.prototypes[0].faceMaterials = { 2: LACQUER };
+  structure.prototypes[0].faceColors = { 2: LACQUER.color };
+  structure.prototypes[1].material = GLASS;
+  const document = await loadXbfDocument(URL_BASE, { fetch: engine({ structure }).fetch });
+  const scene = createXbfScene(THREE, document);
+  const [plate, pegOne, pegTwo] = scene.object3D.children.map(carrier => carrier.children[0].children.find(child => child.isMesh));
+  const [own, paint] = plate.material;
+  assert.deepEqual([own.metalness, own.roughness, own.anisotropy, own.anisotropyRotation, own.userData.cadAuthoredFinish],
+    [1, 0.35, 0.3, 0.5, true]);
+  assert.deepEqual([paint.clearcoat, paint.clearcoatRoughness, paint.emissiveIntensity], [1, 0.05, 2], "the painted face's own look");
+  assert.deepEqual([pegTwo.material.transmission, pegTwo.material.ior], [1, 1.52], "each placement in the look");
+  const pegBox = new THREE.Box3().setFromBufferAttribute(pegOne.geometry.getAttribute("position")).getSize(new THREE.Vector3());
+  assert.deepEqual([pegOne.material.transmission, pegOne.material.ior], [1, 1.52]);
+  assert.ok(Math.abs(pegOne.material.thickness - Math.min(pegBox.x, pegBox.y, pegBox.z)) < 1e-6, "as thick as the part");
+  assert.equal(plate.geometry.getAttribute("tangent")?.itemSize, 4, "an anisotropic look brushes along tangents");
+  assert.equal(pegOne.geometry.getAttribute("tangent"), undefined);
+  // Solid: the finish kept, reflecting the environment the host hands the scene.
+  const studio = new THREE.Texture();
+  scene.setReflection(studio);
+  scene.setSurfaceLook(LOOK);
+  let [worn] = plate.material;
+  assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap, worn.envMapIntensity],
+    [1, 0.35, 0.3, studio, XBF_REFLECTION_INTENSITY]);
+  assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [1, studio]);
+  // X-ray and Parts: the look's finish, as any other surface's.
+  for (const look of [{ ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
+    { ...LOOK, materialSettings: { ...LOOK.materialSettings, overrideSourceColors: true } }]) {
+    scene.setSurfaceLook(look);
+    [worn] = plate.material;
+    assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap], [0.02, 0.58, 0, null]);
+    assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [0, null]);
+  }
+  scene.setSurfaceLook(LOOK);
+  assert.equal(plate.material[0].metalness, 1, "and Solid again");
+  // Its mass: the mesh volume by the density, the peg's glass too; a part with none says so.
+  const one = scene.measureParts(["i0"]);
+  assert.ok(Math.abs(one.mass - one.volume * 1e-9 * 2700) < 1e-12);
+  assert.equal(one.unweighed, 0);
+  scene.dispose();
+  document.release();
+  const plain = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
+  const unmade = createXbfScene(THREE, plain);
+  assert.deepEqual([unmade.measureParts(["i0", "i1"]).mass, unmade.measureParts(["i0", "i1"]).unweighed], [null, 2]);
+  unmade.setReflection(studio);
+  unmade.setSurfaceLook(LOOK);
+  const surface = unmade.object3D.children[0].children[0].children.find(child => child.isMesh).material[0];
+  assert.deepEqual([surface.envMap, surface.metalness], [null, 0.02], "no material: the theme's surface, no reflection");
+  unmade.dispose();
+  plain.release();
 });
 
 test("a face the mesher left without triangles is reported, not drawn", async () => {

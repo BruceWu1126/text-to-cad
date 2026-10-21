@@ -83,6 +83,74 @@ function linearColor(THREE, rgba) {
   return new THREE.Color().setRGB(Number(rgba[0]) || 0, Number(rgba[1]) || 0, Number(rgba[2]) || 0, THREE.LinearSRGBColorSpace);
 }
 
+// How strongly an authored finish reflects the neutral studio environment the host hands the
+// scene in the shaded modes (`setReflection`): enough for a metal to read as metal, not so much
+// that it outshines the theme's lights. Preview draws it in the studio's full environment.
+export const XBF_REFLECTION_INTENSITY = 0.5;
+
+// A material's look as the structure serves it (`cadgen.engine.materials`, camelCase): the
+// fields a look's identity is made of.
+const LOOK_FIELDS = Object.freeze(["metallic", "roughness", "ior", "anisotropy", "anisotropyRotation", "transmission",
+  "transmissionColor", "transmissionDepth", "coat", "coatRoughness", "emissive", "emissiveStrength"]);
+
+const finite = (value, fallback) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : fallback);
+
+/**
+ * The `MeshPhysicalMaterial` parameters of a look: its base colour (`rgba`, linear, alpha its
+ * opacity) and, for a part or a face given a material, the material's look as glTF carries it --
+ * metalness, roughness, IOR, anisotropy and its rotation, transmission through `thickness`
+ * millimetres with its attenuation (the material's depth is in metres), clear coat, emission.
+ * A look without a material is its colour alone, as every part was before materials.
+ */
+export function xbfLookParameters(THREE, rgba, material = null, thickness = 0) {
+  const alpha = rgba ? Math.min(Math.max(finite(rgba[3], 1), 0), 1) : 1;
+  const parameters = { color: rgba ? linearColor(THREE, rgba) : new THREE.Color(DEFAULT_SURFACE),
+    transparent: alpha < 1, opacity: alpha, depthWrite: alpha >= 1 };
+  if (!material) return parameters;
+  Object.assign(parameters, {
+    metalness: finite(material.metallic, 0), roughness: finite(material.roughness, 0.5), ior: finite(material.ior, 1.5),
+    anisotropy: finite(material.anisotropy, 0), anisotropyRotation: finite(material.anisotropyRotation, 0),
+    clearcoat: finite(material.coat, 0), clearcoatRoughness: finite(material.coatRoughness, 0),
+    emissiveIntensity: finite(material.emissiveStrength, 1)
+  });
+  const transmission = finite(material.transmission, 0);
+  if (transmission > 0) {
+    parameters.transmission = transmission;
+    parameters.thickness = Math.max(finite(thickness, 0), 0);
+    if (finite(material.transmissionDepth, 0) > 0) {
+      parameters.attenuationDistance = material.transmissionDepth * 1000;
+      parameters.attenuationColor = linearColor(THREE, material.transmissionColor || [1, 1, 1]);
+    }
+  }
+  if ((material.emissive || []).some(value => finite(value, 0) > 0)) parameters.emissive = linearColor(THREE, material.emissive);
+  return parameters;
+}
+
+/** A look's identity: its colour, its material's look and, where it transmits, its part's thickness. */
+function lookKey(rgba, material, thickness) {
+  const look = material ? LOOK_FIELDS.map(field => material[field] ?? null) : null;
+  return JSON.stringify([rgba || null, look, look && finite(material.transmission, 0) > 0 ? thickness : null]);
+}
+
+/**
+ * A tangent per vertex for an anisotropic look, which has no UVs to take one from: across the
+ * normal around the part's Z axis, along its Y where the normal is Z itself (the GLB export's
+ * `tangents`, so the file and the viewer brush a part alike).
+ */
+export function xbfTangents(normals) {
+  const tangents = new Float32Array((normals.length / 3) * 4);
+  for (let at = 0, to = 0; at + 2 < normals.length; at += 3, to += 4) {
+    const x = normals[at], y = normals[at + 1], z = normals[at + 2];
+    let tx = y, ty = -x, tz = 0;
+    if (Math.hypot(tx, ty) < 1e-3) { tx = 0; ty = z; tz = -y; }
+    const length = Math.hypot(tx, ty, tz);
+    if (length > 0) { tangents[to] = tx / length; tangents[to + 1] = ty / length; tangents[to + 2] = tz / length; }
+    else tangents[to] = 1;
+    tangents[to + 3] = 1;
+  }
+  return tangents;
+}
+
 /**
  * The geometry of one part, made once over its buffer's views and kept on the part
  * (`part.hold`): the surface, the edges' line geometries by class over one shared point
@@ -289,19 +357,20 @@ export function createXbfScene(THREE, document) {
   const root = new THREE.Group();
   root.name = "xbf-document";
   const ownedGeometries = [];
+  // One material per look: a colour, and the document's material where the part or face has one.
   const materials = new Map();
-  const material = (rgba) => {
-    const name = rgba ? rgba.join(",") : "";
+  const material = (rgba, look = null, thickness = 0) => {
+    const name = lookKey(rgba, look, thickness);
     let found = materials.get(name);
     if (!found) {
-      const alpha = rgba ? Math.min(Math.max(Number(rgba[3] ?? 1), 0), 1) : 1;
       found = new THREE.MeshPhysicalMaterial({
-        color: rgba ? linearColor(THREE, rgba) : DEFAULT_SURFACE, side: THREE.DoubleSide,
-        transparent: alpha < 1, opacity: alpha, depthWrite: alpha >= 1,
+        ...xbfLookParameters(THREE, rgba, look, thickness), side: THREE.DoubleSide,
         // The edges lie on the surfaces: the surfaces step back a hair so the edges win the depth test.
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
       });
       found.userData.cadSourceColor = Boolean(rgba);
+      // A finish the document authored: the shaded modes keep it (`surfaceLook.js`).
+      if (look) found.userData.cadAuthoredFinish = true;
       materials.set(name, found);
     }
     return found;
@@ -312,13 +381,22 @@ export function createXbfScene(THREE, document) {
   const hiddenDepth = new THREE.MeshBasicMaterial({ colorWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
 
   // A prototype's surface geometry: the part's, or for painted faces one over its buffers with
-  // a group per face and a material per paint.
+  // a group per face and a material per paint (its colour, and its material where it has one).
   const surfaces = prototypes.map((prototype) => {
     const part = document.parts.get(String(prototype.key));
     if (!part) throw new Error(`the document names part ${prototype.key} and the engine sent no buffer for it`);
     const held = partGeometry(THREE, part);
+    const faceMaterials = prototype.faceMaterials || {};
+    // A transmissive look's volume is as thick as its part: the smallest extent of the part's box.
+    const thickness = held.box.isEmpty() ? 0 : Math.min(...held.box.getSize(new THREE.Vector3()).toArray());
+    if ([prototype.material, ...Object.values(faceMaterials)].some(look => finite(look?.anisotropy, 0) > 0)) {
+      part.hold("three:tangents", () => {
+        held.surface.setAttribute("tangent", new THREE.BufferAttribute(xbfTangents(part.mesh.normals), 4));
+        return true;
+      });
+    }
     const painted = Object.entries(prototype.faceColors || {});
-    if (!painted.length) return { part, held, geometry: held.surface, paints: [] };
+    if (!painted.length) return { part, held, geometry: held.surface, paints: [], thickness };
     const geometry = shareGeometry(THREE, held.surface);
     ownedGeometries.push(geometry);
     const byOrdinal = new Map(painted);
@@ -326,16 +404,18 @@ export function createXbfScene(THREE, document) {
     const slot = new Map();
     const faces = part.mesh.faces;
     for (let row = 0; row < faces.length; row += 3) {
-      const paint = byOrdinal.get(String(faces[row]));
+      const ordinal = String(faces[row]);
+      const paint = byOrdinal.get(ordinal);
       let index = 0;
       if (paint) {
-        const name = paint.join(",");
-        if (!slot.has(name)) { slot.set(name, paints.length + 1); paints.push(paint); }
+        const look = faceMaterials[ordinal] || null;
+        const name = lookKey(paint, look, thickness);
+        if (!slot.has(name)) { slot.set(name, paints.length + 1); paints.push({ rgba: paint, look }); }
         index = slot.get(name);
       }
       if (faces[row + 2]) geometry.addGroup(faces[row + 1], faces[row + 2], index);
     }
-    return { part, held, geometry, paints };
+    return { part, held, geometry, paints, thickness };
   });
 
   // Each instance's place in the document's tree ("o1.2.3", the root "o1"): what Explode's layout
@@ -360,7 +440,9 @@ export function createXbfScene(THREE, document) {
     group.matrixAutoUpdate = false;
     group.matrix.fromArray(instance.matrix);
     group.userData.xbfInstance = index;
-    const mesh = new THREE.Mesh(surface.geometry, surface.paints.length ? [material(rgba), ...surface.paints.map(material)] : material(rgba));
+    const own = material(rgba, prototype.material || null, surface.thickness);
+    const mesh = new THREE.Mesh(surface.geometry, surface.paints.length
+      ? [own, ...surface.paints.map(paint => material(paint.rgba, paint.look, surface.thickness))] : own);
     mesh.name = prototype.name || instance.path;
     mesh.castShadow = true;
     // What Parts colours it by, and what a highlight and an annotation name it by.
@@ -696,11 +778,23 @@ export function createXbfScene(THREE, document) {
     /** Faces the mesher left without triangles, by prototype: reported, not drawn. */
     unmeshed,
     triangleCount,
-    // A document authors colours and no finish: Render wears the studio's surface over them.
+    // A part or face the document gave a material keeps its finish in the shaded modes and in
+    // Preview; every other surface wears the look's finish over its colour, as a STEP's does.
     setSurfaceLook(next) {
       if (disposed) return;
       lastLook = next ? { ...next, authored: false } : null;
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";
+      applySurfaces();
+    },
+    /**
+     * The environment an authored finish reflects in the shaded modes, the host's neutral studio
+     * (`XBF_REFLECTION_INTENSITY`), or null: the reflection source of those finishes alone, so a
+     * surface the document gave no material is lit as it always was. Preview lights the scene
+     * with the studio's own environment instead.
+     */
+    setReflection(texture) {
+      if (disposed) return;
+      look.setReflection(texture || null, XBF_REFLECTION_INTENSITY);
       applySurfaces();
     },
     /** The edges the display mode draws (`resolveViewSettings`'s `edges`): on or off, through the surfaces or not, their ink. */
@@ -728,21 +822,31 @@ export function createXbfScene(THREE, document) {
     },
     /**
      * What a chip's card measures of instances (ids `i3`): the box they make where they stand
-     * now, and their volume from their triangles (approximate, as a STEP's is). Null for none.
+     * now, their volume from their triangles (approximate, as a STEP's is), and their mass in kg,
+     * each volume by its material's density -- null when none has a material, `unweighed` the
+     * instances without one. Null for none.
      */
     measureParts(ids) {
       const box = new THREE.Box3();
       let volume = 0;
-      let found = false;
+      let mass = 0;
+      let parts = 0;
+      let unweighed = 0;
       for (const index of indicesOf(ids)) {
         const entry = instances[index];
         const placed = instanceBox(entry);
         if (placed) box.union(placed);
-        volume += entry.surface.held.volume ??= xbfMeshVolume(entry.surface.part.mesh);
-        found = true;
+        const own = entry.surface.held.volume ??= xbfMeshVolume(entry.surface.part.mesh);
+        volume += own;
+        parts += 1;
+        // Its mass: the volume (mm³) times its material's density (kg/m³).
+        const density = finite(entry.prototype.material?.density, 0);
+        if (density > 0) mass += own * 1e-9 * density;
+        else unweighed += 1;
       }
-      if (!found) return null;
-      return { size: box.isEmpty() ? null : box.getSize(new THREE.Vector3()).toArray(), volume };
+      if (!parts) return null;
+      return { size: box.isEmpty() ? null : box.getSize(new THREE.Vector3()).toArray(), volume,
+        mass: unweighed < parts ? mass : null, unweighed };
     },
     /** An element as a chip names it: its kind and ordinal, its class, its name, its part. */
     describeElement(id) {
