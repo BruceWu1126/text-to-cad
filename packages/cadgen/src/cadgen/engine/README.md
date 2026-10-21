@@ -97,7 +97,7 @@ def hinge():
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
-| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), atomic BinXCAF save, read-back of an xbf or a foreign STEP |
+| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
@@ -121,6 +121,15 @@ cadgen xbf status | stop | daemon
 
 `SCRIPT` alone builds every decorated function in it. The build returns once
 every file is on disk. If the document is unchanged, the xbf is not rewritten.
+A warm build does not make the document again: the worker holds the XCAF
+document it last wrote and patches it (`document.Kept`). A prototype whose label
+holds what a cold build would make of it keeps that label untouched; one that
+changed or went is cleared at its place in the order and made again at the tag a
+cold build gives it, with the assemblies that place it, and the references a cold
+build orders by label (a colour's, a material's, a part's placements) are put back
+in that order. The mechanism is written again only when a joint, a configuration
+or an occurrence it names changed. So the file a patch writes is the cold build's,
+byte for byte, and the document the worker serves is the one it wrote.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. The daemon starts on demand and exits after an idle hour
 (`CADGEN_ENGINE_IDLE` seconds). `CADGEN_ENGINE_DIR` moves its socket and lock.

@@ -269,5 +269,152 @@ class BuildTest(EngineCase):
         self.assertFalse([name for name in _files(self.folder) if name.endswith(".json")])
 
 
+KIT = """
+import build123d as bd
+from cadgen.engine import materials, paint, step, xbf
+
+LEFT = {left}
+RIGHT = {right}
+PIN = materials.{pin}
+TOP = bd.Color({top})
+PINS = {pins}
+
+
+@xbf
+def left():
+    plate = bd.Box(LEFT, 8, 3) - bd.Cylinder(1.5, 10)
+    plate.label = "plate"
+    plate.color = bd.Color(0.2, 0.4, 0.8)
+    paint(plate, plate.faces().sort_by(bd.Axis.Z)[-1], TOP)
+    pin = bd.Pos(0, 0, 4) * bd.Cylinder(1, 4)
+    pin.label = "pin"
+    pin.material = PIN
+    peg = bd.Pos(3, 0, 4) * bd.Cylinder(1, 4)
+    peg.label = "peg"
+    peg.material = materials.steel
+    return bd.Compound(children=[plate, pin, peg][:PINS + 1], label="left")
+
+
+@xbf
+def right():
+    block = bd.Box(RIGHT, 4, 4)
+    block.label = "block"
+    block.color = bd.Color(0.8, 0.1, 0.1)
+    cap = bd.Pos(0, 0, 3) * bd.Box(2, 2, 2)
+    cap.label = "cap"
+    cap.material = materials.aluminium
+    bd.RevoluteJoint("hinge", block, axis=bd.Axis((0, 0, 2), (0, 1, 0)), angular_range=(-10, 90))
+    bd.RigidJoint("seat", cap)
+    block.joints["hinge"].connect_to(cap.joints["seat"], angle=20)
+    return bd.Compound(children=[block, cap], label="right")
+
+
+@xbf
+@step(out="kit.step")
+def kit():
+    one = right().moved(bd.Location((30, 0, 0)))
+    one.label = "one"
+    two = right().moved(bd.Location((0, 30, 0)))
+    two.label = "two"
+    return bd.Compound(children=[left(), one, two], label="kit")
+"""
+
+
+class PatchTest(EngineCase):
+    """A warm build patches the document it last wrote: the prototypes it changed are made
+    again in place, the rest keep their labels, and the file is the cold build's bytes."""
+
+    BASE = dict(left=10, right=6, pin="steel", top="0.1, 0.9, 0.1", pins=2)
+
+    def setUp(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        super().setUp()
+        self.script = self.folder / "kit.py"
+        self.xbf = self.folder / "kit.xbf"
+        memo.install()
+        self.addCleanup(memo.clear)
+
+    def source(self, text: str) -> None:
+        self.script.write_text(textwrap.dedent(text), encoding="utf-8")
+        os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
+
+    def kit(self, **values) -> dict:
+        self.source(KIT.format(**{**self.BASE, **values}))
+        report = self.build("kit")["kit"]
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def cold(self, **values) -> bytes:
+        """The kit built by a process that never built it: its bytes."""
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        self.xbf.unlink()
+        self.assertFalse(self.kit(**values)["converted"]["patched"])
+        return self.xbf.read_bytes()
+
+    def patched(self, **values) -> dict:
+        report = self.kit(**values)
+        self.assertTrue(report["converted"]["patched"], report["converted"])
+        self.assertLess(report["converted"]["converted"], report["converted"]["prototypes"])
+        return report
+
+    def test_an_edit_patches_the_document_to_the_cold_bytes(self) -> None:
+        self.kit()
+        kept = engine_build._WRITTEN[f"{self.script}::kit"].kept
+        doc = kept.doc
+        edited = self.patched(left=12)
+        # The plate, the left body and the kit: the right bodies' labels are untouched.
+        self.assertEqual(edited["converted"]["converted"], 3)
+        first = self.xbf.read_bytes()
+        self.source(KIT.format(**self.BASE).replace("    cap.label", "    raise ValueError('no cap')\n    cap.label"))
+        self.assertFalse(self.build("kit")["kit"]["ok"])
+        self.assertEqual(self.xbf.read_bytes(), first, "a build that fails leaves the file")
+        self.patched(left=12, right=7)
+        self.assertIs(kept.doc, doc, "the one document, patched build after build")
+        self.assertEqual(self.xbf.read_bytes(), self.cold(left=12, right=7))
+        self.assertEqual(self.cold(left=12), first)
+
+    def test_a_removed_part_leaves_no_label(self) -> None:
+        from OCP.XCAFDoc import XCAFDoc_DocumentTool
+
+        self.kit()
+        report = self.patched(pins=1)
+        kept = engine_build._WRITTEN[f"{self.script}::kit"].kept
+        shapes = XCAFDoc_DocumentTool.ShapeTool_s(kept.doc.Main()).Label()
+        self.assertEqual(len(document._held_children(shapes)), report["converted"]["prototypes"])
+        loaded = document.Loaded(self.xbf)
+        self.assertNotIn("peg", {prototype.name for prototype in loaded.prototypes})
+        self.assertEqual(self.xbf.read_bytes(), self.cold(pins=1))
+        self.patched()
+        self.assertIn("peg", {prototype.name for prototype in document.Loaded(self.xbf).prototypes})
+        self.assertEqual(self.xbf.read_bytes(), self.cold())
+
+    def test_a_changed_material_or_paint_converts_its_prototype(self) -> None:
+        self.kit()
+        # Aluminium is the cap's too, and now comes first: the materials are numbered anew.
+        self.assertEqual(self.patched(pin="aluminium")["converted"]["converted"], 3)
+        pin = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "pin")
+        self.assertEqual(pin.material.name, "Aluminum Generic")
+        self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium"))
+        self.patched(pin="aluminium", top="0.9, 0.9, 0.1")
+        plate = next(p for p in document.Loaded(self.xbf).prototypes if p.name == "plate")
+        self.assertIn((0.9, 0.9, 0.1, 1.0), plate.face_colors.values())
+        self.assertEqual(self.xbf.read_bytes(), self.cold(pin="aluminium", top="0.9, 0.9, 0.1"))
+
+    def test_the_served_document_is_the_written_one(self) -> None:
+        import json
+
+        self.kit()
+        self.patched(right=8)
+        made = document.tree_structure(document.saved(self.xbf), self.xbf)
+        read = document.Loaded(self.xbf).structure()
+        self.assertEqual(json.loads(json.dumps(made)), json.loads(json.dumps(read)))
+        self.assertEqual(len(read["kinematics"]["pairs"]), 2, "each right body's hinge")
+
+
 if __name__ == "__main__":
     unittest.main()
