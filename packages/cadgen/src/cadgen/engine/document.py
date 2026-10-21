@@ -1504,14 +1504,22 @@ def as_read(material: Any, rgba: tuple) -> Any:
                         description=material.description or None)
 
 
-# A material's fields as the structure carries them, by the structure's names: what the page draws.
-_JSON_FIELDS = (("name", "name"), ("density", "density"), ("color", "color"), ("metallic", "metallic"),
-                ("roughness", "roughness"), ("emissive", "emissive"), ("description", "description"))
+# A material's fields as the structure carries them, by the structure's (camelCase) names.
+_JSON_FIELDS = (("name", "name"), ("family", "family"), ("standard", "standard"), ("description", "description"),
+                ("source", "source"), ("density", "density"), ("young_modulus", "youngModulus"),
+                ("poisson_ratio", "poissonRatio"), ("yield_strength", "yieldStrength"),
+                ("ultimate_strength", "ultimateStrength"), ("thermal_expansion", "thermalExpansion"),
+                ("thermal_conductivity", "thermalConductivity"), ("specific_heat", "specificHeat"),
+                ("isotropic", "isotropic"), ("color", "color"), ("metallic", "metallic"), ("roughness", "roughness"),
+                ("ior", "ior"), ("anisotropy", "anisotropy"), ("anisotropy_rotation", "anisotropyRotation"),
+                ("transmission", "transmission"), ("transmission_color", "transmissionColor"),
+                ("transmission_depth", "transmissionDepth"), ("coat", "coat"), ("coat_roughness", "coatRoughness"),
+                ("emissive", "emissive"), ("emissive_strength", "emissiveStrength"))
 
 
 def material_json(material: Any) -> dict[str, Any] | None:
-    """A material as the structure carries it: its name, density, look's colour (the base colour
-    it is drawn in), metallic, roughness and emissive (black where it has none), and description."""
+    """A material as the structure carries it: every field, its colour the base colour it is
+    drawn in, ``emissive`` black where it has none, tuples as lists."""
     if material is None:
         return None
     found: dict[str, Any] = {}

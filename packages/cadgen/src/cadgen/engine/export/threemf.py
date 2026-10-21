@@ -89,10 +89,11 @@ def write(view: Any, path: Path) -> None:
         items.append(f'<item objectid="{ident}" transform="{transform}"/>')
     bases, metallic = [], []
     for at, (rgba, given) in enumerate(looks):
-        name = given[0] if given is not None else f"colour {at + 1}"
+        given = dict(given) if given is not None else None
+        name = given["name"] if given is not None else f"colour {at + 1}"
         if given is not None:
-            metallic.append(f'<m:pbmetallic name={quoteattr(name)} metallicness="{given[2]:.6g}" '
-                            f'roughness="{given[3]:.6g}"/>')
+            metallic.append(f'<m:pbmetallic name={quoteattr(name)} metallicness="{given["metallic"]:.6g}" '
+                            f'roughness="{given["roughness"]:.6g}"/>')
         else:
             metallic.append(f'<m:pbmetallic name={quoteattr(name)} metallicness="0" roughness="0.6"/>')
         bases.append(f'<base name={quoteattr(name)} displaycolor="{_hex(rgba)}"/>')

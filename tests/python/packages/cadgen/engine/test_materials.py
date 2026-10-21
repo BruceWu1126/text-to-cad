@@ -55,6 +55,36 @@ FULL = Material("Full", 1234.5, family="composite", standard="X-1", description=
                 anisotropy_rotation=0.7, transmission=0.5, transmission_color=(0.9, 0.8, 0.7),
                 transmission_depth=0.02, coat=0.6, coat_roughness=0.15, emissive=(0.1, 0.2, 0.3), emissive_strength=2.5)
 
+# The material fixture: a steel block, a brushed aluminium plate, a PLA part, a glass pane,
+# a clear-coated paint on one face, and two placements of one bracket apart by a look alone.
+FIXTURE = """
+import build123d as bd
+from cadgen.engine import Material, glb, materials, paint, xbf
+
+LACQUER = Material("Red lacquer", 1200, family="other", color=(0.6, 0.02, 0.02), roughness=0.4, coat=1.0,
+                   coat_roughness=0.05)
+
+
+@xbf
+@glb(out="bench.glb")
+def bench():
+    block = bd.Box(30, 30, 30)
+    block.label, block.material = "block", materials.steel_1018
+    plate = bd.Pos(50, 0, -10) * bd.Box(40, 30, 4)
+    plate.label, plate.material = "plate", materials("6061")
+    print_ = bd.Pos(100, 0, 0) * bd.Cylinder(12, 30)
+    print_.label, print_.material = "print", materials.pla
+    pane = bd.Pos(50, 40, 10) * bd.Box(40, 3, 30)
+    pane.label, pane.material = "pane", materials.glass
+    paint(print_, print_.faces().sort_by(bd.Axis.Z)[-1], LACQUER)
+    left = bd.Pos(0, -50, 0) * bd.Box(10, 10, 10)
+    left.label, left.material = "left", materials.stainless_304
+    right = left.moved(bd.Location((20, 0, 0)))
+    right.label, right.material = "right", materials.stainless_304.but(anisotropy=0.0, roughness=0.2)
+    return bd.Compound(children=[block, plate, print_, pane, left, right], label="bench")
+"""
+
+
 def _glb_json(path: Path) -> dict:
     data = path.read_bytes()
     magic, version, length = struct.unpack_from("<4sII", data, 0)
@@ -208,6 +238,14 @@ class MaterialDocumentTest(unittest.TestCase):
         for field in ("metallic", "roughness", "ior"):
             self.assertAlmostEqual(getattr(pin.material, field), getattr(FULL, field), places=6)
         self.assertEqual(pin.color, (0.25, 0.5, 0.75, 0.8))
+        # The structure carries the whole look and every physical field, from the file and the tree.
+        path = self.folder / "XBF/plate.xbf"
+        served = next(p for p in document.Loaded(path).structure()["prototypes"] if p["name"] == "pin")
+        self.assertEqual(served, next(p for p in document.tree_structure(document.saved(path), path)["prototypes"]
+                                      if p["name"] == "pin"))
+        self.assertEqual(document.material_from_json(served["material"]), pin.material)
+        self.assertEqual(set(served["material"]), {key for _field, key in document._JSON_FIELDS})
+        self.assertEqual((served["material"]["coat"], served["material"]["transmissionColor"]), (0.6, [0.9, 0.8, 0.7]))
         # And a STEP, which carries a material's name and density alone.
         step = self.prototypes("plate.step")["pin"].material
         self.assertEqual((step.name, step.density, step.family, step.coat), ("Full", 1234.5, None, 0.0))
@@ -275,6 +313,63 @@ class MaterialDocumentTest(unittest.TestCase):
         placed = {i["path"]: structure["prototypes"][i["prototype"]] for i in structure["instances"]}
         self.assertEqual(placed["pair/right"]["material"]["name"], materials.steel.name)
         self.assertEqual(len(structure["prototypes"]), 1, "two placements of one steel box")
+
+
+class MaterialFixtureTest(unittest.TestCase):
+    """The material fixture built once: its GLB's extensions, its served looks, its weights."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.folder = Path(tempfile.mkdtemp(prefix="engine-material-fixture-")).resolve()
+        script = cls.folder / "bench.py"
+        script.write_text(textwrap.dedent(FIXTURE), encoding="utf-8")
+        reports = engine_build.build(script, ["bench"], cwd=cls.folder)
+        assert reports[-1]["ok"], reports
+        cls.xbf = cls.folder / "XBF/bench.xbf"
+        cls.structure = document.Loaded(cls.xbf).structure()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.folder, ignore_errors=True)
+
+    def prototype(self, name: str) -> dict:
+        return next(p for p in self.structure["prototypes"] if p["name"] == name)
+
+    def test_placements_apart_by_a_look_alone_are_prototypes_apart(self) -> None:
+        left, right = self.prototype("left"), self.prototype("right")
+        self.assertEqual(left["key"], right["key"], "one geometry")
+        self.assertEqual((left["material"]["anisotropy"], right["material"]["anisotropy"]), (0.3, 0.0))
+        self.assertAlmostEqual(right["material"]["roughness"], 0.2, places=6)
+        [(ordinal, lacquer)] = self.prototype("print")["faceMaterials"].items()
+        self.assertEqual((lacquer["name"], lacquer["coat"], lacquer["coatRoughness"]), ("Red lacquer", 1.0, 0.05))
+        self.assertEqual(list(self.prototype("print")["faceColors"][ordinal][:3]), [0.6, 0.02, 0.02])
+
+    def test_the_glb_writes_an_extension_for_each_part_of_the_look(self) -> None:
+        gltf = _glb_json(self.folder / "bench.glb")
+        self.assertEqual(set(gltf["extensionsUsed"]), {"KHR_materials_ior", "KHR_materials_transmission",
+                                                      "KHR_materials_volume", "KHR_materials_clearcoat",
+                                                      "KHR_materials_anisotropy"})
+        by_name = {entry.get("name"): entry for entry in gltf["materials"]}
+        glass = by_name[materials.glass.name]
+        extensions = glass["extensions"]
+        self.assertEqual(extensions["KHR_materials_ior"], {"ior": materials.glass.ior})
+        self.assertEqual(extensions["KHR_materials_transmission"], {"transmissionFactor": 1.0})
+        volume = extensions["KHR_materials_volume"]
+        self.assertAlmostEqual(volume["thicknessFactor"], 3.0, places=3, msg="the pane's thickness, its smallest extent")
+        self.assertEqual(volume["attenuationDistance"], materials.glass.transmission_depth)
+        self.assertEqual(volume["attenuationColor"], list(materials.glass.transmission_color))
+        self.assertEqual(by_name["Red lacquer"]["extensions"]["KHR_materials_clearcoat"],
+                         {"clearcoatFactor": 1.0, "clearcoatRoughnessFactor": 0.05})
+        aluminium = by_name[materials.aluminium_6061.name]
+        self.assertEqual(aluminium["extensions"]["KHR_materials_anisotropy"]["anisotropyStrength"], 0.3)
+        self.assertEqual((aluminium["pbrMetallicRoughness"]["metallicFactor"], aluminium["alphaMode"]), (1.0, "OPAQUE"))
+        self.assertNotIn("extensions", by_name[materials.steel_1018.name], "a plain metal needs none")
+        # An anisotropic look's mesh carries tangents; the others do not.
+        for mesh in gltf["meshes"]:
+            looks = [gltf["materials"][primitive["material"]] for primitive in mesh["primitives"]]
+            anisotropic = any("KHR_materials_anisotropy" in look.get("extensions", {}) for look in looks)
+            for primitive in mesh["primitives"]:
+                self.assertEqual("TANGENT" in primitive["attributes"], anisotropic, mesh["name"])
 
 
 if __name__ == "__main__":

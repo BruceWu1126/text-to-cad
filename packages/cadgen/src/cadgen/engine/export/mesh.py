@@ -47,16 +47,15 @@ def _material(value: Any) -> dict[str, Any] | None:
 
 
 def look_of(color: Any, material: Any) -> tuple:
-    """A hashable look: the base colour (RGBA) and the material (its structure's JSON), or None."""
+    """A hashable look: the base colour (RGBA) and the material -- its structure's JSON but its
+    colour, as ``(key, value)`` pairs, lists as tuples (``dict(held)`` reads it) -- or None."""
     rgba = tuple(float(value) for value in (color if color is not None else DEFAULT_COLOR))
     if len(rgba) == 3:
         rgba = (*rgba, 1.0)
     held = None
     if material:
-        held = (material.get("name"), material.get("density"), float(material.get("metallic") or 0.0),
-                float(material.get("roughness") if material.get("roughness") is not None else 0.5),
-                tuple(float(value) for value in (material.get("emissive") or (0.0, 0.0, 0.0))),
-                material.get("description"))
+        held = tuple((key, tuple(value) if isinstance(value, list) else value)
+                     for key, value in material.items() if key != "color")
     return rgba, held
 
 
