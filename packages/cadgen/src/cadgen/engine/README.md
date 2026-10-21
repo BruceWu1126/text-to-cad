@@ -146,7 +146,8 @@ cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or o
 cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
 cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
-cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
+cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
+                    [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf status | stop | daemon
@@ -224,12 +225,23 @@ daemon's meshes, or `--no-daemon` a server of this process), and a headless brow
 cadgen's snapshot page (the package's built `_runtime/browser`, read as files) with one job for
 the xbf family: the page loads the document from the engine and builds the viewer's own scene
 of it, dressed in the look the viewer resolves for the same display settings. `--display` takes
-a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`) or the display object
-(`mode`, `grid`, `appearance`, `camera`, `clip`); `--json` reports what was drawn and each
-stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
-`captureMs`, `totalMs`). `display.exploded` (a document's parts stand where it places them) and
-`parts` for a document that places one part are refused by name before any browser starts. A
-face the mesher left without triangles is named in a warning. Nothing is written but OUT.
+a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
+moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
+`hidden-line,exploded=0.6`), or the display object (`mode`, `grid`, `appearance`, `camera`,
+`clip`, `exploded`: `{"enabled", "amount"}`, 0.5 unless given); `--json` reports what was drawn
+and each stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
+`captureMs`, `totalMs`). `parts` and `exploded` for a document that places one part are refused
+by name before any browser starts. `--annotation FILE` draws the viewer's annotation over the
+model -- each mark on the part it was drawn on, wherever the picture places that part -- from an
+annotation file or the Quick Edit packet that carries one (the `.snapshot.json` the viewer writes),
+and `--measurements FILE` Measure's dimensions (`[{start, end, label, color}]`). A mark names the
+view it was drawn in by label alone (`"view": "view 1"`); the view itself -- its camera
+(`position`, `target`, `up`, `orthographicHalfHeight`, the snapshot's own camera object), size and
+projection -- is a job of the packet. `--camera authored` draws the picture from the view of the
+last mark, exactly (no fit), at its size and projection unless the flags say otherwise: from the
+packet given as `--annotation`, else the newest packet beside the annotation file that draws this
+document; with none, it is refused by name. A face the mesher left without triangles is named in a
+warning. Nothing is written but OUT.
 
 `SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
 bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's

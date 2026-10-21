@@ -5,8 +5,9 @@ the functions of ``api``.
     cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
     cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs]
-    cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--camera PRESET|az:el] [--grid] [--preview]
-        [--pose NAME|JSON] [--width N] [--height N] [--size-profile P] [--json]
+    cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
+        [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
+        [--size-profile P] [--json]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
     cadgen xbf status | stop | daemon
     cadgen where DOC [REF]                           a document's build closure, or what made one element
