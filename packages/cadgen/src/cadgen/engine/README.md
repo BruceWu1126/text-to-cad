@@ -45,9 +45,11 @@ material the first one's description.
 An assembly's mechanism is build123d's joints and nothing else: `RevoluteJoint`,
 `LinearJoint`, `CylindricalJoint`, `BallJoint` and `RigidJoint` on its parts, placed with
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
-as-built configuration; `configuration(assembly, name, **values)` names another, by joint
-label. Connect parts before putting them in the compound that holds them; where `connect_to`
-cannot place them (a nested assembly), give the two joints one label where the parts stand.
+as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
+**values)` names another, by joint label, and never moves the build; `motion(assembly, name,
+...)` names a motion (**Motions**). Connect parts before putting them in the compound that holds
+them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
+where the parts stand.
 
 ```python
 from cadgen.engine import configuration, xbf
@@ -100,10 +102,12 @@ def hinge():
    the trace of the worker that built the document, and is asked of it while it
    lives (`made_by` on the facts endpoints, `cadgen xbf where`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
-7. **Poses, never time.** The document carries kinematics -- the mechanism and
-   its configurations, each a pose: where its parts stand, how they may move --
-   and never time: no animation, no clip, no keyframe, ever. Nothing in the
-   engine keys, plays or bakes motion.
+7. **Poses and motion definitions, never frames.** The document carries
+   kinematics -- the mechanism, its configurations (each a pose: where its parts
+   stand) and its motions (each a definition: waypoints, an ease, a loop) -- and
+   the document holds poses and motion definitions, never baked frames or clips.
+   A GLB export is the one place a motion is baked, into a clip of the GLB; the
+   engine plays nothing.
 8. **Names are the durable tie to code.** An element's name is spelled from the
    function that made its feature and the author's name for that feature (the
    target its result is assigned to, or a label), never from a line or a file:
@@ -117,7 +121,7 @@ def hinge():
 | `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
-| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
+| `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
 | `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
@@ -309,6 +313,8 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   the first's). build123d's joints cannot express a coupling, so no model authors one; the
   document, its readers and every pose honour it.
 - **Configurations**: the as-built values and each named configuration, as pair values.
+- **Motions**: each named motion, as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE`: its
+  segments' times (`t_parameter`) and states (a configuration it names, or pair values).
 
 **Geometry is never held hostage by a mechanism.** What the harvest finds inconsistent is a
 warning, said by name, and the document is written all the same: a pair whose part stands
@@ -329,7 +335,8 @@ The xbf holds the mechanism as a subtree under `Main():100`, found by the
 label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes (named as
 the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
 `TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
-occurrence (`mechanism.py` draws the tree). **STEP carries none of it**: OCCT reads AP242
+occurrence (`mechanism.py` draws the tree); a motion's ease and loop are `cadgen_ease` and
+`cadgen_loop` strings in its `NamedData`, AP242 having no such attribute. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen xbf snapshot` and `cadgen xbf export` poses the mechanism at a
@@ -339,6 +346,39 @@ kinematics, and draws or writes that (a posed STEP is written from the document'
 every placement its own). No flag is as built. An unknown configuration or joint, a value out
 of range, a pair a gear drives, a pair kept inconsistent and a pair of a loop are refused by
 name before anything renders or is written.
+
+## Motions
+
+A motion is a definition in the model's code, beside its configurations:
+
+```python
+from cadgen.engine import configuration, motion
+
+configuration(arm, "folded", shoulder=0, elbow=0)
+configuration(arm, "reach", shoulder=45, elbow=90)
+motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])          # waypoints, eased
+motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
+```
+
+`motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None, ease="cubic",
+loop=None)` takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a
+configuration's name or `{joint: value}`, the rest as built; the last time is the duration), a
+sweep `{joint: (from, to)}` with `duration` (two waypoints), or a callable `t -> {joint: value}`
+with `duration`. `ease` is `cubic` (each step eased in and out, resting at every waypoint),
+`linear` or `spline` (a cubic Hermite through the waypoints, each one's slope its neighbours'
+secant); `loop` is None, `"loop"` or `"pingpong"`. A motion never moves the build.
+
+The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
+samples, eased `spline`: eight equal steps over its duration, each step halved while the
+samples' spline strays from the function by more than the tolerance at a quarter, half or three
+quarters of it -- 1e-3 radian for an angle, 1e-3 of the model's size (its bounding box's
+diagonal, from the B-rep's geometry) for a distance -- at most 4,097 samples. The same code
+samples at the same times, so the file is a function of the code. A motion naming a
+configuration or a joint its assembly lacks fails the build by name; one setting a value its
+pair cannot take, or moving a pair kept inconsistent or closing a loop, is left out and warned.
+A warm build that changes only a motion rewrites the mechanism's subtree and converts no
+prototype; the file is the cold build's bytes.
 
 ## Placements
 
@@ -428,8 +468,9 @@ colour), the tree, the document's version, and for an assembly with joints `kine
 links (name, the instances each moves, its frame as built), the pairs (label, type, the two
 links, the two frames as 4x4 matrices in their links' frames, limits and units per value; a
 gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `configurations`
-(name → joint → value: a number, or a list for a cylindrical or spherical pair), and `loop`
-(the pairs closing a loop, or null). A page poses the instances from it: each link's
+(name → joint → value: a number, or a list for a cylindrical or spherical pair), `motions`
+(name → `{duration, ease, loop, keys}`, each key `{t, configuration}` or `{t, values}`), and
+`loop` (the pairs closing a loop, or null). A page poses the instances from it: each link's
 placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.

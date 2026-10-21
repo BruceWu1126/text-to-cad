@@ -8,9 +8,9 @@ component placed in its parent's frame. A part read from a STEP this engine did 
 write takes the geometry key a build would give it, so an xbf of it caches like any.
 
 An xbf extracted with ``part`` carries the mechanism's share of the subtree: the links
-every member of which is in it, the pairs between two such links, and the configurations'
-values of those pairs; the ground is the document's when it is kept, else the first link
-kept.
+every member of which is in it, the pairs between two such links, the configurations'
+values of those pairs, and the motions that move those pairs alone; the ground is the
+document's when it is kept, else the first link kept.
 """
 
 from __future__ import annotations
@@ -147,9 +147,14 @@ def _mechanism(mechanism: Any, root: tuple[int, ...]) -> Any:
     def share(values: dict[str, Any]) -> dict[str, Any]:
         return {label: value for label, value in values.items() if label in labels}
 
+    configurations = {name: share(values) for name, values in mechanism.configurations.items() if share(values)}
+    # A motion every joint of which is in the subtree, and every configuration it names.
+    motions = {name: motion for name, motion in mechanism.motions.items()
+               if motion.labels() <= labels and all(configuration in configurations and set(
+                   mechanism.configurations[configuration]) <= labels
+                   for _t, configuration, _values in motion.keys if configuration is not None)}
     return Mechanism(mechanism.name, links, kept.get(mechanism.ground, 0), pairs, share(mechanism.as_built),
-                     {name: share(values) for name, values in mechanism.configurations.items() if share(values)},
-                     list(mechanism.warnings))
+                     configurations, list(mechanism.warnings), motions)
 
 
 def write_xbf(view: Any, path: Path) -> None:

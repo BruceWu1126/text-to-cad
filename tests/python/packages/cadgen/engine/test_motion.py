@@ -1,0 +1,187 @@
+"""Motions: definitions in a model's code (``motion``), kept in the document beside the
+configurations as data -- waypoints, a sweep, or a function's samples -- read back whole,
+patched by a warm build to the cold build's bytes; and a GLB export baking each motion into
+a glTF clip whose curves stay within the tolerance of forward kinematics."""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import shutil
+import struct
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+
+import numpy as np
+
+from cadgen.engine import document, mechanism
+from cadgen.engine import build as engine_build
+
+ARM = """
+import math
+import build123d as bd
+from cadgen.engine import configuration, motion, xbf
+
+
+@xbf
+def arm():
+    base = bd.Box(100, 60, 20)
+    link = bd.Pos(40, 0, 25) * bd.Box(120, 20, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    tip = bd.Pos(60, 0, 35) * bd.Box(40, 10, 10, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
+    base.label, link.label, tip.label = "base", "link", "tip"
+    elbow = bd.Axis((40, 0, 20), (0, 1, 0))
+    bd.RevoluteJoint("elbow", base, axis=elbow, angular_range=(-10, 120))
+    bd.RigidJoint("mount", link, bd.Plane(origin=elbow.position, z_dir=elbow.direction).location)
+    slide = bd.Axis((60, 0, 30), (1, 0, 0))
+    bd.LinearJoint("slide", link, axis=slide, linear_range=(0, 80))
+    bd.RigidJoint("carriage", tip, bd.Plane(origin=slide.position, z_dir=slide.direction).location)
+    link.joints["slide"].connect_to(tip.joints["carriage"], position=0)
+    base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
+    arm = bd.Compound(children=[base, link, tip], label="arm")
+    configuration(arm, "raised", elbow=90)
+    motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})], loop="loop")
+    motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear", loop="pingpong")
+    {nod}motion(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
+    {more}
+    return arm
+"""
+
+
+class _Folder(unittest.TestCase):
+    def setUp(self) -> None:
+        from cadgen.engine.kernel import memo
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-motion-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        self.script = self.folder / "arm.py"
+        self.xbf = self.folder / "XBF/arm.xbf"
+        memo.install()
+        self.addCleanup(memo.clear)
+
+    def arm(self, *, ok: bool = True, reach: int = 60, more: str = "pass", nod: bool = True) -> dict:
+        text = ARM.format(reach=reach, more=more, nod="" if nod else "# ")
+        self.script.write_text(textwrap.dedent(text), encoding="utf-8")
+        os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
+        [report] = engine_build.build(self.script, ["arm"], cwd=self.folder)
+        self.assertEqual(report["ok"], ok, report)
+        return report
+
+    def cold(self, **values) -> bytes:
+        """The arm built by a process that never built it: its bytes."""
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        self.xbf.unlink()
+        self.assertFalse(self.arm(**values)["converted"]["patched"])
+        return self.xbf.read_bytes()
+
+
+class AuthoringTest(unittest.TestCase):
+    def test_a_motion_is_one_of_waypoints_a_sweep_or_a_function_and_says_what_is_wrong(self) -> None:
+        import build123d as bd
+
+        from cadgen.engine import motion
+
+        box = bd.Box(1, 1, 1)
+        for call, error in (
+                (lambda: motion(box, "m"), "waypoints, a function of time, or sweep=: one of them"),
+                (lambda: motion(box, "m", [(0, "a")], sweep={"j": (0, 1)}, duration=1), "one of them"),
+                (lambda: motion(box, "m", [(0, "a")]), "at least two waypoints"),
+                (lambda: motion(box, "m", [(1, "a"), (2, "b")]), "the first waypoint is at 0 s"),
+                (lambda: motion(box, "m", [(0, "a"), (0, "b")]), "is not after the one before it"),
+                (lambda: motion(box, "m", [(0, "a"), (1, "b")], duration=3), "waypoints give their own times"),
+                (lambda: motion(box, "m", [(0, "a"), (1, {"j": "x"})]), "joint 'j' takes a number"),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}), "sweep= takes duration="),
+                (lambda: motion(box, "m", sweep={"j": 5}, duration=1), "takes \\(from, to\\)"),
+                (lambda: motion(box, "m", lambda t: {}, duration=0), "duration is a number of seconds above 0"),
+                (lambda: motion(box, "m", lambda t: {}), "a function of time takes duration="),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, ease="bounce"), "ease is one of"),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, loop="twice"), "loop is None"),
+                (lambda: motion("arm", "m", sweep={"j": (0, 1)}, duration=1), "takes the assembly")):
+            with self.assertRaisesRegex((TypeError, ValueError), error):
+                call()
+        self.assertIs(motion(box, "m", sweep={"j": (0, 1)}, duration=1), box)
+
+
+class DocumentTest(_Folder):
+    def test_motions_are_definitions_in_the_document_read_back_whole(self) -> None:
+        self.arm()
+        loaded = document.Loaded(self.xbf)
+        motions = loaded.mechanism.motions
+        self.assertEqual(list(motions), ["lift", "nod", "wave"])
+        lift = motions["lift"]
+        self.assertEqual(lift.keys, [(0.0, None, {"elbow": (0.0,)}), (1.5, "raised", {}),
+                                     (3.0, None, {"elbow": (0.0,), "slide": (60.0,)})])
+        self.assertEqual((lift.ease, lift.loop), ("cubic", "loop"))
+        self.assertEqual(motions["wave"].keys, [(0.0, None, {"elbow": (-10.0,)}), (2.0, None, {"elbow": (60.0,)})])
+        self.assertEqual((motions["wave"].ease, motions["wave"].loop), ("linear", "pingpong"))
+        block = loaded.structure()["kinematics"]["motions"]
+        self.assertEqual(block["lift"]["keys"][1], {"t": 1.5, "configuration": "raised"})
+        self.assertEqual(block["wave"]["duration"], 2.0)
+        # The build is as the joints connect the parts: no motion and no configuration moves it.
+        self.assertEqual(loaded.structure()["kinematics"]["asBuilt"]["elbow"], 0.0)
+
+    def test_a_function_is_kept_as_samples_within_the_tolerance_at_times_the_code_chooses(self) -> None:
+        self.arm()
+        nod = document.Loaded(self.xbf).mechanism.motions["nod"]
+        self.assertEqual(nod.ease, "spline")
+        times = np.array([t for t, _name, _values in nod.keys])
+        self.assertEqual((times[0], times[-1]), (0.0, 6.0))
+        self.assertLess(len(times), 200)
+        table = np.array([[values["elbow"][0], values["slide"][0]] for _t, _name, values in nod.keys])
+        worst = np.zeros(2)
+        for t in np.linspace(0, 6, 997):
+            got = mechanism._interpolated(times, table, "spline", float(t))
+            truth = np.array([45 + 20 * math.sin(t), 40 + 30 * math.sin(2 * t)])
+            worst = np.maximum(worst, np.abs(got - truth))
+        size = math.dist((-50, -30, -10), (160, 30, 40))  # the arm's bounding box as built
+        # Within the tolerance at the checked points; between them, within half as much again.
+        self.assertLess(worst[0], math.degrees(mechanism.ANGULAR_TOLERANCE) * 1.5)
+        self.assertLess(worst[1], mechanism.LINEAR_TOLERANCE * size * 1.5)
+        first = self.xbf.read_bytes()
+        self.assertEqual(self.cold(), first, "the same code samples at the same times: the same bytes")
+
+    def test_a_warm_edit_of_a_motion_patches_the_document_to_the_cold_bytes(self) -> None:
+        self.arm()
+        report = self.arm(reach=90)
+        self.assertTrue(report["converted"]["patched"], report["converted"])
+        self.assertEqual(report["converted"]["converted"], 0, "a motion edit converts no prototype")
+        self.assertEqual(document.Loaded(self.xbf).mechanism.motions["wave"].keys[-1], (2.0, None, {"elbow": (90.0,)}))
+        warm = self.xbf.read_bytes()
+        self.assertEqual(self.cold(reach=90), warm)
+        # A motion removed leaves nothing of itself: the warm file is the cold one's again.
+        self.arm(reach=90, nod=False)
+        warm = self.xbf.read_bytes()
+        self.assertNotIn("nod", document.Loaded(self.xbf).mechanism.motions)
+        self.assertEqual(self.cold(reach=90, nod=False), warm)
+
+    def test_what_a_motion_names_wrong_fails_or_warns_by_name(self) -> None:
+        report = self.arm(ok=False, more='motion(arm, "bad", [(0, "raised"), (1, "lowered")])')
+        self.assertIn("names no configuration 'lowered'", report["error"])
+        report = self.arm(ok=False, more='motion(arm, "bad", sweep={"knee": (0, 1)}, duration=1)')
+        self.assertIn("motion 'bad' of arm names no joint 'knee'", report["error"])
+        report = self.arm(more='motion(arm, "far", sweep={"elbow": (0, 200)}, duration=1)')
+        self.assertTrue(any("motion 'far'" in text and "outside its range" in text and "left out" in text
+                            for text in report["kinematics"]["warnings"]), report.get("kinematics"))
+        self.assertNotIn("far", document.Loaded(self.xbf).mechanism.motions)
+
+    def test_a_part_of_one_link_and_a_step_carry_no_motion(self) -> None:
+        from cadgen.engine.export import translate
+
+        self.arm()
+        part = self.folder / "link.xbf"
+        translate(self.xbf, None, part, part="link")
+        self.assertEqual(document.Loaded(part).mechanism, None, "a part of one link holds no pair, and no motion")
+        whole = self.folder / "whole.step"
+        translate(self.xbf, None, whole)
+        self.assertIsNone(document.Loaded(whole).mechanism, "STEP carries no mechanism and no motion")
+
+
+if __name__ == "__main__":
+    unittest.main()

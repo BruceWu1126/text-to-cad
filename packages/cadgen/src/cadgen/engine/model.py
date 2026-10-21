@@ -386,10 +386,32 @@ def configuration(assembly: Any, name: str, **values: Any) -> Any:
     build123d's, placed with ``connect_to``; the values they were connected at are the
     as-built configuration, and a joint a configuration does not name stays as built. The
     document keeps every configuration (AP242's mechanism states); the viewer offers them
-    as presets, ``--pose NAME`` poses a snapshot or an export at one. Returns ``assembly``."""
+    as presets, ``--pose NAME`` poses a snapshot or an export at one, and a motion's
+    waypoint may name one. A configuration never changes the build: every file shows the
+    model as built. Returns ``assembly``."""
     from cadgen.engine import mechanism
 
     return mechanism.configuration(assembly, name, **values)
+
+
+def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None, duration: Any = None,
+           ease: str = "cubic", loop: str | None = None) -> Any:
+    """Name a motion of an assembly's mechanism, by joint label: waypoints ``[(t, pose),
+    ...]`` (``t`` in seconds from 0, ``pose`` a configuration's name or ``{joint: value}``,
+    the rest as built), ``sweep={joint: (from, to)}`` with ``duration``, or a function ``t ->
+    {joint: value}`` with ``duration``. ``ease`` is ``cubic`` (eased in and out at every
+    waypoint), ``linear`` or ``spline``; ``loop`` None, ``"loop"`` or ``"pingpong"``::
+
+        motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])
+        motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+        motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)
+
+    The document keeps the definition, never frames (a function as its samples); a GLB
+    export bakes it into a clip of the same name, and STEP, STL and 3MF ignore it. It never
+    moves the build: the model is as its joints connect it. Returns ``assembly``."""
+    from cadgen.engine import mechanism
+
+    return mechanism.motion(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease, loop=loop)
 
 
 def _read_step(path: Any) -> Any:

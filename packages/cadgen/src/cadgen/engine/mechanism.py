@@ -35,8 +35,17 @@ built tree. The pairs make a mechanism in ISO 10303-105's terms, the kinematics 
   its readers and every pose honour it.
 
 A link's frame is its first member occurrence's placement as built (the ground's, the
-world's when it has none). The document keeps the mechanism and its configurations, never
-time: a pose is a configuration, and there is no animation.
+world's when it has none).
+
+**Motions** (``motion(assembly, name, ...)``) are definitions, kept beside the configurations:
+waypoints -- each a time and a configuration's name or joint values, the rest as built -- an
+ease between them (``cubic``: each step eased in and out, resting at every waypoint;
+``linear``: constant speed; ``spline``: smooth through every waypoint) and a loop (none,
+``loop``, ``pingpong``). A sweep is two waypoints. A function of time is stored as its
+samples (``spline``), at times chosen until the samples' spline stays within the tolerance of
+the function at every check point between them: 1e-3 radian for an angle, 1e-3 of the
+model's size (its bounding box's diagonal, from the B-rep's geometry) for a distance. So the document holds poses and motion definitions, never baked frames or clips; a
+GLB export bakes each motion into a clip (``export/motion.py``).
 
 In the document the mechanism is a subtree under ``Main():100``, marked by a
 ``TDataStd_UAttribute`` of ``GUID`` and read by that GUID, of standard attributes only
@@ -56,6 +65,10 @@ In the document the mechanism is a subtree under ``Main():100``, marked by a
                                ReferenceList[pair per value], RealArray[values], IntegerArray[dof per value]
         :4 "configurations"
           :s <name>            as "as built"
+        :5 "motions"
+          :m <name>            NamedData{entity: INTERPOLATED_CONFIGURATION_SEQUENCE, cadgen_ease, cadgen_loop}
+            :k                 NamedData{entity: INTERPOLATED_CONFIGURATION_SEGMENT, t_parameter}, and its state:
+                               ReferenceList[the configuration it names], or as "as built"
 
 STEP carries none of it: OCCT reads AP242 kinematics but cannot write them.
 """
@@ -68,14 +81,23 @@ from typing import Any, Callable
 
 import numpy as np
 
-__all__ = ["CONFIGURATIONS", "GUID", "KinematicsError", "Link", "Mechanism", "Pair", "block", "configuration",
-           "harvest", "posed_structure", "read", "resolve", "write"]
+__all__ = ["CONFIGURATIONS", "GUID", "MOTIONS", "KinematicsError", "Link", "Mechanism", "Motion", "Pair", "Timeline",
+           "block", "configuration", "harvest", "motion", "posed_structure", "read", "resolve", "write"]
 
 GUID = "5b0e7a64-3c1d-4f8e-a2b9-6d4c1e7f9a20"
 TAG = 100  # Main():100, clear of XCAFDoc_DocumentTool's tool labels (1..10)
 SCHEMA = "cadgen.kinematics/1"
-# The attribute ``configuration`` keeps a shape's named configurations in.
+# The attribute ``configuration`` keeps a shape's named configurations in, and ``motion`` its motions.
 CONFIGURATIONS = "xbf_configurations"
+MOTIONS = "xbf_motions"
+EASES = ("cubic", "linear", "spline")
+LOOPS = (None, "loop", "pingpong")
+# How near a motion's stored samples (a function's) and a GLB's baked curves keep to the truth:
+# an angle within ANGULAR_TOLERANCE radians, a distance within LINEAR_TOLERANCE of the size.
+ANGULAR_TOLERANCE = 1e-3
+LINEAR_TOLERANCE = 1e-3
+# At most this many samples of a function, or keys of a baked clip.
+MOST_KEYS = 4097
 
 ROTATION = ("deg", "lower_limit_actual_rotation", "upper_limit_actual_rotation")
 TRANSLATION = ("mm", "lower_limit_actual_translation", "upper_limit_actual_translation")
@@ -120,6 +142,29 @@ class Pair:
 
 
 @dataclass
+class Motion:
+    """A motion's definition: its keys, each a time (seconds, the first 0, increasing) and a
+    configuration's name or pair values (by pair label, the rest as built), the ease between
+    them and the loop."""
+
+    name: str
+    keys: list[tuple[float, str | None, dict[str, tuple[float, ...]]]]
+    ease: str = "cubic"
+    loop: str | None = None
+
+    @property
+    def duration(self) -> float:
+        return self.keys[-1][0]
+
+    def labels(self) -> set[str]:
+        return {label for _t, _name, values in self.keys for label in values}
+
+    def signature(self) -> tuple:
+        return (self.name, tuple((t, name, tuple(sorted(values.items()))) for t, name, values in self.keys),
+                self.ease, self.loop)
+
+
+@dataclass
 class Mechanism:
     name: str
     links: list[Link]
@@ -129,13 +174,14 @@ class Mechanism:
     configurations: dict[str, dict[str, tuple[float, ...]]] = field(default_factory=dict)
     # What the harvest found inconsistent, each said by name: the document is written all the same.
     warnings: list[str] = field(default_factory=list)
+    motions: dict[str, Motion] = field(default_factory=dict)
 
     def signature(self) -> tuple:
         return (self.name, tuple((link.name, tuple(link.members)) for link in self.links), self.ground,
                 tuple((p.label, p.kind, p.links, p.frames, p.limits, p.ratio, p.inconsistent) for p in self.pairs),
                 tuple(sorted(self.as_built.items())),
                 tuple((name, tuple(sorted(values.items()))) for name, values in sorted(self.configurations.items())),
-                tuple(self.warnings))
+                tuple(self.warnings), tuple(motion.signature() for _name, motion in sorted(self.motions.items())))
 
 
 # --- matrices ------------------------------------------------------------------------------
@@ -179,7 +225,7 @@ def _rotation(axis: int, degrees: float) -> np.ndarray:
     return found
 
 
-def motion(kind: str, values: tuple[float, ...] | list[float]) -> np.ndarray:
+def pair_motion(kind: str, values: tuple[float, ...] | list[float]) -> np.ndarray:
     """``M(v)``: what a pair's value does between its two frames."""
     if kind == "revolute":
         return _rotation(2, values[0])
@@ -246,6 +292,100 @@ def configuration(assembly: Any, name: str, **values: Any) -> Any:
     held = dict(assembly.__dict__.get(CONFIGURATIONS) or {})
     held[name] = checked
     assembly.__dict__[CONFIGURATIONS] = held
+    return assembly
+
+
+def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None, duration: Any = None,
+           ease: str = "cubic", loop: str | None = None) -> Any:
+    """A named motion of ``assembly``'s mechanism, one of:
+
+    - waypoints, ``[(t, pose), ...]``: ``t`` in seconds (the first 0, then increasing), ``pose``
+      a configuration's name or ``{joint: value}`` (the rest as built); the duration is the
+      last waypoint's time;
+    - ``sweep={joint: (from, to)}`` with ``duration``: the two waypoints ``(0, from)`` and
+      ``(duration, to)``;
+    - a function of time, ``t -> {joint: value}``, with ``duration``: stored as its samples
+      (see the module docstring); ``ease`` does not apply, the function is its own timing.
+
+    ``ease`` is ``cubic`` (each step eased in and out, resting at every waypoint), ``linear``
+    or ``spline`` (smooth through every waypoint); ``loop`` is None, ``loop`` or
+    ``pingpong``. Kept in the document beside the configurations, as a definition; a GLB
+    export bakes it into a clip of the same name. Returns ``assembly``."""
+    import build123d as bd
+
+    if not isinstance(assembly, bd.Shape):
+        raise TypeError(f"motion() takes the assembly whose joints it moves, not {type(assembly).__name__}")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("a motion's name is a non-empty string")
+    where = f"motion {name!r}"
+    if ease not in EASES:
+        raise ValueError(f"{where}: ease is one of {', '.join(EASES)}, not {ease!r}")
+    if loop not in LOOPS:
+        raise ValueError(f"{where}: loop is None, 'loop' or 'pingpong', not {loop!r}")
+    if (waypoints_or_fn is None) == (sweep is None):
+        raise TypeError(f"{where} takes waypoints, a function of time, or sweep=: one of them")
+
+    def seconds(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{where}: duration is a number of seconds above 0, not {value!r}")
+        return float(value)
+
+    def joints(values: Any, at: str) -> dict[str, tuple[float, ...]]:
+        if not isinstance(values, dict) or not values:
+            raise TypeError(f"{where}: {at} is a configuration's name or a dict of joint values, not {values!r}")
+        found = {}
+        for label, value in values.items():
+            numbers = _number_values(value)
+            if not isinstance(label, str) or numbers is None or not all(math.isfinite(v) for v in numbers):
+                raise TypeError(f"{where}: {at}: joint {label!r} takes a number, or a sequence of numbers for a "
+                                f"joint of several values, not {value!r}")
+            found[label] = numbers
+        return found
+
+    if callable(waypoints_or_fn):
+        if duration is None:
+            raise TypeError(f"{where}: a function of time takes duration=")
+        held: Any = ("function", waypoints_or_fn, seconds(duration))
+    elif sweep is not None:
+        if duration is None:
+            raise TypeError(f"{where}: sweep= takes duration=")
+        if not isinstance(sweep, dict) or not sweep:
+            raise TypeError(f"{where}: sweep is {{joint: (from, to)}}, not {sweep!r}")
+        ends: list[dict[str, Any]] = [{}, {}]
+        for label, span in sweep.items():
+            if not isinstance(span, (tuple, list)) or len(span) != 2:
+                raise TypeError(f"{where}: sweep joint {label!r} takes (from, to), not {span!r}")
+            ends[0][label], ends[1][label] = span
+        held = ("keys", [(0.0, None, joints(ends[0], "the sweep's start")),
+                         (seconds(duration), None, joints(ends[1], "the sweep's end"))])
+    else:
+        if duration is not None:
+            raise TypeError(f"{where}: waypoints give their own times; duration= is a sweep's or a function's")
+        try:
+            rows = list(waypoints_or_fn)
+        except TypeError:
+            raise TypeError(f"{where}: waypoints are [(t, pose), ...], not {waypoints_or_fn!r}") from None
+        if len(rows) < 2:
+            raise ValueError(f"{where} takes at least two waypoints")
+        keys = []
+        for at, row in enumerate(rows):
+            if not isinstance(row, (tuple, list)) or len(row) != 2:
+                raise TypeError(f"{where}: waypoint {at} is (t, pose), not {row!r}")
+            t, pose = row
+            if isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t):
+                raise TypeError(f"{where}: waypoint {at}'s time is a number of seconds, not {t!r}")
+            if at == 0 and t != 0:
+                raise ValueError(f"{where}: the first waypoint is at 0 s, not {t!r}")
+            if at and t <= keys[-1][0]:
+                raise ValueError(f"{where}: waypoint {at} at {t!r} s is not after the one before it")
+            if isinstance(pose, str):
+                keys.append((float(t), pose, {}))
+            else:
+                keys.append((float(t), None, joints(pose, f"waypoint {at}")))
+        held = ("keys", keys)
+    motions = dict(assembly.__dict__.get(MOTIONS) or {})
+    motions[name] = (*held, ease, loop)
+    assembly.__dict__[MOTIONS] = motions
     return assembly
 
 
@@ -388,7 +528,7 @@ def _extract(pair: Pair, relative: np.ndarray, hint: tuple | None, scale: float)
             return None
     if not all(_within(value, limit, 1e-6 * max(1.0, scale)) for value, limit in zip(found, limits)):
         return None
-    if np.abs(motion(kind, found) - relative).max() > 1e-6 * max(1.0, scale):
+    if np.abs(pair_motion(kind, found) - relative).max() > 1e-6 * max(1.0, scale):
         return None
     return found
 
@@ -448,6 +588,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     holders: dict[int, list[tuple[int, ...]]] = {}
     jointed: list[tuple[tuple[int, ...], Any]] = []
     configured: list[tuple[tuple[int, ...], Any, dict]] = []
+    motioned: list[tuple[tuple[int, ...], Any, dict]] = []
     for obj, path in objects:
         joints = obj.__dict__.get("joints") or {}
         for joint in list(joints.values()):
@@ -456,6 +597,9 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         held = obj.__dict__.get(CONFIGURATIONS)
         if held:
             configured.append((path, obj, held))
+        held = obj.__dict__.get(MOTIONS)
+        if held:
+            motioned.append((path, obj, held))
 
     # Every connect_to: (the joint called and its part, which stays; the other and its part, which moves).
     seen: set = set()
@@ -487,9 +631,17 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
                     raise KinematicsError(f"configuration {name!r} of {name_of(path)} names no joint {key!r}; "
                                           + (f"its joints are {', '.join(sorted(labels))}" if labels
                                              else "it holds no joint"))
+    for path, _obj, held in motioned:
+        labels = {joint.label for holder, joint in jointed if holder[:len(path)] == path}
+        for name, spec in held.items():
+            for key in (label for _t, _name, values in (spec[1] if spec[0] == "keys" else ()) for label in values):
+                if key not in labels and not any(key.endswith(f":{label}") for label in labels):
+                    raise KinematicsError(f"motion {name!r} of {name_of(path)} names no joint {key!r}; "
+                                          + (f"its joints are {', '.join(sorted(labels))}" if labels
+                                             else "it holds no joint"))
     if not pairings:
-        if configured:
-            warnings.append("the configurations name joints, and no joint is paired with another")
+        if configured or motioned:
+            warnings.append("the configurations or motions name joints, and no joint is paired with another")
         return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     parent: dict[tuple[int, ...], tuple[int, ...]] = {}
@@ -522,8 +674,8 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             moving, held_by, rigid, rigid_by = joint, stays, other, moves
         moving_pairs.append((moving, held_by, rigid, rigid_by, moves))
     if not moving_pairs:
-        if configured:
-            warnings.append("the configurations name joints, and no moving joint is paired")
+        if configured or motioned:
+            warnings.append("the configurations or motions name joints, and no moving joint is paired")
         return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
@@ -588,7 +740,182 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         joint_labels.append((moving.label, held_by))
 
     configurations = _configurations(configured, pairs, joint_labels, name_of, warnings)
-    return Mechanism(tree.root.name, links, 0, pairs, as_built, configurations, warnings)
+    found = Mechanism(tree.root.name, links, 0, pairs, as_built, configurations, warnings)
+    if motioned:
+        functions = any(spec[0] == "function" for _path, _obj, held in motioned for spec in held.values())
+        found.motions = _motions(motioned, found, joint_labels, name_of, _size(result) if functions else 1.0)
+    return found
+
+
+class _Unfit(KinematicsError):
+    """A motion value its pair cannot take: the motion is left out, and warned."""
+
+
+def _matching(path: tuple[int, ...], key: str, pairs: list[Pair], joint_labels: list) -> list[Pair]:
+    """The pairs a joint label set on the assembly at ``path`` names: by the pair's label or
+    its moving joint's, among the joints below the assembly."""
+    return [pair for pair, (raw, holder) in zip(pairs, joint_labels)
+            if holder[:len(path)] == path and key in (pair.label, raw)]
+
+
+def _size(result: Any) -> float:
+    """A model's size: its bounding box's diagonal, from its geometry (never a mesh), at least 1 mm."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    box = Bnd_Box()
+    BRepBndLib.Add_s(result.wrapped, box, False)
+    if box.IsVoid():
+        return 1.0
+    low, high = box.CornerMin(), box.CornerMax()
+    return max(1.0, math.dist((low.X(), low.Y(), low.Z()), (high.X(), high.Y(), high.Z())))
+
+
+def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, name_of: Callable,
+             size: float) -> dict[str, Motion]:
+    """Each motion as the document keeps it, by name: its keys in pair labels (a function's
+    sampled), a shallower assembly's motion over a deeper one's of the same name. A motion
+    naming a configuration the mechanism has not, or a joint its assembly has not, is the
+    harvest's error; one setting a value its pair cannot take, or moving a pair kept with no
+    value or closing a loop, is left out, and warned."""
+    pairs, warnings = mechanism.pairs, mechanism.warnings
+    _reached, loop = _tree(mechanism)
+    blocked = {pair.label: f"it is kept with no value ({pair.inconsistent})" for pair in pairs if pair.inconsistent}
+    blocked.update({label: f"pairs {', '.join(loop)} close a loop" for label in loop or ()})
+    tolerances = {pair.label: [math.degrees(ANGULAR_TOLERANCE) if unit == "deg" else LINEAR_TOLERANCE * size
+                               for unit, *_names in KINDS[pair.kind][1]] for pair in pairs}
+    found: dict[str, Motion] = {}
+    for path, _obj, held in sorted(motioned, key=lambda item: -len(item[0])):
+        for name, spec in held.items():
+            where = f"motion {name!r} of {name_of(path)}"
+
+            def convert(values: dict[str, Any], at: str) -> dict[str, tuple[float, ...]]:
+                converted = {}
+                for key, value in values.items():
+                    matches = _matching(path, key, pairs, joint_labels)
+                    if not matches:
+                        raise _Unfit(f"{where}: {at} sets joint {key!r}, which is in no pair")
+                    for pair in matches:
+                        try:
+                            converted[pair.label] = _checked(pair, value, f"{where}: {at}")
+                        except KinematicsError as error:
+                            raise _Unfit(str(error)) from None
+                return converted
+
+            try:
+                if spec[0] == "function":
+                    _kind, function, duration, _ease, loop_mode = spec
+                    keys = _sampled(function, duration, convert, tolerances, where, path, joint_labels)
+                    ease = "spline"
+                else:
+                    _kind, rows, ease, loop_mode = spec
+                    keys = []
+                    for t, configuration, values in rows:
+                        if configuration is not None:
+                            if configuration not in mechanism.configurations:
+                                known = ", ".join(sorted(mechanism.configurations)) or "none"
+                                raise KinematicsError(f"{where}: the waypoint at {t:g} s names no configuration "
+                                                      f"{configuration!r}; the configurations: {known}")
+                            keys.append((t, configuration, {}))
+                        else:
+                            keys.append((t, None, convert(values, f"the waypoint at {t:g} s")))
+                motion = Motion(name, keys, ease, loop_mode)
+                stopped = sorted({label for label in motion.labels() | {label for _t, configuration, _v in keys
+                                                                        if configuration is not None
+                                                                        for label in mechanism.configurations[configuration]}
+                                  if label in blocked})
+                if stopped:
+                    raise _Unfit(f"{where} moves joint {stopped[0]!r}, which cannot be posed: {blocked[stopped[0]]}")
+            except _Unfit as error:
+                warnings.append(f"{error}: the motion is left out")
+                found.pop(name, None)
+                continue
+            found[name] = motion
+    return {name: found[name] for name in sorted(found)}
+
+
+def _flat(values: dict[str, tuple[float, ...]], labels: list[str]) -> np.ndarray:
+    return np.array([value for label in labels for value in values[label]], dtype=float)
+
+
+def _sampled(function: Callable, duration: float, convert: Callable, tolerances: dict[str, list[float]],
+             where: str, path: tuple[int, ...], joint_labels: list) -> list:
+    """A function of time's samples: eight equal steps over its duration, each step halved
+    where the samples' spline strays from the function, at a quarter, half or three quarters
+    of it, by more than the tolerance (``ANGULAR_TOLERANCE``, ``LINEAR_TOLERANCE``), until
+    none does. A function of the code: the same function samples at the same times."""
+    held: dict[float, dict[str, tuple[float, ...]]] = {}
+
+    def at(t: float) -> dict[str, tuple[float, ...]]:
+        found = held.get(t)
+        if found is None:
+            try:
+                given = function(t)
+            except Exception as error:  # noqa: BLE001 - the model's function, said by name
+                raise KinematicsError(f"{where}: the function raised at {t:g} s: {error!r}") from None
+            if not isinstance(given, dict) or not given:
+                raise KinematicsError(f"{where}: the function returns {{joint: value}}, not {given!r} (at {t:g} s)")
+            for key in given:
+                if not any(key in (raw,) or key.endswith(f":{raw}") for raw, holder in joint_labels
+                           if holder[:len(path)] == path):
+                    labels = sorted({raw for raw, holder in joint_labels if holder[:len(path)] == path})
+                    raise KinematicsError(f"{where} names no joint {key!r}; its joints are {', '.join(labels)}")
+            found = held[t] = convert(given, f"the function at {t:g} s")
+        return found
+
+    first = at(0.0)
+    labels = sorted(first)
+    tolerance = np.array([value for label in labels for value in tolerances[label]], dtype=float)
+    times = [duration * step / 8 for step in range(9)]
+    while True:
+        rows = []
+        for t in times:
+            values = at(t)
+            if sorted(values) != labels:
+                raise KinematicsError(f"{where}: the function sets {', '.join(sorted(values))} at {t:g} s and "
+                                      f"{', '.join(labels)} at 0 s: it sets the same joints at every time")
+            rows.append(_flat(values, labels))
+        grid, table = np.array(times), np.array(rows)
+        split = []
+        for a, b in zip(times, times[1:]):
+            for fraction in (0.25, 0.5, 0.75):
+                t = a + (b - a) * fraction
+                if np.any(np.abs(_interpolated(grid, table, "spline", t) - _flat(at(t), labels)) > tolerance):
+                    split.append((a + b) / 2)
+                    break
+        if not split:
+            return [(t, None, at(t)) for t in times]
+        times = sorted(set(times) | set(split))
+        if len(times) > MOST_KEYS:
+            raise KinematicsError(f"{where}: the function does not settle within the tolerance in {MOST_KEYS} samples")
+
+
+def _tangent(times: np.ndarray, values: np.ndarray, at: int) -> np.ndarray:
+    last = len(times) - 1
+    if at == 0:
+        return (values[1] - values[0]) / (times[1] - times[0])
+    if at == last:
+        return (values[last] - values[last - 1]) / (times[last] - times[last - 1])
+    return (values[at + 1] - values[at - 1]) / (times[at + 1] - times[at - 1])
+
+
+def _interpolated(times: np.ndarray, values: np.ndarray, ease: str, t: float) -> np.ndarray:
+    """Values at ``t`` between keys: ``linear``, ``cubic`` (each step eased in and out) or
+    ``spline`` (a cubic Hermite through the keys, each key's slope its neighbours' secant)."""
+    if t <= times[0]:
+        return values[0].copy()
+    if t >= times[-1]:
+        return values[-1].copy()
+    at = min(int(np.searchsorted(times, t, side="right")) - 1, len(times) - 2)
+    span = times[at + 1] - times[at]
+    s = (t - times[at]) / span
+    if ease == "linear":
+        return values[at] + s * (values[at + 1] - values[at])
+    if ease == "cubic":
+        return values[at] + s * s * (3.0 - 2.0 * s) * (values[at + 1] - values[at])
+    first, second = _tangent(times, values, at), _tangent(times, values, at + 1)
+    return ((2 * s ** 3 - 3 * s ** 2 + 1) * values[at] + (s ** 3 - 2 * s ** 2 + s) * span * first
+            + (-2 * s ** 3 + 3 * s ** 2) * values[at + 1] + (s ** 3 - s ** 2) * span * second)
 
 
 def _shown(values: tuple[float, ...] | list[float]) -> str:
@@ -748,9 +1075,26 @@ def write(doc: Any, mechanism: Mechanism, occurrence: Callable[[tuple[int, ...]]
     _state(_label(top, 3, "as built", "MECHANISM_STATE_REPRESENTATION"), pair_labels, mechanism.as_built,
            mechanism.pairs)
     configurations = _label(top, 4, "configurations")
+    configuration_labels = {}
     for at, (name, values) in enumerate(mechanism.configurations.items(), 1):
-        _state(_label(configurations, at, name, "MECHANISM_STATE_REPRESENTATION"), pair_labels, values,
-               mechanism.pairs)
+        label = configuration_labels[name] = _label(configurations, at, name, "MECHANISM_STATE_REPRESENTATION")
+        _state(label, pair_labels, values, mechanism.pairs)
+    if mechanism.motions:
+        # Each motion as AP242's interpolated configuration sequence: its segments' times and states.
+        motions = _label(top, 5, "motions")
+        for at, (name, motion) in enumerate(mechanism.motions.items(), 1):
+            label = _label(motions, at, name, "INTERPOLATED_CONFIGURATION_SEQUENCE")
+            data = TDataStd_NamedData.Set_s(label)
+            data.SetString(_text("cadgen_ease"), _text(motion.ease))  # cadgen's, no AP242 attribute
+            if motion.loop:
+                data.SetString(_text("cadgen_loop"), _text(motion.loop))
+            for key_at, (t, configuration, values) in enumerate(motion.keys, 1):
+                segment = _label(label, key_at, repr(float(t)), "INTERPOLATED_CONFIGURATION_SEGMENT")
+                TDataStd_NamedData.Set_s(segment).SetReal(_text("t_parameter"), float(t))
+                if configuration is not None:
+                    TDataStd_ReferenceList.Set_s(segment).Append(configuration_labels[configuration])
+                else:
+                    _state(segment, pair_labels, values, mechanism.pairs)
 
 
 def _children_of(label: Any) -> list:
@@ -861,14 +1205,29 @@ def read(doc: Any, occurrences: dict[str, tuple[int, ...]]) -> Mechanism | None:
                           _real(data, "gear_ratio"), _string(data, "cadgen_inconsistent")))
     ground = link_at.get(next(iter(_references(top)), ""), 0)
     as_built = _read_state(top.FindChild(3, False), pair_at, pairs)
-    configurations = {_label_name(label): _read_state(label, pair_at, pairs)
-                      for label in _children_of(top.FindChild(4, False))}
+    configuration_labels = _children_of(top.FindChild(4, False))
+    configurations = {_label_name(label): _read_state(label, pair_at, pairs) for label in configuration_labels}
+    named = {_entry(label): _label_name(label) for label in configuration_labels}
+    motions = {}
+    held_motions = top.FindChild(5, False)
+    for label in ([] if held_motions.IsNull() else _children_of(held_motions)):
+        data = _named(label)
+        keys = []
+        for segment in _children_of(label):
+            references = _references(segment)
+            t = _real(_named(segment), "t_parameter") or 0.0
+            if references and references[0] in named:
+                keys.append((t, named[references[0]], {}))
+            else:
+                keys.append((t, None, _read_state(segment, pair_at, pairs)))
+        motions[_label_name(label)] = Motion(_label_name(label), keys, _string(data, "cadgen_ease") or "cubic",
+                                             _string(data, "cadgen_loop"))
     from OCP.TDataStd import TDataStd_ExtStringArray
 
     held = TDataStd_ExtStringArray()
     warnings = ([held.Value(at).ToExtString() for at in range(held.Lower(), held.Upper() + 1)]
                 if _find(top, held, TDataStd_ExtStringArray.GetID_s()) else [])
-    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations, warnings)
+    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations, warnings, motions)
 
 
 # --- what the page reads -------------------------------------------------------------------
@@ -962,7 +1321,81 @@ def block(mechanism: Mechanism, instance_paths: list[tuple[int, ...]],
             "asBuilt": {label: _json_value(values) for label, values in mechanism.as_built.items()},
             "configurations": {name: {label: _json_value(values) for label, values in values_.items()}
                                for name, values_ in mechanism.configurations.items()},
+            "motions": {name: _motion_json(motion) for name, motion in mechanism.motions.items()},
             "loop": loop, "warnings": warnings}
+
+
+def _motion_json(motion: Motion) -> dict[str, Any]:
+    keys = [{"t": t, "configuration": configuration} if configuration is not None
+            else {"t": t, "values": {label: _json_value(value) for label, value in values.items()}}
+            for t, configuration, values in motion.keys]
+    return {"duration": motion.duration, "ease": motion.ease, "loop": motion.loop, "keys": keys}
+
+
+
+# --- motions over time -----------------------------------------------------------------------
+
+
+class Timeline:
+    """A motion of the structure's ``kinematics`` over time: ``values(t)`` the pair values
+    at ``t`` seconds of its clip, every pair the motion does not move as built and each
+    pair a gear drives from its driver. A clip of a ``pingpong`` motion is twice its
+    duration, out and back; ``breaks`` are the times its keys fall at, where its speed may
+    jump."""
+
+    def __init__(self, kinematics: dict[str, Any], name: str) -> None:
+        motions = kinematics.get("motions") or {}
+        if name not in motions:
+            raise KinematicsError(f"the document has no motion {name!r}; its motions: "
+                                  f"{', '.join(sorted(motions)) or 'none'}")
+        entry = motions[name]
+        self.kinematics, self.name = kinematics, name
+        self.ease, self.loop = entry["ease"], entry.get("loop")
+        keys = entry["keys"]
+        self.times = np.array([float(key["t"]) for key in keys])
+        self.duration = float(self.times[-1])
+        self.period = self.duration * (2 if self.loop == "pingpong" else 1)
+        configurations = kinematics.get("configurations") or {}
+        driven = _driven(kinematics)
+        moving: set[str] = set()
+        poses = []
+        for key in keys:
+            if "configuration" in key:
+                moving |= set(configurations[key["configuration"]])
+                poses.append(resolve(kinematics, key["configuration"])[0])
+            else:
+                moving |= set(key["values"])
+                poses.append(resolve(kinematics, key["values"])[0])
+        self.labels = sorted(label for label in moving if label not in driven)
+        self.sizes = [len(poses[0][label]) for label in self.labels]
+        self.table = np.array([[value for label in self.labels for value in pose[label]] for pose in poses],
+                              dtype=float).reshape(len(poses), sum(self.sizes))
+        pairs = _block_pairs(kinematics)
+        limits = [limit for label in self.labels for limit in (pairs[label].get("limits") or ())]
+        self.lower = np.array([-math.inf if low is None else low for low, _high in limits], dtype=float)
+        self.upper = np.array([math.inf if high is None else high for _low, high in limits], dtype=float)
+
+    def local(self, t: float) -> float:
+        """The motion's own time at ``t`` seconds of its clip."""
+        return 2 * self.duration - t if self.loop == "pingpong" and t > self.duration else t
+
+    def joints(self, t: float) -> dict[str, tuple[float, ...]]:
+        flat = np.clip(_interpolated(self.times, self.table, self.ease, self.local(t)), self.lower, self.upper)
+        found, at = {}, 0
+        for label, size in zip(self.labels, self.sizes):
+            found[label] = tuple(float(value) for value in flat[at:at + size])
+            at += size
+        return found
+
+    def values(self, t: float) -> dict[str, tuple[float, ...]]:
+        return resolve(self.kinematics, self.joints(t))[0]
+
+    @property
+    def breaks(self) -> list[float]:
+        found = [float(t) for t in self.times]
+        if self.loop == "pingpong":
+            found += [2 * self.duration - t for t in reversed(found[:-1])]
+        return found
 
 
 # --- poses -------------------------------------------------------------------------------
@@ -1058,7 +1491,7 @@ def link_worlds(kinematics: dict[str, Any], values: dict[str, tuple[float, ...]]
                 moved = np.eye(4)
             else:
                 item_1, item_2 = (_from_column(frame) for frame in pair["frames"])
-                moved = motion(pair["type"], values[pair["label"]])
+                moved = pair_motion(pair["type"], values[pair["label"]])
             if found[first] is not None and found[second] is None:
                 found[second] = found[first] @ item_1 @ moved @ np.linalg.inv(item_2)
             elif found[second] is not None and found[first] is None:
