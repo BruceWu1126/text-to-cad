@@ -9,12 +9,15 @@ bridges; the hour recorder lives on the dial side (z < -1.5).
 import build123d as bd
 from cadgen.engine import memo
 
+from lib import materials
 from lib import mvt_chrono as C
 
 
 @memo
 def chrono_works():
-    return bd.Compound(children=C.build_chrono(), label="chronograph_works")
+    parts = materials.apply_materials(C.build_chrono(), "chrono_works")
+    compound = bd.Compound(children=parts, label="chronograph_works")
+    return compound
 
 
 if __name__ == "__main__":

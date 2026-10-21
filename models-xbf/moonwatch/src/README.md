@@ -26,27 +26,36 @@ would not set, so no builder of the case is a `@memo`.
 
 The original's `materials=` finishes (`lib/materials.py`) are `Material`
 values set on the parts before they are composed, by the same leaf-label
-assignments (`apply_materials`). Each finish keeps the catalogue's name and
-density where the metal or glass is a catalogue one, with the finish's own
-metallic/roughness and the old finish name as the description:
+assignments (`apply_materials`). Each finish is the catalogue's entry for the
+metal, glass or rubber in the finish's look (`.but(...)`), or the project's own
+where the catalogue has none, with the old finish name as the description. A
+finish keeps the original's metallic, roughness and clearcoat (`coat`,
+`coat_roughness`), and takes the look fields its name implies:
 
-| Old finish | Material |
-| --- | --- |
-| brushed_steel, case_mirror_polish, polished_steel, satin_steel | catalogue `stainless_steel` (Stainless 304) |
-| blued_screw, grained_lever | catalogue `steel` (Steel 1018) |
-| brass_part, gilt_wheel, copper_plate, anglage_mirror | catalogue `brass` (Brass C360) |
-| bezel_anodized | catalogue `aluminium` (Aluminum 6061-T6) |
-| glass | catalogue `glass` (Glass, soda-lime: transmissive) |
-| glass_back | `Sapphire`, 3980 kg/m^3 |
-| ruby_jewel | `Ruby`, 3980 kg/m^3 |
-| rubber | `NBR`, 1000 kg/m^3 |
-| matte_print | `Matte Print`, no density |
+| Old finish | Material | Look beyond the original's metallic, roughness and coat |
+| --- | --- | --- |
+| brushed_steel | Stainless 316 | anisotropy 0.5 (brushed) |
+| case_mirror_polish | Stainless 316 | no grain |
+| polished_steel | Stainless 304 | no grain |
+| satin_steel | Stainless 304 | anisotropy 0.4 (satin) |
+| blued_screw | Steel 1018 | |
+| grained_lever | Steel 1018 | anisotropy 0.5 (straight grain) |
+| brass_part, copper_plate, gilt_wheel | Brass C360 | |
+| anglage_mirror | Brass C360 | roughness 0.1 (mirror; 0.14 before) |
+| bezel_anodized | Aluminum 6061-T6 | no grain |
+| glass | Glass, soda-lime | transmissive, ior 1.52 |
+| glass_back | `Sapphire` (corundum, 3980 kg/m^3) | transmissive, ior 1.77 |
+| ruby_jewel | `Ruby` (corundum, 3980 kg/m^3) | transmission 0.8, ior 1.77 |
+| rubber | NBR 70A | |
+| matte_print | `Matte Print`, no density | |
 
-Every finish has `color=None`, so parts keep their authored colours; the old
-clearcoat factors were dropped in the conversion, which predates `Material.coat`. One face finish is
-painted: the bezel ring is polished steel and its snailed top annulus satin
-(`paint(ring, faces, FINISHES["satin_steel"])` in `case.py`). The
-chronograph works had no assignments and still have none.
+Every finish has `color=None`, so parts keep their authored colours, and a
+transmissive part's colour is its tint. One face finish is painted: the bezel
+ring is polished steel and its snailed top annulus satin (`paint(ring, faces,
+FINISHES["satin_steel"])` in `case.py`). The chronograph works, which had no
+assignments in the original, take the base's finishes by the same rules
+(`MODEL_MATERIAL_ASSIGNMENTS["chrono_works"]`), so every part of both
+documents has a material.
 
 ## Not ported
 
