@@ -1068,11 +1068,11 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         raise
     finally:
         state.bodies.pop()
-    state.keys[name] = (source, list(log.checks), log.keyed, list(log.children))
-    state.statuses[name] = "run"
     if log.reads:
         _hold_reads(log, state)
         state.reads[name] = list(log.reads)
+    state.keys[name] = (source, list(log.checks), log.keyed, list(log.children))
+    state.statuses[name] = "run"
     if log.unread:
         state.unread[name] = list(dict.fromkeys(log.unread))
     _STATS["bodies_run"] += 1

@@ -47,7 +47,7 @@ def cap():
 def kit():
     left = peg().moved(bd.Location((10, 0, 0)))
     right = peg().moved(bd.Location((-10, 0, 0)))
-    plate = bd.Box({plate}, 30, 2)
+    plate = bd.Box({plate}, 30, json.loads((HERE / "kit.json").read_text())["thickness"])
     plate.label = "plate"
     return bd.Compound(children=[left, right, cap().moved(bd.Location((0, 0, 8))), plate], label="kit")
 """
@@ -66,6 +66,7 @@ class PreviousTest(unittest.TestCase):
         (self.folder / "inputs").mkdir()
         bd.export_step(bd.Cylinder(3, 4), str(self.folder / "inputs" / "cap.step"))
         (self.folder / "peg.json").write_text(json.dumps({"size": 4}), encoding="utf-8")
+        (self.folder / "kit.json").write_text(json.dumps({"thickness": 2}), encoding="utf-8")
         self.restart()
         self.addCleanup(self.restart)
         memo.install()
@@ -157,10 +158,13 @@ class PreviousTest(unittest.TestCase):
 
     def test_a_changed_input_file_builds(self) -> None:
         self.cold()
-        for change in ("json", "step"):
+        # A child's own read, the root's own read, a file read through the engine.
+        for change in ("json", "root", "step"):
             self.restart()
             if change == "json":
                 (self.folder / "peg.json").write_text(json.dumps({"size": 5}), encoding="utf-8")
+            elif change == "root":
+                (self.folder / "kit.json").write_text(json.dumps({"thickness": 3}), encoding="utf-8")
             else:
                 import build123d as bd
 
@@ -179,7 +183,7 @@ class PreviousTest(unittest.TestCase):
         text = self.xbf.read_bytes()
         writer, found = previous.scan(self.xbf)
         record = json.loads(found)
-        self.assertEqual(record["inputs"], [["read", "peg.json"], ["file", "inputs/cap.step"]])
+        self.assertEqual(record["inputs"], [["read", "peg.json"], ["file", "inputs/cap.step"], ["read", "kit.json"]])
         self.assertNotIn(str(self.folder).encode(), text)
         self.assertNotIn(b"kit.py", text)
         self.assertEqual(writer, document._writer())
