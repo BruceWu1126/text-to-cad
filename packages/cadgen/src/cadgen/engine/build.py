@@ -255,7 +255,10 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
     # A request that names its own files is written as it asks: the previous document is not
     # taken in place of the run (it says nothing of files the model does not declare).
     overridden = code is None and any(kind != "xbf" or given for kind, given in (outputs or {}).items())
-    with memo.run(script) as run, BuildContext() as context:
+    from cadgen.engine import reader
+
+    # One reader process for the build's STEP reads (``reader``), gone when the build is.
+    with memo.run(script) as run, BuildContext() as context, reader.session():
         run.verify = verify
         try:
             module = load_script(script) if code is None else load_code(script, functions[0], code, outputs)

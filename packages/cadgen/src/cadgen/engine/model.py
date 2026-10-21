@@ -426,7 +426,8 @@ _READ_STEP: Callable[[Any], Any] | None = None
 def read_step(path: Any) -> Any:
     """A STEP file as a build123d shape: a compound tree of its assembly, every part and
     group labelled, coloured and given its material as the file has them. Parsed once per
-    worker and held: a later build's read of the same bytes is the memo's hit, the same objects."""
+    worker and held, in a reader process of the build's (its working memory never the
+    worker's): a later build's read of the same bytes is the memo's hit, the same objects."""
     global _READ_STEP
     if _READ_STEP is None:
         from cadgen.engine.kernel.memo import wrap_function

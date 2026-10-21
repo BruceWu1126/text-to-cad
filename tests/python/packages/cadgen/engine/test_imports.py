@@ -1,14 +1,18 @@
 """What a model imports: ``read_step`` and ``read_xbf`` copy a file's geometry with its names,
-colours and materials (an xbf's mechanism stays behind)."""
+colours and materials (an xbf's mechanism stays behind); a STEP is parsed in a reader process
+of the build's, so the parse's working memory never stays in the worker."""
 
 from __future__ import annotations
 
 import json
 import shutil
+import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document
@@ -116,6 +120,63 @@ class ImportTest(unittest.TestCase):
             self.assertEqual((mine["name"], mine["faceColors"], mine["faceNames"]),
                              (theirs["name"], theirs["faceColors"], theirs["faceNames"]))
         self.assertTrue(copy["prototypes"][0]["faceColors"], "the painted face")
+
+    def test_a_build_parses_its_steps_in_one_reader_that_exits_with_it(self) -> None:
+        from cadgen.engine import reader
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        started = []
+        real = reader.Reader._start
+
+        def start(self):
+            process = real(self)
+            started.append(process)
+            return process
+
+        with mock.patch.object(reader.Reader, "_start", start):
+            self.built("twice")
+        # One reader for two files (the second read of one file is the memo's), gone with the build.
+        self.assertEqual(len(started), 1)
+        self.assertIsNotNone(started[0].poll(), "the reader exited when the build ended")
+        self.assertFalse(reader._SESSION)
+
+    def test_a_step_parse_leaves_the_worker_only_its_result(self) -> None:
+        """Measured: the peak resident memory a parse adds to the process that reads, in the
+        reader process against in this one (the XCAF reader's working memory)."""
+        step = self.folder / "big.step"
+        code = textwrap.dedent("""
+            import build123d as bd
+            parts = []
+            for i in range(500):
+                part = bd.Pos(i * 30 % 600, (i // 20) * 30, 0) * bd.Cylinder(5 + (i % 7) * 0.1, 10 + i * 0.01)
+                part.label = f"p{i}"
+                parts.append(part)
+            bd.export_step(bd.Compound(children=parts, label="big"), __import__("sys").argv[1])
+        """)
+        subprocess.run([sys.executable, "-c", code, str(step)], check=True, capture_output=True)
+        measure = textwrap.dedent("""
+            import resource, sys, json
+            import build123d, OCP.STEPCAFControl, OCP.BinTools
+            from cadgen.engine import reader
+            before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            if sys.argv[2] == "reader":
+                shape = reader.read_step(sys.argv[1])
+            else:
+                header, data = reader._parse(sys.argv[1])
+                shapes, locations = reader.unpack(data, header["shapes"])
+                del data
+                shape = reader.assemble(header, shapes, locations)
+            assert len(shape.children) == 500
+            print(json.dumps(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before))
+        """)
+        grown = {}
+        for where in ("here", "reader"):
+            done = subprocess.run([sys.executable, "-c", measure, str(step), where], capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            grown[where] = json.loads(done.stdout.strip().splitlines()[-1])
+        # Measured 62 MB here against 14 MB with the reader: the parse's memory is the reader's.
+        self.assertLess(grown["reader"], grown["here"] * 0.5, grown)
 
 
 if __name__ == "__main__":

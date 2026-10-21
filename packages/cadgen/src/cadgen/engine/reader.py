@@ -1,4 +1,5 @@
-"""What a model imports: a STEP or an xbf made a build123d compound tree.
+"""What a model imports: a STEP or an xbf made a build123d compound tree, and the reader
+process a STEP is parsed in.
 
 An XCAF document -- a STEP read by OCCT's XCAF reader, or an xbf -- is described as data
 (``describe``): its products, each once however often it is placed (a name, a colour, a
@@ -11,16 +12,34 @@ move places that occurrence, never the product's other placements), every node n
 the file names that occurrence (its own name, else its product's), coloured, given its
 material. A mechanism is never imported: a part is a part.
 
-A STEP is read by OCCT's XCAF reader (``read_step``), an xbf by the document's own
-retrieval driver (``read_xbf``).
+**A STEP is parsed in a reader process** (``Reader``), not in the worker: the XCAF reader's
+working memory is many times the result's (2.3 GB for a 354 MB file) and an allocator gives
+little of it back, so a worker that parsed a STEP would keep it for its life. One reader
+serves a build: started on the build's first STEP read (``session``), reused for the rest,
+gone when the build ends. It answers a read with the description as JSON and one
+``BinTools`` dump of a compound holding every part's shape, then a marker per location
+(``pack``); the worker reads the dump once and assembles the tree. So the worker holds the
+result and nothing of the parse. A shape written and read once is what the kernel gives
+back from a document saved and read (``mesh.shape_bytes``), and the same bytes read the
+same: the tree is a function of the file. A read outside a build starts a reader of its
+own for it.
+
+An xbf is read in the worker (``read_xbf``): its reader is the document's own retrieval
+driver, its working memory the document's.
 """
 
 from __future__ import annotations
 
+import io
+import json
 import os
-from typing import Any
+import subprocess
+import sys
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterator
 
-__all__ = ["assemble", "describe", "read_step", "read_xbf"]
+__all__ = ["Reader", "assemble", "describe", "main", "read_step", "read_xbf", "session"]
 
 
 # --- a document described ---------------------------------------------------------------------
@@ -230,11 +249,51 @@ def assemble(header: dict[str, Any], shapes: list[Any], locations: list[Any]) ->
     return root.children[0] if len(root.children) == 1 else root
 
 
-# --- reading ---------------------------------------------------------------------------------
+# --- the wire: shapes and locations as one BinTools dump ----------------------------------------
 
 
-def _parse(path: str) -> tuple[dict[str, Any], list[Any], list[Any]]:
-    """A STEP read into an XCAF document and described."""
+def pack(shapes: list[Any], locations: list[Any]) -> bytes:
+    """Every shape, then a marker (an empty compound) at each location, in one compound's
+    ``BinTools`` dump."""
+    from OCP.BinTools import BinTools, BinTools_FormatVersion_VERSION_4
+    from OCP.BRep import BRep_Builder
+    from OCP.TopoDS import TopoDS_Compound
+
+    builder = BRep_Builder()
+    holder = TopoDS_Compound()
+    builder.MakeCompound(holder)
+    for shape in shapes:
+        builder.Add(holder, shape)
+    for location in locations:
+        marker = TopoDS_Compound()
+        builder.MakeCompound(marker)
+        builder.Add(holder, marker.Located(location))
+    stream = io.BytesIO()
+    BinTools.Write_s(holder, stream, False, False, BinTools_FormatVersion_VERSION_4)
+    return stream.getvalue()
+
+
+def unpack(data: bytes, shapes: int) -> tuple[list[Any], list[Any]]:
+    """``pack``'s shapes and locations, read back."""
+    from OCP.BinTools import BinTools
+    from OCP.TopoDS import TopoDS_Iterator, TopoDS_Shape
+
+    holder = TopoDS_Shape()
+    BinTools.Read_s(holder, io.BytesIO(data))
+    found = []
+    iterator = TopoDS_Iterator(holder, True, True)
+    while iterator.More():
+        found.append(iterator.Value())
+        iterator.Next()
+    return found[:shapes], [marker.Location() for marker in found[shapes:]]
+
+
+# --- the reader process -----------------------------------------------------------------------
+
+
+def _parse(path: str) -> tuple[dict[str, Any], bytes]:
+    """A STEP read into an XCAF document and described, in this process: the description and
+    the packed shapes and locations."""
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.Interface import Interface_Static
     from OCP.STEPCAFControl import STEPCAFControl_Reader
@@ -251,12 +310,111 @@ def _parse(path: str) -> tuple[dict[str, Any], list[Any], list[Any]]:
     if reader.ReadFile(os.fspath(path)) != IFSelect_RetDone:
         raise ValueError(f"cannot read the STEP file {path}")
     reader.Transfer(doc)
-    return describe(doc, step=True)
+    header, shapes, locations = describe(doc, step=True)
+    header["shapes"] = len(shapes)
+    return header, pack(shapes, locations)
+
+
+class Reader:
+    """A reader process (see the module): started on its first read, one read at a time."""
+
+    def __init__(self) -> None:
+        self.process: subprocess.Popen | None = None
+        self.lock = threading.Lock()
+        self.reads = 0
+
+    def _start(self) -> subprocess.Popen:
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        env = dict(os.environ)
+        path = env.get("PYTHONPATH", "")
+        if root not in path.split(os.pathsep):
+            env["PYTHONPATH"] = os.pathsep.join(item for item in (root, path) if item)
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.Popen([sys.executable, "-m", "cadgen.engine.reader"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, env=env)
+
+    def read(self, path: str) -> tuple[dict[str, Any], bytes]:
+        """The description of the STEP at ``path`` and its packed shapes and locations."""
+        with self.lock:
+            if self.process is None or self.process.poll() is not None:
+                self.process = self._start()
+            process = self.process
+            assert process.stdin is not None and process.stdout is not None
+            try:
+                process.stdin.write((json.dumps({"path": os.fspath(path)}) + "\n").encode())
+                process.stdin.flush()
+                line = process.stdout.readline()
+            except (BrokenPipeError, OSError):
+                line = b""
+            if not line:
+                self.process = None
+                code = process.wait()
+                raise ValueError(f"the STEP reader exited ({code}) reading {path}")
+            answer = json.loads(line)
+            if "error" in answer:
+                raise ValueError(answer["error"])
+            size = int(answer["bytes"])
+            chunks, left = [], size
+            while left:
+                chunk = process.stdout.read(left)
+                if not chunk:
+                    self.process = None
+                    raise ValueError(f"the STEP reader exited inside its answer for {path}")
+                chunks.append(chunk)
+                left -= len(chunk)
+            self.reads += 1
+            return answer["header"], b"".join(chunks)
+
+    def close(self) -> None:
+        with self.lock:
+            process, self.process = self.process, None
+        if process is None:
+            return
+        try:
+            if process.stdin is not None:
+                process.stdin.close()
+            process.wait(timeout=30)
+        except Exception:  # noqa: BLE001 - a reader that will not go is stopped
+            process.kill()
+            process.wait()
+        if process.stdout is not None:
+            process.stdout.close()
+
+
+_SESSION: list[Reader] = []
+_SESSION_LOCK = threading.Lock()
+
+
+@contextmanager
+def session() -> Iterator[Reader]:
+    """One build's reader: every STEP the build reads is parsed by it, and it exits when the
+    build ends (it starts only if the build reads one)."""
+    reader = Reader()
+    with _SESSION_LOCK:
+        _SESSION.append(reader)
+    try:
+        yield reader
+    finally:
+        with _SESSION_LOCK:
+            _SESSION.remove(reader)
+        reader.close()
 
 
 def read_step(path: Any) -> Any:
-    """A STEP file as a build123d compound tree (see the module)."""
-    return assemble(*_parse(os.path.abspath(os.fspath(path))))
+    """A STEP file as a build123d compound tree (see the module), parsed by the build's
+    reader process, or by one of its own outside a build."""
+    with _SESSION_LOCK:
+        reader = _SESSION[-1] if _SESSION else None
+    own = reader is None
+    reader = Reader() if own else reader
+    try:
+        header, data = reader.read(os.path.abspath(os.fspath(path)))
+    finally:
+        if own:
+            reader.close()
+    shapes, locations = unpack(data, header["shapes"])
+    del data
+    return assemble(header, shapes, locations)
 
 
 def read_xbf(path: Any) -> Any:
@@ -275,3 +433,29 @@ def read_xbf(path: Any) -> Any:
     doc = _read(path)
     header, shapes, locations = describe(doc, step=False)
     return assemble(header, shapes, locations)
+
+
+def main() -> int:
+    """The reader process: one ``{"path"}`` line per read on stdin, each answered on stdout by
+    ``{"header", "bytes"}`` and the packed bytes, or ``{"error"}``; it exits when stdin closes."""
+    sys.dont_write_bytecode = True
+    out = os.fdopen(os.dup(1), "wb")
+    os.dup2(2, 1)  # the kernel's prints go to stderr, never into an answer
+    sys.stdout = sys.stderr
+    for line in sys.stdin:
+        if not line.strip():
+            continue
+        path = json.loads(line)["path"]
+        try:
+            header, data = _parse(path)
+            out.write(json.dumps({"header": header, "bytes": len(data)}, separators=(",", ":")).encode() + b"\n")
+            out.write(data)
+        except Exception as error:  # noqa: BLE001 - a file it cannot read is the build's error, said
+            out.write(json.dumps({"error": f"{type(error).__name__}: {error}"}).encode() + b"\n")
+        out.flush()
+        del line
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

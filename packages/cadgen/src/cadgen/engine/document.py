@@ -1015,8 +1015,9 @@ def _same_bytes(first: Path, second: Path) -> bool:
 
 def read_step_shape(path: Any) -> Any:
     """A STEP file as a build123d compound tree, every node named as the file names that
-    occurrence (its own name, else its product's), coloured and given its material
-    (``reader.read_step``)."""
+    occurrence (its own name, else its product's), coloured and given its material:
+    parsed in a reader process (``reader.read_step``), so the parse's working memory never
+    stays in the worker."""
     from cadgen.engine.reader import read_step
 
     return read_step(path)
