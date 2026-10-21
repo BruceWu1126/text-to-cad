@@ -117,38 +117,40 @@ BOARD_FINISHES = {
 
 # --- materials on the shapes ---------------------------------------------------------------------
 # The `materials=` declaration this module used to build is now a `Material` set on each part (the
-# engine has no decorator argument). Each finish keeps the catalogue's name and density where the
-# alloy is a catalogue one, its own metallic/roughness, and its finish name as the description;
-# `color=None`, so every part keeps the srgb() colour its builder gave it.
-from dataclasses import replace as _replace
+# engine has no decorator argument): the catalogue's entry for the alloy or the board, in the
+# finish's look (`.but`): its metallic and roughness, its finish name as the description, and the
+# entry's own look beyond them (the sheet's rolled grain, the solder mask's gloss). `color=None`, so
+# every part keeps the srgb() colour its builder gave it.
+from cadgen.engine import materials as _catalogue
 
-from cadgen.engine import Material, materials as _catalogue
 
-
-def _finish(base, entry):
+def _finish(base, entry, **look):
     pbr = entry['material']
-    return _replace(base, color=None, metallic=pbr['metalness'], roughness=pbr['roughness'],
-                    description=pbr['name'])
+    return base.but(color=None, metallic=pbr['metalness'], roughness=pbr['roughness'],
+                    description=pbr['name'], **look)
 
 
-# 5052-H32 (2680 kg/m^3) has no catalogue card of its own: the generic aluminium's name and density.
-SHEET_MATERIAL = _finish(_catalogue.aluminium, SHEET_FINISHES[SHEET_FINISH])
+SHEET_MATERIAL = _finish(_catalogue.aluminium_5052, SHEET_FINISHES[SHEET_FINISH])
 HARDWARE_MATERIALS = {
-    'brass': _finish(_catalogue.brass, HARDWARE_FINISHES['brass']),
-    'black_oxide': _finish(_catalogue.steel, HARDWARE_FINISHES['black_oxide']),
-    'stainless': _finish(_catalogue.stainless_steel, HARDWARE_FINISHES['stainless']),  # 304 = X5CrNi18-10
+    'brass': _finish(_catalogue.brass_c360, HARDWARE_FINISHES['brass']),
+    'black_oxide': _finish(_catalogue.steel_4140, HARDWARE_FINISHES['black_oxide']),  # 12.9 alloy steel
+    'stainless': _finish(_catalogue.stainless_304, HARDWARE_FINISHES['stainless'], anisotropy=0.0),  # nuts: no grain
 }
 BOARD_MATERIALS = {
-    'pcb_green': Material('FR4', 1850.0, metallic=0.05, roughness=0.55, description='FR-4 solder mask'),
-    'connector_steel': _finish(_catalogue.steel, BOARD_FINISHES['connector_steel']),
-    'connector_black': _finish(_catalogue.nylon, BOARD_FINISHES['connector_black']),
+    'pcb_green': _finish(_catalogue.fr4, BOARD_FINISHES['pcb_green']),
+    'connector_steel': _finish(_catalogue.steel_1018, BOARD_FINISHES['connector_steel']),
+    'connector_black': _finish(_catalogue.nylon_pa6, BOARD_FINISHES['connector_black']),
 }
+# The vendor boards carry no colour of the arm's: each takes the board finish by the label its
+# file gives it (the camera's PCB, the bus-servo driver HAT's).
+BOARD_LABELS = {'innomaker_pcb_32mm_27mm_pattern': 'pcb_green', 'Board': 'pcb_green'}
 
 
 def apply_materials(assembly):
     """Every leaf of ``assembly`` in one of the selected finishes' colours takes that finish's
     material: the colour IS the assignment here, since every sheet part reads ALUMINUM_5052_COLOR
-    and every M2/M3 part its hardware colour. Returns the count per material description."""
+    and every M2/M3 part its hardware colour; a vendor board takes its finish by its label
+    (``BOARD_LABELS``). Returns the count per material description."""
     by_color = [(ALUMINUM_5052_COLOR, SHEET_MATERIAL),
                 (STANDOFF_COLOR, HARDWARE_MATERIALS[STANDOFF_FINISH]),
                 (NUT_COLOR, HARDWARE_MATERIALS[NUT_FINISH]),
@@ -160,6 +162,11 @@ def apply_materials(assembly):
         if children:
             for child in children:
                 walk(child)
+            return
+        board = BOARD_LABELS.get(node.label)
+        if board is not None:
+            node.material = BOARD_MATERIALS[board]
+            counts[node.material.description] = counts.get(node.material.description, 0) + 1
             return
         rgba = node.__dict__.get('_color')
         if rgba is None:
