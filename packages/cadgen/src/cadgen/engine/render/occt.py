@@ -21,7 +21,9 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
 - ``--pose``: the engine's forward kinematics (``mechanism.posed_structure``); ``--explode``: the
   viewer's own explode layout (``explode.py``); ``display.clip``: an OCCT clip plane, capped in the
   parts' colours; ``--annotation`` and ``--measurements``: the snapshot job's ``annotation`` and
-  ``measurements`` data, drawn as polylines and labels.
+  ``measurements`` data, drawn as the viewer draws them: strokes as screen-width strips, a text
+  mark's words (the viewer's face, set and rasterised as its canvas is, ``text.py``) on its quad,
+  Measure's dimensions painted over the frame in screen space (``overlay.py``).
 - ``--preview``: physically based raster (PBR, an image-based environment, a key light with
   shadows on a floor that runs past the frame, the backdrop the floor's own colour as drawn, so
   the two meet without an edge); ``--path-trace N``: OCCT's path tracer, N samples.
@@ -58,9 +60,6 @@ DEFAULT_FILL = LOOK.fill
 PARTS = LOOK.palette
 REFERENCE_HEIGHT = 900  # an annotation's ink is as heavy against the picture as on a viewer this tall
 PADDING = 0.04
-# OCCT sizes a label's font in points of the window's backing store; on a Retina screen's hidden
-# window that draws a label at about half its pixel height in an off-screen frame of the asked size.
-TEXT_SCALE = float(os.environ.get("OCCT_TEXT_SCALE", 2.0))
 FOCAL_LENGTH = 50.0  # the view's default camera.focalLength (viewSettings.js), on three's 35 mm film gauge
 # Preview's studio: the environment's horizon grey (sRGB, as its cube map holds it), which is the
 # floor's colour too; and how far the floor runs, in model diagonals each way.
@@ -154,6 +153,9 @@ class Scene:
         self.sources: dict[tuple, Any] = {}
         self.shown: list[Any] = []
         self.overlays: list[Any] = []
+        self.structures: list[Any] = []  # presentations made below AIS: the text quads
+        self.text_quads: list[tuple[np.ndarray, str]] = []  # their world corners and colours
+        self.screen_marks: list[dict[str, Any]] = []  # painted over the frame: Measure's
         self.mode = None
         self.display: dict[str, Any] = {}
         self.preview = False
@@ -183,6 +185,14 @@ class Scene:
         drawer = self.canvas.context.DefaultDrawer()
         drawer.SetAutoTriangulation(False)  # never mesh: every face carries the engine's triangles
         drawer.SetFaceBoundaryDraw(False)
+        # The Top layer holds the annotation's ink: tested against the model's depth, writing none,
+        # as the viewer's ink is (``annotation.js``: depthTest, no depthWrite, after the model).
+        from OCP.Graphic3d import Graphic3d_ZLayerId_Top
+
+        settings = viewer.ZLayerSettings(Graphic3d_ZLayerId_Top)
+        settings.SetEnableDepthTest(True)
+        settings.SetEnableDepthWrite(False)
+        viewer.SetZLayerSettings(Graphic3d_ZLayerId_Top, settings)
 
     # --- sources: one presentation per part and look ----------------------------------------
 
@@ -445,6 +455,12 @@ class Scene:
         for shown in self.overlays:
             self.canvas.context.Remove(shown, False)
         self.overlays = []
+        for structure in self.structures:
+            structure.Erase()
+            structure.Remove()
+        self.structures = []
+        self.text_quads = []
+        self.screen_marks = []
 
     def _pixel_size(self, point: np.ndarray) -> float:
         """World millimetres per output pixel at ``point`` for the camera framed."""
@@ -504,28 +520,68 @@ class Scene:
         self.canvas.context.SetZLayer(shown, Graphic3d_ZLayerId_Top)
         self.overlays.append(shown)
 
-    def _label(self, at: np.ndarray, text: str, color: str, pixels: float) -> None:
-        from OCP.AIS import AIS_TextLabel
-        from OCP.Graphic3d import Graphic3d_HTA_CENTER, Graphic3d_VTA_CENTER, Graphic3d_ZLayerId_Topmost
-        from OCP.TCollection import TCollection_ExtendedString
-        from OCP.gp import gp_Pnt
+    def _text_quad(self, corners: np.ndarray, mark: dict[str, Any]) -> None:
+        """A text mark as the viewer draws it (``annotation.js``): its words on the viewer's
+        canvas (``text.text_canvas``) mapped onto the quad of its four corners -- corner 0 the
+        canvas's top-left, 1 its top-right, 2 bottom-right, 3 bottom-left; triangles 0-1-2 and
+        0-2-3 with three's uv (0,1) (1,1) (1,0) (0,0) -- unlit and two-sided, blended by the
+        canvas's alpha, filtered trilinearly from mipmaps; drawn after the model in the Top layer,
+        so hidden where the model is in front of it, and writing no depth, as the viewer's mesh
+        (``depthTest``, no ``depthWrite``, render order 40)."""
+        from OCP.Aspect import Aspect_InteriorStyle
+        from OCP.Graphic3d import (Graphic3d_AlphaMode, Graphic3d_ArrayOfTriangles, Graphic3d_AspectFillArea3d,
+                                   Graphic3d_Group, Graphic3d_LevelOfTextureAnisotropy, Graphic3d_Structure,
+                                   Graphic3d_Texture2D, Graphic3d_TypeOfBackfacingModel, Graphic3d_TypeOfShadingModel,
+                                   Graphic3d_TypeOfTextureFilter, Graphic3d_ZLayerId_Top)
+        from OCP.Image import Image_Format, Image_PixMap
+        from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
+        from OCP.gp import gp_Pnt, gp_Pnt2d
 
-        label = AIS_TextLabel()
-        label.SetText(TCollection_ExtendedString(text, True))
-        label.SetPosition(gp_Pnt(*map(float, at)))
-        label.SetColor(_color(color))
-        label.SetHeight(pixels * TEXT_SCALE)
-        label.SetHJustification(Graphic3d_HTA_CENTER)
-        label.SetVJustification(Graphic3d_VTA_CENTER)
-        self.canvas.context.Display(label, False)
-        self.canvas.context.SetZLayer(label, Graphic3d_ZLayerId_Topmost)
-        self.overlays.append(label)
+        from cadgen.engine.render.text import text_canvas
+
+        picture = text_canvas(mark.get("text", ""), float(mark.get("fontPx", 14)), mark["color"])
+        height, width = picture.shape[:2]
+        pixmap = Image_PixMap()
+        pixmap.InitZero(Image_Format.Image_Format_RGBA, width, height)
+        ys, xs = np.nonzero(picture[..., 3])
+        # The canvas's bytes as they are (sRGB colour, straight alpha): OCCT reads a colour
+        # texture's bytes as sRGB, as three reads a canvas texture marked SRGBColorSpace.
+        for x, y, (r, g, b, a) in zip(xs.tolist(), ys.tolist(), (picture[ys, xs] / 255.0).tolist()):
+            pixmap.SetPixelColor(x, y, Quantity_ColorRGBA(r, g, b, a), False)
+        texture = Graphic3d_Texture2D(pixmap)
+        params = texture.GetParams()
+        params.SetFilter(Graphic3d_TypeOfTextureFilter.Graphic3d_TOTF_TRILINEAR)
+        params.SetAnisoFilter(Graphic3d_LevelOfTextureAnisotropy.Graphic3d_LOTA_OFF)
+        params.SetRepeat(False)
+        params.SetModulate(True)
+        texture.SetMipmapsGeneration(True)
+        triangles = Graphic3d_ArrayOfTriangles(4, 6, False, False, True)
+        for point, (u, v) in zip(corners, ((0.0, 1.0), (1.0, 1.0), (1.0, 0.0), (0.0, 0.0))):
+            triangles.AddVertex(gp_Pnt(*map(float, point)), gp_Pnt2d(u, v))
+        triangles.AddEdges(1, 2, 3)
+        triangles.AddEdges(1, 3, 4)
+        aspect = Graphic3d_AspectFillArea3d()
+        aspect.SetInteriorStyle(Aspect_InteriorStyle.Aspect_IS_SOLID)
+        aspect.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
+        aspect.SetInteriorColor(Quantity_ColorRGBA(Quantity_Color(1, 1, 1, Quantity_TOC_RGB), 1.0))
+        aspect.SetAlphaMode(Graphic3d_AlphaMode.Graphic3d_AlphaMode_Blend, 0.5)
+        aspect.SetFaceCulling(Graphic3d_TypeOfBackfacingModel.Graphic3d_TypeOfBackfacingModel_DoubleSided)
+        aspect.SetTextureMap(texture)
+        aspect.SetTextureMapOn(True)
+        structure = Graphic3d_Structure(self.canvas.viewer.StructureManager())
+        group = structure.NewGroup()
+        group.SetGroupPrimitivesAspect(aspect)
+        Graphic3d_Group.AddPrimitiveArray(group, triangles)
+        structure.SetZLayer(Graphic3d_ZLayerId_Top)
+        structure.Display()
+        self.structures.append(structure)
+        self.text_quads.append((np.asarray(corners, float), mark["color"]))
 
     def annotate(self, annotation: dict[str, Any]) -> list[np.ndarray]:
         """The viewer's annotation data drawn: each mark's points in its part's frame (``part``:
         ``i<instance>``, placed where the scene now has the instance; else its recorded placement),
-        a stroke a polyline of its width, a text mark its words at its quad's middle. Returns
-        each mark's world points, for checking where they land."""
+        a stroke a polyline of its width, a text mark its words on its quad (``_text_quad``).
+        Returns each mark's world points, for checking where they land."""
         scale = self.canvas.height / REFERENCE_HEIGHT
         placed_marks = []
         for mark in annotation.get("marks", []):
@@ -543,18 +599,14 @@ class Scene:
                 self._polyline(world, mark["color"], mark.get("width", 2) * scale, bool(mark.get("closed")))
             elif mark["kind"] == "area":
                 self._polyline(world[:mark.get("outline", len(world))], mark["color"], 1.5 * scale, True)
-            else:
-                self._label(world.mean(0), mark.get("text", ""), mark["color"], mark.get("fontPx", 14) * scale)
+            elif len(world) == 4:
+                self._text_quad(world, mark)
         return placed_marks
 
     def measure(self, marks: list[dict[str, Any]]) -> None:
-        """The snapshot job's ``measurements``: a dimension line between the two ends, ticks at
-        them and the label at its middle, in the mark's colour."""
-        scale = self.canvas.height / REFERENCE_HEIGHT
-        for mark in marks:
-            start, end = np.array(mark["start"], float), np.array(mark["end"], float)
-            self._polyline(np.array([start, end]), mark["color"], 2.6 * scale)
-            self._label((start + end) / 2, mark["label"], mark["color"], 13 * scale)
+        """The snapshot job's ``measurements``, painted over the finished frame as the snapshot
+        page paints them on its 2D canvas (``overlay.py``): in screen space, over everything."""
+        self.screen_marks = list(marks)
 
     # --- preview ------------------------------------------------------------------------------
 
@@ -711,8 +763,57 @@ class Scene:
         image.Save(TCollection_AsciiString(str(out)))
         return time.perf_counter() - clock
 
+    def _relay_text(self, frame: np.ndarray) -> None:
+        """The text marks laid over ``frame`` as three lays them. OCCT blends a transparent quad
+        in linear light (its frame buffer is sRGB); three blends the sRGB values themselves (it
+        encodes in the shader and draws into a plain 8-bit buffer), which leaves a glyph's partly
+        covered pixels darker. So each quad's rectangle of the frame is drawn again without the
+        quads (a camera tile, ``Canvas.tile``), the quad's coverage as drawn (filtered, hidden
+        behind the model) is read back from the two in linear light, and the mark's colour is laid
+        over the bare pixels by that coverage, in sRGB."""
+        height, width = frame.shape[:2]
+        boxes = []
+        for corners, color in self.text_quads:
+            screen = self.project(corners)
+            x0, y0 = (int(max(math.floor(v) - 2, 0)) for v in screen.min(0))
+            x1, y1 = int(min(math.ceil(screen[:, 0].max()) + 3, width)), int(min(math.ceil(screen[:, 1].max()) + 3, height))
+            if x1 > x0 and y1 > y0:
+                boxes.append((x0, y0, x1, y1, color))
+        if not boxes:
+            return
+        for structure in self.structures:
+            structure.Erase()
+        try:
+            bares = [self.canvas.tile(x0, y0, x1 - x0, y1 - y0) for x0, y0, x1, y1, _color in boxes]
+        finally:
+            for structure in self.structures:
+                structure.Display()
+
+        def linear(c: np.ndarray) -> np.ndarray:
+            return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+        for (x0, y0, x1, y1, color), bare in zip(boxes, bares):
+            drawn = frame[y0:y1, x0:x1]
+            touched = (drawn != bare).any(-1)
+            if not touched.any():
+                continue
+            ink = np.array([int(color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)], float) / 255
+            seen, under = drawn[touched].astype(np.float64) / 255, bare[touched].astype(np.float64) / 255
+            span = linear(ink) - linear(under)
+            weight = np.where(np.abs(span) > 0.02, np.abs(span), 0.0)
+            ratio = (linear(seen) - linear(under)) / np.where(weight > 0, span, 1.0)
+            cover = np.clip((ratio * weight).sum(-1) / np.maximum(weight.sum(-1), 1e-9), 0, 1)[:, None]
+            drawn[touched] = np.rint((ink * cover + under * (1 - cover)) * 255).astype(np.uint8)
+
     def save(self, out: Path) -> float:
-        return self.canvas.save(str(out))
+        def paint(frame: np.ndarray) -> None:
+            if self.text_quads:
+                self._relay_text(frame)
+            if self.screen_marks:
+                from cadgen.engine.render.overlay import paint_measurements
+
+                paint_measurements(frame, self.screen_marks, self.project)
+        return self.canvas.save(str(out), paint if self.text_quads or self.screen_marks else None)
 
 
 _ENVIRONMENT = None

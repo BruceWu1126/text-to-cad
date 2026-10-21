@@ -1,5 +1,6 @@
 """A headless OCCT view: an OpenGL context on an off-screen Cocoa window (macOS), drawn into
-off-screen frame buffers by ``V3d_View.ToPixMap`` at the exact pixel size asked."""
+off-screen frame buffers by ``V3d_View.ToPixMap`` at the exact pixel size asked, and handed to
+Python as bytes (PIL writes the PNG)."""
 
 from __future__ import annotations
 
@@ -64,11 +65,54 @@ class Canvas:
             raise RuntimeError("OCCT drew nothing")
         return image
 
-    def save(self, path: str) -> float:
-        """Draw the view and write it as a PNG; the seconds the frame and the encoding took."""
+    @staticmethod
+    def _pixels(image: Any) -> Any:
+        """An OCCT picture as sRGB bytes (height, width, 3), handed over as an uncompressed TGA in
+        memory (a millisecond), not through OCCT's PNG encoder (40 ms of a 1600 x 1200 frame)."""
+        import io
+
+        import numpy as np
         from OCP.TCollection import TCollection_AsciiString
+        from PIL import Image
+
+        stream = io.BytesIO()
+        if not image.Save(stream, TCollection_AsciiString("tga")):
+            raise RuntimeError("OCCT could not hand its frame over")
+        return np.asarray(Image.open(io.BytesIO(stream.getvalue())).convert("RGB")).copy()
+
+    def frame(self) -> Any:
+        """The view drawn, as sRGB bytes (height, width, 3)."""
+        return self._pixels(self.pixmap())
+
+    def tile(self, left: int, top: int, width: int, height: int) -> Any:
+        """The view's pixels in one rectangle of the frame (``left``, ``top`` from its top-left),
+        drawn alone: a camera tile keeps the whole frame's projection, so the pixels are the
+        frame's there (to a level at an edge's multisample) at the cost of the rectangle."""
+        from OCP.Graphic3d import Graphic3d_BufferType, Graphic3d_CameraTile, Graphic3d_Vec2i
+        from OCP.Image import Image_AlienPixMap
+
+        camera = self.view.Camera()
+        tile = Graphic3d_CameraTile()
+        tile.TotalSize = Graphic3d_Vec2i(self.width, self.height)
+        tile.TileSize = Graphic3d_Vec2i(width, height)
+        tile.Offset = Graphic3d_Vec2i(left, self.height - top - height)  # counted from the lower left
+        camera.SetTile(tile)
+        try:
+            image = Image_AlienPixMap()
+            if not self.view.ToPixMap(image, width, height, Graphic3d_BufferType.Graphic3d_BT_RGB, False):
+                raise RuntimeError("OCCT drew nothing")
+        finally:
+            camera.SetTile(Graphic3d_CameraTile())
+        return self._pixels(image)
+
+    def save(self, path: str, paint: Any = None) -> float:
+        """Draw the view, let ``paint`` paint over the frame (sRGB bytes, in place), and write it
+        as a PNG; the seconds the frame, the painting and the encoding took."""
+        from PIL import Image
 
         started = time.perf_counter()
-        image = self.pixmap()
-        image.Save(TCollection_AsciiString(str(path)))
+        frame = self.frame()
+        if paint is not None:
+            paint(frame)
+        Image.fromarray(frame).save(str(path))
         return time.perf_counter() - started
