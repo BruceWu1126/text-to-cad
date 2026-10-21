@@ -268,13 +268,13 @@ class HeldTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, "--pose: .*hinge"):
             self.draw(display={}, pose={"hinge": 400})
 
-    def test_preview_keeps_its_floor_and_its_look_between_pictures(self) -> None:
+    def test_preview_keeps_its_studio_and_its_look_between_pictures(self) -> None:
         first = pixels(self.draw(display={}, preview=True)[0])
-        floor = list(self.held.kept[True])
-        self.assertTrue(floor, "Preview's floor")
+        scene = self.held.scenes[True]
+        stage = list(scene.stage)
+        self.assertEqual(len(stage), 2, "Preview's floor and the floor's shadow")
         second = pixels(self.draw(display={}, preview=True, annotation=ANNOTATION)[0])
-        self.assertEqual(self.held.kept[True], floor)
-        self.assertEqual(self.held.scenes[True].overlays[:len(floor)], floor)
+        self.assertTrue(all(now is then for now, then in zip(scene.stage, stage)) and len(scene.stage) == 2)
         self.assertLess(mismatch(second, first), 0.05, "the same look, with ink")
 
     def test_a_new_version_s_scenes_are_new_and_draw_as_the_last_did(self) -> None:

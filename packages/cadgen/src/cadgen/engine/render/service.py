@@ -146,6 +146,8 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
     scene.canvas.view.ZFitAll(1.0)
     scene.camera = {"fov": fov, "direction": d, "up": screen_up, "right": right, "eye": eye, "target": target,
                     "projection": projection, "scale": scale}
+    if scene.studio:
+        scene._studio_backdrop()  # Preview's sweep is shaded for the camera
     return scene.camera
 
 
@@ -283,7 +285,9 @@ class Held:
         if still.preview and still.preview not in self.kept:
             before = len(scene.overlays)
             scene.preview_look(0)
-            self.kept[True] = scene.overlays[before:]  # its floor, shown for good
+            self.kept[True] = scene.overlays[before:]  # what it shows for good (its studio is the scene's)
+        elif still.preview:
+            scene.restage()  # the floor's shadow follows a pose or Explode
         timings["frameMs"] = round((time.perf_counter() - clock) * 1000)
         clock = time.perf_counter()
         data = scene.canvas.png(scene.painter())

@@ -62,10 +62,28 @@ PARTS = LOOK.palette
 REFERENCE_HEIGHT = 900  # an annotation's ink is as heavy against the picture as on a viewer this tall
 PADDING = 0.04
 FOCAL_LENGTH = 50.0  # the view's default camera.focalLength (viewSettings.js), on three's 35 mm film gauge
-# Preview's studio: the environment's horizon grey (sRGB, as its cube map holds it), which is the
-# floor's colour too; and how far the floor runs, in model diagonals each way.
+# The studio environment's horizon grey (sRGB, as its cube map holds it), which lights the model.
 HORIZON = (0.70, 0.71, 0.73)
-FLOOR_REACH = 200.0
+# Preview's studio is the viewer's, light (viewSettings.js previewDefaults, photographicStudioRig.js):
+# the backdrop white, lifted toward white behind the middle of the frame and shaded toward its
+# corners (a dark and a light colour's share) and above the horizon (studioBackdrop.js);
+BACKDROP = "#ffffff"
+BACKDROP_LIFT, BACKDROP_SHADE, BACKDROP_WALL = 0.07, (0.38, 0.1), 0.6
+# the floor at the document's Z=0, #e7e7e5 at 60%, full to 1.6 of the model's reach and gone at 6.
+# OCCT draws it unlit in the colour the viewer's Preview draws it (its #e7e7e5 lit by the studio and
+# tone-mapped), read off the viewer's own Preview pictures;
+FLOOR_COLOUR = "#ececea"
+FLOOR_OPACITY = 0.6
+FLOOR_FADE = (1.6, 6.0)
+# the floor's shadow (studioContactShadow.js): its square reaching 0.85 of the model's height past its
+# footprint, occlusion reaching 0.5 of that height; contact, occlusion and the key's shadow near
+# and far at these strengths, blurred narrow, medium and wide by these shares of the square; the
+# key the viewer's (rotation 0). Baked here at SHADOW_TEXELS a side (the viewer: 512, the same blurs).
+CONTACT_REACH, CONTACT_HEIGHT = 0.85, 0.5
+CONTACT_STRENGTH = (0.75, 0.5, 0.75, 0.35)
+CONTACT_BLUR = (0.012, 0.03, 0.06)
+KEY_DIRECTION = (-0.35, -1.0, 1.5)
+SHADOW_TEXELS = 160
 
 
 def vertical_fov(aspect: float, focal_length: float = FOCAL_LENGTH) -> float:
@@ -161,6 +179,9 @@ class Scene:
         self.structures: list[Any] = []  # presentations made below AIS: the text quads
         self.text_quads: list[tuple[np.ndarray, str]] = []  # their world corners and colours
         self.screen_marks: list[dict[str, Any]] = []  # painted over the frame: Measure's
+        self.stage: list[Any] = []  # Preview's studio: its floor and the floor's shadow
+        self.studio = False
+        self.staged = b""  # the placements its shadow was baked for
         self.mode = None
         self.display: dict[str, Any] = {}
         self.preview = False
@@ -387,6 +408,8 @@ class Scene:
         self.canvas.view.ZFitAll(1.0)
         self.camera = {"fov": vertical_fov(aspect, focal_length), "direction": d, "up": screen_up, "right": right,
                        "eye": eye, "target": target, "projection": projection, "scale": scale}
+        if self.studio:
+            self._studio_backdrop()  # the sweep's shading follows the camera
         return self.camera
 
     def frame(self, camera: str | dict[str, Any] = "iso", projection: str = "orthographic",
@@ -451,6 +474,8 @@ class Scene:
         self.canvas.view.ZFitAll(1.0)
         self.camera = {"fov": vertical_fov(aspect, focal_length), "direction": d, "up": screen_up, "right": right, "eye": eye, "target": target,
                        "projection": projection, "scale": scale}
+        if self.studio:
+            self._studio_backdrop()  # the sweep's shading follows the camera
         return self.camera
 
     def project(self, points: np.ndarray) -> np.ndarray:
@@ -654,74 +679,325 @@ class Scene:
 
     # --- preview ------------------------------------------------------------------------------
 
-    def _floor(self) -> Any:
-        """Preview's floor: a plane under the model at rest, ``FLOOR_REACH`` model diagonals each
-        way, so it runs past the frame of every camera (a perspective view meets it at its horizon).
-        It is the environment's horizon grey, rough and unreflective (no Fresnel: one colour from any
-        angle), its back culled (from below there is no floor), and infinite to the view: the key
-        light's shadow frame is fitted to the model alone, not to the floor."""
-        from OCP.AIS import AIS_Shape
-        from OCP.Graphic3d import (Graphic3d_BSDF, Graphic3d_MaterialAspect, Graphic3d_NameOfMaterial,
-                                   Graphic3d_PBRMaterial, Graphic3d_TypeOfBackfacingModel)
-        from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_sRGB
+    def _structure(self, triangles: Any, aspect: Any, priority: Any) -> Any:
+        """A presentation below AIS (``Graphic3d_Structure``) of ``triangles`` in ``aspect``, in the
+        default layer, infinite to the view (no fit, no shadow frame takes it)."""
+        from OCP.Graphic3d import Graphic3d_Group, Graphic3d_Structure
 
-        from cadgen.engine.render.shapes import craft, read
+        structure = Graphic3d_Structure(self.canvas.viewer.StructureManager())
+        group = structure.NewGroup()
+        group.SetGroupPrimitivesAspect(aspect)
+        Graphic3d_Group.AddPrimitiveArray(group, triangles)
+        structure.SetInfiniteState(True)
+        structure.SetDisplayPriority(priority)
+        structure.Display()
+        self.stage.append(structure)
+        return structure
 
+    @staticmethod
+    def _unlit(texture: Any = None) -> Any:
+        """An unlit, two-sided, alpha-blended look (by vertex colour, or by ``texture``)."""
+        from OCP.Aspect import Aspect_InteriorStyle
+        from OCP.Graphic3d import (Graphic3d_AlphaMode, Graphic3d_AspectFillArea3d, Graphic3d_TypeOfBackfacingModel,
+                                   Graphic3d_TypeOfShadingModel)
+        from OCP.Quantity import Quantity_Color, Quantity_ColorRGBA, Quantity_TOC_RGB
+
+        aspect = Graphic3d_AspectFillArea3d()
+        aspect.SetInteriorStyle(Aspect_InteriorStyle.Aspect_IS_SOLID)
+        aspect.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Unlit)
+        aspect.SetInteriorColor(Quantity_ColorRGBA(Quantity_Color(1, 1, 1, Quantity_TOC_RGB), 1.0))
+        aspect.SetAlphaMode(Graphic3d_AlphaMode.Graphic3d_AlphaMode_Blend, 0.5)
+        aspect.SetFaceCulling(Graphic3d_TypeOfBackfacingModel.Graphic3d_TypeOfBackfacingModel_DoubleSided)
+        if texture is not None:
+            aspect.SetTextureMap(texture)
+            aspect.SetTextureMapOn(True)
+        return aspect
+
+    @staticmethod
+    def _texture(picture: np.ndarray, *, smooth: bool = True) -> Any:
+        """``picture`` (rows top first, RGB or RGBA bytes, sRGB) as an OCCT texture, filtered."""
+        from OCP.Graphic3d import Graphic3d_Texture2D, Graphic3d_TypeOfTextureFilter
+        from OCP.Image import Image_Format, Image_PixMap
+        from OCP.Quantity import Quantity_ColorRGBA
+
+        height, width, depth = picture.shape
+        pixmap = Image_PixMap()
+        pixmap.InitZero(Image_Format.Image_Format_RGBA if depth == 4 else Image_Format.Image_Format_RGB, width, height)
+        values = picture.astype(np.float64) / 255.0
+        if depth == 4:
+            ys, xs = np.nonzero(picture[..., 3])
+        else:
+            ys, xs = np.nonzero(np.ones((height, width), bool))
+        for x, y, value in zip(xs.tolist(), ys.tolist(), values[ys, xs].tolist()):
+            pixmap.SetPixelColor(x, y, Quantity_ColorRGBA(value[0], value[1], value[2], value[3] if depth == 4 else 1.0), False)
+        texture = Graphic3d_Texture2D(pixmap)
+        params = texture.GetParams()
+        params.SetFilter(Graphic3d_TypeOfTextureFilter.Graphic3d_TOTF_BILINEAR if smooth
+                         else Graphic3d_TypeOfTextureFilter.Graphic3d_TOTF_NEAREST)
+        params.SetRepeat(False)
+        params.SetModulate(True)
+        return texture
+
+    def _studio_backdrop(self) -> None:
+        """The viewer's backdrop (``studioBackdrop.js``) behind everything, for the camera framed:
+        its colour lifted toward white behind the middle of the frame (a little above it), shaded
+        toward the corners and, above the horizon, by how far the view looks up. Drawn as a picture
+        stretched over the view, in display colour, as the viewer draws it into its canvas."""
+        from OCP.Aspect import Aspect_FillMethod
+
+        camera = self.camera
+        width, height = 96, 72
+        aspect = self.canvas.width / self.canvas.height
+        ys, xs = np.mgrid[0:height, 0:width]
+        nx, ny = (xs + 0.5) / width * 2 - 1, 1 - (ys + 0.5) / height * 2
+
+        def smoothstep(low: float, high: float, value: np.ndarray) -> np.ndarray:
+            t = np.clip((value - low) / (high - low), 0, 1)
+            return t * t * (3 - 2 * t)
+
+        forward = -np.asarray(camera["direction"], float)
+        if camera["projection"] == "perspective":
+            tangent = math.tan(math.radians(camera["fov"]) / 2)
+            rays = (forward[None, None, :] + (nx * tangent * aspect)[..., None] * camera["right"]
+                    + (ny * tangent)[..., None] * camera["up"])
+        else:
+            rays = np.broadcast_to(forward, (height, width, 3))
+        rays = rays / np.linalg.norm(rays, axis=-1, keepdims=True)
+        reach = np.clip(np.hypot(nx * aspect, ny - 0.12) / math.hypot(aspect, 1.12), 0, 1)
+        glow = 1 - smoothstep(0.0, 0.75, reach)
+        corner = smoothstep(0.3, 1.0, reach)
+        wall = smoothstep(0.0, 0.55, rays[..., 2])
+        base = np.array([int(BACKDROP[i:i + 2], 16) for i in (1, 3, 5)], float) / 255
+        luma = float(base @ [0.2126, 0.7152, 0.0722])
+        shade = BACKDROP_SHADE[0] + (BACKDROP_SHADE[1] - BACKDROP_SHADE[0]) * luma
+        colour = base + (1 - base) * (BACKDROP_LIFT * glow * glow)[..., None]
+        colour = colour * (1 - shade * np.clip(corner + BACKDROP_WALL * wall, 0, 1))[..., None]
+        picture = np.rint(np.clip(colour, 0, 1) * 255).astype(np.uint8)
+        # Shown behind the model, not lighting it: the image-based light stays the one baked from
+        # the environment's cube map (V3d_View.SetBackgroundImage would bake it again from this).
+        graphic = self.canvas.view.View()
+        graphic.SetBackgroundImage(self._texture(picture), False)
+        graphic.SetBackgroundImageStyle(Aspect_FillMethod.Aspect_FM_STRETCH)
+
+    def _studio_place(self) -> dict[str, Any]:
+        """Where the viewer's studio puts its floor and its shadow (``updateGround``): the floor at
+        the document's Z=0, centred under the model at rest, its reach the larger of the model's
+        radius and its footprint's half-diagonal; the shadow's square ``reach`` of the model's
+        height past its footprint, occlusion reaching ``height`` of that height above the floor."""
         low, high = self.rest_bounds()
-        diagonal = float(np.linalg.norm(high - low)) or 1.0
-        cx, cy, z = (low[0] + high[0]) / 2, (low[1] + high[1]) / 2, float(low[2]) - diagonal * 1e-4
-        half = diagonal * FLOOR_REACH
-        nodes = np.array([[cx - half, cy - half, z], [cx + half, cy - half, z], [cx + half, cy + half, z],
-                          [cx - half, cy + half, z]])
-        floor = AIS_Shape(read(craft([(nodes, np.array([[0, 1, 2], [0, 2, 3]]), np.tile([0.0, 0.0, 1.0], (4, 1)))], {})))
-        # The environment's bytes are sRGB, so its horizon is this grey as the environment shows it.
-        grey = Quantity_Color(*HORIZON, Quantity_TOC_sRGB)
-        pbr = Graphic3d_PBRMaterial()
-        pbr.SetColor(Quantity_ColorRGBA(grey, 1.0))
-        pbr.SetMetallic(0.0)
-        pbr.SetRoughness(1.0)
-        pbr.SetIOR(1.0)  # no reflectance head on, and at full roughness none at a grazing angle either
-        material = Graphic3d_MaterialAspect(Graphic3d_NameOfMaterial.Graphic3d_NameOfMaterial_UserDefined)
-        material.SetPBRMaterial(pbr)
-        material.SetColor(grey)
-        material.SetSpecularColor(_color((0.0, 0.0, 0.0)))
-        material.SetBSDF(Graphic3d_BSDF.CreateMetallicRoughness_s(pbr))
-        floor.SetMaterial(material)
-        floor.SetColor(grey)
-        floor.Attributes().ShadingAspect().Aspect().SetFaceCulling(
-            Graphic3d_TypeOfBackfacingModel.Graphic3d_TypeOfBackfacingModel_BackCulled)
-        self.canvas.context.Display(floor, 1, -1, False)
-        floor.SetInfiniteState(True)
-        return floor
+        span = high - low
+        radius = float(np.linalg.norm(span)) / 2 or 1.0
+        floor = 0.0
+        above = max(float(high[2]) - floor, radius * 0.05)
+        half_span = float(max(span[0], span[1])) / 2
+        return {"centre": ((low[0] + high[0]) / 2, (low[1] + high[1]) / 2), "z": floor, "radius": radius,
+                "reach": max(radius, math.hypot(span[0], span[1]) / 2),
+                "shadow_half": (half_span + above * CONTACT_REACH) * 1.12,
+                "range": max(above, half_span * 0.5) * CONTACT_HEIGHT, "top": float(high[2])}
 
-    def _floor_colour(self) -> Any:
-        """The floor as drawn: a tiny orthographic frame straight down on a floor point far from
-        the model, on the light's side (no shadow reaches it), the camera put back after. One
-        colour, as the floor is one colour from any angle."""
-        from OCP.Graphic3d import Graphic3d_Camera
+    def _studio_floor(self, place: dict[str, Any]) -> None:
+        """The viewer's floor: #e7e7e5 at 60%, as its Preview draws it (``FLOOR_COLOUR``), unlit,
+        full out to ``FLOOR_FADE[0]`` of the model's reach and fading (squared, a long tail) to
+        nothing at ``FLOOR_FADE[1]`` of it, so it has no edge from any camera: a disc of rings, the
+        fade in its vertices' alpha."""
+        from OCP.Graphic3d import Graphic3d_ArrayOfTriangles, Graphic3d_DisplayPriority, Graphic3d_Vec4ub
+        from OCP.gp import gp_Pnt
+
+        rings, segments = 48, 96
+        outer = place["reach"] * FLOOR_FADE[1]
+        cx, cy = place["centre"]
+        rgb = [int(FLOOR_COLOUR[i:i + 2], 16) for i in (1, 3, 5)]
+        triangles = Graphic3d_ArrayOfTriangles(1 + rings * segments, 3 * segments * (2 * rings - 1), False, True, False)
+        angles = np.linspace(0, 2 * math.pi, segments, endpoint=False)
+        for ring in range(rings + 1):
+            fraction = ring / rings
+            t = np.clip((fraction - FLOOR_FADE[0] / FLOOR_FADE[1]) / (1 - FLOOR_FADE[0] / FLOOR_FADE[1]), 0, 1)
+            fade = (1 - t * t * (3 - 2 * t)) ** 2
+            colour = Graphic3d_Vec4ub(*rgb, int(round(255 * FLOOR_OPACITY * fade)))
+            if ring == 0:
+                triangles.AddVertex(gp_Pnt(cx, cy, place["z"]), colour)
+                continue
+            for angle in angles:
+                r = outer * fraction
+                triangles.AddVertex(gp_Pnt(cx + r * math.cos(angle), cy + r * math.sin(angle), place["z"]), colour)
+        for segment in range(segments):  # 1-based: the centre is 1, ring k's s-th point 2 + (k-1)*segments + s
+            following = (segment + 1) % segments
+            triangles.AddEdges(1, 2 + segment, 2 + following)
+            for ring in range(1, rings):
+                inner, outer_ring = 2 + (ring - 1) * segments, 2 + ring * segments
+                triangles.AddEdges(inner + segment, outer_ring + segment, outer_ring + following)
+                triangles.AddEdges(inner + segment, outer_ring + following, inner + following)
+        self._structure(triangles, self._unlit(), Graphic3d_DisplayPriority.Graphic3d_DisplayPriority_Below)
+
+    def _depth(self, eye: Any, target: Any, up: Any, scale: float, size: int, z_range: Any = None,
+               keep_above: float | None = None) -> np.ndarray:
+        """The model's depth (0 near to 1 far; 1 where nothing is) from an orthographic camera, as
+        floats (rows top first): OCCT dumps a depth picture to bytes stretched over its own range,
+        so its two ends are read back as floats and the bytes put back between them. The camera,
+        its depth fit, the clip planes, multisampling and the shadow map are put back after."""
+        from OCP.Graphic3d import (Graphic3d_BufferType, Graphic3d_Camera, Graphic3d_ClipPlane,
+                                   Graphic3d_ZLayerId_Default)
         from OCP.Image import Image_AlienPixMap
-        from OCP.gp import gp_Dir, gp_Pnt
+        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
 
-        low, high = self.rest_bounds()
-        diagonal = float(np.linalg.norm(high - low)) or 1.0
-        away = -np.array([0.5, 0.7]) / np.linalg.norm([0.5, 0.7]) * diagonal * 20  # against the key light
-        point = ((low[0] + high[0]) / 2 + away[0], (low[1] + high[1]) / 2 + away[1], float(low[2]))
-        camera = self.canvas.view.Camera()
+        from cadgen.engine.render.context import pixels
+
+        view = self.canvas.view
+        camera = view.Camera()
         kept = Graphic3d_Camera(camera)
-        camera.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Orthographic)
-        camera.SetEyeAndCenter(gp_Pnt(point[0], point[1], point[2] + diagonal), gp_Pnt(*point))
-        camera.SetUp(gp_Dir(0, 1, 0))
-        camera.SetScale(diagonal * 0.01)
-        image = Image_AlienPixMap()
-        self.canvas.view.ToPixMap(image, 8, 8)
-        found = image.PixelColor(4, 4).GetRGB()  # the pixel's own sRGB bytes, unconverted
-        camera.Copy(kept)
-        return "#%02x%02x%02x" % tuple(int(round(value * 255)) for value in (found.Red(), found.Green(), found.Blue()))
+        params = view.ChangeRenderingParams()
+        shadows, msaa = params.IsShadowEnabled, params.NbMsaaSamples
+        auto = view.AutoZFitMode()
+        clip = None
+        try:
+            params.IsShadowEnabled = False
+            params.NbMsaaSamples = 0
+            camera.SetProjectionType(Graphic3d_Camera.Projection_e.Projection_Orthographic)
+            camera.SetEyeAndCenter(gp_Pnt(*map(float, eye)), gp_Pnt(*map(float, target)))
+            camera.SetUp(gp_Dir(*map(float, up)))
+            camera.SetScale(float(scale))
+            if z_range is not None:
+                view.SetAutoZFitMode(False)
+                camera.SetZRange(float(z_range[0]), float(z_range[1]))
+            if keep_above is not None:
+                clip = Graphic3d_ClipPlane(gp_Pln(gp_Pnt(0, 0, float(keep_above)), gp_Dir(0, 0, 1)))
+                view.AddClipPlane(clip)
+            image = Image_AlienPixMap()
+            # Up to the default layer: the overlay layers above it clear the depth they draw over.
+            if not view.ToPixMap(image, size, size, Graphic3d_BufferType.Graphic3d_BT_Depth, False,
+                                 Graphic3d_ZLayerId_Default, 0):
+                raise RuntimeError("OCCT drew no depth")
+            levels = pixels(image)[..., 0].astype(np.float64)
+            low_at, high_at = np.unravel_index(levels.argmin(), levels.shape), np.unravel_index(levels.argmax(), levels.shape)
+            low = image.PixelColor(int(low_at[1]), int(low_at[0])).GetRGB().Red()
+            high = image.PixelColor(int(high_at[1]), int(high_at[0])).GetRGB().Red()
+            return low + levels / 255.0 * (high - low)
+        finally:
+            if clip is not None:
+                view.RemoveClipPlane(clip)
+            view.SetAutoZFitMode(auto)
+            camera.Copy(kept)
+            params.IsShadowEnabled, params.NbMsaaSamples = shadows, msaa
+
+    def _contact_shadow(self, place: dict[str, Any]) -> None:
+        """The viewer's floor shadow (``studioContactShadow.js``), baked as it bakes it: the
+        heights of the lowest surfaces over the floor, seen from just below it (contact: tight, and
+        occlusion: broad, both 1 at the floor and 0 at the top of the contact range), and whether
+        the viewer's key reaches each floor point (its direction, ``KEY_DIRECTION``; the model above
+        the floor seen along it), each blurred as it blurs them (narrow, medium, wide), put together
+        as it does (the key's shadow crisp and full near the model, soft and light away from it), and
+        faded inside the square. Laid on the floor as an unlit black picture of that darkness at
+        the floor's opacity, its alpha set so OCCT's blend in linear light leaves what three's blend
+        of display colours leaves on the floor."""
+        from OCP.Graphic3d import Graphic3d_ArrayOfTriangles, Graphic3d_DisplayPriority
+        from OCP.gp import gp_Pnt, gp_Pnt2d
+
+        size = SHADOW_TEXELS
+        cx, cy = place["centre"]
+        half, contact, floor = place["shadow_half"], place["range"], place["z"]
+        below = contact * 0.004
+        # Heights, from just below the floor looking up: the camera's right is -x (columns mirrored).
+        depth = self._depth((cx, cy, floor - below), (cx, cy, floor + contact), (0, 1, 0), 2 * half, size,
+                            z_range=(below * 0.5, below + contact))[:, ::-1]
+        height = below * 0.5 + depth * (below + contact - below * 0.5) - below
+        near = 1 - np.clip(height / contact, 0, 1)
+        # The key: the model above the floor, seen along the key's direction.
+        light = np.asarray(KEY_DIRECTION, float) / np.linalg.norm(KEY_DIRECTION)
+        right = np.cross(-light, (0, 0, 1))
+        right /= np.linalg.norm(right)
+        up = np.cross(right, -light)
+        origin = np.array([cx, cy, floor])
+        low, high = self.rest_bounds()
+        corners = [np.array([x, y, z]) for x in (low[0], high[0], cx - half, cx + half) for y in (low[1], high[1], cy - half, cy + half)
+                   for z in (floor, high[2])]
+        reach = 1.02 * max(max(abs((c - origin) @ right), abs((c - origin) @ up)) for c in corners)
+        seen = self._depth(origin + light * place["radius"] * 10, origin, up, 2 * reach, size, keep_above=floor) < 0.999999
+        texel = (np.arange(size) + 0.5) / size * 2 - 1
+        xs, ys = cx + texel[None, :] * half, cy - texel[:, None] * half  # rows top first: +y at the top
+        u = ((xs - cx) * right[0] + (ys - cy) * right[1]) / reach
+        v = ((xs - cx) * up[0] + (ys - cy) * up[1]) / reach
+        columns = np.clip((u + 1) / 2 * size - 0.5, 0, size - 1)
+        rows = np.clip((1 - v) / 2 * size - 0.5, 0, size - 1)
+        c0, r0 = np.floor(columns).astype(int), np.floor(rows).astype(int)
+        c1, r1 = np.minimum(c0 + 1, size - 1), np.minimum(r0 + 1, size - 1)
+        fc, fr = columns - c0, rows - r0
+        mask = seen.astype(np.float64)
+        blocked = ((mask[r0, c0] * (1 - fc) + mask[r0, c1] * fc) * (1 - fr) + (mask[r1, c0] * (1 - fc) + mask[r1, c1] * fc) * fr)
+
+        def blur(picture: np.ndarray, share: float) -> np.ndarray:
+            sigma = share * size
+            taps = np.arange(-math.ceil(2 * sigma), math.ceil(2 * sigma) + 1)
+            kernel = np.exp(-0.5 * (taps / sigma) ** 2)
+            kernel /= kernel.sum()
+            pad = len(taps) // 2
+            for axis in (0, 1):
+                padded = np.pad(picture, [(pad, pad) if a == axis else (0, 0) for a in (0, 1)], mode="edge")
+                picture = np.apply_along_axis(lambda line: np.convolve(line, kernel, mode="valid"), axis, padded)
+            return picture
+
+        narrow, medium, wide = CONTACT_BLUR
+        r, g = blur(near ** 3, narrow), blur(near, wide)
+        b, a = blur(blocked, narrow), blur(blocked, medium)
+        strength = CONTACT_STRENGTH
+        occlusion = 1 - (1 - strength[0] * r) * (1 - strength[1] * g)
+        t = np.clip(g / 0.5, 0, 1)
+        proximity = t * t * (3 - 2 * t)
+        key = (a + (b - a) * proximity) * (strength[3] + (strength[2] - strength[3]) * proximity)
+        darkness = 1 - (1 - occlusion) * (1 - key)
+        uv = (np.arange(size) + 0.5) / size
+        edge = np.minimum(np.minimum(uv, 1 - uv)[None, :], np.minimum(uv, 1 - uv)[:, None])
+        t = np.clip(edge / 0.08, 0, 1)
+        alpha = darkness * t * t * (3 - 2 * t) * FLOOR_OPACITY
+        # Black over the floor: three leaves (1 - alpha) of the floor's display colour, OCCT the
+        # same share of its light; so OCCT's alpha is what leaves that display colour.
+        under = np.array([int(FLOOR_COLOUR[i:i + 2], 16) for i in (1, 3, 5)], float) / 255 * FLOOR_OPACITY + (1 - FLOOR_OPACITY)
+        lum = float(under @ [0.2126, 0.7152, 0.0722])
+
+        def linear(c: Any) -> Any:
+            return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+        alpha = 1 - linear((1 - alpha) * lum) / linear(lum)
+        picture = np.zeros((size, size, 4), np.uint8)
+        picture[..., 3] = np.rint(np.clip(alpha, 0, 1) * 255).astype(np.uint8)
+        quad = Graphic3d_ArrayOfTriangles(4, 6, False, False, True)
+        lift = floor + place["radius"] * 1e-4
+        for x, y, uvx, uvy in ((cx - half, cy - half, 0, 0), (cx + half, cy - half, 1, 0), (cx + half, cy + half, 1, 1),
+                               (cx - half, cy + half, 0, 1)):
+            quad.AddVertex(gp_Pnt(x, y, lift), gp_Pnt2d(uvx, uvy))
+        quad.AddEdges(1, 2, 3)
+        quad.AddEdges(1, 3, 4)
+        self._structure(quad, self._unlit(self._texture(picture)), Graphic3d_DisplayPriority.Graphic3d_DisplayPriority_Normal)
+
+    def _studio(self) -> None:
+        """The viewer's Preview studio around the model: its floor and the floor's shadow (its
+        backdrop, ``_studio_backdrop``, goes behind once the environment that lights the model,
+        ``_studio_environment``'s and unchanged, is baked)."""
+        self.clear_stage()
+        place = self._studio_place()
+        self._contact_shadow(place)  # baked from the model alone, before the floor exists
+        self._studio_floor(place)
+        self.staged = self._placed()
+
+    def _placed(self) -> bytes:
+        return np.round(np.concatenate([self.placement(i).ravel() for i in range(len(self.matrices))]), 6).tobytes()
+
+    def restage(self) -> None:
+        """Preview's floor shadow baked again when the parts moved since it was (a pose, Explode),
+        as the viewer bakes it again: the floor and the shadow's square stay where the model at rest
+        put them."""
+        if self.studio and self._placed() != self.staged:
+            self._studio()
+
+    def clear_stage(self) -> None:
+        for structure in self.stage:
+            structure.Erase()
+            structure.Remove()
+        self.stage = []
 
     def preview_look(self, path_trace: int = 0) -> float:
-        """Preview's photographic look: PBR raster under an image-based environment, a key light
-        casting shadows on a floor, and a backdrop of the floor's own colour as drawn, so floor and
-        backdrop meet without an edge; or OCCT's path tracer."""
+        """Preview's photographic look: PBR raster under an image-based environment and a key
+        light, in the viewer's studio (``_studio``): its white sweep behind, its floor fading into
+        it, the floor's soft shadow baked as the viewer bakes it; or OCCT's path tracer."""
         from OCP.Graphic3d import (Graphic3d_BSDF, Graphic3d_RenderingMode, Graphic3d_ToneMappingMethod,
                                    Graphic3d_TypeOfShadingModel)
         from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
@@ -744,15 +1020,16 @@ class Scene:
         viewer.AddLight(ambient)
         viewer.SetLightOn(ambient)
         self.lights = [key, ambient]
-        self.overlays.append(self._floor())
         view.SetBackgroundColor(_color((0.93, 0.93, 0.94)))
         view.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Pbr)
         params = view.ChangeRenderingParams()
         params.ToneMappingMethod = Graphic3d_ToneMappingMethod.Graphic3d_ToneMappingMethod_Filmic
         params.WhitePoint = 1.0
+        # The key's shadow map shades the model only: the floor is unlit, its shadow the baked one.
         params.IsShadowEnabled = True
         params.ShadowMapResolution = 4096
         params.ShadowMapBias = 0.002
+        self._studio()
         if path_trace:
             for source in self.sources.values():
                 aspect = source.Attributes().ShadingAspect()
@@ -769,6 +1046,7 @@ class Scene:
             params.RadianceClampingValue = 30.0
             params.TwoSidedBsdfModels = True
             params.NbMsaaSamples = 0
+            self._studio_backdrop()
         else:
             from OCP.Graphic3d import Graphic3d_CubeMapPacked
 
@@ -779,13 +1057,8 @@ class Scene:
             view.Redraw()  # bakes the environment's lighting from the cube map
             params.PbrEnvPow2Size = 9
             params.PbrEnvSpecMapNbLevels = 8
-            from OCP.Aspect import Aspect_GradientFillMethod
-
-            # The backdrop (in place of the cube map, which only lights) is the floor as drawn:
-            # where the two meet -- a perspective view's horizon, a level view's edge-on floor --
-            # there is nothing to see.
-            backdrop = _color(self._floor_colour())
-            view.SetBgGradientColors(backdrop, backdrop, Aspect_GradientFillMethod.Aspect_GradientFillMethod_Vertical, False)
+            self._studio_backdrop()  # in place of the cube map, which only lights
+        self.studio = True
         return time.perf_counter() - clock
 
     def path_trace(self, out: Path, samples: int) -> float:
