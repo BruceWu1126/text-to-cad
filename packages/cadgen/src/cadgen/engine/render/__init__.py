@@ -1,12 +1,18 @@
-"""PROTOTYPE -- not used by any verb. A pure-Python OCCT renderer of an engine document, built
-to compare with ``cadgen xbf snapshot`` (Chromium) flag by flag and in time.
+"""cadgen's stills drawn by OCCT: an engine document drawn by OCCT's own OpenGL renderer from the
+engine's own meshes (the XBM buffers ``mesh.py`` writes and the daemon serves), never a mesh of
+OCCT's own. ``cadgen xbf snapshot`` draws through it when ``CADGEN_SNAPSHOT_RENDERER=occt`` (until the
+cut-over, the snapshot page otherwise: ``snapshot.renderer``).
 
-Nothing in ``snapshot.py``, ``serve.py`` or ``mesh.py`` imports this package but ``look.py``,
-the regular display modes' look, which ``occt.py`` draws by and ``serve.py`` serves to the viewer
-(``GET /api/look``). It draws from the engine's own meshes (the XBM buffers ``mesh.py`` writes
-and the daemon serves), never a mesh of OCCT's own: ``shapes.py`` turns a part's buffer into
-triangulation-only faces and polygon edges in one kernel read; ``attach.py`` is the alternative
-measured against it (a pool returns the meshed B-rep, its triangulations attached to the
-document's own faces). ``occt.py`` is the scene and the CLI (``python -m
-cadgen.engine.render.occt``); ``context.py`` the headless GL context.
+- ``service.py``: a document held and drawn (``Held``), the daemon's render process per served
+  document (``Renders``, ``python -m cadgen.engine.render.service``), and a document drawn in this
+  process (``draw_here``).
+- ``occt.py``: the scene -- the modes, the camera, clip, grid, overlays, Preview -- and the
+  prototype's CLI (``python -m cadgen.engine.render.occt``); ``look.py`` the regular display modes'
+  look, which ``occt.py`` draws by and ``serve.py`` serves to the viewer (``GET /api/look``);
+  ``text.py`` and ``overlay.py`` the annotation's words and Measure's marks, as the page draws them.
+- ``explode.py``: the viewer's Explode, ported (held to the viewer by one golden).
+- ``shapes.py``: a part's buffer as triangulation-only faces and polygon edges, in one kernel read;
+  ``attach.py`` the alternative measured against it.
+- ``context.py``: the headless OpenGL context, per platform.
+- ``meshes.py``, ``compare.py``: the prototype's harness (buffers from a server, side-by-side sheets).
 """

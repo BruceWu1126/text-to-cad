@@ -33,6 +33,11 @@ written but OUT.
 object, the rest as built): the engine serves the document at that pose, each link placed by its
 pairs from the ground, and the page draws what it is served. An unknown configuration or joint, a
 value out of range and a mechanism that is not a tree are refused by name before anything renders.
+
+``CADGEN_SNAPSHOT_RENDERER=occt`` (``renderer``, until the cut-over) draws a document with OCCT
+instead (``render/service.py``): through the daemon, by the served document's render process, warm;
+with ``--no-daemon``, or a model's document in its worker, in that process. The same request
+(``Still``) and the same refusals; the answer is PNG bytes, which this writes to OUT.
 """
 
 from __future__ import annotations
@@ -703,7 +708,42 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
         out.parent.mkdir(parents=True, exist_ok=True)
     if suffix in MESH_KINDS:
         return _mesh_file(document, out, still, started)
+    if renderer() == "occt":
+        return _occt(document, out, still, daemon, source, started)
     return _chromium(document, out, still, daemon, source, started)
+
+
+def renderer() -> str:
+    """TEMPORARY, until the cut-over: which renderer draws a document. ``CADGEN_SNAPSHOT_RENDERER=occt``
+    draws it with OCCT (``_occt``, ``engine/render``); anything else with the snapshot page
+    (``_chromium``). The cut-over deletes this function, the branch on it in ``snapshot`` and
+    ``_chromium``, and calls ``_occt``; the page stays for mesh files (``_mesh_file``)."""
+    return "occt" if os.environ.get("CADGEN_SNAPSHOT_RENDERER", "").strip().lower() == "occt" else "chromium"
+
+
+def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
+    """A document drawn by OCCT from the engine's meshes (``render/service.py``): by the daemon's
+    render process for the document, warm, or in this process (``--no-daemon``, a model's own
+    document from its worker's memory). The answer is the PNG's bytes; this writes the one file."""
+    if daemon and source is None:
+        from cadgen.engine.client import request
+
+        answer = request({"op": "draw", "path": str(document), "still": still.as_json()})
+        if answer is None:
+            raise RuntimeError("no engine daemon")
+        if "refused" in answer:
+            raise SnapshotRefused(answer["refused"])
+        if "failed" in answer:
+            raise RuntimeError(answer["failed"])
+        data, report = base64.b64decode(answer["png"]), answer["report"]
+    else:
+        from cadgen.engine.render.service import draw_here
+
+        data, report = draw_here(document, still, source=source)
+    _warn(report.get("unmeshed") or {})
+    write_png(out, data)
+    report["timings"]["totalMs"] = round((time.perf_counter() - started) * 1000)
+    return {"ok": True, "document": str(document), "output": str(out), **report, "bytes": out.stat().st_size}
 
 
 def _chromium(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
@@ -744,9 +784,13 @@ def _chromium(document: Path, out: Path, still: Still, daemon: bool, source: Any
 
 
 def _unmeshed(structure: dict[str, Any]) -> dict[str, list[int]]:
-    """The faces the mesher left without triangles, by part, each warned of: the picture lacks them."""
-    unmeshed = {prototype.get("name") or prototype["key"]: prototype["unmeshed"]
-                for prototype in structure["prototypes"] if prototype.get("unmeshed")}
+    """The faces the mesher left without triangles, by part, each warned of (``_warn``)."""
+    return _warn({prototype.get("name") or prototype["key"]: prototype["unmeshed"]
+                  for prototype in structure["prototypes"] if prototype.get("unmeshed")})
+
+
+def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:
+    """A warning for each part's faces the mesher left without triangles: the picture lacks them."""
     for name, faces in unmeshed.items():
         print(f"warning: {name}: the mesher left face{'s' if len(faces) > 1 else ''} "
               f"{', '.join(map(str, faces))} without triangles, so the picture does not draw "

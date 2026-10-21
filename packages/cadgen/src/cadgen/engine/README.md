@@ -245,6 +245,25 @@ packet given as `--annotation`, else the newest packet beside the annotation fil
 document; with none, it is refused by name. A face the mesher left without triangles is named in a
 warning. Nothing is written but OUT.
 
+**The OCCT stills.** With `CADGEN_SNAPSHOT_RENDERER=occt` (until the cut-over, which makes it the
+only way: `snapshot.renderer` is the switch) a document is drawn by OCCT's own OpenGL renderer from
+the engine's meshes instead of by the page (`render/`): one presentation per part and look, each
+instance a connected object of it; the modes, the camera fit, clip, grid and Preview are the
+page's, Explode is the viewer's layout ported to Python (held to the viewer by one golden its own
+scene made), and the annotation's ink and the measurements are drawn over the picture. Through the daemon, a served document a snapshot asks
+for gets a render process of its own, started on its first picture and holding the document --
+each part's buffer from the daemon's one mesh cache (nothing meshed again), its OCCT shapes, a
+scene and its presentations on a hidden OpenGL context: a picture of it is a frame of that
+process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). When
+the served document is patched -- a build of it, or its file rewritten -- the process is sent the
+new version at once with the buffers of the parts it lacks: the parts it shares with the last keep
+their shapes, the new ones are made, and its scene is made again before any picture asks. It goes
+with the daemon, and after a picture that leaves it over the workers' memory cap it says so
+(`retired`) and exits. `--no-daemon`, and a model's own document in its worker, draw in that
+process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on a machine with no
+screen) or OCCT's EGL on Linux, a hidden window on Windows; where none can be made the snapshot
+fails saying so. Nothing is written but OUT.
+
 `SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
 bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
 `headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. `SRC` may be a script's model too
