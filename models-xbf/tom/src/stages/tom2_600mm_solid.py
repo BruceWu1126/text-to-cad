@@ -9,7 +9,7 @@ from dataclasses import asdict
 from functools import cache
 from pathlib import Path
 import build123d as bd
-from cadgen.engine import xbf, read_step
+from cadgen.engine import read_step
 from lib.mates import revolute, fastened
 from stages.tom2_500mm import build_model,moving_sets,kinematics as previous_kinematics
 from lib.reach600_geometry import LINK_EXTENSION,finish_extended_link
@@ -87,7 +87,6 @@ def kinematics():
     mates.append(fastened('fixed_electronics_bay',parent='#direct_servo_clamp',child='#fixed_electronics_bay'))
     return dict(mates=mates,poses={'zero':ZERO_POSE,'rest':{},'reach':REACH_POSE,'packed':PACKED_POSE})
 
-@xbf(out='../../XBF/stages/tom2_600mm_solid.xbf')
 def tom2_600mm_solid():
     source=build_model(finisher=finish_links)
     print('600 mm: source geometry ready',flush=True)

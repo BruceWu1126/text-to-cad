@@ -6,7 +6,7 @@ Production tom2 is unchanged.
 """
 from dataclasses import asdict
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 from lib.mates import revolute, fastened
 from stages import tom2 as base
 
@@ -124,7 +124,7 @@ def visit(node,refs,replacements):
     return node.moved(bd.Pos(-EXTENSION,0,0))
 
 
-@xbf(out='../../XBF/stages/tom2_side_mounted_elbow.xbf')
+@memo
 def tom2_side_mounted_elbow():
     source=base.tom2();refs=downstream_refs('#wrist_yaw_servo')
     children=list(source.children);source.children=()

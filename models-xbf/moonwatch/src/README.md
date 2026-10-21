@@ -2,15 +2,26 @@
 
 The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
 
-| Script            | Artifact                                  | Description                                                     |
+| Script            | What it is                                | Description                                                     |
 |-------------------|-------------------------------------------|-----------------------------------------------------------------|
-| case.py           | XBF/case.xbf                              | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
-| movement.py       | XBF/movement.xbf                          | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
-| movement_base.py  | XBF/movement_base.xbf (built alone)       | Main plate, barrel, going train, bridges, escapement, balance  |
-| keyless_works.py  | XBF/keyless_works.xbf (built alone)       | Stem, winding/sliding pinions, setting lever, yoke, motion works |
-| chrono_works.py   | XBF/chrono_works.xbf (built alone)        | Column wheel, levers, lateral clutch, runners, hammers          |
+| case.py           | model -> XBF/case.xbf                     | Case cluster: middle, bezel stack, crystal, caseback, crown, pushers, lugs |
+| movement.py       | model -> XBF/movement.xbf                 | Complete movement = movement_base + keyless_works + chrono_works (sub-assemblies) |
+| movement_base.py  | `@memo` layer of the movement             | Main plate, barrel, going train, bridges, escapement, balance  |
+| keyless_works.py  | `@memo` layer of the movement             | Stem, winding/sliding pinions, setting lever, yoke, motion works |
+| chrono_works.py   | `@memo` layer of the movement             | Column wheel, levers, lateral clutch, runners, hammers          |
 
-Build from this folder: `python -m cadgen.engine build case.py movement.py`.
+Build from this folder: `python -m cadgen.engine build case.py movement.py`. The
+two models are the only files a build writes.
+
+Inside each layer every group of parts is a `@memo` function too (`lib/mvt_base.py`
+`_plate_parts` ... `_balance_parts`, `lib/mvt_keyless.py` `_stem_parts`,
+`_lever_parts`, `_motion_parts`, `lib/mvt_chrono.py` `_column_wheel_parts` ...
+`_chrono_bridge_parts`: 19 groups): each takes no argument, returns its parts as
+an assigned list, and touches no state another group reads, so an edit to one group's
+code or constants runs that group, its layer and the movement, and replays the
+rest. The case stays one body: `lib/case.py`'s band builder leaves
+`_BAND_CHAMFER_APPLIED` in its module for the polish builder to read, state a replay
+would not set, so no builder of the case is a `@memo`.
 
 ## Materials
 

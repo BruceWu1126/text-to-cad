@@ -8,13 +8,13 @@ around the stem axis at 3 o'clock.
 """
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import materials
 from lib import mvt_keyless as K
 
 
-@xbf(out="../XBF/keyless_works.xbf")
+@memo
 def keyless_works():
     parts = materials.apply_materials(K.build_keyless(), "keyless_works")
     compound = bd.Compound(children=parts, label="keyless_works")

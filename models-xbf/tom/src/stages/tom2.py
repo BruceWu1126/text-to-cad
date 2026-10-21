@@ -12,7 +12,7 @@ import numpy as np
 from dataclasses import asdict
 from lib.link_assembly import location_from_transform
 import build123d as bd
-from cadgen.engine import xbf, read_step
+from cadgen.engine import memo, read_step
 from lib.mates import revolute, fastened
 from lib.booleans import as_single_shape as one
 from lib import horn_cap, sheet_rule_scs as sheet
@@ -522,7 +522,7 @@ def arm_with_inline_wrist():
     return bd.Compound(children=replace_gripper_with_yoke(rest,wrist_yoke),label='tom2')
 
 
-@xbf(out='../../XBF/stages/tom2.xbf')
+@memo
 def tom2():
     from end_effector.servo6_gripper_concept import make_connector
     arm=arm_with_inline_wrist()

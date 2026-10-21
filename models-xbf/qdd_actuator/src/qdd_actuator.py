@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo, xbf
 
 # ---------------------------------------------------------------------------
 # Gear stage parameters (module-1.0 concept teeth, trapezoidal with backlash)
@@ -275,7 +275,7 @@ PLANET_EXPLODE_RADIAL = 14.0
 # ---------------------------------------------------------------------------
 # Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
 # Shape.color setter builds the Color on assignment, and a module-level
-# bd.Color(...) would import the CAD kernel before the @xbf freshness gate.
+# bd.Color(...) would import the CAD kernel when the module loads.
 AL_BODY = (0.13, 0.135, 0.15)  # black-anodized housing
 AL_COVER = (0.115, 0.12, 0.13)  # black-anodized rear cover
 AL_BRIGHT = (0.78, 0.79, 0.81)  # machined aluminum (flange, carrier)
@@ -415,6 +415,7 @@ def make_front_retainer() -> bd.Part:
     return ring - holes
 
 
+@memo
 def make_retainer_screws() -> list[bd.Part]:
     """8x M3 socket-head fasteners populating the retainer screw circle."""
     screws = []
@@ -489,6 +490,7 @@ def make_connector(kind: str) -> list[bd.Part]:
     return [loc * body, loc * collar, loc * o_ring, loc * pins]
 
 
+@memo
 def make_driver_pcb() -> dict[str, object]:
     """Annular motor-driver PCB with FETs, bus capacitors, and MCU."""
     board = _tube_z(DRIVER_BOARD_R[1], DRIVER_BOARD_R[0], DRIVER_BOARD_Z)
@@ -506,6 +508,7 @@ def make_driver_pcb() -> dict[str, object]:
     return {"board": board, "fets": fets, "caps": caps, "mcu": mcu}
 
 
+@memo
 def make_encoder_pcb() -> dict[str, object]:
     """Encoder PCB behind the rotor magnet ring."""
     board = _tube_z(ENCODER_BOARD_R[1], ENCODER_BOARD_R[0], ENCODER_BOARD_Z)
@@ -515,6 +518,7 @@ def make_encoder_pcb() -> dict[str, object]:
     return {"board": board, "chip": chip}
 
 
+@memo
 def make_stator() -> dict[str, object]:
     """24-slot outrunner stator: laminated yoke/teeth and copper windings."""
     yoke = _tube_z(STATOR_YOKE_OR, STATOR_YOKE_IR, STATOR_STACK_Z)
@@ -544,6 +548,7 @@ def make_stator() -> dict[str, object]:
     return {"stack": stack, "windings": windings}
 
 
+@memo
 def make_rotor() -> dict[str, object]:
     """Outrunner rotor bell: hollow hub, front web, back iron, magnet ring."""
     hub = _tube_z(ROTOR_HUB_R[1], ROTOR_HUB_R[0], ROTOR_HUB_Z)
@@ -641,6 +646,7 @@ def make_carrier() -> bd.Part:
     return carrier - lighten
 
 
+@memo
 def make_cross_roller_bearing() -> dict[str, object]:
     """Cross-roller output bearing: V-groove races, alternating 45-deg rollers."""
     z_mid = (XROLLER_Z[0] + XROLLER_Z[1]) / 2
@@ -664,6 +670,7 @@ def make_cross_roller_bearing() -> dict[str, object]:
     return {"inner": inner, "outer": outer, "rollers": rollers}
 
 
+@memo
 def make_torque_sensor() -> dict[str, object]:
     """Spoked torque-sensing flexure with strain-gauge pads."""
     hub = _tube_z(FLEXURE_HUB_R[1], FLEXURE_HUB_R[0], FLEXURE_HUB_Z)

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import bodywork as B
 
 
-@xbf(out="../XBF/steering_cover.xbf")
+@memo
 def steering_cover():
     built = B.build_steering_cover()
     if isinstance(built, list):

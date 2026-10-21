@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from lib.diag import say
 
-from cadgen.engine import xbf
 
 from dataclasses import dataclass
 import math
@@ -1326,7 +1325,6 @@ def build_bracket() -> build123d.Solid:
     return bracket
 
 
-@xbf(out='../../../XBF/base_link/legacy/base_clamp.xbf')
 def base_clamp():
     # Floor-up presentation. The bracket is AUTHORED on its side -- the saddle plane is a Y level,
     # which is the frame every layout constant, the flat pattern and build_dxf() live in -- but the

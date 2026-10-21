@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import chassis as B
 
 
-@xbf(out="../XBF/center_stand.xbf")
+@memo
 def center_stand():
     built = B.build_center_stand()
     if isinstance(built, list):

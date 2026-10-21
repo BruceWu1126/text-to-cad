@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import memo
 
 from lib import trim as B
 
 
-@xbf(out="../XBF/tail_light.xbf")
+@memo
 def tail_light():
     built = B.build_tail_light()
     if isinstance(built, list):

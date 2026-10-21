@@ -9,10 +9,12 @@ import movement_base
 import build123d as bd
 from cadgen.engine import xbf
 
-# Composition is by FUNCTION: importing a sibling model links it (import never
-# builds), and calling it inside this body runs it in the same build as a
-# sub-assembly. An edit that does not reach a child's code replays that child's
-# body from the worker's memory.
+# Composition is by FUNCTION: each layer is a `@memo` function of a sibling file,
+# and calling it inside this body runs it in the same build as a sub-assembly.
+# An edit that does not reach a layer's code replays it from the worker's memory;
+# inside a layer each group of parts (`lib/mvt_*.py`, `_*_parts`) is a `@memo`
+# too, so an edit to one group runs that group alone. Only this model and
+# `case.py` write a file.
 
 
 @xbf(out="../XBF/movement.xbf")
