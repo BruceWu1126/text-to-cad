@@ -74,6 +74,14 @@ so a hit costs the rows later operations left on its result, not the result's si
 a moved copy of an imported assembly is handed back without walking its sub-shapes. A
 change no delta expresses makes the input's maker forget its entry.
 
+**Placements.** build123d's deep copy -- behind ``moved``, ``located``, ``copy.copy`` and
+every transform -- is this layer's (``_sharing``): new objects of the same classes, each a
+new handle on the SAME TShape, never ``BRepBuilderAPI_Copy``. So a placement registers
+nothing of its own, its key is its source's with its location, and a part placed ten times
+is one B-rep. A maker that changes what it is given in place (``_IN_PLACE``) is handed a
+copy of a placed shape (``_unshared``, ``copied_on_write``). A file read again in one build
+from the same site shares the first read's decode (``_read_again``, ``shared_reads``).
+
 **Registration.** A result's shapes are registered under the entry that made them, and
 every sub-shape below a root names the first root registered holding it (``_SUBS``):
 what a foreign wrapper embeds, and where a ledger row is indexed. The walk stops at a
@@ -164,7 +172,7 @@ _MAPS: "OrderedDict[tuple[int, int], tuple[Any, Any]]" = OrderedDict()
 # model keeps casting shapes out of.
 _ORDINALS: "OrderedDict[tuple[Any, int], dict]" = OrderedDict()
 _STATS = {"hits": 0, "misses": 0, "unkeyable": 0, "unreplayable": 0, "errors": 0, "tainted": 0,
-          "bodies_run": 0, "bodies_skipped": 0}
+          "bodies_run": 0, "bodies_skipped": 0, "copied_on_write": 0, "shared_reads": 0}
 _RUN_IDS = itertools.count(1)
 _EFFECT_IDS = itertools.count(1)
 # Every row applied takes the next stamp: a maker's reset undoes the rows applied
@@ -608,7 +616,8 @@ def _patch(cls: type, attr: str, label: str, kind: str) -> None:
         if not inspect.isfunction(static):
             raise TypeError(f"{cls.__name__}.{attr} is not a plain method")
         if not getattr(static, "__kernel_memo__", False):
-            setattr(cls, attr, _wrap(label, _with_pcurves(static) if label == "bool_op" else static, kind))
+            function = {"bool_op": _with_pcurves, "deepcopy": _sharing}.get(label, lambda found: found)(static)
+            setattr(cls, attr, _wrap(label, function, kind))
 
 
 def _wrap(label: str, function: Any, kind: str) -> Any:
@@ -636,13 +645,80 @@ def _with_pcurves(function: Any) -> Any:
         _store_pcurves(result, (self, *args, *tools))
         return result
 
-    _bool_op.__kernel_pcurves__ = True
+    _bool_op.__kernel_original__ = function
     return _bool_op
 
 
 def _original(function: Any) -> Any:
-    """What ``install`` found, under the step ``_with_pcurves`` adds to a boolean."""
-    return function.__wrapped__ if getattr(function, "__kernel_pcurves__", False) else function
+    """What ``install`` found, under the step ``_with_pcurves`` adds to a boolean or
+    ``_sharing`` puts in place of a deep copy."""
+    return getattr(function, "__kernel_original__", function)
+
+
+def _sharing(function: Any) -> Any:
+    """build123d's ``Shape.__deepcopy__`` as a placement: a new object of the same class
+    for every node, with its own copies of the node's fields -- its label, colour,
+    materials, joints, children and parent, as build123d copies them -- and its own
+    ``TopoDS`` handle on the SAME ``TShape``, at the same location and orientation
+    (``TopoDS_Shape.Located``), where build123d runs ``BRepBuilderAPI_Copy`` on it. Every
+    build123d placement is a deep copy and a location: ``moved``, ``located`` and
+    ``copy.copy`` place the copy; the transforms, ``fix``, ``offset`` and a face's ``-``
+    replace its ``wrapped`` at once with what they made. So a part placed ten times is
+    one B-rep and ten handles, as FreeCAD's ``App::Link`` places it, and the document
+    places one prototype ten times. The kernel's own operations never change a shape they
+    are given in place; a maker a model runs itself is given a copy of a placed shape
+    first (``_unshared``). The TShape is noted as placed (``_note_placed``)."""
+    @functools.wraps(function)
+    def __deepcopy__(self: Any, memo: dict) -> Any:
+        import copy
+
+        from build123d.topology.shape_core import downcast
+
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        wrapped = self.__dict__.get("_wrapped")
+        if wrapped is not None:
+            memo[id(wrapped)] = downcast(wrapped.Located(wrapped.Location()))
+            _note_placed(wrapped.TShape())
+        for key, value in self.__dict__.items():
+            if key == "topo_parent":
+                result.topo_parent = value
+            else:
+                setattr(result, key, copy.deepcopy(value, memo))
+            if key == "joints":
+                for joint in result.joints.values():
+                    joint.parent = result
+        return result
+
+    __deepcopy__.__kernel_original__ = function
+    return __deepcopy__
+
+
+def _note_placed(tshape: Any) -> None:
+    """``tshape`` has a second handle now (``_sharing``): a maker that changes what it is
+    given in place is given a copy of it (``_unshared``). Noted on the shape's record, or,
+    for a shape no operation made, for the run."""
+    state = getattr(_LOCAL, "run", None)
+    made = _made_of(tshape, state)
+    if made is not None:
+        made.placed = True
+    elif state is not None:
+        state.placed.add(tshape)
+
+
+def _is_placed(handle: Any, state: "_Run") -> bool:
+    """Whether a placement shares ``handle``'s TShape, or the TShape of the shape holding it."""
+    tshape = handle.TShape()
+    if tshape in state.placed:
+        return True
+    made = _made_of(tshape, state)
+    while made is not None:
+        if made.placed:
+            return True
+        made = made.parent
+    root = _SUBS.get(tshape)
+    return root is not None and (root.placed or root.tshape in state.placed)
 
 
 def _store_pcurves(result: Any, given: tuple) -> None:
@@ -745,6 +821,10 @@ class _Run:
         # those that are no regular file, which keep it running.
         self.reads: dict[str, list[str]] = {}
         self.unread: dict[str, list[str]] = {}
+        # The TShapes no operation made that a placement shares (``_note_placed``).
+        self.placed: set = set()
+        # Per file key and site, the read of this build that decoded it (``_read_again``).
+        self.decoded: dict[tuple, _Entry] = {}
 
     def scoped(self, key_id: int) -> int:
         """A call's key as the running model's own: two bodies making the same call are
@@ -1066,6 +1146,7 @@ def _replay(record: _Body, state: _Run) -> Any:
             feature.history = entry.history
             copied = _copy_origins(feature, state)
             entry.refresh(feature.index, state, copied)
+            _decoded(state, entry)
         elif kind == "maker":
             entry, frame, op = event[1:4]
             inputs = state.trace.given(event[4:], state.feature_of) if op is not None else None
@@ -1142,16 +1223,23 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
         if key_id is None:
             return _plain(state, op, frame, kind, shapes, function, args, kwargs, capture=True)
         inputs = state.trace.given(shapes, state.feature_of)
-        key_id = state.scoped(key_id)
+        raw, key_id = key_id, state.scoped(key_id)
         n = state.count(key_id)
         entry = None
         if enabled():
             with _LOCK:
                 entry = _MEMO.get((key_id, n))
-                if entry is not None and entry.matches(shapes):
+                if entry is not None and entry.matches(shapes) and not _orphaned(entry, label, state):
                     _MEMO.move_to_end((key_id, n))
                 else:
                     entry = None
+        # A file read: decoded once a build per statement that reads it (``_read_again``).
+        read = (raw, _site(frame)) if label in _FILE_OPS else None
+        if read is not None:
+            if entry is None:
+                function = _read_again(state, read, function)
+            else:
+                _decoded(state, entry)
         if entry is not None:
             result = _hit(state, entry, kind, function, args, kwargs, shapes)
             # The hit's feature is the miss's: its results are the objects the miss made,
@@ -1223,12 +1311,65 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
                        handles=feature.handles)
         _replace(entry.key)
         entry.made = _register(result, entry.key, feature.index, state, entry, copied)
+        entry.read = read
         _keep(entry)
+        _decoded(state, entry)
         if state.bodies:
             _log_call(state, entry, op, frame, inputs, feature, results, returned)
         return function_result
     finally:
         state.depth -= 1
+
+
+def _site(frame: tuple) -> tuple:
+    """What names a call's feature, of the frame it is made from (``Trace.frame``): its
+    statement (file, line, function), the targets it assigns -- not which execution -- and
+    the caller whose assignment names it. Two calls from one site are named alike."""
+    assignment = frame[3] if len(frame) > 3 else None
+    return (*frame[:3], None if assignment is None else tuple(assignment[1]), frame[4] if len(frame) > 4 else None)
+
+
+def _decoded(state: _Run, entry: "_Entry") -> None:
+    """A read this build decoded, or hit, or replayed: what a later read of the same
+    file from the same site shares (``_read_again``)."""
+    if entry.read is not None and entry.made:
+        state.decoded.setdefault(entry.read, entry)
+
+
+def _read_again(state: _Run, read: tuple, function: Any) -> Any:
+    """A file read again in one build -- the same bytes (its key is their digest), with
+    the same arguments, from the same site (``_site``), by any model body: a helper
+    reading one screw for each place it goes -- as ``function`` would read it, but
+    decoded once: that first read's result again, as new objects on the same TShapes
+    (``_ShapeState.fresh``), so the reads are one B-rep placed again and again, and
+    their elements are named alike, as their prototype's. A read from another site is
+    another feature, named apart (**names are the durable tie to code**), so it is
+    decoded apart: one B-rep cannot carry two names. ``function`` itself where no read of
+    the build from that site kept anything to share."""
+    first = state.decoded.get(read)
+    with _LOCK:
+        if first is None or _MEMO.get(first.key) is not first or not first.made:
+            return function
+
+    def again(*_args: Any, **_kwargs: Any) -> Any:
+        _STATS["shared_reads"] += 1
+        return first.snapshot.fresh()
+
+    return again
+
+
+def _orphaned(entry: "_Entry", label: str, state: _Run) -> bool:
+    """Whether an entry of a read that shared another's B-rep (``_read_again``) lost it: the
+    read that decoded it is gone from the memo, and with it the registration that keys
+    what is made of it. It reads again."""
+    if label not in _FILE_OPS or entry.made:
+        return False
+    snapshot = entry.snapshot
+    while isinstance(snapshot, _Sequence):
+        if not snapshot.items:
+            return False
+        snapshot = snapshot.items[0]
+    return isinstance(snapshot, _ShapeState) and _made_of(snapshot.wrapped.TShape(), state) is None
 
 
 def _replace(key: tuple[int, int]) -> None:
@@ -1297,16 +1438,7 @@ def _history(feature: Any, makers: list) -> "kernel_history.History | None":
     except Exception:  # noqa: BLE001
         kernel_history._STATS["errors"] += 1
         return None
-    if feature.operation in _PLACING:
-        try:
-            kernel_history.placed_by_ordinal(history, feature.handles, feature.results)
-        except Exception:  # noqa: BLE001 - what compose reported stands
-            kernel_history._STATS["errors"] += 1
     return history
-
-
-# The calls that place or copy a shape (build123d's ``moved`` copies an assembly's parts).
-_PLACING = frozenset({"moved", "located", "copy", "deepcopy"})
 
 
 def _copy_origins(feature: Any, state: _Run) -> dict[int, Any]:
@@ -1435,6 +1567,34 @@ def wrap_function(label: str, function: Callable[..., Any]) -> Callable[..., Any
 # ordinal when the two map one-to-one (``kernel_history.by_ordinal``).
 
 
+# The makers that change the shape they are given in place: ``ShapeFix_Shape`` fixes the
+# sub-shapes it is handed (their tolerances, p-curves, flags). Given a shape a placement
+# shares (``_sharing``), it is given a copy of it instead (``_unshared``), so it never
+# changes the shape's other placements. The others build what they make anew: a transform,
+# a copy, a fillet, and a unify in its safe input mode, on unless a model turns it off.
+_IN_PLACE = frozenset({"ShapeFix_Shape"})
+
+
+def _unshared(args: tuple) -> tuple:
+    """A maker's arguments with each shape a placement shares (``_is_placed``) replaced by
+    a copy of it -- the layer's own ``BRepBuilderAPI_Copy``, so the copy is a feature of
+    the model's run, keyed and named as the shape it copies -- outside a model's run, or
+    for a shape no placement shares, the arguments as given. Counted (``copied_on_write``)."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from OCP.TopoDS import TopoDS_Shape
+
+    state = getattr(_LOCAL, "run", None)
+    if state is None or state.depth or not any(isinstance(value, TopoDS_Shape) for value in args):
+        return args
+    given = []
+    for value in args:
+        if isinstance(value, TopoDS_Shape) and not value.IsNull() and _is_placed(value, state):
+            value = BRepBuilderAPI_Copy(value).Shape()
+            _STATS["copied_on_write"] += 1
+        given.append(value)
+    return tuple(given)
+
+
 def _maker_class(cls: type, perform: str | None, idle: tuple[int, ...], builds: bool,
                  setters: tuple[str, ...]) -> type:
     """``cls`` as a model's code meets it: a subclass whose instances are ``cls``'s own
@@ -1442,6 +1602,8 @@ def _maker_class(cls: type, perform: str | None, idle: tuple[int, ...], builds: 
     own = frozenset((*setters, perform, "Shape"))
 
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        if cls.__name__ in _IN_PLACE:
+            args = _unshared(args)
         maker = _Maker.open(cls, args, kwargs)
         self.__dict__["_kernel_maker"] = maker
         if maker is not None and perform is None:
@@ -2307,7 +2469,7 @@ class _Made:
     registered sub-shapes. Runs bind their own features to this shared record."""
 
     __slots__ = ("tshape", "key", "position", "entry", "parent", "kind", "index", "effects",
-                 "subs", "born", "origin", "tainted", "rowed", "held")
+                 "subs", "born", "origin", "tainted", "rowed", "held", "placed")
 
     def __init__(self, tshape: Any, *, key: tuple[int, int] | None,
                  entry: "_Entry | None", parent: "_Made | None" = None, kind: int | None = None,
@@ -2334,6 +2496,9 @@ class _Made:
         # Keyed by the root holding its TShape, not by an ancestor it was taken from
         # (``_held``).
         self.held = False
+        # A placement shares this TShape (``_sharing``): a maker that changes what it is
+        # given in place is given a copy of it (``_unshared``).
+        self.placed = False
 
     def root(self) -> "_Made":
         made = self
@@ -2591,7 +2756,7 @@ def _result_shapes(result: Any) -> list:
 
 
 class _Entry:
-    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place", "handles")
+    __slots__ = ("key", "inputs", "snapshot", "effects", "history", "made", "in_place", "handles", "read")
 
     def __init__(self, *, key: tuple[int, int], inputs: list, snapshot: Any, effects: list,
                  history: Any = None, in_place: bool = False, handles: list = ()) -> None:
@@ -2610,6 +2775,8 @@ class _Entry:
         # by another object wrapping the same TShape changes THAT object, as the
         # operation would, and returns it.
         self.in_place = in_place
+        # A file read's file key and site (``_read_again``), else None.
+        self.read: tuple | None = None
 
     def matches(self, shapes: list) -> bool:
         if len(shapes) != len(self.inputs):
@@ -2678,6 +2845,27 @@ class _ShapeState:
                 state.restore()
         return obj
 
+    def fresh(self, memo: dict | None = None) -> Any:
+        """New objects as the operation returned these, each a handle on the same TShape
+        (``_sharing``): another placement of the result, the objects it returned left as
+        the model holds them now."""
+        import copy
+
+        memo = {} if memo is None else memo
+        cls = type(self.obj)
+        obj = cls.__new__(cls)
+        memo[id(self.obj)] = obj
+        obj.__dict__["_wrapped"] = _build123d().downcast(self.wrapped.Located(self.wrapped.Location()))
+        _note_placed(self.wrapped.TShape())
+        for name, value in self.attrs.items():
+            if name != "_NodeMixin__children":
+                obj.__dict__[name] = value if name == "topo_parent" else copy.deepcopy(value, memo)
+        if self.children is not None:
+            obj.__dict__["_NodeMixin__children"] = [state.fresh(memo) for state in self.children]
+        for joint in (obj.__dict__.get("joints") or {}).values():
+            joint.parent = obj
+        return obj
+
 
 class _Sequence:
     __slots__ = ("container", "items")
@@ -2689,6 +2877,10 @@ class _Sequence:
     def restore(self) -> Any:
         return self.container(item.restore() for item in self.items)
 
+    def fresh(self, memo: dict | None = None) -> Any:
+        memo = {} if memo is None else memo
+        return self.container(item.fresh(memo) for item in self.items)
+
 
 class _Literal:
     __slots__ = ("value",)
@@ -2697,6 +2889,9 @@ class _Literal:
         self.value = value
 
     def restore(self) -> Any:
+        return self.value
+
+    def fresh(self, memo: dict | None = None) -> Any:
         return self.value
 
 

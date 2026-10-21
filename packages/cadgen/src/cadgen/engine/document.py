@@ -5,8 +5,9 @@ A result becomes **prototypes** and **instances**. A prototype is a part -- one
 ``TShape`` in one orientation, with the face colours a model painted on it -- or an
 assembly: its components, each a prototype placed at a location under a name, with
 a colour where its instance's differs from its prototype's. Two nodes of the result
-that hold the same geometry are one prototype placed twice, so a part used ten times
-is one prototype with ten components above it. The result's tree (build123d's
+that hold the same geometry are one prototype placed twice -- the same TShape, as every
+placement of a shape shares it, or once named the same geometry key named alike
+(``merge``) -- so a part used ten times is one prototype with ten components above it. The result's tree (build123d's
 compound children) gives names and colours; its geometry and placements are read
 from the TopoDS compounds themselves, child by child, so a placed copy of an
 assembly is placed as the kernel holds it.
@@ -44,7 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-__all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "posed_tree",
+__all__ = ["Assembly", "Component", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge", "posed_tree",
            "read_step_shape", "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
@@ -242,6 +243,35 @@ def collect(result: Any, name: str) -> Tree:
     return tree
 
 
+def merge(tree: Tree) -> None:
+    """Parts of one geometry made apart -- a helper building the same screw for each place
+    it goes, each call its own kernel construction and so its own TShape -- made one
+    prototype, placed wherever either was: parts of one geometry key (``geometry_key``,
+    their bytes as the document writes them), whose elements are named alike and which
+    hold the same colour, paints and materials. Parts named, coloured, painted or given
+    materials apart stay apart. Once the parts are named and keyed (``build``); the first
+    in the tree's order stands for the others, its name the prototype's, each placement's
+    own name and colour on its component."""
+    first: dict[tuple, Part] = {}
+    replaced: dict[int, Part] = {}
+    for part in tree.parts:
+        names = part.names or {}
+        signature = (part.key, *(tuple(names.get(kind) or ()) for kind in ("faces", "edges", "vertices")),
+                     part.color, tuple(sorted(part.face_colors.items())), part.material,
+                     tuple(sorted(part.face_materials.items(), key=lambda item: item[0])))
+        found = first.setdefault(signature, part)
+        if found is not part:
+            replaced[id(part)] = found
+    if not replaced:
+        return
+    for prototype in tree.order:
+        if isinstance(prototype, Assembly):
+            for component in prototype.components:
+                component.prototype = replaced.get(id(component.prototype), component.prototype)
+    tree.order = [prototype for prototype in tree.order if id(prototype) not in replaced]
+    tree.parts = [part for part in tree.parts if id(part) not in replaced]
+
+
 # --- geometry keys ----------------------------------------------------------------------
 
 
@@ -415,9 +445,15 @@ def to_xcaf(tree: Tree) -> Any:
         key_guid = Standard_GUID(KEY_GUID)
         labels: dict[int, Any] = {}
         placements: dict[int, list] = {}  # each assembly's component labels, in order
+        labelled: set = set()  # the TShapes a part's label holds already
         for prototype in tree.order:
             if isinstance(prototype, Part):
-                label = shapes.AddShape(prototype.shape, False, False)
+                # Parts of one geometry painted or given materials apart share a TShape, and
+                # the shape tool hands a shape it holds its first label again: the second is
+                # added as its own topology on the same geometry (``_apart``).
+                shape = prototype.shape if prototype.shape.TShape() not in labelled else _apart(prototype.shape)
+                labelled.add(prototype.shape.TShape())
+                label = shapes.AddShape(shape, False, False)
                 _name(label, prototype.name)
                 if prototype.color is not None:
                     colors.SetColor(label, _quantity(prototype.color), XCAFDoc_ColorSurf)
@@ -426,7 +462,7 @@ def to_xcaf(tree: Tree) -> Any:
                 if prototype.key:
                     TDataStd_AsciiString.Set_s(label, key_guid, TCollection_AsciiString(prototype.key))
                 faces = TopTools_IndexedMapOfShape()
-                TopExp.MapShapes_s(prototype.shape, TopAbs_FACE, faces)
+                TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
                 face_names = (prototype.names or {}).get("faces") or []
                 painted = prototype.face_colors
                 for ordinal in range(1, faces.Extent() + 1):
@@ -449,7 +485,7 @@ def to_xcaf(tree: Tree) -> Any:
                     if not any(text is not None for text in edge_names):
                         continue
                     edges = TopTools_IndexedMapOfShape()
-                    TopExp.MapShapes_s(prototype.shape, topabs, edges)
+                    TopExp.MapShapes_s(shape, topabs, edges)
                     for ordinal in range(1, min(edges.Extent(), len(edge_names)) + 1):
                         text = edge_names[ordinal - 1]
                         if text is None:
@@ -482,6 +518,24 @@ def to_xcaf(tree: Tree) -> Any:
             mechanism.write(doc, tree.mechanism, occurrence)
         _MADE[:] = [doc, tree]
         return doc
+
+
+def _apart(shape: Any) -> Any:
+    """``shape``'s topology made again over the same geometry (``BRepBuilderAPI_Copy``
+    with ``copyGeom`` off): a shape the shape tool holds no label of, its sub-shapes in
+    the same order (the same ordinals, so the same names, paints and materials), every
+    ``Checked`` flag cleared, as ``unchecked`` writes a part's: the copy is the
+    document's alone."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
+    from OCP.TopExp import TopExp
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    made = BRepBuilderAPI_Copy(shape, False, False).Shape()
+    mapped = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(made, mapped)
+    for ordinal in range(1, mapped.Extent() + 1):
+        mapped.FindKey(ordinal).TShape().Checked(False)
+    return made
 
 
 def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:

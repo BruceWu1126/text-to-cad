@@ -244,6 +244,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         part.names, part.key, part.shape = cached.names, cached.key, cached.shape
         tokens.append(cached.token)
         built[cached.key] = cached
+    document.merge(tree)
     signature = (_signature(tree), tuple(tokens))
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)

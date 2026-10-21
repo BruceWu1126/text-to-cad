@@ -41,9 +41,11 @@ of, the part's first feature to claim a label keeping it -- never in a part made
 before the label reached a construction, and not in the part that shape is itself:
 there (an assembly's leaf) the label names the occurrence, and the elements keep
 their construction's names, so identical constructions labelled apart are one
-part. A function or a label that is not an ASCII identifier
-is written as its ASCII form and a digest of it (``identifier``), so no two are
-written alike. Lines and files are not in a name: they are where the trace
+part. A label on one of several shapes a feature made (a part of a file read) names what
+is made of that one alone; a shape handed on under two labels -- placements of one
+shape, which share it, labelled apart -- pins neither (``_resolved``). A function or a
+label that is not an ASCII identifier is written as its ASCII form and a digest of it
+(``identifier``), so no two are written alike. Lines and files are not in a name: they are where the trace
 says a feature ran: the provenance the worker serves while it holds the run, never
 written.
 
@@ -440,9 +442,13 @@ class Trace:
         self._copy_labels: dict[str, int] = {}
         self._stems: dict[str, int] = {}
         self._labelled: dict[str, list[int]] = {}
-        # Per feature whose shape was handed on labelled, the label and the call that
-        # handed it on first (``_pin``); resolved to the features they name (``_labels``).
+        # Per feature whose shape was handed on labelled -- or per feature of several results
+        # and position, one of its results -- each label it was handed on with and the call
+        # that did (``_pin``); the label that pins it, and the call (``_resolved``); resolved
+        # to the features they name (``_labels``).
+        self._pins: dict[Any, list[tuple[str, int]]] = {}
         self._pinned: dict[int, tuple[str, int]] = {}
+        self._pinned_results: dict[tuple[int, int], tuple[str, int]] = {}
         self._labels_count = -1
         # Per model frame making calls, the assignment it is executing (``_execution``):
         # the frame, the statement, the instruction, the frame it called and the
@@ -699,7 +705,7 @@ class Trace:
             if index is not None:
                 label = labels[j] if labels is not None else getattr(shape, "__dict__", {}).get("label")
                 if context is None:
-                    self._pin(index, label, at=feature.index)
+                    self._pin(index, label, at=feature.index, handle=_handle)
                 elif context.label is None:
                     if isinstance(label, str) and label:
                         context.label, context.pinned_at = identifier(label), feature.index
@@ -718,17 +724,41 @@ class Trace:
                 pass
         return feature
 
-    def _pin(self, index: int, label: object, *, at: int) -> None:
-        """Note that the shape feature ``index`` made is handed on labelled ``label`` --
-        the first label it is handed on with, by the call of feature ``at``. The label
-        names the feature that first made that shape (``_labels``) in what is made of it
-        from that call on (:meth:`_names`). Of a part's features, the first to claim a
-        label keeps it."""
+    def _pin(self, index: int, label: object, *, at: int, handle: Any = None) -> None:
+        """Note that the shape feature ``index`` made is handed on labelled ``label`` by the
+        call of feature ``at``. Its label (``_resolved``) names the feature that first made
+        that shape (``_labels``) in what is made of it from the first such call on
+        (:meth:`_names`). Of a part's features, the first to claim a label keeps it. A shape
+        that is one of several a feature made -- a part of a file read -- is one result of
+        it: its label names what is made of that result alone, never its siblings'. Every
+        placement of a shape (``moved``, ``located``, a copy) shares it: placements labelled
+        apart name their occurrences, and pin none of their labels on the shape they share."""
         if not isinstance(label, str) or not label:
             return
         maker = self.unwrapped(index)
-        if maker not in self._pinned:
-            self._pinned[maker] = (identifier(label), at)
+        key: Any = maker
+        feature = self.features[maker]
+        if handle is not None and len(feature.results) > 1:
+            position = feature.position_of(handle.TShape())
+            if position:
+                key = (maker, position)
+        self._pins.setdefault(key, []).append((identifier(label), at))
+
+    def _resolved(self) -> None:
+        """Each shape's pin (``_pin``): the label it was handed on with, by the first call that
+        did -- where every label it was handed on with is that one. A shape handed on under
+        two labels -- placements of it labelled apart, each its occurrence's name -- pins
+        neither: one label would rename what is made of every other placement. A feature's
+        pin in ``_pinned``, one result's of several in ``_pinned_results``."""
+        self._pinned, self._pinned_results = {}, {}
+        for key, pins in self._pins.items():
+            label, at = pins[0]
+            if any(other != label for other, _at in pins):
+                continue
+            if isinstance(key, tuple):
+                self._pinned_results[key] = (label, at)
+            else:
+                self._pinned[key] = (label, at)
 
     def _labels(self) -> None:
         """Resolve each label to the feature it names, once the run's features are all
@@ -741,6 +771,7 @@ class Trace:
         elements the label names keep their names."""
         if self._labels_count == len(self.features):
             return
+        self._resolved()
         unwrapped: dict[int, int] = {}
 
         def through(index: int) -> int:
@@ -790,29 +821,34 @@ class Trace:
         that only place or hold another's: a placement (``moved``, ``located``, a copy
         that keeps the shape) returns the very shape it was given, and a compound built
         of one shape (build123d wraps every part it builds in one) is that shape."""
-        from OCP.TopoDS import TopoDS_Iterator
-
         while True:
-            feature = self.features[index]
-            result = feature.results[0] if len(feature.results) == 1 else None
-            if result is None:
-                return index
-            held = result.TShape()
-            if feature.operation == "compound":
-                children = TopoDS_Iterator(result)
-                child = children.Value() if children.More() else None
-                if child is None:
-                    return index
-                children.Next()
-                if children.More():
-                    return index
-                held = child.TShape()
-            inner = next((feature.inputs[j] for j, handle in enumerate(feature.handles)
-                          if handle is not None and feature.inputs[j] is not None and feature.inputs[j] != index
-                          and handle.TShape() == held), None)
+            inner = self._inner(index)
             if inner is None:
                 return index
             index = inner
+
+    def _inner(self, index: int) -> int | None:
+        """The feature whose shape feature ``index`` returned as its own (``unwrapped``'s
+        one step), or None."""
+        from OCP.TopoDS import TopoDS_Iterator
+
+        feature = self.features[index]
+        result = feature.results[0] if len(feature.results) == 1 else None
+        if result is None:
+            return None
+        held = result.TShape()
+        if feature.operation == "compound":
+            children = TopoDS_Iterator(result)
+            child = children.Value() if children.More() else None
+            if child is None:
+                return None
+            children.Next()
+            if children.More():
+                return None
+            held = child.TShape()
+        return next((feature.inputs[j] for j, handle in enumerate(feature.handles)
+                     if handle is not None and feature.inputs[j] is not None and feature.inputs[j] != index
+                     and handle.TShape() == held), None)
 
     def preserve_copies(self, feature: Feature, copies: dict, made_by: Callable[[Any], int | None]) -> None:
         """Bind whole-copy certificates to this run's original component context.
@@ -1538,6 +1574,10 @@ class _Names:
         if index not in self:
             return None
         feature = self.trace.features[index]
+        self.trace._labels()
+        pinned = self.trace._pinned_results.get((index, position)) if index not in self.overrides else None
+        if pinned is not None and pinned[1] <= self.made_at and index != self.body:
+            return pinned[0]
         if feature.groups is None or index in self.overrides or position >= len(feature.groups):
             return self.get(index)
         name = self.get(index)
