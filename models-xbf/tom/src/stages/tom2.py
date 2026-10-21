@@ -12,7 +12,7 @@ import numpy as np
 from dataclasses import asdict
 from lib.link_assembly import location_from_transform
 import build123d as bd
-from cadgen.engine import memo, read_step
+from cadgen.engine import memo, read_xbf
 from lib.mates import revolute, fastened
 from lib.booleans import as_single_shape as one
 from lib import horn_cap, sheet_rule_scs as sheet
@@ -22,7 +22,14 @@ from hardware.m2_mf_standoff_10mm import m2_mf_standoff_10mm
 from lib import base_stacked_layout as base_layout
 from lib.lower_link_base import ARM_Z_SHIFT, SERVO_PAD_Z
 
+# Tom rev3's production arm (recovered/tom_rev3/tom.step): its kinematics sidecar, and the
+# occurrences this stage uses, each extracted once to parts/<occurrence>.xbf at its place in the
+# arm (parts/README.md has the commands). The rest of the 354 MB file is never read.
 BASELINE=Path(__file__).resolve().parents[2]/'STEP/imported/recovered/tom_rev3/tom.step'
+REV3_PARTS=Path(__file__).resolve().parents[2]/'STEP/imported/parts'
+REV3_OCCURRENCES=('shoulder_yaw_servo','m8_thumbscrew','shoulder_yaw_assembly',
+    'shoulder_pitch_assembly_screws','upper_arm_assembly','elbow_assembly','forearm_assembly',
+    'gripper_screws')
 T=2.032
 RI=.9652
 RO=T+RI
@@ -443,29 +450,34 @@ def bake_rest(parts):
 
 def arm_with_inline_wrist():
     """Shared arm context, without a gripper, for full and isolated models."""
-    print('Reading pinned Tom assembly',flush=True)
-    root=read_step(BASELINE)
+    print('Reading pinned Tom rev3 parts',flush=True)
+    # One read per part, all named as rev3's (a servo's details are one prototype however
+    # many parts carry a servo).
+    rev3={name:read_xbf(REV3_PARTS/f'{name}.xbf') for name in REV3_OCCURRENCES}
     print('Building revised shoulder parts',flush=True)
     # Bake group placements when extracting; retain each purchased servo tree.
     def take_children(group):
         loc=group.location
         cs=list(group.children);group.children=()
         return [c.move(loc) for c in cs]
-    groups=take_children(root)
-    contents=[take_children(g)for g in groups]
-    old_yaw=contents[1][0].solids()[0]
-    old_link=contents[3][1].solids()[0]
+    # rev3's groups: shoulder_yaw_assembly (yoke, pitch servo, screws), shoulder_pitch_assembly
+    # (only its screws), upper_arm_assembly (roll servo, link pair, elbow servo, screws), elbow
+    # and forearm wholly, and of the gripper its screws (the wrist's centre screw).
+    shoulder_yaw=take_children(rev3['shoulder_yaw_assembly'])
+    upper_arm=take_children(rev3['upper_arm_assembly'])
+    old_yaw=shoulder_yaw[0].solids()[0]
+    old_link=upper_arm[1].solids()[0]
     yaw=revised_yaw_yoke(old_yaw)
     link=joined_link(old_yaw,old_link)
-    pitch=flip_motor(contents[1][1]).moved(bd.Pos(0,PIVOT_SHIFT_Y,0));pitch.label='shoulder_pitch_servo'
+    pitch=flip_motor(shoulder_yaw[1]).moved(bd.Pos(0,PIVOT_SHIFT_Y,0));pitch.label='shoulder_pitch_servo'
     # Keep base horn hardware; replace the four former case screws.
-    old_screws=contents[1][2]
+    old_screws=shoulder_yaw[2]
     yaw_screws=[c for c in take_children(old_screws) if 'm2x6' not in c.label]
     m3=hex_socket_m3x5();m2=hex_socket_m2x6()
     for sign,y in zip((-1,1),HORN_SEATS):
         for x,z in SHOULDER_HORN_HOLES:
             yaw_screws.append(screw(m3,f'pitch_horn_m3x5_{len(yaw_screws)-6}',(x,y+sign*T,z),sign))
-    old_pitch_screws=contents[2][1]
+    old_pitch_screws=rev3['shoulder_pitch_assembly_screws']
     yaw_screws += [c.move(bd.Pos(PIVOT_SHIFT_X,PIVOT_SHIFT_Y,PIVOT_SHIFT_Z)) for c in take_children(old_pitch_screws) if c.label=='shoulder_pitch__hex_socket_m3x5__center']
     # Four end holes plus two direct inner-side case tabs.
     case_screws=[]
@@ -473,22 +485,26 @@ def arm_with_inline_wrist():
         part=screw(m2,f'pitch_case_m2x6_{len(case_screws)+1}',(x,sign*(16+T)+PIVOT_SHIFT_Y,z),sign)
         case_screws.append(part.rotate(pitch_axis(),-90))
     # Root feet vanish with the shoulder-roll motor; distal link screws stay.
-    upper_screws=contents[3][3]
+    upper_screws=upper_arm[3]
     distal_screws=[c for c in take_children(upper_screws) if c.label[-2:] in ('03','04','05','06')]
-    contents[1]=[yaw,pitch,bd.Compound(children=yaw_screws,label='shoulder_yaw_assembly_screws')]
-    contents[2]=[link,bd.Compound(children=case_screws,label='shoulder_pitch_assembly_screws')]
-    contents[3]=[contents[3][2],bd.Compound(children=distal_screws,label='upper_arm_assembly_screws')]
+    contents=[None,
+              [yaw,pitch,bd.Compound(children=yaw_screws,label='shoulder_yaw_assembly_screws')],
+              [link,bd.Compound(children=case_screws,label='shoulder_pitch_assembly_screws')],
+              [upper_arm[2],bd.Compound(children=distal_screws,label='upper_arm_assembly_screws')],
+              take_children(rev3['elbow_assembly']),
+              take_children(rev3['forearm_assembly']),
+              [rev3['gripper_screws']]]
     for cs in contents[3:]:
         for part in cs:part.move(bd.Pos(PIVOT_SHIFT_X+LINK_ROOF_DROP,PIVOT_SHIFT_Y,PIVOT_SHIFT_Z-LINK_INSET_MM))
-    # Retain the production base servo and thumbscrew; discard PCB stack,
-    # carrier, and their hardware before constructing the flat root assembly.
+    # Retain the production base servo and thumbscrew; the PCB stack, carrier
+    # and their hardware are not extracted.
     g=base_layout
     clamp=g.make_clamp()
     clamp=one(clamp.fuse(*[g.cylinder(g.CLAMP_M2_TAP_DIAMETER/2+.01,g.T,x,y)for x,y in g.mount_xy('pi_hat')]))
     clamp=one(clamp.cut(*[g.cylinder(1.1,g.T,x,y)for x,y in g.servo_xy('pi_hat')])).clean()
     clamp.label='direct_servo_clamp'
-    base_servo=contents[0][0].move(bd.Pos(0,0,ARM_Z_SHIFT))
-    thumb=contents[0][6]
+    base_servo=rev3['shoulder_yaw_servo'].move(bd.Pos(0,0,ARM_Z_SHIFT))
+    thumb=rev3['m8_thumbscrew']
     post=m2_mf_standoff_10mm();supports=[]
     for i,(x,y) in enumerate(g.servo_xy('pi_hat'),1):
         p=post.moved(bd.Pos(x,y,SERVO_PAD_Z)*bd.Rot(X=180));p.label=f'servo_standoff_{i}';supports.append(p)

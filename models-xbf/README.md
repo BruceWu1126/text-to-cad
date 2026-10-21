@@ -82,7 +82,7 @@ piece. Nested `@xbf` is never needed for caching.
 | `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; one body (no `@memo`: its makers save under 0.1 s); 54 build123d joints (rigid mounts, revolute drive train with ranges) |
 | `motorbike` | 21 part files + one model, one body | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts; one motion, `steer` (`cadgen xbf export ../XBF/motorbike.xbf bike.glb` carries it as a clip) |
 | `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
-| `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
+| `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages, 8 occurrences of Tom rev3's arm extracted once to xbf (`read_xbf`, never the 354 MB STEP) and 11 `read_step` vendor files (139 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
 
 Each model's `src/README.md` says what was ported and what was dropped.
@@ -104,6 +104,10 @@ motorbike's parts and qdd's makers are plain functions in one body. The same ele
 names in every document, one xbf per model. `--verify` finds one function whose fresh run differs from
 its logged one: tom's `tom2_symmetric_yokes` (47 misses on a second run, an
 intermediate yoke's geometry; the arm tom writes is unchanged).
+
+Since 2026-10-21 tom reads the parts of Tom rev3 it uses as xbf extracted from the
+recovered `tom.step` (`cadgen xbf export ... --part`), not the whole file: cold 165 s ->
+107 s, the worker 2.1 -> 1.9 GB after it; edits, no-op and restart unchanged (9 s, 1 s, 6 s).
 
 Known engine gaps these surface: a shape that carries a build123d joint makes
 the compound holding it unkeyable, so a body that authors joints is never
