@@ -10,6 +10,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import document
@@ -165,7 +166,12 @@ class BuildTest(EngineCase):
         # compound above it is made afresh on every build, around the very parts the memo handed back.
         self.write(text=MODEL.replace('    rail.label = "rail"', '    rail.label = "rail"\n    rail.joints = {{"slide": object()}}'))
         self.build("frame")
-        frame = self.build("frame")["frame"]
+        # Its key unchanged, its file is taken and the body is not run at all (``previous``).
+        self.assertEqual(self.build("frame")["frame"]["cache"], {"used": True, "from": "memory"})
+        # Run, with retention off: made afresh around the same parts, and nothing rewritten.
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_BODIES": "0"}):
+            self.build("frame")
+            frame = self.build("frame")["frame"]
         self.assertGreater(frame["memo"]["uncached"], 0)
         self.assertFalse(any(row["written"] for row in frame["files"].values()))
 

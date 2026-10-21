@@ -938,7 +938,10 @@ class Symbols:
         if kind is tuple or kind is list:
             return kind.__name__ + "(" + ",".join(self._canonical(item, node, where, depth) for item in value) + ")"
         if kind is set or kind is frozenset:
-            return kind.__name__ + "{" + ",".join(self._canonical(item, node, where, depth) for item in value) + "}"
+            # Sorted: a set's order is its members' hashes', and a string's hash is another in
+            # each process, so a key read in another process (``previous``) would differ.
+            return kind.__name__ + "{" + ",".join(sorted(self._canonical(item, node, where, depth)
+                                                        for item in value)) + "}"
         if kind is dict:
             return "dict{" + ",".join(self._canonical(k, node, where, depth) + ":" + self._canonical(v, node, where, depth)
                                       for k, v in value.items()) + "}"

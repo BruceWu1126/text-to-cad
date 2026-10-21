@@ -15,12 +15,17 @@ its element names and its geometry key; per model, the document it last wrote, k
 object) is neither named nor keyed again; a document whose every part, placement, name
 and colour is what the file already holds is not touched or rewritten; and any other
 document is the kept one patched, only its changed prototypes made again.
+
+Before a model's body runs, unless the memo replays it, its xbf is asked (``previous``):
+an xbf holding the key the model has now is what the body would make, and the body is
+not run, nor any file written.
 """
 
 from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -43,6 +48,8 @@ class _Written:
     stats: dict[str, tuple | None]
     # The document as written, kept in memory: the next build patches it (``document.Kept``).
     kept: Any = None
+    # The model's key the file holds (``previous.record``), or None.
+    record: str | None = None
 
 
 @dataclass
@@ -157,6 +164,19 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             run.reads.clear()
             run.unread.clear()
             try:
+                verdict, previous_report = _previous(model, context, shown, log)
+            except Exception as error:  # noqa: BLE001 - the cache never fails a build: the body runs
+                verdict, previous_report = {"used": False, "reason": f"the cache failed: {error}"}, None
+            if previous_report is not None:
+                timings = previous_report["timings"]
+                timings["load"] = round(loaded - started, 4)
+                timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
+                reports.append(previous_report)
+                results.append((model, None, 0.0))
+                continue
+            verdict["seconds"] = round(time.perf_counter() - body_started, 4)
+            body_started = time.perf_counter()
+            try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
                 reports.append({"ok": False, "model": f"{shown}::{model.name}", "error": _model_traceback(error)})
@@ -185,7 +205,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                             f"reads {path}, not a regular file: it runs on every build" for path in shown_paths)
             reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
-                                         if name != model.identity}})
+                                         if name != model.identity},
+                            "bodies": _statuses(run, f"{model.script}::{model.name}"), "cache": verdict})
             context.timings.clear()
     load_seconds = loaded - started
     for report, (model, result, body) in zip(reports, results):
@@ -215,6 +236,11 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     targets = model.targets()
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
+    xbf = next((path for kind, path in targets if kind == "xbf"), None)
+    if xbf is not None:
+        from cadgen.engine import previous
+
+        tree.key = previous.record(run.keys, f"{model.script}::{model.name}", Path(xbf).parent)
     timings["collect"] = round(time.perf_counter() - clock, 4)
     # What the joints' harvest found inconsistent: said, and the document written all the same.
     if tree.mechanism is not None and tree.mechanism.warnings:
@@ -249,7 +275,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
         tokens.append(cached.token)
         built[cached.key] = cached
     document.merge(tree)
-    signature = (_signature(tree), tuple(tokens))
+    signature = (_signature(tree), tuple(tokens), tree.key)
     timings["names"] = round(time.perf_counter() - clock, 4)
     report["parts"] = len(tree.parts)
     report["named"] = named
@@ -281,9 +307,97 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
             timings[kind] = round(seconds, 4)
             written[str(path)] = {"written": fresh, "seconds": round(seconds, 4), "bytes": size}
             log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
-        _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets}, kept)
+        _WRITTEN[key] = _Written(signature, {str(path): _stat(path) for _kind, path in targets}, kept, tree.key)
     report["files"] = written
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
+
+
+def _statuses(run: Any, name: str) -> dict[str, str]:
+    """How each body of a model went in this build, by its identity: ``run``, ``replayed``."""
+    from cadgen.engine import previous
+
+    return {_identity(body): run.statuses.get(body, "run") for body in previous.closure(run.keys, name)}
+
+
+def _identity(name: str) -> str:
+    script, _, function = name.rpartition("::")
+    return f"{Path(script).name}::{function}"
+
+
+def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) -> tuple[dict, dict | None]:
+    """The model's previous document asked before its body runs (``previous``): the
+    verdict, and the model's report where the document is what the body would make -- the
+    key the model has now is the one the document holds -- so the body is not run and the
+    files are left as they are. A body the memo replays is replayed, as ever."""
+    from cadgen.engine import document, previous
+    from cadgen.engine.kernel import memo
+
+    targets = model.targets()
+    xbf = next((Path(path) for kind, path in targets if kind == "xbf"), None)
+    if xbf is None:
+        return {"used": False, "reason": "the model declares no xbf"}, None
+    if not memo.enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        return {"used": False, "reason": "retention is off"}, None
+    name = f"{model.script}::{model.name}"
+    clock = time.perf_counter()
+    source = context.source(model)
+    if memo.replayable(name, source):
+        return {"used": False, "reason": "replayed from memory"}, None
+    stats = {str(path): _stat(path) for _kind, path in targets}
+    remembered = _WRITTEN.get(name)
+    where = "memory"
+    if remembered is not None and remembered.stats == stats:
+        # The file this process last wrote or took, as it left it: its record is in memory.
+        text = remembered.record
+        if text is None:
+            return {"used": False, "reason": "its last build wrote no key"}, None
+    else:
+        where = "file"
+        if stats[str(xbf)] is None:
+            return {"used": False, "reason": "no file yet"}, None
+        missing = [path for kind, path in targets if kind != "xbf" and stats[str(path)] is None]
+        if missing:
+            return {"used": False, "reason": f"{_shown(Path(missing[0]), xbf.parent)} is missing"}, None
+        writer, text = previous.scan(xbf)
+        if writer != document._writer():
+            return {"used": False, "reason": f"written by {writer or 'another program'}"}, None
+        if text is None:
+            return {"used": False, "reason": "the file holds no key"}, None
+    found = json.loads(text)
+    try:
+        now = previous.current(found, source, xbf.parent)
+    except Exception as error:  # noqa: BLE001 - a file it read that reads no more: the body runs
+        return {"used": False, "reason": f"an input cannot be read: {error}"}, None
+    keyed = time.perf_counter()
+    if now != found["key"]:
+        changed = "its code changed" if previous.code_key(source) != found["code"] else "a file it reads changed"
+        return {"used": False, "reason": changed}, None
+    timings = {"key": round(keyed - clock, 4)}
+    if where == "file":
+        # Taken only once it reads whole, written by this engine, holding the record its head showed.
+        try:
+            doc = document._read(xbf)
+            held = previous.read_record(doc)
+        except Exception as error:  # noqa: BLE001 - a document that does not read is built again
+            return {"used": False, "reason": f"the file does not read: {error}"}, None
+        del doc
+        if held != (document._writer(), text):
+            return {"used": False, "reason": "the file does not hold the key its head shows"}, None
+        timings["read"] = round(time.perf_counter() - keyed, 4)
+        _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
+    log(f"took {os.path.relpath(xbf)}: its key is the model's ({found['bodies']} bodies), nothing ran")
+    report = {"ok": True, "model": f"{shown}::{model.name}",
+              "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
+                       "bodies_loaded": found["bodies"]},
+              "retention": {"keys": round(context.key_seconds, 4),
+                            "fallbacks": {key: list(reasons) for key, reasons in context.fallbacks.items()
+                                          if key == model.identity},
+                            "reads": {}},
+              "children": {}, "bodies": {model.identity: "loaded"}, "cache": {"used": True, "from": where},
+              "timings": timings,
+              "files": {str(path): {"written": False, "seconds": 0.0, "bytes": stats[str(path)][1]}
+                        for _kind, path in targets}}
+    return report["cache"], report
 
 
 def _names(run: Any, part: Any) -> tuple[Any, dict[str, dict[str, Any]], dict[tuple[str, str], str | None]]:

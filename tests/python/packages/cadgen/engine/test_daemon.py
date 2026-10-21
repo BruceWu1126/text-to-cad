@@ -165,8 +165,8 @@ class DaemonTest(unittest.TestCase):
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
         """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
-        them; the document writes them all cleared. So the first build after a restart
-        finds the file it would write already there and rewrites nothing."""
+        them; the document writes them all cleared. So a fresh worker, building the file
+        afresh, writes the bytes the warm one did."""
         self.script = self.folder / "cut.py"
         xbf = self.folder / "cut.xbf"
 
@@ -182,7 +182,11 @@ class DaemonTest(unittest.TestCase):
         self.assertTrue(build(10)["files"][str(xbf)]["written"], "the edit's file is replaced")
         self.assertEqual(xbf.read_bytes(), cold, "the warm worker wrote the cold one's bytes")
         self._stop_daemon()
-        self.assertFalse(build(10)["files"][str(xbf)]["written"], "a fresh worker keeps the same bytes")
+        self.assertTrue(build(10)["cache"]["used"], "a fresh worker takes the file its key is in")
+        xbf.unlink()
+        self._stop_daemon()
+        self.assertTrue(build(10)["files"][str(xbf)]["written"])
+        self.assertEqual(xbf.read_bytes(), cold, "a fresh worker writes the same bytes")
 
     def test_a_served_document_follows_the_build_without_its_file_being_read(self) -> None:
         self.script = self.folder / "pair.py"
