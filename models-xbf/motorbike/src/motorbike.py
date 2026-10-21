@@ -17,8 +17,9 @@ world-coincident datum frames:
 - everything else: rigid mounts at named, parameterized datums.
 
 Each revolute joint carries the range the old typed mate declared. The old
-`KINEMATICS` poses (ride, stand_down, turned_left, bump) have no build123d
-equivalent and are not ported.
+`KINEMATICS` poses (ride, stand_down, turned_left, bump) are not ported; one
+motion is: `steer`, the bars swung 20 degrees each way and back, which a GLB
+export bakes into a clip of that name.
 
 Two parts are instanced twice: `turn_signal_left()` is the front-left signal
 and, PLACED with `Pos`, the rear-left one (a second call in one build is a new
@@ -33,7 +34,7 @@ OCCURRENCE ORDER IS FROZEN — top to bottom below.
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import xbf
+from cadgen.engine import motion, xbf
 
 from center_stand import center_stand
 from engine import engine
@@ -186,12 +187,13 @@ def motorbike():
     _rigid_mate(bars, "mirror_mount_left", mirror_l, "bar_mount", bd.Location(MIRROR_MOUNT_LEFT))
     _rigid_mate(bars, "mirror_mount_right", mirror_r, "bar_mount", bd.Location(MIRROR_MOUNT_RIGHT))
 
-    return bd.Compound(children=[
+    bike = bd.Compound(children=[
         chassis, shroud, shield,
         fork, bars, fender_front, wheel_front, lamp, signal_fl, signal_fr,
         motor, pipe, shock, wheel_rear,
         body, fender_rear, saddle, lamp_rear, signal_rl, signal_rr, mirror_l, mirror_r, stand,
     ], label="motorbike")
+    return motion(bike, "steer", sweep={"head_tube_axis": (-20, 20)}, duration=2, loop="pingpong")
 
 
 if __name__ == "__main__":
