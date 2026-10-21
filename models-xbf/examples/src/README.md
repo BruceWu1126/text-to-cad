@@ -11,7 +11,7 @@ Four scripts from `models/examples/src`, ported to `cadgen.engine`:
 
 Each model declares its xbf alone. The import reads fixed STEP inputs committed in
 `../STEP/`, exported once from the enclosure and the fixture; no model writes them
-(re-export one with `cadgen xbf export ../XBF/NAME.xbf --step ../STEP/NAME.step`).
+(re-export one with `cadgen xbf export ../XBF/NAME.xbf ../STEP/NAME.step`).
 Build from this folder, in any order:
 
 ```
