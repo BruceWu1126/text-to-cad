@@ -78,7 +78,8 @@ def hinge():
    but for the xbf itself: a model whose xbf holds the closure the model has now is
    not run (**Build closure**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
-   OCP, build123d, numpy and the standard library only. A test holds it.
+   OCP, build123d, numpy, Pillow (the renderer's rasteriser) and the standard library
+   only. A test holds it.
 4. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
