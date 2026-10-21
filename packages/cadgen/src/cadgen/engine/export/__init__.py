@@ -233,12 +233,14 @@ def structure_of(tree: Any, path: Path | None) -> dict[str, Any]:
 @dataclass
 class Placed:
     """One placed part: the prototype's index in the structure, its world matrix (4x4,
-    numpy, row-major), its names from the root down, and its instance's own colour."""
+    numpy, row-major), its names from the root down, its instance's own colour, and its
+    instance's index in the structure."""
 
     prototype: int
     matrix: Any
     path: list[str]
     color: tuple | None
+    instance: int = -1
 
 
 @dataclass
@@ -304,7 +306,7 @@ class View:
             instance = instances[index]
             names = instance["path"].split("/")
             placements.append(Placed(instance["prototype"], matrices[index], names[len(root):] if root else names,
-                                     tuple(instance["color"]) if instance.get("color") else None))
+                                     tuple(instance["color"]) if instance.get("color") else None, index))
         return cls(source, name, placements, tree, root, rerooted, pose is not None, part is not None, matrices)
 
 

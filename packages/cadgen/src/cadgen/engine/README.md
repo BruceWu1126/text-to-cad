@@ -125,7 +125,7 @@ def hinge():
 | `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
 | `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
+| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
@@ -235,7 +235,8 @@ target and moved over it.
   roughness, emissive: a material reads back matte), a face's material (the face keeps its
   colour), the mechanism and its configurations, and the model's key and provenance.
 - **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
-  look (a paint is a primitive of its own); **3MF**: an object per prototype, a build item per
+  look (a paint is a primitive of its own), and every motion of the document an animation of
+  the same name (below); **3MF**: an object per prototype, a build item per
   placement, looks through the materials extension (base materials, `pbmetallic` display
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
@@ -247,6 +248,22 @@ target and moved over it.
   of a posed or parted document is an assembly of its own placement.
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
+
+**Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
+CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
+accessor (`export/motion.py`). The keys start at the motion's waypoints (a pingpong's way back
+too: its clip is twice the duration) and the halfway point between each two; at a key every
+moving placement is where forward kinematics through the mechanism (gears included) puts it,
+its in- and out-tangents the one-sided derivatives there, so a step's speed may jump at a
+waypoint. A step is halved while at any eighth of it the Hermite strays from the true forward
+kinematics by more than 1e-3 of the model's size (the diagonal of what the GLB places) in a
+placement's origin or 1e-3 radian in its rotation, at most 4,097 keys. A moved placement's node
+stands by translation and rotation, every other by its matrix; the animation's
+`extras.cadgen` holds the loop (None, `loop`, `pingpong`) and the duration. STEP, STL and 3MF
+ignore motions, and neither `export` nor `@glb` takes an argument for them. On the corpus's
+motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° pingpong sweep of the head
+tube over 2 s, a 4 s clip) bakes to 5 keys on 15 placements, within 1.26 mm and 2.1e-4 rad of
+forward kinematics at eight points inside every step.
 
 **Decorators carry only `out`.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf`
 beside the script); `@step(out=None)`, `@glb`, `@stl` and `@threemf` declare translations of

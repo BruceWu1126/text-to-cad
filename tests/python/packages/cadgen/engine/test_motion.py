@@ -15,6 +15,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -43,9 +44,9 @@ def arm():
     base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
     arm = bd.Compound(children=[base, link, tip], label="arm")
     configuration(arm, "raised", elbow=90)
-    motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})], loop="loop")
-    motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear", loop="pingpong")
-    {nod}motion(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
+    {m}motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})], loop="loop")
+    {m}motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear", loop="pingpong")
+    {m}{nod}motion(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
     {more}
     return arm
 """
@@ -62,8 +63,9 @@ class _Folder(unittest.TestCase):
         memo.install()
         self.addCleanup(memo.clear)
 
-    def arm(self, *, ok: bool = True, reach: int = 60, more: str = "pass", nod: bool = True) -> dict:
-        text = ARM.format(reach=reach, more=more, nod="" if nod else "# ")
+    def arm(self, *, ok: bool = True, reach: int = 60, more: str = "pass", nod: bool = True,
+            motions: bool = True) -> dict:
+        text = ARM.format(reach=reach, more=more, nod="" if nod else "# ", m="" if motions else "# ")
         self.script.write_text(textwrap.dedent(text), encoding="utf-8")
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
         [report] = engine_build.build(self.script, ["arm"], cwd=self.folder)
@@ -181,6 +183,156 @@ class DocumentTest(_Folder):
         whole = self.folder / "whole.step"
         translate(self.xbf, None, whole)
         self.assertIsNone(document.Loaded(whole).mechanism, "STEP carries no mechanism and no motion")
+
+
+def _glb(path: Path) -> tuple[dict, Any]:
+    """A GLB's JSON chunk, and a reader of its accessors (as float64 rows)."""
+    data = path.read_bytes()
+    length = struct.unpack_from("<I", data, 12)[0]
+    gltf = json.loads(data[20:20 + length])
+    blob = data[28 + length:28 + length + struct.unpack_from("<I", data, 20 + length)[0]]
+
+    def read(at: int) -> np.ndarray:
+        accessor = gltf["accessors"][at]
+        view = gltf["bufferViews"][accessor["bufferView"]]
+        width = {"SCALAR": 1, "VEC3": 3, "VEC4": 4}[accessor["type"]]
+        return np.frombuffer(blob, "<f4", accessor["count"] * width, view.get("byteOffset", 0)).reshape(
+            accessor["count"], width).astype(float)
+
+    return gltf, read
+
+
+def _cubic(times: np.ndarray, rows: np.ndarray, t: float) -> np.ndarray:
+    """glTF's CUBICSPLINE at ``t``, as a viewer evaluates it: rows of (in-tangent, value, out-tangent)."""
+    keys = rows.reshape(len(times), 3, -1)
+    at = max(0, min(int(np.searchsorted(times, t, side="right")) - 1, len(times) - 2))
+    span = times[at + 1] - times[at]
+    s = (t - times[at]) / span
+    return ((2 * s ** 3 - 3 * s ** 2 + 1) * keys[at, 1] + span * (s ** 3 - 2 * s ** 2 + s) * keys[at, 2]
+            + (-2 * s ** 3 + 3 * s ** 2) * keys[at + 1, 1] + span * (s ** 3 - s ** 2) * keys[at + 1, 0])
+
+
+def _rotation(q: np.ndarray) -> np.ndarray:
+    x, y, z, w = q / np.linalg.norm(q)
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def deviations(glb: Path, structure: dict, between: int = 9) -> dict[str, tuple[int, float, float]]:
+    """Each clip of ``glb`` sampled at ``between - 1`` times inside every step between two of
+    its keys, against forward kinematics through the document's mechanism at those times:
+    its key count, its worst origin (mm) and its worst rotation (radians) apart."""
+    gltf, read = _glb(glb)
+    kinematics = structure["kinematics"]
+    instances = {instance["path"]: at for at, instance in enumerate(structure["instances"])}
+    root = structure["tree"]["name"]
+    found = {}
+    for animation in gltf["animations"]:
+        timeline = mechanism.Timeline(kinematics, animation["name"])
+        times = read(animation["samplers"][0]["input"])[:, 0]
+        truths = {}
+        worst = [0.0, 0.0]
+        for channel in animation["channels"]:
+            node = gltf["nodes"][channel["target"]["node"]]
+            index = instances[f"{root}/{node['name']}"]
+            rows = read(animation["samplers"][channel["sampler"]]["output"])
+            for a, b in zip(times, times[1:]):
+                for step in range(1, between):
+                    t = float(a + (b - a) * step / between)
+                    if t not in truths:
+                        truths[t] = mechanism.posed_instances(structure, timeline.values(t))
+                    truth = np.array(truths[t][index]).reshape(4, 4).T
+                    got = _cubic(times, rows, t)
+                    if channel["target"]["path"] == "translation":
+                        worst[0] = max(worst[0], float(np.linalg.norm(got - truth[:3, 3])))
+                    else:
+                        turned = _rotation(got).T @ truth[:3, :3]
+                        worst[1] = max(worst[1], math.acos(max(-1.0, min(1.0, (np.trace(turned) - 1) / 2))))
+        found[animation["name"]] = (len(times), worst[0], worst[1])
+    return found
+
+
+class GlbTest(_Folder):
+    def test_a_glb_bakes_every_motion_into_a_clip_within_the_tolerance_of_forward_kinematics(self) -> None:
+        from cadgen.engine.export import translate
+
+        self.arm()
+        out = self.folder / "arm.glb"
+        translate(self.xbf, None, out)
+        gltf, read = _glb(out)
+        structure = document.Loaded(self.xbf).structure()
+        self.assertEqual([animation["name"] for animation in gltf["animations"]], ["lift", "nod", "wave"])
+        nodes = {node["name"]: node for node in gltf["nodes"][1:]}
+        self.assertIn("matrix", nodes["base"], "a placement no motion moves stands by its matrix")
+        for name in ("link", "tip"):
+            self.assertNotIn("matrix", nodes[name], "an animated node stands by translation and rotation")
+            self.assertEqual(len(nodes[name]["rotation"]), 4)
+        for animation in gltf["animations"]:
+            self.assertEqual(len(animation["channels"]), 4, "translation and rotation of the link and the tip")
+            first = animation["samplers"][0]["input"]
+            keys = gltf["accessors"][first]["count"]
+            for channel in animation["channels"]:
+                sampler = animation["samplers"][channel["sampler"]]
+                self.assertEqual((sampler["interpolation"], sampler["input"]), ("CUBICSPLINE", first))
+                output = gltf["accessors"][sampler["output"]]
+                self.assertEqual(output["count"], 3 * keys, "in-tangent, value, out-tangent per key")
+                self.assertEqual(output["type"], {"translation": "VEC3", "rotation": "VEC4"}[channel["target"]["path"]])
+            times = read(first)[:, 0]
+            self.assertTrue(np.all(np.diff(times) > 0))
+            self.assertEqual(gltf["accessors"][first]["min"][0], 0.0)
+        extras = {animation["name"]: animation["extras"]["cadgen"] for animation in gltf["animations"]}
+        self.assertEqual(extras["wave"], {"loop": "pingpong", "duration": 2.0})
+        self.assertEqual(extras["nod"]["loop"], None)
+        self.assertAlmostEqual(read(gltf["animations"][2]["samplers"][0]["input"])[-1, 0], 4.0, places=5,
+                               msg="a pingpong clip is the way out and the way back")
+        size = math.dist((-50, -30, -10), (160, 30, 40))
+        found = deviations(out, structure)
+        for name, (keys, linear, angular) in found.items():
+            self.assertLess(keys, 200, name)
+            # Within the tolerance at the bake's checks; between them, within half as much again.
+            self.assertLess(linear, mechanism.LINEAR_TOLERANCE * size * 1.5, (name, found))
+            self.assertLess(angular, mechanism.ANGULAR_TOLERANCE * 1.5, (name, found))
+        self.assertLess(found["wave"][0], found["nod"][0], "few keys where the motion is simple")
+        again = self.folder / "again.glb"
+        translate(self.xbf, None, again)
+        self.assertEqual(again.read_bytes(), out.read_bytes(), "the same document bakes the same bytes")
+
+    def test_a_posed_glb_keeps_its_clips_and_the_other_exports_ignore_motions(self) -> None:
+        from cadgen.engine.export import translate
+
+        self.arm()
+        posed = self.folder / "raised.glb"
+        translate(self.xbf, None, posed, pose="raised")
+        self.assertEqual([animation["name"] for animation in _glb(posed)[0]["animations"]], ["lift", "nod", "wave"])
+        moving = {kind: self.folder / f"moving{suffix}" for kind, suffix in (("stl", ".stl"), ("threemf", ".3mf"))}
+        for path in moving.values():
+            translate(self.xbf, None, path)
+        self.arm(motions=False)
+        still = self.folder / "still.glb"
+        translate(self.xbf, None, still)
+        self.assertNotIn("animations", _glb(still)[0], "no motion, no animation")
+        for kind, path in moving.items():
+            other = self.folder / f"still{path.suffix}"
+            translate(self.xbf, None, other)
+            self.assertEqual(other.read_bytes(), path.read_bytes(), f"a {kind} is the same with motions or without")
+
+    def test_neither_export_nor_glb_takes_an_animation_argument(self) -> None:
+        import inspect
+
+        from cadgen.engine import api
+        from cadgen.engine.export import translate
+        from cadgen.engine.model import Model
+
+        for function in (translate, api.export, Model.export):
+            self.assertNotIn("animate", inspect.signature(function).parameters, function)
+        import contextlib
+        import io
+
+        from cadgen.engine import cli
+
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            cli.build_parser().parse_args(["export", "a.xbf", "a.glb", "--animate", "x"])
 
 
 if __name__ == "__main__":
