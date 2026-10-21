@@ -12,9 +12,9 @@ from cadgen.engine import xbf
 # Composition is by FUNCTION: each layer is a `@memo` function of a sibling file,
 # and calling it inside this body runs it in the same build as a sub-assembly.
 # An edit that does not reach a layer's code replays it from the worker's memory;
-# inside a layer each group of parts (`lib/mvt_*.py`, `_*_parts`) is a `@memo`
-# too, so an edit to one group runs that group alone. Only this model and
-# `case.py` write a file.
+# inside a layer the groups of parts (`lib/mvt_*.py`, `_*_parts`) are plain
+# functions: a marker per group saved nothing beyond the layers. Only this model
+# and `case.py` write a file.
 
 
 @xbf(out="../XBF/movement.xbf")

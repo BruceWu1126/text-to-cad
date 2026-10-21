@@ -6,14 +6,11 @@
 
 Build from this folder: `python -m cadgen.engine build qdd_actuator.py::qdd_actuator`.
 
-Seven makers are `@memo` functions: `make_stator`, `make_rotor`,
-`make_cross_roller_bearing`, `make_torque_sensor`, `make_driver_pcb`,
-`make_encoder_pcb` and `make_retainer_screws`, the modules of many repeated
-features, each called once and returning assigned parts. An edit elsewhere (the
-housing's fins, a joint) runs the root and replays them. The makers that return a
-boolean's result unassigned (`return housing - cuts`) stay plain: marked, their
-elements would be named in the maker instead of by the root's assignment. So do the
-repeated helpers (`make_ball_bearing(z)`, the gears): the kernel memo covers them.
+The makers (`make_stator`, `make_rotor`, `make_cross_roller_bearing`,
+`make_torque_sensor`, `make_driver_pcb`, `make_encoder_pcb`, `make_retainer_screws`)
+are plain functions in one body, like the repeated helpers (`make_ball_bearing(z)`,
+the gears): the kernel memo caches their kernel calls, and a `@memo` on the seven
+saved under 0.1 s of an edit (see "When to use `@memo`" in `models-xbf/README.md`).
 
 Joints (build123d, placed with `connect_to` at their as-built pose): every
 rigid mount of the original as a `RigidJoint` pair; the old fastened mates the

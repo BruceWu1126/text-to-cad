@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import memo
 
 from lib import frontend as B
 
 
-@memo
 def front_fender():
     built = B.build_front_fender()
     if isinstance(built, list):

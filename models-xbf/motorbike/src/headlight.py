@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import memo
 
 from lib import trim as B
 
 
-@memo
 def headlight():
     built = B.build_headlight()
     if isinstance(built, list):

@@ -1,9 +1,8 @@
 """Full motorbike assembly: the one model here, every part composed by CALLING it.
 
-Each part is a `@memo` function in a sibling file: called inside this body it
-runs in the same build, as a sub-assembly of this one, and a later build whose
-edit does not reach it replays it from the worker's memory instead of running
-it. A part writes no file of its own: the bike is one xbf. Every part is
+Each part is a plain function in a sibling file, called inside this body: the
+bike is one body and one xbf, and the kernel memo caches the parts' kernel calls
+(a `@memo` per part saves under 0.1 s, so none carries one). Every part is
 authored in the BIKE frame (see `lib/spec.py`), so the assembly composes at
 identity and still
 records the functional relationships as native build123d joints on

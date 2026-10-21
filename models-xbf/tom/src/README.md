@@ -58,7 +58,9 @@ holds most of 20 GB; a second build of the unchanged model replays from the work
   reaches that were their own models -- the stages `tom2`, `tom2_side_mounted_elbow` and
   `tom2_symmetric_yokes`, and the parts `gripper_frame`, `camera_payload` and
   `common_base_plate` -- are `@memo`: one xbf, and an edit to the root (its layout
-  layers in `lib/`) replays the whole stage chain. The stages `tom` does not call
+  layers in `lib/`) replays the whole stage chain; each of the six holds seconds of
+  kernel work, which is what earns a `@memo` (1.3-3 s per edit; see "When to use
+  `@memo`" in `models-xbf/README.md`). The stages `tom` does not call
   (`tom2_500mm`, `tom2_600mm_solid`, `diagonal_lightning_current`, `legacy/base_clamp`)
   are plain functions: their helpers are what the root reads. The `purchased/` and
   `hardware/` readers stay plain: each is one `read_step`, which the kernel memo already
