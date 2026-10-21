@@ -79,7 +79,7 @@ class DecoratorTest(unittest.TestCase):
 
         self.assertIsInstance(one, Model)
         here = Path(__file__).resolve().parent
-        self.assertEqual(one.targets(), [("xbf", here / "one.xbf")])
+        self.assertEqual(one.targets(), [("xbf", here / "XBF/one.xbf")])
         self.assertEqual(two.targets(), [("xbf", here / "a/b.xbf"), ("stl", here / "b.stl"), ("step", here / "two.step")])
         self.assertEqual(two.identity, "test_build.py::two")
         with self.assertRaises(ValueError):
@@ -102,7 +102,7 @@ class BuildTest(EngineCase):
         self.write()
         reports = self.build()
         self.assertTrue(all(report["ok"] for report in reports.values()), reports)
-        self.assertEqual(_files(self.folder), {"frame.py", "bracket.xbf", "out/frame.xbf", "out/frame.step"})
+        self.assertEqual(_files(self.folder), {"frame.py", "XBF/bracket.xbf", "out/frame.xbf", "out/frame.step"})
         loaded = document.load(self.folder / "out/frame.xbf")
         structure = loaded.structure()
         self.assertEqual(structure["name"], "frame")
@@ -271,7 +271,7 @@ class BuildTest(EngineCase):
         self.build()
         self.assertFalse(any("__pycache__" in name for name in _files(self.folder)))
         # The declared outputs and nothing else: no sidecar, no record of the build.
-        self.assertEqual(_files(self.folder), {"frame.py", "helper.py", "bracket.xbf", "out/frame.xbf", "out/frame.step"})
+        self.assertEqual(_files(self.folder), {"frame.py", "helper.py", "XBF/bracket.xbf", "out/frame.xbf", "out/frame.step"})
         self.assertFalse([name for name in _files(self.folder) if name.endswith(".json")])
 
 
@@ -337,7 +337,7 @@ class PatchTest(EngineCase):
 
         super().setUp()
         self.script = self.folder / "kit.py"
-        self.xbf = self.folder / "kit.xbf"
+        self.xbf = self.folder / "XBF/kit.xbf"
         memo.install()
         self.addCleanup(memo.clear)
 
@@ -460,7 +460,7 @@ class DateTest(unittest.TestCase):
             done = subprocess.run([sys.executable, "-c", COLD, str(folder)], env={**os.environ, "TZ": zone},
                                   capture_output=True, text=True)
             self.assertEqual(done.returncode, 0, done.stderr)
-            files.append(folder / "block.xbf")
+            files.append(folder / "XBF/block.xbf")
         first, second = (path.read_bytes() for path in files)
         self.assertEqual(first, second)
         self.assertIn(b"\x0a\x00\x00\x00" + document.WRITTEN_DATE, first[:1024])

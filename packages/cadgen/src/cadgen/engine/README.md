@@ -2,15 +2,15 @@
 
 A model is a parameterless function that returns a build123d shape, decorated
 with `@xbf`. The engine runs it in a warm worker, saves the result as an XCAF
-document (`.xbf`, BinXCAF), and writes the exports the model declares from that
-document.
+document (`.xbf`, BinXCAF), and writes the derived files the model declares,
+each a translation of that document.
 
 ```python
 import build123d as bd
 from cadgen.engine import xbf, step
 
-@xbf                      # arm.xbf beside the script; @xbf(out="path.xbf") to choose
-@step(out="arm.step")     # also @glb, @stl, @threemf; stacked or alone
+@xbf                      # XBF/arm.xbf beside the script; @xbf(out="path.xbf") to choose
+@step("arm.step")         # also @glb, @stl, @threemf, @snapshot; stacked or alone
 def arm():
     return bd.Box(10, 20, 30)
 ```
@@ -67,7 +67,7 @@ def hinge():
    <release>)`, `document.Loaded.writer`) and holds the model's key: digests, and the
    data files the model read by their paths relative to the document (**Previous
    document**). No script path and no code location is in it. STEP, GLB, STL and 3MF
-   are translations of it.
+   are translations of it (**Exports**).
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
@@ -98,17 +98,18 @@ def hinge():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators; identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `paint` |
+| `model.py` | the decorators and their options; `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `python model.py` asking the daemon; `paint` |
+| `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
-| `build.py` | one build: load the script afresh, one memo run, document, element names, files |
+| `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
 | `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
+| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder into a PNG |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; also the `@snapshot` decorator's name |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -116,17 +117,23 @@ def hinge():
 ## CLI
 
 ```
-cadgen xbf build SCRIPT[::FUNCTION] ... [--json]   build in the script's warm worker
-cadgen xbf export DOC [--step F] [--glb F] [--stl F] [--threemf F] [--pose NAME|JSON]
-cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-cadgen xbf snapshot DOC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
+cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
+cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
+    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--snapshot [F]]
+    [--pose NAME|JSON] [--part NAME] [--json] [--no-daemon]
+cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-daemon]
+cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf where DOC REF                    REF: PART/face N (edge, vertex), or an element name
 cadgen xbf status | stop | daemon
 ```
 
-`SCRIPT` alone builds every decorated function in it. The build returns once
-every file is on disk. If the document is unchanged, the xbf is not rewritten.
+`SCRIPT` alone builds every decorated function in it; `python SCRIPT [flags]` is the
+same build (the script's own process builds nothing: it asks the daemon, and exits with
+the build's status). The build returns once every file is on disk. If the document is
+unchanged, the xbf is not rewritten, nor is a derived file whose options and stat are
+what the build left (**Exports**).
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that
@@ -178,6 +185,79 @@ stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildMo
 `captureMs`, `totalMs`). `display.exploded` (a document's parts stand where it places them) and
 `parts` for a document that places one part are refused by name before any browser starts. A
 face the mesher left without triangles is named in a warning. Nothing is written but OUT.
+
+`SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
+bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
+`headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. A build's own
+picture (`@snapshot`, `--snapshot`) is drawn from the document in the worker's memory, served by
+a server of the worker's over its one mesh cache: what the build meshed is not meshed again.
+
+## Exports
+
+The xbf is the model's result; STEP, GLB, STL and 3MF are exports of a document, and an xbf
+can be one too. One writer, `export.translate(document, kind, path, pose=, part=, animate=)`,
+writes every one, whether a decorator declares the file or `cadgen xbf export` asks for it: the
+same document and the same options write the same bytes. Every file is written beside its
+target and moved over it.
+
+- **Sources are documents**: an `.xbf`, a `.step` (read into a document first), or a script's
+  model (`SCRIPT.py::MODEL`, built first, in its worker). A mesh is never a source: it has no
+  B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
+  pose is a request, never a document). Several destinations read the document once; an export
+  runs in the worker that built the document while the file is as it left it, else in the
+  daemon's documents worker, which reads it.
+- **STEP** (AP242, `export/step.py`): the assembly with instance and product names, colours per
+  part and per painted face, material names and densities, element names on face, edge and
+  vertex sub-shape labels. Read back through the engine's own reader, the instance tree, every
+  name (on the same elements: the reader numbers edges and vertices in its own order), colours
+  and materials' names and densities are the xbf's. OCCT's writer drops the PBR look (metallic,
+  roughness, emissive: a material reads back matte), a face's material (the face keeps its
+  colour), the mechanism and its configurations, and the model's key and provenance.
+- **GLB**: one mesh per prototype, a node per placement named by its path, a PBR material per
+  look (a paint is a primitive of its own); **3MF**: an object per prototype, a build item per
+  placement, looks through the materials extension (base materials, `pbmetallic` display
+  properties, painted triangles naming their own); **STL**: binary, every placed triangle.
+  Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
+  build meshed for the viewer is not meshed again for a GLB, nor the other way round.
+- `--pose` places the mechanism's links by forward kinematics before anything is written;
+  `--part` (an occurrence's path, `board/rack`, or a node's name) writes that subtree as a
+  document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
+  of it (the links wholly inside, the pairs between them, their configurations). Every assembly
+  of a posed or parted document is an assembly of its own placement.
+- `animate` (GLB motion) is reserved: it takes nothing yet.
+
+**Decorators.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf` beside the
+script): its only argument. A derived-file decorator is its verb run on the built document, and
+takes `out` (`<function><suffix>` beside the script) and exactly that verb's options:
+`@step(out, pose=, part=)`, `@glb(out, pose=, part=, animate=)`, `@stl` and `@threemf` as
+`@step`, `@snapshot(out, display=, camera=, grid=, preview=, pose=, width=, height=)`. Nothing
+else: a model's material, colours, joints and configurations are written in its body. A child
+model's files are written only when it is built as a target. A model with no `@xbf` writes its
+derived files and nothing else.
+
+**Build flags** are additive and select and override on a script: no flag writes what the
+decorators declare; `--xbf` alone writes the xbf alone; `--xbf --step out.step --glb` the xbf,
+the STEP at `out.step` and the GLB where the model declares it (or its default). A flag with a
+path builds one model. `--pose` and `--part` apply to every derived file whose verb takes them.
+A build whose request names its own files is not taken from the previous document (its files
+say nothing of the options they were written with); the memo replays it as ever. The xbf is
+saved first and the viewer woken with it: the worker waits for the daemon to hold the patch
+(`{"op": "patched"}` on its pipe) before it writes a derived file.
+
+**Code** (`--code SOURCE`, `-` for stdin, `--name N`, default `model`) is one model with no
+decorators: the code assigns its final shape to `result` (refused by name otherwise), its files
+are the flags alone and each takes a path, it runs in the warm worker of its name, and its
+elements are named from its assignment targets with `N` as the function (`f:N.body.3`). Its
+source is held in memory only (`sources.MEMORY`), under the path `(code)/N.py` of the working
+folder, which no file holds, so its provenance is live only. `--xbf F` gives it the cold cache
+as any model has.
+
+**Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
+`cadgen.where`): one per command, each through the daemon. `build(target)` returns a `Report`,
+`build(code=...)` a `Built` (`.files`, `.report`, `.document` and `.shape` asked of the worker
+that holds them, `.export(...)`); `export(source, *destinations)` a list of `Written`;
+`snapshot(source, out, ...)` a `Drawn`. A `Model` builds, exports and draws itself the same way
+(`.build()`, `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only.
 
 ## Kinematics
 

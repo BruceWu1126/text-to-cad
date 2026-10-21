@@ -68,7 +68,7 @@ class StandaloneTest(unittest.TestCase):
                 from cadgen.engine.build import build
                 from cadgen.engine import document, serve, mesh
                 reports = build(Path({str(script)!r}))
-                document.load(Path({folder!r}) / "part.xbf").structure()
+                document.load(Path({folder!r}) / "XBF/part.xbf").structure()
                 loaded = {{name for name in sys.modules if name.startswith("cadgen")}} - baseline
                 print(json.dumps({{"ok": reports[0]["ok"], "extra": sorted(loaded)}}))
             """)

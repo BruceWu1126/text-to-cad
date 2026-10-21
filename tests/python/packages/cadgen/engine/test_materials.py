@@ -17,7 +17,7 @@ from pathlib import Path
 
 from cadgen.engine import Material, materials
 from cadgen.engine import build as engine_build
-from cadgen.engine import document, exports
+from cadgen.engine import document, export
 
 MODEL = """
 import build123d as bd
@@ -93,7 +93,7 @@ class MaterialDocumentTest(unittest.TestCase):
         self.assertTrue(report["ok"], report)
         return report
 
-    def prototypes(self, name: str = "plate.xbf") -> dict:
+    def prototypes(self, name: str = "XBF/plate.xbf") -> dict:
         return {p.name: p for p in document.Loaded(self.folder / name).prototypes}
 
     def test_a_part_and_its_faces_keep_their_materials_through_the_xbf(self) -> None:
@@ -112,8 +112,8 @@ class MaterialDocumentTest(unittest.TestCase):
         self.assertEqual((bare.name, bare.density, bare.color), ("Bare", 900.0, steel.color))
         self.assertEqual(sorted(body.face_colors.values()), sorted([steel.color, (0.2, 0.9, 0.3, 1.0)]))
         # The structure the page reads: the same from the file and from the build's tree.
-        structure = document.Loaded(self.folder / "plate.xbf").structure()
-        made = document.tree_structure(document.saved(self.folder / "plate.xbf"), self.folder / "plate.xbf")
+        structure = document.Loaded(self.folder / "XBF/plate.xbf").structure()
+        made = document.tree_structure(document.saved(self.folder / "XBF/plate.xbf"), self.folder / "XBF/plate.xbf")
         self.assertEqual(structure["prototypes"], made["prototypes"])
         entry = next(p for p in structure["prototypes"] if p["name"] == "body")
         self.assertEqual(entry["material"]["name"], steel.name)
@@ -143,9 +143,9 @@ class MaterialDocumentTest(unittest.TestCase):
 
     def test_glb_has_pbr_materials_from_the_document(self) -> None:
         self.build()
-        loaded = document.Loaded(self.folder / "plate.xbf")
+        loaded = document.Loaded(self.folder / "XBF/plate.xbf")
         path = self.folder / "plate.glb"
-        exports.write_from_loaded("glb", loaded, path)  # ``cadgen xbf export``: the xbf alone
+        export.translate(loaded.path, "glb", path)  # ``cadgen xbf export``: the xbf alone
         gltf = _glb_json(path)
         by_name = {entry.get("name"): entry for entry in gltf["materials"]}
         self.assertEqual(set(by_name), {materials.steel.name, materials.aluminium.name, "Glow", "Bare"})
@@ -163,12 +163,12 @@ class MaterialDocumentTest(unittest.TestCase):
 
     def test_a_material_only_edit_calls_no_kernel_rewrites_the_xbf_and_keeps_every_key(self) -> None:
         self.build()
-        before = document.Loaded(self.folder / "plate.xbf")
+        before = document.Loaded(self.folder / "XBF/plate.xbf")
         report = self.build(body="titanium", root="pla", pin="pin.material = materials.copper")
         self.assertEqual(report["memo"]["misses"], 0, report["memo"])
         self.assertEqual(report["memo"]["uncached"], 0, report["memo"])
-        self.assertTrue(report["files"][str(self.folder / "plate.xbf")]["written"])
-        after = document.Loaded(self.folder / "plate.xbf")
+        self.assertTrue(report["files"][str(self.folder / "XBF/plate.xbf")]["written"])
+        after = document.Loaded(self.folder / "XBF/plate.xbf")
         self.assertNotEqual(after.structure()["version"], before.structure()["version"])
         self.assertEqual({p.name: p.key for p in after.prototypes}, {p.name: p.key for p in before.prototypes})
         found = {p.name: p for p in after.prototypes}
@@ -194,13 +194,13 @@ class MaterialDocumentTest(unittest.TestCase):
                 return bd.Compound(children=[left, right], label="pair")
             """).format(line="right.material = materials.copper"), encoding="utf-8")
         engine_build.build(self.script, ["pair"], cwd=self.folder)
-        self.assertEqual(self.prototypes("pair.xbf")["right"].material.name, materials.copper.name)
+        self.assertEqual(self.prototypes("XBF/pair.xbf")["right"].material.name, materials.copper.name)
         self.script.write_text(self.script.read_text(encoding="utf-8").replace(
             "right.material = materials.copper", "pass"), encoding="utf-8")
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
         report = engine_build.build(self.script, ["pair"], cwd=self.folder)[0]
         self.assertEqual(report["memo"]["misses"], 0, report["memo"])
-        structure = document.Loaded(self.folder / "pair.xbf").structure()
+        structure = document.Loaded(self.folder / "XBF/pair.xbf").structure()
         placed = {i["path"]: structure["prototypes"][i["prototype"]] for i in structure["instances"]}
         self.assertEqual(placed["pair/right"]["material"]["name"], materials.steel.name)
         self.assertEqual(len(structure["prototypes"]), 1, "two placements of one steel box")

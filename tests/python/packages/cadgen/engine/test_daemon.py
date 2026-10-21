@@ -91,14 +91,14 @@ class PatcherTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(PAIR.format(size=size)), encoding="utf-8")
         os.utime(self.script, ns=(time.time_ns(), time.time_ns()))
         self.assertTrue(engine_build.build(self.script, ["pair"], cwd=self.folder)[-1]["ok"])
-        return document.saved(self.folder / "pair.xbf")
+        return document.saved(self.folder / "XBF/pair.xbf")
 
     def patch(self, request: dict, tree) -> list:
         from cadgen.engine.worker import Patcher
 
         sent: list = []
         patcher = Patcher(request, lambda message, payload: sent.append(message))
-        patcher.saved(self.folder / "pair.xbf", tree)
+        patcher.saved(self.folder / "XBF/pair.xbf", tree)
         return sent
 
     def test_a_document_nobody_serves_is_meshed_by_no_build(self) -> None:
@@ -109,7 +109,7 @@ class PatcherTest(unittest.TestCase):
         first = self.build(10)
         served = sorted({part.key for part in first.parts})
         edited = self.build(12)
-        path = str(self.folder / "pair.xbf")
+        path = str(self.folder / "XBF/pair.xbf")
         # The daemon serves the first build's document and holds no mesh yet (a cold daemon).
         sent = self.patch({"served": {path: "0-0"}, "served_keys": {path: served}, "held": [], "shapes": []}, edited)
         self.assertEqual(len(sent), 1)
@@ -155,20 +155,21 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual((warm["memo"]["bodies_run"], warm["memo"]["bodies_skipped"]), (0, 1))
         edited = self.build(12)
         self.assertGreater(edited["memo"]["misses"], 0)
-        self.assertTrue(edited["files"][str(self.folder / "block.xbf")]["written"])
+        self.assertTrue(edited["files"][str(self.folder / "XBF/block.xbf")]["written"])
         status = json.loads(self.cli("status").stdout)
         self.assertEqual(len(status["workers"]), 1)
         self.assertEqual(status["workers"][0]["builds"], 3)
         # The daemon's only files are its socket and lock; the build's, its outputs.
         self.assertEqual({path.suffix for path in self.state.iterdir()}, {".sock", ".lock"})
-        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf"])
+        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+                         ["XBF/block.xbf", "block.py"])
 
     def test_a_warm_build_writes_the_bytes_a_cold_one_does(self) -> None:
         """A warm worker's faces carry whichever ``Checked`` flag the memo's replay left
         them; the document writes them all cleared. So a fresh worker, building the file
         afresh, writes the bytes the warm one did."""
         self.script = self.folder / "cut.py"
-        xbf = self.folder / "cut.xbf"
+        xbf = self.folder / "XBF/cut.xbf"
 
         def build(size: int) -> dict:
             self.script.write_text(textwrap.dedent(CUT.format(size=size)), encoding="utf-8")
@@ -192,7 +193,7 @@ class DaemonTest(unittest.TestCase):
         self.script = self.folder / "pair.py"
         self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
         self.assertEqual(self.cli("build", "pair.py").returncode, 0)
-        served = self.cli("serve", "pair.xbf")
+        served = self.cli("serve", "XBF/pair.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
         base, ident = served.stdout.strip().split("/?doc=")
         api = f"{base}/api/doc/{ident}"
@@ -202,7 +203,7 @@ class DaemonTest(unittest.TestCase):
         self.script.write_text(textwrap.dedent(PAIR.format(size=12)), encoding="utf-8")
         self.assertEqual(self.cli("build", "pair.py").returncode, 0)
         answer = get_json(f"{api}/version?after={before['version']}&wait=60")
-        stat = (self.folder / "pair.xbf").stat()
+        stat = (self.folder / "XBF/pair.xbf").stat()
         self.assertEqual(answer["version"], f"{stat.st_mtime_ns}-{stat.st_size}")
         self.assertIsNotNone(answer["patch"], "the document came from the worker, not from its file")
         self.assertEqual(answer["patch"]["meshes"], 1, "the worker meshed the changed part alone")
@@ -219,7 +220,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1])["meshed"], 0, "nobody serves it: nothing meshed")
         # A fresh daemon serves the file: its worker has built nothing yet.
         self.cli("stop")
-        served = self.cli("serve", "pair.xbf")
+        served = self.cli("serve", "XBF/pair.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
         base, ident = served.stdout.strip().split("/?doc=")
         before = get_json(f"{base}/api/doc/{ident}")
@@ -233,7 +234,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(json.loads(unchanged.stdout.strip().splitlines()[-1])["meshed"], 0)
 
     def where(self, ref: str) -> dict:
-        found = self.cli("where", "block.xbf", ref)
+        found = self.cli("where", "XBF/block.xbf", ref)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
@@ -257,13 +258,101 @@ class DaemonTest(unittest.TestCase):
         self.assertIsNone(cold.pop("made_by"))
         drop = ("made_by", "meshed")
         self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
-        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["block.py", "block.xbf"])
+        self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
+                         ["XBF/block.xbf", "block.py"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")
         done = self.cli("build", "block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
+
+    def test_running_a_model_script_asks_the_daemon_to_build_it(self) -> None:
+        self.script.write_text(textwrap.dedent(MODEL.format(size=3)), encoding="utf-8")
+        done = subprocess.run([sys.executable, "block.py", "--json"], cwd=self.folder, env=self.env,
+                              capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(json.loads(done.stdout.strip().splitlines()[-1])["ok"])
+        self.assertTrue((self.folder / "XBF/block.xbf").is_file())
+        workers = json.loads(self.cli("status").stdout)["workers"]
+        self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 1)],
+                         "the daemon's worker built it, not the script's own process")
+        # The script's argv is the build's: a flag selects its files.
+        done = subprocess.run([sys.executable, "block.py", "--step", "b.step"], cwd=self.folder, env=self.env,
+                              capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.folder / "b.step").is_file())
+
+    def test_the_viewer_moves_before_a_derived_file_is_written(self) -> None:
+        # A deliberately slow STL writer, put in place in the worker by the model's own module.
+        slow = textwrap.dedent("""
+            import time
+            from cadgen.engine import export
+
+            if not getattr(export, "slow", False):
+                class Slow(type(export.KINDS["stl"])):
+                    def write(self, view, path):
+                        time.sleep(3)
+                        super().write(view, path)
+
+                given = export.KINDS["stl"]
+                export.KINDS["stl"] = Slow(given.name, given.suffixes, given.writer, given.atomic)
+                export.slow = True
+        """) + textwrap.dedent(PAIR).replace("@xbf\n", "@xbf\n@stl\n").replace(
+            "import xbf", "import stl, xbf")
+        self.script = self.folder / "pair.py"
+        self.script.write_text(slow.format(size=10), encoding="utf-8")
+        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        served = self.cli("serve", "XBF/pair.xbf")
+        base, ident = served.stdout.strip().split("/?doc=")
+        before = get_json(f"{base}/api/doc/{ident}")
+        stl = self.folder / "pair.stl"
+        written = stl.stat().st_mtime_ns
+        self.script.write_text(slow.format(size=12), encoding="utf-8")
+        building = subprocess.Popen([sys.executable, "-m", "cadgen.engine", "build", "pair.py"], cwd=self.folder,
+                                    env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(building.wait)
+        answer = get_json(f"{base}/api/doc/{ident}/version?after={before['version']}&wait=60")
+        self.assertNotEqual(answer["version"], before["version"])
+        self.assertEqual(stl.stat().st_mtime_ns, written, "the viewer moved before the STL was written")
+        self.assertEqual(building.wait(timeout=300), 0)
+        self.assertNotEqual(stl.stat().st_mtime_ns, written)
+
+    def test_exports_and_code_through_the_daemon(self) -> None:
+        self.script = self.folder / "pair.py"
+        self.script.write_text(textwrap.dedent(PAIR.format(size=10)), encoding="utf-8")
+        self.assertEqual(self.cli("build", "pair.py").returncode, 0)
+        done = self.cli("export", "XBF/pair.xbf", "pair.glb", "pair.step")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(len(json.loads(self.cli("status").stdout)["workers"]), 1,
+                         "the worker that built the document wrote its exports")
+        done = self.cli("export", "pair.step", "back.xbf")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue((self.folder / "back.xbf").is_file())
+        done = self.cli("export", "pair.py::pair", "made.stl", "--part", "peg")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
+        code = "import build123d as bd\nresult = bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)\n"
+        built = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "--code", "-", "--name", "plug",
+                                "--stl", "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env,
+                               capture_output=True, text=True, timeout=300)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        self.assertTrue((self.folder / "plug.stl").is_file())
+        # From Python: the code's document and shape, asked of the worker that holds them.
+        probe = textwrap.dedent(f"""
+            import json, cadgen
+            built = cadgen.build(code={code!r}, name="plug", stl="plug.stl")
+            shape = built.shape
+            print(json.dumps({{"bodies": built.report["bodies"], "name": built.document.name,
+                               "volume": round(shape.volume, 3)}}))
+        """)
+        done = subprocess.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env, capture_output=True,
+                              text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        found = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertEqual(found["bodies"], {"plug.py::plug": "replayed"}, "the code's warm worker")
+        self.assertEqual(found["name"], "plug")
+        self.assertAlmostEqual(found["volume"], 8 - 3.14159265 * 0.25 * 2, places=2)
 
     def test_an_idle_daemon_exits(self) -> None:
         env = {**self.env, "CADGEN_ENGINE_IDLE": "0.5"}

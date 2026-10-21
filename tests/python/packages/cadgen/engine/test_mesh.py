@@ -164,8 +164,8 @@ class OneKeyOneMeshTest(unittest.TestCase):
         script = folder / "turned.py"
         script.write_text(textwrap.dedent(TURNED), encoding="utf-8")
         self.assertTrue(engine_build.build(script, ["turned"], cwd=folder)[-1]["ok"])
-        live = document.saved(folder / "turned.xbf").parts[0]
-        read = document.Loaded(folder / "turned.xbf").prototypes[0]
+        live = document.saved(folder / "XBF/turned.xbf").parts[0]
+        read = document.Loaded(folder / "XBF/turned.xbf").prototypes[0]
         self.assertEqual(live.key, read.key)
         data = mesh.shape_bytes(live.shape)
         self.assertEqual(data, mesh.shape_bytes(read.shape, read=True))
@@ -201,7 +201,7 @@ class FactsTest(unittest.TestCase):
         assert reports[-1]["ok"], reports
         cls.server = Server(port=0, mesh_mode="inline")
         cls.server.start()
-        cls.ident = cls.server.add(cls.folder / "plate.xbf")
+        cls.ident = cls.server.add(cls.folder / "XBF/plate.xbf")
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -276,7 +276,7 @@ class SurfaceFactsTest(unittest.TestCase):
         server = Server(port=0, mesh_mode="inline")
         server.start()
         self.addCleanup(server.stop)
-        ident = server.add(folder / "solids.xbf")
+        ident = server.add(folder / "XBF/solids.xbf")
 
         def get(path: str) -> dict:
             with urllib.request.urlopen(server.url + path, timeout=120) as response:

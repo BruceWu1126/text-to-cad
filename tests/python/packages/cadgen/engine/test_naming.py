@@ -158,7 +158,7 @@ class NamingCase(unittest.TestCase):
         os.utime(script, ns=(time.time_ns(), time.time_ns()))
         reports = engine_build.build(script, [name], cwd=self.folder)
         self.assertTrue(all(report["ok"] for report in reports), reports)
-        loaded = document.load(self.folder / f"{name}.xbf")
+        loaded = document.load(self.folder / f"XBF/{name}.xbf")
         for each in loaded.prototypes:
             # Every name the engine writes is a reference the viewer's grammar parses.
             for text in [*each.face_names.values(), *each.edge_names.values(), *each.vertex_names.values()]:
@@ -170,7 +170,7 @@ class NamingCase(unittest.TestCase):
     def derivations(self, names: dict[str, list[str]], name: str = "block", part: int = 0) -> dict[str, list[str]]:
         """``names`` with every folded atom spelled out, from the table the build holds of
         the part (in the worker's memory: nothing but the xbf is written)."""
-        key = document.load(self.folder / f"{name}.xbf").prototypes[part].key
+        key = document.load(self.folder / f"XBF/{name}.xbf").prototypes[part].key
         table = next(named.names["table"] for named in reversed(engine_build._PARTS.values()) if named.key == key)
 
         def spelled(text: str) -> str:
@@ -262,7 +262,7 @@ def stand():
         alone = self.names(child, name="peg")["faces"]
         self.assertTrue(alone and all(name.startswith("f:peg.") for name in alone), alone)
         self.names(child, name="stand")
-        placed = [[p.face_names[k] for k in sorted(p.face_names)] for p in document.load(self.folder / "stand.xbf").prototypes]
+        placed = [[p.face_names[k] for k in sorted(p.face_names)] for p in document.load(self.folder / "XBF/stand.xbf").prototypes]
         self.assertIn(alone, placed)
 
     def test_renaming_a_variable_renames_exactly_that_feature(self) -> None:
@@ -284,7 +284,7 @@ def stand():
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_BODIES": "0"}):
             after = self.derivations(self.names("# moved\n\n\n" + BLOCK, insert="", relief="relief"))
         self.assertEqual(before, after)
-        self.assertNotIn(b"block.py", (self.folder / "block.xbf").read_bytes())
+        self.assertNotIn(b"block.py", (self.folder / "XBF/block.xbf").read_bytes())
 
 
 class LabelTest(NamingCase):
@@ -472,7 +472,7 @@ class GrammarTest(unittest.TestCase):
 class VertexNamesTest(NamingCase):
     def test_every_vertex_is_named_in_the_document_and_its_structure(self) -> None:
         self.names(BLOCK, insert="", relief="relief")
-        path = self.folder / "block.xbf"
+        path = self.folder / "XBF/block.xbf"
         loaded = document.load(path)
         prototype = loaded.prototypes[0]
         from OCP.TopAbs import TopAbs_VERTEX
@@ -538,7 +538,7 @@ class RunOrderTest(unittest.TestCase):
             done = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "grid.py", "--no-daemon", "--json"],
                                   cwd=folder, env=env, capture_output=True, text=True, timeout=300)
             self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
-            prototype = document.load(folder / "grid.xbf").prototypes[0]
+            prototype = document.load(folder / "XBF/grid.xbf").prototypes[0]
             found = {}
             for kind, names in ((TopAbs_FACE, prototype.face_names), (TopAbs_EDGE, prototype.edge_names),
                                 (TopAbs_VERTEX, prototype.vertex_names)):

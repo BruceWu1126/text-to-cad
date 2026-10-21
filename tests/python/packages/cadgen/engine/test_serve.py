@@ -52,7 +52,7 @@ class ServeTest(unittest.TestCase):
         self.server = Server(port=0, mesh_mode="inline")  # a test asks for the pool itself
         self.server.start()
         self.addCleanup(self.server.stop)
-        self.ident = self.server.add(self.folder / "rack.xbf")
+        self.ident = self.server.add(self.folder / "XBF/rack.xbf")
 
     def write(self, size: int) -> None:
         self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
@@ -148,7 +148,7 @@ class DocumentInMemoryTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-patch-")).resolve()
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.script = self.folder / "shelf.py"
-        self.path = self.folder / "shelf.xbf"
+        self.path = self.folder / "XBF/shelf.xbf"
 
     def build(self, size: int) -> list:
         self.script.write_text(textwrap.dedent(SHELF.format(size=size)), encoding="utf-8")
@@ -177,7 +177,7 @@ class DocumentInMemoryTest(unittest.TestCase):
         before = server.document(ident)
         server.mesh_all(before, None)
         held = server.hold([str(self.path)])  # as the daemon does while a build writes the file
-        export = self.path.with_name("shelf.step")
+        export = self.folder / "shelf.step"
         sent = []
         patcher = worker.Patcher({"served": server.versions(), "held": server.cache.keys(),
                                   "shapes": server.shape_keys()}, lambda message, payload: sent.append(
