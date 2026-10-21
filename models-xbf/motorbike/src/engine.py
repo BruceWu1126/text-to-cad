@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import build123d as bd
-from cadgen.engine import memo
 
 from lib import drivetrain as B
 
 
-@memo
 def engine():
     built = B.build_engine()
     if isinstance(built, list):

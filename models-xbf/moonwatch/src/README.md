@@ -13,13 +13,12 @@ The two main documents of `models/moonwatch`, ported to `cadgen.engine`:
 Build from this folder: `python -m cadgen.engine build case.py movement.py`. The
 two models are the only files a build writes.
 
-Inside each layer every group of parts is a `@memo` function too (`lib/mvt_base.py`
-`_plate_parts` ... `_balance_parts`, `lib/mvt_keyless.py` `_stem_parts`,
-`_lever_parts`, `_motion_parts`, `lib/mvt_chrono.py` `_column_wheel_parts` ...
-`_chrono_bridge_parts`: 19 groups): each takes no argument, returns its parts as
-an assigned list, and touches no state another group reads, so an edit to one group's
-code or constants runs that group, its layer and the movement, and replays the
-rest. The case stays one body: `lib/case.py`'s band builder leaves
+Only the three layers are `@memo`: each holds seconds of kernel work (movement_base
+alone is ~130 s cold), so an edit to one layer runs it and replays the other two, and
+a leaf edit costs about 4.5 s. The groups of parts inside a layer (`lib/mvt_*.py`,
+`_plate_parts` ... `_chrono_bridge_parts`) are plain functions: marking each of the
+19 added nothing beyond the layers (see "When to use `@memo`" in
+`models-xbf/README.md`). The case stays one body: `lib/case.py`'s band builder leaves
 `_BAND_CHAMFER_APPLIED` in its module for the polish builder to read, state a replay
 would not set, so no builder of the case is a `@memo`.
 

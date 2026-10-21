@@ -31,7 +31,6 @@ from __future__ import annotations
 import math
 
 import build123d as bd
-from cadgen.engine import memo
 
 from lib import spec as S
 from lib import finishing as F
@@ -766,7 +765,6 @@ def _bridge(outline, z0, z1, jewel_xy, screw_xy, cutouts=(), recesses=(),
 # 1. Main plate (perlage, recesses, bosses, lower jewels)
 # ---------------------------------------------------------------------------
 
-@memo
 def _plate_parts():
     parts = []
     plate = _cyl(S.MOVEMENT_DIAMETER / 2.0, S.PLATE_THICKNESS, -S.PLATE_THICKNESS)
@@ -857,7 +855,6 @@ def _plate_parts():
 # 2. Barrel group (drum + tooth flange, lid, mainspring, arbor)
 # ---------------------------------------------------------------------------
 
-@memo
 def _barrel_parts():
     parts = []
     bx, by = S.BARREL_POS
@@ -919,7 +916,6 @@ def _barrel_parts():
 # 3. Going train (wheels GILT, pinions+arbors STEEL_DARK, mesh-phased)
 # ---------------------------------------------------------------------------
 
-@memo
 def _train_parts():
     parts = []
 
@@ -953,7 +949,6 @@ def _train_parts():
 # 4. Bridges, screws, upper jewels, ratchet/crown/click layer
 # ---------------------------------------------------------------------------
 
-@memo
 def _bridge_parts():
     parts = []
     z0, z1 = BRIDGE_SEAT_Z, BRIDGE_TOP_Z
@@ -1138,7 +1133,6 @@ def _escape_wheel():
     return _finish(wheel, "escape_wheel", S.GILT)
 
 
-@memo
 def _pallet_parts():
     parts = []
     pp = S.PALLET_FORK_POS
@@ -1225,7 +1219,6 @@ def _pallet_parts():
 #    cock with stripes/anglage, lyre-spring shock setting, regulator, stud
 # ---------------------------------------------------------------------------
 
-@memo
 def _balance_parts():
     parts = []
     lx, ly = S.BALANCE_POS

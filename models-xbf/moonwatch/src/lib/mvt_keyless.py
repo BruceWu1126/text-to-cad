@@ -34,7 +34,6 @@ from __future__ import annotations
 import math
 
 import build123d as bd
-from cadgen.engine import memo
 
 from lib import spec as S
 from lib import finishing as F
@@ -248,7 +247,6 @@ def _stem_axis(part, x0=0.0):
 # 1. Stem + winding pinion + sliding pinion (castle wheel)
 # ---------------------------------------------------------------------------
 
-@memo
 def _stem_parts():
     parts = []
 
@@ -307,7 +305,6 @@ def _lever_plate(prof, z_band, bevel):
     return body
 
 
-@memo
 def _lever_parts():
     parts = []
     z0, z1 = LEVER_Z
@@ -383,7 +380,6 @@ def _cyl_box_pad():
 # 3. Motion works: cannon pinion, minute wheel + pinion, hour wheel
 # ---------------------------------------------------------------------------
 
-@memo
 def _motion_parts():
     parts = []
     mw = MINUTE_WHEEL_POS

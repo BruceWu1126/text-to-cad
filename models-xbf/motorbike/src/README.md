@@ -1,43 +1,43 @@
 # motorbike models
 
 `motorbike.py` is the one model (`@xbf`, into `../XBF/motorbike.xbf`). Every other
-`.py` directly under `src/` is one part of it: a `@memo` function the assembly
-composes by CALLING it (`frame()`, `seat()`, …). Each runs in the assembly's build
-as a sub-assembly, writes no file of its own, and on a later build whose edit does
-not reach it is replayed from the worker's memory instead of run; a part called
-twice is one prototype placed twice. Shared code lives in `src/lib/` and is never
-marked.
+`.py` directly under `src/` is one part of it: a plain function the assembly
+composes by CALLING it (`frame()`, `seat()`, …). The bike is one body and one xbf; a
+part called twice is one prototype placed twice. No part is a `@memo`: the kernel
+memo already caches their kernel calls and a marker per part saved under 0.1 s of
+an edit (see "When to use `@memo`" in `models-xbf/README.md`). Shared code lives in
+`src/lib/`.
 
 | Script               | What it is                | Description                                              |
 |----------------------|---------------------------|----------------------------------------------------------|
 | motorbike.py         | XBF/motorbike.xbf         | Full assembly: 23 occurrences of 21 parts, build123d joints |
-| frame.py             | `@memo` part              | Welded underbone frame + steel floor pan (the fixed root) |
-| center_stand.py      | `@memo` part              | Center stand, folded-up pose under the floor pan          |
-| front_fork.py        | `@memo` part              | Telescopic fork + chrome axle on the steering axis        |
-| handlebar.py         | `@memo` part              | Bar, stem collar, grips and levers; owns `MIRROR_MOUNT_*` |
-| front_fender.py      | `@memo` part              | Cream arc band over the front tire                        |
-| front_wheel.py       | `@memo` part              | Tire + five-spoke cast rim + brake disc                   |
-| rear_wheel.py        | `@memo` part              | Tire + five-spoke cast rim + drum hub                     |
-| engine.py            | `@memo` part              | Unit powertrain doubling as the swingarm (CVT + covers)   |
-| exhaust.py           | `@memo` part              | Head pipe + oval chrome muffler, rider right              |
-| rear_shock.py        | `@memo` part              | Coilover between the frame lug and the engine boss        |
-| leg_shield.py        | `@memo` part              | Cream step-through apron                                  |
-| steering_cover.py    | `@memo` part              | Head-tube shroud above the apron                          |
-| under_seat_body.py   | `@memo` part              | Rear body panel carrying seat and tail                    |
-| rear_fender.py       | `@memo` part              | Cream arc over the rear tire                              |
-| seat.py              | `@memo` part              | Brown saddle                                              |
-| headlight.py         | `@memo` part              | Chrome shell + clear dome lens                            |
-| tail_light.py        | `@memo` part              | Housing + red lens                                        |
-| turn_signal_left.py  | `@memo` part              | Front-left amber signal; the assembly links it 2x (rear-left is `Pos * turn_signal_left()`) |
-| turn_signal_right.py | `@memo` part              | Its mirror image (same `lib/trim.py` factory, right side); linked 2x the same way |
-| mirror_left.py       | `@memo` part              | Left bar-end mirror at `handlebar.MIRROR_MOUNT_LEFT` (a constant from another file: tracked by value) |
-| mirror_right.py      | `@memo` part              | Its mirror image at `handlebar.MIRROR_MOUNT_RIGHT` — its own part, because a reflection is new geometry |
+| frame.py             | part                     | Welded underbone frame + steel floor pan (the fixed root) |
+| center_stand.py      | part                     | Center stand, folded-up pose under the floor pan          |
+| front_fork.py        | part                     | Telescopic fork + chrome axle on the steering axis        |
+| handlebar.py         | part                     | Bar, stem collar, grips and levers; owns `MIRROR_MOUNT_*` |
+| front_fender.py      | part                     | Cream arc band over the front tire                        |
+| front_wheel.py       | part                     | Tire + five-spoke cast rim + brake disc                   |
+| rear_wheel.py        | part                     | Tire + five-spoke cast rim + drum hub                     |
+| engine.py            | part                     | Unit powertrain doubling as the swingarm (CVT + covers)   |
+| exhaust.py           | part                     | Head pipe + oval chrome muffler, rider right              |
+| rear_shock.py        | part                     | Coilover between the frame lug and the engine boss        |
+| leg_shield.py        | part                     | Cream step-through apron                                  |
+| steering_cover.py    | part                     | Head-tube shroud above the apron                          |
+| under_seat_body.py   | part                     | Rear body panel carrying seat and tail                    |
+| rear_fender.py       | part                     | Cream arc over the rear tire                              |
+| seat.py              | part                     | Brown saddle                                              |
+| headlight.py         | part                     | Chrome shell + clear dome lens                            |
+| tail_light.py        | part                     | Housing + red lens                                        |
+| turn_signal_left.py  | part                     | Front-left amber signal; the assembly links it 2x (rear-left is `Pos * turn_signal_left()`) |
+| turn_signal_right.py | part                     | Its mirror image (same `lib/trim.py` factory, right side); linked 2x the same way |
+| mirror_left.py       | part                     | Left bar-end mirror at `handlebar.MIRROR_MOUNT_LEFT` (a constant from another file: tracked by value) |
+| mirror_right.py      | part                     | Its mirror image at `handlebar.MIRROR_MOUNT_RIGHT` — its own part, because a reflection is new geometry |
 
 Build from `src/`: `python -m cadgen.engine build motorbike.py`. A part script
 defines no model and builds nothing on its own. No imported sources — every
 artifact is generated.
 
-## `src/lib/` — shared code, no models, no `@memo`
+## `src/lib/` — shared code, no models
 
 | Module          | Role                                                                 |
 |-----------------|----------------------------------------------------------------------|

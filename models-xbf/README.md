@@ -53,26 +53,36 @@ The migration a user makes, and nothing more:
   The motorbike carries one (`steer`); the others' clips are not ported.
 - A model is one output file: `@xbf` marks the dfm trays, the examples, the
   moonwatch `case` and `movement`, `qdd_actuator`, `motorbike` and `tom`, and
-  nothing else. What a model is built from -- an assembly's parts, a derivation's
-  stages, a group of parts -- is a `@memo` function: called in the model's body it
-  is a sub-assembly of that build, it writes no file, and a later build whose edit
-  does not reach it replays it instead of running it. `@memo` sits where an edit
-  elsewhere leaves the function unchanged and its work is worth skipping, on
-  functions that return an assigned result (a `@memo` function names what its
-  `return` statement makes in itself, so one returning `a - b` would rename those
-  elements). Helpers called many times with varying arguments stay plain: the
-  kernel memo covers their calls. `cadgen xbf build --verify` checks every
-  replayed call against a fresh run.
+  nothing else. A big piece of a model -- a layer of an assembly, a stage of a
+  derivation -- can be a `@memo` function: called in the model's body it is a
+  sub-assembly of that build, it writes no file, and a later build whose edit
+  does not reach it replays it instead of running it. `cadgen xbf build --verify`
+  checks every replayed call against a fresh run.
+
+### When to use `@memo`
+
+Rarely. The kernel memo already caches every kernel call in any model, markers or
+not, so `@memo` only saves the Python cost of the memo hits a replayed function
+avoids (0.1-0.4 ms per hit). It pays only where a function holds seconds of kernel
+work that an edit elsewhere leaves untouched: roughly a thousand kernel calls or
+more. Measured here: the movement's 3 layers halve an edit (a leaf edit runs in
+about 4.5 s), and tom's 6 stages save 1.3-3 s per edit. It does not pay on small
+pieces: the motorbike's 21 part markers and qdd's 7 makers saved under 0.1 s, and
+the movement's 19 part groups added nothing beyond its 3 layers, so those models
+carry none of them. A `@memo` function must also return an assigned result (it
+names what its `return` statement makes in itself, so one returning `a - b` would
+rename those elements), and a marker costs a model body that is no longer one
+piece. Nested `@xbf` is never needed for caching.
 
 ## The models
 
 | Model | Source | What it exercises |
 | --- | --- | --- |
 | `dfm-process-comparison` | 5 single-part trays | per-part catalogue materials (PLA, aluminium, ABS); lofts, fillets, drafted cones |
-| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; 7 `@memo` makers (stator, rotor, bearings, sensor, boards, screws) replayed while an edit elsewhere runs the root; 54 build123d joints (rigid mounts, revolute drive train with ranges) |
-| `motorbike` | 21 `@memo` parts + one model | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts; one motion, `steer` (`cadgen xbf export ../XBF/motorbike.xbf bike.glb` carries it as a clip) |
-| `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers, 19 `@memo` part groups) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
-| `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
+| `qdd_actuator` | one file, 153 occurrences | a 102-part assembly, modules as nested compounds; one body (no `@memo`: its makers save under 0.1 s); 54 build123d joints (rigid mounts, revolute drive train with ranges) |
+| `motorbike` | 21 part files + one model, one body | parts as sub-assemblies of one xbf, a part placed twice; revolute and rigid joints across parts; one motion, `steer` (`cadgen xbf export ../XBF/motorbike.xbf bike.glb` carries it as a clip) |
+| `moonwatch` | `case.py`, `movement.py` (3 `@memo` layers) | finishes as materials on 220 parts (29 case, 191 movement): catalogue names and densities with finish looks, own materials (sapphire, ruby, NBR, print ink), a painted face finish, transparent parts |
+| `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages and 14 `read_step` vendor parts (536 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
 
 Each model's `src/README.md` says what was ported and what was dropped.
@@ -89,9 +99,9 @@ Each model's `src/README.md` says what was ported and what was dropped.
 | examples (each) | 1-11 | 2.5 s | replayed; the fixture's root re-runs (joints) |
 | tom | 619 / 628 | 347 s (worker ~12 GB after) | 2.9 s, all 7 bodies replayed |
 
-Since 2026-10-21 the nested models are `@memo` functions: the same bodies (plus the
-movement's 19 part groups and qdd's 7 makers), the same element names in every
-document, one xbf per model. `--verify` finds one function whose fresh run differs from
+Since 2026-10-21 tom's stages and the movement's layers are `@memo` functions; the
+motorbike's parts and qdd's makers are plain functions in one body. The same element
+names in every document, one xbf per model. `--verify` finds one function whose fresh run differs from
 its logged one: tom's `tom2_symmetric_yokes` (47 misses on a second run, an
 intermediate yoke's geometry; the arm tom writes is unchanged).
 
