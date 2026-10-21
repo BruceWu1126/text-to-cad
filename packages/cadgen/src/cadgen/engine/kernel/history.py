@@ -628,8 +628,8 @@ def _held(shape: Any) -> set:
 def _feeding(taken: list[_Record], results: list[Any]) -> list[_Record]:
     """The makers whose results reach the feature's results -- held by one of them, or
     by the input of a maker that does -- in order: what FreeCAD's mapper chain follows.
-    build123d runs makers whose results it drops (a placement deep-copies its shape and
-    keeps the original), and those report nothing of the feature. A maker whose result
+    build123d runs makers whose results it drops (an attempt it gives up, as a clean that
+    fails), and those report nothing of the feature. A maker whose result
     is one of the shapes reached, or held whole by one, is found so: the shapes reached
     are opened (``_held``) only for a result that is not one of them, and once each, and
     that result only when no shape they hold is it."""
@@ -677,81 +677,6 @@ def by_ordinal(source: Any, result: Any, how: str) -> History | None:
                 return None
     return History(origins={(0, kind, ordinal): ((0, kind, ordinal, how, (1,)),)
                             for kind in range(len(KINDS)) for ordinal in range(1, results[kind].Extent() + 1)})
-
-
-def placed_by_ordinal(history: History, inputs: list[Any], results: list[Any]) -> None:
-    """Complete the history of a placement (``moved``, a copy) of one shape: each result
-    its makers reported nothing of -- a part build123d copied while placing an assembly --
-    and that is no sub-shape of the input as it is, is taken to be its counterpart there:
-    the input's sub-shapes and the results are walked in the same order (an assembly's
-    shape holds its parts in the order its object does), and the next sub-shape of the
-    input that maps one-to-one onto the result (``by_ordinal``) is the one it copies.
-    Its elements then come from that sub-shape's, as the same elements, so a placement
-    never names a part as its own."""
-    from OCP.TopoDS import TopoDS_Iterator
-
-    if len(inputs) != 1 or inputs[0] is None or len(results) < 2:
-        return
-    origins = history.origins
-    covered = set(history.copies)
-    covered.update(key[0] for key in origins)
-    if all(result is None or position in covered for position, result in enumerate(results)):
-        return
-    source = inputs[0]
-    subs = []
-    pending = [source]
-    while pending:
-        shape = pending.pop()
-        subs.append(shape)
-        if shape.ShapeType() == TopAbs_COMPOUND:
-            children = []
-            iterator = TopoDS_Iterator(shape)
-            while iterator.More():
-                children.append(iterator.Value())
-                iterator.Next()
-            pending.extend(reversed(children))
-    tshapes = {shape.TShape() for shape in subs}
-
-    def counts(shape: Any) -> tuple:
-        return (shape.ShapeType(), *(_map(shape, kind).Extent() for kind in KINDS))
-
-    given = None
-    added: dict = {}
-    at = 0
-    for position, result in enumerate(results):
-        if result is None:
-            continue
-        identity = result.TShape() in tshapes
-        wanted = None if identity else counts(result)
-        while at < len(subs):
-            sub = subs[at]
-            at += 1
-            if identity:
-                if sub.TShape() == result.TShape():
-                    break
-                continue
-            if sub.ShapeType() != result.ShapeType() or counts(sub) != wanted:
-                continue
-            if position in covered:
-                break  # its makers reported it: only its place in the walk is wanted
-            if by_ordinal(sub, result, SAME) is None:
-                continue
-            if given is None:
-                given = [_map(source, kind) for kind in KINDS]
-            for kind in range(len(KINDS)):
-                elements = _map(sub, KINDS[kind])
-                for ordinal in range(1, elements.Extent() + 1):
-                    found = given[kind].FindIndex(elements.FindKey(ordinal))
-                    if found:
-                        added[(position, kind, ordinal)] = ((0, kind, found, SAME, (1,)),)
-            break
-    if not added:
-        return
-    if isinstance(origins, _Origins):
-        origins.sparse.update(added)
-        origins.size += len(added)
-    else:
-        history.origins = {**origins, **added}
 
 
 def _simple_copy_rows(taken: list[_Record]) -> list[_CopyRows] | None:
