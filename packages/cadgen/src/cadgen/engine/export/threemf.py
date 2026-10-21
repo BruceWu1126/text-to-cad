@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape, quoteattr
 
+from cadgen.engine.export import ZIP_DATE
 from cadgen.engine.export.mesh import groups, meshes
 
 __all__ = ["write"]
@@ -116,6 +117,8 @@ def write(view: Any, path: Path) -> None:
                      '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
                      'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>')
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", relationships)
-        archive.writestr("3D/3dmodel.model", model)
+        for name, text in (("[Content_Types].xml", content_types), ("_rels/.rels", relationships),
+                           ("3D/3dmodel.model", model)):
+            entry = zipfile.ZipInfo(name, ZIP_DATE)
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(entry, text)

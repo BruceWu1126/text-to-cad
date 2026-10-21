@@ -17,10 +17,11 @@ import os
 import zipfile
 from pathlib import Path
 
+from cadgen.engine.export import ZIP_DATE
+
 __all__ = ["SUFFIX", "files", "write"]
 
 SUFFIX = ".cadz"
-_DATE = (1980, 1, 1, 0, 0, 0)
 
 
 def files(xbf: Path, *, inputs: bool = True) -> list[Path]:
@@ -60,7 +61,7 @@ def write(xbf: Path, out: Path, *, inputs: bool = True) -> int:
     try:
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(found, key=lambda item: item.relative_to(root).as_posix()):
-                entry = zipfile.ZipInfo(path.relative_to(root).as_posix(), _DATE)
+                entry = zipfile.ZipInfo(path.relative_to(root).as_posix(), ZIP_DATE)
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 entry.external_attr = 0o644 << 16
                 archive.writestr(entry, path.read_bytes())

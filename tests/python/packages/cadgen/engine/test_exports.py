@@ -205,6 +205,18 @@ class ExportTest(unittest.TestCase):
         painted = [t for t in plate.iter(f"{core}triangle") if t.get("p1") is not None]
         self.assertEqual(len(painted), 4, "the two painted faces' triangles name their own looks")
 
+    def test_a_3mf_is_the_same_bytes_whatever_the_clock(self) -> None:
+        # zipfile stamps an entry with ``time.localtime()``: two clocks a day apart.
+        written = []
+        for seconds in (1_700_000_000, 1_700_086_403):
+            out = self.folder / f"clock-{seconds}.3mf"
+            with mock.patch("time.localtime", return_value=time.gmtime(seconds)):
+                translate(self.xbf, None, out)
+            written.append(out.read_bytes())
+        self.assertEqual(written[0], written[1])
+        with zipfile.ZipFile(self.folder / "clock-1700000000.3mf") as archive:
+            self.assertEqual({entry.date_time for entry in archive.infolist()}, {export.ZIP_DATE})
+
     def test_stl_holds_every_placed_triangle(self) -> None:
         data = (self.folder / "board.stl").read_bytes()
         count = struct.unpack_from("<I", data, 80)[0]
