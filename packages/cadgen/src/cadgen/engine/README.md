@@ -66,49 +66,53 @@ def hinge():
 
 ## Laws
 
-1. **Nothing to disk.** The engine writes the files a model declares -- the xbf
+1. **An xbf carries its build closure as pointers and digests** -- script and
+   function, modules, data inputs, versions, the key, and the repository commit when
+   there is one; never source, never lines on elements, never input contents; names
+   remain the per-element tie to code (**Build closure**).
+2. **Nothing to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
    `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
-   cache, index, memo, mesh or parsed document. A restart is cold, but for the xbf
-   itself: a model whose xbf holds the key the model has now is not run
-   (**Previous document**).
-2. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
+   cache, index, memo, mesh or parsed document, and no derived file beside an input
+   (a STEP converted to an xbf is an export the author asks for). A restart is cold,
+   but for the xbf itself: a model whose xbf holds the closure the model has now is
+   not run (**Build closure**).
+3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
    OCP, build123d, numpy and the standard library only. A test holds it.
-3. **The file is the document.** The xbf is the native document: units in
+4. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
    per face given one (`XCAFDoc_Material`: name, description, density;
    `XCAFDoc_VisMaterial`: PBR), element names on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
    Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
-   <release>)`, `document.Loaded.writer`) and holds the model's key: digests, and the
-   data files the model read by their paths relative to the document (**Previous
-   document**). No script path and no code location is in it. STEP, GLB, STL and 3MF
+   <release>)`, `document.Loaded.writer`) and holds the model's build closure
+   (**Build closure**). No code location is on an element. STEP, GLB, STL and 3MF
    are translations of it (**Exports**).
    `cadgen xbf export` writes any of them from the xbf alone.
-4. **The memo is the only cache, and it lives in the worker.** Every kernel
+5. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
    the first run made, and a miss makes everything downstream of it miss. So an
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
    keyed by a part's geometry, under a size cap. Across a restart, a model's only
-   cache is its own xbf, taken whole or not at all (**Previous document**).
-5. **One file per model.** A model is one xbf, plus the exports it declares --
+   cache is its own xbf, taken whole or not at all (**Build closure**).
+6. **One file per model.** A model is one xbf, plus the exports it declares --
    translations of that xbf, written after it. There is no second file of a
-   model: no sidecar, no manifest, no record of what a build did.
-6. **Provenance is served live, never written.** What made an element -- the
+   model: no sidecar, no record of what a build did beside the xbf's own closure.
+7. **Provenance is served live, never written.** What made an element -- the
    feature, its operation, the function, file and line of its call -- lives in
    the trace of the worker that built the document, and is asked of it while it
-   lives (`made_by` on the facts endpoints, `cadgen xbf where`). A document
+   lives (`made_by` on the facts endpoints, `cadgen where`). A document
    opened with no such worker has none to give, and says so (`made_by: null`).
-7. **Poses and motion definitions, never frames.** The document carries
+8. **Poses and motion definitions, never frames.** The document carries
    kinematics -- the mechanism, its configurations (each a pose: where its parts
    stand) and its motions (each a definition: waypoints, an ease, a loop) -- and
    the document holds poses and motion definitions, never baked frames or clips.
    A GLB export is the one place a motion is baked, into a clip of the GLB; the
    engine plays nothing.
-8. **Names are the durable tie to code.** An element's name is spelled from the
+9. **Names are the durable tie to code.** An element's name is spelled from the
    function that made its feature and the author's name for that feature (the
    target its result is assigned to, or a label), never from a line or a file:
    moving code renames nothing, and the file holds no line to go stale. A line
@@ -118,20 +122,21 @@ def hinge():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
-| `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
+| `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `export/` | `translate` and the kind registry (`__init__`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
+| `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
+| `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory |
-| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start |
-| `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`) |
+| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
+| `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), and `cadgen where` (`where_main`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
@@ -140,13 +145,16 @@ def hinge():
 cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
 cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
-cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-daemon]
+cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
 cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-cadgen xbf where DOC REF                    REF: PART/face N (edge, vertex), or an element name
 cadgen xbf status | stop | daemon
+cadgen where DOC [REF]                      the build closure; with REF: PART/face N (edge, vertex), or an element name
 ```
+
+These are the commands as invoked today: `where` is the first verb at the top level, and
+the `xbf` level disappears at the cutover (`cadgen build`, `cadgen export`, ...).
 
 `SCRIPT` alone builds every decorated function in it; `python SCRIPT [flags]` is the
 same build (the script's own process builds nothing: it asks the daemon, and exits with
@@ -167,7 +175,11 @@ header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. The daemon starts on demand and exits after an idle hour
-(`CADGEN_ENGINE_IDLE` seconds). `CADGEN_ENGINE_DIR` moves its socket and lock.
+(`CADGEN_ENGINE_IDLE` seconds). A worker whose resident memory is over
+`CADGEN_ENGINE_WORKER_RSS_MB` after a build (default: a quarter of the machine's memory,
+at least 2 GiB; `0` for no cap) is retired: the report says so (`retired`), the worker
+exits once it has answered, and the next build is a fresh worker's -- a restart, which
+takes the xbf whole when its closure is unchanged (**Build closure**). `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
 processes started with the server, each handed one part's shape as bytes,
@@ -248,6 +260,12 @@ target and moved over it.
   of a posed or parted document is an assembly of its own placement.
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
+- **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
+  source files (the script and every module the closure lists) and, unless `--no-inputs`, its
+  inputs, zipped at their places relative to one another, with sorted entries and one fixed
+  date. Extracted and built, a drift-free model writes the xbf's bytes again (the closure's
+  `commit` aside, which names the repository the original was built in). Self-contained
+  delivery is this export, never a property of the document.
 
 **Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
 CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
@@ -295,9 +313,11 @@ as any model has.
 **Functions** (`api`, also `cadgen.build`, `cadgen.export`, `cadgen.snapshot`, `cadgen.serve`,
 `cadgen.where`): one per command, each through the daemon. `build(target)` returns a `Report`,
 `build(code=...)` a `Built` (`.files`, `.report`, `.document` and `.shape` asked of the worker
-that holds them, `.export(...)`); `export(source, *destinations, pose=, part=)` a list of
-`Written`; `snapshot(source, out, ...)` a `Drawn`. A `Model` builds, exports and draws itself the same way
-(`.build()`, `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only.
+that holds them, `.export(...)`); `export(source, *destinations, pose=, part=, inputs=)` a list of
+`Written`; `snapshot(source, out, ...)` a `Drawn`; `where(doc)` the build closure an xbf holds,
+`where(doc, ref)` an element's facts. A `Model` builds, exports and draws itself the same way
+(`.build()`, `.export()`, `.snapshot()`), and `.document` is its xbf as last built, read-only
+(`.document.closure` its closure).
 
 ## Kinematics
 
@@ -397,6 +417,41 @@ pair cannot take, or moving a pair kept inconsistent or closing a loop, is left 
 A warm build that changes only a motion rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
+## Imports
+
+`read_step(path)` reads a `.step`/`.stp`, `read_xbf(path)` an engine document; both copy the
+file's geometry into the model's document (`reader.py`). The result is a compound tree of the
+file's assembly: an assembly a `Compound` of its components, a part a handle of its own on its
+product's geometry (a move places that occurrence, never its siblings), every node named as the
+file names that occurrence (its own name, else its product's), coloured and given its material
+as the file has them; an xbf's painted faces and face materials come too, and each element keeps
+the name its file gives it (**Element names**). An xbf's joints, configurations and motions are
+not imported: a part is a part. Linking between models is done by importing code, never by a
+file reference. Both are file reads the memo keys by the file's bytes, so a later build's read
+of the same bytes is the same objects, and both are the build closure's inputs.
+
+**The fast input is an xbf.** Reading one is many times faster than parsing a STEP of the same
+geometry (tom-sized: seconds against most of a minute) and keeps the engine's names losslessly.
+Convert a vendor STEP once, keep the xbf beside it, and read the xbf:
+
+```
+cadgen xbf export vendor.step vendor.xbf
+```
+
+The conversion is the author's: the engine writes no derived file beside an input of its own.
+`read_xbf` of a converted STEP is `read_step` of the STEP: the same geometry, names, colours and
+materials.
+
+**A STEP is parsed in a reader process.** OCCT's XCAF reader works in many times the memory of
+what it makes (2.3 GB for a 354 MB file) and the allocator keeps most of it, so a worker that
+parsed a STEP would hold that for its life. A build starts one reader process on its first STEP
+read, reuses it for the build's other reads and closes it when the build ends; the reader
+answers with the document described as data (products, names, colours, materials, element
+names, components) and one `BinTools` dump of the parts' shapes and the components' locations,
+and the worker assembles the tree from them. A shape written and read once is what a saved
+document reads back, so the tree is a function of the file. An xbf is read in the worker by the
+document's own retrieval driver.
+
 ## Placements
 
 A part used ten times is one prototype placed ten times, in the worker's memory as in the
@@ -469,7 +524,7 @@ during a build too) and never from a file: a document served cold, with no live
 worker that built it (a daemon started again, `serve --foreground`), answers
 `made_by: null`, and so does an element the served version names otherwise than
 that worker's last build. The line is the call's in the run that named the part.
-`cadgen xbf where DOC REF` serves the document on demand and prints one
+`cadgen where DOC REF` serves the document on demand and prints one
 element's facts and `made_by`; `REF` is `PART/face N` (`edge`, `vertex`), `PART`
 a part's or an instance's name as the structure spells it, or an element name
 in the viewer's ref grammar (`f:plate.relief.3`).
@@ -583,7 +638,7 @@ placements of one shape labelled apart name their occurrences and pin none of th
 labels on the shape they share, where one placement's label would rename what is made of
 every other.
 
-An element of a shape read from a file (`read_step`) is named within its own product,
+An element of a shape read from a file (`read_step`, `read_xbf`) is named within its own product,
 the part of the file it belongs to, however often the file places it: by the name the
 file gives it (`read.stepcaf.subshapes.name`; a STEP this engine wrote names every face,
 and those names come back as they were; `NONE`, the schema's empty name, is none),
@@ -618,7 +673,7 @@ arguments -- is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes: `read_step`;
+- every file it reads through the engine, by its bytes: `read_step`, `read_xbf`;
 - every file it reads itself, observed, by its bytes: an audit hook on `open`
   (`kernel/memo.py`, `_audited`) hears each file the body opens for reading
   (`open`, `json.load`, `Path.read_text`, `np.loadtxt`), Python's own files
@@ -637,7 +692,7 @@ A model's inputs are its code, what it reads through the engine, and every file
 its body reads, observed, by their bytes. What the engine cannot see is the
 author's: the clock, environment variables, randomness, a file only tested for
 (`Path.exists`, `os.stat`: an open is heard, a lookup is not), and OCCT's
-readers driven directly instead of through `read_step`.
+readers driven directly instead of through `read_step` or `read_xbf`.
 
 A module falls back to its bytes, and those of every first-party module it
 imports, wherever the walk cannot follow a reference by its value: a `getattr`,
@@ -720,8 +775,16 @@ writes no file. Outside a build it is its function. Its contract:
   object, an argument it mutates: none of it is seen, and a replay leaves it undone.
 
 Each call that runs every time is named in the report's `retention.fallbacks` with why.
-The restart key (**Previous document**) folds a `@memo` function's code in as it folds a
+The restart key (**Build closure**) folds a `@memo` function's code in as it folds a
 child model's.
+
+**When to mark a function.** `@memo` saves only the Python cost of the kernel-memo hits a
+replayed function avoids, 0.1–0.4 ms per hit, so mark a function only when it holds seconds of
+kernel work an edit elsewhere leaves untouched: roughly a thousand kernel calls or more. Never
+per part, never on a helper called many times; whole sub-assembly stages are the usual
+candidates (tom's six stages, movement's three layers: 1.3–3 s each, and twice as fast on an
+edit), while per-part markers measured under 0.1 s. Nested `@xbf` is never needed for caching:
+the operation-level memo handles every kernel call in any model, markers or not.
 
 `cadgen xbf build --verify` runs every body the memo would replay -- a model's and every
 `@memo` call's -- and compares each fresh result with the logged one: per shape its
@@ -732,30 +795,51 @@ that differs. A function whose result differs is marked to run on every call for
 worker's life (`memo.always()`), the bodies that call it with it, and a model that calls it
 is not taken from its file. A verifying build does not ask the previous document.
 
-## Previous document
+## Build closure
 
-A model's previous xbf is its cache, as a FreeCAD document is its own: opened, it is
-what was last computed, and only what changed is computed again. Its main label holds
-the model's key (`previous.py`, a `TDataStd_AsciiString` beside the writer's): a digest
-of the root body's retention key -- the symbols it reaches, every child model's among
-them, the engine's own code -- with the versions of build123d, OCP and numpy, and of
-the bytes of every file the model read (through `read_step` or the importers, a font,
-or opened itself); those files by their paths relative to the document's folder, so a
-fresh process can read them again; and how many bodies the model is. Digests and data
-paths only: no source, no script path, no line.
+A model's xbf is its cache, as a FreeCAD document is its own: opened, it is what was last
+computed, and only what changed is computed again. Its main label holds the model's build
+closure (`previous.py`, a `TDataStd_AsciiString` beside the writer's, schema `cadgen.engine
+closure/1`), pointers and digests only:
 
-Before a body the memo would not replay runs, the build asks the document: the key the
-model has now -- its source key now, each file it read hashed again -- against the one
-the xbf holds. The same key, in an xbf written by this engine that reads whole, and the
-body is not run: the report says `cache: {"used": true, "from": "file"}`, every file
-`written: false`, `memo.bodies_loaded` the bodies the document is, `bodies` the root
-`loaded`, `timings` the key (`key`) and the read (`read`). A later build in the same
-worker takes it from memory without reading it (`"from": "memory"`), as it does a file
-it wrote itself whose root the memo cannot replay. Anything else builds as before, and
-`cache.reason` says why: no file yet, a declared export missing, written by another
-engine or program, a file that does not read, no key in it, its code changed, a file it
-reads changed, or replayed from memory. `CADGEN_ENGINE_MEMO=0` and
-`CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
+```
+schema   "cadgen.engine closure/1"
+engine   {"release": "cadgen 0.8.0", "format": "xbf/1", "digest": ...}   the version VERSION stamps; the engine's code
+libs     {"build123d": ..., "OCP": ..., "numpy": ...}
+source   {"kind": "script", "path": "../src/tom.py", "function": "tom", "commit": "<sha>" | null}
+         | {"kind": "code", "name": "bracket", "digest": ...}             code's text is never written
+modules  [["../src/lib/arm_parts.py", "9f3c..."], ...]
+inputs   [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
+bodies   how many bodies the model is
+key      one digest over engine, libs, source (but its commit), modules and inputs; null where
+         the closure cannot say all the model is made of
+```
+
+Every path is relative to the xbf's folder. `modules` lists each first-party module the
+script's load imported or the model reaches, with a digest of what the model reaches in it: its
+functions' code objects with no line tables or docstrings, its classes, the values its bindings
+hold (a path value inside the script's folder relative to it), and, for a module that falls back
+to its bytes (**Body retention**), each file of its import closure by its bytes. A comment or a
+blank line changes no digest; a module the model loads and does not reach holds the empty one.
+`inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
+the importers), itself (`read`, a `null` digest for one it found missing), or a text's font
+(`font`) -- by its digest. The commit is the repository's at the script, `git rev-parse HEAD`,
+null outside one; it names where the code was and is no part of the key. `cadgen where DOC`
+prints the closure, `cadgen.where(doc)` and `document.Loaded.closure` read it.
+
+Before a body the memo would not replay runs, the build makes the closure again -- the script
+loaded, its modules digested, each input hashed again -- and compares its key with the xbf's.
+The same key, in an xbf written by this engine that reads whole, and the body is not run: the
+report says `cache: {"used": true, "from": "file"}`, every file `written: false`,
+`memo.bodies_loaded` the bodies the document is, `bodies` the root `loaded`, `timings` the key
+(`key`) and the read (`read`). A later build in the same worker takes it from memory without
+reading it (`"from": "memory"`), as it does a file it wrote itself whose root the memo cannot
+replay. Anything else builds as before, and `cache.reason` says why: no file yet, a declared
+export missing, written by another engine or program, a file that does not read, no key in it,
+replayed from memory, or what changed, by name (`cache.changed`, each change; the CLI prints
+`rebuilt: ../src/lib/arm_parts.py changed`): a module changed, is new or is no longer imported,
+an input changed or is missing, the engine, a library or the source moved.
+`CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
 
 The document is taken whole or not at all, never one body's part of it. OCCT's BinXCAF
 reader does not give back the doubles it was given: it makes each direction and placement

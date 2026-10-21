@@ -4,12 +4,15 @@ the functions of ``api``.
     cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or one
     cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
-    cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME]
+    cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs]
     cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--camera PRESET|az:el] [--grid] [--preview]
         [--pose NAME|JSON] [--width N] [--height N] [--size-profile P] [--json]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-    cadgen xbf where DOC REF                         what made one element: its facts and ``made_by``
     cadgen xbf status | stop | daemon
+    cadgen where DOC [REF]                           a document's build closure, or what made one element
+
+``where`` is the first verb at the top level of ``cadgen`` (``where_main``); the others move up
+when the ``xbf`` level goes.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-__all__ = ["build_parser", "elements", "main"]
+__all__ = ["build_parser", "elements", "main", "where_main", "where_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -53,7 +56,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                                              "carries the document's motions as clips")
     export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or SCRIPT.py::MODEL (built first)")
     export.add_argument("destinations", nargs="+", metavar="DST",
-                        help=".xbf (from a STEP, or with --part), .step, .glb, .stl or .3mf")
+                        help=".xbf (from a STEP, or with --part), .step, .glb, .stl or .3mf; or .cadz (from an "
+                             "xbf: it, its build closure's source files and its inputs, zipped)")
+    export.add_argument("--no-inputs", action="store_true", help="a .cadz without the closure's input files")
     export.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
                                        "mechanism posed there; as built without it")
     export.add_argument("--part", help="an occurrence's path or a node's name: that subtree as a document of its own")
@@ -66,12 +71,6 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     from cadgen.engine.snapshot import add_parser as add_snapshot
 
     add_snapshot(verbs)
-    where = verbs.add_parser("where", help="what made one element of a document: its facts, and the feature, "
-                                           "function, file and line behind it")
-    where.add_argument("document", help="an .xbf")
-    where.add_argument("ref", help="PART/face N (or edge, vertex), PART a part's or an instance's name (or the "
-                                   "document's, for a document of one part); "
-                                   "or an element name (f:..., e:..., v:...)")
     verbs.add_parser("status", help="the daemon's workers and served documents")
     verbs.add_parser("stop", help="stop the daemon")
     verbs.add_parser("daemon", help="run the daemon in this process")
@@ -127,6 +126,10 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
                            if timings.get(name))
         line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
                 f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
+        if (report.get("cache") or {}).get("changed"):
+            line += f"\n  rebuilt: {report['cache']['reason']}"
+    if report.get("retired"):
+        files.append(f"retired: {report['retired']}")
     return (line + "".join(f"\n  {text}" for text in files)
             + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
             + _verified(report.get("verify")))
@@ -211,7 +214,8 @@ def _export(args: argparse.Namespace) -> int:
 
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
-                             log=lambda text: print(text, file=sys.stderr), daemon=not args.no_daemon)
+                             inputs=not args.no_inputs, log=lambda text: print(text, file=sys.stderr),
+                             daemon=not args.no_daemon)
     except (ExportRefused, ValueError) as error:
         print(f"cadgen xbf export: {error}", file=sys.stderr)
         return 2
@@ -282,22 +286,35 @@ def elements(structure: dict[str, Any], ref: str) -> list[tuple[dict[str, Any], 
             for ordinal, text in prototype.get(f"{kind}Names", {}).items() if text == ref]
 
 
-def _where(args: argparse.Namespace) -> int:
-    """What the kernel measures of the elements a ref names, and what made each (``made_by``,
-    null for a document no live worker built)."""
+def where_parser(prog: str = "cadgen where") -> argparse.ArgumentParser:
+    """``cadgen where``'s parser: a document, and an element of it or none."""
+    parser = argparse.ArgumentParser(prog=prog, description="A document's build closure (its source, modules, inputs "
+                                                            "and key), or what made one element of it.")
+    parser.add_argument("document", help="an .xbf")
+    parser.add_argument("ref", nargs="?", help="PART/face N (or edge, vertex), PART a part's or an instance's name (or "
+                                               "the document's, for a document of one part); or an element name "
+                                               "(f:..., e:..., v:...). Without it: the build closure")
+    return parser
+
+
+def where_main(argv: list[str] | None = None, prog: str = "cadgen where") -> int:
+    """``cadgen where DOC``: the build closure the xbf holds; ``cadgen where DOC REF``: what the
+    kernel measures of the elements a ref names, and what made each (``made_by``, null for a
+    document no live worker built)."""
     from cadgen.engine import api
 
+    args = where_parser(prog).parse_args(argv)
     path = Path(args.document).resolve()
     if not path.is_file():
-        print(f"cadgen xbf where: no document {args.document}", file=sys.stderr)
+        print(f"{prog}: no document {args.document}", file=sys.stderr)
         return 2
     try:
         found = api.where(path, args.ref)
     except ValueError as error:
-        print(f"cadgen xbf where: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 2
     except api.EngineError as error:
-        print(f"cadgen xbf where: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     print(json.dumps(found, indent=2))
     return 0
@@ -311,8 +328,6 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
         return _export(args)
     if args.verb == "serve":
         return _serve(args)
-    if args.verb == "where":
-        return _where(args)
     if args.verb == "snapshot":
         from cadgen.engine.snapshot import run as snapshot
 

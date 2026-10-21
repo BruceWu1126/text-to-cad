@@ -283,8 +283,8 @@ _HELPER_TARGETS = (
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
 _IMPORTER_TARGETS = ("import_step", "import_brep")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
-# and the engine's own reader (``wrap_function``: ``read_step``).
-_FILE_OPS = {"import_step", "import_brep", "read_step"}
+# and the engine's own readers (``wrap_function``: ``read_step``, ``read_xbf``).
+_FILE_OPS = {"import_step", "import_brep", "read_step", "read_xbf"}
 _BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}

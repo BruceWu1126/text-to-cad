@@ -22,7 +22,8 @@ instead of running it. A part's material is a value set on the shape: ``part.mat
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
 ``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
 **values)`` names a configuration of it and ``motion(assembly, name, ...)`` a motion, which a
-GLB export bakes into a clip.
+GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
+the model, named, coloured and given its materials as the file has them.
 Importing this package imports no kernel: the names below load on first use.
 """
 
@@ -30,8 +31,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "step", "stl",
-           "threemf", "xbf"]
+__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "step",
+           "stl", "threemf", "xbf"]
 
 
 def __getattr__(name: str) -> Any:

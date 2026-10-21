@@ -234,7 +234,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(json.loads(unchanged.stdout.strip().splitlines()[-1])["meshed"], 0)
 
     def where(self, ref: str) -> dict:
-        found = self.cli("where", "XBF/block.xbf", ref)
+        found = subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
+                               env=self.env, capture_output=True, text=True, timeout=300)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
@@ -260,6 +261,21 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in cold.items() if k not in drop}, {k: v for k, v in face.items() if k not in drop})
         self.assertEqual(sorted(str(path.relative_to(self.folder)) for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py"])
+
+    def test_a_worker_over_its_memory_cap_is_retired_and_the_next_build_restarts(self) -> None:
+        capped = {**self.env, "CADGEN_ENGINE_WORKER_RSS_MB": "1"}
+        self.script.write_text(textwrap.dedent(MODEL.format(size=10)), encoding="utf-8")
+        first = self.cli("build", "--json", "block.py::block", env=capped)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        report = json.loads(first.stdout.strip().splitlines()[-1])
+        self.assertIn("over its 1 MB cap", report["retired"])
+        # The next build is a fresh worker's: a restart, which takes the file it wrote.
+        again = self.cli("build", "block.py::block", env=capped)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertTrue(again.stdout.startswith("took block.py::block cold"), again.stdout)
+        self.assertIn("retired: the worker held", again.stdout)
+        status = json.loads(self.cli("status").stdout)
+        self.assertEqual([worker["alive"] for worker in status["workers"]], [False])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
         self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")

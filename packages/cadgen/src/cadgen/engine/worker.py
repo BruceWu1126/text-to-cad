@@ -34,6 +34,11 @@ parts of a served one the build did not change are meshed by the daemon's pool, 
 are asked for -- the build's answer never waits on a whole document's mesh. Each report
 says how many parts the build meshed (``meshed``).
 
+A worker whose resident memory is over its cap after a build (``CADGEN_ENGINE_WORKER_RSS_MB``,
+by default a quarter of the machine's memory) is retired: its reports say so (``retired``),
+and it exits once it has answered. The daemon starts a fresh one for the next build, a
+restart: a model whose xbf holds its closure unchanged is taken in seconds.
+
 A build runs with the cyclic collector off, and the worker collects once after it has
 answered: the memo keeps every live result of the last builds, millions of objects, and a
 full collection walks all of them -- a second on a large model, paid inside whichever call
@@ -136,6 +141,96 @@ class Patcher:
         """Each report says how many parts this build meshed."""
         for report in reports:
             report["meshed"] = self.meshed
+
+
+# --- the worker's memory cap ----------------------------------------------------------------------
+
+
+def resident_mb() -> float | None:
+    """This process's resident memory now, in MiB; None where the platform will not say."""
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+
+            class Info(ctypes.Structure):  # mach_task_basic_info
+                _fields_ = [("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
+                            ("resident_size_max", ctypes.c_uint64), ("user_time", ctypes.c_uint32 * 2),
+                            ("system_time", ctypes.c_uint32 * 2), ("policy", ctypes.c_int32),
+                            ("suspend_count", ctypes.c_int32)]
+
+            system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            info, count = Info(), ctypes.c_uint32(ctypes.sizeof(Info) // 4)
+            task = ctypes.c_uint32.in_dll(system, "mach_task_self_")
+            if system.task_info(task, 20, ctypes.byref(info), ctypes.byref(count)) != 0:  # MACH_TASK_BASIC_INFO
+                return None
+            return info.resident_size / 2**20
+        if sys.platform.startswith("linux"):
+            with open("/proc/self/statm", encoding="ascii") as handle:
+                return int(handle.read().split()[1]) * os.sysconf("SC_PAGE_SIZE") / 2**20
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS
+                _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                            ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                            ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                            ("PeakPagefileUsage", ctypes.c_size_t)]
+
+            counters = Counters()
+            counters.cb = ctypes.sizeof(Counters)
+            process = ctypes.windll.kernel32.GetCurrentProcess()
+            if not ctypes.windll.psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
+                return None
+            return counters.WorkingSetSize / 2**20
+    except Exception:  # noqa: BLE001 - a platform that will not say has no cap
+        return None
+    return None
+
+
+def _physical_mb() -> float | None:
+    try:
+        if sys.platform == "darwin":
+            import ctypes
+
+            system = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            size, length = ctypes.c_uint64(0), ctypes.c_size_t(8)
+            if system.sysctlbyname(b"hw.memsize", ctypes.byref(size), ctypes.byref(length), None, 0) == 0:
+                return size.value / 2**20
+            return None
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def rss_cap_mb() -> float | None:
+    """The resident memory a worker may hold after a build: ``CADGEN_ENGINE_WORKER_RSS_MB``
+    (``0`` for no cap), else a quarter of the machine's memory, at least 2 GiB. None: no cap."""
+    given = os.environ.get("CADGEN_ENGINE_WORKER_RSS_MB", "").strip()
+    if given:
+        try:
+            value = float(given)
+        except ValueError:
+            value = -1.0
+        if value >= 0:
+            return value or None
+    physical = _physical_mb()
+    return None if physical is None else max(physical / 4, 2048.0)
+
+
+def retirement(reports: list[dict[str, Any]]) -> bool:
+    """After a build: this worker's resident memory against its cap. Over it, each report says
+    so (``retired``) and the worker is retired: it exits once it has answered, and the next
+    build is a fresh worker's -- a restart, which takes a model's xbf when nothing changed."""
+    resident, cap = resident_mb(), rss_cap_mb()
+    if resident is None or cap is None or resident <= cap:
+        return False
+    for report in reports:
+        report["retired"] = (f"the worker held {resident:.0f} MB after the build, over its {cap:.0f} MB cap "
+                             "(CADGEN_ENGINE_WORKER_RSS_MB): the next build starts a fresh one")
+    return True
 
 
 def _export(request: dict[str, Any], log: Callable[[str], None]) -> dict[str, Any]:
@@ -268,12 +363,15 @@ def main() -> int:
         ident = request.get("id")
         op = request.get("op")
         if op in ("export", "result"):
+            retire = False
             try:
                 cwd = request.get("cwd")
                 if cwd:
                     os.chdir(cwd)
                 if op == "export":
-                    send({"id": ident, "done": _export(request, lambda text: send({"id": ident, "log": text}))})
+                    done = _export(request, lambda text: send({"id": ident, "log": text}))
+                    retire = retirement(done.get("reports") or []) if done.get("reports") else False
+                    send({"id": ident, "done": done})
                 else:
                     answer, payload = _result(request)
                     send({"id": ident, "done": answer}, payload)
@@ -286,6 +384,8 @@ def main() -> int:
                     return 1
             finally:
                 send({"id": ident, "settled": True, "op": op})
+            if retire:
+                return 0
             gc.collect()
             continue
         if op != "build":
@@ -295,6 +395,7 @@ def main() -> int:
         patcher = Patcher(request, lambda message, payload: send({"id": ident, **message}, payload),
                           acknowledged=bool(request.get("acknowledged")))
         document.SAVED_LISTENERS.append(patcher.saved)
+        retire = False
         try:
             cwd = request.get("cwd")
             if cwd:
@@ -305,6 +406,7 @@ def main() -> int:
                             outputs=request.get("outputs"), code=request.get("code"),
                             verify=bool(request.get("verify")))
             patcher.finish(reports)
+            retire = retirement(reports)
             send({"id": ident, "done": reports})
         except BuildError as error:
             send({"id": ident, "failed": str(error)})
@@ -315,6 +417,8 @@ def main() -> int:
         finally:
             document.SAVED_LISTENERS.remove(patcher.saved)
             send({"id": ident, "settled": True})
+        if retire:
+            return 0  # over its memory cap: gone, with all it held
         gc.collect()  # answered: the cycles the build left, collected while idle
     return 0
 

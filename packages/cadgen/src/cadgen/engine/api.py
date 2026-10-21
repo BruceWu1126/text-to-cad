@@ -6,7 +6,7 @@
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None) -> Drawn
     serve(source, port=0) -> Served
-    where(source, ref) -> Facts
+    where(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
 
 Every one goes through the daemon (``client``), so the warm worker of the script, of the code
@@ -254,27 +254,47 @@ def _source(source: Any) -> dict[str, Any]:
     return {"path": str(path)}
 
 
-def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None,
+def export(source: Any, *destinations: Any, pose: Any = None, part: str | None = None, inputs: bool = True,
            log: Callable[[str], None] | None = None, daemon: bool = True) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``): the document of an ``.xbf``, of a ``.step`` read into one,
     of a script's model (``script.py::model`` or a ``Model``, built first) or of built code
     (a ``Built``). Several destinations read the document once. ``daemon=False`` does it in
-    this process, cold. A GLB carries every motion the document defines, as a clip."""
+    this process, cold. A GLB carries every motion the document defines, as a clip.
+
+    A ``.cadz`` destination packages an ``.xbf`` with its build closure's source files and,
+    unless ``inputs`` is False, its inputs (``export.cadz``), in this process: no document is
+    read, only the files the closure names."""
     from cadgen.engine.export import ExportRefused, kind_of
+    from cadgen.engine.export import cadz
 
     if not destinations:
         raise ExportRefused("export names at least one destination")
     resolved = [Path(os.fspath(destination)).resolve() for destination in destinations]
+    packages = [path for path in resolved if path.suffix.lower() == cadz.SUFFIX]
+    resolved = [path for path in resolved if path.suffix.lower() != cadz.SUFFIX]
     for destination in resolved:
         kind_of(destination)
+    written: list[Written] = []
+    if packages:
+        if pose is not None or part is not None:
+            raise ExportRefused("a .cadz packages the document as built: --pose and --part are another export's")
+        text = os.fspath(source) if isinstance(source, (str, os.PathLike)) else ""
+        if not text.lower().endswith(".xbf"):
+            raise ExportRefused("a .cadz is made from an .xbf: export the model's xbf first")
+        for package in packages:
+            clock = time.perf_counter()
+            size = cadz.write(Path(text), package, inputs=inputs)
+            written.append(Written(package, "cadz", size, round(time.perf_counter() - clock, 4)))
+        if not resolved:
+            return written
     spec = _source(source)
     cwd = str(source.cwd) if isinstance(source, Built) else os.getcwd()
     shown = log or (lambda _text: None)
     order = {"op": "export", "source": spec, "destinations": [str(path) for path in resolved], "pose": pose,
              "part": part, "cwd": cwd}
     done = _exported(order, spec, shown, daemon)
-    return [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
+    return written + [Written(Path(row["path"]), row["kind"], row["bytes"], row["seconds"]) for row in done["files"]]
 
 
 def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str], None], daemon: bool) -> dict:
@@ -339,9 +359,11 @@ def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
     return Served(answer["url"], answer["port"])
 
 
-def where(source: Any, ref: str) -> Facts | list[Facts]:
+def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
     """What made one element of a document, and what the kernel measures of it: ``ref`` is
-    ``PART/face N`` (``edge``, ``vertex``) or an element name (``f:...``)."""
+    ``PART/face N`` (``edge``, ``vertex``) or an element name (``f:...``). Without ``ref``, the
+    build closure the xbf holds (``previous``): its engine, libraries, source, modules, inputs
+    and key, read from the file alone."""
     import urllib.request
 
     from cadgen.engine.cli import elements
@@ -349,6 +371,14 @@ def where(source: Any, ref: str) -> Facts | list[Facts]:
     path = Path(os.fspath(source)).resolve()
     if not path.is_file():
         raise EngineError(f"no document {source}")
+    if ref is None:
+        from cadgen.engine import previous
+
+        writer, found = previous.scan(path)
+        if found is None:
+            raise EngineError(f"{path.name} holds no build closure"
+                              + (f" (written by {writer})" if writer else ": no engine wrote it"))
+        return json.loads(found)
     answer = _ask({"op": "serve", "path": str(path)})
     base, _sep, ident = answer["url"].partition("/?doc=")
 

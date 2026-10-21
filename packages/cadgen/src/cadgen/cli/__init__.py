@@ -84,6 +84,8 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     "telemetry": ("cadgen.cli.telemetry", "show or change the usage stats and crash reports CAD sends: status, on, off"),
     # The engine (cadgen.engine): @xbf models, its own warm daemon and its documents.
     "xbf": ("cadgen.engine.cli", "the engine: build @xbf models, export and serve their documents"),
+    # The first engine verb at the top level; the rest join it when the `xbf` level goes.
+    "where": ("cadgen.cli.where", "an xbf's build closure, or what made one element of it"),
 }
 
 # A skill's pin is the version in the launch command its SKILL.md teaches
@@ -296,7 +298,7 @@ def _report(error: Exception) -> None:
 
 # Commands that never carry the analytics notice: a CAD app's server, whose output only the host's log
 # reads; the daemon's supervisor, writing to its own log; and `telemetry`, which says it its own way.
-_UNTOLD = frozenset({"mcp", "daemon", "telemetry", "xbf"})
+_UNTOLD = frozenset({"mcp", "daemon", "telemetry", "xbf", "where"})
 
 
 def _tell() -> None:

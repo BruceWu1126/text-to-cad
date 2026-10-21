@@ -155,7 +155,7 @@ from cadgen.engine.sources import returning as _returning
 _EXECUTIONS = itertools.count(1)
 # The operations that read a file: what they make is named per product of the file
 # (``_read_structure``).
-_FILE_READS = frozenset({"read_step", "import_step", "import_brep"})
+_FILE_READS = frozenset({"read_step", "read_xbf", "import_step", "import_brep"})
 # What a STEP writer names an element it gives no name ('NONE' is the schema's empty name).
 _UNNAMED = frozenset({"", "NONE", "NULL"})
 # The operations that answer a question of a shape and make nothing of it.

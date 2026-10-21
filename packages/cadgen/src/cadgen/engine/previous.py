@@ -1,21 +1,38 @@
-"""A model's previous document is its cache: the key it was built with, on its main label.
+"""A model's build closure, on its xbf's main label: what made the document, as pointers and
+digests, and the key a restart compares.
 
-When a build writes a model's xbf, the document's main label carries the model's key
-(``record``): a digest of what the model's body is made of -- the source key body
-retention computes (``model.BuildContext.source``: the symbols its function reaches,
-transitively, every child model's among them, and the engine's own code), the versions
-of the libraries it runs on -- and of every file it read, through the engine or itself,
-by its bytes; and those files, each by its path relative to the document's folder, so
-their bytes can be checked again. A digest and data paths: no source text, no script
-path, no line (**the file is the document**, **names are the durable tie to code**).
+When a build writes a model's xbf, the document's main label carries its closure
+(``manifest``, schema ``cadgen.engine closure/1``):
 
-A build asks the document before it runs a model's body (``consult``). Where the key
-the model has now -- its source key now, each file read again -- is the one the document
-holds, the body is not run: the document on disk is what it would make, and is not
-written. The document read cleanly once, written by this engine, settles it; the files
-the model declares are left as they are. Anything else -- no document, another engine's,
-one that does not read, a key that differs -- is a build as it was, and the report says
-why (``cache``).
+- ``engine``: the release that wrote it (``cadgen <VERSION>``, the version declared beside
+  this very code: ``version``), the xbf format, and a digest of the engine's own code;
+- ``libs``: the versions of build123d, OCP and numpy;
+- ``source``: ``{"kind": "script", "path", "function", "commit"}`` -- the script relative to
+  the document's folder, the model's function, the repository's commit when the script is
+  in one (``null`` otherwise) -- or, for code built from text, ``{"kind": "code", "name",
+  "digest"}``, the code never written;
+- ``modules``: ``[path, digest]`` per first-party module the script's load imported or the
+  model reaches, each a digest of what the model reaches in it (its functions' code objects
+  with no line tables, its classes, the values its bindings hold: ``sources.Symbols.modules``);
+  a comment or a blank line changes none;
+- ``inputs``: ``[kind, path, digest]`` per file a body read -- through the engine
+  (``file``: ``read_step``, ``read_xbf``, the importers) or itself (``read``) -- by its path
+  relative to the document's folder (``null`` digest: a file it found missing), and a text's
+  font (``font``);
+- ``bodies``: how many bodies the model is;
+- ``key``: one digest over the engine, the libraries, the source (but its commit), the
+  modules and the inputs; ``null`` where the closure cannot say all the model is made of (a
+  body read a pipe, or reaches what cannot be keyed).
+
+No source text, no line, no input's contents (**the file is the document**, **names are the
+durable tie to code**).
+
+A build asks the document before it runs a model's body (``build._previous``): the closure
+made again now -- the script loaded, its modules digested, each input hashed again --
+against the one the document holds. The same key, in a document this engine wrote that
+reads whole, and the body is not run: the document on disk is what it would make, and it is
+not written. Otherwise the build runs, and its report names what changed (``changes``):
+``../src/lib/arm.py changed``, ``../STEP/gripper.step is missing``.
 
 Only the whole document is taken, never a part of it. OCCT's BinXCAF reader does not
 give back the doubles it was given: it builds each direction and placement anew, and a
@@ -33,46 +50,71 @@ import functools
 import hashlib
 import json
 import os
-import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "cadgen.engine key/1"
-# The prefix of the record's text: ``record`` sorts its keys, ``bodies`` first.
-_RECORD = re.compile(rb'\{"bodies":\d+,"code":"[0-9a-f]+","inputs":\[[ -~]*?\],"key":"[0-9a-f]+",'
-                     rb'"schema":"cadgen\.engine key/1"\}')
-_WRITER = re.compile(rb"cadgen\.engine xbf/1 \(cadgen [ -~]{1,64}?\)")
+SCHEMA = "cadgen.engine closure/1"
+FORMAT = "xbf/1"
+# The start of a closure's text: the schema first, so a head scan finds it.
+_PREFIX = b'{"schema":"cadgen.engine closure/1",'
 # How far into a document its main label's attributes are: right after the header.
 _HEAD_BYTES = 1 << 20
 
 
 @functools.cache
-def _libraries() -> str:
-    """The versions of what a model's body runs on beyond its own code and the engine's:
-    a key made with another build123d or OCP is another key."""
+def version() -> str:
+    """The cadgen release declared beside this very code -- its source tree's
+    ``pyproject.toml`` (stamped from ``VERSION`` by the release), else the ``.dist-info``
+    installed beside the package -- never the first ``cadgen`` metadata on the path, which
+    can be another install's. ``0+unknown`` with neither."""
+    import tomllib
+
+    package = Path(__file__).resolve().parent.parent
+    try:
+        with (package.parent.parent / "pyproject.toml").open("rb") as handle:
+            project = tomllib.load(handle).get("project") or {}
+        if project.get("name") == "cadgen" and project.get("version"):
+            return str(project["version"])
+    except (OSError, ValueError):
+        pass
+    found = []
+    for metadata in package.parent.glob("cadgen-*.dist-info"):
+        try:
+            found.append((metadata.stat().st_mtime_ns, metadata.name))
+        except OSError:
+            continue
+    return max(found)[1][len("cadgen-"):-len(".dist-info")] if found else "0+unknown"
+
+
+@functools.cache
+def _libraries() -> dict[str, str]:
+    """The versions of what a model's body runs on beyond its own code and the engine's."""
     from importlib import metadata
 
-    found = []
-    for name in ("build123d", "cadquery-ocp", "cadquery_ocp", "numpy"):
-        try:
-            found.append(f"{name}={metadata.version(name)}")
-        except metadata.PackageNotFoundError:
-            continue
-    return ";".join(found)
+    found = {}
+    for shown, names in (("build123d", ("build123d",)), ("OCP", ("cadquery-ocp", "cadquery_ocp")),
+                         ("numpy", ("numpy",))):
+        for name in names:
+            try:
+                found[shown] = metadata.version(name)
+                break
+            except metadata.PackageNotFoundError:
+                continue
+    return found
 
 
-def _digest(text: str) -> str:
+@functools.cache
+def _engine() -> dict[str, str]:
+    from cadgen.engine.model import _engine_version
+
+    return {"release": f"cadgen {version()}", "format": FORMAT,
+            "digest": hashlib.sha256(_engine_version().encode()).hexdigest()[:32]}
+
+
+def _digest(value: Any) -> str:
+    text = json.dumps(value, ensure_ascii=True, separators=(",", ":"))
     return hashlib.blake2b(text.encode(), digest_size=16).hexdigest()
-
-
-def code_key(source: str) -> str:
-    """The digest of what a body is made of, without the files it read."""
-    return _digest(f"{SCHEMA}\n{_libraries()}\n{source}")
-
-
-def key(source: str, values: list) -> str:
-    """A model's key: its code (``code_key``) and what each file it read holds."""
-    return _digest(f"{code_key(source)}\n{json.dumps(values, separators=(',', ':'), default=list)}")
 
 
 def closure(keys: dict[str, tuple], name: str) -> list[str]:
@@ -88,79 +130,181 @@ def closure(keys: dict[str, tuple], name: str) -> list[str]:
     return found
 
 
-def record(keys: dict[str, tuple], name: str, folder: Path) -> str | None:
-    """The record a model's document carries: its key, the files it read (relative to
-    ``folder``, the document's), how many bodies it is; None for a body whose key does
-    not say all it read, or whose reads a document cannot name."""
+def _relative(path: str | None, folder: Path) -> str | None:
+    if path is None:
+        return None
+    try:
+        return Path(os.path.relpath(path, folder)).as_posix()
+    except ValueError:  # another drive
+        return Path(path).as_posix()
+
+
+def absolute(path: str | None, folder: Path) -> str | None:
+    """A closure's path as a file: relative to the document's folder."""
+    return None if path is None else os.path.normpath(os.path.join(folder, path))
+
+
+def commit(folder: Path) -> str | None:
+    """The commit the repository holding ``folder`` is at, or None outside one."""
+    try:
+        done = subprocess.run(["git", "-C", str(folder), "rev-parse", "--verify", "-q", "HEAD"], capture_output=True,
+                              text=True, timeout=10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = done.stdout.strip()
+    return found if done.returncode == 0 and len(found) >= 40 else None
+
+
+def _source(model: Any, folder: Path) -> dict[str, Any]:
+    from cadgen.engine import sources
+
+    held = sources.MEMORY.get(str(model.script))
+    if held is not None:
+        return {"kind": "code", "name": model.name, "digest": hashlib.sha256(held).hexdigest()[:32]}
+    return {"kind": "script", "path": _relative(str(model.script), folder), "function": model.name,
+            "commit": commit(Path(model.script).parent)}
+
+
+def _input(recipe: tuple, value: Any, folder: Path) -> list:
+    """One input as the closure lists it: its kind, its path, the digest of what it held."""
+    kind = recipe[0]
+    if kind in ("file", "read"):
+        return [kind, _relative(recipe[1], folder), _value(kind, value)]
+    return [kind, recipe[1], _relative(recipe[2], folder), recipe[3], _value(kind, value)]
+
+
+def _value(kind: str, value: Any) -> str | None:
+    if value is None:
+        return None
+    if kind == "file":
+        return value[1]
+    if kind == "font":
+        return f"{value[1]}:{value[2][1]}"
+    return value
+
+
+def _recipe(row: list, folder: Path) -> tuple:
+    kind = row[0]
+    if kind in ("file", "read"):
+        return (kind, absolute(row[1], folder))
+    return (kind, row[1], absolute(row[2], folder), row[3])
+
+
+def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, modules: dict[str, str],
+             unkeyable: bool) -> dict[str, Any]:
+    """The closure a model's document carries (see the module), its paths relative to
+    ``folder``, the document's: ``keys`` the run's bodies (``memo``), ``name`` the model's
+    body, ``modules`` and ``unkeyable`` its closure by file (``sources.Symbols.modules``)."""
     from cadgen.engine.kernel import memo
 
     found = keys.get(name)
-    if found is None or not found[2]:
-        return None
-    source, checks = found[0], found[1]
-    inputs, values = [], []
-    for check, expected in checks:
-        recipe = memo.recipe(check)
-        if recipe is None:
-            return None
-        shown = _relative(recipe, folder)
-        if shown not in inputs:  # a child placed again holds its reads again
-            inputs.append(shown)
-            values.append(expected)
-    return json.dumps({"bodies": len(closure(keys, name)), "code": code_key(source), "inputs": inputs,
-                       "key": key(source, values), "schema": SCHEMA},
-                      sort_keys=True, ensure_ascii=True, separators=(",", ":"), default=list)
+    keyed = found is not None and bool(found[2]) and not unkeyable
+    inputs: list | None = None
+    if found is not None:
+        inputs = []
+        for check, expected in found[1]:
+            recipe = memo.recipe(check)
+            if recipe is None:
+                keyed = False  # bytes handed to an importer: no path a fresh process reads again
+                continue
+            row = _input(recipe, expected, folder)
+            if row not in inputs:  # a child placed again holds its reads again
+                inputs.append(row)
+    record: dict[str, Any] = {
+        "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
+        "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items()),
+        "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None}
+    record["key"] = key(record) if keyed else None
+    return record
 
 
-def _relative(recipe: tuple, folder: Path) -> list:
-    def shown(path: str | None) -> str | None:
-        if path is None:
-            return None
-        try:
-            return Path(os.path.relpath(path, folder)).as_posix()
-        except ValueError:  # another drive
-            return Path(path).as_posix()
-
-    kind = recipe[0]
-    if kind in ("file", "read"):
-        return [kind, shown(recipe[1])]
-    return [kind, recipe[1], shown(recipe[2]), recipe[3]]
+def key(record: dict[str, Any]) -> str:
+    """The digest a restart compares: the engine, the libraries, the source but its commit,
+    the modules and the inputs."""
+    source = {name: value for name, value in record["source"].items() if name != "commit"}
+    return _digest([SCHEMA, record["engine"], record["libs"], source, record["modules"], record["inputs"]])
 
 
-def _absolute(recipe: list, folder: Path) -> tuple:
-    def placed(path: str | None) -> str | None:
-        return None if path is None else os.path.normpath(os.path.join(folder, path))
-
-    kind = recipe[0]
-    if kind in ("file", "read"):
-        return (kind, placed(recipe[1]))
-    return (kind, recipe[1], placed(recipe[2]), recipe[3])
+def text(record: dict[str, Any]) -> str:
+    """A closure as the main label holds it: ASCII JSON, the schema first."""
+    return json.dumps(record, ensure_ascii=True, separators=(",", ":"))
 
 
-def current(found: dict[str, Any], source: str, folder: Path) -> str:
-    """The key the model has now, by the record's reads: its source now, each file read
-    again. Raises for a file that cannot be read."""
+def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, str]) -> tuple[str, list[str]]:
+    """The closure ``record`` names, made again now: its key, and what differs from the
+    record, each said by name (``../src/arm.py changed``, ``../STEP/gripper.step is
+    missing``). ``modules`` is the model's closure by file now."""
     from cadgen.engine.kernel import memo
 
-    values = []
-    for recipe in found["inputs"]:
-        values.append(memo.recheck(_absolute(recipe, folder)))
-    return key(source, values)
+    now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
+           "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items())}
+    changes: list[str] = []
+    if now["engine"] != record["engine"]:
+        old, new = record["engine"].get("release"), now["engine"]["release"]
+        changes.append(f"the engine changed ({old} to {new})" if old != new else "the engine's code changed")
+    for name in sorted(set(now["libs"]) | set(record["libs"])):
+        if now["libs"].get(name) != record["libs"].get(name):
+            changes.append(f"{name} {record['libs'].get(name)} became {now['libs'].get(name)}")
+    drop = {"commit"}
+    if {k: v for k, v in now["source"].items() if k not in drop} != \
+            {k: v for k, v in record["source"].items() if k not in drop}:
+        source = now["source"]
+        changes.append("the code changed" if source["kind"] == "code"
+                       else f"the model is now {source['path']}::{source['function']}")
+    held, current = dict(map(tuple, record["modules"])), dict(map(tuple, now["modules"]))
+    for path in sorted(set(held) | set(current)):
+        if path not in current:
+            changes.append(f"{path} is no longer imported")
+        elif path not in held:
+            changes.append(f"{path} is new")
+        elif held[path] != current[path]:
+            changes.append(f"{path} changed")
+    inputs = []
+    for row in record["inputs"] or []:
+        recipe = _recipe(row, folder)
+        try:
+            value = _value(row[0], memo.recheck(recipe))
+        except Exception:  # noqa: BLE001 - a file it read that reads no more: missing
+            value = None
+        shown = row[1] if row[0] != "font" else f"font {row[1]}"
+        if value != row[-1]:
+            changes.append(f"{shown} is missing" if value is None else f"{shown} changed")
+        inputs.append([*row[:-1], value])
+    now["inputs"] = inputs if record["inputs"] is not None else None
+    return key(now), changes
 
 
 def scan(path: Path) -> tuple[str | None, str | None]:
-    """What wrote the document at ``path`` and the record its main label holds, read from
-    its head, where the main label's attributes are: ``(writer, record)``, each None where
-    the head holds none. A first look only: a document is taken once it reads whole."""
+    """What wrote the document at ``path`` and the closure its main label holds, read from
+    its head, where the main label's attributes are: ``(writer, closure text)``, each None
+    where the head holds none. A first look only: a document is taken once it reads whole."""
+    import re
+
     with open(path, "rb") as handle:
         head = handle.read(_HEAD_BYTES)
-    writer = _WRITER.search(head)
-    found = _RECORD.search(head)
-    return (writer.group(0).decode() if writer else None, found.group(0).decode() if found else None)
+    writer = re.search(rb"cadgen\.engine xbf/1 \(cadgen [ -~]{1,64}?\)", head)
+    found = None
+    at = head.find(_PREFIX)
+    if at >= 0:
+        end = head.find(b"\x00", at)  # an ASCII string's bytes end before the next attribute's
+        tail = head[at:end if end >= 0 else len(head)].decode("ascii", "replace")
+        try:
+            value, length = json.JSONDecoder().raw_decode(tail)
+            if isinstance(value, dict) and value.get("schema") == SCHEMA:
+                found = tail[:length]
+        except ValueError:
+            found = None
+    return (writer.group(0).decode() if writer else None, found)
 
 
 def read_record(doc: Any) -> tuple[str | None, str | None]:
-    """The writer and the record a document read whole holds on its main label."""
-    from cadgen.engine.document import KEY_RECORD_GUID, WRITER_GUID, _label_text
+    """The writer and the closure a document read whole holds on its main label."""
+    from cadgen.engine.document import CLOSURE_GUID, WRITER_GUID, _label_text
 
-    return _label_text(doc.Main(), WRITER_GUID), _label_text(doc.Main(), KEY_RECORD_GUID)
+    return _label_text(doc.Main(), WRITER_GUID), _label_text(doc.Main(), CLOSURE_GUID)
+
+
+def of(path: Path) -> dict[str, Any] | None:
+    """The closure the xbf at ``path`` holds, or None."""
+    _writer, found = scan(Path(path))
+    return None if found is None else json.loads(found)

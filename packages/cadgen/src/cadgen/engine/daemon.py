@@ -110,6 +110,8 @@ same pipe, even while a build runs."""
         self.answers: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
         self.started = time.time()
         self.builds = 0
+        # Over its memory cap after a build (``worker.retirement``): it exits, and is never asked again.
+        self.retired = False
         self.held: list[Any] = []  # what the daemon holds for this worker's build until it settles
         threading.Thread(target=self._stderr, daemon=True).start()
         threading.Thread(target=self._reader, daemon=True).start()
@@ -203,6 +205,13 @@ same pipe, even while a build runs."""
                     code = self.process.wait()
                     raise WorkerGone(f"the worker for {Path(self.script).name} exited ({code}) during the build")
                 self.builds += 1
+                done = message.get("done")
+                if isinstance(done, dict):
+                    reports = done.get("reports") or []
+                else:
+                    reports = done if isinstance(done, list) else []
+                if any(isinstance(report, dict) and report.get("retired") for report in reports):
+                    self.retired = True
                 return message
             except (BrokenPipeError, OSError) as error:
                 raise WorkerGone(str(error)) from error
@@ -257,7 +266,8 @@ class Daemon:
         relevant = {name: environment.get(name, "") for name in ("PYTHONPATH", "PATH", "VIRTUAL_ENV")}
         with self.workers_lock:
             found = self.workers.get(key)
-            if found is not None and found.alive() and {name: found.environment.get(name, "") for name in relevant} == relevant:
+            if found is not None and found.alive() and not found.retired and \
+                    {name: found.environment.get(name, "") for name in relevant} == relevant:
                 return found
             if found is not None:
                 found.stop()
@@ -403,7 +413,7 @@ class Daemon:
             send({"ok": True, "url": f"{self.server.url}/?doc={ident}", "port": self.server.port})
         elif op == "status":
             with self.workers_lock:
-                workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive(),
+                workers = [{"script": w.script, "pid": w.pid, "builds": w.builds, "alive": w.alive() and not w.retired,
                             "busy": w.lock.locked()} for w in self.workers.values()]
             send({"ok": True, "pid": os.getpid(), "workers": workers, "idle": round(time.monotonic() - self.last, 1),
                   "serving": None if self.server is None else {"url": self.server.url,
