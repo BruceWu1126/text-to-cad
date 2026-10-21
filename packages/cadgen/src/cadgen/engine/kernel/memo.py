@@ -419,7 +419,7 @@ def _audited(event: str, args: tuple) -> None:
     except OSError:
         found = None
     if found is None or not stat_module.S_ISREG(found.st_mode):
-        log.retainable = False
+        log.retainable = log.keyed = False
         log.unread.append(path)
         return
     log.reads[path] = (found.st_size, found.st_mtime_ns)
@@ -474,22 +474,22 @@ def _hold_reads(log: "_BodyLog", state: "_Run") -> None:
         for path, opened in log.reads.items():
             if opened is None:
                 if os.path.exists(path):
-                    log.retainable = False  # appeared while the body ran
+                    log.retainable = log.keyed = False  # appeared while the body ran
                     continue
                 held = _ReadInput(path, None, None, None)
             else:
                 try:
                     found = os.stat(path)
                 except OSError:
-                    log.retainable = False
+                    log.retainable = log.keyed = False
                     continue
                 if (found.st_size, found.st_mtime_ns) != opened:
-                    log.retainable = False
+                    log.retainable = log.keyed = False
                     continue
                 try:
                     held = _ReadInput(path, found.st_size, found.st_mtime_ns, _read_digest(path))
                 except _Unkeyable:
-                    log.retainable = False
+                    log.retainable = log.keyed = False
                     continue
             log.checks.append((held, held.digest))
     finally:
@@ -821,6 +821,12 @@ class _Run:
         # those that are no regular file, which keep it running.
         self.reads: dict[str, list[str]] = {}
         self.unread: dict[str, list[str]] = {}
+        # Per body this run ran or replayed: what it is made of -- its source, its checks
+        # (each file it read, held to its bytes), whether those say all it read, and the
+        # bodies it called -- its key in a document (``build``); and how it went, ``run``
+        # or ``replayed``.
+        self.keys: dict[str, tuple[str, list, bool, list[str]]] = {}
+        self.statuses: dict[str, str] = {}
         # The TShapes no operation made that a placement shares (``_note_placed``).
         self.placed: set = set()
         # Per file key and site, the read of this build that decoded it (``_read_again``).
@@ -988,7 +994,7 @@ class _BodyLog:
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread", "keyed", "children")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -996,6 +1002,13 @@ class _BodyLog:
         self.keys: list[tuple] = []
         self.ids = array.array("q")
         self.retainable = True
+        # Whether the body's key -- its source and its checks -- says all it read: false for
+        # a body that read what has no bytes to hold (a pipe, a file that moved under it),
+        # or that called such a body. A body run plain is still keyed: it is not kept to
+        # replay, but what it makes is a function of its key (``Run.keys``).
+        self.keyed = True
+        # The bodies it called, run, replayed or placed again, in order.
+        self.children: list[str] = []
         # The files the body read itself (``_audited``): each regular one with its stat when
         # opened (``None``: missing), and those that are no regular file.
         self.reads: dict[str, tuple | None] = {}
@@ -1041,6 +1054,7 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
             parent = state.bodies[-1]
             parent.events.append(("body", record))
             parent.checks.extend(record.log.checks)
+            parent.children.append(name)
         return result
     log = _BodyLog()
     state.done.add(name)
@@ -1050,10 +1064,12 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
         result = function()
     except BaseException:
         if len(state.bodies) > 1:
-            state.bodies[-2].retainable = False
+            state.bodies[-2].retainable = state.bodies[-2].keyed = False
         raise
     finally:
         state.bodies.pop()
+    state.keys[name] = (source, list(log.checks), log.keyed, list(log.children))
+    state.statuses[name] = "run"
     if log.reads:
         _hold_reads(log, state)
         state.reads[name] = list(log.reads)
@@ -1074,11 +1090,15 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any]) -> A
             _BODIES[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0)
     if state.bodies:
         parent = state.bodies[-1]
+        # Its checks are the caller's too, kept or not: the caller's key says all it read.
+        parent.checks.extend(log.checks)
+        parent.children.append(name)
+        if not log.keyed:
+            parent.keyed = False
         if snapshot is None:
             parent.retainable = False
         else:
             parent.events.append(("body", _BODIES[name]))
-            parent.checks.extend(log.checks)
     return result
 
 
@@ -1090,13 +1110,65 @@ def used(name: str) -> None:
         return
     record = _BODIES.get(name)
     parent = state.bodies[-1]
+    parent.children.append(name)
     if record is None:
         parent.retainable = False
+        known = state.keys.get(name)
+        if known is None or not known[2]:
+            parent.keyed = False
+        else:
+            parent.checks.extend(known[1])
     else:
         parent.events.append(("body", record))
         parent.checks.extend(record.log.checks)
         if record.log.reads:
             state.reads[name] = list(record.log.reads)
+
+
+def replayable(name: str, source: str) -> bool:
+    """Whether ``body(name, ...)``, its source ``source``, would replay the body's last run
+    in this process rather than run it."""
+    if not enabled() or os.environ.get("CADGEN_ENGINE_BODIES", "1").strip() == "0":
+        return False
+    record = _BODIES.get(name)
+    return record is not None and record.source == source and _replayable(record)
+
+
+def recipe(check: Callable[[], Any]) -> tuple | None:
+    """What one of a body's checks reads, as a document can name it: ``("file", path)`` for
+    a file read through the engine (``read_step``, the importers), ``("read", path)`` for
+    one the body opened itself, ``("font", font, path, style)`` for a text's font; None
+    for a check no document can name (bytes handed to an importer)."""
+    if isinstance(check, _ReadInput):
+        return ("read", check.path)
+    if isinstance(check, functools.partial) and not check.keywords:
+        if check.func is _file_key and len(check.args) == 1 and not isinstance(check.args[0], (bytes, bytearray)):
+            return ("file", os.path.abspath(os.fspath(check.args[0])))
+        if check.func is _font_key and len(check.args) == 3:
+            font, path, style = check.args
+            if font is not None and not isinstance(font, str):
+                return None
+            return ("font", font, None if path is None else os.path.abspath(os.fspath(path)),
+                    None if style is None else style.name)
+    return None
+
+
+def recheck(found: tuple) -> Any:
+    """What the check a recipe names (``recipe``) answers now -- a file's digest, or
+    ``None`` for one gone (a body's own read) -- raising for one that cannot be read."""
+    kind = found[0]
+    if kind == "file":
+        return _file_key(found[1])
+    if kind == "read":
+        return _ReadInput(found[1], None, None, None)()
+    if kind == "font":
+        style = None
+        if found[3] is not None:
+            from build123d import FontStyle
+
+            style = FontStyle[found[3]]
+        return _font_key(found[1], found[2], style)
+    raise ValueError(f"no check reads {kind!r}")
 
 
 def _replayable(record: _Body) -> bool:
@@ -1166,6 +1238,8 @@ def _replay(record: _Body, state: _Run) -> Any:
             _KEY_IDS.move_to_end(key)
     record.generation = generation
     state.done.add(record.name)
+    state.keys[record.name] = (record.source, list(record.log.checks), record.log.keyed, list(record.log.children))
+    state.statuses[record.name] = "replayed"
     if record.log.reads:
         state.reads[record.name] = list(record.log.reads)
     _STATS["bodies_skipped"] += 1

@@ -92,6 +92,9 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         state = "written" if row.get("written") else "unchanged"
         shown.append(f"{os.path.relpath(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
     worker = "" if fresh is None else (" cold" if fresh else " warm")
+    if memo.get("bodies_loaded"):
+        return (f"took {report['model']}{worker} in {wall:.2f}s: its file holds the model's key, "
+                f"{memo.get('bodies_loaded', 0)} bodies, nothing ran" + (f"; {', '.join(shown)}" if shown else ""))
     return (f"built {report['model']}{worker} in {wall:.2f}s: body {timings.get('body', 0):.2f}s, "
             f"{memo.get('hits', 0)} hits, {memo.get('misses', 0)} misses, {memo.get('uncached', 0)} uncached"
             + (f"; {', '.join(shown)}" if shown else "")

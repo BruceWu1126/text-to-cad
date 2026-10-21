@@ -52,7 +52,9 @@ def hinge():
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
    `tempfile.gettempdir()/cadgen-engine`. It writes no sidecar, record of a build,
-   cache, index, memo, mesh or parsed document. A restart is cold.
+   cache, index, memo, mesh or parsed document. A restart is cold, but for the xbf
+   itself: a model whose xbf holds the key the model has now is not run
+   (**Previous document**).
 2. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
    OCP, build123d, numpy and the standard library only. A test holds it.
 3. **The file is the document.** The xbf is the native document: units in
@@ -62,15 +64,18 @@ def hinge():
    `XCAFDoc_VisMaterial`: PBR), element names on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
    Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
-   <release>)`, `document.Loaded.writer`). No script path and no code location
-   is in it. STEP, GLB, STL and 3MF are translations of it.
+   <release>)`, `document.Loaded.writer`) and holds the model's key: digests, and the
+   data files the model read by their paths relative to the document (**Previous
+   document**). No script path and no code location is in it. STEP, GLB, STL and 3MF
+   are translations of it.
    `cadgen xbf export` writes any of them from the xbf alone.
 4. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
    the first run made, and a miss makes everything downstream of it miss. So an
    edit costs what it changed, and an element keeps the name its feature history
    gave it across edits. Tessellations live in the serving process's memory,
-   keyed by a part's geometry, under a size cap.
+   keyed by a part's geometry, under a size cap. Across a restart, a model's only
+   cache is its own xbf, taken whole or not at all (**Previous document**).
 5. **One file per model.** A model is one xbf, plus the exports it declares --
    translations of that xbf, written after it. There is no second file of a
    model: no sidecar, no manifest, no record of what a build did.
@@ -97,6 +102,7 @@ def hinge():
 | `materials.py` | `Material`, a physical material and its PBR look, and the catalogue of common ones |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, and poses (forward kinematics from the ground) |
 | `build.py` | one build: load the script afresh, one memo run, document, element names, files |
+| `previous.py` | the model's key on its xbf's main label, and the xbf asked before the body runs |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `exports.py` | STEP through the XCAF writer (names, colours, material names and densities); binary STL, GLB (PBR materials) and 3MF from the engine's tessellation |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
@@ -494,7 +500,8 @@ edit to a constant or a function re-runs the bodies that reach it, and the
 bodies that hold their results. A comment, a blank line or a docstring re-runs
 nothing. An edit to the root re-runs the root alone. A changed input file
 re-runs the body that reads it and the bodies that hold its result. The
-report's `memo` counts `bodies_run` and `bodies_skipped`.
+report's `memo` counts `bodies_run` and `bodies_skipped`, and `bodies` says of each
+body of the model how it went: `run` or `replayed`.
 `CADGEN_ENGINE_BODIES=0` turns retention off and nothing else. Otherwise a body
 must be a function of its inputs: a body that reads the clock or the environment
 is not seen to change, and nor is state one body leaves in a module for another
@@ -519,3 +526,39 @@ running waits for it.
 The read hook costs nothing measurable: on a small model, built in-process, a
 no-op took a median 50–51 ms and an edit 0.89–0.95 s with the hook, against
 51 ms and 0.89 s with no hook installed.
+
+## Previous document
+
+A model's previous xbf is its cache, as a FreeCAD document is its own: opened, it is
+what was last computed, and only what changed is computed again. Its main label holds
+the model's key (`previous.py`, a `TDataStd_AsciiString` beside the writer's): a digest
+of the root body's retention key -- the symbols it reaches, every child model's among
+them, the engine's own code -- with the versions of build123d, OCP and numpy, and of
+the bytes of every file the model read (through `read_step` or the importers, a font,
+or opened itself); those files by their paths relative to the document's folder, so a
+fresh process can read them again; and how many bodies the model is. Digests and data
+paths only: no source, no script path, no line.
+
+Before a body the memo would not replay runs, the build asks the document: the key the
+model has now -- its source key now, each file it read hashed again -- against the one
+the xbf holds. The same key, in an xbf written by this engine that reads whole, and the
+body is not run: the report says `cache: {"used": true, "from": "file"}`, every file
+`written: false`, `memo.bodies_loaded` the bodies the document is, `bodies` the root
+`loaded`, `timings` the key (`key`) and the read (`read`). A later build in the same
+worker takes it from memory without reading it (`"from": "memory"`), as it does a file
+it wrote itself whose root the memo cannot replay. Anything else builds as before, and
+`cache.reason` says why: no file yet, a declared export missing, written by another
+engine or program, a file that does not read, no key in it, its code changed, a file it
+reads changed, or replayed from memory. `CADGEN_ENGINE_MEMO=0` and
+`CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
+
+The document is taken whole or not at all, never one body's part of it. OCCT's BinXCAF
+reader does not give back the doubles it was given: it makes each direction and placement
+anew, and a direction made again is normalized again, a rotation orthogonalized again,
+one unit in the last place apart. Measured on the corpus: an `l_bracket` read and saved
+is four doubles apart, and `motorbike` read and saved twice is 3,839 bytes apart from
+once (no fixed point). A document holding a body's result read back would drift from the
+cold build's bytes, build after build. So what is written is always made from what this
+process's bodies made, and a document read is never written or patched: the first edit
+after a restart runs the model, and writes the cold build's bytes. A taken document has
+no worker that built it: `made_by` is null until a build of it runs.
