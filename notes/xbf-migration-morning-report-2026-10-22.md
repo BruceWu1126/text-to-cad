@@ -95,3 +95,24 @@ and `tmp/bench/compare.md` in the engine worktree.
 5. The render track (Blender draft PR) and the release remain parked by your word.
 
 Demo viewer: port 5251 on 30a170056, models rebuilding at the time of writing (reload the tabs).
+
+## End of day (2026-10-22, ~15:30 EDT): PR #568 whole at 8aa3fd951
+
+Every branch of the day is merged and pushed; the PR description is rewritten to match. Landed after the morning:
+the git commit out of the closure and the key on the format alone (xbf/2); drift accepted with evidence and
+`--verify` order-free; the sub-assembly ground-link fix; the UI port (Preview floor at the lowest point, prompt view
+pose + ink touches) and eight viewer restorations (reload state, packet hidden/isolated, measure undo, build
+progress + failed card, cad_view selection, ink cleared on a new version, SDF count); the brightness fix (viewer
+environment baked OCCT's way; regular modes isotropic; p95 30→9 fixture, 29→1 qdd); hidden/isolated parts left
+out of the stills; `--display light|dark` on drawings; the AP242 kinematics (law 13, conformance test, couplers,
+standard interpolation, no loop/spline/unlocked couplings, xbf/3); the CLI restorations from the gap audit
+(`--job` with output settings and robot visual ids, DXF replay, `package://`, viewer prewarm, `--json` failures,
+OUT folder, Windows console flags, telemetry kinds; `--mode list` dropped by decision); the corpus recovery of
+every animation routine in the AP242 vocabulary with the moonwatch fan fix and the hero regenerated identical;
+the sampler kink fix and xbf/4. Notes in this folder: `migration-gap-audit-2026-10-22.md`,
+`ap242-function-couplings-scope-2026-10-22.md`, `xbf-post-migration-followups-2026-10-22.md`.
+
+Open for Jake: the eight corpus decisions from the recovery report (GLB sizes, qdd carrier, hypercar door drift,
+rover wheel range, juno ankle/handstand, f1 lift, radial sliders and collisions; the sampler one is fixed), the
+render-scripts draft PR, the Windows follow-ups, the docs rewrite last, the release. The moonwatch grand-tour
+video renders under a Codex babysitter (expected ~17:30).
