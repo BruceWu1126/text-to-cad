@@ -44,7 +44,7 @@ _install_engine_telemetry()
 del _install_engine_telemetry
 
 # The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
-_ENGINE = ("xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint", "configuration",
+_ENGINE = ("model", "xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint", "configuration",
            "motion", "couple", "read_step", "read_xbf", "read_mesh", "select", "report", "track")
 _VERBS = ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon")
 

@@ -9,7 +9,7 @@ A model is a parameterless function returning a build123d shape::
     def arm():
         ...
 
-``python arm.py`` runs it, and every other model the script defines, in a warm worker whose
+An explicit ``arm()`` call builds it, and the child models its body calls, in a warm worker whose
 kernel memo makes an edit cost what it changed; the document is written to
 ``XBF/arm.xbf`` beside the script, and the derived files it declares after it, each a
 translation of that document (``cadgen export``). ``cadgen serve XBF/arm.xbf``
@@ -28,10 +28,8 @@ the model, named, coloured and given its materials as the file has them; ``read_
 an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
 kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
 as build123d shapes in world coordinates (``refs``).
-Importing this package imports no kernel: the names below load on first use. Imported by a
-model script run as a program, it asks the daemon to build the script there and then
-(``model.run_at_import``): a script imports the engine before build123d, so the asking process
-never loads it. Imported by a
+Importing this package imports no kernel: the names below load on first use. Decoration only declares: imports and definitions never build or exit the caller.
+Imported by a
 script run by its path from inside a package (``python proj/parts/model.py``), it gives the
 script the package ``python -m proj.parts.model`` would (``model.as_package_module``).
 """
@@ -40,7 +38,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "couple", "dxf", "glb", "materials", "memo", "motion", "paint",
+__all__ = ["Material", "configuration", "couple", "dxf", "glb", "materials", "memo", "model", "motion", "paint",
            "read_mesh", "read_step", "read_xbf", "report", "select", "step", "stl", "threemf", "track", "xbf"]
 
 
@@ -90,23 +88,8 @@ def __getattr__(name: str) -> Any:
 
         return read_mesh
     if name in __all__:
-        from cadgen.engine import model
+        import importlib
 
-        return getattr(model, name)
+        declarations = importlib.import_module("cadgen.engine.model")
+        return declarations if name == "model" else getattr(declarations, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
-def _run_main_as_program() -> None:
-    """``python model.py``: a model script asks the daemon to build it the moment it imports the
-    engine, so this process never loads build123d (``model.run_at_import``). Last, once every
-    name above can load."""
-    import sys
-
-    file = getattr(sys.modules.get("__main__"), "__file__", None)
-    if isinstance(file, str) and file.endswith(".py"):
-        from cadgen.engine.model import run_at_import
-
-        run_at_import(file)
-
-
-_run_main_as_program()

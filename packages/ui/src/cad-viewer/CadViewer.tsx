@@ -16,6 +16,7 @@ import type { LibraryLayout } from '../tab-store/tabRecord.js';
 import type { TabStore } from '../tab-store/tabStore.js';
 import { useTabViewerState } from '../tab-store/useTabViewerState.js';
 import { normalizePath } from './catalog.js';
+import { MemoryModels } from './MemoryModels.js';
 import { MissingCadFile } from './MissingCadFile.js';
 
 // A STEP: read by the cadgen engine, at a length its size decides (the home's pictures ask first).
@@ -136,7 +137,7 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   }, [client]);
 
   // What is on screen joins the library with a picture, once it has settled.
-  useModelThumbnail(live, shown, String(entry?.documentHash || entry?.hash || ''),
+  useModelThumbnail(live, shown?.includes("::") || shown?.endsWith(".py") ? null : shown, String(entry?.documentHash || entry?.hash || ''),
     (png, pictured) => latest.current.onThumbnail?.(png, pictured) ?? Promise.resolve());
 
   // A file the viewer asks for — a pick in the explorer, a renderer's link — is shown by the host.
@@ -180,12 +181,12 @@ export function CadViewer<Model extends LibraryModel = LibraryModel>({ client, h
   const goHome = useMemo(() => homed ? <Button size="sm" variant="outline" onClick={home}>{t("file.goHome")}</Button> : null, [homed, home, t]);
   const presentation = useMemo(() => ({
     home: library ? <ModelLibrary library={library} layout={layout} onLayoutChange={changeLayout} picture={picture}
-      links={host.links} onError={onError} /> : undefined,
+      links={host.links} onError={onError} sections={<MemoryModels source={host.files} onOpen={openFile} />} /> : undefined,
     loading: <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>,
     error: ({ message, missing, reload }: { message: string; missing: boolean; reload?: () => void }) => missing
       ? <MissingCadFile file={path} entry={entry} reload={reload} action={goHome} title={t("file.missing")} />
       : <EmptyState icon={FileWarning} title={t("file.openFailed")} description={message} tone="warn" action={goHome} />,
-  }), [library, layout, changeLayout, path, picture, host.links, entry, onError, goHome, t]);
+  }), [library, layout, changeLayout, path, picture, host.links, host.files, openFile, entry, onError, goHome, t]);
   return <I18nProvider locale={locale}>
     <FileViewer file={path || null} host={viewerHost} renderers={renderers} state={state} onStateChange={onStateChange}
       colorScheme={colorScheme} language={language} appSettings={appSettings} update={update} fullSize={fullSize} history={history} notice={notice} onError={onError} presentation={presentation} />

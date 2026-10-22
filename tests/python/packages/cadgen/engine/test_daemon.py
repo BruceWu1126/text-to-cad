@@ -28,6 +28,9 @@ SIZE = {size}
 @xbf
 def block():
     return bd.fillet(bd.Box(SIZE, 4, 2).edges().filter_by(bd.Axis.Z), 0.5)
+
+if __name__ == "__main__":
+    block()
 """
 
 
@@ -45,6 +48,9 @@ def pair():
     peg = bd.Pos(20, 0, 0) * bd.Cylinder(2, 5)
     peg.label = "peg"
     return bd.Compound(children=[block, peg], label="pair")
+
+if __name__ == "__main__":
+    pair()
 """
 
 
@@ -64,6 +70,9 @@ def cut():
     other = bd.Pos(20, 0, 0) * (bd.Box(6, 6, 6) + bd.Sphere(3.5))
     other.label = "other"
     return bd.Compound(children=[plate, bd.Pos(0, 20, 0) * peg, other], label="cut")
+
+if __name__ == "__main__":
+    cut()
 """
 
 
@@ -179,6 +188,55 @@ class DaemonTest(unittest.TestCase):
     def build(self, size: int) -> dict:
         self.script.write_text(textwrap.dedent(MODEL.format(size=size)), encoding="utf-8")
         return self.built("block")
+
+    def test_named_memory_model_updates_one_address_and_is_gone_after_restart(self) -> None:
+        from urllib.parse import urlparse, parse_qs
+
+        def build(size):
+            done = self.cli("build", f"import build123d as bd; result = bd.Box({size}, 2, 3)", "--model", "bracket", "--json")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return json.loads(done.stdout.splitlines()[-1])
+
+        first = build(1)
+        self.assertEqual(first["files"], {})
+        self.assertEqual(first["address"], "code::bracket")
+        self.assertEqual(first["meshed"], 0)
+        url = urlparse(first["url"])
+        doc = parse_qs(url.query)["doc"][0]
+        endpoint = f"{url.scheme}://{url.netloc}/api/doc/{doc}"
+        before = get_json(endpoint)
+        second = build(2)
+        self.assertEqual(second["url"], first["url"])
+        after = get_json(endpoint)
+        self.assertNotEqual(before["version"], after["version"])
+        measured = self.cli("where", "code::bracket#face 1")
+        self.assertEqual(measured.returncode, 0, measured.stderr)
+        self.assertEqual(json.loads(measured.stdout)["kind"], "face")
+        models = json.loads(self.cli("status", "--json").stdout)["models"]
+        self.assertEqual([row["address"] for row in models], ["code::bracket"])
+        self.assertEqual(list(self.folder.iterdir()), [], "no source, cache, document, or thumbnail on disk")
+        self._stop_daemon()
+        missing = self.cli("serve", "code::bracket")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("no live model", missing.stderr)
+        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["models"], [])
+
+    def test_script_address_builds_only_the_selected_declaration(self) -> None:
+        self.script.write_text("""from cadgen import model
+import build123d as bd
+@model
+def unused():
+    raise AssertionError('not called')
+@model
+def block():
+    return bd.Box(1, 2, 3)
+""")
+        served = self.cli("serve", f"{self.script}::block")
+        self.assertEqual(served.returncode, 0, served.stderr)
+        self.assertEqual([path.name for path in self.folder.iterdir()], ["block.py"])
+        exported = self.cli("export", f"{self.script}::block", "block.step")
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        self.assertTrue((self.folder / 'block.step').is_file())
 
     def test_a_warm_worker_keeps_its_memo_between_builds(self) -> None:
         cold = self.build(10)
@@ -306,7 +364,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual([row["reason"] for row in status["retired"]], ["RSS", "RSS"])
 
     def test_a_failing_body_answers_with_its_error(self) -> None:
-        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\n", encoding="utf-8")
+        self.script.write_text("from cadgen.engine import xbf\n\n@xbf\ndef block():\n    raise RuntimeError('no')\nif __name__ == '__main__':\n    block()\n", encoding="utf-8")
         done = self.run_script("block.py")
         self.assertEqual(done.returncode, 1)
         self.assertIn("RuntimeError: no", done.stderr)
@@ -315,15 +373,15 @@ class DaemonTest(unittest.TestCase):
         # A script runs like Python and takes no options (law 11): every model it defines writes
         # what it declares, whatever its argv holds.
         self.script.write_text(textwrap.dedent(MODEL.format(size=3)) + "\n\n@stl\ndef peg():\n"
-                               "    return bd.Cylinder(1, 3)\n", encoding="utf-8")
+                               "    return bd.Cylinder(1, 3)\nif __name__ == '__main__':\n    peg()\n", encoding="utf-8")
         self.script.write_text(self.script.read_text(encoding="utf-8").replace("import xbf", "import stl, xbf"),
                                encoding="utf-8")
         done = self.run_script("block.py")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual([line.split(" in ")[0] for line in done.stdout.splitlines() if line.startswith("built")],
-                         ["built block.py::block cold", "built block.py::peg cold"])
+                         ["built block.py::block cold", "built block.py::peg warm"])
         workers = json.loads(self.cli("status", "--json").stdout)["workers"]
-        self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 1)],
+        self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 2)],
                          "the daemon's worker built it, not the script's own process")
         done = engine_daemon.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder,
                                  env=self.env)
@@ -331,30 +389,34 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py", "peg.stl"])
 
-    def test_a_model_script_asks_at_its_import_of_the_engine(self) -> None:
-        # The asking process runs nothing past the engine's import -- not build123d, not the body
-        # of the script -- and the worker runs it all; a script that shows no model is plain Python.
+    def test_decoration_only_declares_and_main_calls_only_its_selected_model(self) -> None:
         self.script.write_text(textwrap.dedent("""
-            from cadgen.engine import xbf
-            import os, sys
-            from pathlib import Path
-            with Path(__file__).with_name("ran.txt").open("a") as ran:
-                ran.write(f"{os.environ.get('CADGEN_ENGINE_WORKER', 'asker')} {'build123d' in sys.modules}\\n")
-            import build123d as bd
+            from cadgen import model, xbf
+
+            @model
+            def unused():
+                raise AssertionError("uncalled model ran")
 
             @xbf
             def block():
+                import build123d as bd
                 return bd.Box(1, 2, 3)
+
+            if __name__ == "__main__":
+                import sys
+                print("after definitions", "build123d" in sys.modules)
+                if "call" in sys.argv:
+                    block()
+                    print("after call")
             """), encoding="utf-8")
-        done = self.run_script("block.py")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(set((self.folder / "ran.txt").read_text(encoding="utf-8").splitlines()), {"1 True"},
-                         "the script ran in the worker alone, past the engine's import")
-        self.assertTrue((self.folder / "XBF" / "block.xbf").is_file())
-        (self.folder / "tool.py").write_text("from cadgen.engine import select\nimport sys\n"
-                                             "print('ran', 'build123d' in sys.modules)\n", encoding="utf-8")
-        done = self.run_script("tool.py")
-        self.assertEqual((done.returncode, done.stdout.strip()), (0, "ran False"), done.stderr)
+        declared = self.run_script("block.py")
+        self.assertEqual((declared.returncode, declared.stdout.strip()), (0, "after definitions False"), declared.stderr)
+        self.assertFalse((self.folder / "XBF").exists())
+        self.assertFalse(self.state.exists() and any(self.state.iterdir()), "importing starts no daemon")
+        called = engine_daemon.run([sys.executable, "block.py", "call"], cwd=self.folder, env=self.env)
+        self.assertEqual(called.returncode, 0, called.stderr)
+        self.assertIn("after call", called.stdout)
+        self.assertTrue((self.folder / "XBF/block.xbf").is_file())
 
 
     def test_the_viewer_moves_before_a_derived_file_is_written(self) -> None:
@@ -447,37 +509,6 @@ class DaemonTest(unittest.TestCase):
         while any(self.state.glob("*.sock")) and time.monotonic() < deadline:
             time.sleep(0.1)
         self.assertFalse(any(self.state.glob("*.sock")), "the idle daemon left")
-
-
-class DeclaresModelsTest(unittest.TestCase):
-    """Which sources hand ``python script.py`` to the daemon at their import of the engine."""
-
-    def declares(self, source: str) -> bool:
-        if str(SRC) not in sys.path:
-            sys.path.insert(0, str(SRC))
-        from cadgen.engine.model import declares_models
-
-        folder = Path(tempfile.mkdtemp(prefix="engine-declares-"))
-        self.addCleanup(shutil.rmtree, folder, True)
-        script = folder / "model.py"
-        script.write_text(textwrap.dedent(source), encoding="utf-8")
-        return declares_models(script)
-
-    def test_an_engine_decorator_by_name_or_through_the_module(self) -> None:
-        self.assertTrue(self.declares("from cadgen.engine import xbf\n@xbf\ndef a():\n    pass\n"))
-        self.assertTrue(self.declares("from cadgen.engine import step as S\n@S('a.step')\ndef a():\n    pass\n"))
-        self.assertTrue(self.declares("import cadgen.engine as ce\n@ce.dxf(out='a.dxf')\ndef a():\n    pass\n"))
-        self.assertTrue(self.declares("import cadgen.engine\n@cadgen.engine.glb\ndef a():\n    pass\n"))
-        self.assertTrue(self.declares("from cadgen import engine\n@engine.xbf\ndef a():\n    pass\n"))
-        # cadgen exports the engine's names at its root.
-        self.assertTrue(self.declares("from cadgen import xbf, step\n@xbf\n@step\ndef a():\n    pass\n"))
-        self.assertTrue(self.declares("import cadgen\n@cadgen.stl\ndef a():\n    pass\n"))
-
-    def test_no_engine_decorator_is_no_model(self) -> None:
-        self.assertFalse(self.declares("from cadgen.engine import select\nselect('a.xbf', 'b')\n"))
-        self.assertFalse(self.declares("from cadgen.engine import memo\nfrom other import step\n"
-                                       "@step\ndef a():\n    pass\n@memo\ndef b():\n    pass\n"))
-        self.assertFalse(self.declares("import other as ce\nimport cadgen.engine\n@ce.xbf\ndef a():\n    pass\n"))
 
 
 if __name__ == "__main__":

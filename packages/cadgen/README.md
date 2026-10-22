@@ -15,6 +15,10 @@ import build123d as bd
 @step("arm.step")         # and its STEP, a translation of that document
 def arm():
     return bd.Box(10, 20, 30)
+
+
+if __name__ == "__main__":
+    arm()
 ```
 
 ```bash
@@ -68,7 +72,8 @@ Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
    ezdxf, build123d's own DXF library), numpy, Pillow and the standard library only. cadgen
    reaches into it, never the other way: its telemetry is an observer the engine calls with
    plain facts (`engine.api.observers`).
-4. **The file is the document.** The xbf is the native document: units in millimetres,
+4. **XCAF is the document; files are explicit.** A live model holds an XCAF document;
+   `@xbf` or `--xbf` serializes it as native BinXCAF. It holds: units in millimetres,
    prototypes and instances with placements, a name on every part and instance, colours and
    materials per part and per painted face, element names on face, edge and vertex labels, and
    an assembly's mechanism. STEP, GLB, STL, 3MF and, of a planar document, DXF are translations
@@ -78,9 +83,12 @@ Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
    makes everything downstream of it miss. So an edit costs what it changed, and an element
    keeps the name its feature history gave it across edits. Across a restart, a model's only
    cache is its own xbf, taken whole or not at all.
-6. **One file per model.** A model is one xbf, plus the exports it declares -- translations of
-   that xbf, written after it. There is no second file of a model: no sidecar, no record of
-   what a build did beside the xbf's own closure.
+6. **One document per model, only declared files.** Bare `@model` and code built
+   with `--model NAME` keep their document in the worker's memory. File decorators
+   imply a model and write only their named outputs. No implicit XBF, source file,
+   sidecar, registry, cache or thumbnail is written for an in-memory model.
+   Model addresses and the viewer's In memory list disappear when their workers
+   retire or the engine restarts. Reusing a code model's name updates that address.
 7. **Provenance is served live, never written.** What made an element -- the feature, its
    operation, the function, file and line of its call -- lives in the trace of the worker that
    built the document, and is asked of it while it lives (`made_by`, `cadgen where`). A document
@@ -95,13 +103,19 @@ Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
 10. **A file decorator defines an output file.** Whenever the model it decorates runs in a
     build -- the build's target, or a child another model's body calls -- that file is written,
     once per build, from the model's own document.
-11. **A model script is Python.** `python model.py` takes no options and behaves like any Python
-    script; its decorators are the whole definition of what it writes. Engine switches are
-    environment variables, never script options.
-12. **`cadgen build` takes code only.** Its one argument is source text, which declares nothing:
-    its flags (`--xbf/--step/--glb/--stl/--threemf/--dxf`, `--name`) are its only declarations,
-    additive among themselves. A script is built by running it (law 11), so there is one way to
-    build each.
+11. **Decoration only declares; a model script is Python.** Importing cadgen or
+    defining a decorated function never builds a model, writes its outputs, starts a
+    worker, or exits the caller. An explicit call builds the model and writes its
+    declared files, then returns to the caller. Python controls which calls run and
+    in what order, including its `__main__` block and conditions; watchers never
+    change that control flow. cadgen consumes no script arguments. Engine switches
+    are environment variables.
+12. **`cadgen build` takes code and requires an output declaration.** Its one
+    positional argument is source text assigning `result`. At least one of
+    `--model NAME`, `--xbf`, `--step`, `--glb`, `--stl`, `--threemf`, or `--dxf` is
+    required before code can run. `--model NAME` declares a named document in
+    memory; the file flags declare files, additive among themselves. `--name`
+    alone declares no output. A script is built by calling its models (law 11).
 13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
     standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
     10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);

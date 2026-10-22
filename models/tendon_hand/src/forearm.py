@@ -115,3 +115,12 @@ def forearm_housing_context():
             s.label = t["actuator"] + f"_context_capstan_{i}"
             parts.append(s)
     return bd.Compound(label="open_forearm_housing_actual_actuator_context", children=parts)
+
+
+if __name__ == "__main__":
+    forearm_frame_review()
+    forearm_guide_banks_review()
+    forearm_mount_system_review()
+    forearm_housing_review()
+    actuator_fasteners_review()
+    forearm_housing_context()

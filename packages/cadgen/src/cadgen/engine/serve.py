@@ -87,6 +87,8 @@ from cadgen.engine.render.look import LOOK
 
 __all__ = ["MeshCache", "PARALLEL_BYTES", "Served", "Server", "find_three"]
 
+from cadgen.engine.addresses import key as document_key, parse as model_address
+
 PAGE = Path(__file__).resolve().parent / "page"
 # A part whose shape bytes reach this is meshed with the kernel's face parallelism inside
 # its pool process: measured one part at a time on two large documents, parts above it
@@ -297,7 +299,7 @@ class Served:
     the document was read from its file, the shape's bytes when a worker sent it."""
 
     ident: str
-    path: Path
+    path: Path | str
     structure: dict[str, Any]
     stat: tuple | None
     shapes: dict[str, Any]
@@ -320,7 +322,9 @@ class Served:
         return made
 
 
-def _stat(path: Path) -> tuple | None:
+def _stat(path: Path | str) -> tuple | None:
+    if isinstance(path, str):
+        return None
     try:
         stat = path.stat()
     except OSError:
@@ -337,7 +341,10 @@ class Server:
                  provenance: Callable[[str, str, str, int], dict[str, Any] | None] | None = None,
                  cache: MeshCache | None = None) -> None:
         self.served: dict[str, Served] = {}
-        self.idents: dict[Path, str] = {}
+        self.idents: dict[Path | str, str] = {}
+        self.model_loaders: dict[str, tuple[Callable, int]] = {}
+        self.model_versions: dict[str, int] = {}
+        self.model_locks: dict[str, threading.Lock] = {}
         # The daemon's server and a worker's snapshot serve from the process's one cache
         # (``MESHES``); a server of its own (a test's) holds its own.
         self.cache = cache if cache is not None else MeshCache()
@@ -417,8 +424,12 @@ class Server:
     # --- documents -------------------------------------------------------------------
 
     def add(self, path: Path) -> str:
-        path = Path(path).resolve()
+        path = document_key(path)
         ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
+        if isinstance(path, str):
+            if path not in self.idents:
+                raise ValueError(f"no live model {path}")
+            return self.idents[path]
         if path.suffix.lower() in FOREIGN:
             # Read outside the lock: a STEP's read is long, and every other document is served
             # meanwhile. Two first opens of one file share its one read (``_foreign``).
@@ -440,7 +451,7 @@ class Server:
     def put(self, path: Path, structure: dict[str, Any], shapes: dict[str, Any]) -> str:
         """Serve a document held in memory (a build's, which a worker draws): its structure
         and each part's shape (or shape bytes) by key. No file is read for it."""
-        path = Path(path).resolve()
+        path = document_key(path)
         ident = hashlib.blake2b(str(path).encode(), digest_size=6).hexdigest()
         with self.load_lock:
             self.served[ident] = Served(ident, path, structure, _stat(path), dict(shapes),
@@ -448,6 +459,23 @@ class Server:
             self.idents[path] = ident
         self._changed()
         return ident
+
+    def register_model(self, address: str, load: Callable, version: int) -> str:
+        ident = hashlib.blake2b(address.encode(), digest_size=6).hexdigest()
+        with self.load_lock:
+            self.idents[address] = ident
+            self.model_loaders[ident] = (load, version)
+            self.model_locks.setdefault(ident, threading.Lock())
+        self._changed()
+        return ident
+
+    def forget_model(self, address: str) -> None:
+        with self.load_lock:
+            ident = self.idents.pop(address, None)
+            self.served.pop(ident, None)
+            self.model_loaders.pop(ident, None)
+            self.model_versions.pop(ident, None)
+        self._changed()
 
     def listing(self) -> list[dict[str, str]]:
         return [{"id": ident, "path": str(doc.path)} for ident, doc in self.served.items()]
@@ -542,6 +570,15 @@ class Server:
         """The document as the server holds it, read from its file again only when some
         other process rewrote the file (and no build is writing it now). A STEP is read
         again in the background (the module docstring): until it is in, this is the last."""
+        if ident in self.model_loaders:
+            # No kernel work on the HTTP thread: the loader asks the owning worker.
+            with self.model_locks[ident]:
+                load, version = self.model_loaders[ident]
+                if self.model_versions.get(ident) != version:
+                    structure, shapes = load()
+                    self.put(structure["address"], structure, shapes)
+                    self.model_versions[ident] = version
+            return self.served[ident]
         with self.load_lock:
             doc = self.served[ident]
             if self.held.get(doc.path):
@@ -582,7 +619,7 @@ class Server:
         held = []
         with self.load_lock:
             for text in paths:
-                path = Path(text).resolve()
+                path = document_key(text)
                 if path in self.idents:
                     self.held[path] = self.held.get(path, 0) + 1
                     held.append(path)
@@ -609,7 +646,7 @@ class Server:
         part neither held nor brought is sent to the pool. Returns what it did, or None for
         a path not served."""
         started = time.perf_counter()
-        path = Path(header["path"]).resolve()
+        path = document_key(header["path"])
         ident = self.idents.get(path)
         if ident is None:
             return None
@@ -684,7 +721,7 @@ class Server:
         paths = []
         for text in frame.get("outputs") or []:
             try:
-                paths.append(Path(text).resolve())
+                paths.append(document_key(text))
             except (OSError, ValueError):
                 continue
         with self.load_lock:
@@ -702,7 +739,7 @@ class Server:
         with self.load_lock:
             for text, failed in outcomes.items():
                 try:
-                    path = Path(text).resolve()
+                    path = document_key(text)
                 except (OSError, ValueError):
                     continue
                 if path not in self.idents:
@@ -828,7 +865,7 @@ class Server:
             if parts == ["api", "look", "environment"]:
                 return self.send(handler, 200, LOOK.environment_path.read_bytes(), "image/vnd.radiance")
             ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
-            if parts[:2] == ["api", "doc"] and ident in self.served:
+            if parts[:2] == ["api", "doc"] and (ident in self.served or ident in self.model_loaders):
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
                     seconds = min(float((query.get("wait") or ["0"])[0] or 0), WAIT_LIMIT)

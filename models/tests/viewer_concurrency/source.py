@@ -15,3 +15,7 @@ def assembly():
         part.color = bd.Color(0.25 + (i % 3) * 0.22, 0.45, 0.65)
         parts.append(part.moved(bd.Location(((i % 8) * 18, (i // 8) * 20, 0))))
     return bd.Compound(children=parts)
+
+
+if __name__ == "__main__":
+    assembly()

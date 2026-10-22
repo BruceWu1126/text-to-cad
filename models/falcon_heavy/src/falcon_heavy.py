@@ -72,3 +72,9 @@ def falcon_heavy_exploded():
     groups.append(bd.Compound(obj=rods, children=rods, label="explode_guides_group"))
     return bd.Compound(obj=groups, children=groups,
                        label="falcon_heavy_exploded__educational_nonfunctional")
+
+
+if __name__ == "__main__":
+    falcon_heavy()
+    falcon_heavy_cutaway()
+    falcon_heavy_exploded()

@@ -282,3 +282,11 @@ def thumb_cmc_candidate_review():
         children.append(make_bowden_body(row["path"], row["tendon"] + "_cmc_tendon"))
         children.append(make_bowden_body(row["path"], row["tendon"] + "_cmc_reaction_liner", liner=True))
     return bd.Compound(label="thumb_cmc_six_continuous_reaction_transports", children=children)
+
+
+if __name__ == "__main__":
+    bowden_review()
+    transport_review()
+    middle_routing_review()
+    thumb_cmc_transport_review()
+    thumb_cmc_candidate_review()

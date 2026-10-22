@@ -329,7 +329,11 @@ def _result(request: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
         raise engine_build.BuildError(f"no code named {request['code']!r} is built in this worker")
     keys = [prototype["key"] for prototype in source.structure["prototypes"]]
     data = [source.shape_data(key) for key in keys]
-    return {"structure": source.structure, "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, \
+    from cadgen.engine import previous
+
+    _writer, closure = previous.read_record(source.xcaf)
+    return {"structure": source.structure, "closure": json.loads(closure) if closure else None,
+            "shapes": [[key, len(part)] for key, part in zip(keys, data)]}, \
         b"".join(data)
 
 

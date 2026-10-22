@@ -81,3 +81,7 @@ def w16():
     motion(engine, "explode", explode.explode_clip(turbo_tags), duration=explode.EXPLODE_SECONDS)
     return motion(engine, "running_reveal", explode.running_reveal_clip(turbo_tags),
                   duration=explode.REVEAL_SECONDS)
+
+
+if __name__ == "__main__":
+    w16()

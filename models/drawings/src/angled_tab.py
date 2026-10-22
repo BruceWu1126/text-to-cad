@@ -42,3 +42,6 @@ def angled_tab():
     plate.label, bend.label = "CUT", "BEND"
     return bd.Compound(children=[plate, bend], label="angled_tab")
 
+
+if __name__ == "__main__":
+    angled_tab()

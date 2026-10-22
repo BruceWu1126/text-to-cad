@@ -304,6 +304,7 @@ def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, A
         sys.modules.pop(module_name, None)
         raise
     model = Model(module.__dict__[name])
+    model._address = f"code::{name}"
     model.outputs = [Output(kind, given["out"]) for kind, given in (outputs or {}).items()]
     module.__dict__[name] = model
     return module
@@ -493,6 +494,9 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             context.timings.clear()
     load_seconds = loaded - started
     for report, (model, result, body, children) in zip(reports, results):
+        report["address"] = model.address
+        report["source"] = {"script": str(model.script), "name": model.name,
+                             "kind": "code" if model.address.startswith("code::") else "script"}
         if result is not None:
             report["timings"] = {"load": round(load_seconds, 4), "body": round(body, 4)}
             _written(model, result, run, report, log, model.plan(), context)
@@ -541,11 +545,11 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
-    if xbf is not None and context is not None:
+    if context is not None:
         from cadgen.engine import previous
 
         modules, unkeyable = context.modules(model)
-        tree.closure = previous.text(previous.manifest(run.keys, f"{model.script}::{model.name}", Path(xbf).parent,
+        tree.closure = previous.text(previous.manifest(run.keys, f"{model.script}::{model.name}", Path(xbf).parent if xbf is not None else model.script.parent,
                                                        model, modules, unkeyable, context.named(model)))
     timings["collect"] = round(time.perf_counter() - clock, 4)
     # What the joints' harvest found inconsistent: said, and the document written all the same.
@@ -588,6 +592,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     for kind, path in targets:
         if kind == "xbf":
             _BUILT[os.path.normcase(str(path))] = built
+    _BUILT[os.path.normcase(model.address)] = built
     _write(model, plan, tree, signature, report, log)
     timings["total"] = round(sum(value for name, value in timings.items() if name != "total"), 4)
 
@@ -665,6 +670,9 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
+    report["address"] = model.address
+    report["source"] = {"script": str(model.script), "name": model.name,
+                         "kind": "code" if model.address.startswith("code::") else "script"}
 
 
 def held(script: Path | None = None, name: str | None = None, *, path: Path | None = None) -> Any:
@@ -675,8 +683,6 @@ def held(script: Path | None = None, name: str | None = None, *, path: Path | No
 
     found = []
     for key, written in _WRITTEN.items():
-        if written.kept is None or written.kept.doc is None or written.tree is None:
-            continue
         model_script, _sep, function = key.rpartition("::")
         xbf = next((Path(target) for target in written.stats if target.endswith(".xbf")), None)
         if path is not None:
@@ -686,10 +692,13 @@ def held(script: Path | None = None, name: str | None = None, *, path: Path | No
                 continue
         elif script is not None and (Path(model_script) != Path(script) or (name is not None and function != name)):
             continue
-        found.append((written, xbf))
+        if written.kept is not None and written.tree is not None or (xbf is not None and _stat(xbf) == written.stats.get(str(xbf))):
+            found.append((written, xbf))
     if len(found) != 1:
         return None
     written, xbf = found[0]
+    if written.kept is None or written.tree is None:
+        return export.Source.read(xbf)
     return export.Source.built(written.kept.doc, written.tree, xbf)
 
 

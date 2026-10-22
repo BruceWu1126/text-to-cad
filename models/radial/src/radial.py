@@ -229,3 +229,7 @@ def radial():
         nose(), reduction(), propeller(), blower(), intake(), accessory(), ignition(), exhaust(), mount(),
     ]
     return mechanism.assemble(systems)
+
+
+if __name__ == "__main__":
+    radial()

@@ -373,3 +373,24 @@ def thumb_proximal():
 @threemf(out="../XBF/thumb_distal.3mf")
 def thumb_distal():
     return links()["thumb_distal"]
+
+
+if __name__ == "__main__":
+    lyra()
+    palm()
+    index_proximal()
+    index_middle()
+    index_distal()
+    middle_proximal()
+    middle_middle()
+    middle_distal()
+    ring_proximal()
+    ring_middle()
+    ring_distal()
+    pinky_proximal()
+    pinky_middle()
+    pinky_distal()
+    thumb_base()
+    thumb_metacarpal()
+    thumb_proximal()
+    thumb_distal()

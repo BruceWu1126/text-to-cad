@@ -37,3 +37,7 @@ def gasket_plate():
     plate = cut.sketch
     plate.label, crosshair.label = "CUT", "ENGRAVE"
     return bd.Compound(children=[plate, crosshair], label="gasket_plate")
+
+
+if __name__ == "__main__":
+    gasket_plate()

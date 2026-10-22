@@ -337,7 +337,11 @@ class CadApp:
         is named), and its revision -- a digest of the entries, which a client that only watches for
         change compares instead of reading the catalog again. A file is written whole, by rename,
         by every writer cadgen has, so a read never meets one half written."""
-        entry = catalog_entry(absolute_path(file)) if file else None
+        from cadgen.engine.addresses import parse
+        from .model_catalog import entry as model_entry
+
+        path = str(parse(file)) if file and parse(file) is not None else absolute_path(file) if file else None
+        entry = (model_entry(path) or catalog_entry(path)) if path else None
         entries = [entry] if entry else []
         return {"schemaVersion": CAD_CATALOG_SCHEMA_VERSION, "entries": entries, "revision": catalog_revision(entries)}
 
@@ -476,6 +480,10 @@ class CadApp:
                     response.send_json(200, self.read_catalog(query.get("file")))
                 elif pathname in ("/__cad/folder", "/__cad/search"):
                     self._handle_folder(response, pathname, query)
+                elif pathname == "/__cad/models":
+                    from .model_catalog import in_memory
+
+                    response.send_json(200, {"models": in_memory()})
                 elif pathname == "/__cad/recents":
                     response.send_json(200, self._recents_payload())
                 elif pathname == "/__cad/thumbnail":
@@ -657,6 +665,11 @@ class CadApp:
 
         if type(payload) is not dict:
             raise ValueError("a recents change is {action, path}")
+        from cadgen.engine.addresses import parse
+
+        # In-memory addresses and their pictures never enter the persistent library.
+        if payload.get("path") and parse(payload["path"]) is not None:
+            return self._recents_payload()
         action, path = payload.get("action"), absolute_path(payload.get("path"))
         if action == "open":
             if extension_of(path) not in VIEWER_EXTENSIONS or not os.path.isfile(path):

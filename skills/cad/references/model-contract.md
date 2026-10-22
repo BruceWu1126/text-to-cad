@@ -6,7 +6,7 @@ assemblies, deciding what a build runs, or reading files into a model.
 ## A model script is Python
 
 A model is a parameterless function that returns a build123d shape, decorated with
-`@xbf`. Running the script builds it:
+`@model` or a file decorator such as `@xbf`. Calling it builds it:
 
 ```python
 from cadgen.engine import glb, step, xbf
@@ -22,23 +22,22 @@ def bracket():
     body = bd.Box(40, 20, THICKNESS)
     body.label = "bracket"
     return body
+
+
+if __name__ == "__main__":
+    bracket()
 ```
 
 ```bash
 python src/bracket.py
 ```
 
-- **`python model.py` builds every model the script defines**: the decorated
-  functions written in it (a model it imports is a child, below). The process you
-  run builds nothing itself: it asks the engine's daemon, prints each model's report
-  and exits with the build's status. It takes no options; what follows the script's
-  name is the script's own `sys.argv`. Engine switches are environment variables
-  ([the daemon](#the-daemon)).
-- **The engine is the script's first import.** The script asks the daemon the
-  moment it imports `cadgen.engine`, before its next line, so the process you run
-  never loads build123d or the script's own modules: the worker has them loaded
-  already. A script that imports build123d (or anything heavy) above the engine
-  builds the same way, after paying for that import on every run.
+- **Decoration only declares.** Imports and function definitions never build or
+  exit the script. `python model.py` runs normal Python; each explicit model call
+  builds that model and its children, writes its declared outputs, and returns.
+  Keep executable calls under `if __name__ == "__main__":` so imports are safe.
+  Watchers never change which calls execute. The engine consumes no script
+  arguments; engine switches are environment variables ([the daemon](#the-daemon)).
 - **A script is plain Python, loaded afresh by each build.** Its folder is first on
   the module search path, so a module beside it imports by its own name. A script
   inside a package (its folder holds an `__init__.py`) is that package's module, so
@@ -52,14 +51,16 @@ python src/bracket.py
 - **A body that raises fails its model**: the report shows the model's frames, the
   files its last good build wrote stay, and the script exits 1.
 
-## Decorators declare files
+## Decorators declare models and files
+
+- `@model` declares a model with no file output. File decorators also declare a model.
 
 - `@xbf` makes the function a model and writes its document, by default
   `XBF/<function>.xbf` beside the script.
 - `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of that
   document, by default `<function>.step` (`.glb`, `.stl`, `.3mf`, `.dxf`) beside the
   script. `@dxf` draws a planar document; `$dxf` covers drawings.
-- **`out` is every decorator's only argument**, a path relative to the script:
+- **`out` is every file decorator's only argument**, a path relative to the script:
   `@step(out="../STEP/arm.step")`, or `@step("../STEP/arm.step")`. Anything else is
   refused when the script loads: a model's materials, colours, joints, the pose its
   joints connect at, its configurations and its motions are written in its body, and
@@ -274,6 +275,10 @@ no path would put it (`--xbf` is `XBF/<name>.xbf` in the working folder):
 cadgen build 'import build123d as bd
 result = bd.Box(10, 10, 10) - bd.Cylinder(3, 10)' --name cube --xbf --step out/cube.step
 ```
+
+`--model NAME` explicitly declares an in-memory model. At least one of `--model`
+or a file flag is required; a command with no output declaration fails before
+executing its code. Building the same named model again updates it.
 
 `-` reads the code from stdin; `--name` (default `model`) names it, its elements and
 its warm worker; `--json` prints the report; `--verify` verifies its bodies. A

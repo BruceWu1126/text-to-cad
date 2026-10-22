@@ -49,3 +49,6 @@ def label_plate():
     plate.label, marks.label = "CUT", "ENGRAVE"
     return bd.Compound(children=[plate, marks], label="label_plate")
 
+
+if __name__ == "__main__":
+    label_plate()

@@ -102,3 +102,6 @@ def multi_bend_test_panel():
     blank.label, bends.label = "CUT", "BEND"
     return bd.Compound(children=[blank, bends], label="multi_bend_test_panel")
 
+
+if __name__ == "__main__":
+    multi_bend_test_panel()

@@ -213,6 +213,10 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     },
     // One folder's subfolders and CAD files, and the CAD files nested under a folder whose path
     // below it holds `query` (bounded by the server, which says when it stopped early).
+    async models({ signal } = {}) {
+      const answer = await request('/__cad/models', { signal, timeoutMs: 10_000, operation: 'models' });
+      return answer.models;
+    },
     folder(path, { signal } = {}) {
       return request('/__cad/folder', { params: { path }, signal, timeoutMs: 10_000, operation: 'folder' });
     },

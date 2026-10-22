@@ -16,3 +16,7 @@ def floor_positions():
         part.color = bd.Color(*color)
         parts.append(part)
     return bd.Compound(children=parts)
+
+
+if __name__ == "__main__":
+    floor_positions()

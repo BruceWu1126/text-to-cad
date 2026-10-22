@@ -122,6 +122,7 @@ class Built:
     script: Path
     report: dict[str, Any]
     cwd: Path
+    source_kind: str = "code"
     _document: Any = field(default=None, repr=False)
 
     @property
@@ -141,7 +142,8 @@ class Built:
         if self._document is None:
             from cadgen.engine.export import Source
 
-            answer = _ask({"op": "result", "script": str(self.script), "name": self.name, "cwd": str(self.cwd)})
+            answer = _ask({"op": "result", "script": str(self.script), "name": self.name, "cwd": str(self.cwd),
+                           "source_kind": self.source_kind})
             payload = base64.b64decode(answer.get("payload") or "")
             done = answer["done"]
             shapes, at = {}, 0
@@ -250,7 +252,7 @@ def _built(script: Path, functions: list[str] | None, *, code: str | None = None
     return reports, fresh, time.perf_counter() - started
 
 
-def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
+def build(code: str, *, model: str | None = None, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
           stl: Any = None, threemf: Any = None, dxf: Any = None, verify: bool = False,
           log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Built:
     """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
@@ -265,19 +267,31 @@ def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = No
     from cadgen.engine.build import code_script
 
     outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf, "dxf": dxf})
-    name = name or "model"
+    if model is None and not outputs:
+        raise EngineError("build requires an output: model=NAME or xbf/step/glb/stl/threemf/dxf")
+    if model is not None:
+        if not isinstance(model, str) or not model.isidentifier() or not model.isascii() or __import__("keyword").iskeyword(model):
+            raise EngineError("model must be a nonempty Python identifier")
+        if name is not None and name != model:
+            raise EngineError("model and name must name the same model")
+    name = model or name or "model"
     cwd = Path.cwd()
     script = code_script(name, cwd)
     reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
                                    daemon=daemon, progress=progress)
-    return Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
+    result = Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
+    if not daemon and result.ok:
+        from cadgen.engine.build import held
+
+        result._document = held(script, name)
+    return result
 
 
 def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False,
                  log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Report:
     """A script's models -- ``functions``, or every one it defines -- each built as its
     decorators declare, and every child model each calls as its own declare (law 10): what
-    ``python script.py`` (every model) and ``Model.build()`` (one) ask. A script takes no file
+    explicit ``Model.build()`` requests ask. A script takes no file
     flags: its decorators are the whole definition of what it writes (law 11). ``progress`` as
     ``_built`` has it."""
     reports, fresh, wall = _built(Path(script).resolve(), functions, verify=verify, log=log, daemon=daemon,
@@ -294,8 +308,15 @@ def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
     if isinstance(source, Model):
         return {"script": str(source.script), "function": source.name}
     if isinstance(source, Built):
-        return {"code": source.name, "script": str(source.script)}
+        return {"code" if source.source_kind == "code" else "function": source.name, "script": str(source.script)}
+    from cadgen.engine.addresses import parse
+
     text = os.fspath(source)
+    address = parse(text)
+    if address is not None:
+        if address.script is not None:
+            return {"script": str(address.script), "function": address.name}
+        return _ask({"op": "model_source", "address": str(address)})["source"]
     if scripts and ("::" in text or text.endswith(".py")):
         script, functions = _target(text)
         return {"script": str(script), "function": functions[0] if functions else None}
@@ -450,8 +471,10 @@ def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: A
 
 def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
     """Serve a document (``.xbf``, ``.step``) from the daemon; its page's URL."""
-    path = Path(os.fspath(source)).resolve()
-    if not path.is_file():
+    from cadgen.engine.addresses import key
+
+    path = key(os.fspath(source))
+    if isinstance(path, Path) and not path.is_file():
         raise EngineError(f"no document {source}")
     if three is None:
         from cadgen.engine.serve import find_three
@@ -478,10 +501,14 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
     from cadgen.engine import refs
     from cadgen.engine.cli import weighed
 
-    path = Path(os.fspath(source)).resolve()
-    if not path.is_file():
+    from cadgen.engine.addresses import key, split
+
+    source, embedded_ref = split(source)
+    ref = ref if ref is not None else embedded_ref
+    path = key(source)
+    if isinstance(path, Path) and not path.is_file():
         raise EngineError(f"no document {source}")
-    if ref is None:
+    if ref is None and isinstance(path, Path):
         from cadgen.engine import previous
 
         writer, found = previous.scan(path)
@@ -489,7 +516,8 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
             raise EngineError(f"{path.name} holds no build closure"
                               + (f" (written by {writer})" if writer else ": no engine wrote it"))
         return json.loads(found)
-    refs.parse(ref)  # a ref that does not parse is refused before anything is served
+    if ref is not None:
+        refs.parse(ref)  # refuse invalid refs before serving
     answer = _ask({"op": "serve", "path": str(path)})
     base, _sep, ident = answer["url"].partition("/?doc=")
 
@@ -505,6 +533,10 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
             raise refs.RefError(said or str(error)) from None
 
     structure = get("")
+    if ref is None:
+        if not structure.get("closure"):
+            raise EngineError(f"{source} holds no build closure")
+        return structure["closure"]
     found: list[Facts] = []
     volumes: dict[str, float] = {}
     for hit in refs.resolve_structure(structure, ref, path):
@@ -519,7 +551,7 @@ def where(source: Any, ref: str | None = None) -> Facts | list[Facts]:
         try:
             facts = get(f"/part/{prototype['key']}/{hit.kind}/{hit.ordinal}")
         except refs.RefError as error:  # an ordinal past the part's elements
-            raise refs.RefError(str(error).replace("the part", hit.path or path.name, 1)) from None
+            raise refs.RefError(str(error).replace("the part", hit.path or os.path.basename(str(path)), 1)) from None
         found.append({"ref": hit.ref, "path": hit.path, "part": prototype["name"],
                       "key": prototype["key"], "kind": hit.kind, "ordinal": hit.ordinal, "name": hit.name,
                       **refs.placed_facts(facts, matrix)})
@@ -650,7 +682,7 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
               "retired": any(report.get("retired") for report in reports), "died": None}
     found: dict[str, Any] = {
         "verb": verb, "ok": error is None and all(report.get("ok") for report in reports),
-        "seconds": round(seconds, 4), "program": bool(getattr(model._run_as_program, "running", False)),
+        "seconds": round(seconds, 4), "program": bool(getattr(model._CONTEXT, "program", False)),
         "models": [_model(report) for report in reports], "worker": worker,
         "error": _error(error, reports, worker)}
     if verb in ("export", "snapshot"):

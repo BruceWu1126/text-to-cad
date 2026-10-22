@@ -257,3 +257,6 @@ def cabinet_panel_drawing():
     views.label, annotation.label = "CUT", "ENGRAVE"
     return bd.Compound(children=[views, annotation], label="cabinet_panel_drawing")
 
+
+if __name__ == "__main__":
+    cabinet_panel_drawing()

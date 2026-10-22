@@ -49,3 +49,6 @@ def u_channel_bracket():
     blank.label, bends.label = "CUT", "BEND"
     return bd.Compound(children=[blank, bends], label="u_channel_bracket")
 
+
+if __name__ == "__main__":
+    u_channel_bracket()

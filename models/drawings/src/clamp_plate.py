@@ -17,3 +17,7 @@ from lib import clamp_plate_profile
 def clamp_plate():
     top = clamp_plate_profile.plate().faces().sort_by(bd.Axis.Z)[-1]
     return bd.Pos(0, 0, -clamp_plate_profile.THICKNESS_MM) * top
+
+
+if __name__ == "__main__":
+    clamp_plate()

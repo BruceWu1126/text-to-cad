@@ -76,6 +76,13 @@ def engine_document_path(file_ref) -> str:
     request that names none."""
     if not file_ref:
         raise ValueError(f"GET {ROUTE_PATH} needs ?file=<the absolute path of an .xbf or a .step>")
+    from cadgen.engine.addresses import parse
+
+    address = parse(file_ref)
+    if address is not None:
+        if address.script is not None and not address.script.is_file():
+            raise ValueError(f"no script {address.script}")
+        return str(address)
     path = absolute_path(file_ref)
     if os.path.splitext(path)[1].lower() not in ENGINE_DOCUMENTS:
         raise ValueError(f"{node_basename(path)} is not a document the cadgen engine reads (.xbf, .step, .stp)")

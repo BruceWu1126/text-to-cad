@@ -143,7 +143,7 @@ def _object(properties: dict[str, Any] | None = None, required: list[str] | None
     return schema
 
 
-_PATH = {"type": "string", "description": "A CAD file's absolute path."}
+_PATH = {"type": "string", "description": "A CAD file or script path, script.py::MODEL, or code::NAME."}
 _VIEW = {"type": "string", "description": "A view id from cad_view; defaults to the most recently used viewer."}
 # What a view watches: its model's catalog entry.
 _WATCH = _object({"file": {"type": ["string", "null"]}})
@@ -512,13 +512,20 @@ class Server:
         """An existing CAD file, from the absolute path a caller named."""
         if not isinstance(value, str) or not value.strip():
             raise ToolFailed("Name a CAD file by its absolute path.", "no_path")
+        from cadgen.engine.addresses import parse
+
+        address = parse(value)
+        if address is not None:
+            if address.script is not None and not address.script.is_file():
+                raise ToolFailed(f"No script at {address.script}.", "no_file")
+            return str(address)
         path = local_path(value)
         if not os.path.isabs(path):
             raise ToolFailed(f"{value} is not an absolute path: name the model by its absolute path.", "relative_path")
         path = os.path.abspath(path)
         if not os.path.isfile(path):
             raise ToolFailed(f"No file at {path}.", "no_file")
-        if os.path.splitext(path)[1].lower() not in VIEWER_EXTENSIONS:
+        if os.path.splitext(path)[1].lower() not in (*VIEWER_EXTENSIONS, ".py"):
             raise ToolFailed(f"CAD opens {', '.join(EXTENSIONS)} files; {os.path.basename(path)} is not one.", "not_cad")
         return path
 
@@ -527,7 +534,7 @@ class Server:
 
     def _tool_cad_tab(self, arguments, context):
         current = next((view.model for view in self.views.live(context.meta.get("threadId")) if view.model), None) or self._model
-        if current is not None and not os.path.isfile(current):
+        if current is not None and "::" not in current and not os.path.isfile(current):
             current = None
         launch = self._launch(current, surface="tab") if current else self._home(surface="tab")
         return _text("CAD is open.", {"launch": launch})

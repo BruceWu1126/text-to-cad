@@ -6,6 +6,8 @@ effects. No shared feature discovers Electron, browser clipboard, a backend URL,
 persistent storage or page navigation. DOM, canvas, workers and layout remain
 shared. Missing optional methods mean an operation is unsupported.
 
+`FileSource.collections`, when supplied by a host, lists transient named documents in the explorer and home. The CAD adapter reads the engine’s live in-memory models; these entries never enter saved recents or thumbnail storage. Model addresses (`script.py::name`, `code::name`) are document identities alongside file paths. Opening a Python script lists its declarations without executing it; choosing a declaration requests its build.
+
 The host contains `files`, optional native `fileActions`, `clipboard`,
 `promptContext`, the optional `promptFiles`, `navigation` (the optional `openFile(path)` and
 `home()`), the optional `links` (the app menu's), the optional `usage`

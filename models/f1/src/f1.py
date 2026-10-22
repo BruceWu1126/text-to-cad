@@ -533,3 +533,7 @@ def f1():
     # The car apart and back together, 12 s; the engine apart and back, 8 s.
     motion(car, "teardown", lambda t: _teardown_pose(explode=_pingpong(t / 12.0)), duration=12)
     return motion(car, "engine", lambda t: _teardown_pose(engine=_pingpong(t / 8.0)), duration=8)
+
+
+if __name__ == "__main__":
+    f1()

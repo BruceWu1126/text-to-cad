@@ -1,7 +1,9 @@
 export type CadJson = null | boolean | number | string | CadJson[] | { [key: string]: CadJson };
+export interface CadMemoryModel { address: string; script: string; name: string; builtAt: number; version: number; state: string }
 export interface CadEntry {
   /** The file's absolute path, `/`-separated. */
   file: string;
+  models?: { name: string; address: string }[];
   kind?: string;
   format?: string;
   sourceFormat?: string;
@@ -147,6 +149,7 @@ export interface CadWorkspaceService {
   refresh(options?: CadRequestOptions & {file?: string;markRefreshing?: boolean}): Promise<CadCatalog>;
   resolveEntry(path: string, options?: CadRequestOptions): Promise<CadEntry>;
   serverInfo(options?: CadRequestOptions & { fresh?: boolean }): Promise<CadServerInfo>;
+  models?(options?: CadRequestOptions): Promise<CadMemoryModel[]>;
   folder(path: string, options?: CadRequestOptions): Promise<CadFolder>;
   search(path: string, query: string, options?: CadRequestOptions): Promise<CadSearch>;
   /** The home's library, newest first. */

@@ -216,6 +216,9 @@ def slow():
     if {fail}:
         raise RuntimeError("no")
     return bd.Compound(children=parts, label="slow")
+
+if __name__ == "__main__":
+    slow()
 """
 
 

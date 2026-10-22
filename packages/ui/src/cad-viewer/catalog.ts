@@ -42,10 +42,17 @@ export function contentRevision(entry: CadEntry): string {
  * content's (`contentRevision`), never compiler progress. (A renderer follows its file's updates
  * through the client itself.)
  */
-export function createCadFileSource(client: Pick<CadWorkspaceService, 'resolveEntry' | 'folder' | 'search'>,
+export function createCadFileSource(client: Pick<CadWorkspaceService, 'resolveEntry' | 'folder' | 'search' | 'models'>,
   { id = 'local' }: { id?: string } = {}): FileSource {
   return {
     id,
+    ...(client.models ? { async collections({ signal }: { signal: AbortSignal }) {
+      const models = await client.models!({ signal });
+      return [{ id: 'memory', label: 'In memory', entries: models.map(model => ({
+        path: model.address, name: model.name, kind: 'file' as const,
+        detail: `${model.address} · ${model.state} · ${new Date(model.builtAt * 1000).toLocaleTimeString()}`,
+      })) }];
+    } } : {}),
     async stat(path, { signal }): Promise<FileMetadata> {
       const entry = await client.resolveEntry(path, { signal });
       signal.throwIfAborted();

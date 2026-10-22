@@ -540,6 +540,9 @@ class Daemon:
         self.builders: dict[str, Worker] = {}
         self.renders = None  # the served documents' render processes (``render.service.Renders``)
         self.serving = threading.Lock()
+        from cadgen.engine.models import Models
+
+        self.models = Models(self)
 
     def touch(self) -> None:
         self.last = time.monotonic()
@@ -557,6 +560,7 @@ class Daemon:
     def _built(self, worker: Worker, answer: dict[str, Any]) -> None:
         """A request of ``worker`` answered: each served document its build wrote is built no
         longer, and one whose model failed says what failed, and where (``serve.Server.built``)."""
+        self.models.register(worker, answer)
         server = self.server
         if server is None:
             return
@@ -596,7 +600,9 @@ class Daemon:
     def provenance(self, path: str, key: str, kind: str, ordinal: int) -> dict[str, Any] | None:
         """What made one element of a served document, asked of the worker that built it
         (``Worker.where``): None for a document no live worker built -- one served cold."""
-        resolved = str(Path(path).resolve())
+        from cadgen.engine.addresses import key as document_key
+
+        resolved = str(document_key(path))
         worker = self.builders.get(os.path.normcase(resolved))
         if worker is None or not self.pool.holds(worker):
             return None
@@ -688,6 +694,12 @@ class Daemon:
     def handle(self, request: dict[str, Any], send: Callable[[dict[str, Any]], None]) -> None:
         self.touch()
         op = request.get("op")
+        if op == "models":
+            send({"ok": True, "models": self.models.listing()})
+            return
+        if op == "model_source":
+            send({"ok": True, "source": self.models.resolve(request["address"])})
+            return
         if op == "export":
             order = {"id": 1, "op": "export", "source": request["source"], "destinations": request["destinations"],
                      "pose": request.get("pose"), "part": request.get("part"), "cwd": request.get("cwd"),
@@ -696,7 +708,7 @@ class Daemon:
         if op == "result":
             order = {"id": 1, "op": "result", "script": request["script"], "code": request["name"],
                      "cwd": request.get("cwd")}
-            return self._call({**request, "code": request["name"]}, order, send)
+            return self._call({**request, "code": None if request.get("source_kind") == "script" else request["name"]}, order, send)
         if op == "build":
             with self.busy_lock:
                 self.busy += 1
@@ -747,7 +759,13 @@ class Daemon:
         elif op == "serve":
             server = self.serve(request)
             try:
-                ident = server.add(Path(request["path"]))
+                from cadgen.engine.addresses import parse
+
+                address = parse(request["path"])
+                if address is not None:
+                    server, ident = self.models.serve(str(address), request)
+                else:
+                    ident = server.add(Path(request["path"]))
             except Exception as error:  # noqa: BLE001
                 send({"failed": f"cannot serve {request['path']}: {error}"})
                 return
@@ -811,12 +829,14 @@ class Daemon:
                 "idle": round(now - self.last, 1),
                 "serving": None if self.server is None else {"url": self.server.url,
                                                              "documents": self.server.listing()},
+                "models": self.models.listing(),
                 "renders": [] if self.renders is None else self.renders.status()}
 
     def watch(self) -> None:
         period = min(30.0, max(min(self.idle, self.pool.idle) / 10, 0.2))
         while not self.stopping.wait(period):
             self.pool.retire_idle()
+            self.models.prune()
             if self.renders is not None:
                 self.renders.retire_idle(self.pool.idle)
             if self.busy == 0 and time.monotonic() - self.last > self.idle:

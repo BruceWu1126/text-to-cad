@@ -138,3 +138,20 @@ def thumb_reaction_arm_context_candidate():
     """Context-constrained reaction-arm candidate; not yet a clearance certificate."""
     shape = bd.Pos(*THUMB_CMC) * bd.Rot(0, 0, 45) * make_candidate(bow_x=4., bow_y=-14.)
     return bd.Compound(label="CMC_reaction_arm_context_candidate", children=[shape])
+
+
+if __name__ == "__main__":
+    index_guide_mounts()
+    middle_guide_mounts()
+    ring_guide_mounts()
+    little_guide_mounts()
+    phalanx_guide_mounts_review()
+    guide_comb_review()
+    fixed_outlet_review()
+    fixed_outlet_mounts_review()
+    yaw_reaction_mounts_review()
+    yaw_outlet_mount_review()
+    yaw_guide_macro_review()
+    thumb_cmc_negative_jaw_repair_review()
+    thumb_downstream_mounts_review()
+    thumb_reaction_arm_context_candidate()

@@ -231,3 +231,17 @@ def fingernail_review():
         place = bd.Pos(*THUMB_CMC) * bd.Rot(0, 0, 45) * bd.Pos(0, sum(THUMB_LENGTHS[:i]), 0)
         parts.append(place * make_phalanx(THUMB_LENGTHS[i], THUMB_WIDTHS[i], i == 2, "thumb_" + THUMB_ROLES[i] + "_frame"))
     return bd.Compound(label="five_fingernails_in_anatomical_hand_context", children=parts)
+
+
+if __name__ == "__main__":
+    anatomy_layout()
+    phalanx_review()
+    phalanx_variants_review()
+    phalanx_continuous_r5()
+    phalanx_continuous_supports_r5()
+    phalanx_continuous_representative_r5()
+    fingertip_pad_review()
+    fingertip_pad_export_repair()
+    fingertip_bridge_repair_review()
+    fingernail_export_repair_review()
+    fingernail_review()

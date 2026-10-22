@@ -48,7 +48,7 @@ def _skipped(name: str) -> bool:
 
 
 def _listed(name: str) -> bool:
-    return not is_hidden_name(name) and extension_of(name) in VIEWER_EXTENSIONS
+    return not is_hidden_name(name) and (extension_of(name) in VIEWER_EXTENSIONS or extension_of(name) == ".py")
 
 
 def _entries(folder: str):

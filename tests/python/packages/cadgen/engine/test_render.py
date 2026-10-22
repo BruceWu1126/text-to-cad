@@ -594,6 +594,9 @@ def pair():
     peg = bd.Pos(20, 0, 0) * bd.Cylinder(2, 5)
     peg.label = "peg"
     return bd.Compound(children=[block, peg], label="pair")
+
+if __name__ == "__main__":
+    pair()
 """
 
 

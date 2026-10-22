@@ -15,12 +15,9 @@ bottom, and the xbf, when declared, is always written first.
 
 The decorated function is a ``Model``: ``.build()``, ``.export(*destinations)``,
 ``.snapshot(out)`` and ``.document`` run the engine's verbs on it, through the daemon.
-Run as a program (``python model.py``), a model script asks the daemon to build every
-model it defines, as their decorators declare: the script's own process builds nothing,
-and exits with the build's status. It takes no options (law 11): the decorators are the
-whole definition of what a script writes, and the engine's switches are environment
-variables. A script inside a package is that package's module (``module_of``), in a
-build and run by its path alike (``as_package_module``).
+Decoration only declares: imports and definitions never build or exit the caller.
+An explicit model call asks the daemon to build that model, then returns its shape.
+The script's own Python control flow, including its main block, selects calls.
 
 Called inside a build, a model is a child: its body runs in the same run, with the
 same memo, and its result is a sub-assembly of whatever the caller makes of it,
@@ -29,13 +26,14 @@ a pure function of its source, so a second call in one build hands back a new
 placement of the same result -- new objects sharing the first call's geometry --
 rather than running the body again: a child used four times is one prototype placed
 four times. A child writes the files it declares, as a target does: once a build, from
-its own document (``BuildContext.children``, ``build``). Called outside a build, a model
-is its function.
+its own document (``BuildContext.children``, ``build``). Called outside a build, a model asks its warm worker to build it.
 """
 
 from __future__ import annotations
 
+import dis
 import functools
+import sys
 import inspect
 import os
 import threading
@@ -43,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "dxf", "glb", "memo", "motion", "paint",
+__all__ = ["KINDS", "Memo", "Model", "Output", "Target", "configuration", "dxf", "glb", "memo", "model", "motion", "paint",
            "read_step", "read_xbf", "step", "stl", "threemf", "xbf", "models_in"]
 
 # The suffix each output kind writes, and the default file name's.
@@ -87,6 +85,52 @@ def check_output(kind: str, out: Any, where: str) -> None:
         raise ValueError(f"{where}: the file must end in {' or '.join(_ACCEPTED[kind])}, not {os.fspath(out)!r}")
 
 
+def _caller_discards_model_result() -> bool:
+    """Whether this wrapper's real-file ``__main__`` caller immediately POP_TOPs.
+
+    This is deliberately a one-way proof: every observer, unfamiliar runtime,
+    synthetic module and bytecode uncertainty keeps the historical materialized
+    return. The caller is two frames above this helper (helper -> model wrapper
+    -> call site).
+    """
+    if sys.implementation.name != "cpython":
+        return False
+    if sys.gettrace() is not None or sys.getprofile() is not None:
+        return False
+    monitoring = getattr(sys, "monitoring", None)
+    if monitoring is not None:
+        try:
+            if any(monitoring.get_tool(tool_id) is not None for tool_id in range(6)):
+                return False
+        except Exception:
+            return False
+    try:
+        caller = sys._getframe(2)
+        if caller.f_trace is not None:
+            return False
+        if caller.f_code.co_name != "<module>" or caller.f_globals.get("__name__") != "__main__":
+            return False
+        main_module = sys.modules.get("__main__")
+        if main_module is None or caller.f_globals is not vars(main_module):
+            return False
+        filename = Path(caller.f_code.co_filename)
+        declared_filename = Path(str(caller.f_globals.get("__file__", "")))
+        if (
+            filename.suffix.lower() != ".py"
+            or not filename.is_file()
+            or declared_filename.resolve() != filename.resolve()
+        ):
+            return False
+        following = next(
+            (instruction for instruction in dis.get_instructions(caller.f_code)
+             if instruction.offset > caller.f_lasti),
+            None,
+        )
+        return following is not None and following.opname == "POP_TOP"
+    except Exception:
+        return False
+
+
 class Model:
     """A decorated function: the body, the script it lives in, the outputs it declares."""
 
@@ -105,8 +149,10 @@ class Model:
         self.outputs: list[Output] = []
         self.__xbf_model__ = True
         _MODELS[f"{self.script}::{self.name}"] = self
-        if getattr(function, "__module__", None) == "__main__":
-            _run_as_program(self.script)
+
+    @property
+    def address(self) -> str:
+        return getattr(self, "_address", f"{self.script}::{self.name}")
 
     @property
     def identity(self) -> str:
@@ -117,9 +163,27 @@ class Model:
 
     def __call__(self) -> Any:
         build = getattr(_CONTEXT, "build", None)
-        if build is None:
-            return self.function()
-        return build.child(self)
+        if build is not None:
+            return build.child(self)
+        from cadgen.engine import api
+        from cadgen.engine.cli import _log, _reported
+
+        # Decoration only declares. The caller's control flow reaches this build,
+        # and resumes after it; importing the engine never runs or exits a script.
+        program = self.function.__module__ == "__main__"
+        previous = getattr(_CONTEXT, "program", False)
+        _CONTEXT.program = program
+        try:
+            built = self.build(log=_log if program else None)
+        finally:
+            _CONTEXT.program = previous
+        if program:
+            _reported(built.models, built.wall, built.fresh, False)
+        if not built.ok:
+            raise api.EngineError(next(row.get("error", "model failed") for row in built.models if not row.get("ok")))
+        if _caller_discards_model_result():
+            return None
+        return api.Built(self.name, self.script, built.models[0], Path.cwd(), source_kind="script").shape
 
     def _path(self, kind: str, out: Any) -> Path:
         if out is None:
@@ -146,8 +210,7 @@ class Model:
 
     def build(self, *, verify: bool = False, log: Callable[[str], None] | None = None, daemon: bool = True) -> Any:
         """Build this model, through the daemon (``daemon=False``: in this process): it and every
-        child model it calls write what their decorators declare, as ``python script.py`` builds
-        every model of the script (``api.build_script``); a ``Report``. ``verify`` runs every body
+        child model it calls write what their decorators declare, when the script explicitly calls it (``api.build_script``); a ``Report``. ``verify`` runs every body
         the memo would replay and compares its result with the logged one."""
         from cadgen.engine import api
 
@@ -168,13 +231,14 @@ class Model:
 
     @property
     def document(self) -> Any:
-        """The model's built document, read-only (``document.Loaded``): its xbf as built
-        last. A model that declares no xbf has no document on disk to read."""
+        """The last built document: from its declared XBF, or the live worker for a bare model."""
         from cadgen.engine import document
 
         found = next((target.path for target in self.plan() if target.kind == "xbf"), None)
         if found is None:
-            raise AttributeError(f"model {self.identity} declares no @xbf: it has no document to read")
+            from cadgen.engine.api import Built
+
+            return Built(self.name, self.script, {}, Path.cwd(), source_kind="script").document
         if not found.is_file():
             raise FileNotFoundError(f"model {self.identity} is not built yet: {found} is missing (.build() it)")
         return document.load(found)
@@ -241,93 +305,9 @@ def as_package_module(main: Any) -> None:
     main.__spec__, main.__package__ = spec, package
 
 
-def _run_as_program(script: Path) -> None:
-    """``python model.py``: the daemon builds every model the script defines, as their
-    decorators declare, and this process exits with the build's status, building nothing
-    itself (``cli.run_script``). Like any Python script it takes no options (law 11): what it
-    is given past its name is the script's own ``sys.argv``, never the build's. It happens at
-    the script's import of the engine when its source shows a model (``run_at_import``), else
-    when its first model's decorator runs."""
-    if not _is_program(script):
-        return
-    _run_as_program.running = True  # type: ignore[attr-defined]
-    from cadgen.engine.cli import run_script
-
-    raise SystemExit(run_script(script))
-
-
-def _is_program(script: Path) -> bool:
-    """Whether ``script`` is the program this process runs (``python script.py``), outside a
-    worker and not already asking the daemon (not ``python -c``, not an embedding)."""
-    if getattr(_run_as_program, "running", False) or os.environ.get("CADGEN_ENGINE_WORKER") == "1":
-        return False
-    import sys
-
-    argv0 = Path(sys.argv[0]).resolve() if sys.argv and sys.argv[0] else None
-    return argv0 == Path(script).resolve()
-
-
-def run_at_import(file: str) -> None:
-    """``python model.py`` whose ``__main__`` (``file``) is importing the engine: when the
-    script's source declares a model -- a function decorated with one of the engine's file
-    decorators, imported from it by name or reached through it as a module -- the build goes to
-    the daemon now (``_run_as_program``), before the script's next line, so this process never
-    imports build123d nor the script's own modules, which the worker that runs it has loaded
-    already. A script that imports them above the engine builds alike, having paid for them; a
-    script whose models its source does not show (``declares_models``) asks when its first
-    model's decorator runs."""
-    script = Path(file).resolve()
-    if _is_program(script) and declares_models(script):
-        _run_as_program(script)
-
-
-def declares_models(script: Path) -> bool:
-    """Whether ``script``'s source decorates a function with one of the engine's file decorators
-    (``KINDS``): a name imported from ``cadgen.engine`` or from ``cadgen``, which exports the
-    engine's names at its root (``from cadgen.engine import xbf``, ``from cadgen import step``,
-    ``as`` any name), or an attribute of either imported as a module (``import cadgen.engine as
-    ce``, ``@ce.step(...)``; ``import cadgen``, ``@cadgen.xbf``). Read, never run."""
-    import ast
-
-    try:
-        tree = ast.parse(Path(script).read_bytes(), filename=str(script))
-    except (OSError, SyntaxError, ValueError):
-        return False
-    engines = {"cadgen.engine", "cadgen.engine.model", "cadgen"}
-    names: set[str] = set()
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and not node.level:
-            for alias in node.names:
-                if node.module in engines and alias.name in KINDS:
-                    names.add(alias.asname or alias.name)
-                elif node.module == "cadgen" and alias.name == "engine":
-                    modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in engines:
-                    modules.add(alias.asname or alias.name)
-    if not names and not modules:
-        return False
-
-    def dotted(node: ast.expr) -> str | None:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            head = dotted(node.value)
-            return f"{head}.{node.attr}" if head else None
-        return None
-
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for decorator in node.decorator_list:
-                found = dotted(decorator.func if isinstance(decorator, ast.Call) else decorator)
-                if found is None:
-                    continue
-                module, _dot, name = found.rpartition(".")
-                if (not module and name in names) or (module in modules and name in KINDS):
-                    return True
-    return False
+def model(function: Any) -> Model:
+    """Declare a model without an output file. A call builds its document."""
+    return function if isinstance(function, Model) else Model(function)
 
 
 def _decorator(kind: str) -> Callable[..., Any]:
@@ -870,3 +850,17 @@ def check_result(model: Model, result: Any) -> None:
         raise TypeError(f"model {model.identity} returned {type(result).__name__}; a model returns a build123d shape")
     if result.__dict__.get("_wrapped") is None:
         raise ValueError(f"model {model.identity} returned an empty shape")
+
+
+# Keep the public decorator and the implementation module one identity, even
+# after an explicit import of cadgen.engine.model (as with engine.materials).
+import sys as _sys
+from types import ModuleType as _ModuleType
+
+
+class _ModelModule(_ModuleType):
+    def __call__(self, function: Any) -> Model:
+        return model(function)
+
+
+_sys.modules[__name__].__class__ = _ModelModule

@@ -228,3 +228,7 @@ def f14d():
     motion(aircraft, "teardown", _teardown, duration=60)
     motion(aircraft, "explodedHold", _exploded_hold, duration=24)
     return aircraft
+
+
+if __name__ == "__main__":
+    f14d()

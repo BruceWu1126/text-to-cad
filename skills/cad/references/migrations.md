@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
 ```python
 # After
-from cadgen.engine import step, xbf   # the engine first
+from cadgen.engine import step, xbf
 import build123d as bd
 
 
@@ -39,12 +39,15 @@ import build123d as bd
 @step(out="../STEP/bracket.step")     # keep it only if something reads the STEP
 def bracket():
     ...
+
+
+if __name__ == "__main__":
+    bracket()
 ```
 
 The document is what the viewer follows build by build, what refs and
-`cadgen where` read, and the model's cache across a daemon restart. The
-`__main__` block is no longer needed: running the script builds every model it
-defines.
+`cadgen where` read, and the model's cache across a daemon restart. Keep the
+`__main__` calls: decoration only declares, and each explicit call builds its model.
 
 | 0.7 | 0.8 |
 | --- | --- |

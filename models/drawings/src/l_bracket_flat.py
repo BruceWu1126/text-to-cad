@@ -37,3 +37,6 @@ def l_bracket_flat():
     blank.label, bend.label = "CUT", "BEND"
     return bd.Compound(children=[blank, bend], label="l_bracket_flat")
 
+
+if __name__ == "__main__":
+    l_bracket_flat()

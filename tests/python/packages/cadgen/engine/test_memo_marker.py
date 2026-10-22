@@ -296,7 +296,7 @@ class MemoTest(MemoCase):
         # Code calling the model: a verifying build of it runs the model's bodies again too.
         printed = io.StringIO()
         with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(io.StringIO()):
-            status = cli.main(["build", "from root import root\nresult = root()", "--no-daemon", "--verify", "--json"])
+            status = cli.main(["build", "from root import root\nresult = root()", "--no-daemon", "--xbf", "--verify", "--json"])
         self.assertEqual(status, 0)
         found = json.loads(printed.getvalue().splitlines()[-1])["verify"]
         self.assertEqual(found["mismatches"], ["parts.py::jitter"], found)
@@ -310,8 +310,8 @@ class MemoTest(MemoCase):
         answer = {"done": [{"ok": True, "model": "probe"}], "worker": {}}
         with mock.patch.object(api, "_ask", side_effect=lambda message, *_relays: asked.append(message) or answer), \
                 contextlib.redirect_stdout(io.StringIO()):
-            cli.main(["build", "result = 1", "--verify"])
-            cli.main(["build", "result = 1"])
+            cli.main(["build", "result = 1", "--model", "probe", "--verify"])
+            cli.main(["build", "result = 1", "--model", "probe"])
             probe.build(verify=True)
         self.assertEqual([message["verify"] for message in asked], [True, False, True])
 

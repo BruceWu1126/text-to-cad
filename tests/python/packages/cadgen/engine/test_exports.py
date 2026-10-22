@@ -510,9 +510,8 @@ class BuildFilesTest(unittest.TestCase):
 
         script = self.write("board.py", BOARD.format(lift=6))
         out = self.folder / "made/board.stl"
-        # A script's path is no source of an export: its model is, built first.
-        with self.assertRaisesRegex(ExportRefused, "board.py::board is no document"):
-            api.export(f"{script}::board", out, daemon=False)
+        # The address selects the declared model, built before exporting.
+        self.assertEqual(api.export(f"{script}::board", out, daemon=False)[0].path, out)
         spec = importlib.util.spec_from_file_location("board_script", script)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -560,12 +559,27 @@ class CodeTest(unittest.TestCase):
             status = cli.main(["build", self.CODE.format(height=5), "--name", "plug", "--stl", "--json", "--no-daemon"])
             self.assertEqual(status, 0, err.getvalue())
             # Its one argument is code: a script's path is code that assigns no result.
-            self.assertEqual(cli.main(["build", "plug.py", "--no-daemon"]), 1)
+            self.assertEqual(cli.main(["build", "plug.py", "--stl", "--no-daemon"]), 1)
             with self.assertRaises(SystemExit):
                 cli.main(["build", "--stl"])
         self.assertEqual(list(json.loads(out.getvalue().splitlines()[0])["files"]), [str(self.folder / "plug.stl")])
         self.assertIn("assigns no `result`", err.getvalue())
         self.assertIn("the following arguments are required: SOURCE", err.getvalue())
+
+    def test_missing_destination_is_rejected_before_code_or_stdin_runs(self) -> None:
+        import contextlib
+        import io
+        from unittest import mock
+        from cadgen.engine import cli
+
+        code = f"from pathlib import Path; Path({str(self.folder / 'ran')!r}).touch(); result = None"
+        for flags in ([], ["--name", "implicit"]):
+            with contextlib.redirect_stderr(io.StringIO()), mock.patch("sys.stdin.read", side_effect=AssertionError("read stdin")):
+                self.assertEqual(cli.main(["build", code, *flags]), 2)
+                self.assertEqual(cli.main(["build", "-", *flags]), 2)
+        self.assertFalse((self.folder / 'ran').exists())
+        with self.assertRaisesRegex(api.EngineError, "requires an output"):
+            api.build(code, daemon=False)
 
     def test_code_is_named_warm_and_cold_cached_by_its_xbf(self) -> None:
         outputs = {"xbf": {"out": "plug.xbf"}, "stl": {"out": "plug.stl"}}

@@ -289,3 +289,26 @@ def runtime_fixture():
     start.label = "fixed_start_marker"
     start.color = bd.Color(0.18, 0.2, 0.23)
     return bd.Compound(children=[tube, start])
+
+
+if __name__ == "__main__":
+    axle_review()
+    driven_axle_review()
+    bushing_review()
+    retaining_ring_review()
+    pulley_review()
+    pulley_hub_review()
+    universal_carrier_review()
+    wrist_review()
+    palm_cradle_clearance_review()
+    thumb_metacarpal_review()
+    motor_review()
+    gearbox_review()
+    capstan_review()
+    capstan_index_overlay()
+    tension_cartridge_review()
+    tension_cartridge_bank_review()
+    drive_terminal_review()
+    drive_terminal_macro()
+    drive_terminal_placements()
+    runtime_fixture()

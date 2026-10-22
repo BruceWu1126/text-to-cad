@@ -23,6 +23,7 @@ export function readDefaultFileParam() {
 export function resolveFileParam(value, start = "") {
   const raw = String(value || "").trim().replace(/\\/g, "/");
   if (!raw) return "";
+  if (/^code::[A-Za-z_][A-Za-z0-9_]*$/.test(raw)) return raw;
   const joined = isAbsolute(raw) ? raw : `${String(start).replace(/\\/g, "/").replace(/\/+$/, "")}/${raw}`;
   const drive = /^[A-Za-z]:/.test(joined) ? joined.slice(0, 2) : "";
   const parts = [];

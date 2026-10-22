@@ -91,12 +91,18 @@ class DecoratorTest(unittest.TestCase):
             def takes(value):
                 return value
 
-    def test_a_model_called_outside_a_build_is_its_function(self) -> None:
-        @xbf
-        def plain():
-            return 42
+    def test_model_only_declares_and_file_decorators_imply_it(self) -> None:
+        from cadgen import model
 
-        self.assertEqual(plain(), 42)
+        @model
+        def plain():
+            raise AssertionError("decoration must not execute the body")
+
+        self.assertIsInstance(plain, Model)
+        self.assertEqual(plain.targets(), [])
+        self.assertIs(model(plain), plain)
+        self.assertIs(step("plain.step")(plain), plain)
+        self.assertEqual([kind for kind, _path in plain.targets()], ["step"])
 
 
 class BuildTest(EngineCase):

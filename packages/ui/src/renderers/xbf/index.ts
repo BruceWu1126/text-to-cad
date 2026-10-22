@@ -22,7 +22,7 @@ export interface PreparedXbfDocument extends PreparedWorkspaceEntry {
 /** A cadgen engine document: B-rep parts placed by instances, every face, edge and vertex named. */
 export const XBF_FILE = /\.xbf$/i;
 /** What the cadgen engine reads and serves as a document: its own, and a STEP. */
-export const ENGINE_DOCUMENT_FILE = /\.(?:xbf|step|stp)$/i;
+export const ENGINE_DOCUMENT_FILE = /(?:\.(?:xbf|step|stp)|::[A-Za-z_][A-Za-z0-9_]*)$/i;
 
 /**
  * An `.xbf` or a STEP is drawn from what the cadgen engine serves of it (its structure and one

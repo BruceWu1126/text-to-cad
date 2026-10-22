@@ -552,6 +552,11 @@ def _element_ref(root: Node, part: Node, kind: str, ordinal: int, name: str | No
 
 def _same_document(file: str, document: Path) -> bool:
     """Whether a ref's ``FILE`` is the document: the same file, or the last segments of its path."""
+    from cadgen.engine.addresses import parse
+
+    given_model, held_model = parse(file), parse(document)
+    if given_model is not None or held_model is not None:
+        return given_model == held_model
     given = Path(file).expanduser()
     if given.is_absolute():
         return os.path.normcase(str(given.resolve())) == os.path.normcase(str(document.resolve()))
@@ -567,7 +572,7 @@ def check_file(file: str | None, document: Path | None) -> None:
     if file is None or document is None:
         return
     if not _same_document(file, document):
-        raise RefError(f"the ref names {file}, not {document.name}")
+        raise RefError(f"the ref names {file}, not {os.path.basename(str(document))}")
 
 
 # --- a served document's structure (``cadgen where``) ----------------------------------------
@@ -585,7 +590,7 @@ def resolve_structure(structure: dict[str, Any], ref: str, document: Path | None
         held = prototypes[node.payload["prototype"]].get(f"{kind}Names") or {}
         return {int(ordinal): text for ordinal, text in held.items()}
 
-    shown = document.name if document is not None else str(structure.get("name") or "the document")
+    shown = os.path.basename(str(document)) if document is not None else str(structure.get("name") or "the document")
     return resolve(root, selectors, _Names(named, lambda _node, _kind: None), shown)
 
 
@@ -870,7 +875,7 @@ def select(source: Any, ref: str, kind: str | None = None) -> Any:
         return world.map(node, kind).Extent()
 
     names = _Names(_shape_names(run), count)
-    shown = document.name if document is not None else (f"shape {root.segment}" if root.label else "the shape")
+    shown = os.path.basename(str(document)) if document is not None else (f"shape {root.segment}" if root.label else "the shape")
     hits = resolve(root, selectors, names, shown)
     one_part = len(root.parts()) == 1
     labelled = not building

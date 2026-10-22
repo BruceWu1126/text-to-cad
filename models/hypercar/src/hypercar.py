@@ -458,3 +458,7 @@ def hypercar():
     motion(car, "doors", [(0, shut), (3.5, "open"), (7, shut)], ease="cubic")
     motion(car, "showcase", _showcase, duration=48)
     return motion(car, "explode", _explode, duration=10)
+
+
+if __name__ == "__main__":
+    hypercar()

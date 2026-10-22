@@ -36,6 +36,9 @@ from ..common.dims import HEIGHT    # two levels: its package's parent
 @xbf
 def bracket():
     return bd.Box(WIDTH, 10, HEIGHT) - bd.Cylinder(helper.RADIUS, dims.HEIGHT * 2)
+
+if __name__ == "__main__":
+    bracket()
 """
 
 PACKAGE = {"proj/__init__.py": "", "proj/common/__init__.py": "", "proj/common/dims.py": "HEIGHT = 5\n",

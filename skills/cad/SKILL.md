@@ -60,7 +60,7 @@ model (its parts and placements, names, colours, materials and mechanism). For
 example, `src/bracket.py`:
 
 ```python
-from cadgen.engine import step, xbf   # first: the script hands its build to the engine here
+from cadgen.engine import step, xbf
 import build123d as bd
 
 WIDTH = 40.0
@@ -74,6 +74,10 @@ def bracket():
     body = body - bore
     body.label = "bracket"
     return body
+
+
+if __name__ == "__main__":
+    bracket()
 ```
 
 ```bash
@@ -86,13 +90,11 @@ built src/bracket.py::bracket cold in 2.33s: bodies 1 run; 6 misses, 0 hits; bod
   STEP/bracket.step (written, 0.0 MB)
 ```
 
-- `python model.py` builds every model the script defines, each writing what its
-  decorators declare, and takes no options: the decorators are the whole
-  definition of what a script writes. A script needs no `__main__` block.
-- Import the engine first and build123d after it, as above. The script hands its
-  build to the daemon at the engine's import, so the process you run loads no CAD
-  kernel; an import above it adds its load time to every run (about 2 s for
-  build123d).
+- **Decoration only declares.** Imports and definitions build nothing. The script's
+  explicit model calls build their models and write their declared outputs; Python
+  controls which calls run. Keep calls under `if __name__ == "__main__":`.
+  cadgen consumes no script arguments, and never exits the caller at import time.
+- `@model` declares a document without a file. Every file decorator implies a model.
 - `@step`, `@glb`, `@stl`, `@threemf` and `@dxf` declare translations of the
   document, written after the `.xbf`. Every decorator takes `out=` and nothing else:
   materials, colours, joints, configurations and motions are written in the body. A

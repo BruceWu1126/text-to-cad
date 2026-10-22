@@ -1,7 +1,7 @@
 """The engine's verbs as commands -- a thin argparse over the functions of ``api`` -- and
-``python SCRIPT.py``'s run (``run_script``).
+ordinary Python scripts call decorated models explicitly.
 
-    python SCRIPT.py                                 every model of a script, as its decorators declare
+    python SCRIPT.py                                 the models the script explicitly calls
     cadgen build SOURCE | - [--name N]               one model from source text (stdin with -), its files
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
         [--no-daemon]
@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-__all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", "run", "run_script", "weighed",
+__all__ = ["VERBS", "Failed", "answered", "build_parser", "main", "parser_for", "run", "weighed",
            "where_main", "where_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
@@ -40,9 +40,10 @@ _DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb",
 
 
 def _build_arguments(build: argparse.ArgumentParser) -> None:
-    build.usage = ("%(prog)s SOURCE [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] "
+    build.usage = ("%(prog)s SOURCE [--model NAME] [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] "
                    "[--dxf [F]] [--json] [--verify] [--no-daemon]")
     build.add_argument("source", metavar="SOURCE", help="the code (- reads it from stdin)")
+    build.add_argument("--model", metavar="NAME", help="build or update the named document in memory")
     build.add_argument("--name", metavar="N",
                        help="the code's name: its model, its files' default names and its warm worker (default: model)")
     for kind in FILE_FLAGS:
@@ -245,6 +246,10 @@ def _reported(reports: list[dict[str, Any]], wall: float, fresh: bool | None, as
             print(json.dumps({**report, "wall": round(wall, 4)}))
         else:
             print(_describe(report, wall, fresh))
+            if report.get("address") and not report.get("files"):
+                print(f"  model: {report['address']}")
+                if report.get("url"):
+                    print(f"  view: {report['url']}")
         if not report.get("ok"):
             failed = True
             print(report.get("error", ""), file=sys.stderr)
@@ -260,26 +265,16 @@ def _build(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
 
     flags = _file_flags(args)
+    if not args.model and not any(flags.values()):
+        raise Failed("build requires an output: --model NAME or --xbf/--step/--glb/--stl/--threemf/--dxf", 2)
+    if args.model and args.no_daemon:
+        raise Failed("--model needs the engine to hold its document; omit --no-daemon", 2)
     code = sys.stdin.read() if args.source == "-" else args.source
     try:
-        built = api.build(code, name=args.name, **flags, verify=args.verify, log=_log, daemon=not args.no_daemon)
+        built = api.build(code, model=args.model, name=args.name, **flags, verify=args.verify, log=_log, daemon=not args.no_daemon)
     except api.EngineError as error:
         raise Failed(str(error)) from None
     return _reported([built.report], built.report.get("wall", 0.0), None, args.json)
-
-
-def run_script(script: Path) -> int:
-    """``python SCRIPT.py``: every model the script defines, built through the daemon as its
-    decorators declare -- the script takes no options (law 11) -- each model's report on stdout
-    and the build's log on stderr; the build's status."""
-    from cadgen.engine import api
-
-    try:
-        found = api.build_script(Path(script), log=_log)
-    except api.EngineError as error:
-        print(f"python {Path(script).name}: {error}", file=sys.stderr)
-        return 1
-    return _reported(found.models, found.wall, found.fresh, False)
 
 
 def _export(args: argparse.Namespace, prog: str) -> int:
@@ -288,7 +283,9 @@ def _export(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
     from cadgen.engine.export import SOURCES, ExportRefused
 
-    if Path(args.source).suffix.lower() not in SOURCES:
+    from cadgen.engine.addresses import key, parse
+
+    if parse(args.source) is None and Path(args.source).suffix.lower() not in SOURCES:
         raise Failed(f"{args.source} is no document: an export reads an .xbf or a .step", 2)
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
@@ -299,7 +296,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
     except api.EngineError as error:
         raise Failed(str(error)) from None
     if args.json:
-        print(json.dumps({"ok": True, "source": str(Path(args.source).resolve()),
+        print(json.dumps({"ok": True, "source": str(key(args.source)),
                           "files": [{"path": str(row.path), "kind": row.kind, "bytes": row.bytes, "seconds": row.seconds}
                                     for row in written]}))
         return 0
@@ -309,9 +306,13 @@ def _export(args: argparse.Namespace, prog: str) -> int:
 
 
 def _serve(args: argparse.Namespace, prog: str) -> int:
-    path = Path(args.document).resolve()
-    if not path.is_file():
+    from cadgen.engine.addresses import key
+
+    path = key(args.document)
+    if isinstance(path, Path) and not path.is_file():
         raise Failed(f"no document {args.document}", 2)
+    if isinstance(path, str) and args.foreground:
+        raise Failed("a model lives in the engine; serve it without --foreground", 2)
     three = args.three
     if three is None:
         from cadgen.engine.serve import find_three
@@ -387,11 +388,8 @@ def where_main(argv: list[str] | None = None, prog: str = "cadgen where") -> int
 def _where(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
 
-    path = Path(args.document).resolve()
-    if not path.is_file():
-        raise Failed(f"no document {args.document}", 2)
     try:
-        found = api.where(path, args.ref)
+        found = api.where(args.document, args.ref)
     except ValueError as error:
         raise Failed(str(error), 2) from None
     except api.EngineError as error:

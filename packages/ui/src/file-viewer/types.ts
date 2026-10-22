@@ -7,6 +7,7 @@ export type { LanguageSetting };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export interface FileEntry { path: string; name: string; kind: "file" | "directory" }
+export interface FileCollection { id: string; label: string; entries: readonly (FileEntry & { detail?: string })[] }
 export interface FileMetadata extends FileEntry {
   size: number;
   extension: string;
@@ -26,6 +27,7 @@ export interface FileActions {
 export interface FileSource {
   /** Stable identity: what a document's key is named by. */
   id: string;
+  collections?: (options: { signal: AbortSignal }) => Promise<readonly FileCollection[]>;
   stat: (path: string, options: { signal: AbortSignal }) => Promise<FileMetadata>;
   list?: (directory: string, options: { signal: AbortSignal }) => Promise<readonly FileEntry[]>;
   search?: (directory: string, query: string, options: { signal: AbortSignal }) => Promise<{ paths: readonly string[]; truncated: boolean }>;
