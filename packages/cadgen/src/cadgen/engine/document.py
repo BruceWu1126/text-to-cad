@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from cadgen.engine.atomic_replace import replace_atomic
+
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
            "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
 
@@ -1026,7 +1028,7 @@ def save(doc: Any, path: Path, *, compare: bool) -> tuple[bool, int]:
     if compare and path.exists() and path.stat().st_size == size and _same_bytes(path, temporary):
         temporary.unlink()
         return False, size
-    os.replace(temporary, path)
+    replace_atomic(temporary, path)
     if tree is not None:
         for listener in list(SAVED_LISTENERS):
             listener(path.resolve(), tree)

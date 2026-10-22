@@ -28,6 +28,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.atomic_replace import replace_atomic
+
 __all__ = ["IDLE_SECONDS", "lock", "lock_path", "main", "socket_path", "state_dir"]
 
 IDLE_SECONDS = 3600.0
@@ -518,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
         port = server.getsockname()[1]
         temporary = port_path().with_suffix(".tmp")
         temporary.write_text(f"{port} {daemon.token}\n", encoding="utf-8")
-        os.replace(temporary, port_path())
+        replace_atomic(temporary, port_path())
     server.settimeout(0.5)
     threading.Thread(target=daemon.watch, daemon=True).start()
     try:

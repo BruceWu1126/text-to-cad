@@ -136,6 +136,7 @@ def hinge():
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
+| `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), and `cadgen where` (`where_main`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 

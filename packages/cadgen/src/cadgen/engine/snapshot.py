@@ -43,6 +43,8 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
+from cadgen.engine.atomic_replace import replace_atomic
+
 __all__ = ["SnapshotRefused", "add_parser", "draw", "options", "parse_pose", "run", "snapshot"]
 
 PAGE_ORIGIN = "http://localhost"
@@ -346,7 +348,7 @@ def _png(result: dict[str, Any], out: Path, timings: dict[str, Any]) -> dict[str
         raise RuntimeError("the snapshot page returned no PNG")
     temporary = out.with_name(f".{out.stem}.{os.getpid()}.tmp.png")
     temporary.write_bytes(base64.b64decode(data))
-    os.replace(temporary, out)
+    replace_atomic(temporary, out)
     return drawn
 
 

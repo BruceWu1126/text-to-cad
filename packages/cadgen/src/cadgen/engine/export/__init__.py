@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from cadgen.engine.atomic_replace import replace_atomic
+
 __all__ = ["KINDS", "ExportRefused", "Kind", "Source", "View", "kind_of", "translate"]
 
 
@@ -376,7 +378,7 @@ def translate(document: Any, kind: str | None, path: Any, *, pose: Any = None, p
     try:
         spec.write(view, temporary)
         size = temporary.stat().st_size
-        os.replace(temporary, path)
+        replace_atomic(temporary, path)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

@@ -17,6 +17,7 @@ import os
 import zipfile
 from pathlib import Path
 
+from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.export import ZIP_DATE
 
 __all__ = ["SUFFIX", "files", "write"]
@@ -65,7 +66,7 @@ def write(xbf: Path, out: Path, *, inputs: bool = True) -> int:
                 entry.compress_type = zipfile.ZIP_DEFLATED
                 entry.external_attr = 0o644 << 16
                 archive.writestr(entry, path.read_bytes())
-        os.replace(temporary, out)
+        replace_atomic(temporary, out)
     finally:
         temporary.unlink(missing_ok=True)
     return out.stat().st_size
