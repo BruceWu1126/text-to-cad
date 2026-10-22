@@ -12,9 +12,13 @@ every surface at ``environment.intensity``. Nothing else: no ambient term, no fi
 an authored finish reflected), baked once by ``scripts/look/bake-environment.mjs`` as a 512 x 256
 equirectangular Radiance image in the document's frame: rows from +Z (the top row) to -Z, columns once around +Z from -X through +Y, +X
 and -Y; a pixel is ``m / 255 * 2 ** (e - 128)``, as three's HDRLoader decodes it. Both renderers
-load that image: the viewer through PMREM, OCCT through a cube map whose texels hold the radiance
-over its brightest value, its ambient light (OCCT's PBR program multiplies the whole image-based
-light by it) that brightest value times ``environment.intensity``.
+load that image: OCCT through a cube map whose texels hold the radiance over its brightest value,
+its ambient light (OCCT's PBR program multiplies the whole image-based light by it) that brightest
+value times ``environment.intensity``, from which OCCT bakes its image-based light; the viewer
+through three's PMREM, every level of which it fills as OCCT bakes (core's
+``lib/viewer/ggxEnvironment.js``): the image convolved with the GGX lobe of the level's roughness,
+the roughest the irradiance's nine spherical harmonics, estimated from the 1024 points OCCT's own
+bake reads.
 
 **The surfaces.** A part without a material, and every fill (Parts), is the ``plain`` finish (a
 dielectric) over its colour, linear, raised to ``colour_power``: squared, which keeps the
@@ -31,8 +35,10 @@ the GLSL it compiles), which the viewer draws too (core's ``lib/viewer/surfaceBr
 ``alpha = r^2``, Schlick-GGX ``G = 1 / ((N.V (1 - k) + k) (N.L (1 - k) + k))`` with
 ``k = (r + 1)^2 / 8``, Schlick ``F`` at V.H from ``F0 = mix(F0(ior), base, metallic)``); and from
 the environment ``ambient * ((1 - F_r) (1 - metallic) base * SH(N) + (F0 A + B) * prefiltered(R, r))``
-(``F_r`` Schlick at N.V toward ``max(1 - r, F0)``). Single scattering: no multiple-scattering
-energy is added back, as three's own physical model adds it.
+(``F_r`` Schlick at N.V toward ``max(1 - r, F0)``; ``A``, ``B`` OCCT's split-sum table,
+``GenerateEnvLUT``: Schlick-GGX at ``k = r^2 / 2``; ``prefiltered`` the image convolved with the GGX
+lobe of ``r``; ``SH`` the irradiance's nine spherical harmonics, over pi). Single scattering: no
+multiple-scattering energy is added back, as three's own physical model adds it.
 
 **The picture** is the linear sum clamped and sRGB-encoded (``tone = "clamp"``): OCCT's raster
 applies no tone curve and no exposure. Its Filmic curve (``Graphic3d_ToneMappingMethod_Filmic``) is
