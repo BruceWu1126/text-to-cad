@@ -205,6 +205,16 @@ describe('the fetch tunnel', () => {
     expect([head.status, head.headers.get('content-length'), await head.text()]).toEqual([200, '11', '']);
   });
 
+  it('keeps version reads from occupying a host call slot', async () => {
+    const calls: any[] = [];
+    const server = createServer({ callTool: async (_name, args) => {
+      calls.push(args);
+      return { structuredContent: { status: 200, headers: {}, body: '' } };
+    } });
+    await createTunnelFetch(server)(`${TUNNEL_ORIGIN}/__cad/api/doc/part/version?after=v&wait=60`);
+    expect(new URL(calls[0].url).searchParams.get('wait')).toBe('0');
+  });
+
   it('inflates a body the server gzipped for the trip, and refuses an encoding it cannot read', async () => {
     const json = JSON.stringify({ entries: Array.from({ length: 200 }, (_, index) => ({ file: `parts/part-${index}.step` })) });
     const gzipped = new Uint8Array(await new Response(new Response(json).body!.pipeThrough(new CompressionStream('gzip'))).arrayBuffer());

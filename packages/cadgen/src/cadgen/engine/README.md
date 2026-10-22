@@ -151,6 +151,13 @@ def hinge():
 16. **No kernel in request threads.** Reading XBF/STEP, meshing, topology facts and poses
     run in child processes. The daemon holds structures and buffers, never live kernel objects.
 
+17. **MCP state belongs to the engine.** Each HTTP MCP session owns its tools, views
+    and UI resource. Stdio peers hold transport metadata only; deleting a session
+    never stops the engine. Sidebar sharing is in memory and never writes a registry.
+18. **Host differences stay at the boundary.** The stdio peer translates host capabilities;
+    the app page keeps version reads short enough for the host's tool-call slots. Engine
+    request handlers act on declared capabilities, never on a host's identity.
+
 ## Architecture
 
 One daemon per installation owns the worker pool, served documents and HTTP listener.
@@ -172,6 +179,19 @@ for a same-site cookie; programmatic clients use Bearer authentication. All rout
 retain the application's Host and cross-site mutation checks. Explicit host/port
 requests must match an existing listener. A second installed version has a different
 installation identity and therefore a different engine.
+
+The injected application also serves `/mcp`, the Streamable HTTP MCP transport
+(2025-11-25 and the previously supported protocol revisions). Initialization returns
+an opaque `Mcp-Session-Id`. Every subsequent request identifies that session;
+DELETE releases it, and a missing/expired session must initialize again. JSON replies
+are used; GET returns 405 because this server has no unsolicited SSE events.
+Each session owns its tool server, view registry and immutable UI resource. `cad_http`
+dispatches into the same application in process. Sidebar views alone are shared through
+an in-memory registry; thread views remain session-local. The host's stdio process
+proxies JSON-RPC and owns no page, tool implementation, catalog or view state.
+Active HTTP calls keep the daemon alive; quiet MCP sessions expire after an hour.
+A card's `cad_sync` renews its served document's warm-worker lease.
+
 
 ## Layout
 

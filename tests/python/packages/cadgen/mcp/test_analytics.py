@@ -25,6 +25,7 @@ from cadgen._internal import channel as install_channel
 from cadgen.analytics import (KEPT, NOTICE_ENV, NOTICE_TEXT, PRIVACY_URL, Recorder, _post, choose, forget_pending,
                               notify, status)
 from cadgen.cli import telemetry as telemetry_cli
+from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.mcp.server import Server
 from cadgen.mcp.ui import AppPage
@@ -66,8 +67,8 @@ class _Tmp(unittest.TestCase):
         (self.tmp / "app").mkdir(exist_ok=True)
         server = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state"),
                         analytics=recorder)
-        server.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                                     "clientInfo": {"name": client, "version": "0.159.0"}}, None)
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {},
+                                     "clientInfo": {"name": client, "version": "0.159.0"}}), None)
         return server, sent
 
     def call(self, server: Server, name: str, arguments: dict | None = None) -> dict:

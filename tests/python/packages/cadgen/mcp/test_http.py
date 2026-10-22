@@ -1,0 +1,127 @@
+"""Real stdio and HTTP peers share an engine, with isolated MCP view state."""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from cadgen.engine.client import request
+from cadgen.mcp.protocol import RequestContext, RpcError
+from cadgen.mcp.shim import Proxy
+from cadgen.viewer.engine_client import EngineClient
+from tests.python.support import engine_daemon
+
+INIT = {'protocolVersion': '2025-11-25', 'clientInfo': {'name': 'codex-mcp-client'}, 'capabilities': {}}
+
+
+class HttpSessionsTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(prefix='mcp-http-')
+        cls.addClassCleanup(cls.tmp.cleanup)
+        cls.root = Path(cls.tmp.name)
+        cls.env = engine_daemon.watched({**os.environ, 'CADGEN_ENGINE_DIR': str(cls.root / 'engine'),
+                   'CADGEN_STATE_DIR': str(cls.root / 'state'), 'CADGEN_ENGINE_MESH': 'inline'}, cls.addClassCleanup)
+        changed = patch.dict(os.environ, cls.env)
+        changed.start()
+        cls.addClassCleanup(changed.stop)
+        cls.endpoint = EngineClient().connect()
+        cls.page = cls.root / 'page'
+        cls.page.mkdir()
+        (cls.page / 'index.html').write_text('<!doctype html><title>test app</title>', encoding='utf-8')
+        cls.model = cls.root / 'part.stl'
+        cls.model.write_bytes(b'solid part\nendsolid part\n')
+
+    def proxy(self):
+        proxy = Proxy()
+        self.addCleanup(proxy.close)
+        self.call(proxy, 'initialize', INIT)
+        return proxy
+
+    @staticmethod
+    def call(proxy, method, params=None):
+        return proxy.handle(method, params or {}, RequestContext(1, {}))
+
+    def tool(self, proxy, name, arguments=None):
+        return self.call(proxy, 'tools/call', {'name': name, 'arguments': arguments or {}})
+
+    def test_two_sessions_share_engine_and_router_but_not_conversation_views(self):
+        first, second = self.proxy(), self.proxy()
+        self.assertNotEqual(first.session, second.session)
+        info = request({'op': 'status'})
+        sessions = {item['id'] for item in info['sessions'] if item['kind'] == 'mcp'}
+        self.assertTrue({first.session, second.session} <= sessions)
+        self.tool(first, 'cad_sync', {'view': 'one', 'surface': 'agent', 'model': str(self.model),
+                  'state': {'selection': ['part#f1']}, 'focused': True})
+        self.assertEqual(self.tool(first, 'cad_view')['structuredContent']['views'][0]['selection'], ['part#f1'])
+        self.assertEqual(self.tool(second, 'cad_view')['structuredContent']['views'], [])
+        reply = self.tool(first, 'cad_http', {'url': '/__cad/server'})['structuredContent']
+        self.assertEqual(reply['status'], 200)
+        self.assertEqual(json.loads(base64.b64decode(reply['body']))['pid'], info['pid'])
+        first.close()
+        self.assertEqual(self.call(second, 'ping'), {})
+        self.assertEqual(request({'op': 'status'})['pid'], info['pid'])
+        self.assertFalse((self.root / 'state' / 'sidebar-views').exists())
+
+    def test_http_transport_validation_and_session_lifecycle(self):
+        client = EngineClient()
+        def post(message, **headers):
+            return client.call('POST', '/mcp', json.dumps(message).encode('utf-8'),
+                               {'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream', **headers})
+        self.assertEqual(client.call('GET', '/mcp')[0], 405)
+        self.assertEqual(post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'})[0], 400)
+        self.assertEqual(post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'}, **{'Mcp-Session-Id': 'unknown'})[0], 404)
+        self.assertEqual(post({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': INIT}, Origin='https://evil.example')[0], 403)
+        self.assertEqual(post([])[0], 400)
+        self.assertEqual(post({}, Accept='application/json')[0], 406)
+        proxy = self.proxy()
+        headers = {'Mcp-Session-Id': proxy.session}
+        self.assertEqual(post({'jsonrpc': '2.0', 'method': 'notifications/initialized'}, **headers)[0], 202)
+        self.assertEqual(post({'jsonrpc': '2.0', 'id': 2, 'method': 'ping'}, **headers, **{'MCP-Protocol-Version': 'bogus'})[0], 400)
+        with self.assertRaises(RpcError) as failure:
+            self.call(proxy, 'does/not/exist')
+        self.assertEqual(failure.exception.code, -32601)
+        self.assertEqual(client.call('DELETE', '/mcp', headers=headers)[0], 200)
+        self.assertEqual(post({'jsonrpc': '2.0', 'id': 2, 'method': 'ping'}, **headers)[0], 404)
+
+    def test_stdio_shim_serves_resource_and_exits_without_stopping_engine(self):
+        process = subprocess.Popen([sys.executable, '-m', 'cadgen.cli', 'mcp'],
+                    env={**self.env, 'CADGEN_MCP_APP_DIR': str(self.page)},
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        def close():
+            if process.poll() is None:
+                process.terminate()
+            process.communicate(timeout=20)
+        self.addCleanup(close)
+        def rpc(ident, method, params):
+            process.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': ident, 'method': method, 'params': params})+'\n')
+            process.stdin.flush()
+            result = json.loads(process.stdout.readline())
+            self.assertEqual(result['id'], ident)
+            self.assertNotIn('error', result)
+            return result['result']
+        self.assertEqual(rpc(1, 'initialize', INIT)['protocolVersion'], '2025-11-25')
+        resources = rpc(2, 'resources/list', {})['resources']
+        document = rpc(3, 'resources/read', {'uri': resources[0]['uri']})['contents'][0]['text']
+        self.assertIn('<title>test app</title>', document)
+        tools = rpc(4, 'tools/list', {})['tools']
+        self.assertIn('cad_open', [tool['name'] for tool in tools])
+        process.stdin.close()
+        process.stdin = None
+        self.assertEqual(process.wait(timeout=20), 0)
+        self.assertTrue(request({'op': 'status'})['ok'])
+
+    def test_shim_imports_no_tool_server_or_viewer_application(self):
+        code = "import sys; from cadgen.mcp.shim import Proxy; assert not {'cadgen.mcp.server', 'cadgen.mcp.ui', 'cadgen.viewer.http_app', 'OCP', 'build123d'} & sys.modules.keys()"
+        done = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=20)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()

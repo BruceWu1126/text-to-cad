@@ -55,9 +55,9 @@ from urllib.parse import unquote, urlparse
 
 from cadgen.viewer.scanner import VIEWER_EXTENSIONS
 
-from .protocol import INVALID_PARAMS, METHOD_NOT_FOUND, Connection, RequestContext, RpcError, claim_stdout
+from .protocol import INVALID_PARAMS, METHOD_NOT_FOUND, RequestContext, RpcError
 from .ui import MIME, RESOURCE_META, AppPage
-from .sidebar_views import SidebarView
+from .sidebar import SidebarView
 from .views import CAPTURE_SECONDS, NoAnswer, ViewRegistry
 
 LOG = logging.getLogger("cadgen.mcp")
@@ -78,7 +78,6 @@ FORMATS = "STEP, XBF, STL, GLB, 3MF, DXF, URDF, SDF"
 # Clients that present CAD as tabs (see the module docstring): Codex by name, since it declares nothing,
 # and any client that declares every entrypoint CAD uses under cadgen's own extension. Every other
 # client is shown views inline, or told where the Viewer has them when it renders no MCP Apps.
-_TAB_HOSTS = frozenset({"codex-mcp-client"})
 _UI_EXTENSION = "io.modelcontextprotocol/ui"
 _TABS_EXTENSION = "dev.texttocad/tabs"
 _TAB_ENTRYPOINTS = frozenset({"global", "thread", "file"})
@@ -182,11 +181,8 @@ def _presentation(client: dict[str, Any], offered: dict[str, Any]) -> str:
     extensions = offered.get("extensions") if isinstance(offered.get("extensions"), dict) else {}
     declared = extensions.get(_TABS_EXTENSION)
     entrypoints = declared.get("entrypoints") if isinstance(declared, dict) else None
-    if client.get("name") in _TAB_HOSTS or (isinstance(entrypoints, list) and _TAB_ENTRYPOINTS <= set(entrypoints)):
+    if isinstance(entrypoints, list) and _TAB_ENTRYPOINTS <= set(entrypoints):
         return "tabs"
-    forced = str(os.environ.get("CADGEN_MCP_PRESENTATION") or "").strip()
-    if forced in ("inline", "text"):
-        return forced
     ui = extensions.get(_UI_EXTENSION)
     return "inline" if isinstance(ui, dict) and MIME in (ui.get("mimeTypes") or []) else "text"
 
@@ -226,8 +222,9 @@ def local_path(value: str, *, windows: bool = os.name == "nt") -> str:
 
 class Server:
     def __init__(self, *, page: AppPage | None = None, recents=None, tunnel=None, viewer_url=None,
-                 sidebar_views=None, analytics=None) -> None:
+                 sidebar_views=None, analytics=None, sync_document=lambda path: None) -> None:
         self.page = page or AppPage()
+        self.sync_document = sync_document
         self.views = ViewRegistry()
         self._recents = recents
         self._tunnel = tunnel
@@ -256,12 +253,12 @@ class Server:
 
     @property
     def sidebar_views(self):
-        """The CAD sidebar's views, which every process reaches (``sidebar_views.py``)."""
+        """The CAD sidebar's views, which every process reaches (``sidebar.py``)."""
         if self._sidebar_views is None:
-            from .sidebar_views import SidebarViews
+            from .sidebar import SidebarViews
 
             # Beside the model library: the person's state, shared by every process of theirs.
-            self._sidebar_views = SidebarViews(Path(self.recents.root).parent / "sidebar-views")
+            self._sidebar_views = SidebarViews()
         return self._sidebar_views
 
     @property
@@ -580,7 +577,7 @@ class Server:
     def _target(self, context: RequestContext, view_id: Any, *, needs_model: bool, sidebar: bool = True) -> Any:
         """The view the agent means: one it names, else the one a person touched last of its thread's
         views and, with ``sidebar``, the CAD sidebar's -- which another process serves
-        (``sidebar_views.py``), so what a person selected there is read and captured there."""
+        (``sidebar.py``), so what a person selected there is read and captured there."""
         return next(iter(self._candidates(context, view_id, needs_model=needs_model, sidebar=sidebar)), None)
 
     def _candidates(self, context: RequestContext, view_id: Any, *, needs_model: bool, files: bool = False,
@@ -632,13 +629,7 @@ class Server:
 
     @staticmethod
     def _leave(request):
-        """A request left for the CAD sidebar (``sidebar_views.py``): a file this machine's disk may refuse,
-        which is the agent's to read, not this server's crash."""
-        try:
-            return request()
-        except OSError as error:
-            raise ToolFailed(f"The CAD sidebar could not be reached: this computer's disk refused the request "
-                             f"({error.strerror or type(error).__name__}).", "other") from error
+        return request()
 
     def _show_in_browser(self, model: str) -> dict[str, Any]:
         """The model's link in the CAD Viewer this machine runs, started if none is."""
@@ -649,7 +640,7 @@ class Server:
             url = (self._viewer_url or viewer_url)()
         except ViewerUnavailable as failure:
             raise ToolFailed(f"This app cannot show CAD views, and the CAD Viewer did not start ({failure}). Run "
-                             f"`cadgen viewer --host 127.0.0.1 --json --detach` and open {model_link('<the url it prints>', model)}.",
+                             f"`cadgen viewer --host 127.0.0.1 --json` and open {model_link('<the url it prints>', model)}.",
                              "no_viewer") from failure
         link = model_link(url, model)
         # Text alone: an app that shows a result's structured content shows it in place of the text
@@ -759,7 +750,7 @@ class Server:
         agent's requests for it (``show``, ``capture``), and for what it watches -- its model's
         catalog entry -- the entry's revision (the view reads the catalog again only when that
         moves). A STEP or an ``.xbf`` the view shows tells it of a new version itself, through the
-        engine's routes (``cadgen.viewer.xbf``): no build feed rides here.
+        engine's routes (``cadgen.viewer.documents``): no build feed rides here.
         """
         view_id = self._register(arguments, context)
         self._mounting.pop(view_id, None)
@@ -769,6 +760,9 @@ class Server:
             if sidebar:
                 self.sidebar_views.forget(view_id)
             return _data({"events": []})
+        model = arguments.get("model")
+        if isinstance(model, str):
+            self.sync_document(Path(model))
         state = arguments.get("state") if isinstance(arguments.get("state"), dict) else None
         focused = arguments.get("focused") is True
         # Use the agent's tools never see: a person touching the view. (The file on screen is counted
@@ -789,7 +783,7 @@ class Server:
             except Exception as error:  # noqa: BLE001 - the view shows the catalog's own failure on its next read
                 answer["catalog"] = {"error": str(error) or type(error).__name__}
         if sidebar:
-            # Every thread's agent can reach the sidebar (``sidebar_views.py``): it says what it shows
+            # Every thread's agent can reach the sidebar (``sidebar.py``): it says what it shows
             # there, and takes what was left for it.
             view = self.views.view(view_id)
             self.sidebar_views.publish(view_id, model=view.model if view else arguments.get("model"),
@@ -813,36 +807,3 @@ class Server:
         headers = arguments.get("headers") if isinstance(arguments.get("headers"), dict) else {}
         return _data(self.tunnel.serve(method=str(arguments.get("method") or "GET"), url=str(arguments.get("url") or ""),
                                        headers=headers, body=body))
-
-
-def serve(argv: list[str] | None = None) -> int:
-    """Serve MCP on this process's standard streams until the host closes them."""
-    logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="cadgen mcp: %(message)s")
-    protocol_out = claim_stdout()
-    import threading
-
-    from cadgen import updates
-    from cadgen._internal.channel import remember
-    from cadgen.analytics import Recorder, collect_crashes
-
-    # The channel this server's plugin named, written down for the processes of its installation no plugin
-    # names one to -- the engine daemon, a skill's commands and the Viewer they open. In the background, so no
-    # start waits on the state directory; an exit waits a moment for it, as a host may start a server only to
-    # list its tools.
-    remembering = threading.Thread(target=remember, name="cadgen-channel", daemon=True)
-    remembering.start()
-    analytics = Recorder()
-    analytics.start()
-    collect_crashes(analytics.crashed)  # what fails in this process, wherever it is caught, is this recorder's
-    updates.refresh()
-    from cadgen.viewer.engine_client import RemoteApp
-    from .tunnel import ViewerTunnel
-
-    server = Server(analytics=analytics, tunnel=ViewerTunnel(app=RemoteApp()))
-    connection = Connection(sys.stdin.buffer, protocol_out, server.handle, workers=64)
-    try:
-        connection.serve()
-    finally:
-        analytics.close()
-        remembering.join(1)
-    return 0

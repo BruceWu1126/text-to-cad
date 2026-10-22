@@ -232,15 +232,20 @@ finally:
         self.assertEqual(self.request('/__cad/xbf/api/docs')[0], 404)
 
     def test_the_cad_apps_tunnel_carries_an_engine_document(self) -> None:
-        from cadgen.mcp.tunnel import ViewerTunnel
-
-        from cadgen.viewer.engine_client import RemoteApp
-        tunnel = ViewerTunnel(app=RemoteApp())
+        from cadgen.mcp.shim import Proxy
+        from cadgen.mcp.protocol import RequestContext
+        proxy = Proxy()
+        context = RequestContext(1, {})
+        proxy.handle('initialize', {'protocolVersion': '2025-11-25',
+                     'capabilities': {'extensions': {'io.modelcontextprotocol/ui':
+                         {'mimeTypes': ['text/html;profile=mcp-app']}}}}, context)
+        self.addCleanup(proxy.close)
         copy = self.base / "tunnelled.step"
         shutil.copyfile(self.step, copy)
 
         def get(url: str):
-            reply = tunnel.serve(method="GET", url=f"http://cad.invalid{url}", headers={}, body=b"")
+            reply = proxy.handle('tools/call', {'name': 'cad_http', 'arguments':
+                         {'method': 'GET', 'url': f'http://cad.invalid{url}'}}, context)['structuredContent']
             body = base64.b64decode(reply.get("body") or "")
             return reply["status"], gzip.decompress(body) if reply.get("encoding") == "gzip" else body
 

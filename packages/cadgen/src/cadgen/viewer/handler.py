@@ -266,6 +266,9 @@ def make_handler_class(app):
         def do_HEAD(self):  # noqa: N802
             self._dispatch()
 
+        def do_DELETE(self):
+            self._dispatch()
+
         def do_POST(self):  # noqa: N802
             self._dispatch()
 
@@ -289,7 +292,7 @@ def make_handler_class(app):
                     return
                 if not self.parse_request():
                     return
-                if self.command not in _ALLOWED_METHODS:
+                if self.command not in _ALLOWED_METHODS and not (self.command == "DELETE" and self.path == "/mcp"):
                     if "chunked" in (self.headers.get("transfer-encoding") or "").lower():
                         # Nothing here can frame a chunked body, so the only
                         # safe answer is to stop reusing the connection.

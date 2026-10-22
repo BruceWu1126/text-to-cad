@@ -12,7 +12,11 @@ def http_factory(server, host, port):
     from cadgen.viewer.engine_app import EngineApp
     from cadgen.viewer.handler import CadHTTPServer, make_handler_class
 
-    app = EngineApp(server, host)
+    from cadgen.mcp.http import Sessions
+
+    app = EngineApp(server, host, session_factory=Sessions)
+    server.clients_active = app.active
+    server.on_close = app.close
     return CadHTTPServer((host, port), make_handler_class(app), app)
 
 

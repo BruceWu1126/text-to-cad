@@ -65,16 +65,27 @@ class SessionApp(CadApp):
 
 
 class EngineApp:
-    def __init__(self, server, host):
+    def __init__(self, server, host, *, session_factory=None):
         self.server, self.host = server, host
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.pages = {}
+        self.active_requests = 0
         self._default = None
         self._mcp = None
+        self.session_factory = session_factory
         from cadgen.analytics import Recorder
         self.analytics = Recorder()
         self.analytics.start()
+
+    def active(self):
+        with self.lock:
+            return self.active_requests > 0
+
+    def close(self):
+        if self._mcp is not None:
+            self._mcp.close()
+        self.analytics.close()
 
     def endpoint(self):
         return {'ok': True, 'url': self.server.url, 'port': self.server.port, 'token': self.token}
@@ -87,7 +98,8 @@ class EngineApp:
             return {'failed': 'CAD Viewer client is not built; build apps/web or install the cadgen wheel'}
         with self.lock:
             found = None if options.get('new') else next((key for key, app in self.pages.items()
-                      if app.start == start and app.dist_dir == dist), None)
+                      if os.path.normcase(os.path.normpath(app.start)) == os.path.normcase(start)
+                      and os.path.normcase(app.dist_dir) == os.path.normcase(dist)), None)
             ident = found or secrets.token_urlsafe(18)
             if found is None:
                 app = SessionApp(self.server, host=self.host, port=self.server.port, dist_dir=dist, start=start)
@@ -101,6 +113,8 @@ class EngineApp:
 
     def sessions(self):
         with self.lock:
+            now = time.monotonic()
+            self.pages = {key: app for key, app in self.pages.items() if now - app.touched < 3600}
             pages = [{'id': key, 'kind': 'viewer', 'root': app.start,
                       'idle': round(time.monotonic()-app.touched, 1)} for key, app in self.pages.items()]
         return pages + ([] if self._mcp is None else self._mcp.listing())
@@ -115,6 +129,16 @@ class EngineApp:
             return self._default
 
     def handle(self, request, response):
+        with self.lock:
+            self.active_requests += 1
+        try:
+            return self._handle(request, response)
+        finally:
+            with self.lock:
+                self.active_requests -= 1
+            self.server.touch()
+
+    def _handle(self, request, response):
         self.server.touch()
         if not host_is_allowed(request.header('host'), self.host):
             return response.send_json(403, {'error': 'Host is not a local name'})
@@ -135,6 +159,8 @@ class EngineApp:
             return response.send_bytes(302, b'', '', [('location', location),
                 ('set-cookie', f'{cookie_name}={self.token}; Path=/; HttpOnly; SameSite=Strict'),
                 ('referrer-policy', 'no-referrer')])
+        if request.path == '/mcp' and self.session_factory is not None:
+            return self.mcp().handle(request, response)
         if request.path == '/' and request.query.get('doc') in self.server.served:
             doc = self.server.served[request.query['doc']]
             launch = self.launch({'start': str(doc.path.parent)})
@@ -151,3 +177,9 @@ class EngineApp:
         else:
             app = self.default_app()
         return app.handle(request, response)
+
+    def mcp(self):
+        with self.lock:
+            if self._mcp is None:
+                self._mcp = self.session_factory(self)
+            return self._mcp

@@ -2,11 +2,14 @@
 
 The page an agent host renders for CAD: the same `@text-to-cad/ui` FileViewer and
 renderers `apps/web` composes, behind a different host — an MCP Apps bridge
-instead of an HTTP origin. Its server is `cadgen mcp`
-(`packages/cadgen/src/cadgen/mcp`).
+instead of an HTTP origin. The installation's engine serves its tools, page resource and HTTP routes.
+`cadgen mcp` is the stateless stdio shim that agent hosts launch: it ensures that
+engine, then forwards JSON-RPC to `/mcp` using its installation token. Each shim
+negotiates a separate MCP session. Closing a shim releases that session and leaves
+the engine, its workers and other clients alive.
 
-Hosts present it in one of two ways, which the server tells apart at
-`initialize` (Codex names itself `codex-mcp-client`; any other host can declare
+Hosts present it in one of two ways, which declared capabilities select at
+`initialize` (the shim translates Codex’s `codex-mcp-client` identity; any other host can declare
 the `dev.texttocad/tabs` extension with the `global`, `thread` and `file`
 entrypoints; an MCP Apps host advertises the `io.modelcontextprotocol/ui`
 extension):
@@ -15,8 +18,8 @@ extension):
   sidebar (the home: the models opened before, and Open), a **CAD** tab beside
   each thread, and *Open with CAD* for a model file. The agent opens a tab once
   (`cad_open`) and drives it (`cad_show`). A host that declares tabs does what
-  Codex does: it starts one `cadgen mcp` process per thread, since a call that
-  names no view reaches the thread's own tab.
+  Codex does: it starts one `cadgen mcp` shim per thread. Each connects to a separate
+  engine session, so an unnamed view belongs to that thread.
 - **Inline (Claude Desktop, and every other MCP Apps host).** Each `cad_show`
   mounts a viewer card in the chat, and the host keeps the old cards. A card is
   the whole viewer at card size: its navbar (the logo, which opens the app menu,
@@ -28,7 +31,7 @@ extension):
 A client that renders no MCP Apps never loads this page: its `cad_show` answers
 with the model's link in this machine's CAD Viewer, started if none runs
 (`cadgen/mcp/browser.py`), and opens no browser. `CADGEN_MCP_PRESENTATION=inline`
-tells the server that a client renders apps without advertising them, as the
+tells the shim that a client renders apps without advertising them, as the
 reference host `basic-host` does.
 
 ## The rules
@@ -76,14 +79,12 @@ reference host `basic-host` does.
   still has the C logo and its menu, without Back to files. The agent reads it
   (`cad_view` lists it) but shows nothing in it: `cad_show` refuses its view, and
   the page ignores a show that reaches it anyway.
-- **An agent reads the sidebar too, and shows beside its thread.** Codex runs the sidebar page
-  in a thread, and a server process, of its own, so no thread's agent syncs with it. Each process
-  publishes its sidebar views beside the model library (`cadgen/mcp/sidebar_views.py`), and an
-  agent's `cad_view` and `cad_screenshot` mean the view a person touched last of its thread's
-  tabs and the sidebar's. A model it shows goes to its thread's tab (`cad_open` when there is
-  none): Codex keeps the sidebar page running while the person is in a thread, so a model sent
-  there lands where nobody is looking. Only a `cad_show` that names the sidebar's view reaches
-  it. Only sidebar views are shared; a thread's tabs are that conversation's.
+- **An agent reads the sidebar too, and shows beside its thread.** Each MCP session
+  owns its conversation views. Sidebar views alone are shared across sessions in the
+  engine’s memory (`cadgen/mcp/sidebar.py`). Selection and capture replies cross sessions
+  directly, with no file registry. `cad_show` targets the thread’s tab unless it names
+  the sidebar’s view. A session closing removes its sidebar views; stale views expire
+  by the same heartbeat rule as other views.
 - **Two requests to the network: the version check, and analytics with consent.**
   Both go to `api.texttocad.dev` (`apps/api`). Once a day at most, cadgen
   reads the version feed (`cadgen/updates.py`): one anonymous GET, with no id and
@@ -162,7 +163,7 @@ reference host `basic-host` does.
   origin `http://cad.invalid`; the server hands it to the viewer's own router,
   over its own model library and analytics. Everything the page asks of the
   server travels this way, as the web page asks its own: the models -- a STEP's
-  and an `.xbf`'s reads too, which the viewer's router relays to the cadgen engine
+  and an `.xbf`'s reads too, dispatched directly to the engine's document router
   that serves them (`/__cad/xbf/api/...`), never a port of the engine's own -- the
   library and its pictures, Open (`/__cad/pick`), Reveal, the person's analytics
   answer and features, the update check. Only the clipboard stays the host's: a
@@ -249,6 +250,18 @@ in this tab presentation, across sidebar, thread and file views, so the composer
 sidebar chat button can occupy bottom-right. `App.tsx` supplies
 `--cad-viewport-corner-left: 2px` and `--cad-viewport-corner-right: auto`;
 inline hosts (including full-size cards) retain the default bottom-right placement.
+
+## Engine transport
+
+The engine exposes authenticated Streamable HTTP at `/mcp`. Its private installation
+socket supplies the endpoint and token; the shim sends Bearer authentication.
+Initialize creates an opaque `Mcp-Session-Id`, which accompanies subsequent POSTs
+and DELETE. Requests negotiate a supported MCP protocol revision. JSON replies need
+no SSE stream, so GET returns 405. Missing sessions return 400; expired sessions 404.
+A restart requires reconnecting the host’s MCP server; mutations are never replayed.
+Host-specific capability corrections live in `mcp/shim.py`. Version polls use `wait=0`
+in the page’s tunnel so they never occupy a host call slot. The engine has no such
+host-specific timing rule. The manifests continue to launch `cadgen mcp`.
 
 ## Develop
 
