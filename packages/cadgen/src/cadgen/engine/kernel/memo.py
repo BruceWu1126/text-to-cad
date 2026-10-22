@@ -920,6 +920,9 @@ class _Run:
         # Per body, each file it read past the engine's readers, by the call that read it
         # (``_bypassed``): what keeps it running.
         self.bypassed: dict[str, list[tuple[str, str | None]]] = {}
+        # Per body, each call it ran uncached and how many times (``_ran_uncached``): what keeps
+        # it from being retained.
+        self.uncached: dict[str, dict[str, int]] = {}
         # Per body this run ran or replayed: what it is made of -- its source, its checks
         # (each file it read, held to its bytes), whether those say all it read, and the
         # bodies it called -- its key in a document (``build``); and how it went, ``run``
@@ -1109,7 +1112,8 @@ class _BodyLog:
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread", "keyed", "children", "bypassed")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread", "keyed", "children", "bypassed",
+                 "uncached")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -1131,6 +1135,8 @@ class _BodyLog:
         self.unread: list[str] = []
         # The files it read past the engine's readers, each with the call (``_bypassed``).
         self.bypassed: list[tuple[str, str | None]] = []
+        # The calls it ran uncached, each with how many times (``_ran_uncached``).
+        self.uncached: dict[str, int] = {}
 
 
 class _Body:
@@ -1217,6 +1223,8 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any], *, i
         state.unread[name] = list(dict.fromkeys(log.unread))
     if log.bypassed:
         state.bypassed[name] = list(log.bypassed)
+    if log.uncached:
+        state.uncached[name] = dict(log.uncached)
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
     if logged is not None:
@@ -1793,12 +1801,21 @@ def _keep(entry: "_Entry") -> None:
                 _drop(old)
 
 
+def _ran_uncached(state: _Run, call: str) -> None:
+    """A call ran with no key (``_plain``, a maker no key names): counted, and named in the
+    running body's log, so its build says what keeps the body from being retained."""
+    state.tally["uncached"] += 1
+    if state.bodies:
+        found = state.bodies[-1].uncached
+        found[call] = found.get(call, 0) + 1
+
+
 def _plain(state: _Run, op: str, frame: tuple, kind: str, shapes: list, function: Any, args: tuple,
            kwargs: dict, *, capture: bool) -> Any:
     """Run the call as plain build123d. It is still a feature, its results are
     this run's (so a later feature can name them as inputs), and what it does
     to a memoized shape is still accounted for."""
-    state.tally["uncached"] += 1
+    _ran_uncached(state, f"build123d's {getattr(function, '__qualname__', None) or op}")
     if state.bodies:
         state.bodies[-1].retainable = False
     inputs = state.trace.given(shapes, state.feature_of)
@@ -2138,7 +2155,7 @@ class _Maker:
         if key_id is None:
             if not own:
                 return real()
-            state.tally["uncached"] += 1
+            _ran_uncached(state, f"OCCT's {self.cls.__name__}")
             if given is None:
                 return real()
             # It runs plain, and is still a feature: what it made is this run's, named.

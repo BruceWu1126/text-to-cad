@@ -105,6 +105,16 @@ def _first_party_modules() -> list[str]:
                                        or _first_party_namespace(module))]
 
 
+def _uncached_said(call: str, count: int) -> str:
+    """What a call a body ran uncached does to it, and the remedy (``retention.fallbacks``)."""
+    times = f"{count} call{'' if count == 1 else 's'}"
+    if call.startswith("OCCT's "):
+        return (f"runs {call} uncached ({times}): it is never retained; use build123d's operation for it, "
+                "or an engine reader (read_step, read_xbf, read_mesh)")
+    return (f"runs {call} uncached ({times}) on a shape no keyed call made (OCCT called past build123d, say): it is "
+            "never retained; make that shape with build123d's operation, or read it with an engine reader")
+
+
 def _first_party_namespace(module: Any) -> bool:
     """Whether ``module`` is a namespace package whose every folder is the model's own: under no
     library root (``trace._library_roots``)."""
@@ -466,6 +476,12 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
                 retention["fallbacks"].setdefault(f"{Path(body_script).name}::{function}", []).extend(
                     f"reads {_shown(Path(path), Path(body_script).parent) if path else 'a file'} through {call}: "
                     "it runs on every build; use read_step/read_xbf/read_mesh" for call, path in reads)
+            # Each call a body ran uncached (``memo._ran_uncached``), which keeps it from being retained:
+            # an OCCT maker no key names, or a build123d call given what no keyed call made.
+            for body_name, counts in run.uncached.items():
+                body_script, _, function = body_name.rpartition("::")
+                retention["fallbacks"].setdefault(f"{Path(body_script).name}::{function}", []).extend(
+                    _uncached_said(call, count) for call, count in sorted(counts.items()))
             reports.append({"ok": True, "model": f"{shown}::{model.name}", "memo": calls, "retention": retention,
                             "children": {name: round(seconds, 4) for name, seconds in context.timings.items()
                                          if name != model.identity},

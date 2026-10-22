@@ -405,6 +405,34 @@ def piped():
 """
 
 
+RAW = """
+import build123d as bd
+from build123d.topology.shape_core import downcast
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+from cadgen.engine import xbf
+
+
+@xbf
+def raw():
+    peg = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 2.0, 5.0).Shape()
+    return bd.Compound(children=[bd.Solid(downcast(peg)), bd.Box(3, 3, 3)])
+"""
+
+
+class UncachedTest(BodiesCase):
+    def test_the_report_names_each_call_that_ran_uncached_and_the_remedy(self) -> None:
+        # A shape OCCT made past the memo's list has no key, so the build123d call given it runs
+        # uncached and the body is never retained: the build says which call, how often, and why.
+        self.write("raw.py", RAW)
+        report = engine_build.build(self.folder / "raw.py", ["raw"], cwd=self.folder)[-1]
+        self.assertTrue(report["ok"], report)
+        self.assertGreater(report["memo"]["uncached"], 0)
+        reasons = report["retention"]["fallbacks"]["raw.py::raw"]
+        self.assertTrue(any(reason.startswith("runs build123d's ") and " uncached (" in reason
+                            and "make that shape with build123d's operation" in reason for reason in reasons), reasons)
+
+
 class ReadTracingTest(unittest.TestCase):
     """A file a body reads itself is one of its inputs, by its bytes (``_audited``,
     ``_ReadInput``): the body is replayed while they stay and runs when they change or the
