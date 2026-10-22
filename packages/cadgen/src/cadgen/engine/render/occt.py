@@ -450,11 +450,23 @@ class Scene:
             self._studio_backdrop()  # the sweep's shading follows the camera
         return self.camera
 
+    def box_corners(self) -> np.ndarray:
+        """The eight corners of the box of every part drawn, placed (``fitOrthographicCamera``'s fit)."""
+        from cadgen.engine.render.explode import placed_box
+
+        boxes = [placed_box(self.boxes[i["prototype"]], self.placement(n))
+                 for n, i in enumerate(self.structure["instances"])
+                 if i["prototype"] in self.boxes and n not in self.hidden]
+        lo, hi = np.min([b[0] for b in boxes], 0), np.max([b[1] for b in boxes], 0)
+        return np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+
     def frame(self, camera: str | dict[str, Any] = "iso", projection: str = "orthographic",
-              focal_length: float = FOCAL_LENGTH) -> dict[str, Any]:
+              focal_length: float = FOCAL_LENGTH, *, padding: float = PADDING, tight: bool = True) -> dict[str, Any]:
         """The snapshot page's framing: the direction a preset or ``az:el`` names, then the tight
-        frame on every placed vertex (orthographic), or the perspective fit on the same points;
-        or a prompt view's own camera, placed as it is (``_pinned``)."""
+        frame on every placed vertex (orthographic), or the perspective fit on the same points, with
+        ``padding`` of the picture each side (a job's ``output.padding``); ``tight`` off (a job's
+        ``output.tightFrame``) fits the drawn parts' box instead. Or a prompt view's own camera,
+        placed as it is (``_pinned``)."""
         from OCP.gp import gp_Dir, gp_Pnt
         from OCP.Graphic3d import Graphic3d_Camera
 
@@ -466,21 +478,15 @@ class Scene:
         right = np.cross(forward, up)
         right /= np.linalg.norm(right)
         screen_up = np.cross(right, forward)
-        if self.mode == "wireframe" and projection != "perspective":
+        if not tight or (self.mode == "wireframe" and projection != "perspective"):
             # The page's tight frame fits the meshes it draws; Wireframe draws none, so the page
             # falls back to the scene's box (``fitOrthographicCamera``): its eight corners.
-            from cadgen.engine.render.explode import placed_box
-
-            boxes = [placed_box(self.boxes[i["prototype"]], self.placement(n))
-                     for n, i in enumerate(self.structure["instances"])
-                     if i["prototype"] in self.boxes and n not in self.hidden]
-            lo, hi = np.min([b[0] for b in boxes], 0), np.max([b[1] for b in boxes], 0)
-            points = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+            points = self.box_corners()
         else:
             points = self.placed_points()
         width, height = self.canvas.width, self.canvas.height
         aspect = width / height
-        safe = max(1 - 2 * PADDING, 0.1)
+        safe = max(1 - 2 * padding, 0.1)
         low, high = points.min(0), points.max(0)
         centre = (low + high) / 2
         radius = float(np.linalg.norm(high - low)) / 2 or 1.0
@@ -793,6 +799,27 @@ class Scene:
         params.SetRepeat(False)
         params.SetModulate(True)
         return texture
+
+    def backdrop(self, colour: Any = None) -> None:
+        """What is behind the model, for a picture matted on nothing (``service.matte``): ``colour``
+        (an RGB triple, 0 to 1) flat, or -- None -- the look's own again: Preview's studio sweep,
+        else the look's backdrop."""
+        from OCP.Aspect import Aspect_FillMethod, Aspect_GradientFillMethod
+
+        vertical = Aspect_GradientFillMethod.Aspect_GradientFillMethod_Vertical
+        if colour is None:
+            if self.studio:
+                self._studio_backdrop()
+            else:
+                self.canvas.view.SetBgGradientColors(_color(BACKGROUND), _color(BACKGROUND), vertical, False)
+            return
+        if self.studio:
+            picture = np.broadcast_to(np.rint(np.asarray(colour, float) * 255).astype(np.uint8), (2, 2, 3))
+            graphic = self.canvas.view.View()
+            graphic.SetBackgroundImage(self._texture(np.ascontiguousarray(picture), smooth=False), False)
+            graphic.SetBackgroundImageStyle(Aspect_FillMethod.Aspect_FM_STRETCH)
+        else:
+            self.canvas.view.SetBgGradientColors(_color(tuple(colour)), _color(tuple(colour)), vertical, False)
 
     def _studio_backdrop(self) -> None:
         """The viewer's backdrop (``studioBackdrop.js``) behind everything, for the camera framed:

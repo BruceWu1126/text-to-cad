@@ -114,12 +114,14 @@ class Held:
         from cadgen.engine.render.look import DRAWING
         from cadgen.engine.render.occt import _color, occt_scale
 
+        from cadgen.engine.render.service import finished, picture
+
         if self.drawing is None:
             raise RuntimeError("the renderer holds no drawing")
         refusals(still, self.path.name)
         started = time.perf_counter()
         timings: dict[str, int] = {}
-        width, height = still.size
+        width, height = still.drawn  # supersampled (a job's renderScale), brought down after (``picture``)
         appearance = still.display.get("appearance", "light")
         paper, ink = DRAWING.paper(appearance)
         if self.canvas is None:
@@ -140,8 +142,9 @@ class Held:
         self.canvas.view.SetBackgroundColor(_color(paper))
         bounds = self.drawing.bounds or (0.0, 0.0, 1.0, 1.0)
         span_x, span_y = abs(bounds[2] - bounds[0]), abs(bounds[3] - bounds[1])
-        usable_x = max(width - 2 * DRAWING.margin, width * 0.5)
-        usable_y = max(height - 2 * DRAWING.margin, height * 0.5)
+        margin = DRAWING.margin * still.scale
+        usable_x = max(width - 2 * margin, width * 0.5)
+        usable_y = max(height - 2 * margin, height * 0.5)
         scale = min(usable_x / span_x if span_x > 0 else np.inf, usable_y / span_y if span_y > 0 else np.inf)
         scale = scale if np.isfinite(scale) and scale > 0 else 1.0  # pixels a unit, the pane's fit
         centre = ((bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2)
@@ -159,10 +162,17 @@ class Held:
         def place(point: Any) -> tuple[float, float]:
             return ((point[0] - centre[0]) * scale + width / 2, height / 2 - (point[1] - centre[1]) * scale)
 
-        data = self.canvas.png((lambda frame: paint_words(frame, texts, place, scale, ink)) if texts else None)
+        view = self.canvas.view
+
+        def backdrop(colour: Any) -> None:  # the paper, or (a transparent picture's matte) black and white
+            view.SetBackgroundColor(_color(paper if colour is None else tuple(colour)))
+
+        data = picture(self.canvas, (lambda frame: paint_words(frame, texts, place, scale, ink)) if texts else None,
+                       still, backdrop)
         timings["drawMs"] = round((time.perf_counter() - clock) * 1000)
         timings["renderMs"] = round((time.perf_counter() - started) * 1000)
-        return data, {"width": width, "height": height, "camera": "top", "projection": "orthographic",
+        return data, {"width": still.size[0], "height": still.size[1], **finished(still), "camera": "top",
+                      "projection": "orthographic",
                       "displayMode": "drawing", "appearance": appearance, "preview": False,
                       "entities": self.drawing.entities, "layers": self.drawing.layers,
                       "lines": len(self.drawing.lines), "fills": len(self.drawing.fills),

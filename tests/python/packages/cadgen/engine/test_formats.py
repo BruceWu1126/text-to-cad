@@ -630,6 +630,33 @@ class RobotTest(FixtureTest):
         door = np.array(swung["instances"][1]["matrix"]).reshape(4, 4).T
         np.testing.assert_allclose(door[:3, 3], (800, 0, 500), atol=1e-6)  # turned about z through the joint: the door's frame
 
+    def test_a_robot_job_leaves_out_the_visuals_its_view_hid(self) -> None:
+        """A robot's view says what it hid as the viewer's visual ids (``selection.hide``: ``arm:v1``); each
+        instance carries its visual's id, so a job drawn with the arm hidden is the robot without its arm."""
+        from cadgen.engine.snapshot import draw_pictures, hidden_instances, job_pictures
+
+        base = '<link name="base"><visual><geometry><box size="0.2 0.2 0.05"/></geometry></visual></link>'
+        arm = ('<link name="arm"><visual><origin xyz="0 0 0.15"/><geometry><box size="0.04 0.04 0.3"/></geometry></visual>'
+               '</link><joint name="shoulder" type="revolute"><parent link="base"/><child link="arm"/>'
+               '<axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>')
+        whole, alone = self.folder / "two_links.urdf", self.folder / "base_alone.urdf"
+        whole.write_text(f'<robot name="r">{base}{arm}</robot>', encoding="utf-8")
+        alone.write_text(f'<robot name="r">{base}</robot>', encoding="utf-8")
+        structure = formats.read(whole).structure
+        self.assertEqual([instance["visual"] for instance in structure["instances"]], ["base:v1", "arm:v1"])
+        self.assertEqual(hidden_instances(structure, {"hidden": ["arm:v1"]}, whole.name), {1})
+        with self.assertRaisesRegex(SnapshotRefused, "arm:v2"):
+            hidden_instances(structure, {"hidden": ["arm:v2"]}, whole.name)
+        gl()
+        outputs = {name: self.folder / f"robot_{name}.png" for name in ("hidden", "alone")}
+        job = {"camera": "iso", "jointValues": {"shoulder": 30}, "outputs": [{"path": str(outputs["hidden"]),
+                                                                              "width": 240, "height": 180}]}
+        packet = {"input": str(whole), "jobs": [{**job, "selection": {"hide": ["arm:v1"]}}]}
+        draw_pictures(job_pictures(packet), daemon=False)
+        draw_pictures(job_pictures({"input": str(alone), "jobs": [{**job, "jointValues": None, "outputs": [
+            {"path": str(outputs["alone"]), "width": 240, "height": 180}]}]}), daemon=False)
+        self.assertLessEqual(mismatch(pixels(outputs["hidden"].read_bytes()), pixels(outputs["alone"].read_bytes())), 0.001)
+
     def test_a_package_mesh_is_found_in_the_package_the_description_is_in(self) -> None:
         """``package://NAME/...`` (#611): the package's folder is the nearest above the description named
         NAME, or holding a ``package.xml`` that names it; no such folder, or a path out of it, is refused."""

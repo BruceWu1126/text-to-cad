@@ -148,6 +148,27 @@ hid left out, a job's
 JSON) as `--measurements` to draw the dimensions. A view without ink is drawn from
 its `camera`, given as `--camera '<its JSON>'`.
 
+Replay the whole packet in one call -- every view, each with its own camera,
+display, hidden and isolated parts and pose, the ink and the dimensions over each --
+into the files its outputs name:
+
+```bash
+cadgen snapshot --job tmp/bracket.snapshot.json
+cadgen snapshot --job tmp/bracket.snapshot.json XBF/bracket.xbf   # the same views of the rebuilt document
+```
+
+`--job` takes a packet, a job (`{input, camera, display, jointValues, outputs, ...}`)
+or a list of jobs, as a file or JSON; a job's `outputs` are its pictures (`path`, and
+`width`, `height`, `camera` of their own; a folder `path` takes a generated name).
+A SRC given is drawn in place of every job's input, and any other flag overrides
+every job. A job's `output` settings finish its pictures: `padding` (0 to 0.15 of
+the picture each side) and `tightFrame` frame a fitted camera (a view's own camera
+with `tightFrame` false, as the viewer writes every view, is drawn exactly),
+`transparent` draws on nothing, `renderScale` (1 to 3) supersamples -- OCCT's edge
+lines stay one pixel of the larger picture, so they read finer -- and `sizeProfile`
+sizes an output that gives no size. Every job is checked before anything renders,
+and a failure leaves none of its pictures. `--json` prints each picture's report.
+
 Inspect supplied annotations before editing. A view without annotations is optional
 context: render it only when useful to the request. After an edit, draw the same
 view of the rebuilt document to see the change from where the person looked, with

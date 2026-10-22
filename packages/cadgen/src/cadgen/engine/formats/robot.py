@@ -918,6 +918,10 @@ def robot_file(path: Path) -> Foreign:
     made: dict[tuple, list[tuple[int, np.ndarray]]] = {}
     visuals: list[tuple[str, np.ndarray, str, str]] = []  # link, placement in the link's frame (mm), path, colour
     rows: list[tuple[int, int]] = []  # each instance: its part, its visual
+    # Each instance's visual as the viewer names it (``robot_payload``: ``link:v1``), and its place
+    # among the visual's objects when it draws several (the viewer's ``link:v1/object/0``): what a
+    # view of the robot says it hid (``selection.hide``), which the stills leave out alike.
+    named: list[tuple[str, int | None]] = []
     to_mm = np.diag([1000.0, 1000.0, 1000.0, 1.0])
     links = list(robot.links)
     tree_links: dict[str, dict[str, Any]] = {}
@@ -931,16 +935,17 @@ def robot_file(path: Path) -> Foreign:
                     made[key].append((len(parts), placement))
                     parts.append(part)
             local = to_mm @ visual.local @ np.linalg.inv(to_mm)
-            for part, placement in made[key]:
+            for at, (part, placement) in enumerate(made[key]):
                 visuals.append((link, local @ placement, f"{robot.name}/{link}/{visual.label}", visual.color))
                 rows.append((part, len(visuals) - 1))
+                named.append((f"{link}:v{index}", at if len(made[key]) > 1 else None))
     if not rows:
         raise RobotError(f"{path.name}: no link of {robot.name} has a visual to draw")
 
     def instances(values: dict[str, float]) -> list[Placed]:
         frames = robot.placements(values)
         return [Placed(part, frames[visuals[at][0]] @ visuals[at][1], visuals[at][2],
-                       _linear(visuals[at][3]) if visuals[at][3] else None, links.index(visuals[at][0]))
+                       _linear(visuals[at][3]) if visuals[at][3] else None, links.index(visuals[at][0]), *named[at])
                 for part, at in rows]
 
     opening, _named = robot.values(None)

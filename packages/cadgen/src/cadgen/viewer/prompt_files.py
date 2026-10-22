@@ -3,8 +3,9 @@
 POST /__cad/prompt-files validates a snapshot packet in memory, then returns 200
 with compact inline JSON up to 1024 UTF-8 bytes, or writes one .snapshot.json and
 returns its path. Shared input, inline annotation and measurements are stored once;
-jobs reserve output names for an agent to render later (``cadgen snapshot`` reads the
-packet as ``--annotation``, and ``--camera authored`` draws a job's view). A packet with
+jobs reserve output names for an agent to render later (``cadgen snapshot --job`` draws
+every one of them; ``cadgen snapshot`` reads the packet as ``--annotation``, and ``--camera
+authored`` draws a job's view). A packet with
 ink also names the parts hidden and isolated where the ink was last drawn, which
 ``--annotation`` leaves out of its stills. No PNG is produced by this route.
 POST /__cad/prompt-files/save writes an annotation or measurement chip's JSON.

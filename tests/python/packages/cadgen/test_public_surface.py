@@ -47,8 +47,8 @@ MIRRORS: dict[str, tuple[str, str]] = {
 
 # The engine snapshot's options (``cadgen.engine.snapshot``), which every format's snapshot
 # command takes: one parser, one picture.
-SNAPSHOT = frozenset({"document", "out", "display", "grid", "camera", "preview", "width", "height", "size_profile",
-                      "pose", "annotation", "measurements", "no_daemon", "json"})
+SNAPSHOT = frozenset({"document", "out", "job", "display", "grid", "camera", "preview", "width", "height",
+                      "size_profile", "pose", "annotation", "measurements", "no_daemon", "json"})
 
 # Commands with a HAND-WRITTEN parser, and the option surface each one owns. An adapter has no
 # generated parser to compare against a signature, so the declaration IS the contract, and a

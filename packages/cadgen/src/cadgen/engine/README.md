@@ -177,6 +177,8 @@ cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] 
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                 [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
+                                             every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR] [--foreground]
 cadgen where DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
@@ -430,8 +432,9 @@ moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a
 object (`mode`, `grid`, `appearance`, `camera`, `clip`, `exploded`: `{"enabled", "amount"}`, 0.5
 unless given; `hidden` and `isolated`: lists of part refs, an occurrence's path in the refs
 grammar, which every look -- Preview, X-ray, Explode, Clip -- leaves out or alone draws, as the
-viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a ref
-that names nothing is refused by name); `--json` reports what was drawn
+viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a
+robot's parts are named by the viewer's visual ids too, `link:v1` (`link:v1/object/0` one object of
+it); a ref that names nothing is refused by name); `--json` reports what was drawn
 and each stage's milliseconds (`serveMs`, `meshMs`, `sceneMs` when a scene is made, `presentMs`,
 `frameMs`, `drawMs`, `renderMs`, `totalMs`; a file no document: `readMs` its reader, `openMs` its
 render process opening it). `parts` and `exploded` for a document that places one
@@ -448,6 +451,36 @@ document; with none, it is refused by name. A face the mesher left without trian
 warning. Nothing is written but OUT. OUT may be a folder -- one that is there, or a path ending in a
 separator -- and the picture is then `<SRC's stem>_<UTC time>.png` in it (a model's name for a model,
 `snapshot.picture_path`), the path the verb prints and reports (`output`).
+
+**A job.** `--job PACKET` replays a whole Quick Edit packet -- or a job file in its words: a job, a list
+of jobs, or `{"input", "jobs": [...], "annotation", "measurements"}` -- in one call
+(`snapshot.job_pictures`, `api.snapshot_job`), on the machinery above: each job is a view, drawn with
+its own `camera` (an output's own `camera` over it), its `display` (its `hidden` and `isolated` parts
+among it; the packet's top-level copies are `--annotation`'s), its pose (`jointValues`, as `--pose`
+takes it), `preview`, and -- a robot's -- the visuals its `selection.hide` names by the viewer's ids
+(`link:v1`, each robot instance carrying its visual's), the packet's ink and dimensions over each
+(a job's own `annotation` and `measurements` over the packet's); and each of its `outputs` (`path`,
+`width`, `height`, `camera`, `label`) is a picture written at its path (a folder takes
+`<stem>[_j<m>][_<n>]_<UTC time>.png`, the job's and the output's place where there are several). A
+job's `output` settings finish its pictures: `padding` (0 to 0.15 of the picture each side, 0.04
+unless given) and `tightFrame` (true unless given: the fit on every drawn vertex, else on the drawn
+parts' box) frame a fitted camera, and a view's own camera -- a position, a target and, orthographic,
+a half height -- with `tightFrame` false is drawn exactly, as the viewer writes every view
+(`padding` 0, `tightFrame` false); `transparent` draws on nothing (OCCT's backdrop is a fill it draws
+whole, so the picture is drawn on black and on white and each pixel's coverage read from the two,
+in linear light: `service.matte`; Preview keeps its floor and its shadow, the sweep gone);
+`renderScale` (1 to 3) draws the picture that many times its size and brings it down, each pixel
+the mean of those it covers (`service.picture`): what the engine draws in pixels -- ink, words,
+Measure, the grid -- is as heavy against the picture at any scale, while OCCT's GL lines (edges, a
+drawing's hairlines) stay one pixel of the larger frame and read finer: OCCT's core profile draws no
+line wider than a pixel, and this is that, not a bug; `sizeProfile` sizes an output that gives no
+size. SRC, given, is drawn in place of every job's input, and a flag given overrides every job: the
+display, the grid, the camera, Preview, the pose, the ink, the dimensions, the size of every
+output; an OUT is refused. Every job is checked before anything renders (an unknown key, a setting
+out of range, two outputs at one path, a file that is not there: refused by name, every file left as
+it was), and a picture that fails leaves none of the job's. Through the daemon each picture is a frame
+of the file's warm render process; `--no-daemon` serves each file once for all its pictures.
+`--json` prints `{"ok": true, "pictures": [what each drew]}`.
 
 **The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
 (`render/`): one presentation per part and look, each

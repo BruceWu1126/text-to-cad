@@ -4,6 +4,7 @@
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
+    snapshot_job(job, source=None, *, the snapshot's flags) -> list[Drawn]
     serve(source, port=0) -> Served
     where(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
@@ -40,7 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
 __all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "build", "daemon", "export",
-           "observers", "serve", "snapshot", "status", "stop", "where"]
+           "observers", "serve", "snapshot", "snapshot_job", "status", "stop", "where"]
 
 KINDS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 
@@ -426,6 +427,27 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
     return Drawn(out, found["width"], found["height"], found)
 
 
+def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: Any = None, grid: bool = False,
+                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+                 measurements: Any = None) -> list[Drawn]:
+    """Every picture a job names (``cadgen snapshot --job``): a Quick Edit packet (the
+    ``.snapshot.json`` the viewer writes, its path or its object), a job or a list of jobs, each
+    job a view drawn as it was -- its camera, display, hidden and isolated parts, pose, the
+    packet's ink and dimensions -- at its output settings, into each of its outputs
+    (``snapshot.job_pictures``). ``source`` is drawn in place of every job's input; a flag given
+    overrides every job. Every request is checked before anything renders, and a picture that
+    fails leaves none of the job's."""
+    from cadgen.engine import snapshot as drawing
+
+    _heard("source", os.fspath(source) if source is not None else drawing.job_input(job))
+    pictures = drawing.job_pictures(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                                    width=width, height=height, size_profile=size_profile, annotation=annotation,
+                                    measurements=measurements)
+    return [Drawn(Path(found["output"]), found["width"], found["height"], found)
+            for found in drawing.draw_pictures(pictures, daemon=daemon)]
+
+
 def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
     """Serve a document (``.xbf``, ``.step``) from the daemon; its page's URL."""
     path = Path(os.fspath(source)).resolve()
@@ -632,7 +654,8 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
         "models": [_model(report) for report in reports], "worker": worker,
         "error": _error(error, reports, worker)}
     if verb in ("export", "snapshot"):
-        source = args[0] if args else kwargs.get("source")
+        # A job's is the file it draws, which it says as it starts (``snapshot_job``).
+        source = heard.get("source") or (args[0] if args else kwargs.get("source"))
         found["source"] = _kind(source)
         found["pose"] = kwargs.get("pose") is not None
     if verb == "export":
@@ -717,3 +740,4 @@ build = _observed("build", build)
 build_script = _observed("build", build_script)
 export = _observed("export", export)
 snapshot = _observed("snapshot", snapshot)
+snapshot_job = _observed("snapshot", snapshot_job)

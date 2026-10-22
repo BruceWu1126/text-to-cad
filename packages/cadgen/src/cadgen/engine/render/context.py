@@ -344,15 +344,17 @@ def pixels(image: Any) -> np.ndarray:
 
 
 def encode(frame: np.ndarray) -> bytes:
-    """sRGB bytes (height, width, 3) as a PNG: eight-bit RGB, rows unfiltered, deflated by zlib
-    (faster than OCCT's encoder on a frame of flat backdrop, and the smaller file)."""
-    height, width = frame.shape[:2]
-    rows = np.empty((height, 1 + width * 3), np.uint8)
+    """sRGB bytes (height, width, 3), or with alpha (4), as a PNG: eight-bit RGB or RGBA, rows
+    unfiltered, deflated by zlib (faster than OCCT's encoder on a frame of flat backdrop, and the
+    smaller file)."""
+    height, width, channels = frame.shape
+    rows = np.empty((height, 1 + width * channels), np.uint8)
     rows[:, 0] = 0  # each row's filter: none
-    rows[:, 1:] = np.ascontiguousarray(frame, np.uint8).reshape(height, width * 3)
+    rows[:, 1:] = np.ascontiguousarray(frame, np.uint8).reshape(height, width * channels)
 
     def chunk(kind: bytes, body: bytes) -> bytes:
         return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
 
-    return b"".join([b"\x89PNG\r\n\x1a\n", chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)),
+    colour = 6 if channels == 4 else 2  # RGBA, else RGB
+    return b"".join([b"\x89PNG\r\n\x1a\n", chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, colour, 0, 0, 0)),
                      chunk(b"IDAT", zlib.compress(rows.tobytes(), 6)), chunk(b"IEND", b"")])
