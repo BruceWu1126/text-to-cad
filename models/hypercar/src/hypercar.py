@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 
-from cadgen.engine import configuration, couple, glb, motion, xbf
+from cadgen.engine import configuration, glb, motion, xbf
 
 import build123d as bd
 
@@ -150,11 +150,11 @@ def _dot(a, b):
 #
 # One CYLINDRICAL joint per door -- rotation and axial travel about the SAME
 # tower axis is exactly what a cylindrical joint is -- paired by its label with
-# a rigid joint on the door skin where the door stands shut. The ``doors``
-# coupling drives both sides from one 0..1 control through the mechanism's own
-# lead: 62 deg of rotation while sweeping 310 mm along the axis (299 up, 80
-# forward). The numbers come straight from lib/hinge.py, so changing the tower
-# changes the joints with it.
+# a rigid joint on the door skin where the door stands shut. Open is the
+# mechanism's own lead: 62 deg of rotation while sweeping 310 mm along the axis
+# (299 up, 80 forward), each door's turn and travel set together (``_open``),
+# so a motion between shut and open keeps them in step. The numbers come
+# straight from lib/hinge.py, so changing the tower changes the joints with it.
 #
 # The joint is held by the door's FLANK (the front fender, which leads the
 # flank's explode group below), not by the chassis: the explodes carry the
@@ -171,6 +171,12 @@ def _dot(a, b):
 def _sweep(side):
     """The door's signed turn at full open, degrees: the two sides are opposite-hand screws."""
     return hinge_lib.DOOR_SWEEP_DEG * hinge_lib.DOOR_SWEEP_SIGN[side]
+
+
+def _open(side):
+    """The door's (turn, travel) fully open: 62 deg about the tower axis while travelling
+    310 mm along it."""
+    return (_sweep(side), hinge_lib.CARRIER_TRAVEL)
 
 
 def _door_joints(car):
@@ -395,7 +401,7 @@ def _smooth(t):
 
 def _win(p, a, b, c, d):
     """Rise a..b, hold b..c, fall c..d, zero outside: every window ends before 1, so the
-    loop is exact."""
+    clip ends where it starts and repeats seamlessly."""
     if p <= a or p >= d:
         return 0.0
     if p < b:
@@ -445,9 +451,10 @@ def hypercar():
     car = bd.Compound(children=groups, label="mid_engine_hypercar")
     _door_joints(car)
     _explode_joints(car)
-    couple(car, "doors", **{f"door_{side}": (_sweep(side), hinge_lib.CARRIER_TRAVEL) for side in SIDES})
-    configuration(car, "open", doors=1)                     # shut is as built
-    # Both doors through the full synchro-helix and shut again, 7 s a loop.
-    motion(car, "doors", sweep={"doors": (0, 1)}, duration=3.5, loop="pingpong")
-    motion(car, "showcase", _showcase, duration=48, loop="loop")
-    return motion(car, "explode", _explode, duration=10, loop="loop")
+    # Shut is as built; open is each door through its full synchro-helix.
+    configuration(car, "open", **{f"door_{side}": _open(side) for side in SIDES})
+    # Both doors open and shut again, 7 s (a player repeats it).
+    shut = {f"door_{side}": (0.0, 0.0) for side in SIDES}
+    motion(car, "doors", [(0, shut), (3.5, "open"), (7, shut)], ease="cubic")
+    motion(car, "showcase", _showcase, duration=48)
+    return motion(car, "explode", _explode, duration=10)

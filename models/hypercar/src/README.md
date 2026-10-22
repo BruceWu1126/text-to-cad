@@ -13,8 +13,8 @@ Build from this folder: `python hypercar.py`.
 ```
 python hypercar.py
 python -m cadgen.engine snapshot ../XBF/hypercar.xbf open.png --pose open
-python -m cadgen.engine snapshot ../XBF/hypercar.xbf half.png --pose '{"doors": 0.5}'
-cadgen export ../XBF/hypercar.xbf half.step --pose '{"doors": 0.5}'
+python -m cadgen.engine snapshot ../XBF/hypercar.xbf half.png --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
+cadgen export ../XBF/hypercar.xbf half.step --pose '{"door_left": [-31, 155], "door_right": [31, 155]}'
 ```
 
 ## How it is built
@@ -69,16 +69,19 @@ door.
 | `door_left` | turn -62 .. 0 deg, travel 0 .. 310 mm | the left door and its 11 riders |
 | `door_right` | turn 0 .. 62 deg, travel 0 .. 310 mm | the right door and its 11 riders |
 
-The `doors` coupling drives both from one 0..1 control: `couple(car, "doors",
-door_left=(-62, 310), door_right=(62, 310))`, the old `doors` coupling. The old
-poses are `shut`, as built, and the configuration `open` (`doors=1`). The old
-`doors` clip is the motion `doors`, the coupling swept 0 to 1 over 3.5 s and back
-(`loop="pingpong"`, a 7 s clip in the GLB).
+The old poses are `shut`, as built, and the configuration `open`, which sets each
+door's turn and travel together (`door_left=(-62, 310)`, `door_right=(62, 310)`).
+The old `doors` clip is the motion `doors`: waypoints shut, open at 3.5 s, shut at
+7 s, cubic, so turn and travel stay in step along the helix.
+
+- The old `doors` coupling (one 0..1 control for both doors) is dropped: a
+  convenience control, not a mechanical relation; `open` and the motion set the
+  two door joints themselves.
 
 ### The explodes
 
-The old `showcase` (48 s, a strip-down tour that loops) and `explode` (10 s, the
-whole car apart and back, looped) moved 37 groups of parts and 10 of the engine's,
+The old `showcase` (48 s, a strip-down tour) and `explode` (10 s, the whole car
+apart and back) moved 37 groups of parts and 10 of the engine's,
 each by one fixed vector times a 0..1 factor: radial (away from the car's long axis,
 from the group's pinned rest centre), lateral (out in Y by its side) or fixed. The
 chassis never moved.
@@ -101,7 +104,9 @@ old one, child for child:
 
 `showcase` and `explode` are motions, functions of time over those 53 joints (the
 old `win` windows on their tours, and the raised-cosine `bump`), which the `@glb`
-bakes into clips beside `doors`. Every part moves as the old clips moved it, within
+bakes into clips beside `doors`. The old clips looped; a motion has no loop (a
+player repeats a clip), and each of these ends where it starts, so it repeats
+seamlessly. Every part moves as the old clips moved it, within
 the motions' sampling tolerance (1e-3 of the car's size, about 5 mm), but where a
 rider and its door rose on different windows -- deliberate, measured over the 48 s:
 
