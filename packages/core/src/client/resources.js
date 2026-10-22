@@ -1,5 +1,4 @@
 import { viewerOriginUrl } from './origin.js';
-import { resolvePackageAssetUrl } from './assetUrl.js';
 import { resolveCadAssetMeshUrl } from '../lib/urdf/meshAssetUrl.js';
 
 let nextProviderId = 1;
@@ -97,17 +96,11 @@ export function createHttpCadResourceProvider({ origin = '', fetch: fetchImpl = 
       const value = Number(response.headers.get('content-length'));
       return Number.isSafeInteger(value) && value > 0 ? value : null;
     },
-    resolveDependency(source, reference, { kind = 'relative' } = {}) {
-      if (kind === 'package') {
-        const resolved = resolvePackageAssetUrl(source, reference);
-        if (resolved) return resourceUrl(resolved);
-      }
-      if (kind === 'relative') {
-        const resolved = resolveCadAssetMeshUrl(reference, resourceUrl(source));
-        if (resolved) return resolved;
-      }
+    resolveDependency(source, reference) {
+      const asset = resolveCadAssetMeshUrl(reference, resourceUrl(source));
+      if (asset) return asset;
       const base = new URL(resourceUrl(source), globalThis.window?.location?.href || 'http://cad.local/');
-      const resolved = new URL(kind === 'package' ? `${String(source).replace(/\/+$/, '')}/${reference}` : reference, base);
+      const resolved = new URL(reference, base);
       return /^[a-z][a-z0-9+.-]*:/i.test(resourceUrl(source)) || /^(https?:)?\/\//i.test(reference) ? resolved.href : `${resolved.pathname}${resolved.search}`;
     },
     async workerTicket(url, options = {}) {

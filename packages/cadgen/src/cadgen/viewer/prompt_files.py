@@ -3,8 +3,9 @@
 POST /__cad/prompt-files validates a snapshot packet in memory, then returns 200
 with compact inline JSON up to 1024 UTF-8 bytes, or writes one .snapshot.json and
 returns its path. Shared input, inline annotation and measurements are stored once;
-jobs reserve output names for an agent to render later with
-``cadgen snapshot --job <file>``. No PNG is produced by this route.
+jobs reserve output names for an agent to render later (``cadgen snapshot`` reads the
+packet as ``--annotation``, and ``--camera authored`` draws a job's view). No PNG is
+produced by this route.
 POST /__cad/prompt-files/save writes an annotation or measurement chip's JSON.
 Guarded GET /__cad/prompt-files/<name> reads only JSON from this process's
 scratch directory. Files outlive the viewer until the system clears them.
@@ -32,6 +33,8 @@ INLINE_SNAPSHOT_BYTES = 1024
 _REQUEST_KEYS = frozenset({"name", "input", "views", "annotation", "measurements", "acceptInline"})
 _VIEW_KEYS = frozenset({"label", "camera", "display", "kinematics", "jointValues", "animation", "selection", "width", "height"})
 _ANNOTATION_KEYS = frozenset({"units", "parts", "marks"})
+# What ``cadgen snapshot`` draws, by suffix (``cadgen.engine.snapshot``): the files a packet's input may be.
+SNAPSHOT_SUFFIXES = (".xbf", ".step", ".stp", ".stl", ".3mf", ".glb", ".urdf", ".srdf", ".sdf", ".dxf")
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.json")
 
@@ -42,7 +45,7 @@ def _slug(text: str, fallback: str) -> str:
 
 def _stem(name: str) -> str:
     base = os.path.basename(str(name or "").replace("\\", "/"))
-    for suffix in (".step", ".stp", ".stl", ".3mf", ".glb", ".urdf", ".srdf", ".sdf", ".dxf"):
+    for suffix in SNAPSHOT_SUFFIXES:
         if base.lower().endswith(suffix):
             base = base[: -len(suffix)]
             break
@@ -92,12 +95,11 @@ class PromptFiles:
                 raise ValueError("an annotation is an object of units, parts and marks (a list)")
             content, suffix = data, "annotation"
         elif kind == "measurement":
-            from cadgen.snapshot_cli import normalize_measurements
-            from cadgen.snapshot_core import SnapshotError
+            from cadgen.engine.snapshot import SnapshotRefused, parse_measurements
 
             try:
-                content = normalize_measurements([data])
-            except SnapshotError as error:
+                content = parse_measurements([data])
+            except SnapshotRefused as error:
                 raise ValueError(str(error)) from None
             suffix = "measurement"
         else:
@@ -124,7 +126,7 @@ class PromptFiles:
         labels: set[str] = set()
         jobs = []
         # A drawing's view is its plan view, framed as the pane framed it (its camera); it has no
-        # 3D framing to pin and no view name to carry (`check_drawing_render_job`).
+        # 3D framing to pin and no view name to carry.
         drawing = str(input_path).lower().endswith(".dxf")
         for index, view in enumerate(views):
             slug = _slug(view["label"].lower(), f"view-{index + 1}")
@@ -150,7 +152,7 @@ class PromptFiles:
             packet["annotation"] = annotation
         if measurements:
             packet["measurements"] = measurements
-        _accepted(packet, cwd=directory)
+        _accepted(packet)
         compact = json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
         # Already-open clients expect a path. Only clients advertising inline support get JSON.
         if request.get("acceptInline", False) and len(compact.encode("utf-8")) <= INLINE_SNAPSHOT_BYTES:
@@ -226,19 +228,35 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     return name or "", input_path, views, annotation, measurements
 
 
-def _accepted(packet: dict, *, cwd: Path) -> None:
-    """The job file as ``cadgen snapshot --job`` accepts it, before anything renders.
-
-    Snapshot's own preparation (``prepare_render_job_packet``): it refuses what a request
-    can be refused for and builds nothing. Its refusal is this request's 400.
+def _accepted(packet: dict) -> None:
+    """The packet as ``cadgen snapshot`` reads it, checked before anything renders: its input a
+    file the snapshot draws, each job's camera and display, its annotation and its measurements,
+    by the snapshot's own parsers (``cadgen.engine.snapshot``). Their refusal is this request's 400.
     """
-    from cadgen._internal.snapshot_door import ALL_KINDS
-    from cadgen.snapshot_cli import enabled_kinds, prepare_render_job_packet
-    from cadgen.snapshot_core import SnapshotError
+    from cadgen.engine.snapshot import (
+        AUTHORED,
+        SnapshotRefused,
+        parse_annotation,
+        parse_camera,
+        parse_display,
+        parse_measurements,
+    )
 
+    suffix = Path(str(packet["input"])).suffix.lower()
+    if suffix not in SNAPSHOT_SUFFIXES:
+        raise ValueError(f"{Path(str(packet['input'])).name} is no file cadgen snapshot draws: "
+                         f"one of {', '.join(SNAPSHOT_SUFFIXES)}")
     try:
-        prepare_render_job_packet(
-            packet, cwd=cwd, kinds=enabled_kinds(ALL_KINDS)
-        )
-    except SnapshotError as error:
+        for index, job in enumerate(packet["jobs"]):
+            camera = job["camera"]
+            text = camera if isinstance(camera, str) else json.dumps(camera)
+            if parse_camera(text) == AUTHORED:
+                raise SnapshotRefused(f"jobs[{index}].camera is the view's own camera, not {AUTHORED}")
+            if job.get("display") is not None:
+                if not isinstance(job["display"], dict):
+                    raise SnapshotRefused(f"jobs[{index}].display is the view's display object")
+                parse_display(json.dumps(job["display"]), False)
+        parse_annotation(packet.get("annotation"))
+        parse_measurements(packet.get("measurements"))
+    except SnapshotRefused as error:
         raise ValueError(str(error)) from None

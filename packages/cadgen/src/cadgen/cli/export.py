@@ -1,33 +1,29 @@
-"""Finish one file from its recorded result; never run a model."""
+"""``cadgen export SRC DST ...``: an ``.xbf`` or a ``.step`` written to each destination, its
+kind by its suffix (``cadgen.engine.cli``).
+
+The parser and the run are the engine's (``cadgen.engine.cli.parser_for``, ``run``), the same
+verb ``python -m cadgen.engine export`` takes.
+"""
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
 DEFAULT_PROG = "cadgen export"
+ENGINE_VERB = "export"
 
 
-def build_parser(*, prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
-    parser.add_argument("path", type=Path, help="the saved file to make available")
-    return parser
+def build_parser(prog: str = DEFAULT_PROG) -> argparse.ArgumentParser:
+    from cadgen.engine.cli import parser_for
+
+    return parser_for(ENGINE_VERB, prog)
 
 
 def main(argv: Sequence[str] | None = None, *, prog: str = DEFAULT_PROG) -> int:
-    args = build_parser(prog=prog).parse_args(argv)
-    from cadgen._internal.cli_from_function import report_failure
-    from cadgen._internal.doors import display_path
-    from cadgen._internal.export_saved import export_saved
+    from cadgen.engine.cli import run
 
-    try:
-        target = export_saved(args.path)
-    except Exception as error:
-        report_failure(error, prog=prog, as_json=False, verbose_hint=False)
-        return 1
-    print(f"ready {display_path(target)}")
-    return 0
+    return run(ENGINE_VERB, list(argv) if argv is not None else None, prog)
 
 
 if __name__ == "__main__":

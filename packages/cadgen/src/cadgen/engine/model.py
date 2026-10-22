@@ -283,16 +283,17 @@ def run_at_import(file: str) -> None:
 
 def declares_models(script: Path) -> bool:
     """Whether ``script``'s source decorates a function with one of the engine's file decorators
-    (``KINDS``): a name imported from ``cadgen.engine`` (``from cadgen.engine import xbf``, ``as``
-    any name) or an attribute of the engine imported as a module (``import cadgen.engine as ce``,
-    ``@ce.step(...)``). Read, never run."""
+    (``KINDS``): a name imported from ``cadgen.engine`` or from ``cadgen``, which exports the
+    engine's names at its root (``from cadgen.engine import xbf``, ``from cadgen import step``,
+    ``as`` any name), or an attribute of either imported as a module (``import cadgen.engine as
+    ce``, ``@ce.step(...)``; ``import cadgen``, ``@cadgen.xbf``). Read, never run."""
     import ast
 
     try:
         tree = ast.parse(Path(script).read_bytes(), filename=str(script))
     except (OSError, SyntaxError, ValueError):
         return False
-    engines = {"cadgen.engine", "cadgen.engine.model"}
+    engines = {"cadgen.engine", "cadgen.engine.model", "cadgen"}
     names: set[str] = set()
     modules: set[str] = set()
     for node in ast.walk(tree):
@@ -576,7 +577,7 @@ def read_xbf(path: Any) -> Any:
     named, coloured and given its materials (painted faces too) as the document has them,
     each element named as the document names it. Its mechanism and configurations are not
     imported: a part is a part. Read once per worker and held, keyed by the file's bytes, as
-    ``read_step`` is. The fast way to bring a vendor STEP in: convert it once (``cadgen xbf
+    ``read_step`` is. The fast way to bring a vendor STEP in: convert it once (``cadgen
     export vendor.step vendor.xbf``) and read the xbf."""
     global _READ_XBF
     if _READ_XBF is None:

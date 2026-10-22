@@ -177,7 +177,7 @@ def identity_token(dist_dir: str) -> str:
     asked only in a source checkout, by ``reload.py``.
 
     The Viewer imports cadgen runtime modules outside ``cadgen.viewer`` — in
-    particular the daemon client, transport and store. Fingerprinting only the
+    particular the engine's client and cadgen's telemetry. Fingerprinting only the
     viewer package let an old resident survive changes to those modules while
     serving a newly rebuilt browser client. The token therefore covers every
     Python file in the installed cadgen package, the Viewer's data table, and

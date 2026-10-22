@@ -4,8 +4,7 @@ The engine counts nothing and imports nothing of cadgen (its law 3). After each 
 snapshot it calls the functions in ``cadgen.engine.api.observers`` with a plain dict of what the verb
 did (``api._facts``). ``observe`` is cadgen's: appended by cadgen's package ``__init__`` (``install``)
 the moment the engine's verbs are imported, never sooner, so a process that does not use the engine
-imports none of it. It counts the events the build daemon counts of the builds it answers
-(``analytics.EVENTS``), at the same moments:
+imports none of it. It counts these events (``analytics.EVENTS``):
 
 - a ``build`` of kind ``xbf``, by who asked (``via``): ``python model.py``, or a Python caller's
   ``cadgen.build()``, is ``script``; a ``cadgen`` command ``command``. How it ended (``crashed``: its
@@ -193,8 +192,8 @@ def _outcome(facts: dict[str, Any], error: dict[str, Any] | None, worker: dict[s
 def _snapshot_failure(facts: dict[str, Any], error: dict[str, Any] | None, outcome: str) -> str:
     """Why a snapshot failed (``analytics.SNAPSHOT_FAILURES``), as ``analytics.snapshot_failure`` decides it of an
     error caught there: the model it draws did not build (``input_error``); a request refused, or a file not
-    there (``bad_request``, ``no_file``); cadgen's mistake (``bug``); a time, a memory or a file run out; the
-    snapshot browser of a mesh file (``browser``); else the picture was not drawn (``render_error``)."""
+    there (``bad_request``, ``no_file``); cadgen's mistake (``bug``); a time, a memory or a file run out; else the
+    picture was not drawn (``render_error``)."""
     from cadgen import analytics
 
     error = error or {}
@@ -210,10 +209,8 @@ def _snapshot_failure(facts: dict[str, Any], error: dict[str, Any] | None, outco
     kind = analytics._builtin(name)
     if kind is not None and issubclass(kind, FileNotFoundError):
         return "no_file"
-    if name.rpartition(".")[2] == "TimeoutError":  # Python's, or the browser's own
+    if name.rpartition(".")[2] == "TimeoutError":
         return "timeout"
     if kind is not None and issubclass(kind, MemoryError):
         return "memory"
-    if name.startswith("playwright."):
-        return "browser"
     return "render_error"

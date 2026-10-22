@@ -12,8 +12,8 @@ export const TUNNEL_ORIGIN = 'http://cad.invalid';
 const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 
 /**
- * The most body one `cad_http` reply carries (`cadgen/mcp/tunnel.py`'s `MAX_REPLY_BYTES`): the
- * most one batched read asks for, and one part of a longer body. A reply crosses the host's
+ * The most body one `cad_http` reply carries (`cadgen/mcp/tunnel.py`'s `MAX_REPLY_BYTES`): one
+ * part of a longer body. A reply crosses the host's
  * JSON-RPC channel as one message, its body base64, 4/3 of its size, and a host reads its
  * server's messages with a ceiling: the MCP TypeScript SDK's stdio reader stops at 10 MiB unless
  * a host sets more (Claude Code reads 16 MiB, Claude Desktop sets 32 MiB), and a longer message
@@ -118,7 +118,7 @@ export function createTunnelFetch(server: Pick<Server, 'http'>): typeof fetch {
   };
 }
 
-/** A CAD client whose requests travel over `cad_http` (`tunnel`), its batched reads within `TUNNEL_REPLY_MAX_BYTES`. */
-export function createTunnelClient(tunnel: typeof fetch, options: Omit<CadClientOptions, 'origin' | 'fetch' | 'maxBatchBytes'> = {}) {
-  return createCadClient({ ...options, origin: TUNNEL_ORIGIN, fetch: tunnel, maxBatchBytes: TUNNEL_REPLY_MAX_BYTES });
+/** A CAD client whose requests travel over `cad_http` (`tunnel`). */
+export function createTunnelClient(tunnel: typeof fetch, options: Omit<CadClientOptions, 'origin' | 'fetch'> = {}) {
+  return createCadClient({ ...options, origin: TUNNEL_ORIGIN, fetch: tunnel });
 }

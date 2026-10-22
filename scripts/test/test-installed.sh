@@ -57,31 +57,26 @@ if ! "$PYTHON_BIN" -c "import OCP, build123d" >/dev/null 2>&1; then
   exit 1
 fi
 
-WORK="$(mktemp -d)"
+# Short: a Unix socket path caps near 104 bytes, and the engine daemon's sits in this folder.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/cti.XXXXXX")"
 VENV="$WORK/venv"
 EMPTY="$WORK/empty"
 DIST="$WORK/dist"
-CACHE="$WORK/cache"
-DAEMON_STATE="$WORK/daemon"
-mkdir -p "$EMPTY" "$DIST" "$CACHE" "$DAEMON_STATE"
-export CADGEN_CACHE_DIR="$CACHE"
-# The builds below run on a build daemon, as every build does: this run's own, at a private
-# address, retired on the way out -- and gone by itself after a minute idle if it is not.
-export CADGEN_DAEMON_STATE_DIR="$DAEMON_STATE"
-export CADGEN_DAEMON_SOCKET="$DAEMON_STATE/d.sock"
-export CADGEN_DAEMON_IDLE_TIMEOUT=60
+mkdir -p "$EMPTY" "$DIST"
+# The builds below run on the engine's daemon, as every build does: this run's own, in a private
+# folder, stopped on the way out -- and gone by itself after two idle minutes if it is not.
+export CADGEN_ENGINE_DIR="$WORK/engine" CADGEN_ENGINE_IDLE=120
 cleanup() {
-  # The installed cadgen's own client retires the daemon its builds started.
+  # The installed cadgen stops the daemon its builds started.
   if [ -x "$VENV/bin/python" ]; then
-    "$VENV/bin/python" "$REPO_ROOT/tests/python/support/daemon_cleanup.py" "$CADGEN_DAEMON_SOCKET" \
-      || echo "warning: this run's build daemon did not retire; it goes once idle" >&2
+    "$VENV/bin/python" -m cadgen.engine stop >/dev/null 2>&1 \
+      || echo "warning: this run's engine daemon did not stop; it goes once idle" >&2
   fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT
 # What the CAD app remembers (its library, release checks) stays in the throwaway directory too.
 export CADGEN_STATE_DIR="$WORK/state"
-unset CADGEN_DAEMON_CHILD
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 step() { printf '\n== %s\n' "$*"; }
@@ -205,54 +200,39 @@ watchdog.cancel()
 print(f"   {len(tools)} tools; the app is {len(page) // 1024} KiB at {uri}")
 PY
 
-step "Build a real STEP with no repo in sight"
+step "Build a real model with no repo in sight"
 mkdir -p "$EMPTY/models"
 cat >"$EMPTY/models/probe.py" <<'PY'
-# A model script declares one @step function and builds it from __main__
-# (library-first: there is no gen verb). Deliberately the simplest one that
-# exists: this checks
-# that an installed cadgen can build at all, not that it models anything
-# interesting. @stl declares a mesh serialization so the mesh door has something
-# to produce below.
-from cadgen import build123d as bd
-from cadgen import step, stl
+# A model script: running it builds every model it defines, each writing what its decorators
+# declare. Deliberately the simplest one that exists: this checks that an installed cadgen can
+# build at all, not that it models anything interesting.
+from cadgen.engine import step, stl, xbf
+import build123d as bd
 
 
+@xbf
 @step
 @stl
 def probe():
     return bd.Box(10, 10, 10)
-
-
-if __name__ == "__main__":
-    probe()
 PY
-# Running the script IS the build: its __main__ calls the model, and no CLI verb
-# takes its place.
+# Running the script IS the build: no CLI verb takes its place.
 "$VENV/bin/python" models/probe.py >"$WORK/build.log" 2>&1 \
   || { cat "$WORK/build.log" >&2; fail "python <model>.py"; }
-[ -f "$EMPTY/models/probe.step" ] \
-  || { cat "$WORK/build.log" >&2; fail "the model script produced no STEP document"; }
-echo "   built a STEP document and package"
+for written in XBF/probe.xbf probe.step probe.stl; do
+  [ -s "$EMPTY/models/$written" ] \
+    || { cat "$WORK/build.log" >&2; fail "the model script did not write models/$written"; }
+done
+echo "   built an xbf and the STEP and STL it declares"
 
-step "Re-emit the document through the build door"
-"$VENV/bin/cadgen" step build models/probe.step models/reemit.step \
-  >"$WORK/reemit.log" 2>&1 \
-  || { cat "$WORK/reemit.log" >&2; fail "cadgen step build"; }
-[ -f "$EMPTY/models/reemit.step" ] \
-  || { cat "$WORK/reemit.log" >&2; fail "step build produced no STEP document"; }
-echo "   re-emitted a document to a new document"
-
-# Running the script above already wrote the STL the model DECLARES. This is
-# the other half: the ad-hoc door, taking a document and an explicit OUT. It
-# needs that OUT because the written document carries no trace of the model's
-# declarations — generated files hold no metadata.
-step "Export it through a format door"
-rm -f "$EMPTY/models/probe.stl"
-"$VENV/bin/cadgen" stl build models/probe.step models/probe.stl >"$WORK/stl.log" 2>&1 \
-  || { cat "$WORK/stl.log" >&2; fail "cadgen stl build"; }
-[ -s "$EMPTY/models/probe.stl" ] \
-  || { cat "$WORK/stl.log" >&2; fail "stl build produced no mesh"; }
-echo "   wrote an STL from the document"
+# The script above wrote the files the model DECLARES. This is the other half: an export of
+# the document to a destination the command names.
+step "Export the document"
+"$VENV/bin/cadgen" export models/XBF/probe.xbf models/exported.step models/exported.stl >"$WORK/export.log" 2>&1 \
+  || { cat "$WORK/export.log" >&2; fail "cadgen export"; }
+for written in exported.step exported.stl; do
+  [ -s "$EMPTY/models/$written" ] || { cat "$WORK/export.log" >&2; fail "export wrote no models/$written"; }
+done
+echo "   wrote a STEP and an STL from the document"
 
 printf '\nInstalled-mode checks passed.\n'

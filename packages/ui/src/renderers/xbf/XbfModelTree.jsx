@@ -12,9 +12,8 @@ import { modelTreeSearchChain, useTreeSearch } from '../kit/inspector/modelTreeS
 import VirtualRows, { revealRow } from '../kit/inspector/VirtualRows.jsx';
 import { implicitXbfRoots, xbfSelectionPaths } from './xbfTree.js';
 
-// An engine document's Model tree: a copy of the STEP renderer's (`step/components/workbench/
-// ModelingTree.jsx`), over the engine's tree as `xbfTree.js` presents it; one again at the
-// renderers' migration. An engine document's faces and edges are always to hand, so no row asks
+// An engine document's Model tree, as the STEP renderer's was, over the engine's tree as
+// `xbfTree.js` presents it. An engine document's faces and edges are always to hand, so no row asks
 // for a part's topology and the tree never says "Loading…".
 
 const EMPTY = [];

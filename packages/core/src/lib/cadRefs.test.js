@@ -21,10 +21,9 @@ import {
   splitElementRef
 } from "./cadRefs.js";
 
-// The same fixture the Python suites read. It is the only thing keeping each grammar's two
-// parsers -- this module and cadgen/engine/refs.py for an .xbf's, this module and
-// cadgen/cad_ref_syntax.py for a STEP's -- from drifting, which they had already done four copies
-// deep before it existed.
+// The same fixture the Python suites read. It is the only thing keeping the engine grammar's two
+// parsers -- this module and cadgen/engine/refs.py -- from drifting, which the grammars had
+// already done four copies deep before it existed; a STEP's cases pin this module alone.
 const FIXTURE = JSON.parse(
   readFileSync(fileURLToPath(new URL("./cadRefs.parity.json", import.meta.url)), "utf8")
 );

@@ -1,22 +1,20 @@
 """``cadgen doctor`` — report the installed cadgen and check a skill's version pin.
 
 The one check a skill teaches: run it with the skill's launch command, pointed at the skill
-(its directory or SKILL.md), and it says which installation is running -- its folder, which
-names the warm daemon it shares -- and whether that is the cadgen the skill's docs were written
+(its directory or SKILL.md), and it says which installation is running -- its folder, and the
+engine daemon it shares -- and whether that is the cadgen the skill's docs were written
 against: the version its launch command pins (``uvx ... --from cadgen==<version>``).
 
 It also proves the CAD kernel loads. ``OCP`` is imported in a fresh interpreter
 (never in this one, so the report itself stays stdlib-only and fast to reach),
 and a refused load is named for what it is: on Windows 11 that is Smart App
 Control blocking the unsigned ``.pyd``, which the bare ``ImportError`` never
-says (``cadgen._internal.kernel_load_hint``). And it says whether a build daemon
-can start here, where every build runs, and why not
-(``cadgen.daemon.client.unavailable``), without starting one.
+says (``cadgen._internal.kernel_load_hint``). And it says where the engine's daemon,
+where every build runs, keeps its socket and whether one is running, without starting one.
 
 Exit codes: 0 = installed cadgen matches the pin (or nothing claims a pin);
 3 = pin mismatch; 4 = the kernel is installed but cannot be loaded (the report
-says why when it can tell); 5 = no build daemon can start here (the report says
-why). A kernel that is simply not installed is reported,
+says why when it can tell). A kernel that is simply not installed is reported,
 not failed: a no-deps install of the wheel (what the release workflow
 smoke-tests) has no OCP and is still a correct install, and the launch command
 is what brings the kernel.
@@ -50,25 +48,21 @@ def _resolve_skill(target: str | None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _daemon_name() -> str | None:
-    """The name of the warm daemon this installation shares, or ``None`` if it cannot tell."""
+def _daemon() -> str:
+    """The engine daemon this installation shares (``cadgen.engine.daemon``): where its socket is,
+    and whether one is running -- asked, never started."""
     try:
-        from cadgen.daemon.client import daemon_identity
+        from cadgen.engine import daemon as engine_daemon
+        from cadgen.engine.client import request
 
-        return daemon_identity()
-    except Exception:  # noqa: BLE001 - a report line, never a reason for the report to fail
-        return None
-
-
-def _daemon_unavailable() -> str | None:
-    """Why no build daemon can start here, or ``None`` when one can
-    (``cadgen.daemon.client.unavailable``): every build runs on one."""
-    try:
-        from cadgen.daemon.client import unavailable
-
-        return unavailable()
-    except Exception as error:  # noqa: BLE001 - what the check could not tell is the report's answer
-        return f"{type(error).__name__}: {error}"
+        where = engine_daemon.port_path() if engine_daemon.WINDOWS else engine_daemon.socket_path()
+        answer = request({"op": "status"}, start=False)
+    except Exception as error:  # noqa: BLE001 - a report line, never a reason for the report to fail
+        return f"unknown ({type(error).__name__}: {error})"
+    if not isinstance(answer, dict):
+        return f"not running ({where}); the first build starts it"
+    workers = len(answer.get("workers") or [])
+    return f"running, pid {answer.get('pid')}, {workers} worker{'' if workers == 1 else 's'} ({where})"
 
 
 def _sharing() -> str | None:
@@ -161,12 +155,8 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
     sys.stdout.write(f"cadgen {installed}\n")
     sys.stdout.write(f"  python   {sys.version.split()[0]} ({sys.executable})\n")
     sys.stdout.write(f"  install  {location}\n")
-    # Named after the installation's folder: the same name means the same warm daemon.
-    blocked = _daemon_unavailable()
-    if blocked is None:
-        sys.stdout.write(f"  daemon   OK — {_daemon_name() or 'one'} can start here\n")
-    else:
-        sys.stderr.write(f"  daemon   FAILED — no build daemon can start here: {blocked}\n")
+    # One per installation: the same socket means the same warm daemon.
+    sys.stdout.write(f"  daemon   {_daemon()}\n")
     sharing = _sharing()
     if sharing:
         # Whether CAD's apps send usage stats, as `cadgen telemetry` says it.
@@ -176,7 +166,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen doctor") -> int:
 
     kernel_state, detail = _probe_kernel()
     kernel_loaded = kernel_state != KERNEL_FAILED
-    status = 4 if not kernel_loaded else 5 if blocked is not None else 0
+    status = 0 if kernel_loaded else 4
     if kernel_state == KERNEL_OK:
         sys.stdout.write(f"  kernel   OK — OCP at {detail}\n")
     elif kernel_state == KERNEL_MISSING:

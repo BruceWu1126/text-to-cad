@@ -575,25 +575,25 @@ class InstallChannelTest(_Tmp):
             return install_channel.remember(path=self.record)
 
     def test_every_process_of_the_installation_reports_the_channel_its_plugins_server_wrote_down(self) -> None:
-        daemon, from_daemon = self.started("daemon")
+        sender, from_sender = self.started("cli")  # the telemetry sender a command starts
         viewer, from_viewer = self.started("viewer")
         app, from_app = self.started("app")
         told, from_told = self.started("viewer", "codex-github")  # a Viewer the CAD server started: told its own
         # A skills-only install: no plugin's server ever ran from it.
-        self.assertEqual([self.channel_of(*started) for started in ((daemon, from_daemon), (viewer, from_viewer))],
+        self.assertEqual([self.channel_of(*started) for started in ((sender, from_sender), (viewer, from_viewer))],
                          ["unknown", "unknown"])
         self.assertEqual(self.server_starts("claude-github"), "claude-github")
         self.assertEqual(json.loads(self.record.read_text(encoding="utf-8")),
                          {install_channel.installation(): "claude-github"})
-        # Read again for each batch: the daemon and the Viewer were running before the server started.
-        self.assertEqual(self.channel_of(daemon, from_daemon), "claude-github")
+        # Read again for each batch: the sender and the Viewer were running before the server started.
+        self.assertEqual(self.channel_of(sender, from_sender), "claude-github")
         self.assertEqual(self.channel_of(viewer, from_viewer), "claude-github")
         self.assertEqual(self.channel_of(told, from_told), "codex-github")  # what a process was told comes first
         # A CAD server no plugin named is configured by hand: it never takes another's channel.
         self.assertEqual(self.channel_of(app, from_app), "unknown")
         # Two plugins pinning one release share its installation: the server that started last is written down.
         self.server_starts("agent-plugins")
-        self.assertEqual(self.channel_of(daemon, from_daemon), "agent-plugins")
+        self.assertEqual(self.channel_of(sender, from_sender), "agent-plugins")
 
     def test_the_record_holds_closed_tokens_for_the_newest_installations_and_never_fails_anything(self) -> None:
         self.assertIsNone(self.server_starts(""))  # nothing named, nothing written
@@ -709,7 +709,7 @@ class NoticeTest(_Tmp):
     def test_every_command_says_it_but_the_servers_and_telemetry_itself(self) -> None:
         with mock.patch("cadgen.analytics.notify") as told, mock.patch.object(cli, "_run", return_value=0), \
                 mock.patch("sys.stdout", io.StringIO()):
-            for argv in (["doctor"], ["step", "snapshot", "a.step"], ["viewer"], ["mcp"], ["daemon"], ["telemetry", "off"]):
+            for argv in (["doctor"], ["dxf", "snapshot", "a.dxf"], ["viewer"], ["mcp"], ["daemon"], ["telemetry", "off"]):
                 cli.main(argv)
             cli.main(["--help"])
         self.assertEqual(told.call_count, 3)

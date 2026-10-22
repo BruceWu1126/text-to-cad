@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 
 // cadgen's tube skins for a 20 mm cord that its clip `curl` bends into a quarter
 // circle of radius 40/pi mm about (0, 40/pi, 0) over one second, joints 2 mm
-// apart, and the sidecar animation they bind: both written by cadgen
-// (`make_fixture.py`), so the suites read what cadgen serves.
+// apart, and the sidecar animation they bind: both written by cadgen's tube-skin payload
+// before the engine replaced it, so the suites read what cadgen served.
 export const CORD_RADIUS = 0.8;
 
 export function tubeSkinsFixture() {

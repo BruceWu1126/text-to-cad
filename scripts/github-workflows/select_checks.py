@@ -100,10 +100,7 @@ NOTHING = select()
 # phase runs with nothing installed, so one that is not fails there until it is listed here
 # with a rule for what it reads.
 HEAVY_POLICY = {
-    "test_cache_root_sync.py",              # cadgen's mesh keys against core's tessellation cache
     "test_cli_stream_contract.py",          # cadgen CLIs, run
-    "test_sidecar_and_package_layering.py",  # cadgen's import layering, imported
-    "test_snapshot_viewer_theme_parity.py",  # cadgen's snapshot against core's view settings
     "test_viewer_renders_emitted_dxf.py",   # a DXF cadgen emits, through the kernel
 }
 # Skill suites that need nothing installed: they read their skill's files.
@@ -112,13 +109,13 @@ LIGHT_SKILL_TESTS = (
     f"{SKILL_SUITES}/sendcutsend",
     f"{SKILL_SUITES}/step-parts",
 )
-# The skill suites that drive cadgen's CLIs, and so read everything cadgen reads.
-CADGEN_SKILL_SUITES = (f"{SKILL_SUITES}/cad", f"{SKILL_SUITES}/dxf")
 
-# Whatever runs cadgen: its suites on both platforms, the skill suites that drive it, the
-# policy tests that load it, the viewer gates that serve and build through it, the wheel.
+# Whatever runs cadgen: its suites on both platforms (the engine's, the viewer backend's and
+# the CAD app server's among them), the policy tests that load it, the viewer gates that serve
+# and draw through it, the wheel. A skill's commands are cadgen's, and the light contracts that
+# check what a skill documents run on every change.
 CADGEN_CONSUMERS = select(
-    flags=["web_viewer", "packaging"], cadgen=[CADGEN_SUITE], skills=CADGEN_SKILL_SUITES,
+    flags=["web_viewer", "packaging"], cadgen=[CADGEN_SUITE],
     policy=[f"{POLICY_SUITE}/{name}" for name in sorted(HEAVY_POLICY)],
 )
 
@@ -184,18 +181,11 @@ def _mcp_change(path: str) -> Select:
     return select(flags=["packaging"], cadgen=_cadgen_tests_naming(_NAMES_MCP, ("mcp",)))
 
 
-# The engine (cadgen.engine) is a leaf too: nothing in cadgen imports it but the CLI's
-# command table, the package root's lazy verbs (``cadgen.build``, ...), by name, and the
-# viewer's route for the documents it serves (a STEP, an .xbf: ``cadgen.viewer.xbf``, over
-# its client). A change to it reaches its own suite, the cadgen tests that name it or read
-# all of cadgen, the viewer's browser gate (which opens a STEP and an .xbf through it), and
-# the wheel it ships in.
+# The engine (cadgen.engine) is no leaf: every build, export and snapshot a skill runs is its,
+# the viewer serves every STEP and .xbf through it (``cadgen.viewer.xbf``), the CAD app's views
+# open them through the viewer's routes, and the package root's names are its. A change to it
+# reaches whatever cadgen reaches.
 ENGINE_CODE = (f"{CADGEN_SRC}/engine/**",)
-_NAMES_ENGINE = r"cadgen\.engine|[\"']xbf[\"' ]"
-
-
-def _engine_change(path: str) -> Select:
-    return select(flags=["web_viewer", "packaging"], cadgen=_cadgen_tests_naming(_NAMES_ENGINE, ("engine",)))
 
 
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
@@ -250,7 +240,7 @@ RULES: tuple[Rule, ...] = (
     Rule(VIEWER_SHARED, CADGEN_CONSUMERS, final=True),
     Rule(VIEWER_CODE, _viewer_change, final=True),
     Rule(MCP_CODE, _mcp_change, final=True),
-    Rule(ENGINE_CODE, _engine_change, final=True),
+    Rule(ENGINE_CODE, CADGEN_CONSUMERS, final=True),
     Rule(("packages/cadgen/**", "scripts/bundle/**"), CADGEN_CONSUMERS),
 
     # The shared UI and the apps. The snapshot runtime is built from core alone, so ui
@@ -263,15 +253,9 @@ RULES: tuple[Rule, ...] = (
     # check-dependencies.mjs walks every app's source and runs in core-js, the cheapest job
     # that has it.
     Rule(("apps/docs/src/**",), select(flags=["core_js"])),
-    # The DXF suite renders ui's DXF fixture, and holds every JS file in packages/ to having
-    # no second layer-intent table.
-    Rule(("packages/ui/src/renderers/dxf/__fixtures__/**",), select(skills=[f"{SKILL_SUITES}/dxf/test_snapshot_render.py"])),
-    # The STEP browser fixture's articulation is cadgen's: the articulation suite asserts it is current.
-    Rule(("packages/ui/src/renderers/step/__fixtures__/step/**",), select(cadgen=[f"{CADGEN_SUITE}/test_articulation.py"])),
     # The robot renderer's browser fixtures are the payloads cadgen resolves for its descriptions:
     # the payload suite asserts they are current.
     Rule(("packages/ui/src/renderers/robot/__fixtures__/**",), select(cadgen=[f"{CADGEN_SUITE}/test_robot_payload.py"])),
-    Rule(("packages/ui/**/*.js",), select(skills=[f"{SKILL_SUITES}/dxf/test_drawing_checks.py"])),
     Rule(("tests/browser/**", "tests/fixtures/cad/**"), select(flags=["web_viewer", "packaging"])),
 
     # Tests: a test file runs itself.
@@ -279,13 +263,9 @@ RULES: tuple[Rule, ...] = (
     Rule((f"{POLICY_SUITE}/**",), _test_file(POLICY_SUITE, whole=POLICY_SUITE)),
     Rule((f"{SKILL_SUITES}/**",), _test_file(SKILL_SUITES)),
 
-    # Skills. Their prose and metadata are read by the policy contracts (light, always) and by
-    # the tests that run what a skill documents; scripts by their skill's suite.
+    # Skills. Their prose and metadata are read by the policy contracts (light, always): the
+    # commands a skill documents among them; scripts by their skill's suite.
     Rule(("skills/**",), NOTHING),
-    Rule(("skills/cad/**",), select(skills=[f"{SKILL_SUITES}/cad/test_documented_models.py",
-                                            f"{SKILL_SUITES}/cad/test_documented_project.py"])),
-    Rule(("skills/cad/references/snapshot-review.md",), select(cadgen=[f"{CADGEN_SUITE}/test_snapshot_requests.py"])),
-    Rule(("skills/dxf/**",), select(skills=[f"{SKILL_SUITES}/dxf/test_documented_commands.py"])),
     Rule(("skills/dfam-check/**",), select(skills=[f"{SKILL_SUITES}/dfam-check"])),
     Rule(("skills/dfm/**",), select(skills=[f"{SKILL_SUITES}/dfm"])),
 
@@ -299,7 +279,6 @@ RULES: tuple[Rule, ...] = (
          select(flags=["web_viewer", "packaging"])),
     Rule(("scripts/test/test-installed.sh",), select(flags=["packaging"])),
     Rule(("scripts/test/test.sh",), NOTHING),  # chains the runners for a local run; CI calls them itself
-    Rule(("scripts/bench/viewer-memory/**",), select(flags=["core_js"])),
 
     # What builds and checks the wheel: bundle.sh stamps metadata with sync-version.mjs.
     Rule((
@@ -315,8 +294,7 @@ RULES: tuple[Rule, ...] = (
     Rule((
         "scripts/release/**", "scripts/install/**", "scripts/github-workflows/deploy-vercel-app.sh",
         "scripts/look/**",
-        "scripts/git-hooks/**", "scripts/bench/cadgen-performance/**", "scripts/bench/mesh-scoreboard/**",
-        "scripts/bench/README.md", "scripts/bench/*.py", "scripts/README.md",
+        "scripts/git-hooks/**", "scripts/bench/README.md", "scripts/bench/*.py", "scripts/README.md",
         ".github/workflows/release-publish.yml", ".github/workflows/release-prepare.yml",
         ".github/workflows/deploy-docs.yml", ".github/workflows/deploy-api.yml",
         ".github/dependabot.yml", ".github/release.yml", ".githooks/**",

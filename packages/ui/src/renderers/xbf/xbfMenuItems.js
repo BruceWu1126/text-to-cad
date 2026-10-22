@@ -1,7 +1,6 @@
 import { Fragment } from "react";
 
-// A copy of the STEP renderer's part menu (`step/components/workbench/AssemblyContextMenuItems.js`),
-// so an engine document's menus read as a STEP's; one again at the renderers' migration.
+// An engine document's menus, which read as the STEP renderer's did.
 //
 // The part menu: what can be done to one node of the model, wherever it was
 // asked for.

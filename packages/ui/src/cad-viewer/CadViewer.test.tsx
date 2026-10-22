@@ -31,7 +31,6 @@ function cadClient() {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     refresh: vi.fn(async () => ({ entries: [] })),
     resolveEntry: vi.fn(async () => { throw new Error('unused'); }),
-    observeEditingPreview: vi.fn(() => () => {}),
     folder: vi.fn(), search: vi.fn(),
     publish(entries: Record<string, unknown>[]) { snapshot = { ...snapshot, hydrated: true, refreshing: false, entries, revision: snapshot.revision + 1 }; for (const listener of [...listeners]) listener(); },
   };

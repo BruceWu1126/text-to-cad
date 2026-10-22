@@ -16,13 +16,12 @@ an endpoint the server does not implement.
 
 ## Scope
 
-This is the rule inside the STEP renderer (`src/renderers/step`). A DXF,
-a GLB, a triangle mesh (STL, 3MF), a robot description (URDF, SRDF, SDF) and a cadgen engine
-document (`.xbf`) have renderers of their own (`src/renderers/dxf`, `src/renderers/glb`,
+Every file family has a renderer of its own: a DXF, a GLB, a triangle mesh (STL, 3MF), a
+robot description (URDF, SRDF, SDF) and a cadgen engine document (an `.xbf`, and a STEP, which
+the engine reads and serves as one) (`src/renderers/dxf`, `src/renderers/glb`,
 `src/renderers/mesh`, `src/renderers/robot`, `src/renderers/xbf`; see [CAD renderer](cad-renderer.md#kit)):
 a vertical slice owns its tools, tabs and scene outright and consults no capability table. The
-`dxf`, `glb`, `stl`, `3mf`, `urdf`, `srdf`, `sdf` and `xbf` rows below remain for what is not a
-renderer: the file list's icon and label. An engine document is read by the page from the
+rows below remain for what is not a renderer: the file list's icon and label. An engine document is read by the page from the
 engine that serves it (`engineDocument` on the workspace service says where), never through the
 viewer's server; its row says `assetKind: engine-document`, `parts` and `topology`. The headless snapshot renderer consults no table either: it draws
 each of those families with the scene builder its renderer uses
@@ -64,23 +63,15 @@ what a file's view offers, for the viewer and a snapshot alike.
 - Capabilities decide **which** panels and tools mount. Format-specific *content* — STEP's
   tree — stays format-specific.
 
-## The content signal
-
-`selectedViewportContent` in the STEP renderer is the single answer to "is there anything on
-screen?", its loaded mesh data. Toolbar gates, the CTA, preview mode, the viewport
-context menu and alert blocking all read it, rather than each one re-deriving the answer
-per format.
-
 ## The render-backend contract
 
 The kit's viewport (`renderers/kit/shell/ShellViewport.jsx`) is the shell and owns the camera,
 `OrbitControls`, the scene stage, frame presentation, the Draw overlay, screenshots and the
-imperative viewer API. A renderer's **scene** (the contract `renderers/kit/scene.js` re-exports from core; STEP's is
-`renderers/step/scene/stepScene.js`) owns geometry only:
+imperative viewer API. A renderer's **scene** (the contract `renderers/kit/scene.js` re-exports from core) owns geometry only:
 
-1. **Consume content**: the document its renderer loaded (a STEP's mesh data, a GLB's native
-   scene, a mesh file's objects, a robot's parts). A GLB's, a mesh's and a robot's scene is
-   built in `@text-to-cad/core`, where the snapshot CLI builds the same one.
+1. **Consume content**: the document its renderer loaded (an engine document's structure and
+   part buffers, a GLB's native scene, a mesh file's objects, a robot's parts). Each family's
+   scene is built in `@text-to-cad/core`, where the snapshot CLI builds the same one.
 2. **Publish bounds** so the shared fit and its zoom baseline work. The mesh
    path does this via `applyRuntimeModelBounds` after composing; a backend with no mesh
    calls back with its own bounds instead.
@@ -99,23 +90,19 @@ them, that is a shell feature and belongs in the shell where every format gets i
 
 Declare a registry row, implement a backend, add a fixture to the sweep. Do not touch the
 shell. If you find yourself adding a format check to `FloatingToolBar` or to anything under
-`renderers/step/scene/`, the capability you need is missing from the table.
+`renderers/kit/`, the capability you need is missing from the table.
 
 ## Enforcement
 
 A ratcheting policy test in the repo where this app is developed counts identity
 checks in non-test client code: the number may only go down. It also asserts a
-growing set of files at **zero** — the toolbar, every module of the STEP scene
-(`renderers/step/scene/`), the alert
+growing set of files at **zero** — the toolbar, the alert
 builder, the file-list icon and status, and the home screen — since those are the surfaces
 every format flows through. Lower the budgets in the same commit that removes checks.
 
-What is left is deliberate. `useCadAssets` is allowlisted: choosing and running a loader
-per format is its whole job, and the `assetKind` field names *which* loader without
-pretending the implementations are the same. STEP is now the only artifact-managed
-format: a DXF is rendered from the file that is on disk — the backend flattens those
-bytes to 2D primitives per request and never owns a package for one (`owns_dxf_path`
-always answers False).
+What is left is deliberate. A DXF is rendered from the file that is on disk — the backend
+flattens those bytes to 2D primitives per request and never owns a package for one
+(`owns_dxf_path` always answers False).
 
 ## Standing gate
 

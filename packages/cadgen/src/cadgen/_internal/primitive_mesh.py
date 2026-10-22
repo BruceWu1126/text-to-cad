@@ -1,19 +1,16 @@
 """The meshes of a robot description's primitive shapes: box, cylinder, sphere, capsule.
 
-A URDF or SDF visual may be a shape rather than a mesh file. cadgen meshes it, as it
-meshes every other display mesh, at the display tolerance
-(``cadgen.tessellation_policy.DISPLAY_TESSELLATION``): a round shape takes as many
-segments as the chord criterion (relative to the shape's bounding diagonal, as a STEP
-component's is) and the angle criterion between them allow, as cadgen's tessellator
-does for the same solid's edges. A box is twelve triangles whatever the tolerance.
+A URDF or SDF visual may be a shape rather than a mesh file. cadgen meshes it for the CAD
+Viewer's robot view at one tolerance (``CHORD``, ``ANGLE``): a round shape takes as many
+segments as the chord criterion (relative to the shape's bounding diagonal) and the angle
+criterion between them allow. A box is twelve triangles whatever the tolerance.
 
 Each mesh is one glTF binary: positions and normals in glTF's Y-up metres, one triangle
 primitive, no material (the robot's visual paints it: the description's colour, else the
-viewer's surface), and the ``cadUpAxis`` declaration every cadgen GLB carries. It is a
-store object addressed by its bytes (``cadgen.store.objects``), so one shape at one size
-is meshed once for every robot that draws it. The page decodes a GLB into millimetres, so a
-primitive's placement carries the same ``0.001`` every GLB link mesh's does
-(``cadgen.robot_payload``).
+viewer's surface), and the ``cadUpAxis`` declaration every cadgen GLB carries. The robot's
+payload names it by the digest of its bytes (``cadgen.robot_payload``), held in memory, so one
+shape at one size is meshed once for every robot that draws it. The page decodes a GLB into
+millimetres, so a primitive's placement carries the same ``0.001`` every GLB link mesh's does.
 """
 
 from __future__ import annotations
@@ -24,10 +21,15 @@ import struct
 
 import numpy as np
 
-from cadgen.store.meshes import GLB_BIN_CHUNK, GLB_JSON_CHUNK, GLB_MAGIC, GLB_VERSION
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION
-
 __all__ = ["PRIMITIVE_SHAPES", "primitive_glb", "primitive_segments"]
+
+# The tolerance a primitive is meshed at: a sagitta of at most this share of the shape's bounding
+# diagonal (a shape 1,000 px across strays half a pixel from its exact surface), and at most this
+# turn (radians, 20 degrees) between neighbouring facets.
+CHORD = 5e-4
+ANGLE = 0.35
+
+GLB_MAGIC, GLB_VERSION, GLB_JSON_CHUNK, GLB_BIN_CHUNK = 0x46546C67, 2, 0x4E4F534A, 0x004E4942
 
 #: The shapes meshed here, by the name URDF and SDF give them.
 PRIMITIVE_SHAPES = ("box", "cylinder", "sphere", "capsule")
@@ -43,12 +45,12 @@ _FLOAT, _UNSIGNED_INT, _ARRAY_BUFFER, _ELEMENT_ARRAY_BUFFER, _TRIANGLES = 5126, 
 def primitive_segments(radius: float, diagonal: float) -> int:
     """How many segments a circle of ``radius`` takes on a shape of bounding ``diagonal``.
 
-    The chord criterion bounds the sagitta of one segment by the display chord tolerance
-    times the diagonal; the angle criterion bounds the turn between two segments' normals.
+    The chord criterion bounds the sagitta of one segment by ``CHORD`` times the diagonal;
+    the angle criterion bounds the turn between two segments' normals by ``ANGLE``.
     The tighter of the two decides, within the floor and the cap above.
     """
-    chord = float(DISPLAY_TESSELLATION["chordTolerance"]) * float(diagonal)
-    angle = float(DISPLAY_TESSELLATION["angleTolerance"])
+    chord = CHORD * float(diagonal)
+    angle = ANGLE
     theta = angle
     if 0.0 < chord < radius:
         theta = min(theta, 2.0 * math.acos(1.0 - chord / radius))

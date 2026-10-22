@@ -4,9 +4,6 @@ import { Button } from '@text-to-cad/ui/primitives/button';
 import { cn } from '@text-to-cad/ui/utils';
 import { treeRowActionsClass } from '@text-to-cad/ui/primitives/tree-row';
 
-// A copy of the STEP renderer's (`step/components/workbench/ModelPartActions.jsx`); one again at
-// the renderers' migration.
-//
 // A row's actions show on hover (or keyboard focus) and stay shown while they are ON: an
 // isolated row keeps its lit Isolate, a hidden row its crossed-out eye, so what is isolated
 // or hidden can be read down the tree without hovering. Isolate is an assembly's; a single

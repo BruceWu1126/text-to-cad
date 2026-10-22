@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import contextlib
 import io
-import os
 import re
 import unittest
 from pathlib import Path
-from unittest import mock
 
 from cadgen.cli import _COMMANDS
 from cadgen.cli import main as dispatch
@@ -68,21 +66,17 @@ class RegisteredCommandsAnswerHelpTest(unittest.TestCase):
 
     def test_every_registered_command_answers_help(self) -> None:
         failures: list[str] = []
-        # As a daemon worker dispatches (CADGEN_DAEMON_CHILD): dispatch hands the doors
-        # to the daemon before importing their module, and its worker answers a help
-        # request with the command's own parser, as here.
-        with mock.patch.dict(os.environ, {"CADGEN_DAEMON_CHILD": "1"}):
-            for command in sorted(_COMMANDS):
-                out, err = io.StringIO(), io.StringIO()
-                try:
-                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                        code = dispatch([*command.split(), "--help"])
-                except SystemExit as exit_:  # argparse's own --help path
-                    code = exit_.code or 0
-                if code != 0:
-                    failures.append(f"cadgen {command} --help exited {code}: {err.getvalue().strip()[:120]}")
-                elif not out.getvalue().strip():
-                    failures.append(f"cadgen {command} --help printed nothing to stdout")
+        for command in sorted(_COMMANDS):
+            out, err = io.StringIO(), io.StringIO()
+            try:
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = dispatch([*command.split(), "--help"])
+            except SystemExit as exit_:  # argparse's own --help path
+                code = exit_.code or 0
+            if code != 0:
+                failures.append(f"cadgen {command} --help exited {code}: {err.getvalue().strip()[:120]}")
+            elif not out.getvalue().strip():
+                failures.append(f"cadgen {command} --help printed nothing to stdout")
         self.assertGreater(len(_COMMANDS), 5, "audit walked no commands — empty registry?")
         self.assertEqual(failures, [], "\n".join(failures))
 

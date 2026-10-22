@@ -2,7 +2,7 @@
 read by the page through this server.
 
 ``GET /__cad/xbf?file=<abs>`` asks the engine's daemon to serve the file (``cadgen.engine.client``,
-connect-or-start, the ``serve`` op every ``cadgen xbf serve`` sends) and answers the document's id
+connect-or-start, the ``serve`` op every ``cadgen serve`` sends) and answers the document's id
 and where the page reads it: ``/__cad/xbf/api/doc/<id>``, under this server's own origin. The
 engine reads the file once and holds it (a STEP in a reader process of its own, held by the file's
 bytes: ``cadgen.engine.serve``); a request never waits for that read. The serve runs on a thread

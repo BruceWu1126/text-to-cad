@@ -1,8 +1,7 @@
 import { spellEngineRefs } from "@text-to-cad/core/lib/cadRefs.js";
 import { xbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 
-// An engine document's tree as a STEP's model tree presents an assembly (the STEP renderer's
-// `step/workbench/modelingPresentation.js`, copied: one again at the renderers' migration): its
+// An engine document's tree as a STEP's model tree presented an assembly: its
 // assemblies over their children and each placed part a leaf, its faces and edges never rows
 // (they are the viewport's to pick). The tree is the engine's (`structure.tree`): an assembly is
 // `{ name, children }`, a placed part `{ name, prototype, instance }`.

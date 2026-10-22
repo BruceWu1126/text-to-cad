@@ -379,9 +379,10 @@ class DaemonTest(unittest.TestCase):
         done = self.cli("export", "pair.step", "back.xbf")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue((self.folder / "back.xbf").is_file())
-        done = self.cli("export", "pair.py::pair", "made.stl", "--part", "peg")
+        done = self.cli("export", "XBF/pair.xbf", "made.stl", "--part", "peg")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
+        self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 2, "nor is a script")
         code = "import build123d as bd\nresult = bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)\n"
         built = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "-", "--name", "plug", "--stl",
                                 "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env,
@@ -434,6 +435,9 @@ class DeclaresModelsTest(unittest.TestCase):
         self.assertTrue(self.declares("import cadgen.engine as ce\n@ce.dxf(out='a.dxf')\ndef a():\n    pass\n"))
         self.assertTrue(self.declares("import cadgen.engine\n@cadgen.engine.glb\ndef a():\n    pass\n"))
         self.assertTrue(self.declares("from cadgen import engine\n@engine.xbf\ndef a():\n    pass\n"))
+        # cadgen exports the engine's names at its root.
+        self.assertTrue(self.declares("from cadgen import xbf, step\n@xbf\n@step\ndef a():\n    pass\n"))
+        self.assertTrue(self.declares("import cadgen\n@cadgen.stl\ndef a():\n    pass\n"))
 
     def test_no_engine_decorator_is_no_model(self) -> None:
         self.assertFalse(self.declares("from cadgen.engine import select\nselect('a.xbf', 'b')\n"))

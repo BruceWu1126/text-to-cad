@@ -1,7 +1,7 @@
 # Render Pipeline
 
 `@text-to-cad/core` exposes a staged render pipeline for shared viewer, docs, and generated
-snapshot browser-runtime work. A STEP document goes:
+snapshot browser-runtime work. A STEP render package (the docs hero's, on a static host) goes:
 
 ```js
 const source = await loadSource(input, sourceOptions);
@@ -10,7 +10,8 @@ const viewport = renderModel(THREE, model, viewportOptions);
 const result = await captureModel(viewport, captureOptions);
 ```
 
-Every other file family (GLB, STL, 3MF, URDF, SRDF, SDF) is drawn by ITS OWN scene
+Every file family (GLB, STL, 3MF, URDF, SRDF, SDF, and an engine document: an `.xbf`, or a
+STEP, which the viewer and a snapshot open as one) is drawn by ITS OWN scene
 builder, the one the viewer's renderer for it calls too: the snapshot page loads the
 file with that family's loader, builds the scene with that family's builder, dresses it
 in the look the viewer's viewport would, and hands it to the same `renderModel` and
@@ -19,7 +20,7 @@ render.
 
 The stages keep ownership narrow:
 
-- `loadSource` reads the published STEP resource and cadgen-resolved metadata, never model source or sidecar code.
+- `loadSource` reads a STEP render package and cadgen-resolved metadata, never model source or sidecar code.
 - `buildModel` owns the CAD object graph, records, selection, clipping,
   materials, topology/display edges, and STEP parameter effects.
 - A family builder owns its scene: `createGlbScene` (`lib/render/glbScene.js`),
@@ -343,7 +344,7 @@ robot description's colour, else its link mesh's own).
 
 Snapshots use the same grouped display contract. Photographic lighting supports
 only the `view` capture mode. Camera,
-selection, clipping, exploded view, guides, part colour, animation, video,
+selection, clipping, exploded view, guides, part colour, animation,
 kinematics, robot joints, per-output cameras and output sizing remain
 composable.
 
@@ -395,17 +396,16 @@ Accepted input fields:
   it for display) and, off a static host, each component's mesh file (`meshUrls`,
   which `packageSourceFromBaseUrl` maps from a package directory). Each component is
   drawn from its part's stored mesh, composed in world space. A component cadgen
-  could not mesh carries why (`failure`) and is left out on its own, as the viewer's
-  progressive loader leaves out a component whose part failed (`componentFailed`):
+  could not mesh carries why (`failure`) and is left out on its own:
   the rest are drawn, and only when every component failed is the first failure the
-  load's. A snapshot job always carries one.
+  load's.
 - `meshData`: already-loaded mesh data, in place of a package.
 - `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
 - A caller that passes a `resolved` packet together with any source URL must also pass
   `resolved.inputPath`. Render asset caches are page-lifetime, so a resolved job has to name the
   source its cache entries belong to; a resolved job without `inputPath` is rejected rather than
-  cached under an unidentified source. Callers with no `resolved` packet (the interactive viewer and
-  the docs hero renderer) render one source per page and need nothing.
+  cached under an unidentified source. Callers with no `resolved` packet (the docs hero
+  renderer) render one source per page and need nothing.
 - `selectorRuntime` and `displayEdgeRuntime`: preloaded runtimes when a caller
   already owns sidecar loading.
 - `kinematics`: pose values for the model's kinematics — a declared preset name,
@@ -705,14 +705,13 @@ This `renderModel` is intentionally separate from `common/renderModel.js`.
 Render is drawn through the studio's frame, every sample of it at once
 (`renderStill`: `PHOTOGRAPHIC_STUDIO_FRAME.stillSamples`, 32, re-rendering shadows only for a
 sample that moved the key), with no MSAA of its own: the snapshot supersamples at its render
-scale. A video's frame and a software renderer draw one sample (`snapshotStudioSamples`).
+scale. A software renderer draws one sample (`snapshotStudioSamples`).
 It uses snapshot sizing, studio environment, the shared stage floor/glow/shadow,
 model-scaled lights with a fitted shadow frustum, canonical camera projection,
 and deterministic renderer settings. Automatic perspective cameras fit the
 current visible vertices to `output.padding` when `output.tightFrame` is true;
 otherwise they fit the model bounds. An explicit camera position is never
-reframed. Video capture fits its precomputed sequence-union bounds once so the
-camera does not breathe between frames. As in the viewer, a still's studio floor
+reframed. As in the viewer, a still's studio floor
 and its contact shadow stay sized and centred on the rest placement however the
 model is posed or exploded (`groundBounds`), and an exploded view radiates from
 that rest box.
@@ -775,7 +774,7 @@ Two names, two things, and they are not interchangeable:
 
 ## Examples
 
-Interactive viewer/docs usage:
+Docs usage:
 
 ```js
 import * as THREE from "three";
@@ -784,8 +783,7 @@ import { buildModel } from "@text-to-cad/core/common/cadScene.js";
 import { renderModel } from "@text-to-cad/core/common/renderModel.js";
 
 // A static package: its tree beside each component's mesh. `articulation` and
-// `sourceAnimation` are what cadgen resolved the model's sidecar into: a catalog entry's,
-// a snapshot job's `resolved`, or a static package's files.
+// `sourceAnimation` are what cadgen resolved the model's sidecar into, as the package's files.
 const descriptor = await (await fetch("/models/part/assembly.json")).json();
 const source = await loadSource({
   ...packageSourceFromBaseUrl("/models/part", descriptor),
@@ -810,32 +808,10 @@ const viewport = renderModel(THREE, model, {
 });
 ```
 
-Headless snapshot usage (a STEP document; `headlessRenderEntry.js` routes every other
-family through `common/headlessScene.js` into the same `renderModel`/`captureModel`):
-
-```js
-import * as THREE from "three";
-import { loadSource } from "@text-to-cad/core/common/source.js";
-import { buildModel } from "@text-to-cad/core/common/cadScene.js";
-import {
-  captureModel,
-  modelOptionsForRenderJob,
-  renderJobContext,
-  renderModel
-} from "@text-to-cad/core/common/renderMeshScene.js";
-
-const source = await loadSource(job);
-const context = renderJobContext(source.meshData, job);
-const model = buildModel(THREE, source, modelOptionsForRenderJob(context, job));
-const viewport = renderModel(THREE, model, { job, context });
-
-try {
-  const result = await captureModel(viewport, { job });
-  // Write result.outputs in the CAD skill snapshot CLI or another caller-owned layer.
-} finally {
-  viewport.dispose();
-}
-```
+A headless snapshot (`headlessRenderEntry.js`) paints a DXF on a 2D canvas
+(`common/headlessDrawingRender.js`) and draws a file family through
+`common/headlessScene.js` into the same `renderModel`/`captureModel`; a STEP is drawn as
+the engine document it opens as.
 
 ## Ownership Rules
 

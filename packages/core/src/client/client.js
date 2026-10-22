@@ -1,13 +1,8 @@
 import { encodeBase64 } from './base64.js';
 import { requestViewerJson, ViewerRequestError } from "./request.js";
-import { retainPartWorkerPool } from '../lib/parts/partWorkerClient.js';
 import { retainGlbMeshWorker } from '../lib/render/glbMeshWorkerClient.js';
 import { retainStlMeshWorker } from '../lib/render/stlMeshWorkerClient.js';
 import { applyViewerOriginToEntries, normalizeViewerOrigin, viewerOriginUrl } from './origin.js';
-import { createHttpTessellationCacheProvider, createTessellationCache } from '../lib/parts/tessellationCache.js';
-
-import { resolveParts } from './partResolution.js';
-import { observeEditingPreview } from './editingPreviewFeed.js';
 import { createHttpCadResourceProvider, scopeCadResources } from './resources.js';
 export * from './origin.js';
 
@@ -31,8 +26,6 @@ function abortError() {
 
 // The longest a drawing's 202 may ask the client to wait before it asks again.
 const DRAWING_RETRY_MAX_MS = 5000;
-// The longest a measure's 202 may have the client wait before it asks again.
-const MEASURE_RETRY_MAX_MS = 2000;
 // The longest an engine document's 202 (the engine still reading it) may have the client wait.
 const ENGINE_RETRY_MAX_MS = 5000;
 
@@ -65,7 +58,7 @@ const JSON_POST = Object.freeze({ 'content-type': 'application/json', 'x-cadgen-
  * @param {import("./types.js").CadClientOptions} options
  * @returns {import("./types.js").CadClient}
  */
-export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fetch, pollIntervalMs = 2000, shouldPoll = () => true, resources: resourceProvider, editingPreviewFeed = null, maxBatchBytes } = {}) {
+export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fetch, pollIntervalMs = 2000, shouldPoll = () => true, resources: resourceProvider } = {}) {
   origin = normalizeViewerOrigin(origin);
   let disposed = false;
   const resourceLifetime = new AbortController();
@@ -81,7 +74,6 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
   const activeFiles = new Map();
   let preferredFile = '';
   const pendingRefreshes = new Map();
-  let tessellationCache = null;
   let server = null;
 
   function publish(patch) {
@@ -273,18 +265,6 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
     reportActivity(activity) {
       void Promise.resolve(fetchImpl(cadApiUrl('/__cad/analytics/activity', { origin }), { method: 'POST', headers: JSON_POST, body: JSON.stringify(activity) })).catch(() => {});
     },
-    requestArtifactStatus(file, { signal } = {}) {
-      if (!file) return Promise.reject(new Error('Missing file'));
-      return request('/__cad/artifact', { file, signal, timeoutMs: 10_000, operation: 'status' });
-    },
-    // Starts the file's compile and answers at once (`compiling`, or `compiled` when there is
-    // nothing to build); the build is followed through `requestArtifactStatus`.
-    requestArtifact(file, { force = false, signal } = {}) {
-      if (!file) return Promise.reject(new Error('Missing file'));
-      return request('/__cad/artifact', {
-        file, signal, method: 'POST', operation: 'compile', params: force ? { force: '1' } : {}, headers: { 'x-cadgen-viewer': '1' }
-      });
-    },
     async drawing(file, { signal } = {}) {
       // A `.dxf` flattened to 2D render primitives on the SERVER: ezdxf does the
       // reading, the client only paints. A plain GET, derived data cached by
@@ -332,80 +312,20 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       const reply = await request('/__cad/xbf', { file, signal, params: { held: '1' }, timeoutMs: 10_000, operation: 'engine-document' });
       return reply?.held === true;
     },
-    requestParts(body, { signal } = {}) {
-      return request('/__cad/parts', {
-        body, signal, method: 'POST', operation: 'parts',
-        headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
-      });
-    },
-    async measureFace(body, { signal } = {}) {
-      // A face's exact area and centroid, measured by cadgen on its component's stored BREP
-      // (`POST /__cad/measure`, no part carries them): the store's answer at once, else a
-      // build-pool job, whose 202 { state: 'measuring', retryMs } has the client ask again.
-      // `body` names the view, the component and its part, and the face by its ordinal.
-      for (;;) {
-        const reply = await request('/__cad/measure', {
-          body, signal, method: 'POST', operation: 'measure', timeoutMs: 10_000,
-          headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
-        });
-        if (reply?.state !== 'measuring') return reply;
-        await pause(Math.min(Math.max(Number(reply.retryMs) || 0, 0), MEASURE_RETRY_MAX_MS), signal);
-        if (disposed) throw abortError();
-      }
-    },
-    cancelPartRequest(body, { signal } = {}) {
-      return request('/__cad/parts/cancel', {
-        body, signal, method: 'POST', operation: 'cancel-parts',
-        headers: { 'content-type': 'application/json', 'x-cadgen-viewer': '1' },
-      });
-    },
-    editingPreview(file, { after = '', signal } = {}) {
-      return request('/__cad/preview', { file, signal, params: { after }, operation: 'preview' });
-    },
-    // Where a store tree's view is read, as a catalog row names a saved file's: `assembly.json`
-    // under it resolves as a package asset (`resolvePackageAssetUrl`). A build feed's preview names
-    // its tree and the producer its parts are keyed under; with none, the view keys them as for a
-    // saved file.
-    storeTreeUrl(tree, { producer = null } = {}) {
-      return cadApiUrl('/__cad/store', { origin, file: tree, params: producer ? { producer: JSON.stringify(producer) } : {} });
-    },
-    // A preview revision's annotations object: what the sidecar will carry, resolved against the
-    // preview's tree. Null for an object the store does not hold (expired with its build).
-    async previewAnnotations(object, { signal } = {}) {
-      try {
-        return await request('/__cad/store', { signal, params: { annotations: object }, timeoutMs: 10_000, operation: 'annotations' });
-      } catch (error) {
-        if (error?.failure?.status === 404) return null;
-        throw error;
-      }
-    },
-    resolveParts(descriptor, requested, options) {
-      return resolveParts(descriptor, requested, { ...options, client });
-    },
-    // A host that already hears a file's build feed (on a call it makes anyway) hands it in as
-    // `editingPreviewFeed`, and nothing here asks the route.
-    observeEditingPreview(file, onUpdate, onError, options) {
-      if (editingPreviewFeed) return editingPreviewFeed(file, onUpdate, onError);
-      return observeEditingPreview(file, onUpdate, onError, { ...options, client });
-    },
     createRenderSession({ file = '' } = {}) {
       if (disposed) throw new Error('This CAD client has been disposed.');
       if (file) activeFiles.set(file, (activeFiles.get(file) || 0) + 1);
       const controller = new AbortController();
-      const releases = [retainPartWorkerPool(), retainGlbMeshWorker(), retainStlMeshWorker()];
-      tessellationCache ??= createTessellationCache({
-        provider: createHttpTessellationCacheProvider({ origin, headers: { 'x-cadgen-viewer': '1' }, fetch: fetchImpl, maxBatchBytes }),
-      });
-      const cache = tessellationCache.createSession({ signal: controller.signal });
+      const releases = [retainGlbMeshWorker(), retainStlMeshWorker()];
       let sessionDisposed = false;
-      const session = { resources, tessellationCache: cache, signal: controller.signal, dispose() {
+      const session = { resources, signal: controller.signal, dispose() {
         if (sessionDisposed) return;
         sessionDisposed = true;
         if (file) {
           const remaining = (activeFiles.get(file) || 0) - 1;
           if (remaining > 0) activeFiles.set(file, remaining); else activeFiles.delete(file);
         }
-        controller.abort(); cache.dispose();
+        controller.abort();
         for (const release of releases) release();
         sessions.delete(session);
       } };
@@ -421,7 +341,6 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       for (const request of requests) request.abort();
       requests.clear();
       for (const session of [...sessions]) session.dispose();
-      tessellationCache?.dispose();
       pendingRefreshes.clear();
       listeners.clear();
     }

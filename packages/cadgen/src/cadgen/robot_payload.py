@@ -1,13 +1,36 @@
 """A robot description resolved into what a page plays and draws.
 
 A URDF, an SDF, or an SRDF with the URDF it plans for, becomes ONE payload: the robot's
-articulation in the format a STEP's kinematics take (``cadgen.articulation``: controls per
-movable joint, joints in their rest frames with affine rows over the controls, which link
-each joint carries, what a drag writes, the named poses and the opening pose), the list of
-visuals to draw (each with its rest placement, its colour and the mesh it draws), and what
-the description says about its links and joints, as written, for a person reading it back.
-The page builds a scene from the visual list and plays the articulation; it parses no XML,
-resolves no frame, meshes no shape and decides no limit.
+articulation (below: controls per movable joint, joints in their rest frames with affine
+rows over the controls, which link each joint carries, what a drag writes, the named poses
+and the opening pose), the list of visuals to draw (each with its rest placement, its colour
+and the mesh it draws), and what the description says about its links and joints, as
+written, for a person reading it back. The page builds a scene from the visual list and
+plays the articulation; it parses no XML, resolves no frame, meshes no shape and decides no
+limit.
+
+The articulation (``ARTICULATION_SCHEMA_VERSION``) is played with closed-form arithmetic and
+nothing else::
+
+    {
+      "schemaVersion": 2,
+      "controls": [{"id", "label", "unit", "min", "max", "default"}],
+      "joints":   [{"id", "parent", "kind", "origin", "axis",
+                    "turn": {"bias", "terms", "curve"?}, "travel": {"bias", "terms", "curve"?}}],
+      "carries":  {joint id: [link, ...]},
+      "handles":  [{"id", "joint", "dof", "control", "weight", "label", "unit", "min", "max"}],
+      "poses":    {name: {control id: value}},
+      "opening":  {control id: value},
+    }
+
+``joints`` are listed parents first, each ``origin`` and ``axis`` (unit) in REST space, its
+motion a displacement about that axis from rest carried by its parent joint's motion;
+``turn`` (degrees) and ``travel`` (metres) are affine rows over the controls (``bias +
+sum(weight * control)``), and a row may carry a ``curve``: a sampled function of another
+row's value (``driver``, ``input`` ascending, ``output``; linear between keys, held beyond,
+``period`` folding a driver that turns without limits). A ``fixed`` joint has no row.
+``carries`` names the links each joint moves, every link under exactly one joint. ``handles``
+are what a drag takes hold of: the control a gesture writes and its weight in the row.
 
 The payload::
 
@@ -16,7 +39,7 @@ The payload::
       "kind": "urdf" | "sdf" | "srdf",
       "name": the robot's (an SDF model's) name,
       "root": the root link; "" for an SDF model whose links float free,
-      "articulation": the articulation (``cadgen.articulation``), whose ``carries`` name links,
+      "articulation": the articulation (above), whose ``carries`` name links,
       "links": [{"name", "placement", "visuals": [facts], "collisions": [facts], "inertial"}],
       "joints": [{"name", "type", "parent", "child", "axis", "origin", "limit", "mimic", "fourBar"}],
       "visuals": [{"id", "link", "label", "placement", "color", "mesh": {"format", ...}}],
@@ -28,7 +51,7 @@ The payload::
   every joint at zero): a link's is its frame, a visual's its mesh's -- the link frame, the
   visual's origin and the mesh's scale composed, so the page sets it on a mesh and nothing
   else. A link's visuals sit under the joint that carries the link, and the joint's delta
-  (``cadgen.articulation``) moves them. A visual's ``id`` is ``<link>:v<n>`` and its
+  moves them. A visual's ``id`` is ``<link>:v<n>`` and its
   ``label`` what a row calls it: the ``name`` the description gave it, else its geometry (the
   mesh file's name, or ``box``, ``cylinder``, ``sphere``, ``capsule``).
 - An SDF model's nested models (SDFormat 1.6+) are part of the robot: their links, frames
@@ -44,16 +67,16 @@ The payload::
 - A URDF joint carrying ``<tcad:four_bar>`` (the urdf skill's authoring contract: the input
   crank of a planar four-bar linkage, derived from the ``driver`` joint on the same ground
   link) is not a control either, and has no handle: its row is a ``curve`` over the driver's
-  row (``cadgen.articulation``), sampled here from the linkage's closed form over the
+  row, sampled here from the linkage's closed form over the
   driver's whole operating range -- its declared limits, or one turn for a continuous driver
   -- densely enough that the page's linear interpolation stays within
   ``FOUR_BAR_CURVE_TOLERANCE_DEG``. The linkage's geometry (one ground link, parallel axes,
   pivots ``ground_length`` apart, the range reachable, the derived range within the joint's
   limits) is checked here, and refused in words; the page solves nothing.
 - A visual's mesh is the file it names (``format`` the page's decoder: stl, 3mf or glb) or,
-  for a box, cylinder, sphere or capsule, a GLB cadgen meshed at the display tolerance and
-  stored as an object (``_internal.primitive_mesh``). The payload names
-  a file by its absolute path (``path``) and a primitive by its object hash (``object``);
+  for a box, cylinder, sphere or capsule, a GLB cadgen meshed (``_internal.primitive_mesh``)
+  and holds by the sha256 of its bytes. The payload names
+  a file by its absolute path (``path``) and a primitive by that digest (``object``);
   the host that serves it mints each one's ``url`` (:func:`locate_robot_payload`). A mesh
   lands in the robot's metres as its format defines it: a GLB is metres by the glTF spec,
   so one authored in metres needs no mesh scale, while an STL or a 3MF is drawn as the
@@ -64,9 +87,10 @@ The payload::
   decoder for, a shape it has no mesh for, a mesh it cannot reach. Every refusal is a
   :class:`RobotReadError` saying what to change.
 
-The payload is derived data, cached in the store's ``robot`` index keyed by the
-description's path and bytes and its paired URDF's bytes (``cadgen.store.robots``), so a
-second read of an unchanged description reads one object.
+The payload is derived data, held in this process's memory keyed by the description's path
+and bytes and its paired URDF's bytes (``robot_payload_bytes``), so a second read of an
+unchanged description parses nothing; a primitive's mesh is held beside it by the digest of
+its bytes (``primitive_glb_bytes``). Nothing is written to disk.
 """
 
 from __future__ import annotations
@@ -75,14 +99,14 @@ import copy
 import hashlib
 import json
 import math
+import threading
+from collections import OrderedDict
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
 import xml.etree.ElementTree as ET
 
-from cadgen.articulation import ARTICULATION_SCHEMA_VERSION
 from cadgen.findings import format_findings
-from cadgen.tessellation_policy import DISPLAY_TESSELLATION
 from cadgen.xml_common import children, display_path, local_name
 
 __all__ = [
@@ -95,6 +119,7 @@ __all__ = [
     "locate_robot_payload",
     "paired_urdf_for_srdf",
     "prepare_robot_description",
+    "primitive_glb_bytes",
     "read_robot_description",
     "resolve_robot_primitives",
     "robot_control_values",
@@ -103,10 +128,17 @@ __all__ = [
 ]
 
 ROBOT_PAYLOAD_SCHEMA_VERSION = 2
+# The articulation's own schema (the ``articulation`` block's ``schemaVersion``), which the page
+# plays: controls, joints as affine rows (a sampled curve where one follows its driver), carries,
+# handles, poses.
+ARTICULATION_SCHEMA_VERSION = 2
 # Raised when the same description resolves to a different payload of the same shape (2: a
-# GLB link mesh in metres, an SDF's nested models), so a payload the store cached before is
-# never read again (``robot_payload_scheme``).
+# GLB link mesh in metres, an SDF's nested models) (``robot_payload_scheme``).
 _RESOLUTION_REVISION = 2
+# How many payloads, and how many primitive meshes, this process holds: the least recently read
+# go first. A payload whose mesh went is read again (``robot_payload_bytes(rebuild=True)``).
+PAYLOADS_HELD = 16
+MESHES_HELD = 256
 ROBOT_SUFFIXES = (".urdf", ".srdf", ".sdf")
 #: The mesh files the page decodes, by suffix: what a link mesh may be.
 DRAWABLE_MESH_FORMATS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb"}
@@ -321,16 +353,42 @@ def _drawable_format(reference: str, *, where: str) -> str:
     return DRAWABLE_MESH_FORMATS[suffix]
 
 
-def _primitive_mesh(shape: str, dimensions: dict) -> dict:
-    """The store object of a primitive's mesh, meshed and published on first sight."""
-    from cadgen._internal.primitive_mesh import primitive_glb
-    from cadgen.store.objects import put_object
+_LOCK = threading.Lock()
+_PAYLOADS: OrderedDict[tuple, bytes] = OrderedDict()
+_MESHES: OrderedDict[str, bytes] = OrderedDict()
 
-    return {"format": "glb", "object": put_object(primitive_glb(shape, dimensions))}
+
+def _held(table: OrderedDict, key: Any, value: Any, limit: int) -> None:
+    with _LOCK:
+        table[key] = value
+        table.move_to_end(key)
+        while len(table) > limit:
+            table.popitem(last=False)
+
+
+def primitive_glb_bytes(digest: str) -> bytes | None:
+    """The GLB of a primitive this process meshed, by the sha256 of its bytes (what a payload's
+    ``mesh.object`` names), or ``None`` when it holds no such mesh."""
+    key = str(digest or "").strip().lower()
+    with _LOCK:
+        found = _MESHES.get(key)
+        if found is not None:
+            _MESHES.move_to_end(key)
+        return found
+
+
+def _primitive_mesh(shape: str, dimensions: dict) -> dict:
+    """A primitive's mesh, meshed on first sight and held by the digest of its bytes."""
+    from cadgen._internal.primitive_mesh import primitive_glb
+
+    data = primitive_glb(shape, dimensions)
+    digest = hashlib.sha256(data).hexdigest()
+    _held(_MESHES, digest, data, MESHES_HELD)
+    return {"format": "glb", "object": digest}
 
 
 def _primitive_descriptor(shape: str, dimensions: dict) -> dict:
-    """A prepared visual's mesh request, internal until resolution stores its GLB."""
+    """A prepared visual's mesh request, internal until resolution meshes its GLB."""
     return {"format": "glb", "_primitive": {"shape": shape, "dimensions": dimensions}}
 
 
@@ -1482,7 +1540,7 @@ def prepare_robot_description(path: Path | str) -> dict[str, Any]:
 
 
 def resolve_robot_primitives(prepared: Mapping[str, Any]) -> dict[str, Any]:
-    """Materialize the prepared description's primitive meshes into the store.
+    """Mesh the prepared description's primitives, each held by the digest of its GLB.
 
     Return the wire payload without changing the prepared data. Mesh files, placements and
     articulation already came from the description's one preparation path.
@@ -1496,7 +1554,7 @@ def resolve_robot_primitives(prepared: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def read_robot_description(path: Path | str) -> dict[str, Any]:
-    """The validated description's payload, with its primitive meshes stored as GLBs.
+    """The validated description's payload, with its primitive meshes held as GLBs.
 
     ``RobotReadError`` names what to change. Request-only callers can prepare and validate
     controls first, then resolve primitives once the whole request has been accepted.
@@ -1505,10 +1563,12 @@ def read_robot_description(path: Path | str) -> dict[str, Any]:
 
 
 def robot_payload_scheme() -> str:
-    """What the payload's shape, its resolution and its primitive meshes depend on, hashed into
-    the index key."""
-    return f"robot-payload-{ROBOT_PAYLOAD_SCHEMA_VERSION}-resolution-{_RESOLUTION_REVISION}-articulation-{ARTICULATION_SCHEMA_VERSION}-" \
-           + json.dumps(DISPLAY_TESSELLATION, sort_keys=True)
+    """What the payload's shape, its resolution and its primitive meshes depend on: part of the
+    key a payload is held under."""
+    from cadgen._internal.primitive_mesh import ANGLE, CHORD
+
+    return (f"robot-payload-{ROBOT_PAYLOAD_SCHEMA_VERSION}-resolution-{_RESOLUTION_REVISION}-"
+            f"articulation-{ARTICULATION_SCHEMA_VERSION}-chord-{CHORD}-angle-{ANGLE}")
 
 
 def encode_robot_payload(payload: Mapping[str, Any]) -> bytes:
@@ -1523,16 +1583,10 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _mesh_objects(payload: Mapping[str, Any]) -> list[str]:
-    return [str(visual["mesh"]["object"]) for visual in payload.get("visuals") or [] if visual.get("mesh", {}).get("object")]
-
-
 def robot_payload_bytes(path: Path | str, *, rebuild: bool = False) -> bytes:
-    """The payload's bytes: the store's cached ones for an unchanged description (and, for an
-    SRDF, an unchanged paired URDF), else read now and published. ``rebuild`` reads now
-    regardless, for a host whose cached payload names an object a sweep took."""
-    from cadgen.store import robots
-
+    """The payload's bytes: the ones this process holds for an unchanged description (and, for an
+    SRDF, an unchanged paired URDF), else read now and held. ``rebuild`` reads now regardless, for
+    a host whose held payload names a mesh this process no longer holds."""
     resolved = Path(path).expanduser().resolve()
     if resolved.suffix.lower() not in ROBOT_SUFFIXES:
         raise RobotReadError(f"{resolved.name} is not a robot description: one of {', '.join(ROBOT_SUFFIXES)}")
@@ -1540,17 +1594,17 @@ def robot_payload_bytes(path: Path | str, *, rebuild: bool = False) -> bytes:
         raise RobotReadError(f"no file is at {resolved}")
     paired = paired_urdf_for_srdf(resolved) if resolved.suffix.lower() == ".srdf" else None
     try:
-        key = robots.robot_input_key(str(resolved), _file_hash(resolved), _file_hash(paired) if paired else None,
-                                     scheme=robot_payload_scheme())
+        key = (str(resolved), _file_hash(resolved), _file_hash(paired) if paired else None, robot_payload_scheme())
     except OSError as exc:
         raise RobotReadError(f"{resolved} could not be read: {exc}") from None
     if not rebuild:
-        cached = robots.read(key)
-        if cached is not None:
-            return cached
-    payload = read_robot_description(resolved)
-    data = encode_robot_payload(payload)
-    robots.write(key, data, meshes=_mesh_objects(payload))
+        with _LOCK:
+            cached = _PAYLOADS.get(key)
+            if cached is not None:
+                _PAYLOADS.move_to_end(key)
+                return cached
+    data = encode_robot_payload(read_robot_description(resolved))
+    _held(_PAYLOADS, key, data, PAYLOADS_HELD)
     return data
 
 

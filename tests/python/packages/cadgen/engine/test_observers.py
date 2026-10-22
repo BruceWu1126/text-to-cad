@@ -83,11 +83,13 @@ class ObserversTest(unittest.TestCase):
             raise RuntimeError("an observer's own bug")
 
         self.api.observers[:] = [broken, self.told.append]
-        written = self.api.export(f"{self.folder / 'secret.py'}::secret_plate", self.folder / "out.stl", daemon=False)
+        report = self.api.build_script(self.folder / "secret.py", ["secret_plate"], daemon=False)
+        self.assertEqual([model["ok"] for model in report.models], [True])
+        written = self.api.export(self.folder / "XBF/secret_plate.xbf", self.folder / "out.stl", daemon=False)
         self.assertEqual([row.kind for row in written], ["stl"])
-        [facts] = self.told  # the next observer is told all the same
-        # An export of a script's model builds it first: that build's report is the export's.
-        self.assertEqual((facts["source"], facts["ok"], [model["ok"] for model in facts["models"]]), ("model", True, [True]))
+        built, exported = self.told  # the next observer is told all the same
+        self.assertEqual((built["verb"], built["ok"]), ("build", True))
+        self.assertEqual((exported["verb"], exported["source"], exported["ok"]), ("export", "xbf", True))
 
     def test_a_worker_s_words_are_read_for_its_error_and_its_death(self) -> None:
         """What the daemon answers when its worker failed or died (``worker.main``, ``daemon.Worker.build``)

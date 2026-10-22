@@ -267,7 +267,7 @@ class TabServerTest(_Session):
         answered.assert_called_once_with(False, by="app")
 
     def test_a_sync_says_when_the_catalog_moved(self) -> None:
-        watch = {"file": self.bracket, "previews": [self.bracket]}
+        watch = {"file": self.bracket}
         first = self.call("cad_sync", {"view": "v1", "surface": "tab", "watch": watch})["structuredContent"]
         catalog = self.http("GET", f"http://cad.invalid/__cad/catalog?file={quote(self.bracket, safe='')}")[1]
         # The revision a view compares is the one its catalog read carries.

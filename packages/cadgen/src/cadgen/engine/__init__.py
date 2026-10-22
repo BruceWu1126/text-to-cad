@@ -12,7 +12,7 @@ A model is a parameterless function returning a build123d shape::
 ``python arm.py`` runs it, and every other model the script defines, in a warm worker whose
 kernel memo makes an edit cost what it changed; the document is written to
 ``XBF/arm.xbf`` beside the script, and the derived files it declares after it, each a
-translation of that document (``cadgen xbf export``). ``cadgen xbf serve XBF/arm.xbf``
+translation of that document (``cadgen export``). ``cadgen serve XBF/arm.xbf``
 shows it. Nothing but those files is written: every cache lives in a process's memory.
 The verbs as functions are ``cadgen.engine.api`` (``cadgen.build``, ``cadgen.export``, ...).
 

@@ -1,7 +1,7 @@
 import { implicitXbfRoots } from "./xbfTree.js";
 
-// The three menus an engine document offers, as a STEP's are (the STEP renderer's
-// `step/file-view/stepMenus.js`, in the same descriptor shape: `xbfMenuItems.js` renders them):
+// The three menus an engine document offers, as a STEP's were, as descriptors
+// (`xbfMenuItems.js` renders them):
 // the model as a whole (a press on empty space), one node's part menu (the viewport and a model
 // tree row alike), and a face's or edge's. Each is built from what the surface holds when the
 // menu is asked for; nothing here holds state.

@@ -4,15 +4,11 @@ import {
 } from "../lib/assembly/meshData.js";
 import { buildComponentMeshData } from "../lib/parts/partMeshData.js";
 import { validateSnapshotRenderJob } from "./snapshotJobValidation.js";
-import {
-  TESS_PROBE_MAX_KEYS,
-  decodeComponentTessellation,
-  tessBatchMaxBytes,
-} from "../lib/parts/tessellationCache.js";
+import { decodeComponentTessellation } from "../lib/parts/tessellationCache.js";
 import { normalizeControlValues } from "./articulation.js";
 
-// A render source is a STEP document: its model is composed here and built by `buildModel`
-// (`cadScene.js`), in the viewer's STEP renderer and in a snapshot alike. Every other file
+// A render source is a STEP document's render package (the docs hero's, served as static files):
+// its model is composed here and built by `buildModel` (`cadScene.js`). Every other file
 // family is drawn by its own scene builder, which the viewer's renderer for it and the
 // snapshot CLI both call (`headlessScene.js`); none of them is flattened into mesh data here.
 export const SOURCE_KIND = Object.freeze({
@@ -106,7 +102,7 @@ async function fetchComponentMeshBuffer(url, cid, options) {
   throw new Error(`Failed to load component mesh ${cid}: HTTP ${lastStatus}${hint}`);
 }
 
-async function loadPackageMeshData(packageInfo, diagnostics = null, tessellationCache = null, options = {}) {
+async function loadPackageMeshData(packageInfo, diagnostics = null, options = {}) {
   const measure = (name, started) => {
     if (diagnostics) diagnostics[name] = (diagnostics[name] || 0) + performance.now() - started;
   };
@@ -116,12 +112,11 @@ async function loadPackageMeshData(packageInfo, diagnostics = null, tessellation
   if (!descriptor) {
     throw new Error("Assembly render job is missing its tree (assembly.json)");
   }
-  // A static package (the docs hero) ships one mesh per component beside its
-  // tree; a served one reads them from the host's mesh store.
+  // A static package (the docs hero) ships one mesh per component beside its tree.
   const meshUrls = isObject(packageInfo.meshUrls) ? packageInfo.meshUrls : {};
   const components = isObject(descriptor.components) ? descriptor.components : {};
   const componentMeshDataByCid = {};
-  // A component cadgen could not mesh carries why (`failure`, cadgen.store.view): it settles
+  // A component cadgen could not mesh carries why (`failure`): it settles
   // on its own and is left out, as the viewer's loader leaves out a component whose part
   // failed (`componentFailed`), and every other component is drawn. When every component
   // failed there is nothing to draw, and the first failure is the load's.
@@ -137,97 +132,12 @@ async function loadPackageMeshData(packageInfo, diagnostics = null, tessellation
   // Each component names its part: the key its display mesh is read by.
   const partOf = (cid) => String(components[cid]?.part || "");
   if (diagnostics) diagnostics.componentCount = cids.length;
-  const probeStarted = performance.now();
-  const probes = await tessellationCache?.probeCachedTessellationEntries(cids.map(partOf)) || new Map();
-  measure("probeMs", probeStarted);
-  const misses = [];
-
-  // Probe metadata is tiny. Full bodies are fetched only in admitted TESB
-  // groups whose observed framing stays under the batch bound: the server's
-  // 32 MiB, or the lower ceiling the cache's transport declares
-  // (`batchMaxBytes`). Each group is decoded, copied into render-owned arrays
-  // and dropped before the next group, so a warm assembly never retains all
-  // raw cache bodies beside the final mesh.
-  const batchMaxBytes = tessBatchMaxBytes(tessellationCache?.batchMaxBytes);
-  const groups = [];
-  let group = [];
-  let framedBytes = 12;
-  const flush = () => {
-    if (group.length) groups.push(group);
-    group = [];
-    framedBytes = 12;
-  };
-  for (const cid of cids) {
-    const probe = probes.get(partOf(cid));
-    if (!probe) {
-      misses.push(cid);
-      continue;
-    }
-    const entryBytes = 4 + ((probe.glb.byteLength + 3) & ~3);
-    if (group.length >= TESS_PROBE_MAX_KEYS
-      || (group.length && framedBytes + entryBytes > batchMaxBytes)) flush();
-    group.push({ cid, part: probe.part, probe });
-    framedBytes += entryBytes;
-    if (framedBytes >= batchMaxBytes || entryBytes + 12 > batchMaxBytes) flush();
-  }
-  flush();
-
-  if (diagnostics) diagnostics.cacheBatchCount = groups.length;
-  let cacheHits = 0;
-  // Components the store named a mesh for whose body could not be read, even alone.
-  const unreadable = new Set();
-  const decodeEntry = (entry, bytes) => decodeComponentTessellation(bytes, { part: entry.part });
-  for (const entries of groups) {
-    const readStarted = performance.now();
-    let bodies;
-    if (entries.length === 1 && entries[0].probe.glb.byteLength + 16 > batchMaxBytes) {
-      const entry = entries[0];
-      bodies = [await tessellationCache?.getCachedEntryBytes(entry.part, { probe: entry.probe })];
-    } else {
-      const maxBytes = 12 + entries.reduce(
-        (sum, entry) => sum + 4 + ((entry.probe.glb.byteLength + 3) & ~3),
-        0,
-      );
-      bodies = await tessellationCache?.getCachedEntryBytesMany(entries.map((entry) => entry.probe), { maxBytes });
-    }
-    measure("cacheReadMs", readStarted);
-    for (let index = 0; index < entries.length; index += 1) {
-      const decodeStarted = performance.now();
-      const entry = entries[index];
-      let decoded = decodeEntry(entry, bodies?.[index]);
-      measure("cacheDecodeMs", decodeStarted);
-      if (!decoded) {
-        // The store named this mesh: a body that did not come back is read again, alone, before
-        // the component is a miss (a batch can fail as a whole where its entries would not).
-        const rereadStarted = performance.now();
-        const body = await tessellationCache?.getCachedEntryBytes(entry.part, { probe: entry.probe });
-        measure("cacheReadMs", rereadStarted);
-        decoded = decodeEntry(entry, body);
-      }
-      if (!decoded) {
-        unreadable.add(entry.cid);
-        misses.push(entry.cid);
-        continue;
-      }
-      cacheHits += 1;
-      const meshStarted = performance.now();
-      componentMeshDataByCid[entry.cid] = buildComponentMeshData(decoded.component);
-      measure("meshBuildMs", meshStarted);
-    }
-  }
-  if (diagnostics) {
-    diagnostics.cacheHitCount = cacheHits;
-    diagnostics.cacheMissCount = misses.length;
-  }
-  // What the store could not answer: a static package's own mesh file, read
-  // through a small pool (6 matches the browser's per-host connection budget),
-  // else a component nothing has meshed, or whose stored mesh could not be read.
+  // Each component's own mesh file, read through a small pool (6 matches the browser's per-host
+  // connection budget); a component with none is one nothing has meshed.
   const loadComponent = async (cid) => {
     const url = String(meshUrls[cid] || "").trim();
     if (!url) {
-      throw new Error(unreadable.has(cid)
-        ? `Assembly package component ${cid}: the store holds its mesh, but it could not be read`
-        : `Assembly package component ${cid} has no mesh; cadgen meshes every component before a page draws it`);
+      throw new Error(`Assembly package component ${cid} has no mesh; cadgen meshes every component before a page draws it`);
     }
     const readStarted = performance.now();
     const bytes = new Uint8Array(await fetchComponentMeshBuffer(url, cid, options));
@@ -243,9 +153,9 @@ async function loadPackageMeshData(packageInfo, diagnostics = null, tessellation
   const POOL = 6;
   let next = 0;
   await Promise.all(
-    Array.from({ length: Math.min(POOL, misses.length) }, async () => {
-      while (next < misses.length) {
-        const cid = misses[next];
+    Array.from({ length: Math.min(POOL, cids.length) }, async () => {
+      while (next < cids.length) {
+        const cid = cids[next];
         next += 1;
         await loadComponent(cid);
       }
@@ -335,7 +245,7 @@ export async function loadSource(input, options = {}) {
   const selectorRuntime = inputObject.selectorRuntime || options.selectorRuntime || null;
   if (!explicitMeshData && packageInfo) {
     const diagnostics = options.stageTimings ? {} : null;
-    const meshData = await loadPackageMeshData(packageInfo, diagnostics, options.tessellationCache, options);
+    const meshData = await loadPackageMeshData(packageInfo, diagnostics, options);
     if (diagnostics) options.stageTimings.sourceLoad = diagnostics;
     // The articulation carries the composed occurrence ids each joint moves, so a package
     // poses with no selector runtime at all.

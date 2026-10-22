@@ -6,9 +6,8 @@ import { formatPromptReference } from "@text-to-cad/core/prompt";
 import { InfoRow, MonoValue, formatNumber } from "../kit/inspector/referenceRows.jsx";
 import { isXbfAssemblyId } from "./xbfTree.js";
 
-// What is selected in an engine document, as Quick Edit's chips -- a STEP's
-// (`step/components/workbench/StepReferenceSection.js`, copied in shape: one again at the
-// renderers' migration): a part or subassembly a chip of its own, its card its part count (a
+// What is selected in an engine document, as Quick Edit's chips -- as the STEP renderer's were:
+// a part or subassembly a chip of its own, its card its part count (a
 // subassembly's), size, volume and mass; faces and edges a chip for each kind on each part -- "base ·
 // face 3" alone, "base · 6 faces" for several -- its card the key measurements, which the engine
 // measures on the exact shape when the element is picked (`fetchXbfElementFacts`).

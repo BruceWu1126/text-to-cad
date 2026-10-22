@@ -10,7 +10,7 @@ import {
 } from "./glbMeshData.js";
 import { createGlbAnimationRuntime, disposeGlbAnimationRuntime, setGlbAnimationTime } from "./glbAnimationRuntime.js";
 
-// cadgen's exports of a polished base and a rider (`fixtures/make_fixtures.py`): static, and with
+// cadgen's exports of a polished base and a rider (`fixtures/README.md`): static, and with
 // the clip that slides the rider 60 mm along +X under its pivot.
 function fixture(name) {
   const bytes = readFileSync(new URL(`./fixtures/${name}`, import.meta.url));

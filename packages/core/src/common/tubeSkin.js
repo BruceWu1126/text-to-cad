@@ -7,8 +7,8 @@ import {
   ensureTubeMaterialStage
 } from "./tubeMaterialShader.js";
 
-// A bending tube, played. cadgen works out where a tube is
-// (cadgen/_internal/tube_skin_payload.py): every tube a clip bends arrives refined
+// A bending tube, played. cadgen worked out where a tube is (its tube skins, written beside a
+// STEP's baked clips): every tube a clip bends arrives refined
 // and bound in its component's frame -- each vertex and each edge point carrying
 // its JOINT COORDINATE, the joint below it plus its weight toward the next -- and
 // every key of the tube's track arrives as its joints, an origin and a unit
@@ -40,7 +40,7 @@ const ARRAY_TYPES = {
   edgeClasses: Uint8Array
 };
 
-/** cadgen's tube skins (`tube_skin_payload.py` says what each field is), with every
+/** cadgen's tube skins (the fields below), with every
  * array field a typed view over the payload's bytes. */
 export function decodeTubeSkins(arrayBuffer) {
   const data = new DataView(arrayBuffer);

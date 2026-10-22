@@ -61,12 +61,11 @@ test('observed backend restart retires resource generation and aborts old reads'
   client.dispose();
 });
 
-test('HTTP dependency resolution preserves catalog query versions and static packages', () => {
+test('HTTP dependency resolution preserves catalog query versions', () => {
   const resources = createHttpCadResourceProvider({origin:'https://cad.test'});
   const asset = resources.resolveDependency('/__cad/asset?file=/models/model.gltf&v=abc', '../mesh.bin');
   assert.equal(new URL(asset).searchParams.get('file'), '/mesh.bin');
   assert.equal(new URL(asset).searchParams.get('v'), 'abc');
-  assert.equal(resources.resolveDependency('/hero/assembly', 'part.selectors.json', {kind:'package'}), 'https://cad.test/hero/assembly/part.selectors.json');
 });
 
 test('worker URL tickets retain the configured HTTP cache policy and headers', async t => {
@@ -103,7 +102,6 @@ test('an issued URL worker ticket cannot publish after its resource generation r
   const { scopeCadResources } = await import('./resources.js');
   const glb = await import('../lib/render/glbMeshWorkerClient.js');
   const stl = await import('../lib/render/stlMeshWorkerClient.js');
-  const parts = await import('../lib/parts/partWorkerClient.js');
   const original = globalThis.Worker;
   const workers=[];
   globalThis.Worker = class {
@@ -114,15 +112,8 @@ test('an issued URL worker ticket cannot publish after its resource generation r
     terminate(){}
   };
   t.after(()=>{globalThis.Worker=original;});
-  // A part worker request carries its part's stored mesh; the resource is its selector table.
-  const { encodeMeshFixture, testPartKey } = await import('../lib/parts/__tests__/meshFixtures.js');
-  const identity = { part: testPartKey('d') };
-  const entry = encodeMeshFixture({ positions: new Float32Array(9), normals: new Float32Array(9),
-    indices: new Uint32Array([0, 1, 2]), faceRanges: [{ ord: 1, color: null, indexStart: 0, indexCount: 3 }], edges: [],
-    bounds: { min: [0, 0, 0], max: [0, 0, 0] } }, identity);
-  const loadPart = (url, options) => parts.loadPartInWorker(url, { ...options, identity: { ...identity, tessellationEntry: entry.slice() } });
   for (const [load,retain] of [[glb.loadGlbMeshDataInWorker,glb.retainGlbMeshWorker],
-    [stl.loadStlMeshDataInWorker,stl.retainStlMeshWorker], [loadPart,parts.retainPartWorkerPool]]) {
+    [stl.loadStlMeshDataInWorker,stl.retainStlMeshWorker]]) {
     const lifetime = new AbortController();
     const resources = scopeCadResources(createHttpCadResourceProvider({origin:'https://cad.test'}),lifetime.signal);
     const release=retain();

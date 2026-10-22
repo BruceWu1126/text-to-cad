@@ -1,9 +1,6 @@
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from '@text-to-cad/ui/primitives/context-menu';
 import { AssemblyPartMenuItems } from './xbfMenuItems.js';
 
-// A copy of the STEP renderer's (`step/components/workbench/ModelPartMenu.jsx`); one again at the
-// renderers' migration.
-//
 // A Features tree row's menu: the SAME menu the viewport offers over the node the row stands
 // for -- one descriptor (`controls.menuForNode`) and one set of actions
 // (`controls.partMenuActions`) -- and unlike the viewport's it is available under any tool,

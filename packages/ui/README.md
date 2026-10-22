@@ -85,7 +85,7 @@ src/
   library/           a host's home: the models opened before, to open again, and their pictures
   renderers/
     kit/            the frame every viewer file shares: viewport, tools, panels, Display settings, status
-    step/           STEP: model tree, Position, routines
+    xbf/            an engine document (.xbf) and a STEP: model tree, Position
     robot/          URDF, SRDF and SDF: Position and Links
     glb/, mesh/     GLB, and STL/3MF triangle meshes
     dxf/            2D drawings
@@ -115,25 +115,25 @@ fallback renderer (`fallback: true`) for the types nothing else matches.
 
 ```tsx
 import { FileViewer } from '@text-to-cad/ui/file-viewer';
-import { createStepRenderer } from '@text-to-cad/ui/renderers/step';
 import { createDxfRenderer } from '@text-to-cad/ui/renderers/dxf';
 import { createGlbRenderer } from '@text-to-cad/ui/renderers/glb';
 import { createMeshRenderer } from '@text-to-cad/ui/renderers/mesh';
 import { createRobotRenderer } from '@text-to-cad/ui/renderers/robot';
+import { createXbfRenderer } from '@text-to-cad/ui/renderers/xbf';
 import '@text-to-cad/ui/tokens.css';
 import '@text-to-cad/ui/styles.css';
 
 // One viewer renderer per file family, sharing one client and one preference source.
-const renderers = [createStepRenderer({ client, preferences }), createDxfRenderer({ client, preferences }),
-  createGlbRenderer({ client, preferences }), createMeshRenderer({ client, preferences }),
-  createRobotRenderer({ client, preferences })];
+const renderers = [createDxfRenderer({ client, preferences }), createGlbRenderer({ client, preferences }),
+  createMeshRenderer({ client, preferences }), createRobotRenderer({ client, preferences }),
+  createXbfRenderer({ client, preferences })];
 // The host supplies storage, actions, navigation and environmental ports.
 <FileViewer file={selectedFile} host={host} renderers={renderers}
   state={state} onStateChange={setState} />;
 ```
 
-Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`, `/renderers/step`,
-`/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
+Public entry points include `/host`, `/file-viewer`, `/tab-store`, `/navigation`,
+`/renderers/dxf`, `/renderers/glb`, `/renderers/mesh`, `/renderers/robot`, `/renderers/xbf`, `/renderers/workspace`, `/file-viewer/presentation`, `/file-viewer/empty`,
 `/cad-viewer`, `/catalog`, `/links`, `/library`, `/consent` (the app menu's Share anonymous usage data row and its state), `/loading-icon`, `/utils`, `/primitives/*`,
 `/tokens.css`, and `/styles.css`. `/catalog` (a CAD client as a `FileSource`, the file menu's
 Copy path and Reveal, and the one spelling of an absolute path: `normalizePath`, `baseName`,
@@ -184,12 +184,6 @@ A renderer owns its viewport and resources; the host owns its CAD client. Last
 render-session disposal releases shared worker leases. One viewer cannot replace
 another viewer's cache provider or camera state.
 
-Completed STEP CPU working sets can outlive a viewport in the shared renderer's
-bounded cache. They retain exact decoded component buffers and copy structural
-metadata for each mount; scene objects, controls and pending work are not cached.
-Reuse is scoped to workspace, resource-provider generation and file revision. See
-[CAD resource lifetime](docs/cad-renderer.md) for cache bounds and invalidation.
-
 The host owns where state lives; the package owns what it is. Everything the
 viewer keeps is one tab record (`@text-to-cad/ui/tab-store`: the tab's settings and
 the view of the file on screen — its camera, Display settings and the renderer's own
@@ -232,16 +226,16 @@ may rely on.
 
 ## CAD document updates
 
-The STEP renderer consumes the artifact, cadgen's resolution of its schema-11 `.step.json`
-sidecar, and immutable store views. The page reads no source or sidecar: the catalog supplies
-resolved articulation, Python-baked animation keyframes and authored appearance. Both the tools
-view and its independent Preview draw cadgen's OCCT display meshes and verified selector tables,
-with progressive component loading and topology loaded only when requested.
+A STEP opens in the engine document's renderer (`renderers/xbf`), as an `.xbf` does: the page
+reads what the cadgen engine serves of it through the viewer (`client.engineDocument`,
+`/__cad/xbf`) — its structure and one buffer per part — and reads no source or sidecar. A
+rebuild reaches the view as the engine's next version, and only the parts the edit changed are
+fetched. Both the tools view and its independent Preview draw the engine's meshes.
 The Model tree shares the explorer's row and filter primitives. Its rows are the
-STEP's assemblies and parts, a part a leaf whose faces and edges the viewport picks;
-its expansion controls viewport selection and exact topology, and its filter searches
-names without expanding anything. See [the model tree](docs/cad-renderer.md#step-panels) for selection, isolation
-and demand.
+document's assemblies and parts, a part a leaf whose faces and edges the viewport picks;
+its expansion controls viewport selection, and its filter searches
+names without expanding anything. See [the engine document renderer](docs/cad-renderer.md#engine-document-renderer)
+for selection, isolation and references.
 
 A CAD file's controls are the shell's chrome over the viewport. The tool strip at the top
 centre holds the file's tools — a STEP's Select (its selection filter the chevron after it),
@@ -285,7 +279,7 @@ was left at, and opening a file — again after leaving it, too — fits it.
 
 Authored material color, finish and opacity are read-only in every style. There
 is no Materials editor or persisted material override. See [View styles](docs/render-mode.md) and
-[progressive loading](docs/loading.md).
+[loading](docs/loading.md).
 
 The navbar leads with the C logo, which opens the app's menu: Back to files where the host
 has a home, the person's settings (Share anonymous usage data), Send feedback

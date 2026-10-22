@@ -51,14 +51,12 @@ def plate(document, modelspace) -> None:
 
 
 class DrawingRouteFixture:
-    """``base/project`` behind a live server, plus a store."""
+    """``base/project`` behind a live server."""
 
     def __init__(self) -> None:
         self.base = tempfile.mkdtemp()
         self.root = os.path.join(self.base, "project")
         os.makedirs(self.root)
-        self._previous_cache = os.environ.get("CADGEN_CACHE_DIR")
-        os.environ["CADGEN_CACHE_DIR"] = os.path.join(self.base, "cache")
 
         write_drawing(Path(self.root, "plate.dxf"), plate)
         write_drawing(Path(self.root, "nested", "bracket.dxf"), plate)
@@ -83,10 +81,6 @@ class DrawingRouteFixture:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
-        if self._previous_cache is None:
-            os.environ.pop("CADGEN_CACHE_DIR", None)
-        else:
-            os.environ["CADGEN_CACHE_DIR"] = self._previous_cache
         shutil.rmtree(self.base, ignore_errors=True)
 
     def request(self, target: str):
@@ -254,9 +248,6 @@ class HeldByItsBytes(unittest.TestCase):
     def setUp(self) -> None:
         self.base = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
-        patcher = mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.base / "cache")})
-        patcher.start()
-        self.addCleanup(patcher.stop)
         self.renders = DrawingRenders(hold_seconds=30)
         self.rendered = []
         from cadgen import drawing_payload
@@ -295,7 +286,8 @@ class HeldByItsBytes(unittest.TestCase):
         self.drawing("plate.dxf", 2)  # rewritten: other bytes, drawn again
         self.assertNotEqual(self.answer(first), body)
         self.assertEqual(self.rendered, ["plate.dxf", "plate.dxf"])
-        self.assertFalse((self.base / "cache").exists(), "the route writes no store")
+        self.assertEqual(sorted(path.name for path in self.base.iterdir()), ["copy.dxf", "plate.dxf"],
+                         "the route writes nothing beside the drawings")
 
     def test_it_holds_the_last_answers_asked_for(self) -> None:
         paths = [self.drawing(f"d{index}.dxf", 1 + index) for index in range(HELD + 1)]

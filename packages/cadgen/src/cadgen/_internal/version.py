@@ -6,8 +6,7 @@ beside the package, else the ``.dist-info`` installed beside it. Never the first
 metadata on ``sys.path``: a machine carries several (a stale editable install's egg-info, a
 wheel in site-packages, the checkout's own), and the one ``importlib.metadata`` finds first
 is whichever install happens to sort first, not the code that was imported -- which reported
-an older release as the version of this tree, stamped it into every record's producer and
-every construction key, and showed it in ``cadgen daemon status``.
+an older release as the version of this tree.
 """
 
 from __future__ import annotations

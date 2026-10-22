@@ -1,8 +1,7 @@
-// TEST-ONLY: synthetic stored-mesh bodies (GLB), for tests in any package that
-// need a stored mesh no producer made (a single triangle, an empty or wire-only
-// component, hundreds of distinct components). cadgen is the only producer of
-// real meshes (cadgen/store/meshes.py encode_payload); nothing in the product
-// imports this module. Browser-safe, so browser tests can use it too.
+// TEST-ONLY: synthetic stored-mesh bodies (GLB), for tests that need a stored
+// mesh no producer made (a single triangle, an empty or wire-only component).
+// cadgen's part store wrote the real ones (`tessellationCache.js` reads them);
+// nothing in the product imports this module.
 
 import {
   MESH_EDGE_CLASSES,

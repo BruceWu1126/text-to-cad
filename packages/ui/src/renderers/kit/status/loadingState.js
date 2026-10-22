@@ -11,7 +11,7 @@ function importing(hint) {
   return /\bcompil|\bimport/.test(hint);
 }
 
-// The phases a cadgen build reports (cadgen.coordination.phases); the page emits none of them.
+// The phases a cadgen build reported; the page emits none of them.
 const BUILD_PHASES = new Set(["generate", "package", "components", "finalize", "mesh"]);
 
 // Internal phases stay diagnostic data. The screen describes the user's wait. "Reading model" is
@@ -42,7 +42,7 @@ export function loadingProgress(progress, { finding = false, preparing = false }
   };
 }
 
-// `currentPreview`: what is drawn is the build's own preview revision (loading.md section 5), so the
+// `currentPreview`: what is drawn is the build's own preview revision, so the
 // wait for that build is over even though its write is not; the view says so in its place.
 export function viewerLoadingState({
   busy = false, editPending = false, previousView = false, currentPreview = false,

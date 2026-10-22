@@ -1,4 +1,4 @@
-"""``python -m cadgen.engine``: the ``cadgen xbf`` commands."""
+"""``python -m cadgen.engine VERB ...``: the engine's verbs (``cli.VERBS``) as subcommands."""
 
 import sys
 

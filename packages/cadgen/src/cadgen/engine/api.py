@@ -1,4 +1,4 @@
-"""The engine's verbs as functions, one per command; ``cadgen xbf`` is a thin argparse over them.
+"""The engine's verbs as functions, one per command; ``cli`` is a thin argparse over them.
 
     build(code, *, name=None, xbf=None, step=None, glb=None, stl=None, threemf=None, dxf=None) -> Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
@@ -178,7 +178,7 @@ def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | Non
 
 
 def _target(target: Any) -> tuple[Path, list[str] | None]:
-    """An export's or a snapshot's script source: ``script.py`` or ``script.py::model``."""
+    """A snapshot's script source: ``script.py`` or ``script.py::model``."""
     text = os.fspath(target)
     script, _sep, function = text.partition("::")
     path = Path(script).resolve()
@@ -284,7 +284,9 @@ def build_script(script: Path, functions: list[str] | None = None, *, verify: bo
     return Report(reports, round(wall, 4), fresh)
 
 
-def _source(source: Any) -> dict[str, Any]:
+def _source(source: Any, *, scripts: bool = False) -> dict[str, Any]:
+    """What an export or a snapshot reads: a ``Model``, built code (a ``Built``), a document's path
+    -- or, for a snapshot (``scripts``), a script's model by its path, ``script.py::model``."""
     from cadgen.engine.export import MESHES, SOURCES, ExportRefused
     from cadgen.engine.model import Model
 
@@ -293,14 +295,14 @@ def _source(source: Any) -> dict[str, Any]:
     if isinstance(source, Built):
         return {"code": source.name, "script": str(source.script)}
     text = os.fspath(source)
-    if "::" in text or text.endswith(".py"):
+    if scripts and ("::" in text or text.endswith(".py")):
         script, functions = _target(text)
         return {"script": str(script), "function": functions[0] if functions else None}
     path = Path(text).resolve()
     if path.suffix.lower() in MESHES:
         raise ExportRefused(f"{path.name} is a mesh: it has no B-rep, and no export is made from one")
     if path.suffix.lower() not in SOURCES:
-        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf, a .step, or a script's model")
+        raise ExportRefused(f"{path.name} is no document: an export reads an .xbf or a .step")
     if not path.is_file():
         raise ExportRefused(f"no document {path}")
     return {"path": str(path)}
@@ -310,10 +312,10 @@ def export(source: Any, *destinations: Any, pose: Any = None, part: str | None =
            log: Callable[[str], None] | None = None, daemon: bool = True) -> list[Written]:
     """Write a document to each destination, its kind from its suffix (``.xbf``, ``.step``,
     ``.glb``, ``.stl``, ``.3mf``, and ``.dxf`` of a planar document): the document of an
-    ``.xbf``, of a ``.step`` read into one, of a script's model (``script.py::model`` or a
-    ``Model``, built first) or of built code (a ``Built``). Several destinations read the
-    document once. ``daemon=False`` does it in this process, cold. A GLB carries every motion
-    the document defines, as a clip.
+    ``.xbf``, of a ``.step`` read into one, of a ``Model`` (built first) or of built code (a
+    ``Built``). Several destinations read the document once. ``part`` is one part or assembly as
+    a ref's owner names it (``refs``). ``daemon=False`` does it in this process, cold. A GLB
+    carries every motion the document defines, as a clip.
 
     A ``.cadz`` destination packages an ``.xbf`` with its build closure's source files and,
     unless ``inputs`` is False, its inputs (``export.cadz``), in this process: no document is
@@ -388,7 +390,7 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
             "::" in os.fspath(source) or os.fspath(source).endswith(".py"))):
         if out.suffix.lower() != ".png":
             raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
-        spec = _source(source)
+        spec = _source(source, scripts=True)
         drawing.options(display, camera, grid, width, height, size_profile)  # refused here, before any build
         drawing.parse_annotation(annotation)  # refused here, before any build
         if isinstance(annotation, (str, Path)) and not str(annotation).lstrip().startswith("{"):

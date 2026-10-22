@@ -53,7 +53,7 @@ export function ViewUpdateStatus({ status, onRetry, className }) {
 }
 
 /**
- * The model on screen is a build's own preview revision, not the saved file (loading.md section 5):
+ * The model on screen is a build's own preview revision, not the saved file:
  * said where the update status is said, for as long as it is drawn -- through the rest of the build,
  * and under the alert of one that failed -- and gone once the saved file replaces it in place.
  */

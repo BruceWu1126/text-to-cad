@@ -1,6 +1,6 @@
 // The incremental composer is pure performance: every test here holds it to the path it
-// replaces, value for value, on synthetic component bundles shaped like the ones
-// `joinSelectorTable` produces.
+// replaces, value for value, on synthetic component bundles shaped like a selector table joined
+// to its mesh.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -21,7 +21,7 @@ function random(seed) {
   };
 }
 
-// The selector table's columns (cadgen selector_table.py, schema 3) as `joinSelectorTable` extends
+// The selector table's columns (cadgen's, schema 3) as joining it to its mesh extended
 // them with each face's triangle range and each edge's segment range. Element rows lead with
 // their name; `shape` is the owning solid's ordinal; no row names an occurrence.
 const OCCURRENCE_COLUMNS = ["transform", "bbox", "shapeStart", "shapeCount", "faceStart", "faceCount", "edgeStart", "edgeCount", "vertexStart", "vertexCount"];

@@ -27,7 +27,7 @@ function box([x, y, z], size) {
   const faces = [[0, 2, 1, 0, 3, 2], [4, 5, 6, 4, 6, 7], [0, 1, 5, 0, 5, 4], [2, 3, 7, 2, 7, 6], [1, 2, 6, 1, 6, 5], [3, 0, 4, 3, 4, 7]];
   return new Float32Array(faces.flat().flatMap(index => corners[index]));
 }
-// cadgen's exports of two boxes, a polished red base and a blue rider (`fixtures/make_fixtures.py`):
+// cadgen's exports of two boxes, a polished red base and a blue rider (`fixtures/README.md`):
 // `pair.glb` static, and `pair.slide.glb` with the rider's clip, one named node per occurrence.
 function glbBytes(name = "pair.glb") {
   const bytes = readFileSync(new URL(`../lib/render/fixtures/${name}`, import.meta.url));

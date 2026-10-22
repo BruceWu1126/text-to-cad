@@ -17,7 +17,7 @@ import {
 import { applySceneState } from "./applySceneState.js";
 import { normalizeAnimationClips } from "./animationRuntime.js";
 
-// A hand-built articulation, in the shape cadgen writes (`cadgen.articulation`): an elbow
+// A hand-built articulation, in the shape cadgen writes (`cadgen.robot_payload`): an elbow
 // turning about z at x=10 carrying the forearm, a slider on the forearm carrying the carriage,
 // a cylindrical lead screw, a fixed pin riding the elbow, and a coupling `curl` gearing the
 // elbow and the slider. The player decides nothing: what it reads here is what it plays.

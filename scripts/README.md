@@ -26,16 +26,14 @@ where those files ship, so these scripts are what produces them.
   metadata (which IS committed) rather than writing it. `--clean` removes the
   `_runtime` tree first. Called by `test.yml`, `release-publish.yml`,
   `check-builds.sh`, the pre-commit hook.
-- `cadgen-runtime.sh` — builds the four runtime stages: `--browser` (snapshot
-  browser bundle), `--viewer` (vite build of `apps/web`), `--mcp` (vite build of
-  `apps/mcp`, one `index.html`), `--native` (the file tracer, zig-compiled for
-  every platform; `--native-host` builds this machine's only). `--print-outputs`
-  lists the two directories a bundle always produces; `--check` skips the viewer
-  and MCP stages, which need the apps' `node_modules` and which nothing in a
-  checkout reads. Called by `bundle.sh`, `check-builds.sh`,
-  `test/test-installed.sh`, and `test/common.sh` when a test runner finds a stage
-  it needs missing; pinned by `test_js_runtime_reproducibility.py`. Call it
-  directly only to debug one stage.
+- `cadgen-runtime.sh` — builds the three runtime stages: `--browser` (the
+  headless browser bundle of the viewer's scene), `--viewer` (vite build of
+  `apps/web`), `--mcp` (vite build of `apps/mcp`, one `index.html`).
+  `--print-outputs` lists the directory a bundle always produces; `--check` skips
+  the viewer and MCP stages, which need the apps' `node_modules` and which nothing
+  in a checkout reads. Called by `bundle.sh`, `check-builds.sh` and
+  `test/test-installed.sh`; pinned by `test_js_runtime_reproducibility.py`. Call
+  it directly only to debug one stage.
 - `lib/snapshot_runtime.sh` — sourced by `cadgen-runtime.sh`; esbuilds the browser
   bundle with `three`/`meshoptimizer` pinned from `package-lock.json`.
 
@@ -46,11 +44,11 @@ where those files ship, so these scripts are what produces them.
   runners per job instead.
 - `test-js.sh [--select core|ui|web|mcp|all]` — builds the required shared exports,
   checks dependency boundaries and runs the selected shared JS/UI/web suites.
-  Core includes the pure `bench/viewer-memory/` helper units; `mcp` runs the CAD
-  app's tests and builds it, since its one-file build is half its contract.
+  `mcp` runs the CAD app's tests and builds it, since its one-file build is half
+  its contract.
 - `test-python.sh [--keep-going] [--select GROUP] [--print-weights] [PATH...]`
   — the cadgen package suite, then every skill's suite. Each test FILE runs in
-  its own interpreter against its own temporary store, `CADGEN_TEST_JOBS` at a
+  its own interpreter with an engine daemon of its own, `CADGEN_TEST_JOBS` at a
   time (default: the core count; CI sets 4). `--keep-going` runs all suites and
   reports every failure. PATHs (repo-relative files or directories) narrow the
   run to the test files at or under them — CI passes what the change selected
@@ -63,19 +61,14 @@ where those files ship, so these scripts are what produces them.
     read when a run is slow.
 - `unittest_files.py` — the runner underneath, invoked by `common.sh`. Loads each
   test file under its full dotted path so an import failure names the file, and
-  runs the files `--jobs` at a time, each in its own interpreter with its own
-  store, all on one build daemon the run starts for itself and retires after the
-  last file; run one test file through it too, rather than `python -m unittest`,
-  which would build on your own daemon.
+  runs the files `--jobs` at a time, each in its own interpreter with an engine
+  directory of its own (`CADGEN_ENGINE_DIR`), and stops the daemon a file left
+  there after it; run one test file through it too, rather than
+  `python -m unittest`, which would build on your own daemon.
   A file still running after 15 minutes is hung: it prints every thread's stack
   and fails.
 - `test-global.sh [PATH...]` — `tests/python/global`, the repo-wide policy
-  suite, narrowed to PATHs as `test-python.sh` is. Like `test-python.sh`, it
-  builds the `--browser` runtime stage and this machine's file tracer first when
-  they are absent: the suites read them and a fresh clone has none.
-  `PYTHON_TEST_RUNTIME=0` skips that build for a selection that reads none
-  of it (the skills job's light phase); a test that does read it then fails on the
-  missing file.
+  suite, narrowed to PATHs as `test-python.sh` is.
 - `test-docs.sh` — `npm --prefix apps/docs run check`, then the animated brand
   marks' tests. Called by `test.yml`.
 - `test-api.sh` — `npm --prefix apps/api test`: the version feed's and the
@@ -86,10 +79,10 @@ where those files ship, so these scripts are what produces them.
   exercises cadgen from outside the repo, including `cadgen mcp` serving the
   packaged CAD app over stdio. Called by `test.yml` and `release-publish.yml`.
 - `test-viewer-launch.sh` — launches `cadgen viewer` against the built client and
-  verifies reuse, cold STEP import, display derivation and browser drawing using
-  a tiny test-owned STEP. Called by `test.yml`.
+  verifies reuse, the engine serving a tiny test-owned STEP and the bundled client
+  drawing it. Called by `test.yml`.
 - `test-viewer-browser.sh` — creates tiny inputs and owns its temporary project,
-  viewer and cache. Requires a bundled viewer and npm Playwright Chromium
+  engine daemon and viewer. Requires a bundled viewer and npm Playwright Chromium
   (`npx --no-install playwright install chromium`). Runs the format and camera
   gates, exactly what `test.yml` runs.
   `--only NAME` selects a gate; `--out DIR` retains screenshots.
@@ -118,9 +111,10 @@ where those files ship, so these scripts are what produces them.
 - `sync-version.mjs [--check]` — stamps the derived versions (package, plugin,
   lockfile and `pyproject.toml` metadata, the cadgen pins) from `VERSION`. Called
   by `bump-version.sh`, `bundle.sh`, `test.yml` (Version Check), `release-publish.yml`.
-- `check-wheel-contents.sh` — builds the wheel and asserts the Python modules and
-  `_runtime/{browser,viewer}` are inside it, with bytes identical to the
-  bundled source. The only gate on package data, which fails quietly. Called by
+- `check-wheel-contents.sh` — builds the wheel and asserts the Python modules,
+  the engine's page, environment image and README, and `_runtime/{browser,viewer,mcp}`
+  are inside it, the runtime with bytes identical to the bundled source, and that
+  no engine test golden is. The only gate on package data, which fails quietly. Called by
   `test.yml` and `release-publish.yml`.
 - `plugin_zip.py --out PATH | --check` — builds the plugin ZIP OpenAI's plugin
   submission portal takes (`cad/` holding `.codex-plugin/`, `skills/`,
@@ -207,17 +201,9 @@ studio scene ray-cast into a small equirectangular Radiance image, which the vie
 and the OCCT prototype both light an engine document's regular modes with. Run by
 hand when the studio or the look changes.
 
-`bench/` — manual edit, warm-build and viewer performance commands
-([benchmark usage](bench/cadgen-performance/README.md)), the mesh
-scoreboard ([`bench/mesh-scoreboard/`](bench/mesh-scoreboard/README.md)): every
-solid of a STEP corpus scored on the properties a display mesh must have and on
-cost, the table a mesher change opens its pull request with; and the 0.8.0
-migration's measurements ([`bench/README.md`](bench/README.md)):
-`compare_commits.py` (cold builds and the moonwatch edit loop between two
-commits, interleaved, each in its own worktree) and `occt_parity.py` (the viewer
-against the OCCT prototype, mode by mode). Reports and profiler captures
-are local output under `tmp/`, never committed here. The drivers are manual;
-their `*.test.mjs` helper units run in `test-js.sh`.
+`bench/` — `occt_parity.py`, a manual measurement of the viewer against the OCCT
+prototype, mode by mode ([`bench/README.md`](bench/README.md)). Its reports are
+local output under `tmp/`, never committed here.
 
 ## CI
 

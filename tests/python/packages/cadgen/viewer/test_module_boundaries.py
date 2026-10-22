@@ -96,8 +96,8 @@ class NoKernelInTheServer(unittest.TestCase):
         # A kernel-bearing call has no home in the viewer at all: a document is the engine's to
         # read (``xbf.py`` asks its daemon). A call site here would be a place for the kernel
         # to leak into the server process.
-        entry_points = ("cadgen.step_artifact_cli", "cadgen.engine.build", "cadgen.engine.document",
-                        "cadgen.engine.serve", "cadgen.engine.reader", "cadgen.daemon.executors")
+        entry_points = ("cadgen.engine.build", "cadgen.engine.document", "cadgen.engine.serve",
+                        "cadgen.engine.reader")
         callers = []
         for path in _python_sources():
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

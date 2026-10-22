@@ -2,23 +2,19 @@
 
 No decorator, for the reason :mod:`cadgen.urdf` gives: a world or model
 description is authored, not generated. ``cadgen sdf validate`` is a generated
-MIRROR of :func:`validate` (README law 6).
+MIRROR of :func:`validate`; ``cadgen sdf snapshot`` draws one
+(``cadgen.engine.snapshot``).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from cadgen._internal.snapshot_door import robot_snapshot_verb
 from cadgen.results import ValidationResult
 
-__all__ = ["snapshot", "validate"]
+__all__ = ["validate"]
 
 SUFFIX = ".sdf"
-
-#: ``cadgen sdf snapshot``'s verb: render the robot the browser assembles from
-#: this description's link meshes.
-snapshot = robot_snapshot_verb("sdf")
 
 #: What `gz sdf --check` may be asked to do. Not a parser `choices=` list: a
 #: generated parser derives types, not enumerations, so the verb validates its

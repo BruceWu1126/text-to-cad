@@ -5,14 +5,14 @@ import type { FileSource } from '@text-to-cad/ui/file-viewer';
 import { createCadClient, createHttpPromptFiles } from '@text-to-cad/core/client';
 import { createTabStore, memoryTabRecord, useTabViewerState } from '@text-to-cad/ui/tab-store';
 import type { TabRecordStorage, TabStore } from '@text-to-cad/ui/tab-store';
-import { createStepRenderer } from '@text-to-cad/ui/renderers/step';
 import { createDxfRenderer } from '@text-to-cad/ui/renderers/dxf';
 import { createGlbRenderer } from '@text-to-cad/ui/renderers/glb';
 import { createMeshRenderer } from '@text-to-cad/ui/renderers/mesh';
 import { createRobotRenderer } from '@text-to-cad/ui/renderers/robot';
+import { createXbfRenderer } from '@text-to-cad/ui/renderers/xbf';
 import { createHarnessRenderer } from '@text-to-cad/ui/renderers/shell-harness';
 import type { ViewerHost } from '@text-to-cad/ui/host';
-import type { CadLiveController } from '@text-to-cad/ui/renderers/step';
+import type { LiveViewController } from '@text-to-cad/ui/renderers/xbf';
 import type { ViewerCommands as CadCommands } from '@text-to-cad/ui/renderers/workspace';
 
 // The one file both panes open, by its absolute path, as a CAD Viewer names files: a fixture server
@@ -76,12 +76,12 @@ function workspace(id: string, store: TabStore) {
       return { status: 'added', partIds: context.parts.map(part => part.id) };
     } }
   };
-  let controller: CadLiveController | null = null;
-  const live = { bind(next: CadLiveController) { controller = next; return () => { controller = null; }; } };
+  let controller: LiveViewController | null = null;
+  const live = { bind(next: LiveViewController) { controller = next; return () => { controller = null; }; } };
   // One live binding per pane: whichever renderer the file selects binds the mounted view.
   const services = { client, preferences: store.settings, commands, live };
   // `harness` is test scaffolding for the shell's own tools; it ships nowhere.
-  const renderers = [createStepRenderer(services), createDxfRenderer(services), createGlbRenderer(services), createMeshRenderer(services), createRobotRenderer(services), createHarnessRenderer(services)];
+  const renderers = [createDxfRenderer(services), createGlbRenderer(services), createMeshRenderer(services), createRobotRenderer(services), createXbfRenderer(services), createHarnessRenderer(services)];
   return { client, source, host, renderers, commands, capture, selectReference, get controller() { return controller; } };
 }
 const a = workspace('one', tabStore), b = workspace('two', otherTabStore);
