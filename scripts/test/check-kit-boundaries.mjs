@@ -186,7 +186,7 @@ export const SHARED_SCENE_PIECES = [
 const SHARED_BUILDER_NAMES = ['createGlbScene', 'createMeshScene', 'buildMeshScene', 'createRobotScene', 'buildRobotParts',
   'resolveSceneSurfaceLook'];
 // What the headless render path used to flatten a family with, and must not reach for again.
-const HEADLESS_RENDER_PATH = [HEADLESS_ENTRY, HEADLESS_SCENE, 'packages/core/src/common/renderMeshScene.js', 'packages/core/src/common/source.js'];
+const HEADLESS_RENDER_PATH = [HEADLESS_ENTRY, HEADLESS_SCENE, 'packages/core/src/common/renderMeshScene.js'];
 const MESH_FLATTENERS = ['buildMeshDataFromGlbBuffer', 'buildMeshDataFromStlBuffer', 'buildMeshDataFrom3MfBuffer', 'robotVisualParts', 'buildRobotParts'];
 
 // `import { a, b as c } from '...'` (across lines): each imported NAME with the specifier it came from.

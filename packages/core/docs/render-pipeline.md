@@ -1,12 +1,10 @@
 # Render Pipeline
 
 `@text-to-cad/core` exposes a staged render pipeline for shared viewer, docs, and generated
-snapshot browser-runtime work. A STEP render package on a static host goes (no app draws
-one now: the docs hero plays a GLB, below):
+snapshot browser-runtime work. Mesh data goes:
 
 ```js
-const source = await loadSource(input, sourceOptions);
-const model = buildModel(THREE, source, modelOptions);
+const model = buildModel(THREE, meshData, modelOptions);
 const viewport = renderModel(THREE, model, viewportOptions);
 const result = await captureModel(viewport, captureOptions);
 ```
@@ -21,7 +19,6 @@ render.
 
 The stages keep ownership narrow:
 
-- `loadSource` reads a STEP render package and cadgen-resolved metadata, never model source or sidecar code.
 - `buildModel` owns the CAD object graph, records, selection, clipping,
   materials, topology/display edges, and STEP parameter effects.
 - A family builder owns its scene: `createGlbScene` (`lib/render/glbScene.js`),
@@ -368,61 +365,6 @@ drawn grid's span and the camera's target as pivot). A logarithmic buffer would
 also lose the instanced CAD edges, which write no logarithmic depth: under a
 perspective camera every edge failed its depth test against the surfaces.
 
-### `common/source.js`
-
-```js
-import { loadSource } from "@text-to-cad/core/common/source.js";
-```
-
-`loadSource(input, options)` returns a normalized STEP render source:
-
-```js
-{
-  kind,
-  meshData,
-  selectorRuntime,
-  pose,        // {articulation, values} or null: what buildModel's stepParameters takes
-  animation,   // the baked animation section, or null
-  resolved,
-  cadPath
-}
-```
-
-Accepted input fields:
-
-- `kind`: `step` or `stp`. A GLB, STL, 3MF, URDF, SRDF or SDF, named by its kind or
-  by a URL's extension, is refused by name: it is drawn by its own scene builder
-  (`common/headlessScene.js`), never flattened into mesh data here.
-- `package` or `resolved.package`: the document's tree (`descriptor`, as cadgen serves
-  it for display) and, off a static host, each component's mesh file (`meshUrls`,
-  which `packageSourceFromBaseUrl` maps from a package directory). Each component is
-  drawn from its part's stored mesh, composed in world space. A component cadgen
-  could not mesh carries why (`failure`) and is left out on its own:
-  the rest are drawn, and only when every component failed is the first failure the
-  load's.
-- `meshData`: already-loaded mesh data, in place of a package.
-- `cadPath` or `resolved.inputPath`: CAD path used by STEP selectors.
-- A caller that passes a `resolved` packet together with any source URL must also pass
-  `resolved.inputPath`. Render asset caches are page-lifetime, so a resolved job has to name the
-  source its cache entries belong to; a resolved job without `inputPath` is rejected rather than
-  cached under an unidentified source. Callers with no `resolved` packet render one
-  source per page and need nothing.
-- `selectorRuntime` and `displayEdgeRuntime`: preloaded runtimes when a caller
-  already owns sidecar loading.
-- `kinematics`: pose values for the model's kinematics — a declared preset name,
-  or `{dof: value}`.
-- `resolved.articulation`: cadgen-resolved model articulation
-  (`.step.json`) URL, whose `kinematics` section is compiled here.
-- `quality.tessellation`: explicit STEP tolerances in every mode. When
-  omitted, `preview: true` selects the bounded final mesh rung.
-
-STEP-only options are rejected for non-STEP sources. The old shared `params`
-field is rejected, and so is the retired `stepParameters` spelling; use
-`kinematics`.
-
-A source's `pose` (`{articulation, values}`, or null) is the `stepParameters`
-object `buildModel` accepts.
-
 ### `common/cadScene.js`
 
 ```js
@@ -452,7 +394,7 @@ import {
 }
 ```
 
-`source` can be a `loadSource()` result or raw mesh data. The model owns the
+`source` is mesh data. The model owns the
 Three.js object graph and its mutable state.
 
 `bounds` follows the live pose — what lighting, the floor, shadows and clipping
@@ -757,8 +699,7 @@ The still's tight frame reads a skinned or morphed mesh where the GPU draws it.
 
 Two names, two things, and they are not interchangeable:
 
-* `kinematics` is the POSE INPUT — what `loadSource()` and the snapshot job
-  packet take. A declared preset name, or direct DOF values:
+* `kinematics` is the POSE INPUT — what the snapshot job packet takes. A declared preset name, or direct DOF values:
 
   ```json
   { "drive": 180, "ringVisible": false }
@@ -820,7 +761,7 @@ the engine document it opens as.
 - Keep STEP-only options explicitly STEP-named and reject them for non-STEP
   sources.
 - Dispose viewports and models that you create.
-- Prefer `loadSource -> buildModel -> renderModel -> captureModel` for new
+- Prefer `buildModel -> renderModel -> captureModel`, or a family's scene builder, for new
   shared render code instead of loading assets or constructing render scenes
   inline.
 - Draw a GLB, a mesh file or a robot with its family's scene builder, in the viewer

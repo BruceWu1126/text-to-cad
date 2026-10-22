@@ -1,12 +1,5 @@
-// meshData from a component's stored mesh (`tessellationCache.js` decodes one).
-//
-// Produces the structure buildMeshDataFromGlbBuffer produced from a component
-// GLB, so everything downstream — package composition, themes, selection
-// ranges — is untouched by the artifact swap. Geometry is cadgen's OCCT mesh
-// of the exact surfaces, in CAD units, handed on INDEXED: the mesh's shared
-// vertices, normals and index buffer are the render buffers, never expanded
-// per corner. CAD edges ride beside the triangles as indexed line segments
-// built from the same mesh's edge table and points.
+// CAD edges as indexed line segments, grouped by class: what a tube skin's edge pass draws
+// (`common/tubeSkin.js`), from an edge table and its points.
 
 import { MESH_EDGE_CLASSES, MESH_TABLE_COLUMNS } from "./tessellationCache.js";
 
@@ -19,16 +12,6 @@ export const CAD_EDGE_LINE_CLASSES = Object.freeze(["feature", "tangent", "seam"
 const LINE_CLASS_OF_CODE = Object.freeze(MESH_EDGE_CLASSES.map((name) => (
   name === "none" ? -1 : Math.max(0, CAD_EDGE_LINE_CLASSES.indexOf(name))
 )));
-
-// The render buffers own their memory: a decoded stored mesh is one buffer
-// holding positions, normals, indices, tables and every polyline, and sharing a
-// view would keep the whole entry resident once the meshData outlives it.
-function ownedArray(array, Ctor) {
-  if (array instanceof Ctor && array.byteOffset === 0 && array.byteLength === array.buffer.byteLength) {
-    return array;
-  }
-  return new Ctor(array || []);
-}
 
 // Indexed line segments for the GL_LINES edge pass: every polyline point once
 // (`positions`, xyz), one Uint32 pair per segment (`indices`), both grouped by
@@ -92,60 +75,4 @@ export function buildCadEdgeLines(table, points) {
     }
   }
   return { positions, indices, classRanges };
-}
-
-// `component` is a decoded stored mesh (`decodeComponentTessellation(...).component`). It carries
-// no colour of its own: a part takes its occurrence's, and a face its own.
-export function buildComponentMeshData(component) {
-  if (!component?.positions) throw new TypeError("Display data needs the component's mesh");
-  const vertices = ownedArray(component.positions, Float32Array);
-  const normals = ownedArray(component.normals, Float32Array);
-  // The render pipeline and the selector runtime take u32 indices; a stored mesh of
-  // at most 65,535 vertices keeps u16 ones, widened here as they are copied.
-  const indices = ownedArray(component.indices, Uint32Array);
-  const vertexCount = vertices.length / 3;
-  const triangleCount = indices.length / 3;
-  const cadEdges = buildCadEdgeLines(component.edgeTable, component.edgePoints);
-
-  const bounds = {
-    min: [...component.bounds.min],
-    max: [...component.bounds.max],
-  };
-
-  const part = {
-    id: "part:0",
-    occurrenceId: "",
-    primitiveIndex: 0,
-    name: "",
-    label: "",
-    nodeType: "part",
-    color: null,
-    opacity: 1,
-    hasSourceColors: false,
-    bounds,
-    vertexOffset: 0,
-    vertexCount,
-    triangleOffset: 0,
-    triangleCount,
-    edgeIndexOffset: 0,
-    edgeIndexCount: 0,
-  };
-
-  return {
-    vertices,
-    indices,
-    normals,
-    colors: new Float32Array(0),
-    edge_indices: new Uint32Array(0),
-    cadEdgePositions: cadEdges.positions,
-    cadEdgeIndices: cadEdges.indices,
-    cadEdgeClassRanges: cadEdges.classRanges,
-    bounds,
-    parts: [part],
-    has_source_colors: false,
-    sourceColor: "",
-    // The faces no mesher could cover, which this mesh does not draw: the viewer names the
-    // parts drawn without them.
-    unmeshedFaces: [...(component.unmeshedFaces || [])],
-  };
 }

@@ -43,8 +43,6 @@ service's URL cache. Mounts borrowing the same service retain warm reuse.
 The public low-level core loaders continue to support omitted providers for
 standalone static HTTP callers. This is an explicit transport API default,
 using ordinary fetch and URL-addressed caches; it is not a mutable process-wide
-workspace provider. Shared UI requires its injected service. `loadSource` is the
-static/source composition boundary and creates an HTTP provider when none is
-supplied. Hosts
+workspace provider. Shared UI requires its injected service. Hosts
 requiring custom credentials, native transfer or workspace isolation must pass
 a provider consistently to both loads and peeks.

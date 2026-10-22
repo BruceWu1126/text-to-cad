@@ -164,7 +164,7 @@ Where the mechanism is written:
 
 | Document | Covers |
 |---|---|
-| [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`loadSource` → `buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
+| [docs/render-pipeline.md](docs/render-pipeline.md) | The staged pipeline (`buildModel` → `renderModel` → `captureModel`), the unified display state, the two lighting recipes, the photographic rig, display modes, CAD edges and per-component geometry sharing |
 | [docs/resource-ownership.md](docs/resource-ownership.md) | Ownership and disposal, the selector/BVH demand boundary, recomposition and instancing reuse, the decode worker pool, part-store admission |
 | [docs/tube-skins.md](docs/tube-skins.md) | Playing cadgen's tube skins: the payload, joint blending, GPU and CPU skinning, edges and bounds |
 
