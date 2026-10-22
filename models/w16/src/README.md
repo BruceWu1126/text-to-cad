@@ -5,10 +5,11 @@ museum cutaway with working kinematics. `w16.py` is the one model:
 
 | Script | Writes | What it is |
 | --- | --- | --- |
-| `w16.py` | `XBF/w16.xbf`, `XBF/w16.glb` | The engine: the thirteen systems below, its mechanism (180 joints that turn or slide with the crank, 24 the explode moves), the `crank`, `explode` and `running_reveal` motions (clips of the GLB) |
+| `w16.py` | `XBF/w16.xbf` | The engine: the thirteen systems below, its mechanism (180 joints that turn or slide with the crank, 24 the explode moves), the `crank`, `explode` and `running_reveal` motions (clips of its GLB) |
 | `block.py` ... `ancillaries.py` (13) | nothing | One system each, a `@memo` stage the engine calls in its body |
 
-Build from this folder: `python w16.py`.
+Build from this folder: `python w16.py`. The GLB is exported on demand
+(`cadgen export XBF/w16.xbf w16.glb`); it is 210 MB with the clips.
 
 ```
 python w16.py

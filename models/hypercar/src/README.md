@@ -5,10 +5,11 @@ panels are cut from one master surface. `hypercar.py` is the one model:
 
 | Script | Writes | What it is |
 | --- | --- | --- |
-| `hypercar.py` | `XBF/hypercar.xbf`, `XBF/hypercar.glb` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the explode joints, the `doors`, `showcase` and `explode` motions (clips of the GLB) |
+| `hypercar.py` | `XBF/hypercar.xbf` | The car: 13 system stages, 706 parts, the dihedral doors' mechanism, the explode joints, the `doors`, `showcase` and `explode` motions (clips of its GLB) |
 | `body.py` ... `details.py` (13) | nothing | One system each, a `@memo` stage the car calls in its body |
 
-Build from this folder: `python hypercar.py`.
+Build from this folder: `python hypercar.py`. The GLB is exported on demand
+(`cadgen export XBF/hypercar.xbf hypercar.glb`); it is 49 MB with the clips.
 
 ```
 python hypercar.py
@@ -103,7 +104,7 @@ old one, child for child:
   on the door, along each set's old move RELATIVE to its door (`v_rider - v_door`).
 
 `showcase` and `explode` are motions, functions of time over those 53 joints (the
-old `win` windows on their tours, and the raised-cosine `bump`), which the `@glb`
+old `win` windows on their tours, and the raised-cosine `bump`), which a GLB export
 bakes into clips beside `doors`. The old clips looped; a motion has no loop (a
 player repeats a clip), and each of these ends where it starts, so it repeats
 seamlessly. Every part moves as the old clips moved it, within

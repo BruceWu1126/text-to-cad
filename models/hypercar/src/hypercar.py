@@ -22,15 +22,16 @@ The assembly tree is grouped BY SYSTEM -- thirteen sibling stages under
     o1.12 hinge             dihedral synchro-helix door mechanism
     o1.13 details           mirrors, badges, filler, vents, fasteners
 
-The car is one xbf (``XBF/hypercar.xbf``) and one GLB (``XBF/hypercar.glb``),
-whose clips are the three motions below: ``doors``, ``showcase`` and ``explode``.
+The car is one xbf (``XBF/hypercar.xbf``), holding the three motions below: ``doors``,
+``showcase`` and ``explode``. Its GLB, whose clips they are, is exported on demand
+(``cadgen export XBF/hypercar.xbf hypercar.glb``).
 """
 
 from __future__ import annotations
 
 import math
 
-from cadgen.engine import configuration, glb, motion, xbf
+from cadgen.engine import configuration, motion, xbf
 
 import build123d as bd
 
@@ -445,7 +446,6 @@ def _explode(t):
 
 
 @xbf(out="../XBF/hypercar.xbf")
-@glb(out="../XBF/hypercar.glb")
 def hypercar():
     groups = [system() for system in SYSTEMS]
     car = bd.Compound(children=groups, label="mid_engine_hypercar")

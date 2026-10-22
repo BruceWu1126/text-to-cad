@@ -3,9 +3,9 @@
 Thirteen systems, each a `@memo` stage in its own file under `src/`, composed
 here by CALLING them (occurrence order = the original's explode order). The
 museum section is one flag, `lib/spec.py:SECTIONED`, read by every system: the
-cutaway is the model's own geometry. The engine is one xbf (`XBF/w16.xbf`) and
-one GLB (`XBF/w16.glb`), whose `crank`, `explode` and `running_reveal` clips are the
-motions below.
+cutaway is the model's own geometry. The engine is one xbf (`XBF/w16.xbf`), holding
+the `crank`, `explode` and `running_reveal` motions below; its GLB, whose clips they
+are, is exported on demand (`cadgen export XBF/w16.xbf w16.glb`).
     block          block + main caps + shells
     crank          crankshaft, damper, flywheel
     pistons        16 x piston/rings/pin/circlips/rod/cap/bolts/shells
@@ -23,7 +23,7 @@ motions below.
 
 from __future__ import annotations
 
-from cadgen.engine import glb, motion, track, xbf
+from cadgen.engine import motion, track, xbf
 
 import build123d as bd
 
@@ -63,7 +63,6 @@ SYSTEMS = [
 
 
 @xbf(out="../XBF/w16.xbf")
-@glb(out="../XBF/w16.glb")
 def w16():
     systems = [system() for system in track(SYSTEMS, label=lambda system: system.__name__)]
     engine = bd.Compound(children=systems, label="w16")
