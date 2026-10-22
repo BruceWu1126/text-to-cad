@@ -7,7 +7,7 @@ pitch, elbow roll, wrist pitch, wrist yaw and the gripper jaw.
 
 ```text
 src/
-  tom.py            the model -> XBF/tom.xbf (`cadgen xbf export` writes the STEP)
+  tom.py            the model -> XBF/tom.xbf (`cadgen export` writes the STEP)
   stages/           rev4 derivation chain: tom2, tom2_side_mounted_elbow, tom2_symmetric_yokes
                     are @memo stages tom calls; the other stages are plain functions
   base/             common_base_plate (@memo part), legacy/base_clamp (rev3 clamp datums)
@@ -52,7 +52,7 @@ reuse the daemon's read):
 for p in base_link/shoulder_yaw_servo base_link/m8_thumbscrew shoulder_yaw_assembly \
          shoulder_pitch_assembly/shoulder_pitch_assembly_screws upper_arm_assembly \
          elbow_assembly forearm_assembly gripper/gripper_screws; do
-  cadgen xbf export recovered/tom_rev3/tom.step parts/${p##*/}.xbf --part $p
+  cadgen export recovered/tom_rev3/tom.step parts/${p##*/}.xbf --part $p
 done
 ```
 
@@ -81,7 +81,7 @@ replays from the worker's memory (1 s), and a restarted daemon takes the file wh
 
 - `from cadgen import ...` -> `build123d`, `cadgen.engine` (`xbf`, `memo`, `read_step`);
   `@step(out='…/STEP/x.step', kinematics=…, animation=…)` -> `@xbf(out='../XBF/tom.xbf')`
-  on `tom` alone (`cadgen xbf export` writes the STEP from it). The six functions `tom`
+  on `tom` alone (`cadgen export` writes the STEP from it). The six functions `tom`
   reaches that were their own models -- the stages `tom2`, `tom2_side_mounted_elbow` and
   `tom2_symmetric_yokes`, and the parts `gripper_frame`, `camera_payload` and
   `common_base_plate` -- are `@memo`: one xbf, and an edit to the root (its layout

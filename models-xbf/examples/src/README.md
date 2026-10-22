@@ -17,7 +17,7 @@ inputs as they are, without materials.
 
 Each model declares its xbf alone. The import reads fixed STEP inputs committed in
 `../STEP/`, exported once from the enclosure and the fixture; no model writes them
-(re-export one with `cadgen xbf export ../XBF/NAME.xbf ../STEP/NAME.step`).
+(re-export one with `cadgen export ../XBF/NAME.xbf ../STEP/NAME.step`).
 Build from this folder, in any order: each script builds every model it defines.
 
 ```

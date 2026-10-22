@@ -38,6 +38,6 @@ The `drive` coupling gears them all off one input, in input revolutions
 viewer's Position shows its slider and none of its joints', and a pose sets them
 through it alone. The old `quarter_output` and `full_output` poses are
 configurations naming it (`rest` is as built):
-`cadgen xbf snapshot ../XBF/qdd_actuator.xbf q.png --pose '{"drive": 2.25}'`.
+`cadgen snapshot ../XBF/qdd_actuator.xbf q.png --pose '{"drive": 2.25}'`.
 
 Not ported: the `drive`/`inspect`/`teardown` animation clips.
