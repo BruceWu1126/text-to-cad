@@ -140,12 +140,14 @@ mimic follower is refused by name (a follower follows its leader). Each link is
 drawn in one colour of the Parts palette.
 
 A visual is a `box`, `cylinder`, `sphere` or `capsule`, which cadgen meshes itself,
-or a mesh `<uri>` naming an STL, 3MF or GLB file beside the description. A `plane`,
-`heightmap`, `polyline` or `ellipsoid`, a mesh in another format, a `model://`,
-`package://` or remote URI, a missing file, a pose in a rotation format other than
-`euler_rpy`, and a joint the stills cannot pose (a `ball` or `universal` joint) are
-refused by name. A link mesh that cannot be loaded fails the snapshot rather than
-leaving the link out.
+or a mesh `<uri>` naming an STL, 3MF or GLB file beside the description, or a
+`package://NAME/...` file of the ROS package the description is in (the nearest
+folder above it named NAME, or holding a `package.xml` that names it). A `plane`,
+`heightmap`, `polyline` or `ellipsoid`, a mesh in another format, a `model://` or
+remote URI, a package no folder above the description is, a missing file, a pose in a
+rotation format other than `euler_rpy`, and a joint the stills cannot pose (a `ball`
+or `universal` joint) are refused by name. A link mesh that cannot be loaded fails the
+snapshot rather than leaving the link out.
 
 A normal snapshot uses Solid mode and Light appearance. `--display` takes any of the
 viewer's display modes (`parts`, `xray`, `hidden-line`, `wireframe`, ...),

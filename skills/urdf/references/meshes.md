@@ -31,12 +31,12 @@ Checklist after export, before authoring:
 ## Reference Forms
 
 - **Local relative paths** (`3MF/forearm_link.3mf`) resolve from the `.urdf` file's directory. Preferred for a robot kept in a project tree — the bundled validator verifies these files exist.
-- **`package://name/path` URIs** are for ROS-package consumers. The validator checks syntax only and warns that resolution is consumer-specific (`--packages NAME=PATH` resolves them for the validator alone); confirm the consuming environment resolves the package root as expected.
+- **`package://name/path` URIs** are for ROS-package consumers. The validator checks syntax only and warns that resolution is consumer-specific (`--packages NAME=PATH` resolves them for the validator alone); confirm the consuming environment resolves the package root as expected. The CAD Viewer and `cadgen snapshot` take the nearest folder above the `.urdf` named `name`, or holding a `package.xml` that names it, as the package root, so keep the description inside its package folder.
 - Remote URIs are accepted with warnings; avoid them for durable fixtures.
 
 Keep mesh files under the same model directory tree as the URDF, so the file and its assets move together.
 
-What the CAD Viewer and `cadgen snapshot` draw is narrower than what the validator accepts: a local STL, 3MF or GLB file beside the description, and the `box`, `cylinder` and `sphere` primitives, which cadgen meshes itself. A `.dae`, `.obj` or `.ply` mesh, a `package://` or remote URI, or a missing file is refused by name before anything renders — convert the mesh, or keep a rendering copy of the robot whose meshes sit beside it.
+What the CAD Viewer and `cadgen snapshot` draw is narrower than what the validator accepts: a local STL, 3MF or GLB file, beside the description or in its package (`package://`, above), and the `box`, `cylinder` and `sphere` primitives, which cadgen meshes itself. A `.dae`, `.obj` or `.ply` mesh, a remote URI, a package no folder above the description is, or a missing file is refused by name before anything renders — convert the mesh, or keep a rendering copy of the robot whose meshes sit beside it.
 
 ## Visual vs Collision Assets
 

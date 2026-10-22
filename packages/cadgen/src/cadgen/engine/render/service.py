@@ -60,7 +60,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-__all__ = ["Held", "Renders", "draw_here", "frame_camera", "holder", "main"]
+__all__ = ["Held", "Renders", "draw_here", "draw_here_each", "frame_camera", "holder", "main", "matte", "picture"]
 
 
 def _matrix(values: list[float]) -> np.ndarray:
@@ -75,13 +75,15 @@ def _paints(prototype: dict[str, Any]) -> str:
 
 
 def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length: float,
-                 padding: float = 0.04) -> dict[str, Any]:
+                 padding: float = 0.04, tight: bool = True) -> dict[str, Any]:
     """A camera object (the snapshot contract's: ``position``, ``target``, ``up``, ``direction``,
     ``preset``, ``orthographicHalfHeight``, ``zoom``) on ``scene``'s view, fitted as the snapshot
     page fits one with its tight frame on (``fitOrthographicCamera`` then
     ``applyTightOrthographicFrame``, ``fitPerspectiveCamera``): its direction, up and target, then
-    the frame on every placed vertex. (A view's own camera drawn exactly -- ``--camera authored``
-    -- is ``Scene.frame``'s.) Sets ``scene.camera`` as ``Scene.frame`` does, for the overlays."""
+    the frame on every placed vertex, ``padding`` of the picture each side; ``tight`` off, on the
+    drawn parts' box. (A view's own camera drawn exactly -- ``--camera authored``, a job's view
+    with its tight frame off -- is ``Scene.frame``'s.) Sets ``scene.camera`` as ``Scene.frame``
+    does, for the overlays."""
     from OCP.Graphic3d import Graphic3d_Camera
     from OCP.gp import gp_Dir, gp_Pnt
 
@@ -93,7 +95,7 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
 
     preset = PRESETS.get(str(spec.get("preset") or "iso").lower(), PRESETS["iso"])
     position, target = vector("position"), vector("target")
-    points = scene.placed_points()
+    points = scene.placed_points() if tight else scene.box_corners()
     low, high = points.min(0), points.max(0)
     centre = (low + high) / 2
     radius = max(float(np.linalg.norm(high - low)) / 2, 1.0)
@@ -157,6 +159,73 @@ def frame_camera(scene: Any, spec: dict[str, Any], projection: str, focal_length
     if scene.studio:
         scene._studio_backdrop()  # Preview's sweep is shaded for the camera
     return scene.camera
+
+
+# --- the picture -------------------------------------------------------------------------------
+
+
+def _linear(srgb: np.ndarray) -> np.ndarray:
+    return np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+
+
+def _srgb(linear: np.ndarray) -> np.ndarray:
+    return np.where(linear <= 0.0031308, linear * 12.92, 1.055 * np.power(linear, 1 / 2.4) - 0.055)
+
+
+def matte(canvas: Any, paint: Callable[[np.ndarray], None] | None,
+          backdrop: Callable[[Any], None]) -> np.ndarray:
+    """The view drawn on nothing (a job's ``output.transparent``), as RGBA bytes: OCCT's backdrop is a
+    fill it draws whole, so the view is drawn twice -- on black, then on white (``backdrop`` sets one,
+    and None its own again), each painted -- and each pixel's coverage read from the two in linear
+    light (where OCCT blends), its colour the black frame's over that coverage."""
+    frames = []
+    try:
+        for colour in ((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)):
+            backdrop(colour)
+            frame = canvas.frame()
+            if paint is not None:
+                paint(frame)
+            frames.append(_linear(frame.astype(np.float64) / 255.0))
+    finally:
+        backdrop(None)
+    black, white = frames
+    alpha = np.clip(1.0 - (white - black).mean(-1), 0.0, 1.0)
+    colour = np.clip(black / np.maximum(alpha, 1e-6)[..., None], 0.0, 1.0)
+    return np.rint(np.concatenate([_srgb(colour), alpha[..., None]], -1) * 255).astype(np.uint8)
+
+
+def finished(still: Any) -> dict[str, Any]:
+    """How a picture was finished, for its report: on nothing, supersampled; nothing when neither."""
+    return {**({"transparent": True} if still.transparent else {}),
+            **({"renderScale": still.scale} if still.scale != 1 else {})}
+
+
+def picture(canvas: Any, paint: Callable[[np.ndarray], None] | None, still: Any,
+            backdrop: Callable[[Any], None]) -> bytes:
+    """The view drawn as a still asks it, as PNG bytes: painted over (``paint``), on nothing when
+    it is ``transparent`` (``matte``), and -- drawn ``scale`` times its size, supersampled -- brought
+    down to its size, each pixel the mean of those it covers. What the engine draws in pixels (ink,
+    text, Measure, the grid) is drawn as heavy against the picture at any scale; OCCT's GL lines
+    (edges, a drawing's hairlines) stay one pixel of the larger frame, so they come out finer: a
+    core-profile context draws no line wider than a pixel."""
+    from PIL import Image
+
+    from cadgen.engine.render.context import encode
+
+    if still.transparent:
+        frame = matte(canvas, paint, backdrop)
+    else:
+        frame = canvas.frame()
+        if paint is not None:
+            paint(frame)
+    width, height = still.size
+    if frame.shape[1] != width or frame.shape[0] != height:
+        if frame.shape[2] == 4:  # averaged premultiplied, so no colour of nothing bleeds into an edge
+            image = Image.fromarray(frame, "RGBA").convert("RGBa").resize((width, height), Image.Resampling.BOX)
+            frame = np.asarray(image.convert("RGBA"))
+        else:
+            frame = np.asarray(Image.fromarray(frame, "RGB").resize((width, height), Image.Resampling.BOX))
+    return encode(frame)
 
 
 # --- a document, held ----------------------------------------------------------------------------
@@ -278,10 +347,10 @@ class Held:
         refusals(still, shown, self.path.name)
         hidden = hidden_instances(shown, still.display, self.path.name)
         clock = time.perf_counter()
-        scene, fresh = self._scene(still.preview, still.size)
+        scene, fresh = self._scene(still.preview, still.drawn)
         if fresh:
             timings["sceneMs"] = round((time.perf_counter() - clock) * 1000)
-        scene.canvas.width, scene.canvas.height = still.size
+        scene.canvas.width, scene.canvas.height = still.drawn  # supersampled, brought down after (``picture``)
         # The pose moves the instances: the structure and matrices the scene places them by.
         scene.structure, scene.matrices = shown, [_matrix(instance["matrix"]) for instance in shown["instances"]]
         scene.hidden = hidden  # hidden and isolated parts: every look leaves them out
@@ -300,13 +369,13 @@ class Held:
         focal_length = float(lens.get("focalLength") or FOCAL_LENGTH)
         camera = still.camera if still.camera is not None else "iso"
         if isinstance(camera, str):
-            scene.frame(camera, projection, focal_length)
+            scene.frame(camera, projection, focal_length, padding=still.padding, tight=still.tight)
             name = camera
         elif still.exact:
             scene.frame(camera, projection, focal_length)  # a view's own camera, placed as it is
             name = "authored"
         else:
-            frame_camera(scene, camera, projection, focal_length)
+            frame_camera(scene, camera, projection, focal_length, still.padding, still.tight)
             name = str(camera.get("name") or "custom")
         if display.get("grid"):
             scene.grid(True)
@@ -322,11 +391,12 @@ class Held:
             scene.restage()  # the floor's shadow follows a pose or Explode
         timings["frameMs"] = round((time.perf_counter() - clock) * 1000)
         clock = time.perf_counter()
-        data = scene.canvas.png(scene.painter())
+        data = picture(scene.canvas, scene.painter(), still, scene.backdrop)
         timings["drawMs"] = round((time.perf_counter() - clock) * 1000)
         timings["renderMs"] = round((time.perf_counter() - started) * 1000)
         unmeshed = {p.get("name") or p["key"]: p["unmeshed"] for p in self.structure["prototypes"] if p.get("unmeshed")}
-        return data, {"width": still.size[0], "height": still.size[1], "camera": name, "projection": projection,
+        return data, {"width": still.size[0], "height": still.size[1], **finished(still), "camera": name,
+                      "projection": projection,
                       "displayMode": display.get("mode", "solid"), "preview": still.preview,
                       "parts": len(self.structure["prototypes"]), "instances": len(shown["instances"]),
                       "unmeshed": unmeshed, "pose": posed, "exploded": exploded_amount(display) or None,
@@ -357,6 +427,13 @@ def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes,
     """A document drawn in this process: served by a server of its own (from ``source``, a build's
     document in this process's memory, over its one mesh cache; else read from its file), every
     part meshed there, drawn once. A file no document (``foreign``) is read by its reader, here."""
+    [drawn] = draw_here_each(document, [still], source=source)
+    return drawn
+
+
+def draw_here_each(document: Path, stills: list[Any], *, source: Any = None) -> list[tuple[bytes, dict[str, Any]]]:
+    """``draw_here`` for several stills of one document (a job's pictures of it): served, read and
+    meshed once, each still drawn from what was held."""
     from cadgen.engine.serve import MESHES, Server
 
     started = time.perf_counter()
@@ -364,11 +441,12 @@ def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes,
         held = holder(document)
         try:
             opened = held.open()
-            data, report = held.draw(still)
+            drawn = [held.draw(still) for still in stills]
         finally:
             held.close()
-        report["timings"] = {"readMs": opened["readMs"], **report["timings"]}
-        return data, report
+        for _data, report in drawn:
+            report["timings"] = {"readMs": opened["readMs"], **report["timings"]}
+        return drawn
     if source is not None:
         server = Server(port=0, mesh_mode="inline", cache=MESHES)
         ident = server.put(document, source.structure,
@@ -389,12 +467,13 @@ def draw_here(document: Path, still: Any, *, source: Any = None) -> tuple[bytes,
     try:
         timings = {"serveMs": round((served - started) * 1000), "meshMs": round((time.perf_counter() - served) * 1000)}
         held.hold(structure, buffers)
-        data, report = held.draw(still)
+        drawn = [held.draw(still) for still in stills]
     finally:
         held.close()
-    report["timings"] = {**timings, **report["timings"]}
-    report["mesh"] = {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")}
-    return data, report
+    for _data, report in drawn:
+        report["timings"] = {**timings, **report["timings"]}
+        report["mesh"] = {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")}
+    return drawn
 
 
 # --- the render process ------------------------------------------------------------------------------
@@ -516,7 +595,7 @@ class RenderProcess:
     first snapshot; the version it holds and the parts whose meshes it was sent."""
 
     def __init__(self, path: Path, environment: dict[str, str]) -> None:
-        from cadgen.engine.daemon import engine_root
+        from cadgen.engine.daemon import engine_root, windowless
 
         env = dict(environment)
         root = engine_root()
@@ -525,7 +604,8 @@ class RenderProcess:
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         self.path = Path(path)
         self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.render.service"],
-                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+                                        **windowless())
         self.lock = threading.Lock()
         self.version: str | None = None
         self.keys: set[str] = set()

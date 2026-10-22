@@ -161,6 +161,65 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn("display.exploded", done.stderr)
         self.assertFalse(out.exists())
 
+    def test_an_out_that_is_a_folder_is_given_the_source_s_stem_and_the_time(self) -> None:
+        import re
+
+        from cadgen.engine import api
+        from cadgen.engine.snapshot import picture_path
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-out-folder-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        timed = r"_\d{8}T\d{6}Z\.png"
+        self.assertRegex(picture_path(folder, self.document).name, rf"^stand{timed}$")  # a folder that is there
+        fresh = picture_path(f"{folder / 'stills'}{os.sep}", self.document)  # a separator: a folder to be
+        self.assertEqual(fresh.parent, folder / "stills")
+        self.assertRegex(picture_path(folder, f"{folder / 'stand.py'}::post").name, rf"^post{timed}$")  # a model's name
+        self.assertEqual(picture_path(folder / "named.png", self.document), folder / "named.png")
+        # A packet's pictures share one time, told apart by their job and output where they have several.
+        self.assertEqual(picture_path(folder, self.document, at="T", job=(1, 3), output=(0, 2)).name, "stand_j2_1_T.png")
+        self.assertEqual(picture_path(folder, self.document, at="T", job=(0, 1), output=(0, 1)).name, "stand_T.png")
+        (folder / "file.png").write_bytes(b"x")
+        with self.assertRaisesRegex(SnapshotRefused, "names a folder"):
+            picture_path(f"{folder / 'file.png'}{os.sep}", self.document)
+        # The verb writes there, and says where.
+        gl()
+        drawn = api.snapshot(self.document, f"{folder / 'stills'}{os.sep}", width=160, height=120, daemon=False)
+        self.assertEqual(drawn.path.parent, folder / "stills")
+        self.assertRegex(drawn.path.name, rf"^stand{timed}$")
+        self.assertEqual((Path(drawn.report["output"]), drawn.path.read_bytes()[:4]), (drawn.path, b"\x89PNG"))
+
+    def test_a_failure_under_json_is_its_envelope_on_stdout(self) -> None:
+        """Under --json a verb says its failure as ``{"ok": false, "error": ...}`` on stdout, the result's
+        channel, and exits 1; without it, its words on stderr: 2 for a request refused before anything ran."""
+        import contextlib
+        import io
+
+        from cadgen.engine import cli
+        from cadgen.engine.snapshot import main as snapshot_main
+
+        def run(call) -> tuple[int, str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = call()
+            return status, out.getvalue(), err.getvalue()
+
+        out = str(self.folder / "enveloped.png")
+        for argv, said, status in ((["snapshot", str(self.folder / "missing.xbf"), out], "no document", 2),
+                                   (["snapshot", str(self.document), out, "--display", "sideways"], "sideways", 2),
+                                   (["build", "result = 1", "--xbf", "a.txt"], "must end in .xbf", 1)):
+            with self.subTest(argv=argv):
+                code, printed, err = run(lambda: cli.main([*argv, "--json"]))
+                found = json.loads(printed)
+                self.assertEqual((code, set(found), found["ok"], err), (1, {"ok", "error"}, False, ""))
+                self.assertIn(said, found["error"])
+                code, printed, err = run(lambda: cli.main(argv))
+                self.assertEqual((code, printed), (status, ""))
+                self.assertIn(said, err)
+        # A format's own snapshot: what it does not draw, refused in the same envelope.
+        code, printed, _err = run(lambda: snapshot_main([str(self.document), out, "--json"], prog="cadgen dxf snapshot",
+                                                        suffixes=(".dxf",)))
+        self.assertEqual((code, json.loads(printed)), (1, {"ok": False, "error": f"{self.document} is not a .dxf file"}))
+
     def test_explode_an_annotation_and_measurements_are_asked_for_by_flags_and_checked(self) -> None:
         self.assertEqual(parse_display("exploded=0.6", grid=False), {"exploded": {"enabled": True, "amount": 0.6}})
         self.assertEqual(parse_display("hidden-line,exploded", grid=True),
@@ -224,6 +283,148 @@ class SnapshotTest(unittest.TestCase):
                                          "color": "#0000ff"}])
         self.assertEqual((report["exploded"], report["width"], report["height"]), (0.6, 240, 180))
         self.drawn(out, (240, 180))
+
+    def packet(self, folder: Path) -> tuple[dict, dict]:
+        """A Quick Edit packet of two views, as the viewer writes one, and the first view's camera: the
+        view the ink was drawn in (a peg hidden), and a top view written twice -- into a folder, and
+        from the front -- on nothing, padded wide and supersampled."""
+        camera = {"position": [80, -60, 50], "target": [0, 0, 4], "up": [0, 0, 1], "orthographicHalfHeight": 25}
+        mark = {"id": "m1", "kind": "stroke", "part": "i0", "points": [-10, 0, 2, 10, 0, 2], "color": "#ff00ff",
+                "width": 4, "view": "view 1"}
+        packet = {"input": str(self.document), "annotation": {"units": "mm", "parts": {}, "marks": [mark]},
+                  "measurements": [{"start": [-20, -10, 2], "end": [20, -10, 2], "label": "40.0 mm", "color": "#0000ff"}],
+                  "hidden": ["peg.1"], "jobs": [
+                      {"camera": camera, "display": {"mode": "solid", "camera": {"projection": "orthographic"},
+                                                     "hidden": ["peg.1"]},
+                       "output": {"padding": 0, "tightFrame": False},
+                       "outputs": [{"path": str(folder / "view-1.png"), "label": "view 1", "width": 240, "height": 180}]},
+                      {"camera": "top", "display": {"mode": "xray"},
+                       "output": {"padding": 0.15, "transparent": True, "renderScale": 2},
+                       "outputs": [{"path": f"{folder / 'tops'}{os.sep}", "width": 200, "height": 150},
+                                   {"path": str(folder / "front.png"), "camera": "front", "width": 160, "height": 120}]}]}
+        return packet, camera
+
+    def test_a_job_replays_each_view_of_a_packet_into_every_output_it_names(self) -> None:
+        """``--job``: each view drawn as the snapshot draws it (the first, exactly as ``--annotation PACKET
+        --camera authored`` with its display draws it), the packet's ink and dimensions over each, every output
+        written at its job's settings: on nothing (its backdrop's colour matted out), supersampled to its size."""
+        import numpy as np
+        from PIL import Image
+
+        from cadgen.engine import cli
+
+        gl()
+        folder = Path(tempfile.mkdtemp(prefix="engine-job-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        packet, _camera = self.packet(folder)
+        path = folder / "stand-1.snapshot.json"
+        path.write_text(json.dumps(packet), encoding="utf-8")
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", "--job", str(path), "--no-daemon"],
+                              env={**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_MESH": "inline"},
+                              capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        [top] = (folder / "tops").iterdir()
+        self.assertRegex(top.name, r"^stand_j2_1_\d{8}T\d{6}Z\.png$")
+        self.assertEqual([line.split(" (")[0] for line in done.stdout.splitlines()],
+                         [f"wrote {os.path.relpath(found)}" for found in (folder / "view-1.png", top, folder / "front.png")])
+
+        def rgba(found: Path) -> np.ndarray:
+            with Image.open(found) as image:
+                return np.asarray(image.convert("RGBA")).astype(int)
+
+        # The view the ink was drawn in: the snapshot's own picture of it, its peg left out.
+        alone = folder / "alone.png"
+        snapshot(self.document, alone, display=parse_display(json.dumps(packet["jobs"][0]["display"]), grid=False),
+                 camera="authored", daemon=False, annotation=packet["annotation"], annotation_source=packet,
+                 measurements=packet["measurements"])
+        self.assertLess(np.abs(rgba(folder / "view-1.png") - rgba(alone)).max(), 3)
+        everything = folder / "everything.png"
+        snapshot(self.document, everything, display={"mode": "solid", "camera": {"projection": "orthographic"}},
+                 camera="authored", daemon=False, annotation=packet["annotation"], annotation_source=packet)
+        self.assertGreater(np.abs(rgba(folder / "view-1.png") - rgba(everything)).max(), 60, "the hidden peg is drawn")
+        # On nothing, at its size: what is not the model is clear, and over the look's backdrop it is the
+        # picture drawn on that backdrop.
+        for found, size in ((top, (200, 150)), (folder / "front.png", (160, 120))):
+            picture = rgba(found)
+            self.assertEqual((picture.shape[1], picture.shape[0]), size)
+            self.assertEqual((picture[0, 0, 3], picture[..., 3].max() > 200), (0, True), found.name)
+        opaque = folder / "opaque.json"
+        job = {**packet["jobs"][1], "output": {"padding": 0.15, "renderScale": 2},
+               "outputs": [{"path": str(folder / "opaque.png"), "width": 200, "height": 150}]}
+        opaque.write_text(json.dumps({"input": str(self.document), "jobs": [job]}), encoding="utf-8")
+        self.assertEqual(cli.main(["snapshot", "--job", str(opaque), "--no-daemon", "--json"]), 0)
+        drawn, clear = rgba(folder / "opaque.png")[..., :3], rgba(top)
+
+        def linear(srgb: np.ndarray) -> np.ndarray:
+            srgb = srgb / 255
+            return np.where(srgb <= 0.04045, srgb / 12.92, ((srgb + 0.055) / 1.055) ** 2.4)
+
+        alpha = clear[..., 3:] / 255  # laid over the backdrop in linear light, as OCCT lays its X-ray faces
+        over = linear(clear[..., :3]) * alpha + linear(drawn[0, 0]) * (1 - alpha)
+        over = np.where(over <= 0.0031308, over * 12.92, 1.055 * over ** (1 / 2.4) - 0.055) * 255
+        self.assertLess(np.abs(over - drawn).mean(), 1.0)
+        # Padded wide, the model is drawn smaller than with no padding.
+        tight = folder / "tight.json"
+        tight.write_text(json.dumps({"input": str(self.document), "jobs": [{**job, "output": {"padding": 0}, "outputs": [
+            {"path": str(folder / "tight.png"), "width": 200, "height": 150}]}]}), encoding="utf-8")
+        self.assertEqual(cli.main(["snapshot", "--job", str(tight), "--no-daemon"]), 0)
+
+        def reach(found: Path) -> int:
+            picture = rgba(found)[..., :3]
+            drawn_x = np.nonzero((np.abs(picture - picture[0, 0]).sum(-1) > 30).any(0))[0]
+            return int(drawn_x.max() - drawn_x.min())
+        self.assertLess(reach(folder / "opaque.png"), reach(folder / "tight.png") * 0.85)
+
+    def test_a_job_is_checked_before_anything_renders(self) -> None:
+        from cadgen.engine import cli
+        from cadgen.engine.snapshot import job_pictures
+
+        folder = Path(tempfile.mkdtemp(prefix="engine-job-refused-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        packet, _camera = self.packet(folder)
+        pictures = job_pictures(packet)
+        self.assertEqual([(out.name, still.exact, still.padding, still.tight, still.transparent, still.scale, still.size)
+                          for _document, out, still in pictures][::2],
+                         [("view-1.png", True, 0.0, False, False, 1.0, (240, 180)),
+                          ("front.png", False, 0.15, True, True, 2.0, (160, 120))])
+        self.assertEqual(pictures[0][2].display["hidden"], ["peg.1"])
+        self.assertEqual([still.annotation for _document, _out, still in pictures], [packet["annotation"]] * 3,
+                         "the packet's ink, over every view")
+        # The flags override every job: SRC drawn in place of the input, and the size of every output.
+        sized = job_pictures(packet, self.single, width=64, height=48)
+        self.assertEqual({(document, still.size) for document, _out, still in sized}, {(self.single, (64, 48))})
+        stale = folder / "view-1.png"
+        stale.write_bytes(b"an earlier run's")
+        job = packet["jobs"][1]
+        for broken, said in (
+                ({**packet, "colour": 1}, "--job has no colour"),
+                ({**packet, "jobs": [{**job, "mode": "list"}]}, r"jobs\[0\] has no mode"),
+                ({**packet, "jobs": [{**job, "output": {"padding": 0.5}}]}, r"padding is a number from 0 to 0.15"),
+                ({**packet, "jobs": [{**job, "output": {"renderScale": 4}}]}, r"renderScale is a number from 1 to 3"),
+                ({**packet, "jobs": [{**job, "output": {"viewLabels": True}}]}, "output has no viewLabels"),
+                ({**packet, "jobs": [{**job, "outputs": []}]}, "lists the pictures it writes"),
+                ({**packet, "jobs": [{**job, "outputs": [{"path": str(folder / "a.jpg")}]}]}, r"a\.jpg is not one"),
+                ({**packet, "jobs": [job, job]}, "writes .*front.png twice"),
+                ({**packet, "input": str(folder / "gone.xbf")}, "no document"),
+                ({"jobs": [job]}, "names no input"),
+                ({**packet, "jobs": [{**job, "selection": {"pick": []}}]}, r"selection is \{hide, focus\}")):
+            with self.subTest(said=said), self.assertRaisesRegex(SnapshotRefused, said):
+                job_pictures(broken)
+        self.assertEqual(stale.read_bytes(), b"an earlier run's", "a refused job writes nothing, and takes nothing away")
+        with self.assertRaisesRegex(SnapshotRefused, "names a model"):
+            job_pictures(packet, f"{self.folder / 'stand.py'}::stand")
+        import contextlib
+        import io
+
+        path = folder / "packet.json"
+        path.write_text(json.dumps(packet), encoding="utf-8")
+        for argv, said in ((["--job", str(path), str(self.document), str(folder / "out.png")], "takes no OUT"),
+                           ([str(self.document)], "required: SRC, OUT.png")):
+            with self.subTest(argv=argv):
+                printed = io.StringIO()
+                with contextlib.redirect_stdout(printed):
+                    self.assertEqual(cli.main(["snapshot", *argv, "--json"]), 1)
+                self.assertIn(said, json.loads(printed.getvalue())["error"])
 
     def drawn(self, path: Path, size: tuple[int, int]) -> None:
         """A picture of something: the size asked, and more than a backdrop."""

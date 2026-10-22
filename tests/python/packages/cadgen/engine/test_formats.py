@@ -630,6 +630,68 @@ class RobotTest(FixtureTest):
         door = np.array(swung["instances"][1]["matrix"]).reshape(4, 4).T
         np.testing.assert_allclose(door[:3, 3], (800, 0, 500), atol=1e-6)  # turned about z through the joint: the door's frame
 
+    def test_a_robot_job_leaves_out_the_visuals_its_view_hid(self) -> None:
+        """A robot's view says what it hid as the viewer's visual ids (``selection.hide``: ``arm:v1``); each
+        instance carries its visual's id, so a job drawn with the arm hidden is the robot without its arm."""
+        from cadgen.engine.snapshot import draw_pictures, hidden_instances, job_pictures
+
+        base = '<link name="base"><visual><geometry><box size="0.2 0.2 0.05"/></geometry></visual></link>'
+        arm = ('<link name="arm"><visual><origin xyz="0 0 0.15"/><geometry><box size="0.04 0.04 0.3"/></geometry></visual>'
+               '</link><joint name="shoulder" type="revolute"><parent link="base"/><child link="arm"/>'
+               '<axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="1" velocity="1"/></joint>')
+        whole, alone = self.folder / "two_links.urdf", self.folder / "base_alone.urdf"
+        whole.write_text(f'<robot name="r">{base}{arm}</robot>', encoding="utf-8")
+        alone.write_text(f'<robot name="r">{base}</robot>', encoding="utf-8")
+        structure = formats.read(whole).structure
+        self.assertEqual([instance["visual"] for instance in structure["instances"]], ["base:v1", "arm:v1"])
+        self.assertEqual(hidden_instances(structure, {"hidden": ["arm:v1"]}, whole.name), {1})
+        with self.assertRaisesRegex(SnapshotRefused, "arm:v2"):
+            hidden_instances(structure, {"hidden": ["arm:v2"]}, whole.name)
+        gl()
+        outputs = {name: self.folder / f"robot_{name}.png" for name in ("hidden", "alone")}
+        job = {"camera": "iso", "jointValues": {"shoulder": 30}, "outputs": [{"path": str(outputs["hidden"]),
+                                                                              "width": 240, "height": 180}]}
+        packet = {"input": str(whole), "jobs": [{**job, "selection": {"hide": ["arm:v1"]}}]}
+        draw_pictures(job_pictures(packet), daemon=False)
+        draw_pictures(job_pictures({"input": str(alone), "jobs": [{**job, "jointValues": None, "outputs": [
+            {"path": str(outputs["alone"]), "width": 240, "height": 180}]}]}), daemon=False)
+        self.assertLessEqual(mismatch(pixels(outputs["hidden"].read_bytes()), pixels(outputs["alone"].read_bytes())), 0.001)
+
+    def test_a_package_mesh_is_found_in_the_package_the_description_is_in(self) -> None:
+        """``package://NAME/...`` (#611): the package's folder is the nearest above the description named
+        NAME, or holding a ``package.xml`` that names it; no such folder, or a path out of it, is refused."""
+        from cadgen.engine.formats.robot import RobotError
+
+        def described(package: Path, uri: str, kind: str = "urdf") -> Path:
+            path = package / kind / f"arm.{kind}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            mesh = f'<mesh filename="{uri}" scale="0.001 0.001 0.001"/>'
+            path.write_text(f'<robot name="arm"><link name="base"><visual><geometry>{mesh}</geometry></visual></link></robot>'
+                            if kind == "urdf" else
+                            f'<sdf version="1.9"><model name="arm"><link name="base"><visual name="shell"><geometry><mesh>'
+                            f'<uri>{uri}</uri><scale>0.001 0.001 0.001</scale></mesh></geometry></visual></link></model></sdf>',
+                            encoding="utf-8")
+            return path
+
+        workspace = self.folder / "ros_ws" / "src"
+        for folder, manifest in (("arm_description", None), ("arm-description-main", "arm_description")):
+            package = workspace / folder
+            (package / "meshes").mkdir(parents=True)
+            mesh = write_stl(package / "meshes" / "base.stl", box_soup((40, 20, 10)))
+            if manifest:
+                (package / "package.xml").write_text(f"<package format='3'><name>{manifest}</name></package>",
+                                                     encoding="utf-8")
+            for kind in ("urdf", "sdf"):
+                with self.subTest(package=folder, kind=kind):
+                    found = formats.read(described(package, "package://arm_description/meshes/base.stl", kind))
+                    self.assertIn(str(mesh.resolve()), found.files)  # read there, and read again when it changes
+                    self.assertEqual([prototype["name"] for prototype in found.structure["prototypes"]], ["base"])
+        lone = workspace / "loose"
+        for uri, said in (("package://gripper/meshes/base.stl", "no folder named 'gripper'"),
+                          ("package://arm_description/../../loose/base.stl", "climbs out of its package")):
+            with self.subTest(uri=uri), self.assertRaisesRegex(RobotError, said):
+                formats.read(described(lone if "gripper" in uri else workspace / "arm_description", uri))
+
 
 # --- DXF -------------------------------------------------------------------------------------------
 
@@ -755,13 +817,53 @@ class PictureTest(FixtureTest):
         with self.assertRaisesRegex(SnapshotRefused, r"is a drawing.*display.mode does not apply.*light or dark"):
             drawn("xray")
 
+    def test_a_drawings_quick_edit_is_drawn_back_in_its_window_with_its_ink(self) -> None:
+        """A drawing's Quick Edit view is the window on screen as a plan view: ``--job`` draws that window
+        with the ink on the sheet and Measure's dimensions over it, ``--camera authored`` the view the ink
+        was last drawn in, the same picture; a camera that is no plan view is refused by name."""
+        from cadgen.engine.formats.dxf import read_dxf
+        from cadgen.engine.snapshot import draw_pictures, job_pictures
+
+        path = self.folder / "plate.dxf"
+        x0, y0, x1, y1 = read_dxf(path).bounds
+        cx, cy, half = (x0 + x1) / 2, (y0 + y1) / 2, (y1 - y0) / 4  # the middle, zoomed in twice
+        plan = {"position": [cx, cy, 100], "target": [cx, cy, 0], "up": [0, 1, 0], "orthographicHalfHeight": half}
+        stroke = {"id": "m1", "kind": "stroke", "part": None, "points": [cx - half, cy, 0, cx + half, cy, 0],
+                  "color": "#ff00ff", "width": 20, "view": "view 1"}
+        words = {"id": "m2", "kind": "text", "part": None, "text": "here", "color": "#00a000", "view": "view 1",
+                 "points": [cx - half, cy + half / 2, 0, cx, cy + half / 2, 0, cx, cy, 0, cx - half, cy, 0]}
+        dimension = {"start": [cx - half, cy - half / 2, 0], "end": [cx + half, cy - half / 2, 0], "label": "40 mm",
+                     "color": "#0000ff"}
+        window = self.folder / "window.png"
+        packet = {"input": str(path), "annotation": {"units": "mm", "parts": {}, "marks": [stroke, words]},
+                  "measurements": [dimension],
+                  "jobs": [{"camera": plan, "outputs": [{"path": str(window), "label": "view 1", "width": 320,
+                                                         "height": 240}]}]}
+        [drawn] = draw_pictures(job_pictures(packet), daemon=False)
+        self.assertEqual((drawn["camera"], drawn["width"], drawn["height"]), ("plan", 320, 240))
+        found, whole = pixels(window.read_bytes()), pixels(self.draw(path)[0])
+        self.assertGreater(mismatch(found, whole), 0.05, "the window, not the whole drawing")
+        red, green, blue = found[..., 0], found[..., 1], found[..., 2]
+        for what, inked, at_least in (("the stroke", np.minimum(red, blue) - green > 120, 300),
+                                      ("the words", green - np.maximum(red, blue) > 60, 20),
+                                      ("the dimension", blue - np.maximum(red, green) > 60, 20)):
+            self.assertGreater(int(inked.sum()), at_least, what)
+        authored = self.folder / "authored.png"
+        snapshot(path, authored, camera="authored", daemon=False, annotation=packet["annotation"],
+                 annotation_source=packet, measurements=packet["measurements"])
+        self.assertLessEqual(mismatch(pixels(authored.read_bytes()), found), 0.001)
+        tilted = {**plan, "position": [cx + 10, cy, 100]}
+        for camera in ("top", tilted, {**plan, "orthographicHalfHeight": 0}):
+            with self.subTest(camera=camera), self.assertRaisesRegex(SnapshotRefused, "its camera is a plan view"):
+                job_pictures({**packet, "jobs": [{**packet["jobs"][0], "camera": camera}]})
+
     def test_what_a_kind_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
         out = self.folder / "stale.png"
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
                 (self.folder / "part.stl", {"display": {"mode": "parts"}}, "places 1 part"),
                 (self.folder / "plate.dxf", {"display": {"mode": "xray"}}, "is a drawing.*display.mode does not apply"),
-                (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing.*--camera does not apply"),
+                (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing, seen from above: its camera is a plan view"),
                 (self.folder / "kinematics.urdf", {"pose": {"lift": 200}}, "--pose: joint 'lift' at 200 is past its limits")):
             out.write_bytes(b"before")
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):

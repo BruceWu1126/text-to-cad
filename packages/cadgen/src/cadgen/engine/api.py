@@ -4,6 +4,7 @@
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
              width=None, height=None, annotation=None, measurements=None) -> Drawn
+    snapshot_job(job, source=None, *, the snapshot's flags) -> list[Drawn]
     serve(source, port=0) -> Served
     where(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
@@ -40,7 +41,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, TypeVar, cast
 
 __all__ = ["Built", "Drawn", "EngineError", "Facts", "Report", "Served", "Written", "build", "daemon", "export",
-           "observers", "serve", "snapshot", "status", "stop", "where"]
+           "observers", "serve", "snapshot", "snapshot_job", "status", "stop", "where"]
 
 KINDS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 
@@ -381,11 +382,13 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
     worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
     annotation: its file's path, its object, or the Quick Edit packet that carries it) and
     ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
-    annotation's ink was drawn in, which the packet holds. A snapshot refused or failed leaves no
-    picture at ``out`` (``snapshot.nothing_left``)."""
+    annotation's ink was drawn in, which the packet holds. ``out`` a folder (a path ending in a
+    separator, or one that is there) is given a name inside it, the source's stem and the time
+    (``snapshot.picture_path``). A snapshot refused or failed leaves no picture at ``out``
+    (``snapshot.nothing_left``)."""
     from cadgen.engine import snapshot as drawing
 
-    out = Path(os.fspath(out)).resolve()
+    out = drawing.picture_path(out, source)
     with drawing.nothing_left(out):
         return _snapshot(source, out, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
                          width=width, height=height, size_profile=size_profile, daemon=daemon, annotation=annotation,
@@ -422,6 +425,27 @@ def _snapshot(source: Any, out: Path, *, display: Any, camera: Any, grid: bool, 
                              annotation=drawing.parse_annotation(annotation),
                              measurements=drawing.parse_measurements(measurements), annotation_source=annotation)
     return Drawn(out, found["width"], found["height"], found)
+
+
+def snapshot_job(job: Any, source: Any = None, *, display: Any = None, camera: Any = None, grid: bool = False,
+                 preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
+                 size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+                 measurements: Any = None) -> list[Drawn]:
+    """Every picture a job names (``cadgen snapshot --job``): a Quick Edit packet (the
+    ``.snapshot.json`` the viewer writes, its path or its object), a job or a list of jobs, each
+    job a view drawn as it was -- its camera, display, hidden and isolated parts, pose, the
+    packet's ink and dimensions -- at its output settings, into each of its outputs
+    (``snapshot.job_pictures``). ``source`` is drawn in place of every job's input; a flag given
+    overrides every job. Every request is checked before anything renders, and a picture that
+    fails leaves none of the job's."""
+    from cadgen.engine import snapshot as drawing
+
+    _heard("source", os.fspath(source) if source is not None else drawing.job_input(job))
+    pictures = drawing.job_pictures(job, source, display=display, camera=camera, grid=grid, preview=preview, pose=pose,
+                                    width=width, height=height, size_profile=size_profile, annotation=annotation,
+                                    measurements=measurements)
+    return [Drawn(Path(found["output"]), found["width"], found["height"], found)
+            for found in drawing.draw_pictures(pictures, daemon=daemon)]
 
 
 def serve(source: Any, port: int = 0, three: str | None = None) -> Served:
@@ -544,8 +568,8 @@ def daemon() -> int:
 #               when no error says), frames ([{file, line, function}], innermost last), engine (raised in
 #               the engine's own code, or its worker's), refused (the engine refused the request by name),
 #               here (raised in this process, as against told by the daemon or a report)}
-#     source    export, snapshot: what it read -- "xbf", "step", "glb", "stl", "threemf", "model" (a script's
-#               model or built code) or "other"
+#     source    export, snapshot: what it read -- "xbf", "step", "glb", "stl", "threemf", "dxf", "urdf",
+#               "sdf", "srdf", "model" (a script's model or built code) or "other"
 #     found     snapshot: the source file is there (a model's always is)
 #     outputs   export: each destination, {kind, seconds (None for one not written)}
 #     pose      export, snapshot: a pose was asked for
@@ -557,7 +581,7 @@ observers: list[Callable[[dict[str, Any]], None]] = []
 _HEARD = threading.local()  # what the daemon's answers said while a verb ran in this thread (``_heard``)
 _ENGINE = os.path.dirname(os.path.abspath(__file__)) + os.sep
 _SUFFIXES = {".xbf": "xbf", ".step": "step", ".stp": "step", ".glb": "glb", ".stl": "stl", ".3mf": "threemf",
-             ".cadz": "cadz"}
+             ".cadz": "cadz", ".dxf": "dxf", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf"}
 _FRAME = re.compile(r'  File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<function>\S.*)')
 _TYPE = re.compile(r"(?P<type>[A-Za-z_][A-Za-z0-9_.]*)(?::|$)")
 _DIED = re.compile(r"exited \((?P<status>-?\d+)\) during the build")  # the daemon's word (``daemon.Worker.build``)
@@ -630,7 +654,8 @@ def _facts(verb: str, args: tuple, kwargs: dict[str, Any], heard: dict[str, Any]
         "models": [_model(report) for report in reports], "worker": worker,
         "error": _error(error, reports, worker)}
     if verb in ("export", "snapshot"):
-        source = args[0] if args else kwargs.get("source")
+        # A job's is the file it draws, which it says as it starts (``snapshot_job``).
+        source = heard.get("source") or (args[0] if args else kwargs.get("source"))
         found["source"] = _kind(source)
         found["pose"] = kwargs.get("pose") is not None
     if verb == "export":
@@ -715,3 +740,4 @@ build = _observed("build", build)
 build_script = _observed("build", build_script)
 export = _observed("export", export)
 snapshot = _observed("snapshot", snapshot)
+snapshot_job = _observed("snapshot", snapshot_job)

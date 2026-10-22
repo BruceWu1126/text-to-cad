@@ -113,7 +113,7 @@ class PromptFilesRouteTest(unittest.TestCase):
 
     def test_a_drawings_view_is_its_plan_view_and_its_job_carries_ink_and_measurements(self) -> None:
         """A DXF's Quick Edit: the window on screen as a plan-view camera, the ink on the sheet and the
-        measurements -- no 3D framing, no view name."""
+        measurements -- no 3D framing; its label, by which the ink names the view it was drawn in."""
         drawing = self.tmp / "panel.dxf"
         drawing.write_text("0\nSECTION\n", encoding="utf-8")
         plan = {"position": [50, 30, 120], "target": [50, 30, 0], "up": [0, 1, 0], "orthographicHalfHeight": 30}
@@ -127,7 +127,8 @@ class PromptFilesRouteTest(unittest.TestCase):
         self.assertEqual(parse_measurements(packet["measurements"]), [mark])
         self.assertEqual(parse_annotation(packet), ANNOTATION)
         self.assertNotIn("output", packet["jobs"][0])
-        self.assertEqual(packet["jobs"][0]["outputs"], [{"path": str(self.files / "panel-1-view-1.png"), "width": 1600, "height": 900}])
+        self.assertEqual(packet["jobs"][0]["outputs"], [{"path": str(self.files / "panel-1-view-1.png"), "label": "view 1",
+                                                         "width": 1600, "height": 900}])
 
     def test_a_prompt_without_an_annotation_names_none_and_the_next_prompt_is_numbered_on(self) -> None:
         _, first, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=None))

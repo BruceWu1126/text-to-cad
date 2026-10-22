@@ -459,17 +459,27 @@ def _resolve_urdf_mesh(filename: str, *, source_path: Path, where: str) -> dict:
             f"{where} names {filename!r}, which is not a local file: the viewer draws the meshes beside "
             "the description; copy the file next to it and name it by a relative path"
         )
-    path = resolve_mesh_uri(filename)
-    if path is None:
-        raise RobotReadError(
-            f"{where} names {filename!r}, a package this cannot resolve: name the mesh by a path relative "
-            "to the description instead (the viewer resolves no package://)"
-        )
-    if reference.kind is MeshUriKind.LOCAL_RELATIVE:
-        path = (source_path.parent / path).resolve()
+    if reference.kind is MeshUriKind.PACKAGE:
+        path = _package_mesh(filename, source_path.parent, where)
+    else:
+        path = resolve_mesh_uri(filename)
+        if reference.kind is MeshUriKind.LOCAL_RELATIVE:
+            path = (source_path.parent / path).resolve()
     if not path.is_file():
         raise RobotReadError(f"{where} names {filename!r}, and no file is at {path}")
     return {"format": fmt, "path": str(path)}
+
+
+def _package_mesh(reference: str, base_dir: Path, where: str) -> Path:
+    """A ``package://`` mesh, resolved as the stills resolve it (``cadgen.engine.formats.robot``):
+    in the ROS package the description is in, the nearest folder above it named for the package
+    or holding a ``package.xml`` that names it."""
+    from cadgen.engine.formats.robot import RobotError, package_file
+
+    try:
+        return package_file(reference, base_dir, where)
+    except RobotError as exc:
+        raise RobotReadError(str(exc)) from None
 
 
 def _four_bar_element(joint_element: ET.Element) -> dict[str, Any] | None:
@@ -831,6 +841,12 @@ def _sdf_metadata(root: ET.Element) -> dict:
 
 def _resolve_sdf_mesh(uri: str, *, base_dir: Path, where: str) -> dict:
     parsed = urlparse(uri)
+    if parsed.scheme == "package":
+        fmt = _drawable_format(uri, where=where)
+        path = _package_mesh(uri, base_dir, where)
+        if not path.is_file():
+            raise RobotReadError(f"{where} names {uri!r}, and no file is at {path}")
+        return {"format": fmt, "path": str(path)}
     if parsed.scheme in _SDF_EXTERNAL_SCHEMES or (parsed.scheme and parsed.scheme != "file"):
         raise RobotReadError(
             f"{where} names {uri!r}, which is not a local file: the viewer draws the meshes beside the "

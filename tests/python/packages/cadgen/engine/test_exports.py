@@ -386,6 +386,32 @@ class ExportTest(unittest.TestCase):
         with self.assertRaisesRegex(ExportRefused, "an export is one of"):
             translate(self.xbf, None, self.folder / "board.obj")
 
+    def test_the_export_verb_answers_in_json_and_a_failure_is_its_envelope(self) -> None:
+        import contextlib
+        import io
+
+        from cadgen.engine import cli
+
+        def run(*argv: str) -> tuple[int, str, str]:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = cli.main(list(argv))
+            return status, out.getvalue(), err.getvalue()
+
+        status, out, err = run("export", str(self.xbf), str(self.folder / "json.stl"), "--json", "--no-daemon")
+        self.assertEqual(status, 0, err)
+        found = json.loads(out)
+        self.assertEqual((found["ok"], found["source"], [(row["path"], row["kind"]) for row in found["files"]]),
+                         (True, str(self.xbf), [(str(self.folder / "json.stl"), "stl")]))
+        self.assertEqual(found["files"][0]["bytes"], (self.folder / "json.stl").stat().st_size)
+        # Refused: under --json, its envelope on stdout and exit 1; else its words on stderr, exit 2.
+        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"), "--json", "--no-daemon")
+        self.assertEqual((status, json.loads(out)["ok"], err), (1, False, ""))
+        self.assertIn("an export is one of", json.loads(out)["error"])
+        status, out, err = run("export", str(self.xbf), str(self.folder / "board.obj"), "--no-daemon")
+        self.assertEqual((status, out), (2, ""))
+        self.assertIn("an export is one of", err)
+
     def test_a_step_becomes_an_xbf(self) -> None:
         out = self.folder / "from-step.xbf"
         translate(self.folder / "board.step", None, out)

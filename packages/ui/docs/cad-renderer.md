@@ -293,9 +293,10 @@ it, the file sidebar, Quick Edit at the top-right.
   under it the block references placed on it, a click picking one.
 - **Quick Edit** carries the picks and the ink (never the measurements: they are the
   person's); its views are the window on screen as a plan-view camera (`planCamera`: looking
-  straight down, `up` +Y, `orthographicHalfHeight` the window's half height). `cadgen
-  snapshot` draws a drawing whole and takes neither, so an agent reads the window and the ink
-  from the packet.
+  straight down, `up` +Y, `orthographicHalfHeight` the window's half height), each with its
+  label, which the ink's marks name. `cadgen snapshot --job PACKET` draws each view's window with
+  the ink and the dimensions on the sheet; `--annotation PACKET --camera authored` the view the
+  ink was last drawn in.
 
 - **The picture comes from the BACKEND.** `client.drawing(file)` is
   `GET /__cad/drawing` (`apps/web/docs/backend.md`), asked again while the server

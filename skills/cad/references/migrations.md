@@ -57,7 +57,7 @@ defines.
 | `cadgen stl build`, `cadgen 3mf build`, `cadgen glb build` | `cadgen export XBF/model.xbf OUT.stl` (`.3mf`, `.glb`), or from a STEP |
 | `cadgen glb build --animation CLIP` | every GLB carries every motion of its model |
 | `cadgen step snapshot`, `cadgen stl snapshot`, `cadgen 3mf snapshot`, `cadgen glb snapshot` | `cadgen snapshot SRC OUT.png`, one command for every kind |
-| `cadgen snapshot --job FILE` | `cadgen snapshot DOC OUT.png --annotation FILE --camera authored`, a view per command |
+| a `--job` file's `kinematics`, a STEP job's `selection`, `animation`, `video`, `quality`, `mode`, `output.viewLabels` | a job's pose is `jointValues` (as `--pose` takes it); a document's hidden and isolated parts are its `display.hidden` and `display.isolated` |
 | snapshot `--kinematics` | `--pose` |
 | snapshot `--animation`, `--time`, `--video` | none: export a GLB and play its clips |
 | snapshot `--mode list`, `--focus`, `--hide` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |

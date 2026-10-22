@@ -172,11 +172,13 @@ def hinge():
 python SCRIPT.py                             every model of the script, as its decorators declare
 cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--no-daemon]
-cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon]
+cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon] [--json]
                                              SRC an .xbf or a .step
 cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                 [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                 [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen snapshot --job PACKET [SRC] [the same flags, each over every job]
+                                             every picture a Quick Edit packet (or a job file) names
 cadgen serve DOC [--port N] [--three DIR] [--foreground]
 cadgen where DOC [REF]                       the build closure; with REF (**References**): an element's facts and
                                              what made it, or a part's or an assembly's volume and mass
@@ -184,6 +186,11 @@ cadgen status [--json] | stop | daemon
 ```
 
 `python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
+
+A verb's `--json` (`build`, `export`, `snapshot`, `status`) prints its answer as one JSON object
+on stdout, and a failure as `{"ok": false, "error": ...}` there too, exit status 1, so a caller
+reading stdout always finds an answer (`cli.answered`); without `--json` a failure is its words
+on stderr, exit 2 for a request refused by name before anything ran and 1 for one that failed.
 
 `python SCRIPT.py` builds every model the script defines, each writing what its
 decorators declare and each child model it calls what that model declares (laws 10 and
@@ -292,6 +299,12 @@ its closure is unchanged (**Build closure**), and else builds the model cold. A 
 process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
 is held to the same memory cap after each picture, and retired after the same idle time.
 
+On Windows every process the engine starts -- each worker, STEP reader and render process --
+has a console of its own and no window (`daemon.windowless`: `CREATE_NO_WINDOW`), and the daemon
+a process group of its own too (`daemon.detached`), never no console at all: a console program
+started with none gets a new console, with a window (#597). What they start in turn (the
+meshing and reading pools) shares their windowless console.
+
 `cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
 
 ```
@@ -377,6 +390,13 @@ names a loopback page's origin as an allowed reader (`access.py`: `localhost`, `
 `[::1]`, any port); a page from anywhere else gets no such header and its browser keeps the
 answer from it.
 
+`cadgen viewer` warms the engine once it has announced its URL (`{"op": "warm"}`, on a thread
+nothing waits on): the daemon starts, and with it its server, its meshing pool and a STEP reader
+(`Server.warm`), so a page's first document waits on no process start. On a 24-part assembly
+(each part filleted and drilled) the first open of its `.xbf` took 0.14 s warm against 2.4 s cold,
+and of its STEP 0.27 s against 5.8 s (a fresh daemon each, the median of three). A daemon that
+cannot start is the first open's to report.
+
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in
 `render/finish.py`) draws by too: one white directional key at radiance 4 travelling
@@ -412,8 +432,9 @@ moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a
 object (`mode`, `grid`, `appearance`, `camera`, `clip`, `exploded`: `{"enabled", "amount"}`, 0.5
 unless given; `hidden` and `isolated`: lists of part refs, an occurrence's path in the refs
 grammar, which every look -- Preview, X-ray, Explode, Clip -- leaves out or alone draws, as the
-viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a ref
-that names nothing is refused by name); `--json` reports what was drawn
+viewer's hide and isolate do, and which a Quick Edit packet given to `--annotation` carries; a
+robot's parts are named by the viewer's visual ids too, `link:v1` (`link:v1/object/0` one object of
+it); a ref that names nothing is refused by name); `--json` reports what was drawn
 and each stage's milliseconds (`serveMs`, `meshMs`, `sceneMs` when a scene is made, `presentMs`,
 `frameMs`, `drawMs`, `renderMs`, `totalMs`; a file no document: `readMs` its reader, `openMs` its
 render process opening it). `parts` and `exploded` for a document that places one
@@ -427,7 +448,39 @@ projection -- is a job of the packet. `--camera authored` draws the picture from
 last mark, exactly (no fit), at its size and projection unless the flags say otherwise: from the
 packet given as `--annotation`, else the newest packet beside the annotation file that draws this
 document; with none, it is refused by name. A face the mesher left without triangles is named in a
-warning. Nothing is written but OUT.
+warning. Nothing is written but OUT. OUT may be a folder -- one that is there, or a path ending in a
+separator -- and the picture is then `<SRC's stem>_<UTC time>.png` in it (a model's name for a model,
+`snapshot.picture_path`), the path the verb prints and reports (`output`).
+
+**A job.** `--job PACKET` replays a whole Quick Edit packet -- or a job file in its words: a job, a list
+of jobs, or `{"input", "jobs": [...], "annotation", "measurements"}` -- in one call
+(`snapshot.job_pictures`, `api.snapshot_job`), on the machinery above: each job is a view, drawn with
+its own `camera` (an output's own `camera` over it), its `display` (its `hidden` and `isolated` parts
+among it; the packet's top-level copies are `--annotation`'s), its pose (`jointValues`, as `--pose`
+takes it), `preview`, and -- a robot's -- the visuals its `selection.hide` names by the viewer's ids
+(`link:v1`, each robot instance carrying its visual's), the packet's ink and dimensions over each
+(a job's own `annotation` and `measurements` over the packet's); and each of its `outputs` (`path`,
+`width`, `height`, `camera`, `label`) is a picture written at its path (a folder takes
+`<stem>[_j<m>][_<n>]_<UTC time>.png`, the job's and the output's place where there are several). A
+job's `output` settings finish its pictures: `padding` (0 to 0.15 of the picture each side, 0.04
+unless given) and `tightFrame` (true unless given: the fit on every drawn vertex, else on the drawn
+parts' box) frame a fitted camera, and a view's own camera -- a position, a target and, orthographic,
+a half height -- with `tightFrame` false is drawn exactly, as the viewer writes every view
+(`padding` 0, `tightFrame` false); `transparent` draws on nothing (OCCT's backdrop is a fill it draws
+whole, so the picture is drawn on black and on white and each pixel's coverage read from the two,
+in linear light: `service.matte`; Preview keeps its floor and its shadow, the sweep gone);
+`renderScale` (1 to 3) draws the picture that many times its size and brings it down, each pixel
+the mean of those it covers (`service.picture`): what the engine draws in pixels -- ink, words,
+Measure, the grid -- is as heavy against the picture at any scale, while OCCT's GL lines (edges, a
+drawing's hairlines) stay one pixel of the larger frame and read finer: OCCT's core profile draws no
+line wider than a pixel, and this is that, not a bug; `sizeProfile` sizes an output that gives no
+size. SRC, given, is drawn in place of every job's input, and a flag given overrides every job: the
+display, the grid, the camera, Preview, the pose, the ink, the dimensions, the size of every
+output; an OUT is refused. Every job is checked before anything renders (an unknown key, a setting
+out of range, two outputs at one path, a file that is not there: refused by name, every file left as
+it was), and a picture that fails leaves none of the job's. Through the daemon each picture is a frame
+of the file's warm render process; `--no-daemon` serves each file once for all its pictures.
+`--json` prints `{"ok": true, "pictures": [what each drew]}`.
 
 **The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
 (`render/`): one presentation per part and look, each
@@ -463,7 +516,9 @@ per file (read again when a file it read changes) or `--no-daemon` in this proce
   IOR, transmission, clear coat, anisotropy, emissive strength) and its base colour texture,
   drawn on its texture coordinates in the lit looks. `--pose` is refused: a mesh has no
   mechanism.
-- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its link visuals' meshes (STL, 3MF and GLB files; a
+- **A robot** (`.urdf`, `.sdf`, `.srdf`) is its link visuals' meshes (STL, 3MF and GLB files, a
+  `package://NAME/...` one in the ROS package the description is in: the nearest folder above it
+  named NAME or holding a `package.xml` that names it, as the viewer finds it too; a
   box, cylinder, sphere or capsule made and meshed by the kernel), each link's in one colour of
   the Parts palette, placed by the viewer's forward kinematics (`lib/urdf/kinematics.js` and
   `fourBarCoupling.js`, ported and held to a golden its own code made: mimic joints and four-bar
@@ -474,9 +529,15 @@ per file (read again when a file it read changes) or `--no-daemon` in this proce
 - **A drawing** (`.dxf`) is drawn as the viewer's DXF pane draws it: from above, fitted with its
   16 px margin, lines, arcs, polylines, splines, ellipses, solids, solid hatches, blocks and
   dimensions one pixel wide in their pens (ACI 7 the look's ink), words set in the platform's UI
-  face, on the light or dark paper (`display.appearance`, `render/look.py`'s `DRAWING`). Every
-  other flag is refused by name; what it does not draw (points, hatch patterns, images) is named
-  in a warning.
+  face, on the light or dark paper (`display.appearance`, `render/look.py`'s `DRAWING`). Its
+  camera is a plan view, the window a Quick Edit view of it names (`render/drawing.py`'s
+  `plan_view`: `{position, target, up, orthographicHalfHeight}` looking straight down at the sheet,
+  +Y up), drawn as that window -- given as `--camera`, as `authored` (the view the ink was last
+  drawn in), or as a job's view; `--annotation`'s ink lies on the sheet in drawing coordinates,
+  painted as the pane paints it (`paint_ink`: strokes round-capped as wide as the viewer drew them
+  against its height, areas filled, a text mark's words filling its box), and `--measurements`
+  Measure's dimensions over it. Every other flag is refused by name; what it does not draw
+  (points, hatch patterns, images) is named in a warning.
 
 `SRC` may be a script's model too
 (`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its
@@ -1393,6 +1454,9 @@ Why that holds, checked:
   `test_memo_marker.py` holds the same for a cold build, a replay and a second cold build.
 - **`--verify` reads it as `same`.** A leaf whose BRep differs only in order measures alike
   (**Memo functions**): a verification reports it `same`, never `differs`.
+
+The snapshot's part listing (0.7's `--mode list`) is gone by decision: `read_xbf` and `read_step`
+(a document's tree) and `cadgen where DOC REF` (what a ref names) are the facts route.
 
 ## Build closure
 

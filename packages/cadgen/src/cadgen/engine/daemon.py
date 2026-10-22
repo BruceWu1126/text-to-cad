@@ -109,6 +109,29 @@ def engine_root() -> str:
     return str(Path(__file__).resolve().parent.parent.parent)
 
 
+# Windows' process creation flags, by number: ``subprocess`` names them on Windows alone.
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+
+
+def windowless() -> dict[str, Any]:
+    """How the engine starts a process -- a worker, a reader, a render process -- on Windows: with
+    a console of its own and no window (``CREATE_NO_WINDOW``); elsewhere as it is. A console program
+    started with no console gets a new one, with a window (#597): a window per process, open as long
+    as it lives, and closing one ends it."""
+    return {"creationflags": CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
+def detached() -> dict[str, Any]:
+    """How the daemon is started: outliving the command that needed it. On Windows a console of its
+    own with no window and a process group of its own, never no console at all (``DETACHED_PROCESS``),
+    which would give each console program it starts a window of its own (#597); elsewhere a session
+    of its own (``start_new_session`` is POSIX's: Windows takes it as nothing)."""
+    if os.name == "nt":
+        return {"creationflags": CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 # --- workers -----------------------------------------------------------------------------
 
 
@@ -148,7 +171,7 @@ or reads ever touches the request pipe (on Windows a DLL's C runtime would wait 
         env["CADGEN_ENGINE_WORKER"] = "1"
         self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.worker"], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                                        cwd=cwd or str(Path(script).parent))
+                                        cwd=cwd or str(Path(script).parent), **windowless())
         self.lock = threading.Lock()
         self.writing = threading.Lock()  # one request line at a time on the worker's stdin
         self.asked: dict[str, "queue.Queue[Any]"] = {}
@@ -731,6 +754,11 @@ class Daemon:
             send({"ok": True, "url": f"{server.url}/?doc={ident}", "port": server.port})
         elif op == "draw":
             self.draw(request, send)
+        elif op == "warm":
+            # The viewer at its launch: the server, its meshing processes and a STEP reader started
+            # while nobody waits, so a page's first document waits on none of them.
+            self.serve(request).warm()
+            send({"ok": True})
         elif op == "status":
             send(self.status())
         elif op == "stop":

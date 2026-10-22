@@ -32,7 +32,10 @@ writer from the document alone. Two ways to ask for one, which write the same by
 
 A source is an `.xbf`, or a `.step` read into a document first. A mesh is never a
 source: it has no B-rep. Each file is written beside its target and moved over it,
-so a failed export leaves the old file whole.
+so a failed export leaves the old file whole. `--json` prints what was written as
+one object (`{"ok": true, "source", "files": [{"path", "kind", "bytes", "seconds"}]}`),
+and a failure as `{"ok": false, "error": ...}` with exit status 1, as every command's
+`--json` does.
 
 ## Formats
 

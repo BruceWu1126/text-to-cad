@@ -134,6 +134,15 @@ class EngineTelemetryTest(unittest.TestCase):
             "features": ["kinematics"]})
         drawn = engine_telemetry.counts(facts("snapshot", source="model", found=True, pose=False), "script")
         self.assertEqual(drawn, {"snapshots": [{"format": "xbf", "ok": True, "seconds": 0.5}]})
+        # Every kind the stills draw is counted by its name, from the facts the verb tells (``api._facts``):
+        # drawings and robot descriptions as documents and meshes are.
+        from cadgen.engine import api
+
+        for suffix, kind in ((".step", "step"), (".3mf", "3mf"), (".dxf", "dxf"), (".urdf", "urdf"), (".sdf", "sdf"),
+                             (".srdf", "srdf")):
+            told = api._facts("snapshot", (self.tmp / f"secret{suffix}", self.tmp / "out.png"), {}, {}, None, None, 0.5)
+            self.assertEqual(engine_telemetry.counts(told, "command"),
+                             {"snapshots": [{"format": kind, "ok": True, "seconds": 0.5}]}, suffix)
 
         def why(failure: dict, **extra) -> str:
             snapshot = facts("snapshot", ok=False, **{"source": "xbf", "found": True, "pose": False, **extra}, error=failure)

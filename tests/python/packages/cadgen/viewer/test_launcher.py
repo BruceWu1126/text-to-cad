@@ -306,6 +306,38 @@ class Launch(LauncherFixture):
         self.assertEqual(stranger.shutdowns, [])
 
 
+class WarmsTheEngine(LauncherFixture):
+    """The launch warms the engine that serves its documents (``_prewarm_engine``): once the URL line
+    is out, the engine's daemon is up and serving, its first document waiting on no process start."""
+
+    def test_a_launch_warms_the_engine_after_it_announces(self) -> None:
+        from cadgen.engine.client import request, wait_gone
+
+        engine = tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)  # a short socket path
+        self.addCleanup(shutil.rmtree, engine, True)
+
+        def stop() -> None:
+            with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
+                if request({"op": "stop"}, start=False) is not None:
+                    wait_gone()
+        self.addCleanup(stop)
+        child = self.launch(["--dist", self.make_dist(), "--port", str(free_port()), "--json"],
+                            CADGEN_ENGINE_DIR=engine, CADGEN_ENGINE_MESH="inline")
+        self.wait_for_url_line(child)
+        serving, deadline = None, time.monotonic() + 60
+        with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
+            while serving is None and time.monotonic() < deadline:
+                serving = (request({"op": "status"}, start=False) or {}).get("serving")
+                time.sleep(0.1)
+        self.assertIsNotNone(serving, "the launch warmed no engine")
+        self.assertEqual(serving["documents"], [])
+
+    def test_an_engine_that_cannot_start_is_the_first_open_s_to_report(self) -> None:
+        with mock.patch("cadgen.engine.client.request", side_effect=ConnectionError("no daemon")) as asked:
+            main_module._prewarm_engine()
+        asked.assert_called_once_with({"op": "warm"})
+
+
 class AnnounceIsConnectable(LauncherFixture):
     """The printed URL is connectable the instant it appears.
 

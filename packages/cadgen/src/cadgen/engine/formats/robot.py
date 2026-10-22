@@ -26,8 +26,11 @@ its limits are refused by name.
 **Meshes**: a link mesh is an STL or a 3MF (its numbers as they are, which the description's
 mesh scale makes metres) or a GLB (metres), each drawn as the stills draw that file; a box,
 cylinder, sphere or capsule is made by the kernel and meshed as a part is (``mesh.py``). The
-robot is drawn in millimetres. A description naming a mesh in any other format (OBJ, DAE), a
-``package://`` URI or a file that is not there is refused by name.
+robot is drawn in millimetres. A ``package://NAME/REST`` mesh is REST in the ROS package the
+description is in: the nearest folder at or above it named NAME, or holding a ``package.xml``
+that names it (``package_file``, which the viewer's robot payload resolves by too). A description
+naming a mesh in any other format (OBJ, DAE), a package no folder above it is, or a file that is
+not there, is refused by name.
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ import numpy as np
 
 from cadgen.engine.formats import Foreign, FormatError, Part, Placed, assemble, files_of
 
-__all__ = ["Robot", "RobotError", "read_robot", "robot_file"]
+__all__ = ["Robot", "RobotError", "package_file", "package_root", "read_robot", "robot_file"]
 
 MOVING = ("revolute", "continuous", "prismatic")
 ANGULAR = ("revolute", "continuous")
@@ -331,12 +334,60 @@ def _parse(path: Path) -> ET.Element:
         raise RobotError(f"{path.name} could not be read as XML: {error}") from None
 
 
+def _package_name(manifest: Path) -> str | None:
+    """The name a ROS package manifest (``package.xml``) gives its package, or None."""
+    try:
+        name = ET.parse(manifest).getroot().find("name")
+    except (OSError, ET.ParseError):
+        return None
+    if name is None:
+        return None
+    return str(name.text or "").strip() or None
+
+
+def package_root(name: str, base: Path) -> Path | None:
+    """ROS package ``name``'s folder for a description in ``base``: the nearest folder at or above
+    ``base`` that is named ``name``, or that holds a ``package.xml`` naming it, ROS's own mark of a
+    package's root; None when none is."""
+    for folder in (base, *base.parents):
+        if folder.name == name:
+            return folder
+        manifest = folder / "package.xml"
+        if manifest.is_file() and _package_name(manifest) == name:
+            return folder
+    return None
+
+
+def package_file(reference: str, base: Path, where: str) -> Path:
+    """``package://NAME/REST``, named by a description in ``base``: REST in package NAME's folder
+    (``package_root``), never above it. Refused by name (``where`` names what names it) when no
+    folder holds the description as its package, and when REST climbs out of it."""
+    parsed = urlparse(reference)
+    name, rest = unquote(parsed.netloc).strip(), unquote(parsed.path).lstrip("/")
+    base = Path(base).resolve()
+    root = package_root(name, base) if name and rest else None
+    if root is None:
+        raise RobotError(f"{where} names {reference!r}: no folder named {name!r}, nor one holding a package.xml that "
+                         f"names it, holds {base}, so its package cannot be found. Keep the description inside its "
+                         "package folder, or name the mesh by a path relative to the description")
+    found = (root / rest).resolve()
+    if root not in found.parents:
+        raise RobotError(f"{where} names {reference!r}, which climbs out of its package, {root}")
+    return found
+
+
 def _mesh_file(reference: str, base: Path, where: str) -> Path:
-    """A visual's mesh file: a path relative to the description, an absolute one, or file://."""
+    """A visual's mesh file: a path relative to the description, an absolute one, file://, or a
+    file of the ROS package the description is in (``package://``, ``package_file``)."""
     parsed = urlparse(reference)
     if parsed.scheme == "package":
-        raise RobotError(f"{where} names {reference!r}, a package this cannot resolve: name the mesh by a path "
-                         "relative to the description instead (the viewer resolves no package://)")
+        found = package_file(reference, base, where)
+        if found.suffix.lower() not in DRAWABLE:
+            raise RobotError(f"{where} names {found.name}: the stills draw STL, 3MF and GLB link meshes, not "
+                             f"{found.suffix or 'this'} files")
+        if not found.is_file():
+            raise RobotError(f"{where} names {reference!r}, and no file is at {found}")
+        return found
     if parsed.scheme not in ("", "file") and not (len(parsed.scheme) == 1 and os.name == "nt"):
         raise RobotError(f"{where} names {reference!r}, which is not a local file: copy it beside the description "
                          "and name it by a relative path")
@@ -867,6 +918,10 @@ def robot_file(path: Path) -> Foreign:
     made: dict[tuple, list[tuple[int, np.ndarray]]] = {}
     visuals: list[tuple[str, np.ndarray, str, str]] = []  # link, placement in the link's frame (mm), path, colour
     rows: list[tuple[int, int]] = []  # each instance: its part, its visual
+    # Each instance's visual as the viewer names it (``robot_payload``: ``link:v1``), and its place
+    # among the visual's objects when it draws several (the viewer's ``link:v1/object/0``): what a
+    # view of the robot says it hid (``selection.hide``), which the stills leave out alike.
+    named: list[tuple[str, int | None]] = []
     to_mm = np.diag([1000.0, 1000.0, 1000.0, 1.0])
     links = list(robot.links)
     tree_links: dict[str, dict[str, Any]] = {}
@@ -880,16 +935,17 @@ def robot_file(path: Path) -> Foreign:
                     made[key].append((len(parts), placement))
                     parts.append(part)
             local = to_mm @ visual.local @ np.linalg.inv(to_mm)
-            for part, placement in made[key]:
+            for at, (part, placement) in enumerate(made[key]):
                 visuals.append((link, local @ placement, f"{robot.name}/{link}/{visual.label}", visual.color))
                 rows.append((part, len(visuals) - 1))
+                named.append((f"{link}:v{index}", at if len(made[key]) > 1 else None))
     if not rows:
         raise RobotError(f"{path.name}: no link of {robot.name} has a visual to draw")
 
     def instances(values: dict[str, float]) -> list[Placed]:
         frames = robot.placements(values)
         return [Placed(part, frames[visuals[at][0]] @ visuals[at][1], visuals[at][2],
-                       _linear(visuals[at][3]) if visuals[at][3] else None, links.index(visuals[at][0]))
+                       _linear(visuals[at][3]) if visuals[at][3] else None, links.index(visuals[at][0]), *named[at])
                 for part, at in rows]
 
     opening, _named = robot.values(None)

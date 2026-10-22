@@ -23,11 +23,12 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
-from cadgen.engine.mesh import Mesh
+if TYPE_CHECKING:  # a reader's module loads no kernel until it reads (the viewer resolves a robot's meshes here)
+    from cadgen.engine.mesh import Mesh
 
 __all__ = ["DRAWING", "Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]
@@ -61,13 +62,17 @@ class Part:
 @dataclass
 class Placed:
     """An instance: its part, its placement (4x4, millimetres, acting on columns), its path, a
-    colour over its part's, and the place it takes in the Parts palette (its index when None)."""
+    colour over its part's, the place it takes in the Parts palette (its index when None), and --
+    a robot's -- the viewer's id of the visual it draws (``link:v1``) and its place among that
+    visual's objects when the visual draws several (the viewer's ``link:v1/object/0``)."""
 
     part: int
     matrix: np.ndarray
     path: str
     color: tuple | None = None
     palette: int | None = None
+    visual: str | None = None
+    object: int | None = None
 
 
 @dataclass
@@ -137,7 +142,9 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
             shapes[key] = made
     instances = [{"prototype": item.part, "path": item.path, "matrix": _column_major(item.matrix),
                   "color": None if item.color is None else list(item.color),
-                  **({} if item.palette is None else {"palette": item.palette})} for item in placed]
+                  **({} if item.palette is None else {"palette": item.palette}),
+                  **({} if item.visual is None else {"visual": item.visual}),
+                  **({} if item.object is None else {"object": item.object})} for item in placed]
     version = hashlib.blake2b(repr(sorted(files.items())).encode(), digest_size=8).hexdigest()
     structure = {"name": name, "path": str(path), "version": version, "units": "mm", "kind": kind,
                  "prototypes": prototypes, "instances": instances, "tree": tree}
