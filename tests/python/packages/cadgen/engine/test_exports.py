@@ -99,6 +99,41 @@ from pathlib import Path
 from cadgen.engine.export import translate
 translate(Path(sys.argv[1]), None, Path(sys.argv[2]))
 """
+EXPORT_POSED = """
+import sys
+from pathlib import Path
+from cadgen.engine.export import translate
+translate(Path(sys.argv[1]), None, Path(sys.argv[2]), pose=sys.argv[3])
+"""
+# Three hinges of one base and one lid, each placed apart, each lid on a joint of its own: a
+# sub-assembly repeated, posed three ways.
+HINGES = """
+import build123d as bd
+from cadgen.engine import configuration, xbf
+
+PLATE = bd.Box(10, 10, 2)
+PLATE.color = bd.Color(0.2, 0.3, 0.9)
+LEAF = bd.Box(10, 10, 1, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.MIN))
+LEAF.color = bd.Color(0.9, 0.2, 0.1)
+
+
+def hinge(index):
+    base = PLATE.moved(bd.Location((index * 20, 0, 0)))
+    base.label = "base"
+    lid = LEAF.moved(bd.Location())
+    lid.label = "lid"
+    bd.RevoluteJoint(f"flap{index}", base, axis=bd.Axis((index * 20 + 5, 0, 1), (0, 1, 0)), angular_range=(0, 90))
+    bd.RigidJoint("mount", lid, bd.Location())
+    base.joints[f"flap{index}"].connect_to(lid.joints["mount"], angle=0)
+    return bd.Compound(children=[base, lid], label="hinge")
+
+
+@xbf
+def hinges():
+    row = bd.Compound(children=[hinge(0), hinge(1), hinge(2)], label="hinges")
+    configuration(row, "open", flap0=30, flap1=60, flap2=90)
+    return row
+"""
 # Two axles labelled alike, a wheel on each: two occurrences at the path kit2/axle/wheel.
 AXLES = """
 import build123d as bd
@@ -605,6 +640,74 @@ class StepTest(unittest.TestCase):
                  for p in document.Loaded(self.folder / "XBF/kit.xbf").prototypes}
         self.assertEqual(sorted(looks), [*(f"part{i}" for i in range(6)), "peg0"])
         self.assertEqual(looks, built)
+
+    def test_the_presentations_are_settled_in_the_file_whatever_order_the_writer_left(self) -> None:
+        # Two writes of one document whose presentations came out in either order, numbered
+        # either way: the file's tail is renumbered where it stands, and what is quoted is text.
+        from cadgen.engine.export.step import _settle
+
+        head = ("ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#1 = SHAPE_REPRESENTATION('',(#2,#3),#4);\n"
+                "#2 = MANIFOLD_SOLID_BREP('a',#9);\n#3 = MANIFOLD_SOLID_BREP('b',#9);\n#4 = ( REPRESENTATION_CONTEXT\n"
+                "('Context #1','3D') );\n")
+        red = ["MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(\n    #{si}),#4);",
+               "STYLED_ITEM('color',(#{psa}),#2);", "PRESENTATION_STYLE_ASSIGNMENT((#{rgb}));", "COLOUR_RGB('red #1',1.,0.,0.);"]
+        blue = [line.replace("#2);", "#3);").replace("red #1", "blue").replace("1.,0.,0.", "0.,0.,1.") for line in red]
+
+        def written(first: list[str], second: list[str], at: int) -> Path:
+            lines = []
+            for block in (first, second):
+                numbers = dict(zip(("mdgpr", "si", "psa", "rgb"), range(at, at + 4)))
+                lines += [f"#{numbers['mdgpr'] + offset} = " + text.format(**numbers)
+                          for offset, text in enumerate(block)]
+                at += 4
+            path = self.folder / f"tail-{len(list(self.folder.iterdir()))}.step"
+            path.write_bytes((head + "\n".join(lines) + "\nENDSEC;\nEND-ISO-10303-21;\n").encode())
+            return path
+
+        one, other = written(red, blue, 5), written(blue, red, 5)
+        self.assertNotEqual(one.read_bytes(), other.read_bytes())
+        for path in (one, other):
+            _settle(path)
+        self.assertEqual(one.read_bytes(), other.read_bytes())
+        text = one.read_text(encoding="ascii")
+        self.assertEqual(text[:len(head)], head)
+        # Red styles #2, which the shapes number first: its presentation comes first, its colour
+        # follows it, and the quoted '#1' is the colour's name still.
+        self.assertIn("#5 = MECHANICAL_DESIGN_GEOMETRIC_PRESENTATION_REPRESENTATION('',(\n    #6),#4);", text)
+        self.assertIn("#6 = STYLED_ITEM('color',(#7),#2);", text)
+        self.assertIn("#8 = COLOUR_RGB('red #1',1.,0.,0.);", text)
+        self.assertIn("#10 = STYLED_ITEM('color',(#11),#3);", text)
+
+    def test_a_posed_step_of_repeated_sub_assemblies_is_the_same_bytes_in_every_process(self) -> None:
+        import subprocess
+        import sys
+
+        from cadgen.engine import mechanism
+
+        (self.folder / "hinges.py").write_text(textwrap.dedent(HINGES), encoding="utf-8")
+        (report,) = engine_build.build(self.folder / "hinges.py", ["hinges"], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        xbf = self.folder / "XBF/hinges.xbf"
+        written = []
+        for seed in ("1", "2"):
+            out = self.folder / f"open-{seed}.step"
+            done = subprocess.run([sys.executable, "-c", EXPORT_POSED, str(xbf), str(out), "open"],
+                                  env={**os.environ, "PYTHONHASHSEED": seed}, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            written.append(out)
+        first, second = (path.read_bytes() for path in written)
+        self.assertEqual(first, second)
+        # Each hinge's lid stands where the pose puts it, read back from the file.
+        structure = document.Loaded(xbf).structure()
+        values, _named = mechanism.resolve(structure["kinematics"], "open")
+        posed = mechanism.posed_instances(structure, values)
+        read = document.Loaded(written[0])
+        lids = [at for at, instance in enumerate(structure["instances"]) if instance["path"].endswith("lid")]
+        found = [instance.matrix for instance in read.instances if instance.path[-1] == "lid"]
+        self.assertEqual(len(lids), 3)
+        self.assertEqual(len(found), 3)
+        for at, matrix in zip(lids, found):
+            np.testing.assert_allclose(matrix, posed[at], atol=1e-6)
 
 
 if __name__ == "__main__":
