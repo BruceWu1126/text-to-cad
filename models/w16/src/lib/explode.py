@@ -141,6 +141,11 @@ def author(engine) -> None:
         return [by_label[label] for label in labels if label in by_label]
 
     _slide("floor_lift", engine, block, _UP, FLOOR_LIFT)
+    # The casting holds the pistons' joints, which makes it a link of its own: fastened to
+    # its group, it rises with the rest of the block (and the pistons with it).
+    here = bd.Location()
+    bd.RigidJoint("floor_lift_casting", block, here)
+    bd.RigidJoint("floor_lift_casting", by_label["block"], here)
     for label, system, direction, reach in _SYSTEMS:
         _slide(label, block, systems[system], direction, reach)
     sets = explode_sets(systems)
