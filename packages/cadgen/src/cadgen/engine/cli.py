@@ -68,8 +68,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                              "document); or .cadz (from an xbf: it, its build closure's source files and its inputs, "
                              "zipped)")
     export.add_argument("--no-inputs", action="store_true", help="a .cadz without the closure's input files")
-    export.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
-                                       "mechanism posed there; as built without it")
+    export.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
+                                       "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
+                                       "without it")
     export.add_argument("--part", help="an occurrence's path or a node's name: that subtree as a document of its own")
     export.add_argument("--no-daemon", action="store_true", help="export in this process (cold, no worker kept)")
     serve = verbs.add_parser("serve", help="serve a document over HTTP and print its URL")

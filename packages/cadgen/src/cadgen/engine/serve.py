@@ -24,7 +24,7 @@ a document served cold, with no live worker that built it, answers null;
 tangent group, each edge's chain: ``mesh.Topology.groups``); ``.../volume`` the part's volume
 in cubic millimetres, what its mass is weighed from (``mesh.Topology.volume``); ``POST /api/doc/<id>/mesh`` meshes every part
 not held yet, in parallel, and answers how long that took. ``POST /api/doc/<id>/pose``
-with ``{"pose": NAME | {joint: value}}`` serves the document at that pose under an id of
+with ``{"pose": NAME | {joint or coupling: value}}`` serves the document at that pose under an id of
 its own (``<id>~<digest>``): its structure's instances where the mechanism places them,
 every other route the document's; what the pose names wrong is refused by name (400).
 The structure carries the document's mechanism as ``kinematics`` (``mechanism.block``),
@@ -868,10 +868,10 @@ class Server:
         return posed_structure(structure, pose)
 
     def pose(self, handler: BaseHTTPRequestHandler, doc: Served) -> None:
-        """``POST /api/doc/<id>/pose`` with ``{"pose": NAME | {joint: value}}``: the document
-        served at that pose under an id of its own, its parts the document's. An unknown
-        configuration or joint, a value out of range and a mechanism that is not a tree are
-        refused by name (400) before the id exists."""
+        """``POST /api/doc/<id>/pose`` with ``{"pose": NAME | {joint or coupling: value}}``: the
+        document served at that pose under an id of its own, its parts the document's. An unknown
+        configuration, joint or coupling, a value out of range and a mechanism that is not a tree
+        are refused by name (400) before the id exists."""
         length = int(handler.headers.get("Content-Length") or 0)
         try:
             pose = json.loads(handler.rfile.read(length) or b"{}").get("pose")

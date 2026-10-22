@@ -31,8 +31,18 @@ built tree. The pairs make a mechanism in ISO 10303-105's terms, the kinematics 
   distance) or build123d's intrinsic X-Y-Z rotation (spherical: three angles). Angles are
   degrees, distances millimetres.
 - A **gear pair** couples two pairs: the second's value is ``gear_ratio`` times the
-  first's. build123d's joints cannot say one, so no model authors one yet; the document,
+  first's. build123d's joints cannot say one, so no model authors one; the document,
   its readers and every pose honour it.
+- A **coupling** (``couple(assembly, name, *, range=(0, 1), lock=False, **joints)``) is one
+  control driving several pairs by ratio: at value ``c`` each joint it names stands at its
+  as-built value plus its ratio times ``c`` (a pair of several values takes a ratio per
+  value), so ``c = 0`` is as built and a coupling never moves the build. A control, not a
+  constraint: each joint still poses alone, unless the coupling is locked (a gear train),
+  which makes it its joints' only control. Its name poses wherever a joint's does --
+  configurations, motions and ``--pose`` -- and configurations and motions resolve it to pair
+  values at document time; couplings sharing a joint add. A gear pair cannot say one: it
+  couples single values with no offset, so a door's turn and travel, or a 0-1 control, are
+  out of its reach. AP242 has no such entity: it is the engine's own (``cadgen_coupling``).
 
 A link's frame is its first member occurrence's placement as built (the ground's, the
 world's when it has none).
@@ -69,6 +79,9 @@ In the document the mechanism is a subtree under ``Main():100``, marked by a
           :m <name>            NamedData{entity: INTERPOLATED_CONFIGURATION_SEQUENCE, cadgen_ease, cadgen_loop}
             :k                 NamedData{entity: INTERPOLATED_CONFIGURATION_SEGMENT, t_parameter}, and its state:
                                ReferenceList[the configuration it names], or as "as built"
+        :6 "couplings"
+          :c <name>            NamedData{entity: cadgen_coupling, lower_limit, upper_limit, lock (1 when locked)},
+                               ReferenceList[pair per term], RealArray[ratio per term], IntegerArray[value index per term]
 
 STEP carries none of it: OCCT reads AP242 kinematics but cannot write them.
 """
@@ -81,15 +94,20 @@ from typing import Any, Callable
 
 import numpy as np
 
-__all__ = ["CONFIGURATIONS", "GUID", "MOTIONS", "KinematicsError", "Link", "Mechanism", "Motion", "Pair", "Timeline",
-           "block", "configuration", "harvest", "motion", "posed_structure", "read", "resolve", "write"]
+__all__ = ["CONFIGURATIONS", "COUPLINGS", "GUID", "MOTIONS", "Coupling", "KinematicsError", "Link", "Mechanism",
+           "Motion", "Pair", "Timeline", "block", "configuration", "couple", "harvest", "motion", "posed_structure",
+           "read", "resolve", "write"]
 
 GUID = "5b0e7a64-3c1d-4f8e-a2b9-6d4c1e7f9a20"
 TAG = 100  # Main():100, clear of XCAFDoc_DocumentTool's tool labels (1..10)
 SCHEMA = "cadgen.kinematics/1"
-# The attribute ``configuration`` keeps a shape's named configurations in, and ``motion`` its motions.
+# The attribute ``configuration`` keeps a shape's named configurations in, ``motion`` its motions
+# and ``couple`` its couplings.
 CONFIGURATIONS = "xbf_configurations"
 MOTIONS = "xbf_motions"
+COUPLINGS = "xbf_couplings"
+# A coupling's entity: the engine's own, AP242 having no virtual degree of freedom.
+COUPLING = "cadgen_coupling"
 EASES = ("cubic", "linear", "spline")
 LOOPS = (None, "loop", "pingpong")
 # How near a motion's stored samples (a function's) and a GLB's baked curves keep to the truth:
@@ -165,6 +183,21 @@ class Motion:
 
 
 @dataclass
+class Coupling:
+    """One control driving several pairs: at value ``c`` each pair it names stands at its
+    as-built values plus ``ratios[pair]`` (one per value of the pair) times ``c``; ``range`` is
+    the control's, holding 0 (as built); a locked coupling is its pairs' only control."""
+
+    name: str
+    ratios: dict[str, tuple[float, ...]]
+    range: tuple[float, float]
+    lock: bool = False
+
+    def signature(self) -> tuple:
+        return (self.name, tuple(sorted(self.ratios.items())), tuple(self.range), self.lock)
+
+
+@dataclass
 class Mechanism:
     name: str
     links: list[Link]
@@ -175,13 +208,15 @@ class Mechanism:
     # What the harvest found inconsistent, each said by name: the document is written all the same.
     warnings: list[str] = field(default_factory=list)
     motions: dict[str, Motion] = field(default_factory=dict)
+    couplings: dict[str, Coupling] = field(default_factory=dict)
 
     def signature(self) -> tuple:
         return (self.name, tuple((link.name, tuple(link.members)) for link in self.links), self.ground,
                 tuple((p.label, p.kind, p.links, p.frames, p.limits, p.ratio, p.inconsistent) for p in self.pairs),
                 tuple(sorted(self.as_built.items())),
                 tuple((name, tuple(sorted(values.items()))) for name, values in sorted(self.configurations.items())),
-                tuple(self.warnings), tuple(motion.signature() for _name, motion in sorted(self.motions.items())))
+                tuple(self.warnings), tuple(motion.signature() for _name, motion in sorted(self.motions.items())),
+                tuple(coupling.signature() for _name, coupling in sorted(self.couplings.items())))
 
 
 # --- matrices ------------------------------------------------------------------------------
@@ -292,6 +327,49 @@ def configuration(assembly: Any, name: str, **values: Any) -> Any:
     held = dict(assembly.__dict__.get(CONFIGURATIONS) or {})
     held[name] = checked
     assembly.__dict__[CONFIGURATIONS] = held
+    return assembly
+
+
+def couple(assembly: Any, name: str, *, range: Any = (0, 1), lock: bool = False, **joints: Any) -> Any:  # noqa: A002
+    """A coupling of ``assembly``'s mechanism: one control, ``name``, driving several joints by
+    ratio, each by the joint's label -- a number, or for a joint of several values a sequence of
+    them (a cylindrical joint's turn and travel, a ball joint's three angles). At value ``c``
+    each joint stands at its as-built value plus its ratio times ``c``: ``c = 0`` is as built,
+    so a coupling never moves the build. ``range`` is the control's ``(lower, upper)``, which
+    holds 0. Each joint still poses alone, unless ``lock=True``: then the coupling is its joints'
+    only control (a gear train), the viewer shows no slider of theirs, and a pose sets them
+    through it alone. Its name poses wherever a joint's does: ``configuration(..., curl=0.5)``, a
+    motion's waypoints and sweeps, and ``--pose``. Kept in the document beside the
+    configurations; a label names the joint in each placement of a sub-assembly placed several
+    times. Returns ``assembly``."""
+    import build123d as bd
+
+    if not isinstance(assembly, bd.Shape):
+        raise TypeError(f"couple() takes the assembly whose joints it drives, not {type(assembly).__name__}")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("a coupling's name is a non-empty string")
+    where = f"coupling {name!r}"
+    bounds = _number_values(range)
+    if bounds is None or len(bounds) != 2:
+        raise TypeError(f"{where}: range is (lower, upper), two numbers, not {range!r}")
+    if not all(math.isfinite(value) for value in bounds) or not bounds[0] < bounds[1]:
+        raise ValueError(f"{where}: range is (lower, upper), finite, lower below upper, not {range!r}")
+    if not bounds[0] <= 0.0 <= bounds[1]:
+        raise ValueError(f"{where}: its range holds 0, the as-built pose, not {range!r}")
+    if not isinstance(lock, bool):
+        raise TypeError(f"{where}: lock is True or False, not {lock!r}")
+    ratios = {}
+    for label, value in joints.items():
+        found = _number_values(value)
+        if found is None or not all(math.isfinite(v) for v in found):
+            raise TypeError(f"{where}: joint {label!r} takes a ratio, or a sequence of them for a joint of "
+                            f"several values, not {value!r}")
+        ratios[label] = found
+    if not ratios:
+        raise ValueError(f"{where} drives no joint")
+    held = dict(assembly.__dict__.get(COUPLINGS) or {})
+    held[name] = (ratios, (bounds[0], bounds[1]), lock)
+    assembly.__dict__[COUPLINGS] = held
     return assembly
 
 
@@ -589,6 +667,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     jointed: list[tuple[tuple[int, ...], Any]] = []
     configured: list[tuple[tuple[int, ...], Any, dict]] = []
     motioned: list[tuple[tuple[int, ...], Any, dict]] = []
+    coupled: list[tuple[tuple[int, ...], Any, dict]] = []
     for obj, path in objects:
         joints = obj.__dict__.get("joints") or {}
         for joint in list(joints.values()):
@@ -600,6 +679,9 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         held = obj.__dict__.get(MOTIONS)
         if held:
             motioned.append((path, obj, held))
+        held = obj.__dict__.get(COUPLINGS)
+        if held:
+            coupled.append((path, obj, held))
 
     # Every connect_to: (the joint called and its part, which stays; the other and its part, which moves).
     seen: set = set()
@@ -621,27 +703,50 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
     def name_of(path: tuple[int, ...]) -> str:
         return "/".join(_occurrence(tree, path)[1])
 
-    # A configuration naming a joint no part of its assembly holds means nothing: the one harvest
-    # error. Every other inconsistency is a warning, and the document is written.
+    def labels_below(path: tuple[int, ...]) -> set[str]:
+        return {joint.label for holder, joint in jointed if holder[:len(path)] == path}
+
+    def controls_below(path: tuple[int, ...]) -> set[str]:
+        return {name for holder, _obj, held in coupled if holder[:len(path)] == path for name in held}
+
+    def unknown(key: str, labels: set[str], controls: set[str] = frozenset()) -> bool:
+        return not any(key == known or key.endswith(f":{known}") for known in (*labels, *controls))
+
+    def known(labels: set[str], controls: set[str]) -> str:
+        found = f"its joints are {', '.join(sorted(labels))}" if labels else "it holds no joint"
+        return found + (f"; its couplings are {', '.join(sorted(controls))}" if controls else "")
+
+    # A configuration, a motion or a coupling naming a joint no part of its assembly holds means
+    # nothing, nor does a coupling named as a joint is (a pose could not tell them apart): the
+    # harvest's errors. Every other inconsistency is a warning, and the document is written.
     for path, _obj, held in configured:
-        labels = {joint.label for holder, joint in jointed if holder[:len(path)] == path}
+        labels, controls = labels_below(path), controls_below(path)
         for name, values in held.items():
             for key in values:
-                if key not in labels and not any(key.endswith(f":{label}") for label in labels):
+                if unknown(key, labels, controls):
                     raise KinematicsError(f"configuration {name!r} of {name_of(path)} names no joint {key!r}; "
-                                          + (f"its joints are {', '.join(sorted(labels))}" if labels
-                                             else "it holds no joint"))
+                                          + known(labels, controls))
     for path, _obj, held in motioned:
-        labels = {joint.label for holder, joint in jointed if holder[:len(path)] == path}
+        labels, controls = labels_below(path), controls_below(path)
         for name, spec in held.items():
             for key in (label for _t, _name, values in (spec[1] if spec[0] == "keys" else ()) for label in values):
-                if key not in labels and not any(key.endswith(f":{label}") for label in labels):
+                if unknown(key, labels, controls):
                     raise KinematicsError(f"motion {name!r} of {name_of(path)} names no joint {key!r}; "
-                                          + (f"its joints are {', '.join(sorted(labels))}" if labels
-                                             else "it holds no joint"))
+                                          + known(labels, controls))
+    for path, _obj, held in coupled:
+        labels = labels_below(path)
+        for name, (ratios, _range, _lock) in held.items():
+            if not unknown(name, labels):
+                raise KinematicsError(f"coupling {name!r} of {name_of(path)} has a joint's name, which a pose could "
+                                      "not tell from it: give it a name of its own")
+            for key in ratios:
+                if unknown(key, labels):
+                    raise KinematicsError(f"coupling {name!r} of {name_of(path)} names no joint {key!r}; "
+                                          + known(labels, set()))
     if not pairings:
-        if configured or motioned:
-            warnings.append("the configurations or motions name joints, and no joint is paired with another")
+        if configured or motioned or coupled:
+            warnings.append("the configurations, couplings or motions name joints, and no joint is paired with "
+                            "another")
         return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     parent: dict[tuple[int, ...], tuple[int, ...]] = {}
@@ -674,8 +779,8 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             moving, held_by, rigid, rigid_by = joint, stays, other, moves
         moving_pairs.append((moving, held_by, rigid, rigid_by, moves))
     if not moving_pairs:
-        if configured or motioned:
-            warnings.append("the configurations or motions name joints, and no moving joint is paired")
+        if configured or motioned or coupled:
+            warnings.append("the configurations, couplings or motions name joints, and no moving joint is paired")
         return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
     classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
@@ -739,11 +844,12 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
         pairs.append(pair)
         joint_labels.append((moving.label, held_by))
 
-    configurations = _configurations(configured, pairs, joint_labels, name_of, warnings)
-    found = Mechanism(tree.root.name, links, 0, pairs, as_built, configurations, warnings)
+    couplings, controls = _couplings(coupled, pairs, joint_labels, name_of, warnings)
+    found = Mechanism(tree.root.name, links, 0, pairs, as_built, {}, warnings, couplings=couplings)
+    found.configurations = _configurations(configured, found, joint_labels, controls, name_of)
     if motioned:
         functions = any(spec[0] == "function" for _path, _obj, held in motioned for spec in held.values())
-        found.motions = _motions(motioned, found, joint_labels, name_of, _size(result) if functions else 1.0)
+        found.motions = _motions(motioned, found, joint_labels, controls, name_of, _size(result) if functions else 1.0)
     return found
 
 
@@ -756,6 +862,156 @@ def _matching(path: tuple[int, ...], key: str, pairs: list[Pair], joint_labels: 
     its moving joint's, among the joints below the assembly."""
     return [pair for pair, (raw, holder) in zip(pairs, joint_labels)
             if holder[:len(path)] == path and key in (pair.label, raw)]
+
+
+def _couplings(coupled: list, pairs: list[Pair], joint_labels: list, name_of: Callable,
+               warnings: list[str]) -> tuple[dict[str, Coupling], list[tuple[tuple[int, ...], str, str]]]:
+    """Each coupling, by name, its joints made pairs: a joint label names the pair of every joint
+    below its assembly so labelled (each placement's, for a sub-assembly placed several times).
+    A name two couplings share takes the path of the assembly holding each (``hand/index:curl``),
+    as a label two pairs share does. A joint in no pair, or given as many ratios as its pair has
+    no values, is left out of the coupling, and warned; a coupling left with no joint is left out.
+    A coupling named as a pair is, and a joint a locked coupling drives that another coupling
+    drives too, fail the harvest. Returns the couplings and, for each, its assembly's path, its
+    own name and the name it is kept by (what a configuration or a motion may call it)."""
+    counts: dict[str, int] = {}
+    for _path, _obj, held in coupled:
+        for name in held:
+            counts[name] = counts.get(name, 0) + 1
+    labels = {pair.label for pair in pairs}
+    found: dict[str, Coupling] = {}
+    controls: list[tuple[tuple[int, ...], str, str]] = []
+    for path, _obj, held in coupled:
+        for name, (given, bounds, lock) in held.items():
+            kept = name if counts[name] == 1 else f"{name_of(path)}:{name}"
+            where = f"coupling {name!r} of {name_of(path)}"
+            if kept in labels:
+                raise KinematicsError(f"{where} is named {kept!r}, as a joint is, which a pose could not tell from it: "
+                                      "give it a name of its own")
+            ratios: dict[str, tuple[float, ...]] = {}
+            for key, value in given.items():
+                matches = _matching(path, key, pairs, joint_labels)
+                if not matches:
+                    warnings.append(f"{where} drives joint {key!r}, which is in no pair: the joint is left out of it")
+                for pair in matches:
+                    if len(value) != pair.dofs:
+                        need = "a ratio" if pair.dofs == 1 else f"{pair.dofs} ratios ({', '.join(_dof_names(pair.kind))})"
+                        warnings.append(f"{where}: joint {pair.label!r} ({pair.kind}) takes {need}, not {_shown(value)}: "
+                                        "the joint is left out of it")
+                        continue
+                    ratios[pair.label] = tuple(float(ratio) for ratio in value)
+            if not ratios:
+                warnings.append(f"{where} drives no pair: it is left out")
+                continue
+            found[kept] = Coupling(kept, ratios, (float(bounds[0]), float(bounds[1])), bool(lock))
+            controls.append((path, name, kept))
+    drivers: dict[str, list[str]] = {}
+    for kept in sorted(found):
+        for label in found[kept].ratios:
+            drivers.setdefault(label, []).append(kept)
+    for label, names in drivers.items():
+        locked = [name for name in names if found[name].lock]
+        if locked and len(names) > 1:
+            other = next(name for name in names if name != locked[0])
+            raise KinematicsError(f"joint {label!r} is driven by the locked coupling {locked[0]!r} and by {other!r}: "
+                                  "a locked coupling is its joints' only control")
+    return {name: found[name] for name in sorted(found)}, controls
+
+
+def _coupling_json(coupling: Coupling, pairs: list[Pair]) -> dict[str, Any]:
+    """A coupling as the structure's ``kinematics.couplings`` holds it: its range, whether it is
+    locked, and its terms, ``[pair, value index, ratio]`` in the pairs' order."""
+    return {"range": [float(coupling.range[0]), float(coupling.range[1])], "lock": bool(coupling.lock),
+            "terms": [[pair.label, index, float(ratio)] for pair in pairs if pair.label in coupling.ratios
+                      for index, ratio in enumerate(coupling.ratios[pair.label])]}
+
+
+def _locked(couplings: dict[str, Any]) -> dict[str, str]:
+    """Each pair a locked coupling drives (``kinematics.couplings``): the coupling's name."""
+    return {label: name for name, coupling in couplings.items() if coupling.get("lock")
+            for label, _index, _ratio in coupling["terms"]}
+
+
+def _coupled(given: dict[str, Any], couplings: dict[str, Any], as_built: dict[str, tuple[float, ...]],
+             checked: Callable[[str, tuple[float, ...], str], tuple[float, ...]], where: str) -> dict[str, tuple[float, ...]]:
+    """The pair values couplings put their joints at: ``given`` is each coupling's value by name,
+    ``couplings`` the structure's. Each joint stands at its as-built values plus each coupling's
+    ratio times its value (couplings sharing a joint add). A value that is no number or is outside
+    its coupling's range, and one putting a joint past its limits (``checked``), are refused by
+    name."""
+    moved: dict[str, list[float]] = {}
+    by: dict[str, dict[str, None]] = {}
+    for name, value in given.items():
+        coupling = couplings[name]
+        found = _number_values(value)
+        if found is None or len(found) != 1 or not math.isfinite(found[0]):
+            raise KinematicsError(f"{where}: coupling {name!r} takes a number, not {value!r}")
+        lower, upper = coupling["range"]
+        if not _within(found[0], (lower, upper)):
+            raise KinematicsError(f"{where}: coupling {name!r} at {found[0]:g} is outside its range "
+                                  f"[{lower:g}, {upper:g}]")
+        for label, index, ratio in coupling["terms"]:
+            if label not in as_built:
+                raise KinematicsError(f"{where}: coupling {name!r} moves joint {label!r}, which is kept with no value")
+            row = moved.setdefault(label, list(as_built[label]))
+            row[index] += ratio * found[0]
+            by.setdefault(label, {})[f"{name!r} at {found[0]:g}"] = None
+    return {label: checked(label, tuple(row), f"{where}: coupling{'s' if len(by[label]) > 1 else ''} "
+                                              f"{', '.join(by[label])}")
+            for label, row in moved.items()}
+
+
+def _converted(path: tuple[int, ...], values: dict[str, Any], mechanism: Mechanism, joint_labels: list,
+               controls: list, where: str) -> tuple[dict[str, tuple[float, ...]], list[str]]:
+    """``values`` -- joints by label and couplings by name, as the assembly at ``path`` sets them
+    -- as the pair values they put the pairs at, and what could not be taken, each said by name:
+    a joint in no pair, a value its pair cannot take, a locked coupling's joint set alone, a
+    coupling set with one of its joints, a coupling's value outside its range or putting a joint
+    past its limits. What a configuration and a motion name is made pair values here, at
+    document time."""
+    pairs = mechanism.pairs
+    by_label = {pair.label: pair for pair in pairs}
+    couplings = {name: _coupling_json(coupling, pairs) for name, coupling in mechanism.couplings.items()}
+    locked = _locked(couplings)
+    found: dict[str, tuple[float, ...]] = {}
+    problems: list[str] = []
+    driving: dict[str, Any] = {}
+    for key, value in values.items():
+        named = [kept for holder, own, kept in controls if holder[:len(path)] == path and key in (own, kept)]
+        if named:
+            driving.update(dict.fromkeys(named, value))
+            continue
+        matches = _matching(path, key, pairs, joint_labels)
+        if not matches:
+            problems.append(f"{where} sets joint {key!r}, which is in no pair")
+        for pair in matches:
+            if pair.label in locked:
+                problems.append(f"{where}: joint {pair.label!r} moves only with the locked coupling "
+                                f"{locked[pair.label]!r}; set {locked[pair.label]!r}")
+                continue
+            try:
+                found[pair.label] = _checked(pair, value, where)
+            except KinematicsError as error:
+                problems.append(str(error))
+    as_built = mechanism.as_built
+    checked = lambda label, row, at: _checked(by_label[label], row, at)  # noqa: E731
+    for name in list(driving):
+        clash = [label for label in mechanism.couplings[name].ratios if label in found]
+        problem = f"{where} sets coupling {name!r} and its joint {clash[0]!r}: set one of them" if clash else None
+        if problem is None:
+            try:
+                _coupled({name: driving[name]}, couplings, as_built, checked, where)
+            except KinematicsError as error:
+                problem = str(error)
+        if problem is not None:
+            problems.append(problem)
+            del driving[name]
+    if driving:
+        try:
+            found.update(_coupled(driving, couplings, as_built, checked, where))
+        except KinematicsError as error:  # each alone within the limits, together past them
+            problems.append(str(error))
+    return {pair.label: found[pair.label] for pair in pairs if pair.label in found}, problems
 
 
 def _size(result: Any) -> float:
@@ -771,13 +1027,13 @@ def _size(result: Any) -> float:
     return max(1.0, math.dist((low.X(), low.Y(), low.Z()), (high.X(), high.Y(), high.Z())))
 
 
-def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, name_of: Callable,
+def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, controls: list, name_of: Callable,
              size: float) -> dict[str, Motion]:
     """Each motion as the document keeps it, by name: its keys in pair labels (a function's
-    sampled), a shallower assembly's motion over a deeper one's of the same name. A motion
-    naming a configuration the mechanism has not, or a joint its assembly has not, is the
-    harvest's error; one setting a value its pair cannot take, or moving a pair kept with no
-    value or closing a loop, is left out, and warned."""
+    sampled, a coupling's value made its joints'), a shallower assembly's motion over a deeper
+    one's of the same name. A motion naming a configuration the mechanism has not, or a joint
+    its assembly has not, is the harvest's error; one setting a value its pair cannot take, or
+    moving a pair kept with no value or closing a loop, is left out, and warned."""
     pairs, warnings = mechanism.pairs, mechanism.warnings
     _reached, loop = _tree(mechanism)
     blocked = {pair.label: f"it is kept with no value ({pair.inconsistent})" for pair in pairs if pair.inconsistent}
@@ -790,22 +1046,15 @@ def _motions(motioned: list, mechanism: Mechanism, joint_labels: list, name_of: 
             where = f"motion {name!r} of {name_of(path)}"
 
             def convert(values: dict[str, Any], at: str) -> dict[str, tuple[float, ...]]:
-                converted = {}
-                for key, value in values.items():
-                    matches = _matching(path, key, pairs, joint_labels)
-                    if not matches:
-                        raise _Unfit(f"{where}: {at} sets joint {key!r}, which is in no pair")
-                    for pair in matches:
-                        try:
-                            converted[pair.label] = _checked(pair, value, f"{where}: {at}")
-                        except KinematicsError as error:
-                            raise _Unfit(str(error)) from None
+                converted, problems = _converted(path, values, mechanism, joint_labels, controls, f"{where}: {at}")
+                if problems:
+                    raise _Unfit(problems[0])
                 return converted
 
             try:
                 if spec[0] == "function":
                     _kind, function, duration, _ease, loop_mode = spec
-                    keys = _sampled(function, duration, convert, tolerances, where, path, joint_labels)
+                    keys = _sampled(function, duration, convert, tolerances, where, path, joint_labels, controls)
                     ease = "spline"
                 else:
                     _kind, rows, ease, loop_mode = spec
@@ -839,12 +1088,13 @@ def _flat(values: dict[str, tuple[float, ...]], labels: list[str]) -> np.ndarray
 
 
 def _sampled(function: Callable, duration: float, convert: Callable, tolerances: dict[str, list[float]],
-             where: str, path: tuple[int, ...], joint_labels: list) -> list:
+             where: str, path: tuple[int, ...], joint_labels: list, controls: list) -> list:
     """A function of time's samples: eight equal steps over its duration, each step halved
     where the samples' spline strays from the function, at a quarter, half or three quarters
     of it, by more than the tolerance (``ANGULAR_TOLERANCE``, ``LINEAR_TOLERANCE``), until
     none does. A function of the code: the same function samples at the same times."""
     held: dict[float, dict[str, tuple[float, ...]]] = {}
+    names = {name for holder, own, kept in controls if holder[:len(path)] == path for name in (own, kept)}
 
     def at(t: float) -> dict[str, tuple[float, ...]]:
         found = held.get(t)
@@ -856,10 +1106,11 @@ def _sampled(function: Callable, duration: float, convert: Callable, tolerances:
             if not isinstance(given, dict) or not given:
                 raise KinematicsError(f"{where}: the function returns {{joint: value}}, not {given!r} (at {t:g} s)")
             for key in given:
-                if not any(key in (raw,) or key.endswith(f":{raw}") for raw, holder in joint_labels
-                           if holder[:len(path)] == path):
+                if key not in names and not any(key in (raw,) or key.endswith(f":{raw}") for raw, holder in joint_labels
+                                                if holder[:len(path)] == path):
                     labels = sorted({raw for raw, holder in joint_labels if holder[:len(path)] == path})
-                    raise KinematicsError(f"{where} names no joint {key!r}; its joints are {', '.join(labels)}")
+                    raise KinematicsError(f"{where} names no joint {key!r}; its joints are {', '.join(labels)}"
+                                          + (f"; its couplings are {', '.join(sorted(names))}" if names else ""))
             found = held[t] = convert(given, f"the function at {t:g} s")
         return found
 
@@ -923,26 +1174,18 @@ def _shown(values: tuple[float, ...] | list[float]) -> str:
     return text[0] if len(text) == 1 else "(" + ", ".join(text) + ")"
 
 
-def _configurations(configured: list, pairs: list[Pair], joint_labels: list, name_of: Callable,
-                    warnings: list[str]) -> dict:
-    """Each named configuration, every assembly's that names it merged, a deeper one's
-    values first and a shallower one's over them. A value for a joint that is in no pair, or
-    one its pair cannot take, is left out, and warned."""
+def _configurations(configured: list, mechanism: Mechanism, joint_labels: list, controls: list,
+                    name_of: Callable) -> dict:
+    """Each named configuration as pair values (a coupling's value made its joints'), every
+    assembly's that names it merged, a deeper one's values first and a shallower one's over
+    them. What a value cannot be taken for (``_converted``) is left out, and warned."""
     merged: dict[str, dict[str, tuple[float, ...]]] = {}
     for path, _obj, held in sorted(configured, key=lambda item: -len(item[0])):
         for name, values in held.items():
-            found = merged.setdefault(name, {})
-            for key, value in values.items():
-                matches = [pair for pair, (raw, holder) in zip(pairs, joint_labels)
-                           if holder[:len(path)] == path and key in (pair.label, raw)]
-                if not matches:
-                    warnings.append(f"configuration {name!r} of {name_of(path)} sets joint {key!r}, which is in no "
-                                    "pair: the value is left out")
-                for pair in matches:
-                    try:
-                        found[pair.label] = _checked(pair, value, f"configuration {name!r}")
-                    except KinematicsError as error:
-                        warnings.append(f"{error}: the value is left out")
+            found, problems = _converted(path, values, mechanism, joint_labels, controls,
+                                         f"configuration {name!r} of {name_of(path)}")
+            mechanism.warnings.extend(f"{problem}: the value is left out" for problem in problems)
+            merged.setdefault(name, {}).update(found)
     return {name: merged[name] for name in sorted(merged)}
 
 
@@ -1095,6 +1338,18 @@ def write(doc: Any, mechanism: Mechanism, occurrence: Callable[[tuple[int, ...]]
                     TDataStd_ReferenceList.Set_s(segment).Append(configuration_labels[configuration])
                 else:
                     _state(segment, pair_labels, values, mechanism.pairs)
+    if mechanism.couplings:
+        # Each coupling, the engine's own entity (AP242 has no virtual degree of freedom): its
+        # range and lock, and its terms as a state's rows, a ratio where a state holds a value.
+        couplings = _label(top, 6, "couplings")
+        for at, (name, coupling) in enumerate(mechanism.couplings.items(), 1):
+            label = _label(couplings, at, name, COUPLING)
+            data = TDataStd_NamedData.Set_s(label)
+            data.SetReal(_text("lower_limit"), float(coupling.range[0]))
+            data.SetReal(_text("upper_limit"), float(coupling.range[1]))
+            if coupling.lock:
+                data.SetInteger(_text("lock"), 1)
+            _state(label, pair_labels, coupling.ratios, mechanism.pairs)
 
 
 def _children_of(label: Any) -> list:
@@ -1222,12 +1477,22 @@ def read(doc: Any, occurrences: dict[str, tuple[int, ...]]) -> Mechanism | None:
                 keys.append((t, None, _read_state(segment, pair_at, pairs)))
         motions[_label_name(label)] = Motion(_label_name(label), keys, _string(data, "cadgen_ease") or "cubic",
                                              _string(data, "cadgen_loop"))
+    couplings = {}
+    held_couplings = top.FindChild(6, False)
+    for label in ([] if held_couplings.IsNull() else _children_of(held_couplings)):
+        data = _named(label)
+        lower, upper = _real(data, "lower_limit"), _real(data, "upper_limit")
+        if _string(data, "entity") != COUPLING or lower is None or upper is None:
+            continue
+        lock = data.HasInteger(_text("lock")) and data.GetInteger(_text("lock")) == 1
+        couplings[_label_name(label)] = Coupling(_label_name(label), _read_state(label, pair_at, pairs),
+                                                 (lower, upper), lock)
     from OCP.TDataStd import TDataStd_ExtStringArray
 
     held = TDataStd_ExtStringArray()
     warnings = ([held.Value(at).ToExtString() for at in range(held.Lower(), held.Upper() + 1)]
                 if _find(top, held, TDataStd_ExtStringArray.GetID_s()) else [])
-    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations, warnings, motions)
+    return Mechanism(_label_name(top), links, ground, pairs, as_built, configurations, warnings, motions, couplings)
 
 
 # --- what the page reads -------------------------------------------------------------------
@@ -1321,6 +1586,7 @@ def block(mechanism: Mechanism, instance_paths: list[tuple[int, ...]],
             "asBuilt": {label: _json_value(values) for label, values in mechanism.as_built.items()},
             "configurations": {name: {label: _json_value(values) for label, values in values_.items()}
                                for name, values_ in mechanism.configurations.items()},
+            "couplings": {name: _coupling_json(coupling, mechanism.pairs) for name, coupling in mechanism.couplings.items()},
             "motions": {name: _motion_json(motion) for name, motion in mechanism.motions.items()},
             "loop": loop, "warnings": warnings}
 
@@ -1365,7 +1631,7 @@ class Timeline:
                 poses.append(resolve(kinematics, key["configuration"])[0])
             else:
                 moving |= set(key["values"])
-                poses.append(resolve(kinematics, key["values"])[0])
+                poses.append(resolve(kinematics, key["values"], own=True)[0])
         self.labels = sorted(label for label in moving if label not in driven)
         self.sizes = [len(poses[0][label]) for label in self.labels]
         self.table = np.array([[value for label in self.labels for value in pose[label]] for pose in poses],
@@ -1388,7 +1654,7 @@ class Timeline:
         return found
 
     def values(self, t: float) -> dict[str, tuple[float, ...]]:
-        return resolve(self.kinematics, self.joints(t))[0]
+        return resolve(self.kinematics, self.joints(t), own=True)[0]
 
     @property
     def breaks(self) -> list[float]:
@@ -1421,18 +1687,26 @@ def _block_checked(pair: dict[str, Any], value: Any, where: str) -> tuple[float,
     return _checked(as_pair, value, where)
 
 
-def resolve(kinematics: dict[str, Any] | None, pose: Any) -> tuple[dict[str, tuple[float, ...]], str | None]:
+def resolve(kinematics: dict[str, Any] | None, pose: Any, *,
+            own: bool = False) -> tuple[dict[str, tuple[float, ...]], str | None]:
     """The values a pose sets every pair to, and the configuration it names: ``pose`` is
-    None (as built), a configuration's name, or ``{joint label: value}`` (the rest as
-    built). An unknown name or joint, a value out of range, and a value for a pair a gear
-    drives are refused by name."""
+    None (as built), a configuration's name, or ``{joint label or coupling name: value}``
+    (the rest as built; a coupling at ``c`` puts each of its joints at its as-built values
+    plus its ratio times ``c``, couplings sharing a joint adding). An unknown name or joint,
+    a value out of range, a value for a pair a gear drives, a locked coupling's joint set
+    alone and a coupling set with one of its joints are refused by name. ``own``: the values
+    are the document's own (a motion's keys), which set a locked coupling's joints."""
     if kinematics is None:
         if pose is None:
             return {}, None
         raise KinematicsError("the document has no joints to pose")
-    values = {label: _as_tuple(value) for label, value in kinematics["asBuilt"].items()}
+    as_built = {label: _as_tuple(value) for label, value in kinematics["asBuilt"].items()}
+    values = dict(as_built)
     pairs = _block_pairs(kinematics)
     driven = _driven(kinematics)
+    couplings = kinematics.get("couplings") or {}
+    locked = _locked(couplings)
+    loop = kinematics.get("loop") or ()
     named = None
     if isinstance(pose, str):
         configurations = kinematics.get("configurations") or {}
@@ -1446,21 +1720,46 @@ def resolve(kinematics: dict[str, Any] | None, pose: Any) -> tuple[dict[str, tup
         given, where = {}, ""
     else:
         raise KinematicsError("a pose is a configuration's name or an object of joint values")
+
+    def unposable(label: str) -> str | None:
+        """Why the pair cannot be posed, or None."""
+        if pairs[label].get("inconsistent"):
+            return pairs[label]["inconsistent"]
+        if label in loop:
+            return f"pairs {', '.join(loop)} close a loop, which has no pose without a solver"
+        return None
+
+    controls = {}
     for label, value in given.items():
         pair = pairs.get(label)
+        if pair is None and label in couplings:
+            controls[label] = value
+            continue
         if pair is None or pair["type"] == "gear":
             movable = ", ".join(sorted(name for name, found in pairs.items() if found["type"] != "gear")) or "none"
-            raise KinematicsError(f"{where} names no joint {label!r}; the document's joints: {movable}")
-        if pair.get("inconsistent"):
-            raise KinematicsError(f"{where}: joint {label!r} cannot be posed: {pair['inconsistent']}")
-        if label in (kinematics.get("loop") or ()):
-            raise KinematicsError(f"{where}: joint {label!r} cannot be posed: pairs {', '.join(kinematics['loop'])} "
-                                  "close a loop, which has no pose without a solver")
+            raise KinematicsError(f"{where} names no joint {label!r}; the document's joints: {movable}"
+                                  + (f"; its couplings: {', '.join(sorted(couplings))}" if couplings else ""))
+        why = unposable(label)
+        if why:
+            raise KinematicsError(f"{where}: joint {label!r} cannot be posed: {why}")
         if label in driven and not named:
             driver, _ratio, gear = driven[label]
             raise KinematicsError(f"{where}: joint {label!r} is driven by {driver!r} through gear {gear!r}; "
                                   f"set {driver!r}")
+        if label in locked and not named and not own:
+            raise KinematicsError(f"{where}: joint {label!r} moves only with the locked coupling {locked[label]!r}; "
+                                  f"set {locked[label]!r}")
         values[label] = _block_checked(pair, value, where)
+    for name in controls:
+        for label, _index, _ratio in couplings[name]["terms"]:
+            if label in given:
+                raise KinematicsError(f"{where} sets coupling {name!r} and its joint {label!r}: set one of them")
+            why = unposable(label)
+            if why:
+                raise KinematicsError(f"{where}: coupling {name!r} cannot be posed: its joint {label!r} cannot be: "
+                                      f"{why}")
+    values.update(_coupled(controls, couplings, as_built,
+                           lambda label, row, at: _block_checked(pairs[label], row, at), where))
     for label, (driver, ratio, gear) in driven.items():
         if driver not in values or label not in values:
             continue
