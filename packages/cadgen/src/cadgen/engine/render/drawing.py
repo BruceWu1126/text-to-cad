@@ -126,7 +126,11 @@ class Held:
             clock = time.perf_counter()
             self.canvas = Canvas(width, height)
             params = self.canvas.view.ChangeRenderingParams()
-            params.NbMsaaSamples = 8
+            # Hairlines aliased, a pixel wide, as a 2D CAD viewer draws them: multisampled 1-pixel
+            # lines broke into dots on Mesa's llvmpipe, and drawn larger and brought down
+            # (RenderResolutionScale) they come out a quarter as dark, since a core-profile context
+            # draws no line wider than a pixel.
+            params.NbMsaaSamples = 0
             self._show()
             timings["sceneMs"] = round((time.perf_counter() - clock) * 1000)
         self.canvas.width, self.canvas.height = width, height
