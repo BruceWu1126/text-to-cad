@@ -28,7 +28,10 @@ The stages keep ownership narrow:
   document read by `loadXbfDocument` from the engine that serves it: one geometry per
   prototype over its XBM2 buffer's own typed-array views, one placed group per instance, CAD
   edges by class from the edge table, faces, edges and vertices picked by ordinal; the
-  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`). Each returns the scene contract of
+  document's edges are the view's `edges`, which the scene wears through `setEdgeLook`; its
+  regular modes are drawn in the engine's look, `GET /api/look`, and its environment image,
+  `GET /api/look/environment`, read beside the document: `lib/xbf/xbfLook.js`). Each returns the
+  scene contract of
   `lib/viewer/sceneContract.js`, and each scene gives a sibling (`createSibling()`): a
   second scene of the same file with its own objects, materials and look over the first's
   geometry (`lib/render/sharedGeometry.js`), which the viewer's Preview draws beside
@@ -37,7 +40,17 @@ The stages keep ownership narrow:
   has its own links and pose, and its own vertex colours. Ownership is
   [resource-ownership §1](resource-ownership.md#1-shared-ownership-and-disposal).
 - `renderModel` owns renderer, scene, camera, lighting, background, floor,
-  framing, resizing, and render loop concerns.
+  framing, resizing, and render loop concerns. A scene that brings its own lighting (the
+  contract's `rig`: an engine document's, its engine's look) is lit by it outside Render in place
+  of the theme's lights, its environment the scene's (one PMREM per image and renderer, which every
+  surface reflects, an authored finish in Solid and Shaded among them), its tone curve three's
+  `CustomToneMapping` (`lib/viewer/sceneRig.js`, which the viewer's viewport puts up the same way);
+  every other scene keeps the theme's rig. Such a scene's surface look may name a surface model
+  too (`brdf`, `lib/viewer/surfaceBrdf.js`): an engine document's lit surfaces answer light as
+  OCCT's PBR program does, which its look is defined by, in place of three's own physical model.
+  A scene may light one look otherwise (the contract's `rigFor`, asked through `sceneRigFor`): an
+  engine document's X-ray is its look's colour-only model, an ambient term and plain directional
+  lights, no environment, three's own surface model and no finish, as OCCT draws it by Phong.
 - `captureModel` owns deterministic snapshot outputs without filesystem writes.
 
 The CAD skill's Python snapshot CLI remains responsible for job parsing, path
@@ -504,7 +517,8 @@ presets resolve to those implementation details plus independent surface and
 edge settings; never feed a public preset into `normalizeDisplayMode()`. Normal CAD
 keeps authored albedo, opacity and finish. Workbench PBR channels are fallbacks;
 a small neutral reflection environment makes authored metals readable without
-loading the photographic studio.
+loading the photographic studio (an engine document's: its look's environment,
+which its rig brings).
 `resolveDisplayMaterialSettings()` applies the shared Original, Single color
 and Color by part policy without app state.
 

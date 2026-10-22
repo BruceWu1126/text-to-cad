@@ -78,7 +78,8 @@ def hinge():
    but for the xbf itself: a model whose xbf holds the closure the model has now is
    not run (**Build closure**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
-   OCP, build123d, numpy and the standard library only. A test holds it.
+   OCP, build123d, numpy, Pillow (the renderer's rasteriser) and the standard library
+   only. A test holds it.
 4. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
@@ -134,7 +135,8 @@ def hinge():
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory; `CADGEN_SNAPSHOT_RENDERER=occt` draws a document with `render/` |
+| `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), and `cadgen where` (`where_main`) |
@@ -147,7 +149,8 @@ cadgen xbf build SCRIPT[::MODEL] ...             every model of the script, or o
 cadgen xbf build --code 'SOURCE' | - [--name N]  one model from source text (stdin with -)
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--no-daemon] [--verify]
 cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
-cadgen xbf snapshot SRC OUT.png [--display MODE|JSON] [--grid] [--camera C] [--preview] [--pose NAME|JSON]
+cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
+                    [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
 cadgen xbf status | stop | daemon
@@ -181,7 +184,8 @@ previous files stay. The daemon starts on demand and exits after an idle hour
 `CADGEN_ENGINE_WORKER_RSS_MB` after a build (default: a quarter of the machine's memory,
 at least 2 GiB; `0` for no cap) is retired: the report says so (`retired`), the worker
 exits once it has answered, and the next build is a fresh worker's -- a restart, which
-takes the xbf whole when its closure is unchanged (**Build closure**). `CADGEN_ENGINE_DIR` moves its socket and lock.
+takes the xbf whole when its closure is unchanged (**Build closure**). A render process (**The viewer and the
+snapshot**) is held to the same cap after each picture. `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
 processes started with the server, each handed one part's shape as bytes,
@@ -207,17 +211,69 @@ moment the engine has it. Every answer names a loopback page's origin as an allo
 (`access.py`: `localhost`, `127.0.0.1`, `[::1]`, any port); a page from anywhere else gets no
 such header and its browser keeps the answer from it.
 
+**The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
+record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in
+`render/finish.py`) draws by too: one white directional key at radiance 4 travelling
+(-0.35, 0.55, -1), and one environment lighting every surface at 0.5, the viewer's neutral studio
+baked as a 512 x 256 Radiance image beside the record (`render/studio.hdr`); no ambient term, fill,
+shadow, exposure or tone curve: the sum is clamped and sRGB-encoded. Every surface answers that
+light as OCCT's PBR program does (the record's `brdf`, `occt`): single scattering, Schlick-GGX
+geometry, the roughness as given, which the viewer draws in place of three's own physical model
+(the bundled `@text-to-cad/core`'s `lib/viewer/surfaceBrdf.js`). A part without a material,
+and every fill (Parts), wears a plain dielectric finish (roughness 0.5) over its colour, linear,
+squared, which keeps the saturated colours of OCCT's old Phong look. A part with a material wears
+its finish in Solid and Shaded on both renderers, its colour as authored, reflecting that
+environment; X-ray draws it in the plain finish. What OCCT's raster has no term for it
+approximates (`render/finish.py`): a clear coat eases the base's roughness toward the coat's,
+anisotropy is dropped, transmission is opacity over the colour tinted by the transmission colour.
+Edges are unlit in their class's ink, 1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's
+are the backdrop's colour. The engine serves the record as `GET /api/look` and its image as
+`GET /api/look/environment`; the page reads both once per engine, beside the document, and the
+document's scene brings them as its own lighting and surface rule (the bundled
+`@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
+up in place of the theme's. Preview is drawn as any file's is.
+
 `cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
 cadgen's snapshot page (the package's built `_runtime/browser`, read as files) with one job for
 the xbf family: the page loads the document from the engine and builds the viewer's own scene
 of it, dressed in the look the viewer resolves for the same display settings. `--display` takes
-a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`) or the display object
-(`mode`, `grid`, `appearance`, `camera`, `clip`); `--json` reports what was drawn and each
-stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
-`captureMs`, `totalMs`). `display.exploded` (a document's parts stand where it places them) and
-`parts` for a document that places one part are refused by name before any browser starts. A
-face the mesher left without triangles is named in a warning. Nothing is written but OUT.
+a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
+moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
+`hidden-line,exploded=0.6`), or the display object (`mode`, `grid`, `appearance`, `camera`,
+`clip`, `exploded`: `{"enabled", "amount"}`, 0.5 unless given); `--json` reports what was drawn
+and each stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
+`captureMs`, `totalMs`). `parts` and `exploded` for a document that places one part are refused
+by name before any browser starts. `--annotation FILE` draws the viewer's annotation over the
+model -- each mark on the part it was drawn on, wherever the picture places that part -- from an
+annotation file or the Quick Edit packet that carries one (the `.snapshot.json` the viewer writes),
+and `--measurements FILE` Measure's dimensions (`[{start, end, label, color}]`). A mark names the
+view it was drawn in by label alone (`"view": "view 1"`); the view itself -- its camera
+(`position`, `target`, `up`, `orthographicHalfHeight`, the snapshot's own camera object), size and
+projection -- is a job of the packet. `--camera authored` draws the picture from the view of the
+last mark, exactly (no fit), at its size and projection unless the flags say otherwise: from the
+packet given as `--annotation`, else the newest packet beside the annotation file that draws this
+document; with none, it is refused by name. A face the mesher left without triangles is named in a
+warning. Nothing is written but OUT.
+
+**The OCCT stills.** With `CADGEN_SNAPSHOT_RENDERER=occt` (until the cut-over, which makes it the
+only way: `snapshot.renderer` is the switch) a document is drawn by OCCT's own OpenGL renderer from
+the engine's meshes instead of by the page (`render/`): one presentation per part and look, each
+instance a connected object of it; the modes, the camera fit, clip, grid and Preview are the
+page's, Explode is the viewer's layout ported to Python (held to the viewer by one golden its own
+scene made), and the annotation's ink and the measurements are drawn over the picture. Through the daemon, a served document a snapshot asks
+for gets a render process of its own, started on its first picture and holding the document --
+each part's buffer from the daemon's one mesh cache (nothing meshed again), its OCCT shapes, a
+scene and its presentations on a hidden OpenGL context: a picture of it is a frame of that
+process, answered as PNG bytes that the verb writes to OUT (tom: about a tenth of a second). When
+the served document is patched -- a build of it, or its file rewritten -- the process is sent the
+new version at once with the buffers of the parts it lacks: the parts it shares with the last keep
+their shapes, the new ones are made, and its scene is made again before any picture asks. It goes
+with the daemon, and after a picture that leaves it over the workers' memory cap it says so
+(`retired`) and exits. `--no-daemon`, and a model's own document in its worker, draw in that
+process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on a machine with no
+screen) or OCCT's EGL on Linux, a hidden window on Windows; where none can be made the snapshot
+fails saying so. Nothing is written but OUT.
 
 `SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
 bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
@@ -473,10 +529,12 @@ other field in one `TDataStd_NamedData` on the material's label, named as the sc
 32-bit floats. A material change converts the prototypes it is on; a cold and a warm build write
 the same bytes. The structure serves every field of each part's and each painted face's material;
 a GLB writes the look as glTF's extensions (the volume's thickness the part's, the smallest extent
-of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in the
-shaded modes and Preview -- the shaded modes reflecting the studio's neutral environment on those
-surfaces alone, so a part with no material is drawn as ever -- and the theme's finish in X-ray and
-Parts. A part's chip card and `cadgen where` weigh it: volume by density, summed over an assembly.
+of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in
+Solid, Shaded and Preview, and a plain finish in X-ray and Parts. In Solid and Shaded a file's
+finishes reflect the studio's neutral environment on those surfaces alone, so a part with no
+material is drawn as ever; an engine document's reflect its look's environment, which lights every
+surface of it, and OCCT's stills draw them the same way (**The look**). A part's chip card and
+`cadgen where` weigh it: volume by density, summed over an assembly.
 
 ## Imports
 
@@ -611,6 +669,9 @@ gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `con
 placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.
+`GET /api/look` is the look the regular display modes are drawn in (**The viewer and the
+snapshot**), the same for every document; `GET /api/look/environment` is its environment, the
+Radiance image `render/studio.hdr`.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
 `V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
 reaches it at once. The answer carries the patch's timings.

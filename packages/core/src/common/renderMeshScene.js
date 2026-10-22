@@ -31,6 +31,7 @@ import {
 import { syncRuntimeStepClipPlane } from "../lib/viewer/modelRuntime.js";
 import { createSceneClip } from "../lib/viewer/sceneClip.js";
 import { disposeSectionCaps } from "../lib/viewer/sectionCaps.js";
+import { applySceneRig, sceneRigFor } from "../lib/viewer/sceneRig.js";
 import {
   applyExplodedViewProgress,
   clearExplodedViewRecords,
@@ -604,7 +605,6 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
   const scene = new THREE.Scene();
   let disposed = false;
   let environmentResource = null;
-  let reflectionResource = null;
   let backgroundTexture = null;
   const photographicConfiguration = context.sceneSettings.render.configuration || null;
   const studioConfiguration = photographicConfiguration && normalizeBoolean(job.output?.transparent, false)
@@ -634,9 +634,15 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     backgroundTexture = colorTextureFromBackground(context.theme.background || {}, firstSize.width, firstSize.height);
     scene.background = backgroundTexture;
   }
+  // A family's scene that brings its own lighting (`sceneContract.js`'s `rig`, or `rigFor` the look
+  // it wears) is lit by it outside Render, in place of the theme's rig, as the viewer's viewport
+  // lights it (`sceneRig.js`): its environment is the scene's.
+  const ownRig = photographicConfiguration ? null : sceneRigFor(model.scene, model.look);
+  const sceneRig = ownRig ? applySceneRig(THREE, { scene, renderer }, ownRig) : null;
   // PMREM generation is synchronous, but `ready` stays a promise so a failure
   // reaches the caller after it holds a viewport it can dispose.
   const ready = Promise.resolve().then(() => {
+    if (sceneRig) return null;
     const resource = context.sceneSettings.view.lighting.enabled
       ? createEnvironmentResource(renderer, studioConfiguration, { size: context.quality.environmentMapSize })
       : keepsAuthoredFinish(model) ? createInspectEnvironmentResource(THREE) : null;
@@ -646,15 +652,9 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
     }
     environmentResource = resource;
     scene.environment = resource?.texture || null;
-    // A family scene that keeps authored finishes on some surfaces alone reflects the studio's
-    // neutral environment on those, as the viewer's viewport hands it (`setReflection`).
-    if (model.scene?.setReflection && !context.sceneSettings.view.lighting.enabled) {
-      reflectionResource = createEnvironmentResource(renderer, {}, { size: context.quality.environmentMapSize });
-      model.scene.setReflection(reflectionResource.texture);
-    }
     return resource;
   });
-  if (!context.sceneSettings.view.lighting.enabled) applyLighting(
+  if (!sceneRig && !context.sceneSettings.view.lighting.enabled) applyLighting(
     scene,
     context.theme,
     model.bounds || context.bounds,
@@ -713,13 +713,12 @@ export function renderModel(_THREE, model, viewportOptions = {}) {
       viewport.sceneClip?.dispose();
       model.dispose?.();
       scene.remove?.(model.root);
+      sceneRig?.dispose();
       if (studioRuntime) disposePhotographicStudio(studioRuntime);
       if (scene.environment === environmentResource?.texture) scene.environment = null;
       if (scene.background === environmentResource?.texture) scene.background = null;
       disposeEnvironmentResource(environmentResource);
       environmentResource = null;
-      disposeEnvironmentResource(reflectionResource);
-      reflectionResource = null;
       disposeSnapshotSceneResources(scene, model.root, [backgroundTexture]);
       backgroundTexture = null;
       renderer.dispose?.();

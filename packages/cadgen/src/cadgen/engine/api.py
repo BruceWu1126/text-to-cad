@@ -4,7 +4,7 @@
           threemf=None) -> Report | Built
     export(source, *destinations, pose=None, part=None) -> list[Written]
     snapshot(source, out, *, display=None, camera=None, grid=False, preview=False, pose=None,
-             width=None, height=None) -> Drawn
+             width=None, height=None, annotation=None, measurements=None) -> Drawn
     serve(source, port=0) -> Served
     where(source, ref=None) -> Facts (the build closure without a ref)
     status() / stop() / daemon()
@@ -317,11 +317,15 @@ def _exported(order: dict[str, Any], spec: dict[str, Any], shown: Callable[[str]
 
 def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, grid: bool = False,
              preview: bool = False, pose: Any = None, width: int | None = None, height: int | None = None,
-             size_profile: str | None = None, daemon: bool = True) -> Drawn:
+             size_profile: str | None = None, daemon: bool = True, annotation: Any = None,
+             measurements: Any = None) -> Drawn:
     """Draw a document (``.xbf``, ``.step``) or a mesh file (``.glb``, ``.stl``, ``.3mf``) into
     ``out`` (a ``.png``) as the viewer draws it. A ``Model`` (or ``script.py::model``) is built
     first and built code (a ``Built``) is drawn as built: the document drawn is the one its
-    worker holds in memory, whether or not an xbf of it is on disk."""
+    worker holds in memory, whether or not an xbf of it is on disk. ``annotation`` (the viewer's
+    annotation: its file's path, its object, or the Quick Edit packet that carries it) and
+    ``measurements`` are drawn over the model; ``camera="authored"`` draws it from the view the
+    annotation's ink was drawn in, which the packet holds."""
     from cadgen.engine import snapshot as drawing
     from cadgen.engine.model import Model
 
@@ -332,16 +336,23 @@ def snapshot(source: Any, out: Any, *, display: Any = None, camera: Any = None, 
             raise drawing.SnapshotRefused(f"a snapshot is a .png; {out.name} is not one")
         spec = _source(source)
         drawing.options(display, camera, grid, width, height, size_profile)  # refused here, before any build
+        drawing.parse_annotation(annotation)  # refused here, before any build
+        if isinstance(annotation, (str, Path)) and not str(annotation).lstrip().startswith("{"):
+            annotation = str(Path(annotation).expanduser().resolve())  # read in the worker, beside its packets
         draw = {"out": str(out), "display": display, "camera": camera, "grid": grid, "preview": preview,
                 "pose": drawing.parse_pose(pose) if isinstance(pose, str) else pose, "width": width,
-                "height": height, "size_profile": size_profile}
+                "height": height, "size_profile": size_profile, "annotation": annotation,
+                "measurements": drawing.parse_measurements(measurements)}
         order = {"op": "export", "source": spec, "destinations": [], "draw": draw,
                  "cwd": str(source.cwd) if isinstance(source, Built) else os.getcwd()}
         found = _exported(order, spec, lambda _text: None, daemon)["drawn"]
         return Drawn(out, found["width"], found["height"], found)
     shown, framed, size = drawing.options(display, camera, grid, width, height, size_profile)
-    found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed, preview=preview, size=size,
-                             daemon=daemon, pose=drawing.parse_pose(pose) if isinstance(pose, str) else pose)
+    found = drawing.snapshot(Path(os.fspath(source)), out, display=shown, camera=framed, preview=preview,
+                             size=None if width is None and height is None and size_profile is None else size,
+                             daemon=daemon, pose=drawing.parse_pose(pose) if isinstance(pose, str) else pose,
+                             annotation=drawing.parse_annotation(annotation),
+                             measurements=drawing.parse_measurements(measurements), annotation_source=annotation)
     return Drawn(out, found["width"], found["height"], found)
 
 

@@ -15,6 +15,12 @@ from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src" / "cadgen" / "engine"
 SRC = ENGINE.parent.parent
+# Law 3: what the engine imports besides itself and the standard library. Pillow is the renderer's
+# rasteriser (a dependency of the cadgen wheel already).
+LIBRARIES = {"OCP", "build123d", "numpy", "PIL"}
+# By module, what one imports beyond those: the snapshot page's browser, which snapshot.py drives
+# for a still OCCT does not draw.
+BESIDES = {"snapshot.py": {"playwright"}}
 
 
 class StandaloneTest(unittest.TestCase):
@@ -45,6 +51,21 @@ class StandaloneTest(unittest.TestCase):
                         if isinstance(argument, ast.Constant) and str(argument.value).startswith("cadgen") \
                                 and not str(argument.value).startswith("cadgen.engine"):
                             offenders.append(f"{path.relative_to(ENGINE)}: {argument.value}")
+        self.assertEqual(offenders, [])
+
+    def test_every_engine_module_imports_only_the_standard_library_and_the_engine_s_libraries(self) -> None:
+        offenders = []
+        for path in sorted(ENGINE.rglob("*.py")):
+            name = path.relative_to(ENGINE).as_posix()
+            allowed = set(sys.stdlib_module_names) | LIBRARIES | {"cadgen"} | BESIDES.get(name, set())
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+                if isinstance(node, ast.Import):
+                    roots = [alias.name.split(".")[0] for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                    roots = [node.module.split(".")[0]]
+                else:
+                    continue
+                offenders += [f"{name}: {root}" for root in roots if root not in allowed]
         self.assertEqual(offenders, [])
 
     def test_a_build_loads_no_cadgen_module_but_the_engine(self) -> None:

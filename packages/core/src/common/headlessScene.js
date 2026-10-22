@@ -210,6 +210,8 @@ export function headlessSceneModel(THREE, scene, { look = null, receiveShadows =
   scene.object3D.traverse((object) => { if (object.isMesh) meshes.push(object); });
   const model = {
     scene,
+    // The look it wears, which the stage asks its rig for (`sceneRig.js`'s `sceneRigFor`).
+    look,
     root: scene.object3D,
     get bounds() { return scene.bounds; },
     get restBounds() { return sceneFramingBounds(scene); },

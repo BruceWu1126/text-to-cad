@@ -19,7 +19,8 @@ from pathlib import Path
 from cadgen.engine import build as engine_build
 from cadgen.engine.access import loopback_origin
 from cadgen.engine.serve import Server
-from cadgen.engine.snapshot import SnapshotRefused, parse_camera, parse_display, snapshot
+from cadgen.engine.snapshot import (SnapshotRefused, authored, parse_annotation, parse_camera, parse_display,
+                                    parse_measurements, snapshot)
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -103,8 +104,12 @@ class SnapshotTest(unittest.TestCase):
     def test_what_a_document_does_not_offer_is_refused_by_name_and_out_is_kept(self) -> None:
         out = self.folder / "kept.png"
         out.write_bytes(b"before")
-        with self.assertRaisesRegex(SnapshotRefused, "exploded"):
-            parse_display('{"mode": "solid", "exploded": {"enabled": true}}', grid=False)
+        with self.assertRaisesRegex(SnapshotRefused, "exploded=2 is no amount"):
+            parse_display("exploded=2", grid=False)
+        with self.assertRaisesRegex(SnapshotRefused, "display.exploded has no spin"):
+            parse_display('{"exploded": {"amount": 0.5, "spin": 1}}', grid=False)
+        with self.assertRaisesRegex(SnapshotRefused, "'solid' is no display mode"):
+            parse_display("wireframe,solid", grid=False)
         with self.assertRaisesRegex(SnapshotRefused, "lighting"):
             parse_display('{"lighting": {}}', grid=False)
         with self.assertRaisesRegex(SnapshotRefused, "sideways"):
@@ -115,18 +120,85 @@ class SnapshotTest(unittest.TestCase):
             parse_camera('{"projection": "perspective"}')
         with self.assertRaisesRegex(SnapshotRefused, r"\.png"):
             snapshot(self.document, self.folder / "out.jpg", daemon=False)
-        # Parts colours placed parts apart: a document of one is refused before the page opens.
+        # Parts colours placed parts apart, and Explode moves them apart: a document of one is
+        # refused before the page opens.
         with self.assertRaisesRegex(SnapshotRefused, "parts .* places 1 part"):
             snapshot(self.single, out, display={"mode": "parts"}, daemon=False)
+        with self.assertRaisesRegex(SnapshotRefused, "exploded .* peg.xbf places 1 part"):
+            snapshot(self.single, out, display=parse_display("exploded=0.5", grid=False), daemon=False)
+        with self.assertRaisesRegex(SnapshotRefused, "--camera authored .* give --annotation"):
+            snapshot(self.document, out, camera="authored", daemon=False)
         self.assertEqual(out.read_bytes(), b"before")
         env = {**os.environ, "PYTHONPATH": str(SRC)}
-        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.document), str(out),
+        done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.single), str(out),
                                "--display", '{"exploded": {"enabled": true}}', "--no-daemon"],
                               env=env, capture_output=True, text=True, timeout=120)
         self.assertEqual(done.returncode, 2)
         self.assertIn("display.exploded", done.stderr)
         self.assertEqual(out.read_bytes(), b"before")
 
+    def test_explode_an_annotation_and_measurements_are_asked_for_by_flags_and_checked(self) -> None:
+        self.assertEqual(parse_display("exploded=0.6", grid=False), {"exploded": {"enabled": True, "amount": 0.6}})
+        self.assertEqual(parse_display("hidden-line,exploded", grid=True),
+                         {"mode": "hidden-line", "exploded": {"enabled": True, "amount": 0.5}, "grid": True})
+        self.assertEqual(parse_display('{"exploded": {"enabled": true}}', grid=False)["exploded"]["amount"], 0.5)
+        mark = {"id": "m1", "kind": "stroke", "part": "i0", "points": [-10, 0, 2, 10, 0, 2], "color": "#ff00ff", "width": 4,
+                "view": "view 1"}
+        annotation = {"units": "mm", "parts": {}, "marks": [mark]}
+        for broken, said in (({"marks": {}}, "units, parts and marks"), ({"marks": [], "colour": 1}, "has no colour"),
+                             ({"marks": [{**mark, "kind": "blob"}]}, r"marks\[0\].kind"),
+                             ({"marks": [{**mark, "points": [0, 0]}]}, "triples"),
+                             ({"marks": [{**mark, "view": 1}]}, "label of the view")):
+            with self.assertRaisesRegex(SnapshotRefused, said):
+                parse_annotation(json.dumps(broken))
+        with self.assertRaisesRegex(SnapshotRefused, "no such file"):
+            parse_annotation(str(self.folder / "missing.json"))
+        line = {"start": [-20, -10, 2], "end": [20, -10, 2], "label": "40.0 mm", "color": "#0000ff"}
+        self.assertEqual(parse_measurements(json.dumps(line)), [line], "one, as a chip copies it")
+        with self.assertRaisesRegex(SnapshotRefused, r"\.start is \[x, y, z\]"):
+            parse_measurements(json.dumps([{**line, "start": [0, 0]}]))
+
+    def test_the_authored_view_is_read_from_the_quick_edit_packet(self) -> None:
+        """A mark names its view by label; the view -- camera, size, projection -- is a job of the
+        packet the viewer writes (``cadgen.viewer``'s prompt files), given as --annotation or beside
+        the annotation file. None, or no view: refused by name."""
+        folder = Path(tempfile.mkdtemp(prefix="engine-authored-")).resolve()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        camera = {"position": [80, -60, 50], "target": [0, 0, 4], "up": [0, 0, 1], "orthographicHalfHeight": 25}
+        mark = {"id": "m1", "kind": "stroke", "part": "i0", "points": [-10, 0, 2, 10, 0, 2], "color": "#ff00ff",
+                "width": 4, "view": "view 1"}
+        annotation = {"units": "mm", "parts": {}, "marks": [mark]}
+        packet = {"input": str(self.document), "annotation": annotation, "jobs": [
+            {"camera": camera, "display": {"mode": "solid", "camera": {"projection": "orthographic"}},
+             "output": {"padding": 0, "tightFrame": False},
+             "outputs": [{"path": str(folder / "stand-1-view-1.png"), "label": "view 1", "width": 240, "height": 180}]}]}
+        (folder / "stand-1.snapshot.json").write_text(json.dumps(packet), encoding="utf-8")
+        file = folder / "stand-2.annotation.json"
+        file.write_text(json.dumps(annotation), encoding="utf-8")
+        self.assertEqual(parse_camera("authored"), "authored")
+        self.assertEqual(parse_annotation(str(folder / "stand-1.snapshot.json")), annotation, "a packet's annotation")
+        for source in (str(file), str(folder / "stand-1.snapshot.json"), packet):
+            found, exact, view = authored("authored", annotation, source, self.document)
+            self.assertEqual((found, exact, view.size, view.lens), (camera, True, (240, 180), {"projection": "orthographic"}))
+        self.assertEqual(authored("iso", annotation, str(file), self.document)[:2], ("iso", False))
+        with self.assertRaisesRegex(SnapshotRefused, "name no view"):
+            authored("authored", {"marks": [{**mark, "view": None}]}, str(file), self.document)
+        with self.assertRaisesRegex(SnapshotRefused, "give --annotation"):
+            authored("authored", None, None, self.document)
+        # A packet beside the file that draws another document, or no packet: refused, naming what it lacks.
+        with self.assertRaisesRegex(SnapshotRefused, "no Quick Edit packet .* beside stand-2.annotation.json holds "
+                                                     "that view of peg.xbf"):
+            authored("authored", annotation, str(file), self.single)
+        with self.assertRaisesRegex(SnapshotRefused, "'view 2'"):
+            authored("authored", {"marks": [{**mark, "view": "view 2"}]}, str(file), self.document)
+        # The verb draws from it: the view's size unless one is asked, over the exploded parts, ink and dimension on.
+        out = folder / "annotated.png"
+        report = snapshot(self.document, out, display=parse_display("exploded=0.6", grid=False), camera="authored",
+                          daemon=False, annotation=annotation, annotation_source=str(file),
+                          measurements=[{"start": [-20, -10, 2], "end": [20, -10, 2], "label": "40.0 mm",
+                                         "color": "#0000ff"}])
+        self.assertEqual((report["exploded"], report["width"], report["height"]), (0.6, 240, 180))
+        self.drawn(out, (240, 180))
 
     def drawn(self, path: Path, size: tuple[int, int]) -> None:
         """A picture of something: the size asked, and more than a backdrop."""

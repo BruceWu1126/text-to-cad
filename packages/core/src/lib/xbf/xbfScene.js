@@ -26,6 +26,9 @@
 // The display modes are the shared view settings' (`common/viewSettings.js`), resolved by the
 // host as for any family: the surface look (`setSurfaceLook`: Solid, Shaded, Parts, X-ray; Hidden
 // line's depth-only surfaces and Wireframe's none) and the edges the mode draws (`setEdgeLook`).
+// They are drawn as the engine draws them (`xbfLook.js`, the look the engine serves beside the
+// document): the scene brings its own `rig`, which the stage lights it with in place of the
+// theme's, and its surfaces wear the look's colour rule and finish.
 // Selection is drawn as a STEP's is: a lit part blended toward the highlight with its edges in
 // it (`setHighlight`), a picked face filled and outlined and a picked edge drawn heavy in the
 // highlight colour (`setElementHighlight`), an isolated part's neighbours dimmed (`setFocusedParts`).
@@ -44,6 +47,7 @@ import { createSceneExplode } from "../viewer/sceneExplode.js";
 import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
+import { xbfLookRig, xbfLookSurface, xbfLookXray, xbfLookXrayRig, xbfLookXraySurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS_NAMES, xbfEdgeLine, xbmFaceRow, xbmEdgeRow, xbmTriangleFaceRows } from "./xbm.js";
 import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
@@ -82,11 +86,6 @@ export function parseXbfElementId(id) {
 function linearColor(THREE, rgba) {
   return new THREE.Color().setRGB(Number(rgba[0]) || 0, Number(rgba[1]) || 0, Number(rgba[2]) || 0, THREE.LinearSRGBColorSpace);
 }
-
-// How strongly an authored finish reflects the neutral studio environment the host hands the
-// scene in the shaded modes (`setReflection`): enough for a metal to read as metal, not so much
-// that it outshines the theme's lights. Preview draws it in the studio's full environment.
-export const XBF_REFLECTION_INTENSITY = 0.5;
 
 // A material's look as the structure serves it (`cadgen.engine.materials`, camelCase): the
 // fields a look's identity is made of.
@@ -354,6 +353,13 @@ export function xbfMeshVolume(mesh) {
 export function createXbfScene(THREE, document) {
   const { structure } = document;
   const prototypes = structure.prototypes;
+  // How the engine draws the regular modes: the rig a stage lights this scene with there, and what
+  // its surfaces wear there. A document read without the engine's look is drawn under the theme's.
+  // X-ray has a rig and a surface of its own: the look's colour-only model.
+  const rig = document.look ? xbfLookRig(document.look) : null;
+  const lookSurface = document.look ? xbfLookSurface(document.look) : null;
+  const xrayRig = document.look ? xbfLookXrayRig(document.look) : null;
+  const xraySurface = document.look ? xbfLookXraySurface(document.look) : null;
   const root = new THREE.Group();
   root.name = "xbf-document";
   const ownedGeometries = [];
@@ -778,23 +784,31 @@ export function createXbfScene(THREE, document) {
     /** Faces the mesher left without triangles, by prototype: reported, not drawn. */
     unmeshed,
     triangleCount,
+    /** The lighting of the regular modes (`sceneContract.js`): the engine's look's (`xbfLookRig`). */
+    rig,
+    /** The lighting under a surface look: X-ray's colour-only rig (`xbfLookXrayRig`), else `rig`. */
+    rigFor(next) {
+      return xbfLookXray(next) && next?.authored !== true ? xrayRig : rig;
+    },
     // A part or face the document gave a material keeps its finish in the shaded modes and in
-    // Preview; every other surface wears the look's finish over its colour, as a STEP's does.
+    // Preview, reflecting the scene's environment (the rig's in the regular modes, the studio's in
+    // Preview); every other surface wears the look's finish over its colour. In the regular modes
+    // that is the engine's look (`xbfLookSurface`): its plain finish, the colour of a surface
+    // without a finish raised to its power, nothing graded; X-ray wears the look's colour-only
+    // model (`xbfLookXraySurface`): no finish at all; photographic Render's look (`authored`) is
+    // worn as any scene wears it.
     setSurfaceLook(next) {
       if (disposed) return;
+      const regular = Boolean(next && lookSurface) && next.authored !== true;
       lastLook = next ? { ...next, authored: false } : null;
+      if (regular) {
+        const worn = xbfLookXray(next) ? xraySurface : lookSurface;
+        lastLook.colorPower = worn.colorPower;
+        lastLook.brdf = worn.brdf;
+        if (worn.finishes === false) lastLook.finishes = false;
+        lastLook.materialSettings = { ...next.materialSettings, ...worn.materialSettings };
+      }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";
-      applySurfaces();
-    },
-    /**
-     * The environment an authored finish reflects in the shaded modes, the host's neutral studio
-     * (`XBF_REFLECTION_INTENSITY`), or null: the reflection source of those finishes alone, so a
-     * surface the document gave no material is lit as it always was. Preview lights the scene
-     * with the studio's own environment instead.
-     */
-    setReflection(texture) {
-      if (disposed) return;
-      look.setReflection(texture || null, XBF_REFLECTION_INTENSITY);
       applySurfaces();
     },
     /** The edges the display mode draws (`resolveViewSettings`'s `edges`): on or off, through the surfaces or not, their ink. */

@@ -9,8 +9,10 @@
 // whose keys it has not held (an edit changes the keys of the parts it touched, and only those)
 // and keeps the rest, buffers and the geometry built over them, as FreeCAD recomputes only the
 // objects an edit touched. What the kernel measures of an element is asked of the engine when a
-// person asks (`fetchXbfElementFacts`), never extracted ahead.
+// person asks (`fetchXbfElementFacts`), never extracted ahead. Beside the document, the engine's
+// look of the regular display modes (`GET /api/look`, `xbfLook.js`), read once per engine.
 
+import { fetchXbfLook } from "./xbfLook.js";
 import { readXbmPart, xbmUnmeshedFaces } from "./xbm.js";
 
 const DOC_PATH = /^(.*\/api\/doc\/[^/?#]+)\/?$/;
@@ -92,13 +94,15 @@ async function inBatches(items, limit, run) {
  * @property {object} structure  The engine's structure JSON, as it answered.
  * @property {string} version
  * @property {Map<string, ReturnType<typeof createPart>>} parts  By geometry key.
+ * @property {object} look  The engine's look of the regular display modes (`parseXbfLook`).
  * @property {{ fetched: string[], kept: string[], structureMs: number, partsMs: number, bytes: number }} load
  * @property {() => void} release  Let go of its parts (the last holder disposes their geometry).
  */
 
 /**
  * Read a served document: its structure, then every part it holds that `previous` (an earlier
- * version of the same document, or of any document from the same engine) does not.
+ * version of the same document, or of any document from the same engine) does not; and the
+ * engine's look, unless `previous` came from the same engine and holds it.
  *
  * @param {string | { url: string }} source  The document's API URL (`xbfDocumentSource`).
  * @param {{ previous?: XbfDocument | null, fetch?: typeof fetch, signal?: AbortSignal,
@@ -108,6 +112,10 @@ async function inBatches(items, limit, run) {
 export async function loadXbfDocument(source, { previous = null, fetch: fetchImpl = globalThis.fetch, signal, onProgress } = {}) {
   const where = xbfDocumentSource(source);
   const started = performance.now();
+  const looked = previous?.look && previous.source?.origin === where.origin ? Promise.resolve(previous.look)
+    : fetchXbfLook(where.origin, { fetch: fetchImpl, signal });
+  // Read beside the structure; a failure of it is reported once the structure is in.
+  looked.catch(() => {});
   const structure = await getJson(fetchImpl, where.url, "the document's structure", signal);
   if (!Array.isArray(structure?.prototypes) || !Array.isArray(structure?.instances)) {
     throw new Error("the engine's structure has no prototypes and instances");
@@ -141,12 +149,20 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
     for (const part of parts.values()) part.release();
     throw error;
   }
+  let look;
+  try {
+    look = await looked;
+  } catch (error) {
+    for (const part of parts.values()) part.release();
+    throw error;
+  }
   let released = false;
   return {
     source: where,
     structure,
     version: String(structure.version || ""),
     parts,
+    look,
     load: { fetched, kept, structureMs: Math.round(structureMs), partsMs: Math.round(performance.now() - partsStarted), bytes },
     release() {
       if (released) return;
