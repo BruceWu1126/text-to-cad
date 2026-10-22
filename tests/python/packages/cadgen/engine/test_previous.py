@@ -416,6 +416,21 @@ class ClosureTest(unittest.TestCase):
         with zipfile.ZipFile(package) as archive:
             self.assertNotIn("depth.json", archive.namelist())
 
+    def test_ocp_without_vtk_is_the_ocp_recorded(self) -> None:
+        from importlib import metadata
+        from unittest import mock
+
+        def version(name: str) -> str:
+            # An install with OCP's no-VTK distribution and not the other.
+            if name in ("build123d", "numpy", "cadquery-ocp-novtk"):
+                return {"cadquery-ocp-novtk": "7.9.3.1"}.get(name, "1.0")
+            raise metadata.PackageNotFoundError(name)
+
+        previous._libraries.cache_clear()
+        self.addCleanup(previous._libraries.cache_clear)
+        with mock.patch.object(metadata, "version", version):
+            self.assertEqual(previous._libraries(), {"build123d": "1.0", "OCP": "7.9.3.1", "numpy": "1.0"})
+
 
 if __name__ == "__main__":
     unittest.main()

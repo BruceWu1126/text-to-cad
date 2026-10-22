@@ -93,7 +93,8 @@ def _libraries() -> dict[str, str]:
     from importlib import metadata
 
     found = {}
-    for shown, names in (("build123d", ("build123d",)), ("OCP", ("cadquery-ocp", "cadquery_ocp")),
+    # OCP ships as two distributions, with VTK and without: either is the OCP a body runs on.
+    for shown, names in (("build123d", ("build123d",)), ("OCP", ("cadquery-ocp", "cadquery-ocp-novtk")),
                          ("numpy", ("numpy",))):
         for name in names:
             try:
