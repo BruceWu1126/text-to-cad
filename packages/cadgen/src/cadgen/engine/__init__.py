@@ -24,7 +24,8 @@ instead of running it. A part's material is a value set on the shape: ``part.mat
 **values)`` names a configuration of it, ``couple(assembly, name, *, range=(0, 1), lock=False,
 **joints)`` one control driving several joints by ratio, and ``motion(assembly, name, ...)`` a
 motion, which a GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
-the model, named, coloured and given its materials as the file has them. ``select(source, ref,
+the model, named, coloured and given its materials as the file has them; ``read_mesh(path)`` reads
+an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
 kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --
 as build123d shapes in world coordinates (``refs``).
 Importing this package imports no kernel: the names below load on first use. Imported by a
@@ -39,8 +40,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "couple", "dxf", "glb", "materials", "memo", "motion", "paint", "read_step",
-           "read_xbf", "report", "select", "step", "stl", "threemf", "track", "xbf"]
+__all__ = ["Material", "configuration", "couple", "dxf", "glb", "materials", "memo", "motion", "paint",
+           "read_mesh", "read_step", "read_xbf", "report", "select", "step", "stl", "threemf", "track", "xbf"]
 
 
 def _main_in_a_package() -> None:
@@ -84,6 +85,10 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine.mechanism import couple
 
         return couple
+    if name == "read_mesh":
+        from cadgen.engine.reader import read_mesh
+
+        return read_mesh
     if name in __all__:
         from cadgen.engine import model
 

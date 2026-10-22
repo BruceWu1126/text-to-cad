@@ -155,7 +155,7 @@ from cadgen.engine.sources import returning as _returning
 _EXECUTIONS = itertools.count(1)
 # The operations that read a file: what they make is named per product of the file
 # (``_read_structure``).
-_FILE_READS = frozenset({"read_step", "read_xbf", "import_step", "import_brep"})
+_FILE_READS = frozenset({"read_step", "read_xbf", "import_step", "import_brep", "import_stl"})
 # What a STEP writer names an element it gives no name ('NONE' is the schema's empty name).
 _UNNAMED = frozenset({"", "NONE", "NULL"})
 # The operations that answer a question of a shape and make nothing of it.
@@ -210,9 +210,10 @@ _HERE = Path(__file__).resolve().parent
 _ENGINE = _HERE.parent
 _OWN = (_ENGINE,)
 # The functions a model calls (``cadgen.engine.model``: its decorators, ``read_step``,
-# ``paint``; ``cadgen.engine.refs``: ``select``) count as build123d does: what they run for
-# the model is the model's call (a document ``select`` reads is the model's read).
-_API = frozenset({_ENGINE / "model.py", _ENGINE / "refs.py"})
+# ``paint``; ``cadgen.engine.refs``: ``select``; ``cadgen.engine.reader``: ``read_mesh``) count
+# as build123d does: what they run for the model is the model's call (a document ``select``
+# reads is the model's read).
+_API = frozenset({_ENGINE / "model.py", _ENGINE / "refs.py", _ENGINE / "reader.py"})
 _NOT_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # What a digest of a name looks like at its end, which a name written as it is never has.
@@ -522,6 +523,18 @@ class Trace:
             below = frame
             frame = frame.f_back
         return None
+
+    def called_by_model(self) -> bool:
+        """Whether the call being made is the model's own, as ``frame`` tells it -- the
+        innermost first-party frame of the stack is the model's, not cadgen's -- with nothing
+        recorded of the statement it runs in."""
+        frame = sys._getframe(1)
+        while frame is not None:
+            verdict = self._verdict(frame.f_code.co_filename)
+            if verdict != "other":
+                return verdict == "model"
+            frame = frame.f_back
+        return False
 
     def _returned(self, frame: Any) -> tuple[tuple[int, tuple[str, ...]], Any] | None:
         """The assignment a helper's call is named by, when the helper makes it in its
