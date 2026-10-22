@@ -206,7 +206,7 @@ Explode or Clip with its effect set takes it up again, as it is; unset, it start
 | --- | --- | --- | --- |
 | Select | The default tool of every 3D file but an STL; picks what its filter ticks, or a GLB's nodes, a 3MF's objects (Shift adds; Delete deletes annotations and measurements); what is picked is Quick Edit's chips | None: its filter is the chevron after its button | The selection stays, lit and in Quick Edit, under any tool |
 | Pencil / Shapes | Draws on the view: Pencil with the pen, the highlighter or the eraser, Shapes with the rectangle, line, arrow, ellipse or text; each button is the tool last chosen in it | One row for both: the tools of the one that is up, then Color, Stroke width, Placement and Clear annotations (Undo and Redo are ⌘Z, ⇧⌘Z) | The annotations stay in the model, their chip in Quick Edit; each tool keeps what it draws with, the strip showing its icon |
-| Measure | Arms picking two entities and reading what the pair makes (a STEP's exact vertices, edges and faces, what its filter ticks; on a mesh, two points on its surface, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"); each result a chip in its colour | Its measurements, as chips, then Clear measurements; none while nothing is measured | Unfinished picks are cancelled; completed measurements stay, drawn on the model, their row back with the tool |
+| Measure | Arms picking two entities and reading what the pair makes (an engine document's — an `.xbf`'s or a STEP's — exact vertices, edges and faces, what its filter ticks; on a mesh, two points on its surface, approximately, in its file's unit; a drawing's ends, centres and lines, in the unit it declares, else "units"); each result a chip in its colour | Its measurements, as chips, then Clear measurements; none while nothing is measured | Unfinished picks are cancelled; completed measurements stay, drawn on the model, their row back with the tool |
 | Explode / Clip | The effect as it is set, or neutral; an edit applies it (Explode's, as a motion: see below) | The slider, its amount beside it, Reset (Clip's: its axis first, whose dropdown holds its settings) | The effect stays on the model |
 
 **One motion at a time.** Every tool's state stands beside every other's — the selection,
@@ -332,15 +332,16 @@ the view with its annotations to the clipboard as a PNG. A first stroke opens
 disable the cube without hiding it.
 
 **Measure.** Its button is the ruler, badged as Select's is with what it
-picks alone. On a STEP, its menu is Select's own (`kit/tools/measure/MeasureFilterMenu.jsx`):
-**All** (when a file opens), **Vertices**, **Edges** or **Faces**, one chosen. A press takes an
-ENTITY, whole, as a CAD measure tool does: an edge's end within 10px of the pointer is its
-vertex, else the edge, else the face (`measureFilter.js`). What lights under the resting pointer
-is what a press takes, with what it is worth on its own beside it (a vertex's X Y Z, an edge's
-length or ⌀, a face's area). With one kind chosen, only that kind is taken: an edge's end is still
-its vertex under Vertices, and anywhere else a press takes nothing. Shift held, a press takes the
-point on the model as it is. In an assembly, a press on a part whose faces and edges are not loaded asks
-for them and takes the pick there once they arrive.
+picks alone. On an engine document (an `.xbf`, or a STEP, which opens as one), its menu is
+Select's own (`kit/tools/measure/MeasureFilterMenu.jsx`): **All** (when a file opens),
+**Vertices**, **Edges** or **Faces**, one chosen. A press takes an ENTITY, whole, as a CAD measure
+tool does: an edge's end within 10px of the pointer is its vertex, else the edge, else the face
+(`measureFilter.js`, `xbf/xbfMeasurePick.js`), of any part, open in the Model tree or not. What
+lights under the resting pointer is what a press takes, with what it is worth on its own beside
+it (a vertex's X Y Z; an edge's length or ⌀, a face's ⌀ or normal and its area, the length along
+a curve and the area the engine's facts of it, shown once they are in). With one kind chosen,
+only that kind is taken: an edge's end is still its vertex under Vertices, and anywhere else a
+press takes nothing. Shift held, a press takes the point on the model as it is.
 
 The reading follows from the pair (`@text-to-cad/core/lib/viewer/measureEntities.js`), not from
 where on each the pointer happened to be:

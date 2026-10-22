@@ -48,6 +48,7 @@ import { createSceneHighlight } from "../viewer/sceneHighlight.js";
 import { createSurfaceLook } from "../viewer/surfaceLook.js";
 import { releaseGeometry, shareGeometry } from "../render/sharedGeometry.js";
 import { xbfLookRig, xbfLookSurface, xbfLookXray, xbfLookXrayRig, xbfLookXraySurface } from "./xbfLook.js";
+import { placeXbfPoint, placeXbfSurface, xbfEdgePolyline, xbfFaceNodes, xbfFaceSurface, xbfVertexPoint } from "./xbfEntities.js";
 import { XBF_EDGE_CLASS_NAMES, xbfEdgeLine, xbmFaceRow, xbmEdgeRow, xbmTriangleFaceRows } from "./xbm.js";
 import { xbfKinematics, xbfPosedMatrices } from "./xbfKinematics.js";
 
@@ -880,6 +881,39 @@ export function createXbfScene(THREE, document) {
       return { id, kind: parsed.kind, ordinal: parsed.ordinal, instance: parsed.instance, key: String(entry.prototype.key),
         name: (names || {})[String(parsed.ordinal)] || "", edgeClass, path: entry.instance.path, partName: entry.prototype.name || "",
         matrix: entry.matrix };
+    },
+    /**
+     * An element (`i3/face/12`, `i3/edge/4`, `i3/vertex/2`) whole, where its instance stands now
+     * (the pose and Explode included), in the scene's coordinates (`xbfEntities.js`): a face's
+     * surface (`{ kind: "face", surface }`, and its nodes as `points` where `points` is asked for), an
+     * edge's polyline (`{ kind: "edge", points }`), a vertex's place (`{ kind: "vertex", point }`).
+     * What Measure and Look at take an element as. Null for an id that names none.
+     * @param {string} id
+     * @param {{ points?: boolean }} [options]
+     */
+    elementGeometry(id, { points = false } = {}) {
+      const parsed = parseXbfElementId(id);
+      const entry = parsed && instances[parsed.instance];
+      if (disposed || !entry || !parsed.kind) return null;
+      const mesh = entry.surface.part.mesh;
+      entry.group.updateWorldMatrix(true, false);
+      const matrix = entry.group.matrixWorld.elements;
+      if (parsed.kind === "vertex") {
+        const at = xbfVertexPoint(mesh, parsed.ordinal);
+        return at ? { kind: "vertex", id, point: placeXbfPoint(matrix, at) } : null;
+      }
+      if (parsed.kind === "edge") {
+        const line = xbfEdgePolyline(mesh, parsed.ordinal);
+        return line ? { kind: "edge", id, points: line.map(point => placeXbfPoint(matrix, point)) } : null;
+      }
+      // A face's surface is read once per part (every instance and version holding it shares it).
+      const surfaces = entry.surface.part.hold("xbf:surfaces", () => new Map());
+      if (!surfaces.has(parsed.ordinal)) surfaces.set(parsed.ordinal, xbfFaceSurface(mesh, parsed.ordinal));
+      const surface = surfaces.get(parsed.ordinal);
+      if (!surface) return null;
+      const placed = { kind: "face", id, surface: placeXbfSurface(matrix, surface) };
+      if (points) placed.points = (xbfFaceNodes(mesh, parsed.ordinal)?.points || []).map(point => placeXbfPoint(matrix, point));
+      return placed;
     },
     /** The box, in the scene's coordinates where they stand now, of instances and elements (ids `i3`, `i3/face/12`): what Zoom to selection frames. */
     selectionBounds(ids) {

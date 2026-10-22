@@ -611,7 +611,7 @@ pairs (`xbfKinematics.js`), a geared pair written through its gear, and its knob
 a STEP's are (`xbfJointHandles.js`). A pair the engine could not keep a value for is said in the
 section, under the rows.
 
-What an `.xbf`'s selection copies -- a chip, Copy Reference, a double-click, Copy Prompt -- is the
+What an `.xbf`'s selection copies -- a chip, Copy Reference, Copy Prompt -- is the
 engine's canonical ref of each thing, the file's path first, the ref `cadgen where` answers and
 `select` labels its shapes with (`cadgen.engine.refs`): a part or subassembly by its label where that
 names it alone in the document, else by its occurrence path, each segment its label numbered among the
@@ -905,17 +905,18 @@ selected entities, without attaching a source filename or source line.
 An engine document's Select picks what its menu chooses — All, or Parts, Faces, Edges or
 Position's knobs alone — and grows a face or edge pick by Group edges or Group faces
 (`xbf/xbfSelectionFilter.js`, `kit/tools/select/selectFilter.js`); Measure's menu chooses the
-same way among vertices, edges and faces, though a press still measures between points on the
-model. Explicit filters never fall back to a different entity type. Every face and edge is to
-hand from the start, so nothing waits on topology.
+same way among vertices, edges and faces, which a press takes whole. Explicit filters never fall
+back to a different entity type. Every face and edge is to hand from the start, so nothing waits
+on topology.
 Shift-click adds/removes entities. A double-click on a face or edge (outside the
 Parts filter) turns the view square to it and selects nothing (the selection is as
 its first click found it); on a component or
 subassembly it isolates it, and on empty space it leaves isolation.
 
-**Look at** (`kit/camera/lookAt.js`, the STEP side `scene/lookAtReference.js`, the
+**Look at** (`kit/camera/lookAt.js`, an engine document's side `xbf/xbfLookAt.js`, the
 viewport's `lookAt` / `lookAtAnnotation`). A double-click under Select on a face, an edge
-or ink turns the view square to it, its zero point the orbit centre. It is navigation only: it
+or ink turns the view square to it, its zero point the orbit centre (under Explode and Clip
+too, and under Measure the face or edge a press there takes). It is navigation only: it
 sets no plane for ink: a mark's level is the plane of the surface it starts on, whatever view
 the turn brought ([annotation](annotation.md)):
 - A planar face (and flat ink): along its normal, from the side the camera is on; its
@@ -932,15 +933,22 @@ the turn brought ([annotation](annotation.md)):
   from the side, is seen edge-on; flat ink, its plane; ink that lies on no plane, the view it was
   drawn in.
 
-Kinds and axes come from the topology row (`surfaceType`/`curveType`, `normal`, `params`);
-points from the selector proxy, moved as Explode moved the part. A row that does not say
-(no params) is read off the edge's polyline, as Measure reads it. A click acts at once: nothing
+Kinds and axes come from the element itself (the scene's `elementGeometry`,
+`@text-to-cad/core/lib/xbf/xbfEntities.js`): a face's surface read off its nodes and the normals
+the engine meshed it with (a plane's normal, a cylinder's axis, origin and radius), an edge's
+polyline read as Measure reads it (straight, or a flat circle about its centre); its points
+where its instance stands now, the pose and Explode included. A click acts at once: nothing
 waits to tell it from a double-click. The first click of a double-click therefore
-selects, briefly, whatever it hit, and the double-click begins by putting the selection back
-the way its first click found it — through the same setters every pick goes through, so
-Quick Edit's chips, the tree and the viewport follow — before it isolates, leaves isolation
-or copies.
-Every copied reference — a chip's click, ⌘C, both menus, the double-click — carries the
+selects, briefly, whatever it hit; the second is not a click of its own (the browser
+counts it, `xbf/clickActivation.js` holds it for the `dblclick` that owns the gesture),
+and the double-click begins by putting the selection back the way its first click
+found it — through the same setters every pick goes through, so Quick Edit's chips,
+the tree and the viewport follow — before it isolates, leaves isolation or looks at it.
+The one click that still waits is one under a tool a pick would leave (Explode, Clip:
+a pick there takes up Select): it is held for the double-click window, so a double-click
+there isolates and stays in the tool, and a lone click selects and switches to Select once
+the window has passed. A coarse pointer has no double-click: every tap picks at once.
+Every copied reference — a chip's click, ⌘C, both menus — carries the
 file's prefix: the file's absolute path, the real file name with its extension.
 Escape clears the
 selection after any open menu has been dismissed. Input fields
@@ -948,10 +956,15 @@ keep their own Escape behaviour.
 
 Measure is an exclusive picking tool. Its chevron chooses, as Select's does, All or vertices,
 edges or faces alone (`kit/tools/measure/MeasureFilterMenu.jsx`, `measureFilter.js`), and badges
-Measure's button with the choice; what a press takes is still a point on the model, snapping to
-no edge or face (its faces and edges are not pickable while it is up; `xbf/XbfMeasure.jsx`): the
-entity readings (`@text-to-cad/core/lib/viewer/measureEntities.js`) are not carried over yet.
-Completed rulers are chips in its sub-toolbar while it is the tool
+Measure's button with the choice. A press takes an entity whole, as a STEP's Measure did
+(`xbf/XbfMeasure.jsx`, `xbf/xbfMeasurePick.js`): an edge's end within 10px of the pointer is its
+vertex, else the edge, else the face, of any part, open in the tree or not, kept to the choice;
+Shift takes the point on the model as it is. What it is comes from the document
+(`@text-to-cad/core/lib/xbf/xbfMeasure.js`): a face's surface read off its mesh, an edge's
+polyline; an edge's length along a curve and a face's area, beside the pointer, are the engine's
+facts of it (`GET …/part/<key>/edge|face/<n>`), asked for when the pointer first rests on it.
+A pair reads what the two make (`@text-to-cad/core/lib/viewer/measureEntities.js`), drawn as
+every measurement is. Completed rulers are chips in its sub-toolbar while it is the tool
 (`kit/tools/measure/measurementChips.jsx`'s `MeasurementsBar`, Quick Edit's chips, their card
 `MeasurementCard.jsx`), and no row while there are none. They are the person's alone: nothing of
 them reaches Quick Edit or its snapshots (`cadgen snapshot --measurements` draws the rulers it is
