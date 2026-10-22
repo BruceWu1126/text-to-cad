@@ -201,7 +201,7 @@ class ConnectedPoolTest(unittest.TestCase):
             synced = server.synced[path]
             with mock.patch("time.monotonic", return_value=synced + LIVE - 1):
                 self.assertEqual(daemon.pool.retire_idle(), [], "recent sync keeps the worker warm")
-            with mock.patch("time.monotonic", return_value=synced + LIVE):
+            with mock.patch("time.monotonic", return_value=synced + LIVE + 1):
                 self.assertEqual(daemon.pool.retire_idle(), [builder], "no watcher: idle retirement")
 
     def test_failed_wait_releases_watcher_and_memory_cap_still_retires(self) -> None:

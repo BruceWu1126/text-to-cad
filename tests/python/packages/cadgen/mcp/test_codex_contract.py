@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext
 from cadgen.viewer.recents import RecentStore
 from cadgen.mcp.server import Server
@@ -48,7 +49,7 @@ def converse(tmp: Path) -> dict:
         with mock.patch("cadgen.mcp.server.OPENING_SECONDS", 0.0):
             return call(name)
 
-    initialized = server.handle("initialize", CODEX_INITIALIZE, None)
+    initialized = server.handle("initialize", initialize_params(CODEX_INITIALIZE), None)
     initialized["serverInfo"]["version"] = "<version>"
     uri = server.handle("resources/list", {}, None)["resources"][0]["uri"]
     record = {
@@ -90,7 +91,7 @@ class CodexContractTest(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         server = Server(page=AppPage(tmp), recents=RecentStore(tmp / "state"))
-        server.handle("initialize", {**CODEX_INITIALIZE, "capabilities": {"elicitation": {"form": {}, "url": {}}}}, None)
+        server.handle("initialize", initialize_params({**CODEX_INITIALIZE, "capabilities": {"elicitation": {"form": {}, "url": {}}}}), None)
         names = [tool["name"] for tool in json.loads(CONTRACT.read_text(encoding="utf-8"))["tools"]]
         self.assertEqual([tool["name"] for tool in server.handle("tools/list", {}, None)["tools"]], names)
 

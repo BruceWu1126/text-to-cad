@@ -33,7 +33,7 @@ SHARED_PACKAGE_MANIFESTS = (
 
 CADGEN_PACKAGE = repo_path("packages/cadgen/src/cadgen")
 # The adapter and its command shell: the only cadgen code allowed to know the host.
-CADGEN_ADAPTER = ("mcp/", "cli/mcp.py")
+CADGEN_ADAPTER = ("mcp/", "cli/mcp.py", "_internal/engine_host.py")
 
 # Each entry: (compiled pattern, what the match means).
 HOST_NAMES = (re.compile(r"\b(?:codex|chatgpt|openai|skybridge)\b", re.IGNORECASE), "names a host")

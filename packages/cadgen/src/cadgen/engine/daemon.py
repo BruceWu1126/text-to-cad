@@ -870,7 +870,7 @@ class Daemon:
             if self.renders is not None:
                 self.renders.retire_idle(self.pool.idle)
             if (self.busy == 0 and time.monotonic() - self.last > self.idle
-                    and not (self.server is not None and self.server.watched())):
+                    and not (self.server is not None and (self.server.watched() or self.server.clients_active()))):
                 self.stopping.set()
 
     def shutdown(self) -> None:

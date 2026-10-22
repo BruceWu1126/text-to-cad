@@ -19,6 +19,7 @@ from unittest import mock
 from urllib.parse import quote
 
 from cadgen._internal.picker import FilePicker
+from cadgen.mcp.shim import initialize_params
 from cadgen.mcp.protocol import RequestContext, RpcError
 from cadgen.viewer.recents import RecentStore
 from cadgen.mcp.server import Server, local_path
@@ -76,8 +77,8 @@ class _Session(unittest.TestCase):
         page.mkdir()
         (page / "index.html").write_text("<!doctype html><title>CAD</title>", encoding="utf-8")
         self.server = Server(page=AppPage(page), recents=RecentStore(self.tmp / "state"), viewer_url=self.viewer_url)
-        self.initialized = self.server.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": self.offered,
-                                                             "clientInfo": self.client}, None)
+        self.initialized = self.server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": self.offered,
+                                                             "clientInfo": self.client}), None)
 
     def call(self, name: str, arguments: dict | None = None, meta: dict | None = None) -> dict:
         context = RequestContext(1, {"threadId": "t", **(meta or {})})
@@ -100,12 +101,14 @@ class _Session(unittest.TestCase):
         """A view syncing as the page does (every few milliseconds here): its first sync registers it
         and says what it shows; it answers ``answers`` captures with ``png``."""
         state = {"model": model, "selection": [f"{model}#o1.f1"]}
-        self.call("cad_sync", {"view": view, "surface": surface, "model": model, "state": state})
+        first = self.call("cad_sync", {"view": view, "surface": surface, "model": model, "state": state})["structuredContent"]["events"]
 
         def page() -> None:
             asked = 0
+            pending = first
             while asked < answers:
-                events = self.call("cad_sync", {"view": view, "surface": surface, "model": model})["structuredContent"]["events"]
+                events = pending or self.call("cad_sync", {"view": view, "surface": surface, "model": model})["structuredContent"]["events"]
+                pending = []
                 if not events:
                     time.sleep(0.002)
                 for event in events:
@@ -300,7 +303,7 @@ class TabServerTest(_Session):
         self.assertEqual((home["page"], home["model"], home["surface"], [entry["path"] for entry in home["recents"]]),
                          ("home", None, "sidebar", [self.bracket]))
         fresh = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "other"))
-        fresh.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}, None)
+        fresh.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}), None)
         context = RequestContext(1, {"threadId": "t"})
         tab = fresh.handle("tools/call", {"name": "cad_tab", "arguments": {}}, context)["structuredContent"]["launch"]
         self.assertEqual((tab["page"], tab["model"], tab["surface"], tab["recents"]), ("home", None, "tab", []))
@@ -327,8 +330,10 @@ class SidebarAcrossThreadsTest(_Session):
     def setUp(self) -> None:
         super().setUp()
         # The sidebar's own process: another server over the same state directory.
-        self.sidebar = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state"))
-        self.sidebar.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}, None)
+        from cadgen.mcp.sidebar import SidebarViews
+        self.sidebar = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state"),
+                              sidebar_views=SidebarViews(self.server.sidebar_views.registry))
+        self.sidebar.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": CODEX}), None)
         self.model = self.bracket
 
     def on_sidebar(self, name: str, arguments: dict) -> dict:
@@ -382,36 +387,18 @@ class SidebarAcrossThreadsTest(_Session):
 
     def test_a_sidebar_that_stopped_syncing_is_not_reached(self) -> None:
         self.sync_sidebar(focused=True)
-        stale = time.time() - 120
-        for published in (self.tmp / "state" / "sidebar-views").glob("*.json"):
-            os.utime(published, (stale, stale))
+        self.sidebar.sidebar_views.registry._clock = lambda: time.monotonic() + 120
         self.assertEqual(self.call("cad_view")["structuredContent"]["views"], [])
         self.assertEqual(self.call("cad_show", {"path": self.bracket, "view": "s1"})["structuredContent"], {"delivered": 0})
 
-    def test_a_disk_that_refuses_the_sidebars_file_fails_no_sync(self) -> None:
-        """0.7.19 raised the disk's refusal (a bare OSError: full, failing) out of every sync of the
-        sidebar, a crash each second, and the requests left for it stayed where they were."""
+    def test_sidebar_sync_and_capture_create_no_disk_registry(self):
         self.sync_sidebar(focused=True)
-        self.assertEqual(self.call("cad_show", {"path": self.loose, "view": "s1"})["structuredContent"]["delivered"], 1)
-        full = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
-        published = self.tmp / "state" / "sidebar-views" / "s1.json"
-        with mock.patch("cadgen.mcp.sidebar_views.write_bytes_atomic", side_effect=full), \
-                mock.patch.object(type(self.sidebar.analytics), "crashed") as crashed, \
-                self.assertLogs("cadgen.mcp", "WARNING") as said:
-            # Focused, so each sync has news to publish: each one tries, and fails, to write it.
-            (event,) = self.sync_sidebar(focused=True)["events"]
-            self.assertEqual((event["type"], event["launch"]["model"]), ("show", self.loose))
-            for _ in range(3):
-                self.assertEqual(self.sync_sidebar(focused=True)["events"], [])
-            # An agent's request it cannot leave is its tool's failure, not the server's crash.
-            refused = self.call("cad_show", {"path": self.loose, "view": "s1"})
-            self.assertTrue(refused["isError"])
-            self.assertIn("disk refused", refused["content"][0]["text"])
-        crashed.assert_not_called()
-        self.assertEqual(len([line for line in said.output if "cannot be published" in line]), 1)
-        # The disk takes files again: the next sync publishes what the view shows now.
-        self.sync_sidebar(focused=True, state={"model": self.loose})
-        self.assertEqual(json.loads(published.read_text(encoding="utf-8"))["state"], {"model": self.loose})
+        self.call("cad_show", {"path": self.loose, "view": "s1"})
+        (event,) = self.sync_sidebar()["events"]
+        self.assertEqual(event["launch"]["model"], self.loose)
+        self.assertFalse((self.tmp / "state" / "sidebar-views").exists())
+        self.sidebar.sidebar_views.close()
+        self.assertEqual(self.call("cad_view")["structuredContent"]["views"], [])
 
 
 class DeclaredTabServerTest(_Session):
@@ -430,7 +417,7 @@ class DeclaredTabServerTest(_Session):
     def test_a_partial_declaration_is_shown_inline(self) -> None:
         partial = {"extensions": {**RENDERS_APPS["extensions"], "dev.texttocad/tabs": {"entrypoints": ["thread"]}}}
         server = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "state2"))
-        server.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": partial, "clientInfo": OTHER_HOST}, None)
+        server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": partial, "clientInfo": OTHER_HOST}), None)
         tools = {tool["name"] for tool in server.handle("tools/list", {}, None)["tools"]}
         self.assertNotIn("cad_open", tools)
 
@@ -549,14 +536,14 @@ class TextServerTest(_Session):
         self.server._viewer_url = refuse
         failed = self.call("cad_show", {"path": self.bracket})
         self.assertTrue(failed["isError"])
-        self.assertIn("`cadgen viewer --host 127.0.0.1 --json --detach`", failed["content"][0]["text"])
+        self.assertIn("`cadgen viewer --host 127.0.0.1 --json`", failed["content"][0]["text"])
 
     def test_an_app_that_renders_without_advertising_it_can_be_told(self) -> None:
         from unittest import mock
 
         with mock.patch.dict(os.environ, {"CADGEN_MCP_PRESENTATION": "inline"}):
             server = Server(page=AppPage(self.tmp / "app"), recents=RecentStore(self.tmp / "other"))
-            server.handle("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": self.client}, None)
+            server.handle("initialize", initialize_params({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": self.client}), None)
         self.assertIn("ui", {tool["name"]: tool for tool in server.handle("tools/list", {}, None)["tools"]}["cad_show"]["_meta"])
 
 

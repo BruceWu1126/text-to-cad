@@ -82,10 +82,12 @@ class Connection:
         handler: Handler,
         *,
         workers: int = 16,
+        notification=None,
     ) -> None:
         self._reader = reader
         self._writer = writer
         self._handler = handler
+        self._notify = notification
         self._write_lock = threading.Lock()
         self._cancelled: set[Any] = set()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cadgen-mcp")
@@ -133,6 +135,12 @@ class Connection:
         # The one notification read: a request the host gave up on gets no response.
         if method == "notifications/cancelled":
             self._cancelled.add(params.get("requestId"))
+        if self._notify is not None:
+            try:
+                self._notify(method, params)
+            except Exception:
+                LOG.exception("notification %s failed", method)
+
 
     def _run(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
         meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}

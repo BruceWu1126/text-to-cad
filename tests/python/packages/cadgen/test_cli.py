@@ -31,9 +31,9 @@ class Registry(unittest.TestCase):
 
     def test_the_viewer_verbs_are_registered_and_lazy(self):
         # The CAD Viewer's backend is cadgen.viewer, reached through the front
-        # door as one serve verb plus its stop verb. Registered by dotted module
+        # door as a launcher for the shared engine. Registered by dotted module
         # name like everything else, so `cadgen --help` imports none of it.
-        for name in ("viewer", "viewer stop"):
+        for name in ("viewer",):
             self.assertIn(name, cli._COMMANDS)
             module_name, _ = cli._COMMANDS[name]
             self.assertTrue(module_name.startswith("cadgen.cli.viewer"), module_name)

@@ -401,6 +401,8 @@ class Server:
                              workers=1 if isolated and (mesh_mode or os.environ.get("CADGEN_ENGINE_MESH")) == "inline" else None)
         self.three = Path(three) if three else find_three()
         self.touch = touch
+        self.clients_active = lambda: False
+        self.on_close = lambda: None
         self.provenance = provenance
         self.load_lock = threading.RLock()
         self.held: dict[Path, int] = {}
@@ -469,6 +471,7 @@ class Server:
         if self.thread is not None:  # shutdown waits for a loop that runs
             self.http.shutdown()
         self.http.server_close()
+        self.on_close()
         self.mesher.stop()
         with self.foreign_lock:
             reader, self.reader = self.reader, None
@@ -828,6 +831,14 @@ class Server:
                     self.watchers[path] = left
                 else:
                     del self.watchers[path]
+                self.synced[path] = time.monotonic()
+            self.touch()
+
+    def sync(self, path: Path) -> None:
+        """A connected app's heartbeat, even when its document version has not changed."""
+        path = Path(path).resolve()
+        if path in self.idents:
+            with self.watch_lock:
                 self.synced[path] = time.monotonic()
             self.touch()
 

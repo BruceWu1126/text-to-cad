@@ -151,7 +151,6 @@ class ViewerTunnel:
                 app.analytics, app.consent_by = self._analytics, "app"
                 app.drawings.hold_seconds, app.drawings.retry_ms = DRAWING_HOLD_SECONDS, DRAWING_RETRY_MS
                 app.engine_documents.hold_seconds, app.engine_documents.retry_ms = ENGINE_HOLD_SECONDS, ENGINE_RETRY_MS
-                app.engine_documents.wait_seconds = 0.0  # a version is answered at once: the page asks again
                 self._app = app
             return self._app
 

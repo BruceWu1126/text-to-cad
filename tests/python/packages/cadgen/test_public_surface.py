@@ -84,7 +84,6 @@ UNCLASSIFIED = {
     # The viewer launcher owns its parser: the launch contract (reuse, replace or start on its
     # one port, the --json announce line) is not a function signature to mirror.
     "viewer",
-    "viewer stop",
 }
 
 HEAVY = ("OCP", "build123d", "ezdxf", "shapely")

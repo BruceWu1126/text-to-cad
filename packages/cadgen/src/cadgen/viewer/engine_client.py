@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import http.client
-import json
-import os
 import threading
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlsplit
 
 from cadgen.engine.client import request
 
@@ -39,23 +37,3 @@ class EngineClient:
             raise
         finally:
             conn.close()
-
-
-class RemoteApp:
-    """Transitional MCP client of the engine's complete HTTP application."""
-    def __init__(self):
-        self.client = EngineClient()
-
-    def read_catalog(self, file):
-        status, _, data = self.client.call('GET', '/__cad/catalog?' + urlencode({'file': file}))
-        if status != 200:
-            raise ValueError('engine catalog read failed')
-        return json.loads(data)
-
-    def handle(self, request, response):
-        route = request.path + ('?' + urlencode(list(request.query)) if request.query else '')
-        status, headers, data = self.client.call(request.raw_method, route,
-                                request.body() if request.method == 'POST' else b'', request.headers)
-        response.send_bytes(status, data, headers.get('Content-Type', headers.get('content-type', '')),
-                            [(k, v) for k, v in headers.items() if k.lower() not in
-                             {'date', 'server', 'content-length', 'content-type', 'cache-control'}])

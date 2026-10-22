@@ -32,8 +32,8 @@ cadgen where XBF/arm.xbf                      # its build closure
 **PURPOSE** — the engine and its command surface: models built in a warm worker whose memo
 makes an edit cost what it changed, documents and their exports, kinematics and motions,
 materials, references to geometry, snapshots drawn by OCCT; the CAD Viewer (`cadgen viewer`: a
-launcher for a page on the installation’s engine, serving every CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: an MCP App server that
-an agent host starts, over the viewer's own routes); the URDF, SDF and SRDF validators; and
+launcher for a page on the installation’s engine, serving every CAD file by its absolute path); CAD beside an agent's chat (`cadgen mcp`: a stateless stdio peer of the engine’s
+HTTP MCP endpoint, with tools and the app page owned by the engine); the URDF, SDF and SRDF validators; and
 engineering drawings (`@eng_drawing`).
 
 **MAY DEPEND ON** — the Python ecosystem it declares (OCP/build123d lazily, never at
@@ -167,7 +167,9 @@ Laws 1 to 13 and 19 to 20 are the engine's; 14 to 18 hold for the whole package.
 20. **One engine serves the installation.** Page sessions and document reads share its
     authenticated HTTP listener. Launchers exit; clients closing never stop it. Kernel
     operations run in child processes, never in the engine's request threads. Each
-    page session keeps its own root. See the engine's **Architecture**.
+    page session keeps its own root; each MCP session owns its views and resource. The
+    stdio shim owns only connection metadata. Sidebar sharing stays in memory, and host
+    quirks stay in the shim and page. See the engine's **Architecture**.
 
 ## The shape of the package
 
