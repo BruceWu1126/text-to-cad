@@ -85,7 +85,12 @@ every surface of it answers light as OCCT's PBR program does (core's `lib/viewer
 the look's `brdf`), not by three's own physical model. Parts draws a plain finish. An engine
 document's X-ray is its look's colour-only model (the scene's `rigFor` its own rig): no finish, an
 ambient term and plain lights, no environment, three's own physical model, as the engine's OCCT
-stills draw it by Phong. Authored materials are read-only. Color
+stills draw it by Phong, its see-through layers blended in linear light as OCCT blends them (the
+rig's `blend`): the viewport draws the surfaces through a half-float frame of the rig's and encodes
+them once, its edges, highlights and ink over them as before (core's `renderWithSceneRig`), where
+three's canvas would blend each layer after encoding it and draw dark see-through parts too dark.
+It holds about 60 bytes a pixel while X-ray is on; every other mode, and every other file, is
+drawn as before. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 

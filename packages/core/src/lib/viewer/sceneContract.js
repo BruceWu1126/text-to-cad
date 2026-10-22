@@ -24,11 +24,13 @@
  *   lights: { name: string, towards: [number, number, number], color: string, intensity: number }[],
  *   environment: { width: number, height: number, data: Float32Array, intensity: number,
  *     rotation: [number, number, number] } | null,
- *   exposure: number, toneCurve: string }} SceneRig
+ *   exposure: number, toneCurve: string, blend?: "linear" }} SceneRig
  *   A scene's own lighting, in three's units (`sceneRig.js`): an ambient light or none, directional
  *   lights shining from `towards` (world frame) that cast no shadow, an equirectangular environment
  *   image the stage turns into its PMREM and lights the scene with, the renderer's exposure and a
- *   tone curve of `SCENE_RIG_TONE_CURVES`.
+ *   tone curve of `SCENE_RIG_TONE_CURVES`; `blend: "linear"`, its see-through surfaces blended in
+ *   linear light as an sRGB frame buffer blends them, which a stage draws through the rig's frame
+ *   (`renderWithSceneRig`).
  *
  * @typedef {object} KitScene
  * @property {import("three").Object3D} object3D  What the host adopts under its model group.
@@ -50,8 +52,8 @@
  *   document: `lib/xbf/xbfLook.js`). Outside Preview's Render the host hides the theme's lights and
  *   puts this up instead (`sceneRig.js`, `applySceneRig`): its lights, its environment as the
  *   scene's (every surface, an authored finish included, reflects it), its exposure and its tone
- *   curve as three's `CustomToneMapping`; Render lights every scene alike. Absent or null: the
- *   theme's rig, as ever.
+ *   curve as three's `CustomToneMapping`, and draws the scene as it blends (`renderWithSceneRig`);
+ *   Render lights every scene alike. Absent or null: the theme's rig, as ever.
  * @property {(look: SurfaceLook | null) => (SceneRig | null)} [rigFor]  The rig for the surface look
  *   the host resolved, where a scene lights one look otherwise than the rest (an engine document's
  *   X-ray: `lib/xbf/xbfLook.js`); a host asks it (`sceneRig.js`'s `sceneRigFor`) before `rig`. Each
