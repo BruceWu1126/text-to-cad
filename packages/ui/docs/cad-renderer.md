@@ -291,12 +291,13 @@ it, the file sidebar, Quick Edit at the top-right.
   (`layersSectionShown`): four or more layers drawn on, or any block reference. Each
   layer's pen, name, entity count and eye (hidden: not drawn, picked or snapped to), and
   under it the block references placed on it, a click picking one.
-- **Quick Edit** carries the picks and the ink (never the measurements: they are the
-  person's); its views are the window on screen as a plan-view camera (`planCamera`: looking
-  straight down, `up` +Y, `orthographicHalfHeight` the window's half height), each with its
-  label, which the ink's marks name. `cadgen snapshot --job PACKET` draws each view's window with
-  the ink and the dimensions on the sheet; `--annotation PACKET --camera authored` the view the
-  ink was last drawn in.
+- **Quick Edit** carries the picks and the ink; its views are the window on screen as a
+  plan-view camera (`planCamera`: looking straight down, `up` +Y, `orthographicHalfHeight` the
+  window's half height), each with its label, which the ink's marks name. `cadgen snapshot --job
+  PACKET` draws each view's window with the ink on the sheet, and a packet's `measurements`
+  (`PromptFiles.create` takes them) as Measure draws its dimensions; `--annotation PACKET
+  --camera authored` the view the ink was last drawn in. The viewer's own Quick Edit puts no
+  measurement in its packet: they are the person's.
 
 - **The picture comes from the BACKEND.** `client.drawing(file)` is
   `GET /__cad/drawing` (`apps/web/docs/backend.md`), asked again while the server
@@ -423,8 +424,8 @@ its NATIVE glTF scene, always: one path whether or not a clip is playing.
   copies of the file's authored materials, kept before any look, over the editor's geometry
   and textures, with a sibling `document` for its routine; `kit/shell/usePreviewScene.js`).
 - **Quick Edit**: as a STEP's — the picked nodes as references (`model.glb#n12`), the
-  annotation, the measurements and the views (Clip and Explode in their `display`), Copy,
-  Queue and Send.
+  annotation and the views (Clip and Explode in their `display`), Copy, Queue and Send; no
+  measurement, as no renderer's Quick Edit carries one.
 - **Host commands**: the base live commands, and `clearSelection`; `select` is declined with
   a sentence (a node is picked by a person), a `selectReference` host request is consumed and
   acknowledged without changing the view, and live state reports `selectedNodes`.
