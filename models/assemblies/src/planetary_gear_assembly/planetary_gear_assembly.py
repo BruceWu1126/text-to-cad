@@ -227,33 +227,71 @@ def _planet_center(index: int) -> tuple[float, float]:
 
 # ---------------------------------------------------------------------------
 # Kinematics: build123d joints, connected at 0 where the parts stand. The ring
-# is the ground; the sun and the carrier turn on it, each planet turns on the
-# carrier, and each pin is fastened to the carrier. The gear train is one
-# locked coupling, `drive` (the sun's angle), over the exact fixed-ring
-# planetary ratios: 3.5 sun revolutions (1260 deg) return the carrier to 360
-# deg and every gear to an equivalent tooth phase, so `meshCycle`, the drive
-# swept once over 6 s and looped, plays without a seam.
+# is the ground; the sun and the carrier turn on it and slide along its axis
+# (cylindrical), each pin slides radially out of the carrier (prismatic, along
+# the carrier's own radial), and each planet turns on its pin and slides along
+# it (cylindrical). The gear train is one coupling, `drive` (the sun's angle),
+# over the exact fixed-ring planetary ratios: 3.5 sun revolutions (1260 deg)
+# return the carrier to 360 deg and every gear to an equivalent tooth phase, so
+# `meshCycle`, the drive swept once over 6 s and looped, plays without a seam.
+#
+# `drive` is not locked. A locked coupling is its joints' only control, so no
+# motion could set the sun's, the carrier's or a planet's slide (the second
+# value of the same joints) beside it; `inspectExplode` sets every member's
+# turn and slide itself, at the coupling's ratios. The old pipeline's
+# couplings were never locked either.
 # ---------------------------------------------------------------------------
 
 _CARRIER_RATIO = SUN_TEETH / (SUN_TEETH + RING_TEETH)          # 24/84
 _PLANET_RATIO = -(SUN_TEETH / PLANET_TEETH) * (1 - _CARRIER_RATIO)
 _FULL_MESH_CYCLE_DEG = 1260
 
+# The inspection explode, mm at its peak: each pin (and its planet) slides out
+# along its radial, the sun lifts 7/16 of it and the carrier (with the pins)
+# drops 4/16 of it, the planets staying in the gear plane.
+_EXPLODE_MM = 16.0
+_SUN_LIFT = 7.0 / 16.0
+_CARRIER_DROP = -4.0 / 16.0
+_UP = (0.0, 0.0, 1.0)
 
-def _revolute(fixed, moving, label: str, center: tuple[float, float], limits: tuple[float, float]) -> None:
-    """``moving`` turns about +Z through ``center`` on ``fixed``."""
+
+def _turns(fixed, moving, label: str, center: tuple[float, float], limits: tuple[float, float],
+           travel: tuple[float, float]) -> None:
+    """``moving`` turns about +Z through ``center`` on ``fixed``, and slides along it."""
     point = (center[0], center[1], 0.0)
-    bd.RevoluteJoint(label, fixed, axis=bd.Axis(point, (0.0, 0.0, 1.0)), angular_range=limits)
-    bd.RigidJoint(label, moving, bd.Plane(origin=point, z_dir=(0.0, 0.0, 1.0)).location)
-    fixed.joints[label].connect_to(moving.joints[label], angle=0.0)
+    bd.CylindricalJoint(label, fixed, axis=bd.Axis(point, _UP), angular_range=limits, linear_range=travel)
+    bd.RigidJoint(label, moving, bd.Plane(origin=point, z_dir=_UP).location)
+    fixed.joints[label].connect_to(moving.joints[label], angle=0.0, position=0.0)
 
 
-def _fastened(fixed, moving, label: str, center: tuple[float, float]) -> None:
-    """``moving`` fixed to ``fixed`` where it stands."""
-    location = bd.Location((center[0], center[1], 0.0))
-    bd.RigidJoint(label, fixed, location)
-    bd.RigidJoint(label, moving, location)
-    fixed.joints[label].connect_to(moving.joints[label])
+def _slides_out(fixed, moving, label: str, center: tuple[float, float], travel: tuple[float, float]) -> None:
+    """``moving`` slides along the radial through ``center`` on ``fixed``: the rigid half a pure
+    translation at the axis origin, where the linear joint holds it at 0."""
+    point = (center[0], center[1], 0.0)
+    length = (center[0] ** 2 + center[1] ** 2) ** 0.5
+    radial = (center[0] / length, center[1] / length, 0.0)
+    bd.LinearJoint(label, fixed, axis=bd.Axis(point, radial), linear_range=travel)
+    bd.RigidJoint(label, moving, bd.Location(point))
+    fixed.joints[label].connect_to(moving.joints[label], position=0.0)
+
+
+def _inspect_explode(t: float) -> dict:
+    """The old `inspectExplode`: the drive swept 0..1260 over 5 s while the stage opens and
+    closes, ``16 * sine(progress)``. Each pin slides along the carrier's radial, outward at
+    every point of the orbit; the old clip shifted it along its rest radial in the world
+    (deliberate: a joint carries one direction in its holder's frame)."""
+    progress = t / 5.0
+    sun = progress * _FULL_MESH_CYCLE_DEG
+    explode = _EXPLODE_MM * (0.5 - 0.5 * cos(2.0 * pi * progress))
+    values = {
+        "sun": (sun, _SUN_LIFT * explode),
+        "carrier": (sun * _CARRIER_RATIO, _CARRIER_DROP * explode),
+    }
+    for index in range(PLANET_COUNT):
+        values[f"pin{index + 1}"] = explode
+        # The pin drops with the carrier; the planet rises back on its pin into the gear plane.
+        values[f"planet{index + 1}"] = (sun * _PLANET_RATIO, -_CARRIER_DROP * explode)
+    return values
 
 
 @xbf(out="../../XBF/planetary_gear_assembly/planetary_gear_assembly.xbf")
@@ -299,28 +337,31 @@ def planetary_gear_assembly():
         parts.append(_make_planet_pin(label=f"planet_pin_{index + 1}", center=center))
 
     carrier, ring, sun = parts[:3]
-    # Each planet and pin on the carrier before the carrier turns on the ring.
+    # Each pin on the carrier and each planet on its pin before the carrier turns on the ring.
     for index in range(PLANET_COUNT):
         planet, pin = parts[3 + 2 * index], parts[4 + 2 * index]
         center = _planet_center(index)
         limits = (-4 * _FULL_MESH_CYCLE_DEG, 4 * _FULL_MESH_CYCLE_DEG)
-        _revolute(carrier, planet, f"planet{index + 1}", center, limits)
-        _fastened(carrier, pin, f"pin{index + 1}", center)
-    _revolute(ring, sun, "sun", (0.0, 0.0), (-_FULL_MESH_CYCLE_DEG, _FULL_MESH_CYCLE_DEG))
-    _revolute(ring, carrier, "carrier", (0.0, 0.0), (-360.0, 360.0))
+        _slides_out(carrier, pin, f"pin{index + 1}", center, (0.0, _EXPLODE_MM))
+        _turns(pin, planet, f"planet{index + 1}", center, limits, (0.0, -_CARRIER_DROP * _EXPLODE_MM))
+    _turns(ring, sun, "sun", (0.0, 0.0), (-_FULL_MESH_CYCLE_DEG, _FULL_MESH_CYCLE_DEG),
+           (0.0, _SUN_LIFT * _EXPLODE_MM))
+    _turns(ring, carrier, "carrier", (0.0, 0.0), (-360.0, 360.0), (_CARRIER_DROP * _EXPLODE_MM, 0.0))
 
     assembly = bd.Compound(
         obj=parts,
         children=parts,
         label="simplified_planetary_gear_assembly",
     )
-    planets = {f"planet{index + 1}": _PLANET_RATIO for index in range(PLANET_COUNT)}
-    couple(assembly, "drive", range=(0, _FULL_MESH_CYCLE_DEG), lock=True,
-           sun=1.0, carrier=_CARRIER_RATIO, **planets)
+    # A cylindrical joint's ratio is its turn's; its slide's is 0.
+    planets = {f"planet{index + 1}": (_PLANET_RATIO, 0.0) for index in range(PLANET_COUNT)}
+    couple(assembly, "drive", range=(0, _FULL_MESH_CYCLE_DEG),
+           sun=(1.0, 0.0), carrier=(_CARRIER_RATIO, 0.0), **planets)
     configuration(assembly, "quarter_cycle", drive=_FULL_MESH_CYCLE_DEG / 4)
     configuration(assembly, "half_cycle", drive=_FULL_MESH_CYCLE_DEG / 2)
-    return motion(assembly, "meshCycle", sweep={"drive": (0, _FULL_MESH_CYCLE_DEG)}, duration=6,
-                  ease="linear", loop="loop")
+    motion(assembly, "meshCycle", sweep={"drive": (0, _FULL_MESH_CYCLE_DEG)}, duration=6,
+           ease="linear", loop="loop")
+    return motion(assembly, "inspectExplode", _inspect_explode, duration=5)
 
 
 if __name__ == "__main__":

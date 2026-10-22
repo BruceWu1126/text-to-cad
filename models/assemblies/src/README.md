@@ -28,7 +28,7 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 | `motorcycle_shock_absorber/motorcycle_shock_absorber.py` | `motorcycle_shock_absorber.xbf` | Coilover damper; the rod rides a linear joint, `damper_stroke` |
 | `pelican_riding_bicycle/pelican_riding_bicycle.py` | `pelican_riding_bicycle.xbf` | Pelican riding a bicycle |
 | `photo_coffee_cup/photo_coffee_cup.py` | `photo_coffee_cup.xbf` | Photo-inspired takeaway coffee cup |
-| `planetary_gear_assembly/planetary_gear_assembly.py` | `planetary_gear_assembly.xbf`, `.glb` | The docs site's hero: a gear train locked to one coupling, `drive`, and the `meshCycle` motion its GLB carries as a clip |
+| `planetary_gear_assembly/planetary_gear_assembly.py` | `planetary_gear_assembly.xbf`, `.glb` | The docs site's hero: a gear train driven by one coupling, `drive`, and the `meshCycle` and `inspectExplode` motions its GLB carries as clips |
 | `planetary_gear_stage/planetary_gear_stage.py` | `planetary_gear_stage.xbf` | Simplified planetary gear stage (`lib/gear_teeth.py`) |
 | `research_humanoid/research_humanoid.py` | `research_humanoid.xbf` | Adult-scale humanoid: 28 body joints, and 15 per hand from `lib.build_hand(side)` |
 | `robotic_hand_end_effector/robotic_hand_end_effector.py` | `robotic_hand_end_effector.xbf` | Cybernetic robotic hand end-effector |
@@ -73,13 +73,34 @@ python -m cadgen.engine snapshot ../../XBF/planetary_gear_assembly/planetary_gea
 ## Kinematics, motions and what was dropped
 
 - `planetary_gear_assembly`: the typed mates are build123d joints. `sun` and
-  `carrier` turn on the ring (the ground), `planet1..3` turn on the carrier, and
-  `pin1..3` are fastened to it. `drive` is a locked coupling over the exact
-  fixed-ring ratios (sun 1, carrier 24/84, planets -(24/18)(60/84)), with range
-  0..1260. `quarter_cycle` and `half_cycle` are configurations. `meshCycle` is
-  `drive` swept 0 -> 1260 over 6 s, linear and looped, a seamless cycle; `@glb`
-  bakes it into a clip of that name. The `inspectExplode` clip (radial
-  translations, which no joint makes) and the STL and 3MF exports are dropped.
+  `carrier` turn on the ring (the ground) and slide along its axis
+  (cylindrical), `pin1..3` slide radially out of the carrier (prismatic, held
+  by the carrier), and `planet1..3` turn on their pins and slide along them
+  (cylindrical): the pins carry the planets, as the old explode moved each
+  planet with its pin. `drive` is a coupling over the exact fixed-ring ratios
+  (sun 1, carrier 24/84, planets -(24/18)(60/84)), with range 0..1260.
+  `quarter_cycle` and `half_cycle` are configurations. `meshCycle` is `drive`
+  swept 0 -> 1260 over 6 s, linear and looped, a seamless cycle, the same
+  motion as before. `inspectExplode` is back: a function of time over 5 s, no
+  loop, sweeping the same drive while `16 * sine(progress)` slides each pin and
+  its planet out by it, lifts the sun 7/16 of it and drops the carrier and pins
+  4/16 of it (each planet slides back up its pin, staying in the gear plane).
+  `@glb` bakes both into clips of their names; the STL and 3MF exports are
+  dropped. Deliberate differences:
+  - `drive` is no longer locked. A locked coupling is its joints' only
+    control, so no motion could set the slides of the joints it turns;
+    `inspectExplode` sets each member's turn (at the coupling's ratios) and
+    slide itself. The old pipeline's couplings were never locked. `meshCycle`
+    is still a sweep of `drive`.
+  - Each pin slides along the carrier's radial, so a planet moves outward from
+    the sun at every point of its orbit. The old clip shifted each planet and
+    pin along its rest radial in the world while it orbited, so half a carrier
+    turn on, a planet moved toward the sun.
+  - The as-built placements of the sun, carrier and planets are exact now: the
+    revolute `connect_to` left them turned by 2.4e-16 rad, the cylindrical one
+    does not. The baked `meshCycle` keeps its channels, key times and
+    interpolation; its values move by float noise only (at most 1.2e-16 in a
+    quaternion, 4.1e-10 mm in a pin's translation).
 - `mars_rover_concept`: its 27 typed mates are build123d joints on its
   top-level groups (26 revolute, one linear: `lid_lift`). Of its 7 couplings
   one is a real linkage and stays: `rocker_split`, the differential bar making
