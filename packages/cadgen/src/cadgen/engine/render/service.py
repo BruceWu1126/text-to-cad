@@ -450,8 +450,8 @@ class RenderProcess:
             env["PYTHONPATH"] = os.pathsep.join(item for item in (root, env.get("PYTHONPATH", "")) if item)
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         self.path = Path(path)
-        self.process = subprocess.Popen([sys.executable, "-m", "cadgen.engine.render.service"], stdin=subprocess.PIPE,
-                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        self.process = subprocess.Popen([sys.executable, "-P", "-m", "cadgen.engine.render.service"],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         self.lock = threading.Lock()
         self.version: str | None = None
         self.keys: set[str] = set()
