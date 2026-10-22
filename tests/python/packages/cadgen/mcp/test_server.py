@@ -475,6 +475,18 @@ class InlineServerTest(_Session):
         shown = self.call("cad_show", {"path": self.bracket})
         self.assertIn(shown["structuredContent"]["launch"]["view"], shown["content"][0]["text"])
 
+    def test_a_step_and_an_engine_document_are_shown_and_the_agent_is_told_so(self) -> None:
+        # The page draws both from what the cadgen engine serves of them (``cadgen.viewer.xbf``).
+        tools = {tool["name"]: tool for tool in self.server.handle("tools/list", {}, None)["tools"]}
+        self.assertIn("(STEP, XBF, STL, GLB, 3MF, DXF, URDF, SDF)", tools["cad_show"]["description"])
+        self.assertIn("(STEP, XBF, STL, GLB, 3MF, DXF, URDF, SDF)", self.initialized["instructions"])
+        for name in ("arm.xbf", "arm.step", "ARM.STP"):
+            model = self.workspace / "parts" / name
+            model.write_bytes(b"\0")
+            with self.subTest(model=name):
+                shown = self.launch("cad_show", {"path": str(model)})
+                self.assertEqual((shown["page"], shown["model"]), ("viewer", str(model)))
+
     def test_the_agent_reads_only_the_view_it_names(self) -> None:
         model = self.bracket
         view = self.launch("cad_show", {"path": model})["view"]
