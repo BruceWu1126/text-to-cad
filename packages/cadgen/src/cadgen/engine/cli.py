@@ -1,20 +1,20 @@
-"""``cadgen xbf``: build code, export documents, draw and serve them -- a thin argparse over
-the functions of ``api``; and ``python SCRIPT.py``'s run (``run_script``).
+"""The engine's verbs as commands -- a thin argparse over the functions of ``api`` -- and
+``python SCRIPT.py``'s run (``run_script``).
 
-    cadgen xbf build SOURCE | - [--name N]           one model from source text (stdin with -), its files
+    python SCRIPT.py                                 every model of a script, as its decorators declare
+    cadgen build SOURCE | - [--name N]               one model from source text (stdin with -), its files
         [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
         [--no-daemon]
-    python SCRIPT.py                                 every model of a script, as its decorators declare
-    cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs]
-    cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
+    cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon]
+    cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
-    cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-    cadgen xbf status [--json] | stop | daemon
+    cadgen serve DOC [--port N] [--three DIR] [--foreground]
+    cadgen status [--json] | stop | daemon
     cadgen where DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
-``where`` is the first verb at the top level of ``cadgen`` (``where_main``); the others move up
-when the ``xbf`` level goes.
+cadgen's command line runs each verb by its name (``parser_for``, ``run``); the engine's own entry,
+``python -m cadgen.engine VERB ...``, takes the same verbs as subcommands (``main``).
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-__all__ = ["build_parser", "main", "run_script", "weighed", "where_main", "where_parser"]
+__all__ = ["VERBS", "build_parser", "main", "parser_for", "run", "run_script", "weighed", "where_main", "where_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
@@ -35,21 +35,9 @@ _DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb",
             "threemf": "<name>.3mf", "dxf": "<name>.dxf"}
 
 
-def build_parser(prog: str = "cadgen xbf") -> argparse.ArgumentParser:
-    """The command's parser: its verbs and their options."""
-    return _parser(prog)
-
-
-def _parser(prog: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=prog, description="Build, export, draw and serve cadgen engine documents.")
-    verbs = parser.add_subparsers(dest="verb", required=True)
-    build = verbs.add_parser(
-        "build", help="build source text into the files its flags name (a script builds by running it)",
-        usage="%(prog)s SOURCE [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] "
-              "[--json] [--verify] [--no-daemon]",
-        description="Build source text: one model, which assigns its final shape to `result`. Code declares "
-                    "nothing, so its file flags are its declarations, additive among themselves; a child model it "
-                    "calls writes the files that model declares. A script builds by running it: python SCRIPT.py.")
+def _build_arguments(build: argparse.ArgumentParser) -> None:
+    build.usage = ("%(prog)s SOURCE [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] "
+                   "[--dxf [F]] [--json] [--verify] [--no-daemon]")
     build.add_argument("source", metavar="SOURCE", help="the code (- reads it from stdin)")
     build.add_argument("--name", metavar="N",
                        help="the code's name: its model, its files' default names and its warm worker (default: model)")
@@ -60,9 +48,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     build.add_argument("--verify", action="store_true",
                        help="run every function the engine would replay and compare its result with the logged one")
     build.add_argument("--no-daemon", action="store_true", help="build in this process (cold, no worker kept)")
-    export = verbs.add_parser("export", help="write a document to STEP, GLB, STL, 3MF, DXF or xbf files, by suffix; a "
-                                             "GLB carries the document's motions as clips, a DXF draws a planar one")
-    export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or SCRIPT.py::MODEL (built first)")
+
+
+def _export_arguments(export: argparse.ArgumentParser) -> None:
+    export.add_argument("source", metavar="SRC", help="an .xbf, or a .step (read into a document first)")
     export.add_argument("destinations", nargs="+", metavar="DST",
                         help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
                              "document); or .cadz (from an xbf: it, its build closure's source files and its inputs, "
@@ -71,21 +60,71 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     export.add_argument("--pose", help="a configuration's name, or joint and coupling values as JSON "
                                        "('{\"elbow\": 45}', '{\"curl\": 0.6}'): the mechanism posed there; as built "
                                        "without it")
-    export.add_argument("--part", help="an occurrence's path or a node's name: that subtree as a document of its own")
+    export.add_argument("--part", metavar="OWNER",
+                        help="one part or assembly, as a ref names it (hand/finger.2, palm; cadgen.engine.refs): that "
+                             "subtree as a document of its own")
     export.add_argument("--no-daemon", action="store_true", help="export in this process (cold, no worker kept)")
-    serve = verbs.add_parser("serve", help="serve a document over HTTP and print its URL")
+
+
+def _serve_arguments(serve: argparse.ArgumentParser) -> None:
     serve.add_argument("document", help="an .xbf, or a STEP")
     serve.add_argument("--port", type=int, default=0)
     serve.add_argument("--three", help="the three.js package folder (default: the nearest node_modules/three)")
     serve.add_argument("--foreground", action="store_true", help="serve from this process until interrupted")
-    from cadgen.engine.snapshot import add_parser as add_snapshot
 
-    add_snapshot(verbs)
-    status = verbs.add_parser("status", help="the daemon's workers, what each is building, and its served documents")
+
+def _status_arguments(status: argparse.ArgumentParser) -> None:
     status.add_argument("--json", action="store_true", help="the daemon's answer as JSON")
-    verbs.add_parser("stop", help="stop the daemon")
-    verbs.add_parser("daemon", help="run the daemon in this process")
+
+
+def _no_arguments(_parser: argparse.ArgumentParser) -> None:
+    return None
+
+
+def _where_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("document", help="an .xbf")
+    parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
+                                               "part's or an assembly's label, or its occurrence path (hand/finger.2); "
+                                               "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
+                                               "An element answers what the kernel measures of it, placed where its "
+                                               "occurrence stands, and what made it; a part or an assembly its volume "
+                                               "and mass. Without it: the build closure")
+
+
+def _snapshot_arguments(parser: argparse.ArgumentParser) -> None:
+    from cadgen.engine.snapshot import _arguments
+
+    _arguments(parser)
+
+
+def _snapshot(args: argparse.Namespace, prog: str) -> int:
+    from cadgen.engine.snapshot import run
+
+    return run(args, prog)
+
+
+def build_parser(prog: str = "python -m cadgen.engine") -> argparse.ArgumentParser:
+    """The engine's own command: its verbs as subcommands, each with its options."""
+    parser = argparse.ArgumentParser(prog=prog, description="Build, export, draw and serve cadgen engine documents.")
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    for verb, (help_text, arguments, _runner) in VERBS.items():
+        arguments(verbs.add_parser(verb, help=help_text, description=help_text))
     return parser
+
+
+def parser_for(verb: str, prog: str | None = None) -> argparse.ArgumentParser:
+    """One verb's parser, as a command of its own (``cadgen build``, ``cadgen export``, ...)."""
+    help_text, arguments, _runner = VERBS[verb]
+    parser = argparse.ArgumentParser(prog=prog or f"cadgen {verb}", description=help_text)
+    arguments(parser)
+    return parser
+
+
+def run(verb: str, argv: list[str] | None = None, prog: str | None = None) -> int:
+    """One verb run as a command of its own: its arguments parsed by ``parser_for``."""
+    prog = prog or f"cadgen {verb}"
+    args = parser_for(verb, prog).parse_args(argv)
+    return VERBS[verb][2](args, prog)
 
 
 def _pose(value: str | None) -> Any:
@@ -142,14 +181,14 @@ def _verified(found: dict[str, Any] | None) -> str:
     return "".join(lines)
 
 
-def _file_flags(args: argparse.Namespace) -> dict[str, Any]:
+def _file_flags(args: argparse.Namespace, prog: str) -> dict[str, Any]:
     """The file flags, each True (its default path) or a path ending in its kind's suffix."""
     flags = {}
     for kind in FILE_FLAGS:
         value = getattr(args, kind)
         if isinstance(value, str) and Path(value).suffix.lower() != _SUFFIX[kind] and not (
                 kind == "step" and Path(value).suffix.lower() == ".stp"):
-            raise SystemExit(f"cadgen xbf build: --{kind} {value}: the file must end in {_SUFFIX[kind]}")
+            raise SystemExit(f"{prog}: --{kind} {value}: the file must end in {_SUFFIX[kind]}")
         flags[kind] = value
     return flags
 
@@ -172,16 +211,16 @@ def _log(text: str) -> None:
     print(text, file=sys.stderr)
 
 
-def _build(args: argparse.Namespace) -> int:
-    """``cadgen xbf build SOURCE``: code, its flags its declarations (law 12)."""
+def _build(args: argparse.Namespace, prog: str) -> int:
+    """``cadgen build SOURCE``: code, its flags its declarations (law 12)."""
     from cadgen.engine import api
 
-    flags = _file_flags(args)
+    flags = _file_flags(args, prog)
     code = sys.stdin.read() if args.source == "-" else args.source
     try:
         built = api.build(code, name=args.name, **flags, verify=args.verify, log=_log, daemon=not args.no_daemon)
     except api.EngineError as error:
-        print(f"cadgen xbf build: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     return _reported([built.report], built.report.get("wall", 0.0), None, args.json)
 
@@ -200,29 +239,33 @@ def run_script(script: Path) -> int:
     return _reported(found.models, found.wall, found.fresh, False)
 
 
-def _export(args: argparse.Namespace) -> int:
+def _export(args: argparse.Namespace, prog: str) -> int:
+    """``cadgen export SRC DST...``: an ``.xbf`` or a ``.step`` written to each destination."""
     from cadgen.engine import api
-    from cadgen.engine.export import ExportRefused
+    from cadgen.engine.export import SOURCES, ExportRefused
 
+    if Path(args.source).suffix.lower() not in SOURCES:
+        print(f"{prog}: {args.source} is no document: an export reads an .xbf or a .step", file=sys.stderr)
+        return 2
     try:
         written = api.export(args.source, *args.destinations, pose=_pose(args.pose), part=args.part,
                              inputs=not args.no_inputs, log=lambda text: print(text, file=sys.stderr),
                              daemon=not args.no_daemon)
     except (ExportRefused, ValueError) as error:
-        print(f"cadgen xbf export: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 2
     except api.EngineError as error:
-        print(f"cadgen xbf export: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     for row in written:
         print(f"wrote {os.path.relpath(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
     return 0
 
 
-def _serve(args: argparse.Namespace) -> int:
+def _serve(args: argparse.Namespace, prog: str) -> int:
     path = Path(args.document).resolve()
     if not path.is_file():
-        print(f"cadgen xbf serve: no document {args.document}", file=sys.stderr)
+        print(f"{prog}: no document {args.document}", file=sys.stderr)
         return 2
     three = args.three
     if three is None:
@@ -246,7 +289,7 @@ def _serve(args: argparse.Namespace) -> int:
     try:
         print(api.serve(path, args.port, three).url)
     except api.EngineError as error:
-        print(f"cadgen xbf serve: {error}", file=sys.stderr)
+        print(f"{prog}: {error}", file=sys.stderr)
         return 1
     return 0
 
@@ -287,25 +330,19 @@ def weighed(structure: dict[str, Any], hit: Any, volumes: dict[str, float]) -> d
 
 def where_parser(prog: str = "cadgen where") -> argparse.ArgumentParser:
     """``cadgen where``'s parser: a document, and a ref into it or none."""
-    parser = argparse.ArgumentParser(prog=prog, description="A document's build closure (its source, modules, inputs "
-                                                            "and key), or what one thing a ref names is and what made it.")
-    parser.add_argument("document", help="an .xbf")
-    parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
-                                               "part's or an assembly's label, or its occurrence path (hand/finger.2); "
-                                               "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
-                                               "An element answers what the kernel measures of it, placed where its "
-                                               "occurrence stands, and what made it; a part or an assembly its volume "
-                                               "and mass. Without it: the build closure")
-    return parser
+    return parser_for("where", prog)
 
 
 def where_main(argv: list[str] | None = None, prog: str = "cadgen where") -> int:
     """``cadgen where DOC``: the build closure the xbf holds; ``cadgen where DOC REF``: what the
     kernel measures of the elements a ref names, and what made each (``made_by``, null for a
     document no live worker built)."""
+    return run("where", argv, prog)
+
+
+def _where(args: argparse.Namespace, prog: str) -> int:
     from cadgen.engine import api
 
-    args = where_parser(prog).parse_args(argv)
     path = Path(args.document).resolve()
     if not path.is_file():
         print(f"{prog}: no document {args.document}", file=sys.stderr)
@@ -322,40 +359,45 @@ def where_main(argv: list[str] | None = None, prog: str = "cadgen where") -> int
     return 0
 
 
-def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
-    args = _parser(prog).parse_args(argv)
-    if args.verb == "build":
-        return _build(args)
-    if args.verb == "export":
-        return _export(args)
-    if args.verb == "serve":
-        return _serve(args)
-    if args.verb == "snapshot":
-        from cadgen.engine.snapshot import run as snapshot
+def _daemon(_args: argparse.Namespace, _prog: str) -> int:
+    from cadgen.engine.daemon import main as daemon
 
-        return snapshot(args)
-    if args.verb == "daemon":
-        from cadgen.engine.daemon import main as run
+    return daemon([])
 
-        return run([])
+
+def _status(args: argparse.Namespace, _prog: str) -> int:
     from cadgen.engine.client import request
 
-    answer = request({"op": args.verb}, start=False)
+    answer = request({"op": "status"}, start=False)
     if answer is None:
-        print("null" if getattr(args, "json", False) else "no engine daemon is running")
+        print("null" if args.json else "no engine daemon is running")
         return 0
-    if args.verb == "stop":
-        from cadgen.engine.client import wait_gone
-
-        # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
-        if not wait_gone():
-            print("cadgen xbf stop: the engine daemon did not exit", file=sys.stderr)
-            return 1
-    if args.verb == "status" and not args.json:
+    if args.json:
+        print(json.dumps(answer, indent=2))
+    else:
         print(status_text(answer))
+    return 0
+
+
+def _stop(_args: argparse.Namespace, prog: str) -> int:
+    from cadgen.engine.client import request, wait_gone
+
+    answer = request({"op": "stop"}, start=False)
+    if answer is None:
+        print("no engine daemon is running")
         return 0
+    # Stopped means gone: the next command starts a fresh daemon, never reaches this one.
+    if not wait_gone():
+        print(f"{prog}: the engine daemon did not exit", file=sys.stderr)
+        return 1
     print(json.dumps(answer, indent=2))
     return 0
+
+
+def main(argv: list[str] | None = None, prog: str = "python -m cadgen.engine") -> int:
+    """The engine's own command: ``VERB [args]``, every verb of ``VERBS``."""
+    args = build_parser(prog).parse_args(argv)
+    return VERBS[args.verb][2](args, f"{prog} {args.verb}")
 
 
 def _span(seconds: Any) -> str:
@@ -374,7 +416,7 @@ def _gb(megabytes: Any) -> str:
 
 
 def status_text(answer: dict[str, Any]) -> str:
-    """``cadgen xbf status``: the daemon and its pool's rules, a line per worker -- busy or idle,
+    """``cadgen status``: the daemon and its pool's rules, a line per worker -- busy or idle,
     its script, process, builds and memory after its last build, where a busy one's build is
     (its last progress frame), how long it has been busy or idle -- the builds waiting for a
     worker, the last retirements, and what it serves."""
@@ -414,6 +456,24 @@ def status_text(answer: dict[str, Any]) -> str:
         lines.append(f"serving {serving['url']}: {documents} document{'' if documents == 1 else 's'}"
                      + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else ""))
     return "\n".join(lines)
+
+
+# Each verb: its help, the function adding its arguments to a parser, and the function running it.
+VERBS: dict[str, tuple[str, Callable[[argparse.ArgumentParser], None], Callable[[argparse.Namespace, str], int]]] = {
+    "build": ("build source text into the files its flags name (a script builds by running it)", _build_arguments,
+              _build),
+    "export": ("write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf files, by suffix; a GLB carries the "
+               "document's motions as clips, a DXF draws a planar one", _export_arguments, _export),
+    "snapshot": ("draw a document or a file the viewer opens as the CAD Viewer does, into a PNG", _snapshot_arguments,
+                 _snapshot),
+    "serve": ("serve a document over HTTP and print its URL", _serve_arguments, _serve),
+    "where": ("a document's build closure (its source, modules, inputs and key), or what one thing a ref names is "
+              "and what made it", _where_arguments, _where),
+    "status": ("the engine daemon's workers, what each is building, and its served documents", _status_arguments,
+               _status),
+    "stop": ("stop the engine daemon", _no_arguments, _stop),
+    "daemon": ("run the engine daemon in this process", _no_arguments, _daemon),
+}
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """Exports: a document translated to STEP, GLB, STL, 3MF and xbf by one writer
-(``export.translate``), whether a decorator declares the file or ``cadgen xbf export`` asks
+(``export.translate``), whether a decorator declares the file or ``cadgen export`` asks
 for it. The STEP reads back through the engine's own reader with its names, colours,
 materials and instance tree; the meshes are parsed and counted; a pose moves a placement and
 a part is a subtree of its own; a build keeps a file its document did not change, writes only
@@ -316,12 +316,15 @@ class ExportTest(unittest.TestCase):
         self.assertEqual([pair.label for pair in found.pairs], ["flap"])
         self.assertEqual(found.configurations, {"open": {"flap": (60.0,)}})
         self.assertIsNone(document.Loaded(rack).mechanism)
-        with self.assertRaisesRegex(ExportRefused, "no part 'nothing'"):
+        with self.assertRaisesRegex(ExportRefused, "--part: board has no part or assembly nothing"):
             translate(self.xbf, None, self.folder / "nothing.step", part="nothing")
+        with self.assertRaisesRegex(ExportRefused, "names one part or assembly"):
+            translate(self.xbf, None, self.folder / "face.step", part="rack/peg0/face 1")
 
-    def test_a_path_two_occurrences_share_is_refused_naming_them_in_the_ref_grammar(self) -> None:
-        """``--part kit2/axle/wheel`` took the first of two wheels at that path, silently. Refused
-        now, each listed as the ref grammar tells them apart, until --part reads that grammar."""
+    def test_a_part_is_read_by_the_ref_grammar_and_a_path_two_occurrences_share_is_refused(self) -> None:
+        """``--part kit2/axle/wheel`` took the first of two wheels at that path, silently. A part is
+        an owner of the ref grammar now: ``kit2/axle.2/wheel`` names the second axle's wheel, and a
+        path two occurrences share is refused with each as the grammar tells them apart."""
         (self.folder / "axles.py").write_text(textwrap.dedent(AXLES), encoding="utf-8")
         (report,) = engine_build.build(self.folder / "axles.py", ["kit2"], cwd=self.folder)
         self.assertTrue(report["ok"], report)
@@ -330,9 +333,13 @@ class ExportTest(unittest.TestCase):
                             ("axle", "kit2/axle.1, kit2/axle.2")):
             with self.assertRaises(ExportRefused) as refused:
                 translate(self.folder / "XBF/kit2.xbf", None, out, part=part)
-            self.assertIn(f"--part {part!r} names 2 occurrences a plain path cannot tell apart: {named} in the ref "
-                          "grammar; --part reads plain paths until it moves onto that grammar", str(refused.exception))
+            self.assertIn(f"--part: {part} names 2 occurrences in kit2: {named}", str(refused.exception))
         self.assertFalse(out.exists())
+        second = self.folder / "second.xbf"
+        translate(self.folder / "XBF/kit2.xbf", None, second, part="kit2/axle.2/wheel")
+        self.assertEqual(document.Loaded(second).name, "wheel")
+        translate(self.folder / "XBF/kit2.xbf", None, self.folder / "axle.xbf", part="axle.1")
+        self.assertEqual(document.Loaded(self.folder / "axle.xbf").name, "axle")
 
     def test_what_is_no_document_or_no_new_one_is_refused_by_name(self) -> None:
         with self.assertRaisesRegex(ExportRefused, "only with --part"):
@@ -437,10 +444,18 @@ class BuildFilesTest(unittest.TestCase):
         self.assertEqual(lid(document.Loaded(self.folder / "board.step").structure()), lid(built),
                          "the STEP shows the lid where its joint put it, not at a configuration")
 
-    def test_an_export_from_a_script_builds_it_then_writes(self) -> None:
+    def test_an_export_of_a_model_builds_it_then_writes(self) -> None:
+        import importlib.util
+
         script = self.write("board.py", BOARD.format(lift=6))
         out = self.folder / "made/board.stl"
-        written = api.export(f"{script}::board", out, self.folder / "made/rack.3mf", part=None, daemon=False)
+        # A script's path is no source of an export: its model is, built first.
+        with self.assertRaisesRegex(ExportRefused, "board.py::board is no document"):
+            api.export(f"{script}::board", out, daemon=False)
+        spec = importlib.util.spec_from_file_location("board_script", script)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        written = api.export(module.board, out, self.folder / "made/rack.3mf", part=None, daemon=False)
         self.assertEqual([row.path for row in written], [out, self.folder / "made/rack.3mf"])
         self.assertTrue(out.is_file())
         self.assertIn("XBF/board.xbf", self.files(), "the model's document was built")

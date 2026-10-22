@@ -1,4 +1,13 @@
-"""Shared CAD artifact generation runtime."""
+"""cadgen: CAD models as Python, built by its engine (``cadgen.engine``) into documents (``.xbf``)
+and the files they declare.
+
+The root exports the engine's surface -- the decorators (``xbf``, ``step``, ``glb``, ``stl``,
+``threemf``, ``dxf``), ``memo``, materials (``Material``, ``materials``, ``paint``), the mechanism
+(``configuration``, ``motion``, ``couple``), the readers (``read_step``, ``read_xbf``,
+``read_mesh``), ``select``, progress (``report``, ``track``) -- and its verbs as functions
+(``build``, ``export``, ``snapshot``, ``serve``, ``where``, ``status``, ``stop``, ``daemon``),
+every name loaded on first use: ``import cadgen`` imports no CAD kernel.
+"""
 
 from functools import cache as _cache
 from typing import TYPE_CHECKING
@@ -10,7 +19,7 @@ from typing import TYPE_CHECKING
 # no family name, whose empty name OCCT refuses (#636). This hides the fonts build123d
 # cannot register from that one listing.
 #
-# It belongs here rather than in a launcher because the `cadgen` front door, the daemon's
+# It belongs here rather than in a launcher because the `cadgen` front door, the engine's
 # warm workers and `python -m cadgen.X` children all reach cadgen by different routes, and a
 # fix that covered only one of them would leave the builds it spawns still broken.
 #
@@ -28,22 +37,37 @@ del _install_font_guard
 
 # The engine counts nothing (its law 3: it imports nothing of cadgen): it tells what each of its verbs did to
 # the functions in cadgen.engine.api.observers. cadgen's telemetry is one, appended here for the reason the
-# font guard is installed here: every route into the engine -- `python model.py`, a `cadgen xbf` command,
-# `cadgen.build()` -- comes through this package first. Appended as the engine's verbs are imported, never
-# sooner: a process that uses no engine imports none of it.
+# font guard is installed here: every route into the engine -- `python model.py`, a `cadgen build`, `export`
+# or `snapshot`, `cadgen.build()` -- comes through this package first. Appended as the engine's verbs are
+# imported, never sooner: a process that uses no engine imports none of it.
 _install_engine_telemetry()
 del _install_engine_telemetry
 
+# The engine's surface (``cadgen.engine.__all__``) and its verbs as functions (``cadgen.engine.api``).
+_ENGINE = ("xbf", "memo", "step", "glb", "stl", "threemf", "dxf", "Material", "materials", "paint", "configuration",
+           "motion", "couple", "read_step", "read_xbf", "read_mesh", "select", "report", "track")
+_VERBS = ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon")
+
 __all__ = [
     "__version__",
+    *_ENGINE,
+    *_VERBS,
     "build123d",
     "srgb",
 ]
 
 
 def __getattr__(name: str):
+    if name in _ENGINE:
+        import cadgen.engine as _engine
+
+        return getattr(_engine, name)
+    if name in _VERBS:
+        from cadgen.engine import api
+
+        return getattr(api, name)
     if name == "build123d":
-        # `from cadgen import build123d as bd` — the lazy transparent re-export.
+        # `from cadgen import build123d as bd` -- the lazy transparent re-export.
         # Importing the submodule is cheap; the real build123d import happens on
         # first attribute touch inside cadgen.build123d.
         import cadgen.build123d as _bd
@@ -53,13 +77,6 @@ def __getattr__(name: str):
         from cadgen import color
 
         return getattr(color, name)
-    if name in {"build", "export", "snapshot", "serve", "where"}:
-        # The engine's verbs as functions (cadgen.engine.api), one per `cadgen xbf` command,
-        # each through the engine's daemon. Served without advertising them in __all__ while
-        # the engine is in its isolation round.
-        from cadgen.engine import api
-
-        return getattr(api, name)
     if name == "__version__":
         return _resolve_version()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -77,13 +94,27 @@ if TYPE_CHECKING:
         linear_to_srgb as linear_to_srgb,
         srgb_to_linear as srgb_to_linear,
     )
-    from cadgen.engine.api import (
-        build as build,
-        export as export,
-        serve as serve,
-        snapshot as snapshot,
-        where as where,
+    from cadgen.engine import materials
+    from cadgen.engine.api import build, daemon, export, serve, snapshot, status, stop, where
+    from cadgen.engine.materials import Material
+    from cadgen.engine.mechanism import couple
+    from cadgen.engine.model import (
+        configuration,
+        dxf,
+        glb,
+        memo,
+        motion,
+        paint,
+        read_step,
+        read_xbf,
+        step,
+        stl,
+        threemf,
+        xbf,
     )
+    from cadgen.engine.progress import report, track
+    from cadgen.engine.reader import read_mesh
+    from cadgen.engine.refs import select
 
 
 @_cache

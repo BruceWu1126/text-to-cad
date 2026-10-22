@@ -222,7 +222,7 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.xbf.read_bytes(), first)
 
     def export(self, name: str) -> bytes:
-        """The kit's STEP as ``cadgen xbf export`` writes it, in a process of its own."""
+        """The kit's STEP as ``cadgen export`` writes it, in a process of its own."""
         import subprocess
         import sys
 

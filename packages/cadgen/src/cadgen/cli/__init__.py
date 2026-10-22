@@ -1,13 +1,11 @@
-"""The ``cadgen`` console script — a subcommand dispatcher over the distribution's CLIs.
+"""The ``cadgen`` console script -- a subcommand dispatcher over the distribution's CLIs.
 
 Every subcommand is also reachable as ``python -m cadgen.<module>``; this is the friendly
 front door, not a second implementation. A subcommand's parser lives in its own module and
-owns its arguments, so the console and module entry points cannot drift.
-
-Commands in the ``<format> <verb>`` grammar (README law 6) go one step further:
-their module names only the public verb function, and the parser is DERIVED from that
-function's signature (``cadgen._internal.cli_from_function``). A flag and a parameter
-cannot drift, because there is only one of them.
+owns its arguments, so the console and module entry points cannot drift. The engine's verbs
+(``build``, ``export``, ``snapshot``, ``serve``, ``where``, ``status``, ``stop``, ``daemon``) are
+``cadgen.engine.cli``'s, each run by its name; the robot validators' parsers are DERIVED from
+the verb function's signature (``cadgen._internal.cli_from_function``).
 
 **Dispatch is lazy on purpose.** Importing a CAD subcommand pulls in OCP/build123d, which
 costs seconds and needs the heavy dependency set installed. ``cadgen --help`` and an
@@ -28,14 +26,21 @@ import sys
 # ``cadgen --help`` stays a single readable column.
 #
 # Two-word names are intentional where a noun has several verbs. Dispatch joins
-# argv[0:2] before argv[0], so the two-word form wins where it exists and one-word
-# commands like `daemon` still work.
+# argv[0:2] before argv[0], so the two-word form wins where it exists.
 #
-# Generation has NO CLI (README law 7): a model script runs itself —
-# `python <model>.py` through the @step/@dxf decorators.
+# A model script builds by running it (``python <model>.py``): no command takes its place.
 _COMMANDS: dict[str, tuple[str, str]] = {
+    # The engine (cadgen.engine): code built, documents exported, drawn and served, its daemon.
+    "build": ("cadgen.cli.build", "build source text into the files its flags name"),
+    "export": ("cadgen.cli.export", "write an .xbf or a .step to STEP, GLB, STL, 3MF, DXF or xbf"),
+    "snapshot": ("cadgen.cli.snapshot", "render any supported file to an image"),
+    "serve": ("cadgen.cli.serve", "serve a document over HTTP and print its URL"),
+    "where": ("cadgen.cli.where", "an xbf's build closure, or what made one element of it"),
+    "status": ("cadgen.cli.status", "show the engine daemon's workers and what it serves"),
+    "stop": ("cadgen.cli.stop", "stop the engine daemon"),
+    "daemon": ("cadgen.cli.daemon", "run the engine daemon in this process"),
     # DXF and robot descriptions: each format's snapshot draws its own files alone (the engine's
-    # snapshot, cadgen.engine.snapshot), and the robot validators check a description.
+    # snapshot), and the robot validators check a description.
     "dxf snapshot": ("cadgen.cli.dxf_snapshot", "render a DXF to an image"),
     "urdf validate": ("cadgen.cli.urdf_validate", "validate a URDF robot description"),
     "urdf snapshot": ("cadgen.cli.urdf_snapshot", "render a URDF to an image"),
@@ -52,10 +57,6 @@ _COMMANDS: dict[str, tuple[str, str]] = {
     # CAD inside an agent host's panels. The host starts it, one process per thread.
     "mcp": ("cadgen.cli.mcp", "serve CAD to an agent host over MCP (stdio)"),
     "telemetry": ("cadgen.cli.telemetry", "show or change the usage stats and crash reports CAD sends: status, on, off"),
-    # The engine (cadgen.engine): @xbf models, its own warm daemon and its documents.
-    "xbf": ("cadgen.engine.cli", "the engine: build @xbf models, export and serve their documents"),
-    # The first engine verb at the top level; the rest join it when the `xbf` level goes.
-    "where": ("cadgen.cli.where", "an xbf's build closure, or what made one element of it"),
 }
 
 # A skill's pin is the version in the launch command its SKILL.md teaches
@@ -97,7 +98,7 @@ def _usage() -> str:
 
 
 def _format_verbs(noun: str) -> list[str]:
-    """The two-word commands of one format noun (``step`` -> ``step build``, ...)."""
+    """The two-word commands of one format noun (``urdf`` -> ``urdf validate``, ...)."""
     return [name for name in _COMMANDS if name.split(" ")[0] == noun and " " in name]
 
 
@@ -129,12 +130,8 @@ def _harden_std_stream_errors() -> None:
     rather than to a question mark that destroys it.
 
     CLI ENTRY POINTS ONLY: these are process globals owned by whoever embedded
-    us, so a library import must never touch them, and a daemon worker -- whose
-    stdout is the pool's frame channel, pinned by the protocol at both ends --
-    is not a CLI boundary.
+    us, so a library import must never touch them.
     """
-    if os.environ.get("CADGEN_DAEMON_CHILD"):
-        return
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is None:  # a caller replaced it with a plain object
@@ -193,7 +190,7 @@ def _main(argv: list[str] | None) -> int:
         sys.stdout.write(f"cadgen {__version__}\n")
         return 0
 
-    # Longest match first, so `step build` beats a hypothetical `step`.
+    # Longest match first, so `viewer stop` beats `viewer`.
     command, rest = " ".join(argv[:2]), argv[2:]
     entry = _COMMANDS.get(command)
     if entry is None:
@@ -232,8 +229,8 @@ def _main(argv: list[str] | None) -> int:
 
 
 def _report(error: Exception) -> None:
-    """A command that failed past its own reporting -- a crash of cadgen's -- handed to a running daemon
-    for telemetry (``cadgen.analytics.report``); the traceback is the person's, as ever."""
+    """A command that failed past its own reporting -- a crash of cadgen's -- kept for telemetry
+    (``cadgen.analytics.report``); the traceback is the person's, as ever."""
     try:
         from cadgen.analytics import report
     except Exception:  # noqa: BLE001 - a crash report never adds a failure to one
@@ -242,8 +239,8 @@ def _report(error: Exception) -> None:
 
 
 # Commands that never carry the analytics notice: a CAD app's server, whose output only the host's log
-# reads; the daemon's supervisor, writing to its own log; and `telemetry`, which says it its own way.
-_UNTOLD = frozenset({"mcp", "daemon", "telemetry", "xbf", "where"})
+# reads; the engine's daemon, writing nowhere; and `telemetry`, which says it its own way.
+_UNTOLD = frozenset({"mcp", "daemon", "telemetry"})
 
 
 def _tell() -> None:
@@ -268,10 +265,10 @@ def _run_module(command: str, module_name: str, rest: list[str]) -> int:
     module = importlib.import_module(module_name)
 
     # Tell the parser which front door it was reached through, so
-    # `cadgen step build --help` says "cadgen step build".
-    # Not every command has a parser to name (the daemon owns its own), hence
-    # the signature check rather than a blanket keyword.
-    import inspect  # only the dispatcher needs it; `--help` and the daemon handoff do not.
+    # `cadgen urdf validate --help` says "cadgen urdf validate".
+    # Not every command takes a name for its parser, hence the signature check rather
+    # than a blanket keyword.
+    import inspect  # only the dispatcher needs it; `--help` does not.
 
     if "prog" in inspect.signature(module.main).parameters:
         return int(module.main(rest, prog=f"cadgen {command}") or 0)

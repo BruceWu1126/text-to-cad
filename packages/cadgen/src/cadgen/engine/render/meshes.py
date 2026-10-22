@@ -2,9 +2,9 @@
 
 - ``from_daemon``: the daemon serves the document and meshes every part in its warm pool
   (``POST /api/doc/<id>/mesh``), then hands each part's XBM buffer (``GET .../part/<key>``) --
-  the bytes the viewer and the Chromium snapshot draw.
+  the bytes the viewer draws.
 - ``from_server``: the same from a server of this process (``serve.Server``), as
-  ``cadgen xbf snapshot --no-daemon`` meshes.
+  ``cadgen snapshot --no-daemon`` meshes.
 - ``save``/``load``: those buffers kept in a folder, a cold run's pre-built cache (prototype
   only: the engine itself writes no mesh to disk).
 """

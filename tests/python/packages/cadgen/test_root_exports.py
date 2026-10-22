@@ -22,6 +22,30 @@ class RootExports(unittest.TestCase):
         unresolvable = [name for name in cadgen.__all__ if not hasattr(cadgen, name)]
         self.assertEqual([], unresolvable, "in __all__ but not handled by __getattr__")
 
+    def test_the_root_is_the_engines_surface_and_its_verbs(self):
+        """A model imports what it needs from ``cadgen`` itself: the engine's names, each the very
+        object ``cadgen.engine`` exports, and its verbs as functions."""
+        import cadgen.engine
+        from cadgen.engine import api
+
+        self.assertEqual(set(cadgen.engine.__all__) - set(cadgen.__all__), set(), "an engine name the root lacks")
+        for name in cadgen.engine.__all__:
+            with self.subTest(name=name):
+                self.assertIs(getattr(cadgen, name), getattr(cadgen.engine, name))
+        for verb in ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon"):
+            with self.subTest(verb=verb):
+                self.assertIs(getattr(cadgen, verb), getattr(api, verb))
+        self.assertEqual(set(cadgen.__all__) - set(cadgen.engine.__all__),
+                         {"__version__", "build", "export", "snapshot", "serve", "where", "status", "stop", "daemon",
+                          "build123d", "srgb"})
+
+    def test_a_name_the_root_never_had_is_pythons_own_error(self):
+        # No backwards compatibility: a retired name is no name, and says nothing about history.
+        for name in ("read_scene", "AssemblyHelper", "label_shape", "revolute", "compound_from_instances"):
+            with self.subTest(name=name), self.assertRaises(AttributeError) as caught:
+                getattr(cadgen, name)
+            self.assertEqual(str(caught.exception), f"module 'cadgen' has no attribute {name!r}")
+
     def test_importing_cadgen_does_not_import_the_cad_stack(self):
         """Run in a subprocess: this one almost certainly has OCP loaded already."""
         code = (

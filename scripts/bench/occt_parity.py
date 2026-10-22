@@ -21,7 +21,7 @@ points the camera sees (no triangle in front of them), sampled in Solid and Shad
 point's hue against its material's colour (CIELab hue angle, degrees) and its chroma over the
 colour's, per renderer -- a metal washed out to cream or white keeps neither.
 
-``--preview`` adds Preview at each camera (``preview-iso``, ...): OCCT's drawn as ``cadgen xbf
+``--preview`` adds Preview at each camera (``preview-iso``, ...): OCCT's drawn as ``cadgen
 snapshot --preview`` draws it (``render/service.py``'s ``Held``), the page's with the job's
 ``"preview": true``. Its studio is no flat backdrop, so the model's pixels are those where OCCT's
 picture differs from its own studio drawn without the model (``preview-<camera>-studio.png``), and
@@ -242,7 +242,7 @@ def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], siz
 # --- the viewer's side: its snapshot page, in a headless Chromium -------------------------------------
 # The page is cadgen's built browser runtime (``_runtime/browser``: render.html, snapshot-render.js),
 # read as files and routed to the page's origin; it reads the document from the engine daemon that
-# serves it. ``cadgen xbf snapshot`` drew mesh files this way before OCCT drew every kind; this
+# serves it. ``cadgen snapshot`` drew mesh files this way before OCCT drew every kind; this
 # bench keeps the page for the viewer's side alone.
 
 PAGE_ORIGIN = "http://localhost"

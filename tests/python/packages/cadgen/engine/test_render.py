@@ -513,7 +513,7 @@ def pair():
 
 
 class DaemonRenderTest(unittest.TestCase):
-    """`cadgen xbf snapshot` drawn by OCCT through the daemon: a render process per served
+    """`cadgen snapshot` drawn by OCCT through the daemon: a render process per served
     document, warm from its second picture, sent each build's patch with only the parts it
     lacks, gone with the daemon; and in this process with --no-daemon. Nothing is written but
     the pictures, and the daemon's socket and lock."""

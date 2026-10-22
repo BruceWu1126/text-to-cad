@@ -242,8 +242,8 @@ class ThroughTheDaemonTest(unittest.TestCase):
         """), encoding="utf-8")
         script = self.run_in("plate.py")
         self.assertEqual(script.returncode, 0, script.stderr)
-        # A command asks for the script's model as an export does (``cadgen xbf build`` takes code alone).
-        command = self.run_in("-m", "cadgen.cli", "xbf", "export", "plate.py::plate", "plate.step")
+        # A command exports the xbf the script built: the worker that built it holds it.
+        command = self.run_in("-m", "cadgen.cli", "export", "XBF/plate.xbf", "plate.step")
         self.assertEqual(command.returncode, 0, command.stderr)
         self.assertEqual(self.run_in("dies.py").returncode, 1)
         spool = self.state / analytics.SPOOL

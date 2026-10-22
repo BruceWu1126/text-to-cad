@@ -66,10 +66,16 @@ ADAPTERS: dict[str, frozenset[str]] = {
     "mcp": frozenset(),
     # The person's telemetry choice: status, on or off.
     "telemetry": frozenset({"action"}),
-    # The engine's verbs (cadgen.engine.cli), each with its own options.
-    "xbf": frozenset({"verb", "build", "export", "serve", "snapshot", "status", "stop", "daemon"}),
-    # The engine's `where`, the first of its verbs at the top level.
+    # The engine's verbs (cadgen.engine.cli), each a command of its own.
+    "build": frozenset({"source", "name", "xbf", "step", "glb", "stl", "threemf", "dxf", "json", "verify",
+                        "no_daemon"}),
+    "export": frozenset({"source", "destinations", "no_inputs", "pose", "part", "no_daemon"}),
+    "snapshot": SNAPSHOT,
+    "serve": frozenset({"document", "port", "three", "foreground"}),
     "where": frozenset({"document", "ref"}),
+    "status": frozenset({"json"}),
+    "stop": frozenset(),
+    "daemon": frozenset(),
 }
 
 # Commands that own their parser outright and mirror no function.
@@ -131,7 +137,7 @@ class Manifest(unittest.TestCase):
         # No backwards compatibility: a retired command has no entry and no module, so it gets the
         # same answer as any unknown command.
         for command in ("step build", "step compile", "step snapshot", "stl build", "stl snapshot", "3mf build",
-                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status"):
+                        "3mf snapshot", "glb build", "glb snapshot", "store", "daemon status", "xbf"):
             self.assertNotIn(command, cli._COMMANDS)
         for module in ("cadgen.cli.step_build", "cadgen.cli.step_snapshot", "cadgen.cli.stl_build",
                        "cadgen.cli.store", "cadgen.cli.daemon_status", "cadgen.step", "cadgen.store", "cadgen.daemon"):
@@ -173,7 +179,7 @@ class Manifest(unittest.TestCase):
         code, out, err = self._dispatch("frobnicate", "build")
         self.assertEqual(2, code)
         self.assertIn("unknown command 'frobnicate'", err)
-        for command in ("dxf snapshot", "urdf validate", "viewer", "where"):
+        for command in ("build", "export", "snapshot", "dxf snapshot", "urdf validate", "viewer", "where"):
             self.assertIn(command, err)
 
     def test_a_name_that_is_not_a_verb_raises_the_plain_attribute_error(self):
@@ -183,6 +189,16 @@ class Manifest(unittest.TestCase):
             urdf.snapshot  # noqa: B018 - the attribute access IS the assertion
         self.assertIn("snapshot", str(caught.exception))
         self.assertNotIn("deleted", str(caught.exception))
+
+    def test_the_engines_verbs_are_commands_of_their_own(self):
+        # One parser per verb, the engine's (cadgen.engine.cli), named by the command that runs it.
+        for verb in ("build", "export", "snapshot", "serve", "where", "status", "stop", "daemon"):
+            with self.subTest(verb=verb):
+                module = importlib.import_module(cli._COMMANDS[verb][0])
+                self.assertEqual(module.build_parser().prog, f"cadgen {verb}")
+        code, out, err = self._dispatch("export", "model.py::model", "out.step")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("cadgen export: model.py::model is no document: an export reads an .xbf or a .step", err)
 
     def test_a_format_snapshot_draws_its_own_files_alone(self):
         # `cadgen dxf snapshot` is the engine's snapshot for a .dxf: any other file is refused by

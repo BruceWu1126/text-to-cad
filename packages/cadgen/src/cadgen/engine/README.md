@@ -94,7 +94,7 @@ def hinge():
    <release>)`, `document.Loaded.writer`) and holds the model's build closure
    (**Build closure**). No code location is on an element. STEP, GLB, STL, 3MF and,
    of a planar document, DXF are translations of it (**Exports**).
-   `cadgen xbf export` writes any of them from the xbf alone.
+   `cadgen export` writes any of them from the xbf alone.
 5. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
    the first run made, and a miss makes everything downstream of it miss. So an
@@ -151,33 +151,33 @@ def hinge():
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
+| `snapshot.py` | `cadgen snapshot`: one dispatcher by suffix -- a document, a mesh file, a robot or a DXF drawn by OCCT (`render/`) into a PNG; a script's model drawn from its worker's memory |
 | `formats/` | the files the stills draw that are not documents, each read into a structure and part buffers: STL (numpy), 3MF (zip + XML), GLB (OCCT's glTF reader, textures and all), URDF/SDF/SRDF (XML, the viewer's forward kinematics), DXF (group codes, flattened as the viewer's pane draws it) |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document and per file (`service.py`); the scene (`occt.py`); a DXF drawn in the 2D look (`drawing.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
 | `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
-| `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), `python model.py`'s run (`run_script`), and `cadgen where` (`where_main`) |
+| `cli.py` | the verbs as commands: `cadgen build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`parser_for`, `run`; also `python -m cadgen.engine VERB`), and `python model.py`'s run (`run_script`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
 
 ## CLI
 
 ```
-python SCRIPT.py                                 every model of the script, as its decorators declare
-cadgen xbf build SOURCE | - [--name N]           one model from source text (stdin with -), its files
+python SCRIPT.py                             every model of the script, as its decorators declare
+cadgen build SOURCE | - [--name N]           one model from source text (stdin with -), its files
     [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--no-daemon]
-cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
-cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
-                    [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
-                    [--width W --height H | --size-profile P] [--no-daemon] [--json]
-cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-cadgen xbf status [--json] | stop | daemon
-cadgen where DOC [REF]                      the build closure; with REF (**References**): an element's facts and
-                                            what made it, or a part's or an assembly's volume and mass
+cadgen export SRC DST [DST ...] [--pose NAME|JSON] [--part OWNER] [--no-inputs] [--no-daemon]
+                                             SRC an .xbf or a .step
+cadgen snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
+                [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
+                [--width W --height H | --size-profile P] [--no-daemon] [--json]
+cadgen serve DOC [--port N] [--three DIR] [--foreground]
+cadgen where DOC [REF]                       the build closure; with REF (**References**): an element's facts and
+                                             what made it, or a part's or an assembly's volume and mass
+cadgen status [--json] | stop | daemon
 ```
 
-These are the commands as invoked today: `where` is the first verb at the top level, and
-the `xbf` level disappears at the cutover (`cadgen build`, `cadgen export`, ...).
+`python -m cadgen.engine VERB ...` takes the same verbs, the engine's own entry.
 
 `python SCRIPT.py` builds every model the script defines, each writing what its
 decorators declare and each child model it calls what that model declares (laws 10 and
@@ -286,7 +286,7 @@ its closure is unchanged (**Build closure**), and else builds the model cold. A 
 process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
 is held to the same memory cap after each picture, and retired after the same idle time.
 
-`cadgen xbf status` says what the daemon holds (`--json`: the same as data, `api.status()`):
+`cadgen status` says what the daemon holds (`--json`: the same as data, `api.status()`):
 
 ```
 engine daemon 98307, up 2h10m · workers 2/10 · idle timeout 1h · RSS cap 16.0 GB
@@ -341,10 +341,10 @@ frame is the build's last state. The worker sends each on its pipe (`{"id", "pro
 the daemon:
 
 - passes it to the build's caller as it does the log's lines (`client.request(on_progress=)`):
-  `python model.py` and `cadgen xbf build` draw a bar on stderr when it is a terminal -- each
+  `python model.py` and `cadgen build` draw a bar on stderr when it is a terminal -- each
   phase finished a line with its time, the one in flight repainted in place -- and nothing when
   it is not (`progress.Bar`; `api.build(progress=)` takes the frames instead, `False` none);
-- keeps a busy worker's last, which `cadgen xbf status` shows (**The daemon and its workers**);
+- keeps a busy worker's last, which `cadgen status` shows (**The daemon and its workers**);
 - wakes the pages waiting on a served document among the frame's `outputs` (below).
 
 Each model's report holds its last frame (`progress`, which `--json` prints), so a failed build
@@ -393,7 +393,7 @@ document's scene brings them as its own lighting and surface rule (the bundled
 `@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
 up in place of the theme's. Preview is drawn as any file's is.
 
-`cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
+`cadgen snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or `--no-daemon` a server of this process), and OCCT draws it from those meshes
 (`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
@@ -475,13 +475,13 @@ decorator and no build flag draws one.
 
 The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a document, and an
 xbf can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,
-writes every one, whether a decorator declares the file or `cadgen xbf export` asks for it: the
+writes every one, whether a decorator declares the file or `cadgen export` asks for it: the
 same document and the same options write the same bytes. Every file is written beside its
 target and moved over it; a DXF only when its bytes change.
 
-- **Sources are documents**: an `.xbf`, a `.step` (read into a document first), or a script's
-  model (`SCRIPT.py::MODEL`, built first, in its worker). A mesh is never a source: it has no
-  B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
+- **Sources are documents**: an `.xbf` or a `.step` (read into a document first); from Python,
+  a `Model` (built first, in its worker) or built code (a `Built`) too. A mesh is never a
+  source: it has no B-rep. An xbf is written from a STEP, or from an xbf with `--part`; a posed xbf is refused (a
   pose is a request, never a document). Several destinations read the document once; an export
   runs in the worker that built the document while the file is as it left it, else in the
   daemon's documents worker, which reads it.
@@ -515,19 +515,19 @@ target and moved over it; a DXF only when its bytes change.
   off z=0, by its element name. Layers are written in name order and edges in an order of
   their content (curve kind, sampled points, length), never the kernel's traversal, and
   ezdxf's provenance is pinned and its classes sorted: the same geometry is the same bytes in
-  any process on any day, so a declared DXF is the bytes `cadgen xbf export flat.xbf flat.dxf`
+  any process on any day, so a declared DXF is the bytes `cadgen export flat.xbf flat.dxf`
   writes. The drawing checks run on the document before it is written -- units set, no
   zero-length or duplicate entity, every cut profile closed, something drawn; open geometry
   only on a layer its name's whole tokens make a bend, engrave or reference one -- and an
   error refuses the file, saying which. `export.dxf.validate_dxf_file` runs them on any DXF.
 - `--pose` places the mechanism's links by forward kinematics before anything is written;
-  `--part` (an occurrence's path, `board/rack`, or a node's name) writes that subtree as a
-  document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
-  of it (the links wholly inside, the pairs between them, their configurations). Every assembly
-  of a posed or parted document is an assembly of its own placement. A path several occurrences
-  share (siblings labelled alike: `kit2/axle/wheel` twice) is refused, each listed as the ref
-  grammar tells them apart (`kit2/axle.1/wheel, kit2/axle.2/wheel`), until `--part` reads that
-  grammar (**References**); a name several nodes bear is refused with their paths.
+  `--part` (one part or assembly as a ref's owner names it, **References**: `board/rack`,
+  `kit2/axle.2/wheel`, `rack`) writes that subtree as a document of its own, its root at the
+  subtree's frame, an xbf of it with the mechanism's share of it (the links wholly inside, the
+  pairs between them, their configurations). Every assembly of a posed or parted document is an
+  assembly of its own placement. An owner that names several occurrences (`kit2/axle/wheel`,
+  where two axles each hold a wheel) is refused, each listed as the grammar tells them apart
+  (`kit2/axle.1/wheel, kit2/axle.2/wheel`).
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
 - **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
@@ -581,7 +581,7 @@ make a child's part, placed in its caller's assembly, other bytes than its own b
 The xbf is saved first and the viewer woken with it: the worker waits for the daemon to hold
 the patch (`{"op": "patched"}` on its pipe) before it writes a derived file.
 
-**Code** (`cadgen xbf build SOURCE`, `-` reading it from stdin; `--name N`, default `model`) is
+**Code** (`cadgen build SOURCE`, `-` reading it from stdin; `--name N`, default `model`) is
 one model with no decorators (law 12): the code assigns its final shape to `result` (refused by
 name otherwise), it runs in the warm worker of its name, and its elements are named from its
 assignment targets with `N` as the function (`f:N.body.3`). It declares nothing, so its file flags
@@ -710,9 +710,9 @@ def hypercar():
     return configuration(car, "open", doors=1)                        # shut is as built
 ```
 
-`cadgen xbf snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
+`cadgen snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
 knuckles at 54, 60 and 42 degrees: the picture of `--pose '{"index_mcp_flexion": 54,
-"index_pip": 60, "index_dip": 42}'`. `cadgen xbf export XBF/hypercar.xbf half.step --pose
+"index_pip": 60, "index_dip": 42}'`. `cadgen export XBF/hypercar.xbf half.step --pose
 '{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a locked
 coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`
 (`models-xbf/qdd_actuator`). A coupling joint in no pair, or given as many ratios as its pair has
@@ -734,7 +734,7 @@ serves them as `kinematics.couplings`: `{name: {range, lock, terms: [[pair, valu
 ratio]]}}`. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
-`--pose` on `cadgen xbf snapshot` and `cadgen xbf export` poses the mechanism at a
+`--pose` on `cadgen snapshot` and `cadgen export` poses the mechanism at a
 configuration (its name) or at joint and coupling values (`'{"elbow": 45}'`, `'{"curl": 0.6}'`,
 the rest as built): the engine places each link by composing its pairs from the ground down,
 exact forward kinematics, and draws or writes that (a posed STEP is written from the document's
@@ -883,7 +883,7 @@ geometry (tom-sized: seconds against most of a minute) and keeps the engine's na
 Convert a vendor STEP once, keep the xbf beside it, and read the xbf:
 
 ```
-cadgen xbf export vendor.step vendor.xbf
+cadgen export vendor.step vendor.xbf
 ```
 
 The conversion is the author's: the engine writes no derived file beside an input of its own.
@@ -948,7 +948,7 @@ A part is meshed from its binary shape bytes read into a fresh shape, so its
 mesh is a function of those bytes alone. Those are its read-back bytes, the
 bytes its document holds of it. A build's live part is written and read once to
 get them, as saving its document does. A part read from a document (the served
-document, `cadgen xbf export`) is written as it was read. So a worker, the
+document, `cadgen export`) is written as it was read. So a worker, the
 server and an export all mesh one geometry key from the same bytes.
 
 Every edge has a class read from the B-rep: 1 feature (two faces at an angle),
@@ -1233,12 +1233,10 @@ import_stl: it runs on every build; use read_step/read_xbf/read_mesh`. What the 
 cannot see is the author's: the clock, environment variables, randomness, a file only
 tested for (`Path.exists`, `os.stat`: an open is heard, a lookup is not), a folder listed
 (`glob`, `os.listdir`: a file added to it is not heard), and a file a C library opens for
-a reader not on that list. cadgen's old native tracer (`_internal/filetrace.py`, an
-interposer on the C library's `open`) heard every open by any code -- an OCCT reader of any
-name, a C extension's own reader (trimesh's), FreeType loading a font outside a text --
-and every folder listing, environment variable and program a model's code used; the
-engine hears Python's `open`, its own readers and the calls on that list, and none of the
-rest.
+a reader not on that list. The engine hears Python's `open`, its own readers and the calls on
+that list, and none of the rest: no interposer on the C library's `open` hears every open by
+any code (an OCCT reader of any name, a C extension's own reader, FreeType loading a font
+outside a text), every folder listing, environment variable or program a model's code used.
 
 A module falls back to its bytes, and those of every first-party module it
 imports, wherever the walk cannot follow a reference by its value: a `getattr`,
@@ -1332,7 +1330,7 @@ candidates (tom's six stages, movement's three layers: 1.3–3 s each, and twice
 edit), while per-part markers measured under 0.1 s. Nested `@xbf` is never needed for caching:
 the operation-level memo handles every kernel call in any model, markers or not.
 
-A verifying build (`Model.build(verify=True)`, `cadgen xbf build SOURCE --verify`) runs every
+A verifying build (`Model.build(verify=True)`, `cadgen build SOURCE --verify`) runs every
 body the memo would replay -- a model's and every `@memo` call's -- and compares each fresh
 result with the logged one: per shape its class, label, colour, paints, material and
 placement, and each leaf's geometry (the same TShape, else the same binary BRep digest). The report's `verify` gives each body checked
