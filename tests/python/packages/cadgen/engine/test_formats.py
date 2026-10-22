@@ -41,7 +41,7 @@ import numpy as np
 from cadgen.engine import formats
 from cadgen.engine.formats.buffer import buffer, feature_edges
 from cadgen.engine.render import context
-from cadgen.engine.snapshot import SnapshotRefused, Still, snapshot
+from cadgen.engine.snapshot import SnapshotRefused, Still, parse_display, snapshot
 from tests.python.support import opengl
 
 GOLDEN = Path(__file__).resolve().parent / "formats_golden"
@@ -738,6 +738,22 @@ class PictureTest(FixtureTest):
         # The checker is orange and blue: in Parts, no pixel is far bluer than it is red.
         blue = ((parts[..., 2] - parts[..., 0]) > 90).sum()
         self.assertLess(blue, 5, "Parts paints over the texture")
+
+    def test_a_drawing_takes_its_appearance_as_the_word_or_the_json(self) -> None:
+        # `--display dark` and `--display '{"appearance": "dark"}'` draw one picture; a 3D mode is
+        # refused naming the two words a drawing takes.
+        path = self.folder / "plate.dxf"
+
+        def drawn(display: str) -> bytes:
+            out = self.folder / "appearance.png"
+            snapshot(path, out, display=parse_display(display, False), size=SIZE, daemon=False)  # as the verb parses it
+            return out.read_bytes()
+
+        word, json_form, light = drawn("dark"), drawn('{"appearance": "dark"}'), drawn("light")
+        self.assertEqual(word, json_form)
+        self.assertNotEqual(word, light)
+        with self.assertRaisesRegex(SnapshotRefused, r"is a drawing.*display.mode does not apply.*light or dark"):
+            drawn("xray")
 
     def test_what_a_kind_does_not_offer_is_refused_by_name_and_leaves_no_picture(self) -> None:
         out = self.folder / "stale.png"

@@ -58,6 +58,7 @@ __all__ = ["SnapshotRefused", "Still", "add_parser", "authored", "build_parser",
 
 DISPLAY_MODES = ("solid", "shaded", "parts", "xray", "hidden-line", "wireframe")
 DISPLAY_KEYS = frozenset({"mode", "grid", "appearance", "camera", "clip", "exploded"})
+APPEARANCES = ("light", "dark")
 EXPLODED_KEYS = frozenset({"enabled", "amount"})
 # Explode's amount when a request names none: the viewer's own default.
 EXPLODED_AMOUNT = 0.5
@@ -132,8 +133,9 @@ def exploded_amount(display: dict[str, Any]) -> float:
 
 
 def parse_display(value: str | None, grid: bool) -> dict[str, Any]:
-    """``--display``: a mode, ``exploded=AMOUNT`` (or both, ``hidden-line,exploded=0.6``), or the
-    viewer's display object (JSON, or a JSON file)."""
+    """``--display``: a mode, ``exploded=AMOUNT``, an appearance (``light``, ``dark``: all a drawing
+    takes), several by commas (``hidden-line,exploded=0.6``), or the viewer's display object (JSON,
+    or a JSON file)."""
     display: dict[str, Any] = {}
     if value:
         text = value.strip()
@@ -149,9 +151,12 @@ def parse_display(value: str | None, grid: bool) -> dict[str, Any]:
                     display["exploded"] = {"enabled": True, "amount": _amount(amount) if equals else EXPLODED_AMOUNT}
                 elif token in DISPLAY_MODES and "mode" not in display:
                     display["mode"] = token
+                elif token in APPEARANCES and "appearance" not in display:
+                    display["appearance"] = token
                 else:
                     raise SnapshotRefused(f"--display {token!r} is no display mode; the modes are {', '.join(DISPLAY_MODES)}, "
-                                          "and exploded=AMOUNT moves the parts apart (one of each, by commas)")
+                                          "exploded=AMOUNT moves the parts apart, and light or dark is the appearance "
+                                          "(all a drawing takes; one of each, by commas)")
     if "exploded" in display:
         display["exploded"] = _exploded(display["exploded"])
     unknown = sorted(set(display) - DISPLAY_KEYS)
@@ -589,7 +594,8 @@ def _arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("--display", help="a mode (solid, shaded, parts, xray, hidden-line, wireframe), exploded=AMOUNT "
                                           "(the parts moved apart, 0 to 1; with a mode: hidden-line,exploded=0.6), or "
                                           "the display JSON object (mode, grid, appearance, camera, clip, exploded), or "
-                                          "a JSON file of it; a drawing takes appearance (light, dark) alone")
+                                          "a JSON file of it; a drawing takes appearance alone: light or dark, as the word "
+                                          "or as {\"appearance\": ...}")
     parser.add_argument("--grid", action="store_true", help="draw the measuring grid")
     parser.add_argument("--camera", help="a preset (iso, front, back, left, right, top, bottom), azimuth:elevation, "
                                          "a camera JSON object, or authored: the view --annotation's ink was drawn "
