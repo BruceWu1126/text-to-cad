@@ -10,7 +10,10 @@ placement of a shape shares it, or once named the same geometry key named alike
 (``merge``) -- so a part used ten times is one prototype with ten components above it. The result's tree (build123d's
 compound children) gives names and colours; its geometry and placements are read
 from the TopoDS compounds themselves, child by child, so a placed copy of an
-assembly is placed as the kernel holds it.
+assembly is placed as the kernel holds it. A part with a face that has no surface -- a
+mesh's triangles alone, as build123d's ``import_stl`` makes -- is refused by its
+occurrence's path before anything is made of it (``mesh_faces``): a document holds B-rep,
+and the kernel's face modifier (``direct``) crashes the process on such a face.
 
 The XCAF document: units millimetres; a name on every prototype and component; a
 colour per part and per painted face; a material per part and per face given one
@@ -47,6 +50,7 @@ import hashlib
 import os
 import re
 import threading
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,7 +59,7 @@ from typing import Any, Iterable, Iterator
 from cadgen.engine.atomic_replace import replace_atomic
 
 __all__ = ["Assembly", "Component", "Kept", "Loaded", "Part", "Tree", "collect", "geometry_key", "load", "merge",
-           "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
+           "mesh_faces", "read_step_shape", "read_xbf_shape", "save", "to_xcaf", "unchecked"]
 
 # The GUID of the attribute that holds a part's geometry key on its label.
 KEY_GUID = "c8f2d4a6-1b3e-4f5a-9c7d-2e8b6a4f0d13"
@@ -174,8 +178,50 @@ def _children(topods: Any) -> list[Any]:
     return found
 
 
+# Per part's TShape, the ordinals of its faces with no surface (``mesh_faces``): each part walked
+# once, as the parts a build keeps (``build._PARTS``) are named once.
+_MESH_FACES: "OrderedDict[Any, tuple[int, ...]]" = OrderedDict()
+_MESH_FACES_HELD = 1 << 16
+
+
+def mesh_faces(shape: Any) -> tuple[int, ...]:
+    """The ordinals (``TopExp.MapShapes``) of ``shape``'s faces that have no surface: a mesh's
+    triangles alone, what build123d's ``import_stl`` makes. No document holds one, and the
+    kernel's face modifier (``direct``) crashes the process on one."""
+    key = shape.TShape()
+    found = _MESH_FACES.get(key)
+    if found is not None:
+        _MESH_FACES.move_to_end(key)
+        return found
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(shape, TopAbs_FACE, faces)
+    found = _MESH_FACES[key] = tuple(ordinal for ordinal in range(1, faces.Extent() + 1)
+                                     if not BRep_Tool.IsGeometric_s(TopoDS.Face_s(faces.FindKey(ordinal))))
+    while len(_MESH_FACES) > _MESH_FACES_HELD:
+        _MESH_FACES.popitem(last=False)
+    return found
+
+
+def _mesh_refused(path: str, ordinals: tuple[int, ...]) -> str:
+    """Why a part holding mesh faces is refused, by its occurrence's path, and what to do."""
+    shown = ", ".join(str(ordinal) for ordinal in ordinals[:6]) + (
+        f" and {len(ordinals) - 6} more" if len(ordinals) > 6 else "")
+    faces = f"face {shown} is a triangulation" if len(ordinals) == 1 else f"faces {shown} are triangulations"
+    return (f"{path} is a mesh, not B-rep: {faces} with no surface (as build123d's import_stl makes), and a "
+            "document holds B-rep alone. Read the mesh as data with read_mesh(path) -- its vertices, triangles "
+            "and bounding_box() -- and build B-rep from those")
+
+
 def collect(result: Any, name: str) -> Tree:
-    """The prototypes and instances of a model's result (see the module docstring)."""
+    """The prototypes and instances of a model's result (see the module docstring). A part
+    holding a face with no surface -- a mesh's triangles -- is refused by its occurrence's path
+    (``mesh_faces``), before anything is made of it."""
     from OCP.TopAbs import TopAbs_COMPOUND
 
     from cadgen.engine.kernel.memo import FACE_COLORS, FACE_MATERIALS
@@ -185,8 +231,8 @@ def collect(result: Any, name: str) -> Tree:
     order: list = []
     parts: list[Part] = []
 
-    def visit(obj: Any, topods: Any, inherited: tuple | None,
-              inherited_material: Any = None) -> tuple[Part | Assembly, tuple, tuple | None]:
+    def visit(obj: Any, topods: Any, inherited: tuple | None, inherited_material: Any,
+              path: str) -> tuple[Part | Assembly, tuple, tuple | None]:
         state = obj.__dict__ if obj is not None else {}
         own_color = _rgba(state.get("_color"))
         color = own_color or inherited
@@ -198,9 +244,11 @@ def collect(result: Any, name: str) -> Tree:
         if children and len(held) == len(children):
             components = []
             parts_signature = []
-            for child, child_topods in zip(children, held):
-                prototype, signature, child_color = visit(child, child_topods.Located(_identity()), color, material)
+            own = path.rpartition("/")[2]
+            for at, (child, child_topods) in enumerate(zip(children, held), 1):
                 child_label = child.__dict__.get("label") or ""
+                prototype, signature, child_color = visit(child, child_topods.Located(_identity()), color, material,
+                                                          path + "/" + (child_label or f"{own}.{at}"))
                 components.append((prototype, child_topods.Location(), child_label, child_color))
                 parts_signature.append((signature, _location_key(child_topods.Location()), child_label, child_color))
             # An assembly is its components: the compound holding them is no content of its
@@ -231,6 +279,9 @@ def collect(result: Any, name: str) -> Tree:
                      tuple(sorted(face_materials.items(), key=lambda item: item[0])))
         found = prototypes.get(signature)
         if found is None:
+            meshes = mesh_faces(topods)
+            if meshes:
+                raise ValueError(_mesh_refused(path, meshes))
             found = Part(topods, label or f"part{len(parts) + 1}", color, dict(painted), origin=obj,
                          material=material, face_materials=face_materials)
             prototypes[signature] = found
@@ -241,8 +292,8 @@ def collect(result: Any, name: str) -> Tree:
     from cadgen.engine import mechanism
 
     wrapped = result.wrapped
-    root, signature, color = visit(result, wrapped.Located(_identity()), None)
     root_name = result.__dict__.get("label") or name
+    root, signature, color = visit(result, wrapped.Located(_identity()), None, None, root_name)
     location = wrapped.Location()
     held = not (isinstance(root, Assembly) and location.IsIdentity())
     if not held:

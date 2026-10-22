@@ -144,7 +144,7 @@ def hinge():
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
-| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
+| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
@@ -823,9 +823,8 @@ file's numbers as millimetres; a point the triangles share is one vertex), `tria
 rows of indices into them), `name` (an ASCII STL's solid's, else the file's stem) and
 `bounding_box()` (build123d's `BoundBox`), its arrays read-only. A mesh has no B-rep -- no
 surface under a face, no curve under an edge -- so no document holds one: a model measures it
-and builds B-rep from its numbers. Its read is keyed by the
-file's bytes as the others' are, the same object again for the same bytes, and the file is one
-of the closure's inputs:
+and builds B-rep from its numbers. Its read is keyed by the file's bytes as the others' are,
+the same object again for the same bytes, and the file is one of the closure's inputs:
 
 ```python
 @xbf
@@ -833,6 +832,14 @@ def enclosure():
     pcb = read_mesh(HERE / "scans/pcb.stl").bounding_box()   # keyed by the scan's bytes
     return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
 ```
+
+A result holding a mesh face -- a triangulation with no surface, as build123d's `import_stl`
+makes, or a face a model builds of `read_mesh`'s triangles -- is refused by the occurrence's
+path before its document is made (`document.mesh_faces`), and the worker builds on: `kit/scan
+is a mesh, not B-rep: face 1 is a triangulation with no surface (as build123d's import_stl
+makes), and a document holds B-rep alone. Read the mesh as data with read_mesh(path) ...`. The
+kernel's face modifier, which every part passes through (`document.direct`), crashed the
+process on one.
 
 build123d's own importers (`import_step`, `import_brep`, `import_stl`, `Mesher.read`) and
 OCCT's readers read a file past the engine: a body that calls one runs on every build

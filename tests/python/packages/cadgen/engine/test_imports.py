@@ -187,7 +187,9 @@ from pathlib import Path
 import build123d as bd
 from OCP.BRep import BRep_Builder
 from OCP.BRepTools import BRepTools
-from OCP.TopoDS import TopoDS_Shape
+from OCP.gp import gp_Pnt
+from OCP.Poly import Poly_Triangle, Poly_Triangulation
+from OCP.TopoDS import TopoDS_Face, TopoDS_Shape
 from cadgen.engine import read_mesh, xbf
 
 HERE = Path(__file__).resolve().parent
@@ -214,6 +216,23 @@ def by_occt():
     shape = TopoDS_Shape()
     BRepTools.Read_s(shape, str(HERE / "part.brep"), BRep_Builder())
     return bd.Solid(shape)
+
+
+@xbf
+def mesh_face():
+    mesh = read_mesh(HERE / "scans" / "pcb.stl")
+    triangulation = Poly_Triangulation(len(mesh.vertices), len(mesh.triangles), False)
+    for at, point in enumerate(mesh.vertices, 1):
+        triangulation.SetNode(at, gp_Pnt(*(float(value) for value in point)))
+    for at, corners in enumerate(mesh.triangles, 1):
+        triangulation.SetTriangle(at, Poly_Triangle(*(int(corner) + 1 for corner in corners)))
+    face = TopoDS_Face()
+    BRep_Builder().MakeFace(face, triangulation)  # its triangles alone, as import_stl makes a face
+    scan = bd.Face(face)
+    scan.label = "scan"
+    base = bd.Box(50, 40, 2)
+    base.label = "base"
+    return bd.Compound(children=[base, scan], label="kit")
 """
 
 # A model sized from an STL by build123d's importer, as a user writes one.
@@ -341,6 +360,17 @@ class ReadsTest(unittest.TestCase):
         self.assertEqual(sized(25), ((25.0, 25.0, 25.0), False), "warm: it was replayed, 40 mm")
         self.restart()
         self.assertEqual(sized(30), ((30.0, 30.0, 30.0), False), "a fresh worker: it took the 25 mm xbf")
+
+    def test_a_mesh_face_is_refused_by_name_and_the_worker_builds_on(self) -> None:
+        """A face with no surface -- read_mesh's triangles made a face, as import_stl makes one --
+        crashed the process in the kernel's face modifier (``ShapeCustom.DirectFaces``). It is
+        refused by its occurrence's path, saying what to do, and the next build runs."""
+        (report,) = engine_build.build(self.folder / "reads.py", ["mesh_face"], cwd=self.folder)
+        self.assertFalse(report["ok"])
+        self.assertIn("kit/scan is a mesh, not B-rep: face 1 is a triangulation with no surface", report["error"])
+        self.assertIn("read_mesh(path)", report["error"])
+        self.assertFalse((self.folder / "XBF/mesh_face.xbf").exists())
+        self.assertTrue(self.built("enclosure")["ok"])
 
 
 if __name__ == "__main__":
