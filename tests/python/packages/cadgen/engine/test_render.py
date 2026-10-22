@@ -9,7 +9,8 @@ under Xvfb: `xvfb-run -a scripts/test/test-python.sh tests/python/packages/cadge
 
 The golden pictures (`render_golden/*.png`) are the material fixture (`test_materials.py`'s bench,
 its pane hinged on the plate for a pose) at 320x240, drawn on macOS: one per display mode, and Explode,
-Clip, a pose, and an annotation with a measurement. A picture matches its golden when at most 1.5%
+Clip, a pose, and an annotation with a measurement; and `cap.png`, Clip's cap on a box holding
+another (`CapTest`). A picture matches its golden when at most 1.5%
 of its pixels are more than 32 levels from every golden pixel within one pixel of them (anti-aliasing
 and drivers apart, a line a pixel over still matches). A deliberate change to the look makes them
 again: `CADGEN_RENDER_GOLDENS=write scripts/test/test-python.sh tests/python/packages/cadgen/engine/test_render.py`.
@@ -237,7 +238,8 @@ class HeldTest(unittest.TestCase):
                 share = mismatch(found, pixels(golden.read_bytes()))
                 self.assertLessEqual(share, 0.015, f"{name}: {share:.1%} of its pixels are not the golden's")
         if not WRITE:
-            self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted(ROWS), "a golden per row")
+            self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted([*ROWS, "cap"]),
+                             "a golden per row, and the cap's")
 
     def test_rows_differ_where_they_should(self) -> None:
         """Each row draws something of its own: the goldens cannot all be one picture."""
@@ -351,6 +353,89 @@ class HeldTest(unittest.TestCase):
         with self.assertRaisesRegex(KeyError, "no mesh of part"):
             held.hold({**self.structure, "version": "lost", "prototypes": [{**self.structure["prototypes"][0],
                                                                              "key": "0" * 32}]}, {})
+
+
+class GridPaperTest(unittest.TestCase):
+    """The viewer's grid rule (core's stageGrid.js): the round step and the cells of a model at rest."""
+
+    def test_the_step_is_the_round_number_nearest_on_a_log_scale(self) -> None:
+        from cadgen.engine.render.grid import round_step
+
+        for target, expected in ((1.0, (1.0, 1)), (1.4, (1.0, 1)), (1.5, (2.0, 2)), (3.0, (2.0, 2)), (3.3, (5.0, 5)),
+                                 (7.0, (5.0, 5)), (7.2, (10.0, 1)), (0.031, (0.02, 2)), (450.0, (500.0, 5))):
+            step, digit = round_step(target)
+            self.assertAlmostEqual(step, expected[0], msg=target)
+            self.assertEqual(digit, expected[1], target)
+
+    def test_the_paper_of_a_model_at_rest(self) -> None:
+        from cadgen.engine.render.grid import paper
+
+        sheet = paper((0, 0, 0), (100, 60, 30))  # its diagonal 120.4: framing 125.2, a step near 6.26
+        self.assertAlmostEqual(sheet.framing, float(np.linalg.norm((100, 60, 30))) * 1.04)
+        self.assertEqual((sheet.cell, sheet.every, sheet.major), (5.0, 10, 50.0))
+        self.assertAlmostEqual(sheet.fade_start, sheet.framing * 1.5)
+        self.assertAlmostEqual(sheet.fade_end, sheet.framing * 6.0)
+        small = paper((0, 0, 0), (0.1, 0.1, 0.1))  # each side at least 1, the radius at least 1: framing 2.08
+        self.assertEqual((small.cell, small.every), (0.1, 10))
+        two = paper((0, 0, 0), (30, 0, 0))  # framing 31.2: a step near 1.56 is 2, a major every 5th
+        self.assertEqual((two.cell, two.every, two.major), (2.0, 5, 10.0))
+
+
+class CapTest(unittest.TestCase):
+    """Clip's cap as the viewer draws it: unlit, flat, in the part's colour as a lit face's albedo
+    (linear, squared), hiding what is inside the cut part -- a small box held in a big one."""
+
+    def setUp(self) -> None:
+        gl()
+        import build123d as bd
+
+        from cadgen.engine.mesh import mesh_shape
+        from cadgen.engine.render.occt import Scene
+
+        outer, inner = mesh_shape(bd.Box(20, 20, 20).wrapped), mesh_shape(bd.Box(6, 6, 6).wrapped)
+        identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+        inside = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -4, 0, 0, 1]  # column-major: x -7..-1, in the kept half
+        self.red, blue = (0.8, 0.1, 0.1), (0.05, 0.2, 0.9)
+        structure = {"prototypes": [{"key": "outer", "color": [*self.red, 1]}, {"key": "inner", "color": [*blue, 1]}],
+                     "instances": [{"prototype": 0, "matrix": identity}, {"prototype": 1, "matrix": inside}]}
+        self.scene = Scene(Path("caps.xbf"), {"outer": outer.to_bytes(), "inner": inner.to_bytes()}, size=SIZE,
+                           structure=structure)
+        self.addCleanup(self.scene.canvas.close)
+
+    def draw(self, display: dict) -> tuple[np.ndarray, tuple[int, int]]:
+        self.scene.show(display)
+        self.scene.frame("iso")
+        x, y = np.rint(self.scene.project(np.array([[0.0, 0.0, 0.0]]))[0]).astype(int)  # the cut's middle
+        return pixels(self.scene.canvas.png()), (x, y)
+
+    def cap(self, found: np.ndarray, at: tuple[int, int]) -> np.ndarray:
+        x, y = at
+        return found[y - 12:y + 13, x - 12:x + 13].reshape(-1, 3)
+
+    def test_the_cap_is_flat_in_the_part_s_colour_and_hides_what_is_inside(self) -> None:
+        from cadgen.engine.render.clip import CAP
+        from cadgen.engine.render.grid import hex_colour, to_linear, to_srgb
+        from cadgen.engine.render.look import LOOK
+
+        clip = {"enabled": True, "axis": "x"}
+        found, at = self.draw({"mode": "solid", "clip": clip})
+        golden = GOLDEN / "cap.png"
+        if WRITE:
+            golden.write_bytes(self.scene.canvas.png())
+        else:
+            share = mismatch(found, pixels(golden.read_bytes()))
+            self.assertLessEqual(share, 0.015, f"cap: {share:.1%} of its pixels are not the golden's")
+        expected = np.rint(to_srgb(np.array(self.red) ** LOOK.colour_power) * 255)
+        patch = self.cap(found, at)
+        self.assertLessEqual(int(np.abs(patch - expected).max()), 3, "unlit, in the red box's colour, the blue unseen")
+        plain, _ = self.draw({"mode": "solid", "clip": {**clip, "partColors": False}})
+        expected = np.rint(to_srgb(to_linear(hex_colour(CAP))) * 255)
+        self.assertLessEqual(int(np.abs(self.cap(plain, at) - expected).max()), 3, "#e9a451 without part colours")
+        uncut, _ = self.draw({"mode": "solid"})
+        self.assertGreater(int(np.abs(self.cap(uncut, at) - patch).max()), 16, "no clip: the box's lit side")
+        self.assertEqual(self.scene.caps, [], "no carrier shown without a clip")
+        wire, _ = self.draw({"mode": "wireframe", "clip": clip})
+        self.assertEqual(self.scene.caps, [], "nor in Wireframe, which draws no faces")
 
 
 class RenderProcessTest(unittest.TestCase):

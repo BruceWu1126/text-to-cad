@@ -42,11 +42,13 @@ times ``2 ** Exposure`` and ``W`` the ``WhitePoint``,
     f(x)  = (x * (1.425 x + 0.05) + 0.004) / (x * (1.425 x + 0.6) + 0.0491) - 0.0821
     out   = f(x) / f(W)
 
-Edges are unlit lines in their class's colour, 1 px; X-ray's faces are lit at 0.22 opacity under
-every edge; Hidden line's faces are unlit in the backdrop's colour, hiding what is behind them;
-Wireframe draws edges alone. The grid is OCCT's rectangular grid on the model's lowest Z: cells
-``10 ** floor(log10(size / 4))`` across, ``size`` the larger of the model's X and Y extents at rest,
-drawn ``1.5 * size`` square in one colour, no axes.
+Edges are unlit lines in their class's colour, 1 px; X-ray's faces are lit at 0.22 opacity
+under every edge; Hidden line's faces are unlit in the backdrop's colour, hiding what is behind
+them; Wireframe draws edges alone. The grid is the viewer's measuring grid (core's
+``lib/viewer/stageGrid.js``, drawn by ``grid.py``): graph paper on z = 0 through the origin, the
+step of 1, 2 or 5 x 10^n nearest ``framing / cells`` (``framing`` the model's diameter at rest
+times 1.04), a major every 5th or 10th line, a red X and a green Y axis, faded out ``extent``
+framings from the origin.
 """
 
 from __future__ import annotations
@@ -99,9 +101,9 @@ class Mode:
 @dataclass(frozen=True)
 class Grid:
     colour: str
-    cells: float  # the cell is 10 ** floor(log10(size / cells))
-    extent: float  # drawn extent * size square
-    axes: bool
+    cells: float  # minor cells across the model's framing: the cell is the round step nearest framing / cells
+    extent: float  # framings from the origin by which the paper has faded out
+    axes: bool  # a red X and a green Y axis line
 
 
 @dataclass(frozen=True)
@@ -169,5 +171,5 @@ LOOK = Look(
     modes=(Mode("solid", "lit", "visible"), Mode("shaded", "lit", "none"),
            Mode("parts", "lit", "visible", palette=True), Mode("xray", "lit", "all", opacity=0.22),
            Mode("hidden-line", "backdrop", "visible"), Mode("wireframe", "none", "all")),
-    grid=Grid(colour="#4ea8cc", cells=4.0, extent=1.5, axes=False),
+    grid=Grid(colour="#4ea8cc", cells=20.0, extent=6.0, axes=True),
 )

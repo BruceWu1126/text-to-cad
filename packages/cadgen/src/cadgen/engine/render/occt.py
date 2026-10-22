@@ -20,11 +20,12 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
   (``display.camera.projection``, 48 degrees, the same tight fit); or a prompt view's camera
   (``{position, target, up, orthographicHalfHeight}``, JSON or a file), placed as it is.
 - ``--pose``: the engine's forward kinematics (``mechanism.posed_structure``); ``--explode``: the
-  viewer's own explode layout (``explode.py``); ``display.clip``: an OCCT clip plane, capped in the
-  parts' colours; ``--annotation`` and ``--measurements``: the snapshot job's ``annotation`` and
-  ``measurements`` data, drawn as the viewer draws them: strokes as screen-width strips, a text
-  mark's words (the viewer's face, set and rasterised as its canvas is, ``text.py``) on its quad,
-  Measure's dimensions painted over the frame in screen space (``overlay.py``).
+  viewer's own explode layout (``explode.py``); ``display.clip``: an OCCT clip plane, its cut
+  capped as the viewer caps it (``clip.py``); ``--annotation`` and ``--measurements``: the
+  snapshot job's ``annotation`` and ``measurements`` data, drawn as the viewer draws them:
+  strokes as screen-width strips, a text mark's words (the viewer's face, set and rasterised as
+  its canvas is, ``text.py``) on its quad, Measure's dimensions painted over the frame in screen
+  space (``overlay.py``).
 - ``--preview``: physically based raster (PBR, an image-based environment, a key light with
   shadows on a floor that runs past the frame, the backdrop the floor's own colour as drawn, so
   the two meet without an edge), a part with a material in the material the modes draw it in
@@ -188,6 +189,8 @@ class Scene:
         self.offsets: dict[int, np.ndarray] = {}
         self.sources: dict[tuple, Any] = {}
         self.shown: list[Any] = []
+        self.carriers: dict[int, Any] = {}  # each prototype's cap carrier, made on the first clip (``clip.py``)
+        self.caps: list[Any] = []  # the carriers shown, each an instance's (``clip.py``)
         self.overlays: list[Any] = []
         self.structures: list[Any] = []  # presentations made below AIS: the text quads
         self.text_quads: list[tuple[np.ndarray, str]] = []  # their world corners and colours
@@ -367,29 +370,11 @@ class Scene:
 
     def _clip(self, clip: dict[str, Any] | None) -> None:
         """``display.clip``: one plane along an axis, at ``at`` (else the middle of the model at
-        rest), keeping the lower side (``invert`` the upper), its cut capped in each part's colour."""
-        from OCP.gp import gp_Dir, gp_Pln, gp_Pnt
-        from OCP.Graphic3d import Graphic3d_ClipPlane, Graphic3d_SequenceOfHClipPlane
+        rest), keeping the lower side (``invert`` the upper), its cut capped as the viewer caps it
+        (``clip.py``)."""
+        from cadgen.engine.render import clip as section
 
-        view = self.canvas.view
-        planes = Graphic3d_SequenceOfHClipPlane()
-        view.SetClipPlanes(planes)
-        if not clip or clip.get("enabled") is False:
-            return
-        axis = "xyz".index(clip.get("axis", "x"))
-        low, high = self.rest_bounds()
-        at = clip.get("at", (low[axis] + high[axis]) / 2)
-        normal = [0.0, 0.0, 0.0]
-        # OCCT keeps the half-space the normal points into.
-        normal[axis] = 1.0 if clip.get("invert") else -1.0
-        point = [0.0, 0.0, 0.0]
-        point[axis] = at
-        plane = Graphic3d_ClipPlane(gp_Pln(gp_Pnt(*point), gp_Dir(*normal)))
-        plane.SetCapping(True)
-        plane.SetUseObjectMaterial(clip.get("partColors", True))
-        plane.SetUseObjectShader(False)
-        plane.SetUseObjectTexture(False)
-        view.AddClipPlane(plane)
+        section.apply(self, clip)
 
     # --- camera ------------------------------------------------------------------------------
 
@@ -516,24 +501,11 @@ class Scene:
 
     # --- grid, explode, overlays -----------------------------------------------------------------
 
-    def grid(self, on: bool = True) -> None:
-        from OCP.Aspect import Aspect_GridDrawMode, Aspect_GridType
-        from OCP.gp import gp_Ax3, gp_Dir, gp_Pnt
+    def grid(self, on: bool = True) -> float:
+        """The viewer's measuring grid for the camera framed (``grid.py``; after ``frame``), or none."""
+        from cadgen.engine.render import grid
 
-        viewer = self.canvas.viewer
-        if not on:
-            viewer.DeactivateGrid()
-            return
-        low, high = self.rest_bounds()
-        size = float(max(high[:2] - low[:2]))
-        step = 10 ** math.floor(math.log10(max(size / LOOK.grid.cells, 1e-6)))
-        viewer.SetPrivilegedPlane(gp_Ax3(gp_Pnt(0, 0, float(low[2])), gp_Dir(0, 0, 1), gp_Dir(1, 0, 0)))
-        viewer.SetRectangularGridValues(0, 0, step, step, 0)
-        viewer.SetRectangularGridGraphicValues(size * LOOK.grid.extent, size * LOOK.grid.extent, 0)
-        viewer.SetGridEcho(False)
-        viewer.ActivateGrid(Aspect_GridType.Aspect_GT_Rectangular, Aspect_GridDrawMode.Aspect_GDM_Lines)
-        grid = viewer.Grid()
-        grid.SetColors(_color(LOOK.grid.colour), _color(LOOK.grid.colour))
+        return grid.show(self, on)
 
     def explode(self, amount: float) -> float:
         from cadgen.engine.render.explode import offsets
@@ -731,13 +703,17 @@ class Scene:
 
     def _structure(self, triangles: Any, aspect: Any, priority: Any) -> Any:
         """A presentation below AIS (``Graphic3d_Structure``) of ``triangles`` in ``aspect``, in the
-        default layer, infinite to the view (no fit, no shadow frame takes it)."""
+        default layer, infinite to the view (no fit, no shadow frame takes it), never cut by Clip
+        (the viewer's studio is whole whatever its Clip cuts)."""
         from OCP.Graphic3d import Graphic3d_Group, Graphic3d_Structure
+
+        from cadgen.engine.render.grid import unclipped
 
         structure = Graphic3d_Structure(self.canvas.viewer.StructureManager())
         group = structure.NewGroup()
         group.SetGroupPrimitivesAspect(aspect)
         Graphic3d_Group.AddPrimitiveArray(group, triangles)
+        structure.SetClipPlanes(unclipped())
         structure.SetInfiniteState(True)
         structure.SetDisplayPriority(priority)
         structure.Display()
@@ -1081,6 +1057,9 @@ class Scene:
         params.ShadowMapBias = 0.002
         self._studio()
         if path_trace:
+            from cadgen.engine.render import clip as section
+
+            section.withdraw(self)
             for source in self.sources.values():
                 aspect = source.Attributes().ShadingAspect()
                 face = aspect.Material()
