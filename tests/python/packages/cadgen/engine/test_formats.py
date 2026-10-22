@@ -1,9 +1,16 @@
 """The files no document that the stills draw (`engine/formats`): each kind read into what a
 renderer holds -- a mesh file's parts, colours, materials and placements; a GLB's node tree and
-textures through OCCT's glTF reader -- and each drawn as its golden picture.
+textures through OCCT's glTF reader; a robot posed by the viewer's forward kinematics -- and each
+drawn as its golden picture.
 
 The fixtures are made here, small: a binary and an ASCII STL, a 3MF of colour groups, base
-materials and components, a GLB of a node tree, two materials and a base colour texture.
+materials and components, a GLB of a node tree, two materials and a base colour texture, a URDF
+of every joint kind (a mimic and a four-bar among them), an SRDF and an SDF over it.
+
+`formats_golden/kinematics.json` is the viewer's own forward kinematics on `KINEMATICS`: each
+link's world transform (row-major, metres) at three poses, made by origin/main's
+`@text-to-cad/core` `lib/urdf/parseUrdf.js` and `kinematics.js` (with jsdom's DOMParser) when the
+port was written; the port must agree to 1e-9.
 
 The pictures (`formats_golden/*.png`, 320x240, macOS) match as `test_render.py`'s do: at most 1.5%
 of the pixels more than 32 levels from every golden pixel within one pixel. A test that draws makes
@@ -36,8 +43,53 @@ GOLDEN = Path(__file__).resolve().parent / "formats_golden"
 WRITE = os.environ.get("CADGEN_RENDER_GOLDENS") == "write"
 SIZE = (320, 240)
 
+KINEMATICS = """<?xml version="1.0"?>
+<robot name="kinematics" xmlns:tcad="https://text-to-cad.dev/urdf">
+  <link name="base"><visual><origin xyz="0 0 0.01"/><geometry><box size="0.3 0.2 0.02"/></geometry></visual></link>
+  <link name="turret"><visual><origin xyz="0 0 0.03"/><geometry><cylinder radius="0.04" length="0.06"/></geometry></visual></link>
+  <link name="arm"><visual><origin xyz="0.06 0 0" rpy="0 1.5707963 0"/><geometry><cylinder radius="0.012" length="0.12"/></geometry></visual></link>
+  <link name="slider"><visual><geometry><box size="0.03 0.03 0.03"/></geometry></visual></link>
+  <link name="twin"><visual><origin xyz="0 0.02 0"/><geometry><box size="0.01 0.04 0.01"/></geometry></visual></link>
+  <link name="tool"><visual><geometry><sphere radius="0.01"/></geometry></visual></link>
+  <link name="ground"><visual><origin xyz="0.1 0 -0.01"/><geometry><box size="0.26 0.02 0.01"/></geometry></visual></link>
+  <link name="rocker"><visual><origin xyz="0.04 0 0"/><geometry><box size="0.08 0.015 0.01"/></geometry></visual></link>
+  <link name="crank"><visual><origin xyz="0.025 0 0"/><geometry><box size="0.05 0.015 0.01"/></geometry></visual></link>
+  <joint name="spin" type="continuous"><parent link="base"/><child link="turret"/><origin xyz="0.05 -0.02 0.02" rpy="0 0 0.3"/><axis xyz="0 0 1"/></joint>
+  <joint name="lift" type="revolute"><parent link="turret"/><child link="arm"/><origin xyz="0 0 0.06" rpy="0.2 -0.1 0"/><axis xyz="0 1 0.2"/><limit lower="-1.2" upper="1.4" effort="1" velocity="1"/></joint>
+  <joint name="reach" type="prismatic"><parent link="arm"/><child link="slider"/><origin xyz="0.12 0 0" rpy="0 0 0.5"/><axis xyz="1 0 0"/><limit lower="-0.02" upper="0.05" effort="1" velocity="1"/></joint>
+  <joint name="mirror" type="revolute"><parent link="arm"/><child link="twin"/><origin xyz="0.08 0 0.015"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="1" velocity="1"/><mimic joint="lift" multiplier="-0.5" offset="0.1"/></joint>
+  <joint name="mount" type="fixed"><parent link="slider"/><child link="tool"/><origin xyz="0.02 0.01 0" rpy="0.4 0 0.2"/></joint>
+  <joint name="foot" type="fixed"><parent link="base"/><child link="ground"/><origin xyz="-0.12 0.06 0.02" rpy="0 0 -0.4"/></joint>
+  <joint name="output_joint" type="revolute"><parent link="ground"/><child link="rocker"/><origin xyz="0.2 0 0" rpy="0 0 1.5707963267948966"/><axis xyz="0 0 1"/><limit lower="-0.5" upper="0.5" effort="1" velocity="1"/></joint>
+  <joint name="input_joint" type="revolute"><parent link="ground"/><child link="crank"/><origin xyz="0 0 0" rpy="0 0 1.5253680280265103"/><axis xyz="0 0 1"/><limit lower="-1.5" upper="1.5" effort="1" velocity="1"/>
+    <tcad:four_bar driver="output_joint" input_length="0.05" ground_length="0.2" output_length="0.08" coupler_length="0.2" input_zero="1.5253680280265103" output_zero="1.5707963267948966"/>
+  </joint>
+</robot>
+"""
 
+SRDF = """<?xml version="1.0"?>
+<robot name="kinematics">
+  <group name="arm"><joint name="spin"/><joint name="lift"/><joint name="reach"/></group>
+  <group_state name="home" group="arm"><joint name="spin" value="0.5"/><joint name="lift" value="0.3"/></group_state>
+  <group_state name="tucked" group="arm"><joint name="lift" value="-1.0"/><joint name="reach" value="-0.02"/></group_state>
+</robot>
+"""
 
+# A link at 1 m along x and 0.5 m up, its frame turned 90 degrees about z, relative_to a frame of
+# the model; a hinge whose pose is its child's and whose axis is expressed in the model's frame.
+SDF = """<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="hinge">
+    <frame name="shelf"><pose>1 0 0.5 0 0 0</pose></frame>
+    <link name="post"><visual name="v"><geometry><box><size>0.1 0.1 0.1</size></box></geometry></visual></link>
+    <link name="door"><pose relative_to="shelf">0 0 0 0 0 1.5707963267948966</pose>
+      <visual name="v"><pose>0.2 0 0 0 0 0</pose><geometry><box><size>0.4 0.02 0.3</size></box></geometry>
+        <material><diffuse>0.8 0.2 0.1 1</diffuse></material></visual></link>
+    <joint name="swing" type="revolute"><parent>post</parent><child>door</child>
+      <axis><xyz expressed_in="__model__">0 0 1</xyz><limit><lower>-2</lower><upper>2</upper></limit></axis></joint>
+  </model>
+</sdf>
+"""
 
 
 
@@ -339,6 +391,54 @@ class GlbTest(FixtureTest):
         np.testing.assert_allclose(positions.mean(0), (0, -25, 0), atol=1e-3)
 
 
+# --- robots ----------------------------------------------------------------------------------------
+
+
+class RobotTest(FixtureTest):
+    def test_the_forward_kinematics_are_the_viewer_s(self) -> None:
+        from cadgen.engine.formats.robot import read_urdf
+
+        path = self.folder / "kinematics.urdf"
+        path.write_text(KINEMATICS, encoding="utf-8")
+        robot = read_urdf(path)
+        for row in json.loads((GOLDEN / "kinematics.json").read_text(encoding="utf-8")):
+            values, _named = robot.values(row["values"])
+            placed = robot.placements(values)
+            for link, matrix in row["links"].items():
+                with self.subTest(pose=row["values"], link=link):
+                    mine = placed[link].copy()
+                    mine[:3, 3] /= 1000
+                    np.testing.assert_allclose(mine, np.array(matrix).reshape(4, 4), atol=1e-9)
+
+    def test_a_pose_is_refused_by_name_and_an_srdf_opens_at_home(self) -> None:
+        (self.folder / "kinematics.urdf").write_text(KINEMATICS, encoding="utf-8")
+        (self.folder / "kinematics.srdf").write_text(SRDF, encoding="utf-8")
+        found = formats.read(self.folder / "kinematics.urdf")
+        for pose, why in (({"elbow": 3}, "no joint 'elbow'"), ({"mirror": 3}, "'mirror' follows 'lift'"),
+                          ({"input_joint": 3}, "follows its driver 'output_joint'"), ({"lift": 200}, "past its limits"),
+                          ({"foot": 1}, "is fixed"), ("home", "no group state")):
+            with self.subTest(pose=pose), self.assertRaisesRegex(ValueError, why):
+                found.pose(found.structure, pose)
+        srdf = formats.read(self.folder / "kinematics.srdf")
+        posed = srdf.pose(srdf.structure, "tucked")
+        self.assertEqual(posed["kinematics"]["pose"]["configuration"], "arm/tucked")
+        self.assertAlmostEqual(posed["kinematics"]["pose"]["values"]["spin"], math.degrees(0.5), msg="home under the state")
+        self.assertAlmostEqual(posed["kinematics"]["pose"]["values"]["lift"], math.degrees(-1.0))
+        self.assertNotEqual(srdf.structure["instances"][1]["matrix"], found.structure["instances"][1]["matrix"],
+                            "the SRDF opens at its home state")
+
+    def test_an_sdf_places_its_links_by_their_frames(self) -> None:
+        path = self.folder / "hinge.sdf"
+        path.write_text(SDF, encoding="utf-8")
+        found = formats.read(path)
+        door = np.array(found.structure["instances"][1]["matrix"]).reshape(4, 4).T
+        np.testing.assert_allclose(door[:3, 3], (1000, 200, 500), atol=1e-6)  # its visual 0.2 m along the door's turned x
+        self.assertAlmostEqual(found.structure["prototypes"][1]["name"], "box")
+        swung = found.pose(found.structure, {"swing": 90})
+        door = np.array(swung["instances"][1]["matrix"]).reshape(4, 4).T
+        np.testing.assert_allclose(door[:3, 3], (800, 0, 500), atol=1e-6)  # turned about z through the joint: the door's frame
+
+
 # --- pictures --------------------------------------------------------------------------------------
 
 
@@ -353,12 +453,14 @@ class PictureTest(FixtureTest):
         write_stl(folder / "part.stl", np.concatenate([box_soup((20, 10, 4)), cylinder_soup(3, 12, at=(0, 0, 2))]))
         write_3mf(folder / "kit.3mf")
         write_glb(folder / "rig.glb")
+        (folder / "kinematics.urdf").write_text(KINEMATICS, encoding="utf-8")
         cls.rows = {
             "stl": (folder / "part.stl", {}),
             "stl-wireframe": (folder / "part.stl", {"display": {"mode": "wireframe"}}),
             "3mf": (folder / "kit.3mf", {}),
             "3mf-parts": (folder / "kit.3mf", {"display": {"mode": "parts", "grid": True}}),
             "glb": (folder / "rig.glb", {}),
+            "urdf": (folder / "kinematics.urdf", {"pose": {"spin": 75, "lift": 40, "reach": 0.03, "output_joint": 20}}),
         }
 
     def draw(self, path: Path, **fields) -> tuple[bytes, dict]:
@@ -403,7 +505,7 @@ class PictureTest(FixtureTest):
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
                 (self.folder / "part.stl", {"display": {"mode": "parts"}}, "places 1 part"),
-):
+                (self.folder / "kinematics.urdf", {"pose": {"lift": 200}}, "--pose: joint 'lift' at 200 is past its limits")):
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):
                 snapshot(path, out, size=SIZE, daemon=False, **options)
         self.assertEqual(out.read_bytes(), b"kept")

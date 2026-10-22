@@ -35,7 +35,7 @@ workers' cap.
 **In process** (``draw_here``): ``--no-daemon`` and a model drawn from its worker's memory serve
 the document from a server of this process, and draw it once.
 
-**A file that is not a document** -- a mesh file (``formats/``) -- is read by its
+**A file that is not a document** -- a mesh file, a robot (``formats/``) -- is read by its
 reader in the process that draws it, into a structure and part buffers as a document's are: a
 render process of its own per file in the daemon
 (``{"op": "open", "path"}`` answered ``{"opened": {...}}``, again whenever a file it read has

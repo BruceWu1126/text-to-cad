@@ -1,6 +1,6 @@
 """The files the stills draw that are not documents: each read here into what a document is to
 the renderer -- a structure (prototypes, instances, a tree) and a part buffer per prototype
-(``mesh.Mesh``, XBM2) -- so a mesh file is drawn by the documents' own path
+(``mesh.Mesh``, XBM2) -- so a mesh file or a robot is drawn by the documents' own path
 (``render/service.py``'s ``Held``): the look, the modes, the camera fit, the grid, clip,
 Explode, Preview, the annotation and the size are theirs.
 
@@ -9,6 +9,7 @@ Explode, Preview, the annotation and the size are theirs.
 | ``.stl`` | ``stl.py`` (numpy) | one part, its numbers as millimetres |
 | ``.3mf`` | ``threemf.py`` (zip + XML) | its objects placed by its build, each triangle's colour, its unit |
 | ``.glb`` | ``glb.py`` (OCCT's ``RWGltf_CafReader``) | its node tree, meshes, materials and textures |
+| ``.urdf``, ``.sdf``, ``.srdf`` | ``robot.py`` (XML) | the link meshes placed by forward kinematics |
 
 Nothing is written, nothing is cached on disk: a reader's answer lives in the process that drew
 it (the daemon's render process for the file keeps it, warm, until a file it read changes:
@@ -26,11 +27,12 @@ import numpy as np
 
 from cadgen.engine.mesh import Mesh
 
-__all__ = ["Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "assemble", "files_of",
+__all__ = ["Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]
 
-KINDS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb"}
+KINDS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf"}
 MESHES = (".stl", ".3mf", ".glb")
+ROBOTS = (".urdf", ".sdf", ".srdf")
 
 
 class FormatError(ValueError):
@@ -156,6 +158,10 @@ def read(path: Path) -> Any:
         from cadgen.engine.formats.meshes import threemf_file
 
         return threemf_file(path)
-    from cadgen.engine.formats.glb import glb_file
+    if suffix == ".glb":
+        from cadgen.engine.formats.glb import glb_file
 
-    return glb_file(path)
+        return glb_file(path)
+    from cadgen.engine.formats.robot import robot_file
+
+    return robot_file(path)

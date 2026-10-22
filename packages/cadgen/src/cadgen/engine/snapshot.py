@@ -544,7 +544,7 @@ DOCUMENTS = (".xbf", ".step", ".stp")
 # A mesh file and the family the snapshot page draws it with (``headlessScene.js``).
 MESH_KINDS: dict[str, str] = {}
 # The files no document that OCCT draws, each read by its reader (``formats``).
-FILES = (".stl", ".3mf", ".glb")
+FILES = (".stl", ".3mf", ".glb", ".urdf", ".sdf", ".srdf")
 MESHES = (".stl", ".3mf", ".glb")
 
 
