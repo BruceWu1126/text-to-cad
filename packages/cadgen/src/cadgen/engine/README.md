@@ -378,14 +378,18 @@ record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishe
 baked as a 512 x 256 Radiance image beside the record (`render/studio.hdr`); no ambient term, fill,
 shadow, exposure or tone curve: the sum is clamped and sRGB-encoded. Every surface answers that
 light as OCCT's PBR program does (the record's `brdf`, `occt`): single scattering, Schlick-GGX
-geometry, the roughness as given, which the viewer draws in place of three's own physical model
-(the bundled `@text-to-cad/core`'s `lib/viewer/surfaceBrdf.js`). A part without a material,
+geometry, OCCT's split-sum table, the roughness as given, no anisotropy, which the viewer draws in
+place of three's own physical model (the bundled `@text-to-cad/core`'s `lib/viewer/surfaceBrdf.js`),
+its environment prefiltered as OCCT bakes it (`lib/viewer/ggxEnvironment.js`: each roughness the
+image convolved with that roughness's GGX lobe, the diffuse light OCCT's nine spherical harmonics
+of the irradiance). A part without a material,
 and every fill (Parts), wears a plain dielectric finish (roughness 0.5) over its colour, linear,
 squared, which keeps the saturated colours of OCCT's old Phong look. A part with a material wears
 its finish in Solid and Shaded on both renderers, its colour as authored, reflecting that
 environment; X-ray draws it in the plain finish. What OCCT's raster has no term for it
 approximates (`render/finish.py`): a clear coat eases the base's roughness toward the coat's,
-anisotropy is dropped, transmission is opacity over the colour tinted by the transmission colour.
+anisotropy is dropped (and the viewer drops it too), transmission is opacity over the colour tinted
+by the transmission colour.
 Edges are unlit in their class's ink, 1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's
 are the backdrop's colour. The engine serves the record as `GET /api/look` and its image as
 `GET /api/look/environment`; the page reads both once per engine, beside the document, and the

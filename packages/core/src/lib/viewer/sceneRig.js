@@ -10,8 +10,10 @@
 //     environment,                          the light every surface reflects, or null:
 //                                           { width, height, data, intensity, rotation }, an
 //                                           equirectangular image (RGBA floats, bottom row
-//                                           first) the stage turns into its PMREM, lighting the
-//                                           scene at `intensity`, turned by `rotation` (Euler
+//                                           first) the stage turns into its PMREM, each
+//                                           roughness's level the image prefiltered by that
+//                                           roughness's GGX lobe (`ggxEnvironment.js`), lighting
+//                                           the scene at `intensity`, turned by `rotation` (Euler
 //                                           radians, three's `scene.environmentRotation`)
 //     exposure,                             the renderer's toneMappingExposure
 //     toneCurve,                            a curve of SCENE_RIG_TONE_CURVES, drawn as three's
@@ -26,6 +28,8 @@
 // it back; one stage's rigs that share an environment image share its PMREM. A rig that blends in
 // linear light is drawn through a frame of its own (`createLinearFrame`): the stage draws its scene
 // with `renderWithSceneRig`, which is three's own draw for every other rig and for none.
+
+import { prefilterEnvironment } from "./ggxEnvironment.js";
 
 // The tone curves a rig may name: the body of three's `CustomToneMapping( vec3 color )`, after
 // exposure. `clamp` is the colour times the exposure, clamped to [0, 1]: what an sRGB frame
@@ -329,7 +333,8 @@ export function compileWithSceneRig(rig, renderer, scene, camera) {
 }
 
 // A renderer's PMREMs of environment images, by the image's pixels: shared by the rigs that light
-// with the same image, released with the last of them.
+// with the same image, released with the last of them. Each level is the image prefiltered by the
+// GGX lobe of its roughness, as OCCT bakes its image-based light (`ggxEnvironment.js`).
 const environments = new WeakMap();
 
 function acquireEnvironment(THREE, renderer, environment) {
@@ -337,21 +342,7 @@ function acquireEnvironment(THREE, renderer, environment) {
   if (!held) environments.set(renderer, held = new Map());
   let found = held.get(environment.data);
   if (!found) {
-    // Half floats: what WebGL2 filters linearly without an extension, as three's HDRLoader loads.
-    const texture = new THREE.DataTexture(Uint16Array.from(environment.data, THREE.DataUtils.toHalfFloat),
-      environment.width, environment.height, THREE.RGBAFormat, THREE.HalfFloatType);
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    texture.colorSpace = THREE.LinearSRGBColorSpace;
-    texture.magFilter = texture.minFilter = THREE.LinearFilter;
-    texture.generateMipmaps = false;
-    texture.needsUpdate = true;
-    const generator = new THREE.PMREMGenerator(renderer);
-    try {
-      found = { target: generator.fromEquirectangular(texture), refs: 0 };
-    } finally {
-      generator.dispose();
-      texture.dispose();
-    }
+    found = { target: prefilterEnvironment(THREE, renderer, environment), refs: 0 };
     held.set(environment.data, found);
   }
   found.refs += 1;

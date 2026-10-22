@@ -137,7 +137,7 @@ test("a look's surface model: its stand-ins compile OCCT's lighting after three'
   look.apply({ materialSettings: INSPECT, authored: false, surface: { style: "shaded", opacity: 1 }, brdf: "occt" });
   const standIn = a.material;
   assert.equal(standIn.customProgramCacheKey(), "surface-brdf:occt", "one program per model, shared by every stand-in");
-  const shader = { fragmentShader: THREE.ShaderLib.physical.fragmentShader };
+  const shader = { fragmentShader: THREE.ShaderLib.physical.fragmentShader, uniforms: {} };
   standIn.onBeforeCompile(shader);
   const at = (text) => shader.fragmentShader.indexOf(text);
   assert.ok(at("#include <lights_physical_pars_fragment>") < at("#define RE_Direct RE_Direct_Occt"), "after three's own functions");
@@ -145,6 +145,7 @@ test("a look's surface model: its stand-ins compile OCCT's lighting after three'
   assert.ok(at("#include <lights_physical_fragment>") < at("material.roughness = clamp( roughnessFactor, 0.01, 1.0 );"));
   assert.ok(at("material.roughness = clamp( roughnessFactor, 0.01, 1.0 );") < at("#include <lights_fragment_begin>"),
     "the roughness set before the lights read it");
+  assert.equal(shader.uniforms.occtEnvironmentTable.value.image.width, 32, "OCCT's split-sum table, not three's");
   assert.throws(() => look.apply({ materialSettings: INSPECT, authored: false, surface: { style: "shaded", opacity: 1 }, brdf: "phong" }),
     /a surface model is one of occt, not "phong"/);
 
