@@ -103,6 +103,7 @@ piece. Nested `@xbf` is never needed for caching.
 | `drawings` | `gasket_plate`, `clamp_plate` | `@dxf` drawings of planar documents: a layer per part (`CUT`, an open `ENGRAVE`), and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
 | `juno` | one script: the robot and its 28 URDF links, 29 models | 27 revolute joints connected at the athletic stance (absolute angles, the URDF's travel as ranges) and the SRDF's five group states as configurations; each link a model writing the 3MF `juno.urdf` references; one `@memo` stage, `links()`, shared by all 29 (30.8 s cold against 56.2 s without it) |
 | `assemblies` | 23 models in 21 groups | the demo assemblies: `AssemblyHelper` frames as build123d joints, the planetary gear's locked `drive` coupling and `meshCycle` motion (its GLB, the docs hero), the mars rover's 27 joints, 7 couplings and 4 configurations; no `@memo`, no model calling another |
+| `tendon_hand` | 54 of the 112 one-model scripts, folded into 5 scripts by subsystem | the research hand's components, phalanges, routing, guide mounts and forearm, each model its own xbf; three shared `@memo` stages (each finger's guide combs, the forearm frame, its guide banks) placed by several models; `anatomy_layout`'s finger joints with a curl coupling per finger and two configurations; 58 not ported (frozen checkpoints, generated validation output; listed in its `src/README.md`) |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 
