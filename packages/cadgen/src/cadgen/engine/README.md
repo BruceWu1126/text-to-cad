@@ -123,11 +123,11 @@ def hinge():
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
-| `build.py` | one build: load the script (or code) afresh, one memo run, document, element names, files |
+| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
@@ -166,6 +166,20 @@ same build (the script's own process builds nothing: it asks the daemon, and exi
 the build's status). The build returns once every file is on disk. If the document is
 unchanged, the xbf is not rewritten, nor is a derived file whose options and stat are
 what the build left (**Exports**).
+
+A script is plain Python, loaded afresh by each build as Python imports it
+(`build.load_script`), its folder first on the module search path as `python SCRIPT` has
+it, so a module beside it imports by its own name. A script inside a package -- its folder,
+and each above it up to the topmost, holding an `__init__.py` -- is that package's module by
+its dotted name (`proj.parts.model`), imported as `python -m proj.parts.model` imports it:
+its packages first, from their root, which the search path holds next. So its relative imports
+(`from .lib import WIDTH`, `from ..common import dims`) and the package by its name
+(`import proj.common.dims`) resolve, in a build, in the warm worker build after build, and
+under `python -m`; and `python proj/parts/model.py` takes its package the moment the script
+imports the engine (`model.as_package_module`), so a relative import written above that
+import fails as Python's own does. A script in a folder with no `__init__.py` is the module
+its stem names. An edit to any module the script imports is read on the next build, which
+re-runs the bodies that reach it (**Body retention**).
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that
