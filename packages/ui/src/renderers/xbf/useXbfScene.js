@@ -7,6 +7,9 @@ import { createXbfScene } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 const SERVING = Object.freeze({ phase: "read", label: "Opening document", done: 0, total: 0, determinate: false });
 // How long a page waits before asking an engine that stopped answering again.
 const RETRY_MS = 1000;
+// The least time from one ask for the next version to the next: the viewer holds an ask about this
+// long, and a host whose calls share a few slots (the CAD app's) answers one at once.
+const VERSION_PACE_MS = 1000;
 
 const pause = (ms, signal) => new Promise((resolve, reject) => {
   const timer = setTimeout(resolve, ms);
@@ -14,15 +17,17 @@ const pause = (ms, signal) => new Promise((resolve, reject) => {
 });
 
 /**
- * An `.xbf` as the scene on screen, kept current with the engine that serves it.
+ * A document the cadgen engine serves -- an `.xbf`, or a STEP -- as the scene on screen, kept current
+ * with the engine.
  *
- * The viewer's server says where the engine serves the file (`client.engineDocument`); the page reads
- * the structure and every part buffer from the engine (`loadXbfDocument`) and builds the scene
- * (`createXbfScene`, the builder a snapshot calls too). Then it waits on the engine for the next
- * version (`waitForXbfVersion`): a build that rewrites the document answers at once, and the new
- * version is read with the old one as `previous`, so only the parts the edit changed are fetched and
- * every other part keeps its buffer and the geometry already uploaded. The new scene replaces the old
- * when it is ready, so the old one stays on screen meanwhile and the camera stays where it is.
+ * The viewer's server says where the page reads the file (`client.engineDocument`, through the
+ * viewer, with the client's fetch); the page reads the structure and every part buffer
+ * (`loadXbfDocument`) and builds the scene (`createXbfScene`, the builder a snapshot calls too).
+ * Then it waits on the engine for the next version (`waitForXbfVersion`), about once a second: a
+ * build that rewrites the document, or a STEP written again, answers at once, and the new version
+ * is read with the old one as `previous`, so only the parts the edit changed are fetched and every
+ * other part keeps its buffer and the geometry already uploaded. The new scene replaces the old when
+ * it is ready, so the old one stays on screen meanwhile and the camera stays where it is.
  *
  * @param {{ client: { engineDocument?: Function }, file: string }} options
  * @returns {{ scene: object | null, document: object | null, revision: string, busy: boolean, progress: object | null,
@@ -55,7 +60,7 @@ export function useXbfScene({ client, file }) {
       let noticed = null;
       for (;;) {
         const document = await loadXbfDocument(served.url, {
-          previous, signal,
+          previous, signal, fetch: served.fetch,
           onProgress: ({ done, total }) => {
             if (!previous) setState(current => ({ ...current, progress: { phase: "geometry", label: "Loading parts", done, total, determinate: true } }));
           }
@@ -74,8 +79,11 @@ export function useXbfScene({ client, file }) {
         // The next version: the engine answers when a build lands, else after its wait with this one.
         for (;;) {
           try {
-            const answer = await waitForXbfVersion(served.url, document.version, { signal });
+            const asked = performance.now();
+            const answer = await waitForXbfVersion(served.url, document.version, { signal, fetch: served.fetch });
             if (answer.version && answer.version !== document.version) { noticed = performance.now(); break; }
+            const early = VERSION_PACE_MS - (performance.now() - asked);
+            if (early > 0) await pause(early, signal);
           } catch (error) {
             if (signal.aborted || isAbortError(error)) throw error;
             // The engine went away (its daemon idled out or was stopped): ask for it again, which

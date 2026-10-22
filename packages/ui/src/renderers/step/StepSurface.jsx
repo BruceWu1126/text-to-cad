@@ -39,7 +39,7 @@ import { animationControlsHaveContent } from "../kit/tools/playbar/AnimationTime
 import { useCadAssets } from "./components/workbench/hooks/useCadAssets.js";
 import { useEditingPreview } from "./components/workbench/hooks/useEditingPreview.js";
 import { usePreviewRevision } from "./components/workbench/hooks/usePreviewRevision.js";
-import { useViewportLoadStatus } from "./components/workbench/hooks/useViewportLoadStatus.js";
+import { useViewportLoadStatus } from "../kit/shell/useViewportLoadStatus.js";
 import { editingBuildActive } from "./workbench/editingPreview.js";
 import { useQuickEditMeasurements } from "../kit/tools/measure/measurementChips.jsx";
 import { measureSelectHandlers } from "../kit/tools/measure/measureSelection.js";

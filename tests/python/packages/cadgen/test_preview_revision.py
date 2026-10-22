@@ -1,16 +1,11 @@
 """A build's preview revision (STORE.md §9b): the result tree the moment the result exists,
 its annotations as one object, and its parts as the build pool's one job derives them, all
-before the STEP is published; the saved file's parts are the preview's; its catalog row
-carries what the annotations carried, by the same tokens; and the viewer's reads of a
-preview open no record and import no kernel."""
+before the STEP is published; and the saved file's parts are the preview's."""
 from __future__ import annotations
 
 import contextlib
 import io
-import json
 import os
-import subprocess
-import sys
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -46,52 +41,6 @@ if __name__ == "__main__":
 '''
 
 UNRESOLVABLE = MODEL.replace('m.get("#arm")', 'm.get("#nothing")')
-
-# The viewer's reads of a preview, run where a native import is an error and a record read
-# too (STORE.md §2, property 2): the status, the preview tree's view and its annotations.
-READS = '''
-import importlib.abc, json, sys
-
-
-class NoNative(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"OCP", "build123d"}:
-            raise AssertionError("native import: " + fullname)
-
-
-sys.meta_path.insert(0, NoNative())
-import cadgen.store.index as index
-import cadgen.store.records as records
-
-real = index.read_entry
-
-
-def guarded(kind, key):
-    if kind in ("model", "output", "provenance"):
-        raise AssertionError("a reader consulted index/" + kind)
-    return real(kind, key)
-
-
-index.read_entry = records.read_entry = guarded
-from cadgen.viewer.preview import preview_status
-from cadgen.viewer.store_paths import preview_annotations, virtual_store_asset
-
-output, tree, producer, annotations, store, parts = sys.argv[1:7]
-producer, parts = json.loads(producer), json.loads(parts)
-job = {"id": "e:job-1", "epoch": "e", "sequence": 1, "tool": "run", "storeRoot": store, "outputs": [output],
-       "state": "building", "subject": "/private/part.py",
-       "previews": {output: {"tree": tree, "producer": producer, "parts": parts, "complete": True}},
-       "annotations": {output: {"tree": tree, "object": annotations}}}
-status = preview_status(output, jobs=[job])
-assert status["preview"] == {"tree": tree, "producer": producer, "parts": parts, "complete": True,
-                             "annotations": annotations}, status
-payload, _kind = virtual_store_asset(tree + "/assembly.json", producer=producer)
-descriptor = json.loads(payload)
-assert {cid: entry["part"] for cid, entry in descriptor["components"].items()} == parts, descriptor
-assert json.loads(preview_annotations(annotations))["tree"] == tree
-assert not any(name.split(".")[0] in {"OCP", "build123d"} for name in sys.modules)
-print("ok")
-'''
 
 
 class PreviewRevision(unittest.TestCase):
@@ -165,30 +114,6 @@ class PreviewRevision(unittest.TestCase):
         document = descriptor_for_view(document_entry_for_hash(digest)["tree"], document_hash=digest)
         self.assertEqual({entry["part"] for entry in document["components"].values()}, set(keys.values()))
 
-    def test_the_annotations_are_what_the_saved_files_row_carries_by_the_same_tokens(self):
-        from cadgen._internal.preview_revision import read_annotations
-        from cadgen._internal.source_sidecar import appearance_digest, source_sidecar_path
-        from cadgen.store.objects import object_path
-        from cadgen.store.records import read_record
-        from cadgen.viewer.scanner import catalog_entry
-
-        code, events = self.build()
-        self.assertEqual(code, 0, self.output)
-        announced = self._of(events, "annotations")[-1]["annotations"]
-        self.assertEqual(announced["tree"], self._of(events, "preview")[-1]["preview"]["tree"])
-        payload = read_annotations(announced["object"])
-        self.assertIsNotNone(payload)
-        self.assertTrue(object_path(announced["object"]).is_file(), "artifact side: one object")
-        row = catalog_entry(str(self.step))
-        for field in ("articulation", "display", "animation"):
-            self.assertIsNotNone(payload[field], field)
-            self.assertEqual(payload[field], row[field], field)
-        # The row carries its appearance as a digest; the object carries the block it digests.
-        self.assertEqual(appearance_digest(payload["appearance"]), row["appearanceHash"])
-        # Nothing durable names the object: not the record, not the sidecar.
-        self.assertNotIn(announced["object"], json.dumps(read_record(self.model)))
-        self.assertNotIn(announced["object"], Path(source_sidecar_path(self.step)).read_text(encoding="utf-8"))
-
     def test_a_build_bakes_its_clips_once_for_the_preview_and_the_sidecar(self):
         """The file is written from the result tree the preview resolves against, so its
         sidecar carries the very keyframes the annotations do: baked once, not twice."""
@@ -200,18 +125,6 @@ class PreviewRevision(unittest.TestCase):
         self.assertEqual(code, 0, self.output)
         self.assertTrue(self._of(events, "annotations") and self._of(events, "saved"))
         self.assertEqual(1, bake.call_count)
-
-    def test_the_viewers_reads_of_a_preview_open_no_record_and_import_no_kernel(self):
-        code, events = self.build()
-        self.assertEqual(code, 0, self.output)
-        preview = self._of(events, "preview")[-1]["preview"]
-        annotations = self._of(events, "annotations")[-1]["annotations"]["object"]
-        result = subprocess.run(
-            [sys.executable, "-c", READS, str(self.step), preview["tree"], json.dumps(preview["producer"]),
-             annotations, str(self.store), json.dumps(preview["parts"])],
-            env=os.environ.copy(), text=True, capture_output=True, timeout=120)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout.strip(), "ok")
 
     def test_a_declaration_that_fails_to_resolve_fails_the_build_after_its_preview(self):
         code, events = self.build(UNRESOLVABLE)

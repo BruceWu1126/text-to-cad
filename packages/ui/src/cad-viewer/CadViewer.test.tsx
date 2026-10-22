@@ -51,7 +51,8 @@ test('the CAD viewer shows one file by its absolute path, the home with none, an
     library={homed ? library : undefined} onShow={next => shows.push(next)} onShown={next => shown.push(next)} />;
   const { rerender } = render(view('C:\\models\\a.step'));
   // One renderer per file family, every one reading the tab's settings.
-  expect(props().renderers.map(renderer => renderer.id)).toEqual(['step', 'dxf', 'glb', 'mesh', 'robot', 'xbf']);
+  // A STEP opens as an .xbf does, in the engine document's renderer: the STEP renderer is not registered.
+  expect(props().renderers.map(renderer => renderer.id)).toEqual(['dxf', 'glb', 'mesh', 'robot', 'xbf']);
   // The file in the viewer's one spelling, which the host hears of once the catalog has it.
   expect([props().file, shown]).toEqual(['C:/models/a.step', [null]]);
   await act(async () => client.publish([{ file: 'C:/models/a.step' }]));
@@ -126,16 +127,23 @@ test('the failure states read in the language the host names, and follow it when
   back.unmount();
 });
 
-test('the home pictures a card out of sight, in a viewer of its own, from what is already built, and never builds one', async () => {
-  const client = { ...cadClient(), requestArtifactStatus: vi.fn(async (file: string) => ({ state: file === '/models/a.stl' ? 'compiled' : 'not-compiled' })) };
+test('the home pictures a card out of sight, in a viewer of its own, and never starts the engine reading a STEP', async () => {
+  const client = { ...cadClient(), engineHolds: vi.fn(async (file: string) => file === '/models/held.step') };
   const host = ports(client);
   const view = (file: string) => <CadViewer client={client as never} host={host} tabStore={createTabStore(memoryTabRecord())} live={createLiveRegistry()} file={file}
     library={library} onThumbnail={async () => {}} onShow={() => {}} />;
   const { rerender } = render(view(''));
   const picture = (props().presentation!.home as { props: { picture(model: { path: string }): Promise<boolean> } }).props.picture;
-  // A model whose display is not built keeps its placeholder: its status is read, and that is all.
+  // A STEP the engine does not hold keeps its placeholder: the engine is asked, and that is all.
   await expect(picture({ path: '/models/b.step' })).resolves.toBe(false);
+  expect(client.engineHolds).toHaveBeenCalledWith('/models/b.step');
   expect(viewer.hidden).toBeNull();
+  // One it holds is drawn.
+  let held!: Promise<boolean>;
+  await act(async () => { held = picture({ path: '/models/held.step' }); });
+  expect(viewer.hidden!.file).toBe('/models/held.step');
+  act(() => viewer.hidden!.onError!(new Error('unreadable')));
+  await expect(held).resolves.toBe(false);
   // One that is built is drawn in a view of its own: compact, with renderers of its own, reaching no prompt.
   let drawn!: Promise<boolean>;
   await act(async () => { drawn = picture({ path: '/models/a.stl' }); });

@@ -266,13 +266,14 @@ class TabServerTest(_Session):
             self.assertEqual(self.http("POST", "/__cad/analytics", {"share": False})[0], 200)
         answered.assert_called_once_with(False, by="app")
 
-    def test_a_sync_says_when_the_catalog_moved_and_how_a_watched_build_stands(self) -> None:
+    def test_a_sync_says_when_the_catalog_moved(self) -> None:
         watch = {"file": self.bracket, "previews": [self.bracket]}
         first = self.call("cad_sync", {"view": "v1", "surface": "tab", "watch": watch})["structuredContent"]
         catalog = self.http("GET", f"http://cad.invalid/__cad/catalog?file={quote(self.bracket, safe='')}")[1]
         # The revision a view compares is the one its catalog read carries.
         self.assertEqual(first["catalog"]["revision"], catalog["revision"])
-        self.assertEqual(first["previews"][0]["file"], self.bracket)
+        # No build feed rides on it: a document the engine serves tells its view of a new version.
+        self.assertNotIn("previews", first)
         Path(self.bracket).write_bytes(STL.replace(b"vertex 1 0 0", b"vertex 2 0 0"))
         with mock.patch("cadgen.mcp.tunnel.CATALOG_REVISION_SECONDS", 0):
             moved = self.call("cad_sync", {"view": "v1", "surface": "tab", "watch": watch})["structuredContent"]
@@ -285,12 +286,23 @@ class TabServerTest(_Session):
         self.assertEqual([event["type"] for event in refused["structuredContent"]["events"]], ["show"])
 
     def test_the_tunnel_never_holds_a_call_open(self) -> None:
-        # The preview feed's ``after`` holds a request until the build ledger moves. The host relays every
-        # call through a few slots all its views share, so here it is answered at once; the feed paces itself.
-        url = f"http://cad.invalid/__cad/preview?file={quote(self.bracket, safe='')}&after=epoch%3A1"
-        with mock.patch("cadgen.viewer.preview.preview_update", return_value={"state": "disconnected"}) as update:
-            self.assertEqual(self.http("GET", url)[0], 200)
-        self.assertEqual((update.call_args.args[0], update.call_args.kwargs["after"]), (self.bracket, None))
+        # The host relays every call through a few slots all its views share: an engine document's
+        # wait for its next version is answered at once (the page asks again a second later), and a
+        # document the engine is still reading holds a call no longer than a drawing does.
+        from cadgen.mcp.tunnel import ENGINE_HOLD_SECONDS, ENGINE_RETRY_MS
+
+        asked = []
+
+        def engine(_address, target, _timeout):
+            asked.append(target)
+            return 200, b'{"version":"1-1","patch":null}', "application/json"
+
+        documents = self.server.tunnel.app.engine_documents
+        self.assertEqual((documents.hold_seconds, documents.retry_ms), (ENGINE_HOLD_SECONDS, ENGINE_RETRY_MS))
+        with mock.patch.object(documents, "_engine", "127.0.0.1:9"), mock.patch("cadgen.viewer.xbf._get", engine):
+            reply = self.http("GET", "http://cad.invalid/__cad/xbf/api/doc/abc/version?after=0-0&wait=25")
+        self.assertEqual(reply, (200, {"version": "1-1", "patch": None}))
+        self.assertEqual(asked, ["/api/doc/abc/version?after=0-0&wait=0"])
 
     def test_the_sidebar_and_a_tab_with_nothing_to_show_open_the_home(self) -> None:
         self.http("POST", "/__cad/recents", {"action": "open", "path": self.bracket})
@@ -623,17 +635,32 @@ class TunnelBoundTest(_Session):
         reply, size = self.sized("GET", url)
         self.assertEqual((reply["status"], size < 1024), (502, True))
 
-    def test_a_display_mesh_read_in_parts_is_the_body_its_object_names(self) -> None:
-        from tests.python.support.tessellation import part_fixture, store_part
+    def test_an_engine_part_read_in_parts_is_the_engines_one_answer(self) -> None:
+        # A part's buffer the engine answered, relayed: read a range at a time, every later range
+        # cut from the body the first kept, never asked of the engine again.
+        body = os.urandom(2 * MAX_REPLY_BYTES + 11)
+        asked = []
 
-        fixture = part_fixture()
-        body = base64.b64decode(fixture["glb"])
-        digest = fixture["record"]["glb"]["object"]
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(self.tmp / "store")}):
-            store_part(fixture)
-            whole, sizes, etags = self.read(f"http://cad.invalid/__tess_cache/{fixture['key']}.glb?object={digest}&maxBytes={len(body)}", part=256)
-        self.assertEqual((whole, etags), (body, {f'"{digest}"'}))
-        self.assertGreaterEqual(len(sizes), 3)
+        def engine(_address, target, _timeout):
+            asked.append(target)
+            return 200, body, "application/octet-stream"
+
+        documents = self.server.tunnel.app.engine_documents
+        url = "http://cad.invalid/__cad/xbf/api/doc/abc/part/k1"
+        whole, sizes, etag = b"", [], ""
+        with mock.patch.object(documents, "_engine", "127.0.0.1:9"), mock.patch("cadgen.viewer.xbf._get", engine):
+            while len(whole) < len(body):
+                # As the page asks: each later part names the body it continues (``if-range``).
+                headers = {"range": f"bytes={len(whole)}-{len(whole) + MAX_REPLY_BYTES - 1}", **({"if-range": etag} if etag else {})}
+                reply, size = self.sized("GET", url, headers)
+                self.assertEqual(reply["status"], 206)
+                etag = etag or reply["headers"]["etag"]
+                self.assertEqual(reply["headers"]["etag"], etag)
+                whole += base64.b64decode(reply["body"])
+                sizes.append(size)
+        self.assertEqual((whole, asked), (body, ["/api/doc/abc/part/k1"]))
+        self.assertEqual(len(sizes), 3)
+        self.assertLessEqual(max(sizes), MESSAGE_BOUND)
 
     def test_a_screenshot_longer_than_one_message_is_refused_not_sent(self) -> None:
         viewer = self.poll_as("v1", "tab", 1, self.bracket, png=base64.b64encode(b"\x89PNG" + bytes(MAX_REPLY_BYTES)).decode("ascii"))
@@ -658,8 +685,8 @@ class TunnelBodyTest(unittest.TestCase):
             def handle(self, request, response) -> None:
                 if request.path == "/__cad/catalog":
                     response.send_json(200, catalog)
-                elif request.path == "/__cad/preview":
-                    response.send_json(200, {"state": "idle"})
+                elif request.path == "/__cad/xbf/api/doc/abc/version":
+                    response.send_json(200, {"version": "1-1"})
                 else:
                     response.send_bytes(200, binary, "application/octet-stream")
 
@@ -676,8 +703,8 @@ class TunnelBodyTest(unittest.TestCase):
         self.assertEqual(gzip.decompress(base64.b64decode(reply["body"])), written)
         self.assertEqual(int(reply["headers"]["content-length"]), len(written))
         self.assertLess(len(reply["body"]), len(base64.b64encode(written)) // 4)
-        for path, method, body in (("/__cad/preview", "GET", b'{"state":"idle"}'),
-                                   ("/__tess_cache/a.glb", "GET", binary), ("/__cad/catalog", "HEAD", b"")):
+        for path, method, body in (("/__cad/xbf/api/doc/abc/version", "GET", b'{"version":"1-1"}'),
+                                   ("/__cad/xbf/api/doc/abc/part/k1", "GET", binary), ("/__cad/catalog", "HEAD", b"")):
             reply = call(path, method)
             self.assertNotIn("encoding", reply)
             self.assertEqual(base64.b64decode(reply["body"]), body)

@@ -166,14 +166,15 @@ export function parseXbfLook(json) {
 }
 
 /**
- * The look of the engine at `origin`: `GET <origin>/api/look`, parsed, and its environment image
+ * The look of the engine read under `base` (its origin, or the viewer's relay of it:
+ * `xbfDocument.js`'s `xbfDocumentSource`): `GET <base>/api/look`, parsed, and its environment image
  * read and decoded (`environment.image`).
  */
-export async function fetchXbfLook(origin, { fetch: fetchImpl = globalThis.fetch, signal } = {}) {
-  const response = await fetchImpl(`${origin}/api/look`, { signal, cache: "no-store" });
+export async function fetchXbfLook(base, { fetch: fetchImpl = globalThis.fetch, signal } = {}) {
+  const response = await fetchImpl(`${base}/api/look`, { signal, cache: "no-store" });
   if (!response.ok) throw new Error(`the engine's look: the engine answered ${response.status}`);
   const look = parseXbfLook(await response.json());
-  const image = await fetchImpl(`${origin}${look.environment.url}`, { signal });
+  const image = await fetchImpl(`${base}${look.environment.url}`, { signal });
   if (!image.ok) throw new Error(`the engine's look's environment: the engine answered ${image.status}`);
   return Object.freeze({ ...look, environment: Object.freeze({ ...look.environment, image: decodeRadiance(await image.arrayBuffer()) }) });
 }

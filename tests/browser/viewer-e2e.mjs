@@ -30,14 +30,16 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const diagnosticDir = args.out || process.env.VIEWER_TEST_DIAGNOSTICS_DIR || "";
 const root = path.resolve(args.dir || ".");
-// One fixture per LOAD PATH: an exact-surface STEP package, a mesh, a 2D drawing,
-// a robot description, an engine document.
+// One fixture per LOAD PATH: a mesh, a 2D drawing, a robot description, and the two
+// documents the cadgen engine serves -- a STEP and an engine document (.xbf) -- read through
+// the viewer and drawn by one renderer.
 const fixtures = [
   // `tools` is the file's own tool strip; unavailable tools are hidden. `threeD` has
   // Projection, Display and Preview at the strip's end; `sections`
   // are file sidebar tiles it must have (what there is to read of the file, whatever the tool).
   { format: "stl", file: "smoke.stl", parts: false, tools: ["Annotate", "Clip"], sections: [], threeD: true },
-  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure"], sections: ["Model tree"], threeD: true },
+  // A STEP: read by the engine, drawn as an engine document is.
+  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Model tree"], threeD: true },
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
   { format: "dxf", file: "smoke.dxf", parts: false, tools: ["Select", "Annotate", "Measure"], sections: [], threeD: false, minCoverage: 0.003 },
   { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Links"], threeD: true },
@@ -103,11 +105,10 @@ async function newPage() {
         errors.push(`a relative file reached ${parsed.pathname}: ${file}`);
       }
     }
-    // This machine is not external: an engine document is read from the cadgen engine that
-    // serves it, on a loopback origin of its own.
-    const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname);
-    if (["http:", "https:"].includes(parsed.protocol) && parsed.origin !== viewerOrigin && !loopback) {
-      errors.push(`unexpected external request: ${request.method()} ${url} (${request.resourceType()})`);
+    // The page reads its own origin alone: a document the cadgen engine serves is read through
+    // the viewer (`/__cad/xbf/api/...`), never from the engine's own port.
+    if (["http:", "https:"].includes(parsed.protocol) && parsed.origin !== viewerOrigin) {
+      errors.push(`a request to another origin: ${request.method()} ${url} (${request.resourceType()})`);
       await route.abort("blockedbyclient");
       return;
     }

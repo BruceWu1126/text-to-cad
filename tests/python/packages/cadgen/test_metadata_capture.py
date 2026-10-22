@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import functools
-import json
 import os
 from pathlib import Path
 import threading
@@ -20,17 +19,11 @@ add_repo_path("packages/cadgen/src")
 from cadgen.store import parts, trees
 from cadgen.store.build import build_tree_from_compound
 from cadgen.store.objects import iter_objects, object_path
-from cadgen.viewer.parts import PartSubscribers
 
 WINDOWS_TICK_NS = 15_625_000
 # Twice the coarsest tick trees.py knows (FAT's 2 s write time), and a whole
 # multiple of every finer one.
 SETTLE_OFFSET_NS = 4_000_000_000
-
-
-class PendingPart(Future):
-    def detach(self):
-        pass
 
 
 def runtime_view(tree: str, producer: dict) -> dict:
@@ -63,12 +56,6 @@ class MetadataCapture(unittest.TestCase):
         self.producer = parts.producer_identity()
         self.view = runtime_view(self.tree, self.producer)
         self.cid = next(iter(self.view["components"]))
-        self.request = {
-            "tree": self.tree, "viewId": self.view["viewId"], "producer": self.producer,
-            "components": [{"cid": self.cid, "part": self.view["components"][self.cid]["part"]}],
-        }
-        self.manager = PartSubscribers()
-        self.addCleanup(lambda: [self.manager.cancel(token) for token in list(self.manager._jobs)])
         trees._reset_metadata_capture_cache()
         self.addCleanup(trees._reset_metadata_capture_cache)
         self.settle_store_objects()
@@ -133,26 +120,6 @@ class MetadataCapture(unittest.TestCase):
         first.move(Location((12, 0, 0)))
         self.assertEqual(second.bounding_box().min.X, previous)
         self.assertEqual(captured, self.payloads)
-
-    def test_resolve_and_polls_recheck_one_verified_complete_closure(self):
-        pending = PendingPart()
-        read = trees.read_verified_object
-        with mock.patch.object(trees, "read_verified_object", wraps=read) as reads, \
-             mock.patch("cadgen.daemon.artifacts.submit_artifact", return_value=pending) as submit:
-            first = self.manager.resolve(json.dumps(self.request).encode())
-            self.assertEqual(Counter(call.args[0] for call in reads.call_args_list), Counter(self.payloads.keys()))
-            reads.reset_mock()
-            polled = self.manager.resolve(json.dumps({**self.request, "job": first["job"]}).encode())
-            self.assertEqual(polled["job"], first["job"])
-            self.assertFalse(reads.call_args_list)
-            submit.assert_called_once()
-        records = parts.derive(self.tree, [self.cid], producer=self.producer)
-        pending.set_result(records)
-        with mock.patch.object(trees, "read_verified_object", wraps=read) as reads:
-            ready = self.manager.resolve(json.dumps({**self.request, "job": first["job"]}).encode())
-            self.assertEqual(ready["components"][self.cid]["state"], "ready")
-            self.assertFalse(reads.call_args_list)
-        self.assertEqual(trees.capture_tree(self.tree)[0], self.geometry)
 
     def test_metadata_cache_is_private_bounded_and_store_root_isolated(self):
         trees._reset_metadata_capture_cache()
@@ -289,50 +256,12 @@ class MetadataCapture(unittest.TestCase):
                             lambda: trees.capture_tree(self.tree, retain_payloads=False),
                             lambda: runtime_view(self.tree, self.producer),
                             lambda: parts.derive(self.tree, [self.cid], producer=self.producer),
-                            lambda: self.manager.resolve(json.dumps(self.request).encode()),
                         ):
                             with self.assertRaises((OSError, ValueError)):
                                 call()
                 finally:
                     target.write_bytes(original)
         self.assertEqual(trees.capture_tree(self.tree), (self.geometry, self.payloads))
-
-    def test_the_viewer_verifies_a_tree_once_and_stats_what_each_request_names(self):
-        from cadgen.viewer import parts as viewer_parts
-
-        parts.derive(self.tree, [self.cid], producer=self.producer)
-        resolve = lambda: self.manager.resolve(json.dumps(self.request).encode())["components"][self.cid]["state"]
-        self.assertEqual(resolve(), "ready")
-        with mock.patch.object(viewer_parts, "capture_tree", side_effect=AssertionError("verified again")):
-            for _ in range(3):
-                self.assertEqual(resolve(), "ready")
-
-        # GC or eviction deleting what a request names sends the tree back through the
-        # complete verification, which fails as it did before the tree was pinned.
-        for digest in (self.geometry["components"][self.cid]["brep"], self.tree):
-            target = object_path(digest)
-            original = target.read_bytes()
-            target.unlink()
-            try:
-                with mock.patch("cadgen.daemon.artifacts.submit_artifact", side_effect=AssertionError("missing object admitted")):
-                    with self.assertRaises(FileNotFoundError):
-                        resolve()
-            finally:
-                target.write_bytes(original)
-            self.assertEqual(resolve(), "ready")
-
-        # A component no request names is not looked at; a derivation still verifies
-        # the whole closure before it writes anything.
-        other = next(entry for cid, entry in self.geometry["components"].items() if cid != self.cid)
-        target = object_path(other["brep"])
-        original = target.read_bytes()
-        target.unlink()
-        try:
-            self.assertEqual(resolve(), "ready")
-            with self.assertRaises(FileNotFoundError):
-                parts.derive(self.tree, [self.cid], producer=self.producer)
-        finally:
-            target.write_bytes(original)
 
     def test_damage_inside_one_write_clock_tick_is_never_certified(self):
         """A stamp a later write could reproduce must not certify a cache entry.

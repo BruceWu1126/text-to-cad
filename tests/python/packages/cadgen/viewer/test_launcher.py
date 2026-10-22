@@ -30,7 +30,6 @@ import time
 import unittest
 import urllib.error
 import urllib.request
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -168,8 +167,6 @@ class LauncherFixture(unittest.TestCase):
                 "TEMP": self.home,
                 "TMP": self.home,
                 "CADGEN_STATE_DIR": self.state,
-                # A launch warms the build daemon: the test run's, at the endpoint the
-                # runner gave this process, one for every launch here.
             }
         )
         env.update(overrides)
@@ -666,54 +663,6 @@ class Detach(LauncherFixture):
         self.assertEqual(env["CADGEN_STATE_DIR"], self.state)
         self.assertNotIn("DO_NOT_TRACK", env)
         self.assertNotIn("CADGEN_TELEMETRY", env)
-
-class RefusesWithoutADaemon(LauncherFixture):
-    """Every compile and every part a view lacks is a build daemon's job: where none can
-    start, the viewer does not start either, and says why."""
-
-    def test_where_no_build_daemon_can_start_the_viewer_refuses_naming_why(self) -> None:
-        blocker = Path(self.make_root()) / "not-a-folder"
-        blocker.write_text("", encoding="utf-8")
-        code, stdout, stderr = self.run_to_exit(["--dist", self.make_dist(), "--json", "--new"],
-                                                CADGEN_DAEMON_STATE_DIR=str(blocker / "state"))
-        self.assertEqual(code, 1, stdout + stderr)
-        self.assertIn("The CAD Viewer cannot start: no build daemon can start here.", stderr)
-        self.assertIn("set CADGEN_DAEMON_STATE_DIR to a folder this user can write", stderr)
-        self.assertNotIn("CAD Viewer URL", stdout)
-
-
-class PrewarmsTheDaemon(LauncherFixture):
-    """After its announcement a launch starts the build daemon, whose workers import
-    build123d before any build asks: a session's first build finds them warm."""
-
-    def test_a_launch_leaves_a_daemon_answering(self) -> None:
-        from cadgen.daemon import client
-        from tests.python.support.daemon_cleanup import retire_owned_daemon
-
-        state = tempfile.mkdtemp(prefix="cgv-")  # short: a Unix socket path caps near 104 bytes
-        daemon_env = {
-            "CADGEN_DAEMON_STATE_DIR": state,
-            "CADGEN_DAEMON_SOCKET": (rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt"
-                                     else os.path.join(state, "d.sock")),
-            "CADGEN_CACHE_DIR": os.path.join(state, "store"),
-        }
-        self.addCleanup(shutil.rmtree, state, True)
-
-        def retire() -> None:
-            with mock.patch.dict(os.environ, daemon_env):
-                if client.status() is not None:
-                    retire_owned_daemon(daemon_env["CADGEN_DAEMON_SOCKET"])
-
-        self.addCleanup(retire)  # before the fixture's directories go: the daemon stands in one
-        child = self.launch(["--dist", self.make_dist(), "--json", "--new"], **daemon_env)
-        self.wait_for_url_line(child)
-        with mock.patch.dict(os.environ, daemon_env):
-            deadline = time.monotonic() + 60
-            while client.status() is None:
-                if time.monotonic() >= deadline:
-                    self.fail("no build daemon answered after the viewer started")
-                time.sleep(0.1)
-
 
 class Stop(LauncherFixture):
     def test_stop_asks_the_viewer_on_its_port_to_exit(self) -> None:

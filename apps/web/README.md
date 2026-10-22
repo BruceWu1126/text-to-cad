@@ -48,26 +48,20 @@ and assets, so the app does not scan another package's source.
 - **One boundary**: the app imports shared packages through public exports.
   The root dependency checker prevents app-to-app and package-to-app imports.
   The backend is not here: its code, its tests and its laws live with cadgen.
-- **Document boundary**: everything renders from the artifact, what cadgen
-  resolved its optional schema-11 `.step.json` sidecar into (the catalog entry's
-  `articulation`, `animation` and per-occurrence `display`: data, never code; the
-  page reads no sidecar) and immutable cache views. The viewer never reads model
-  source and never triggers a source build. An already-running build publishes
-  its **preview revision** -- its result tree and the parts that draw it,
-  artifact-side objects -- before saving its STEP output, and the viewer draws it
-  labelled as a preview until the saved file replaces it in place; a preview is
-  never shown as the file. A recorded result whose file cannot be written shows
-  **Save failed**, retaining its usable preview; a model failure stays a build
-  failure even if it published provisional geometry. A part is named by the
-  construction that made it and
-  a ref by its place in the tree and its element's lineage (an `o:` token, then
-  an `f:`/`e:`/`v:` name), never by bytes, ordinals or positions, so the
-  preview's parts are the saved file's and a copied ref survives a rebuild.
-- **Independent motion**: kinematics and animation compose in effect records.
-  Annotation revisions reload without rebuilding geometry. A mismatched STEP
-  digest leaves geometry viewable and reports unavailable annotations.
-- **Loud failure**: a missing entry, an unresolvable ref, or a failed
-  compile surfaces as an alert — never a silently wrong scene.
+- **Document boundary**: everything renders from the file. A STEP and an `.xbf`
+  render from what the cadgen engine serves of them — the structure (names,
+  colours, materials, the mechanism) and one buffer per part, read through the
+  viewer (`/__cad/xbf`, [docs/backend.md](docs/backend.md)) — and every other
+  format from its own bytes or what cadgen resolved from them. The viewer never
+  reads model source and never triggers a source build: a build of a document a
+  view shows reaches it as the engine's next version, at once, and only the parts
+  the edit changed are fetched. A part and an element are named as the engine
+  names them (`f:`/`e:`/`v:` names), never by bytes, ordinals or positions, so a
+  copied ref survives a rebuild.
+- **Independent motion**: a document's mechanism poses its parts in the page
+  (Position); the engine serves the document, never a frame of it.
+- **Loud failure**: a missing entry, an unresolvable ref, or a file the engine
+  cannot read surfaces as an alert — never a silently wrong scene.
 
 ## Launching
 
@@ -90,7 +84,7 @@ without changing that folder. It is only where relative links resolve
 (`serverInfo.start`): the backend opens any file by its absolute path.
 
 Dev spawns the real backend — `python -m cadgen.viewer --new --api-only` on a
-port of its own — and proxies `/__cad` and `/__tess_cache` to it, so there is
+port of its own — and proxies `/__cad` to it, so there is
 one implementation, not two, and Vite owns the client. `VIEWER_PYTHON` names the
 interpreter that has cadgen installed (it defaults to `python3` and must be
 Python 3.11 or newer); `VIEWER_BACKEND_URL` attaches to a backend you started
@@ -153,10 +147,9 @@ detection only; it keeps serving.
   that route serves raw files; generated entries render through a
   different route, so probing it 404s whether or not anything is wrong.
 - **Warm work survives navigation.** The app retains one client across navigation, so the
-  caches keyed to its resources stay valid across file switches. The shared renderer
-  retains completed STEP working sets in a bounded CPU cache, so reopening a
-  warm assembly does not reload each component. Origin and revision identities
-  isolate reuse; changed files and evicted entries load normally.
+  caches keyed to its resources stay valid across file switches. The cadgen engine holds
+  every document it served, a STEP's read held by its bytes, so reopening one reads and
+  meshes nothing again while its daemon lives.
   Inactive WebGL scenes are released, and a file's view (its camera, Display
   settings and pose) lasts only while it is the file on screen: a refresh brings it
   back, and leaving the file drops it.
@@ -170,7 +163,7 @@ detection only; it keeps serving.
 
 This app exports no components. Other hosts use `@text-to-cad/ui/file-viewer` with
 registered renderers and explicit services. Viewer content is registered through
-`@text-to-cad/ui/renderers/step`, for `.dxf` `@text-to-cad/ui/renderers/dxf`, for `.glb`
+`@text-to-cad/ui/renderers/xbf` for `.step`, `.stp` and `.xbf`, for `.dxf` `@text-to-cad/ui/renderers/dxf`, for `.glb`
 `@text-to-cad/ui/renderers/glb`, for `.stl` and `.3mf` `@text-to-cad/ui/renderers/mesh`, and
 for `.urdf`, `.srdf` and `.sdf` `@text-to-cad/ui/renderers/robot` (`CadViewer` registers all
 five with the same client and preferences, as it does for the MCP app); all loading,

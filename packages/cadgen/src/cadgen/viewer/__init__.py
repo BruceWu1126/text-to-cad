@@ -11,9 +11,8 @@ the wheel under ``cadgen/_runtime/viewer`` (see ``cadgen.assets.viewer_dist_dir`
 
 Nothing in this package may import the CAD kernel (OCP, build123d) at module
 scope. ``cadgen viewer`` must start in the time ``cadgen --help`` does, and a
-long-lived server must not hold ~300MB of kernel it never uses: the one
-kernel-bearing action, compiling a document whose bytes have no tree, is a
-compile job in cadgen's build pool (``compiles``; a daemon spare), never this
-process. ``tests/python/packages/cadgen/viewer/test_module_boundaries.py``
-holds the line.
+long-lived server must not hold ~300MB of kernel it never uses: a STEP or an
+``.xbf`` is read, meshed and measured by the cadgen engine, in its daemon and
+the processes it starts (``xbf.py``), never this process.
+``tests/python/packages/cadgen/viewer/test_module_boundaries.py`` holds the line.
 """

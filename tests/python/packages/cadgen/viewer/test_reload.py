@@ -280,12 +280,14 @@ class TheProductionPath(unittest.TestCase):
             type(app), "_dispatch",
             lambda self, request, _: seen.__setitem__(request.path, self.busy_requests()),
         ):
-            for path in ("/__cad/catalog", "/__cad/artifact", "/__cad/server", "/__cad/preview"):
+            for path in ("/__cad/catalog", "/__cad/drawing", "/__cad/server", "/__cad/xbf",
+                         "/__cad/xbf/api/doc/abc/version"):
                 app.handle(_Request(path), None)
         self.assertEqual(seen["/__cad/catalog"], 1)
-        self.assertEqual(seen["/__cad/artifact"], 1, "a compile must defer the restart")
+        self.assertEqual(seen["/__cad/drawing"], 1, "a render must defer the restart")
         self.assertEqual(seen["/__cad/server"], 0, "the reload watcher's own poll must not")
-        self.assertEqual(seen["/__cad/preview"], 0, "a parked long-poll must not")
+        self.assertEqual(seen["/__cad/xbf"], 0, "the engine's serve, which goes on in its daemon, must not")
+        self.assertEqual(seen["/__cad/xbf/api/doc/abc/version"], 0, "nor a parked wait relayed to the engine")
         self.assertEqual(app.busy_requests(), 0, "and the counter unwinds")
         self.assertTrue(app.restart_is_safe())
 

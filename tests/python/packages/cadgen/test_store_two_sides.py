@@ -241,7 +241,6 @@ class TwoSidesLaw(unittest.TestCase):
         from cadgen._internal import doors
         from cadgen.step_artifact_cli import build_step_artifact
         from cadgen.step_export_target import export_cad_target
-        from cadgen.viewer import artifact_status, scanner, store_paths
 
         expected = self._document_trees()
         self.assertTrue(all(expected.values()), expected)
@@ -251,16 +250,7 @@ class TwoSidesLaw(unittest.TestCase):
                 document = self.root / f"{name}.step"
                 self.assertEqual(tree, catalog.result_tree_for(document))
                 self.assertEqual(tree, doors.document_tree(document))
-                self.assertEqual(tree, store_paths.result_tree(document))
                 self.assertTrue((catalog.result_view_dir(document) / "assembly.json").is_file())
-                self.assertIsInstance(store_paths.result_descriptor(tree), dict)
-            listed = scanner.catalog_entry(str(self.robot_step))
-            self.assertEqual(expected["robot"], listed["hash"])
-            # The viewer's status — the badge included — is artifact-side only.
-            verdict = artifact_status.resolve_artifact_verdict(str(self.robot_step))
-            self.assertTrue(verdict.get("ok"), verdict)
-            self.assertNotIn("generated", verdict)
-            self.assertEqual("compiled", artifact_status.artifact_status(str(self.robot_step))["state"])
             payload = export_cad_target(self.robot_step, [("stl", out)], repo_root=self.root)
             self.assertTrue(out.is_file(), payload)
             # A second export at the same variant is satisfied by the ARTIFACT-side ledger.
@@ -276,7 +266,6 @@ class TwoSidesLaw(unittest.TestCase):
     def test_property_3_records_are_deletable(self) -> None:
         from cadgen._internal import doors
         from cadgen.store.provenance import read_provenance, where
-        from cadgen.viewer import scanner, store_paths
         from cadgen.store.records import read_record
 
         expected = self._document_trees()
@@ -296,8 +285,6 @@ class TwoSidesLaw(unittest.TestCase):
                 for name, tree in expected.items():
                     document = self.root / f"{name}.step"
                     self.assertEqual(tree, doors.document_tree(document))
-                    self.assertEqual(tree, store_paths.result_tree(document))
-                self.assertEqual(expected["robot"], scanner.catalog_entry(str(self.root / "robot.step"))["hash"])
             stl = _cli("stl", "build", "robot.step", "exports/robot_no_records.stl", cwd=self.root)
             self.assertEqual(0, stl.returncode, stl.stderr)
             self.assertTrue((self.root / "exports" / "robot_no_records.stl").is_file())

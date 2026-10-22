@@ -4,9 +4,8 @@ The cord (``cord.py`` below) is a 0.8 mm round tube 20 mm long on +X from the
 origin; its clip ``curl`` bends it, over one second, into a quarter circle of
 radius 40/pi mm about (0, 40/pi, 0), keeping its length, with joints 2 mm apart.
 This writes the document sidecar's animation section (``cord.animation.json``)
-and cadgen's tube skins for it (``cord.skins.glb``), exactly the bytes the
-viewer's ``GET /__cad/tube-skins`` serves, so the JS suites read what cadgen
-writes and no JS writes the format.
+and cadgen's tube skins for it (``cord.skins.glb``), the bytes cadgen's tube-skin
+payload makes, so the JS suites read what cadgen writes and no JS writes the format.
 
 Run it from the repository root with the repo's Python whenever the payload, the
 binding rule or the mesher moves::
@@ -60,10 +59,10 @@ import json, sys
 from pathlib import Path
 from cadgen._internal.source_sidecar import read_source_sidecar
 from cadgen._internal.tube_skin_payload import tube_skins_bytes
-from cadgen.viewer.store_paths import result_snapshot
+from cadgen.catalog import result_snapshot_for
 
 step = sys.argv[1]
-document, tree = result_snapshot(step)
+document, tree = result_snapshot_for(Path(step))
 animation = read_source_sidecar(step, document_hash=document)["animation"]
 Path(sys.argv[2]).write_bytes(tube_skins_bytes(tree=tree, document_hash=document, animation=animation))
 Path(sys.argv[3]).write_text(json.dumps(animation, indent=1) + "\\n", encoding="utf-8")

@@ -10,9 +10,10 @@ refines a mesh.
 The bake (`cadgen/_internal/animation_bake.py`) keeps a tube track's keys as
 centerlines in the sidecar's `animation` section. cadgen turns them into a
 **skins payload** (`cadgen/_internal/tube_skin_payload.py`), cached in its
-store and served by `GET /__cad/tube-skins?file=<step>&documentHash=<hash>`; the
-catalog names that URL as an entry's `tubeSkinsUrl` when its animation bends a
-tube, and a snapshot job carries its own in `resolved.tubeSkinsUrl`. The payload
+store; a snapshot job carries its URL in `resolved.tubeSkinsUrl`. (The CAD Viewer
+served it to the STEP renderer as `GET /__cad/tube-skins`; it opens a STEP through
+the cadgen engine now, whose documents carry motions, never clips, and the route
+is gone with that renderer's path.) The payload
 is GLB-framed; its JSON says what each array is:
 
 - a **binding** per occurrence a track bends: its component's mesh refined into

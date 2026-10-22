@@ -56,15 +56,15 @@ fi
 log="$(mktemp)"
 viewer_pidfile="$project/viewer.pid"
 export CADGEN_CACHE_DIR="$project/cache"
-# The fixture builds below and the Viewer's compiles run on a build daemon: this test's own,
-# at a private address, retired on the way out -- and gone by itself after a minute idle if not.
+# The fixture builds below run on a build daemon: this test's own, at a private address,
+# retired on the way out -- and gone by itself after a minute idle if not.
 export CADGEN_DAEMON_STATE_DIR="$project/daemon-state"
 CADGEN_DAEMON_SOCKET="$("$PYTHON" -c 'import os, sys, uuid; print(rf"\\.\pipe\cadgen-test-{uuid.uuid4().hex}" if os.name == "nt" else os.path.join(sys.argv[1], "d.sock"))' "$CADGEN_DAEMON_STATE_DIR")"
 export CADGEN_DAEMON_SOCKET CADGEN_DAEMON_IDLE_TIMEOUT=60
 # The model library every Viewer writes: the test's own, never the user's.
 export CADGEN_STATE_DIR="$project/state"
-# The engine that serves the .xbf fixture to the page: this test's own daemon, one part
-# meshed at a time, stopped on the way out.
+# The engine that serves the STEP and .xbf fixtures to the page: this test's own daemon, one
+# part meshed at a time, stopped on the way out.
 export CADGEN_ENGINE_DIR="$project/engine" CADGEN_ENGINE_MESH=inline CADGEN_ENGINE_IDLE=120
 export CADGEN_VIEWER_DIST="$RUNTIME"
 unset CADGEN_DAEMON_CHILD
@@ -227,9 +227,8 @@ if ! (cd "$project" && "$PYTHON" -m cadgen.engine build --no-daemon smoke_xbf.py
   exit 1
 fi
 
-# The builds and the mesh export above stored display data. The browser gate
-# starts with a new store so its first STEP page is a true cold import, whose
-# compile derives it; only this test's private cache is removed.
+# The fixture builds above stored their results in this test's private store; the
+# viewer reads none of it (a STEP and the .xbf are the engine's to read), so it goes.
 rm -rf "$CADGEN_CACHE_DIR"
 mkdir -p "$CADGEN_CACHE_DIR"
 

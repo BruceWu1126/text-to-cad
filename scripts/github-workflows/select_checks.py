@@ -185,15 +185,17 @@ def _mcp_change(path: str) -> Select:
 
 
 # The engine (cadgen.engine) is a leaf too: nothing in cadgen imports it but the CLI's
-# command table and the package root's lazy verbs (``cadgen.build``, ...), by name. A
-# change to it reaches its own suite, the cadgen tests that name
-# it or read all of cadgen, and the wheel it ships in.
+# command table, the package root's lazy verbs (``cadgen.build``, ...), by name, and the
+# viewer's route for the documents it serves (a STEP, an .xbf: ``cadgen.viewer.xbf``, over
+# its client). A change to it reaches its own suite, the cadgen tests that name it or read
+# all of cadgen, the viewer's browser gate (which opens a STEP and an .xbf through it), and
+# the wheel it ships in.
 ENGINE_CODE = (f"{CADGEN_SRC}/engine/**",)
 _NAMES_ENGINE = r"cadgen\.engine|[\"']xbf[\"' ]"
 
 
 def _engine_change(path: str) -> Select:
-    return select(flags=["packaging"], cadgen=_cadgen_tests_naming(_NAMES_ENGINE, ("engine",)))
+    return select(flags=["web_viewer", "packaging"], cadgen=_cadgen_tests_naming(_NAMES_ENGINE, ("engine",)))
 
 
 _MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")

@@ -131,7 +131,7 @@ class HostGate(HttpLayerTestCase):
         self.assertIn(b"'evil.example'", body)
 
     def test_the_gate_covers_every_route(self):
-        for path in ("/", "/assets/app.js", "/__cad/catalog", "/__tess_cache/a.glb", "/__cad/nope"):
+        for path in ("/", "/assets/app.js", "/__cad/catalog", "/__cad/xbf/api/look", "/__cad/nope"):
             with self.subTest(path=path):
                 status, _, _ = self.fixture.request("GET", path, headers={"Host": "attacker.example"})
                 self.assertEqual(status, 403)
@@ -173,7 +173,7 @@ class BindAsksNoReverseDns(unittest.TestCase):
 
 class PostGuard(HttpLayerTestCase):
     def test_missing_header_is_refused_with_the_exact_message(self):
-        status, _, body = self.fixture.request("POST", "/__cad/artifact")
+        status, _, body = self.fixture.request("POST", "/__cad/recents")
         self.assertEqual(status, 403)
         self.assertEqual(
             body.decode("utf-8"),
@@ -182,7 +182,7 @@ class PostGuard(HttpLayerTestCase):
         )
 
     def test_an_empty_value_is_falsy_and_refused(self):
-        status, _, _ = self.fixture.request("POST", "/__cad/artifact", headers={"x-cadgen-viewer": ""})
+        status, _, _ = self.fixture.request("POST", "/__cad/recents", headers={"x-cadgen-viewer": ""})
         self.assertEqual(status, 403)
 
     def test_the_gate_runs_before_dispatch_so_unknown_routes_are_covered(self):
@@ -191,7 +191,7 @@ class PostGuard(HttpLayerTestCase):
 
     def test_host_gate_wins_over_the_header_gate(self):
         status, _, body = self.fixture.request(
-            "POST", "/__cad/artifact", headers={"Host": "attacker.example", "x-cadgen-viewer": "1"}
+            "POST", "/__cad/recents", headers={"Host": "attacker.example", "x-cadgen-viewer": "1"}
         )
         self.assertEqual(status, 403)
         self.assertIn(b"DNS-rebinding", body)
@@ -337,29 +337,6 @@ class Pick(HttpLayerTestCase):
             first.join(10)
         self.assertEqual((second[0], json.loads(second[2])), (500, {"error": "A file chooser is already open."}))
         self.assertEqual(answers, [200])
-
-
-class ArtifactBuildPayload(HttpLayerTestCase):
-    """The build route answers at once: it never holds a request for a build.
-
-    An ``.stl`` is the subject on purpose -- ``build_artifact`` answers "compiled"
-    for an unowned entry without touching the kernel, so this pins the payload
-    shape rather than exercising a compile (``test_document_compile`` follows a
-    compile through the status route).
-    """
-
-    def test_an_entry_with_nothing_to_build_answers_compiled_and_nothing_else(self):
-        import json as json_module
-
-        target = os.path.join(self.fixture.root, "part.stl")
-        Path(target).write_text("solid part\nendsolid part\n", encoding="utf-8")
-        status, _, body = self.fixture.request(
-            "POST",
-            f"/__cad/artifact?file={target}",
-            headers={"x-cadgen-viewer": "1"},
-        )
-        self.assertEqual(status, 200, body[:400])
-        self.assertEqual(json_module.loads(body), {"ok": True, "state": "compiled"})
 
 
 class StaticDistAndSpa(HttpLayerTestCase):
@@ -620,7 +597,7 @@ class HeaderContract(HttpLayerTestCase):
             b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
             b"GET /__cad/server HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
             b"GET /__cad/server HTTP/1.1\r\nHost: evil.example\r\nConnection: close\r\n\r\n",
-            b"POST /__cad/artifact HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            b"POST /__cad/recents HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
             b"OPTIONS / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
             b"GET /assets/missing.js HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         ]
@@ -668,8 +645,8 @@ class HeaderContract(HttpLayerTestCase):
 class KeepAlive(HttpLayerTestCase):
     """The highest-risk framing detail in the port.
 
-    ``POST /__cad/artifact`` never reads its request body — every parameter
-    rides the query string, so a body sent with it goes unread.
+    A POST answered without its body read (one to a route that is not there)
+    leaves the body unread.
     Node discards them harmlessly; an HTTP/1.1 handler that leaves
     content-length bytes in the buffer mis-parses the NEXT request on that
     connection. It never shows up in single-request tests — only as intermittent
@@ -678,7 +655,7 @@ class KeepAlive(HttpLayerTestCase):
 
     def test_an_undrained_post_body_does_not_desync_the_next_request(self):
         raw = self.fixture.raw(
-            b"POST /__cad/artifact?file=/x.step HTTP/1.1\r\n"
+            b"POST /__cad/nope?file=/x.step HTTP/1.1\r\n"
             b"Host: 127.0.0.1\r\nx-cadgen-viewer: 1\r\nContent-Length: 5\r\n\r\nHELLO"
             b"GET /__cad/server HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
             reads=2,
@@ -709,12 +686,11 @@ class KeepAlive(HttpLayerTestCase):
 
 
 class RequestBodies(HttpLayerTestCase):
-    def test_tess_metadata_cap_precedes_body_read_and_closes_the_connection(self):
-        from cadgen.viewer.tess_cache import TESS_CACHE_METADATA_MAX_BYTES
+    def test_a_body_cap_precedes_the_body_read_and_closes_the_connection(self):
+        from cadgen.viewer.http_app import _LIBRARY_BODY_LIMIT
 
-        for path, limit in (("/__tess_cache/probe", TESS_CACHE_METADATA_MAX_BYTES),
-                            ("/__tess_cache/batch", TESS_CACHE_METADATA_MAX_BYTES),
-                            ("/__cad/parts", 128 * 1024), ("/__cad/parts/cancel", 128 * 1024)):
+        for path, limit in (("/__cad/features", 4096), ("/__cad/language", 4096),
+                            ("/__cad/recents", _LIBRARY_BODY_LIMIT)):
             with self.subTest(path=path):
                 raw = self.fixture.raw(
                     f"POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
@@ -739,11 +715,10 @@ class RequestBodies(HttpLayerTestCase):
         self.assertTrue(received.startswith(b"HTTP/1.1 413"), received[:200])
 
     def test_a_chunked_body_is_refused_deliberately(self):
-        # The stdlib decodes no chunked framing at all. Silently mangling a
-        # /__tess_cache/batch body would demote the client's provider to
-        # per-key gets for the life of the page.
+        # The stdlib decodes no chunked framing at all: a body it cannot frame is
+        # refused before any route reads a mangled one.
         raw = self.fixture.raw(
-            b"POST /__tess_cache/batch HTTP/1.1\r\n"
+            b"POST /__cad/recents HTTP/1.1\r\n"
             b"Host: 127.0.0.1\r\nx-cadgen-viewer: 1\r\nTransfer-Encoding: chunked\r\n\r\n"
             b"5\r\nHELLO\r\n0\r\n\r\n"
         )
@@ -755,7 +730,7 @@ class RequestBodies(HttpLayerTestCase):
         # it. Answer first, then close.
         oversize = handler_module.MAX_REQUEST_BODY_BYTES + 1
         raw = self.fixture.raw(
-            b"POST /__tess_cache/batch HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            b"POST /__cad/recents HTTP/1.1\r\nHost: 127.0.0.1\r\n"
             b"x-cadgen-viewer: 1\r\nContent-Length: " + str(oversize).encode() + b"\r\n\r\n"
         )
         self.assertIn(b"400", raw.split(b"\r\n")[0])
@@ -763,48 +738,6 @@ class RequestBodies(HttpLayerTestCase):
 
 
 class EveryRouteAnswersForReal(HttpLayerTestCase):
-    def test_tess_get_requires_exact_object_and_admitted_size_before_read(self):
-        from urllib.parse import urlencode
-
-        digest = "ab" * 32
-        for object_hash, limit in ((None, None), (digest, None), (None, "1"), (digest.upper(), "1"),
-                                   (" " + digest, "1"), (digest, "0"), (digest, "-1"),
-                                   (digest, "1.5"), (digest, "9007199254740992")):
-            query = urlencode({key: value for key, value in (("object", object_hash), ("maxBytes", limit)) if value is not None})
-            with self.subTest(object_hash=object_hash, limit=limit), mock.patch(
-                "cadgen.viewer.http_app.read_tess_cache_entry", side_effect=AssertionError("unadmitted cache read"),
-            ):
-                status, _, _ = self.fixture.request("GET", f"/__tess_cache/a.glb?{query}")
-            self.assertEqual(status, 400)
-
-    def test_tess_get_uses_the_probed_object_and_byte_limit(self):
-        import base64
-        import json
-        from cadgen.store import parts
-        from tests.python.support.tessellation import part_fixture, store_part
-
-        fixture = part_fixture()
-        key = fixture["key"]
-        with mock.patch.dict(os.environ, {"CADGEN_CACHE_DIR": str(Path(self.fixture.root) / "store")}):
-            record = store_part(fixture)
-            status, _, body = self.fixture.request("POST", "/__tess_cache/probe", headers={"x-cadgen-viewer": "1"},
-                                                 body=json.dumps({"parts": [key, "2" * 64 + key[64:]]}).encode())
-            self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body), {"entries": {key: record}}, "a part the store lacks is absent")
-            # The part's display mesh and its selector table, each read by what its record says of it.
-            for role, suffix, content_type in (("glb", ".glb", "model/gltf-binary"),
-                                               ("selectors", ".selectors.json", "application/json")):
-                with self.subTest(role=role):
-                    route = f"/__tess_cache/{key}{suffix}?object={record[role]['object']}&maxBytes={record[role]['byteLength']}"
-                    status, headers, body = self.fixture.request("GET", route)
-                    self.assertEqual((status, body), (200, base64.b64decode(fixture[role])))
-                    self.assertEqual({name.lower(): value for name, value in headers.items()}.get("content-type"), content_type)
-            # cadgen writes every part: a client's write is refused, and changes nothing.
-            status, headers, _ = self.fixture.request("POST", f"/__tess_cache/{key}.glb",
-                                                      headers={"x-cadgen-viewer": "1"}, body=base64.b64decode(fixture["glb"]))
-            self.assertEqual(status, 405)
-            self.assertEqual(parts.probe(key), record)
-
     def test_no_route_reports_itself_as_unported(self):
         # This class used to list the routes still awaiting their step, each
         # answering 501 with a distinctive body so a missing route could never
@@ -813,11 +746,8 @@ class EveryRouteAnswersForReal(HttpLayerTestCase):
         for method, path, headers in [
             ("GET", "/__cad/server", {}),
             ("GET", "/__cad/catalog", {}),
-            ("GET", "/__cad/artifact?file=x.step", {}),
-            ("POST", "/__cad/artifact?file=x.step", {"x-cadgen-viewer": "1"}),
+            ("GET", "/__cad/xbf", {}),
             ("GET", "/__cad/asset?file=/x.step", {}),
-            ("GET", "/__cad/store?file=x", {}),
-            ("GET", "/__tess_cache/a.glb", {}),
         ]:
             with self.subTest(method=method, path=path):
                 _, _, body = self.fixture.request(method, path, headers=headers)

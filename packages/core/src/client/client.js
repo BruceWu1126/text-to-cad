@@ -33,6 +33,8 @@ function abortError() {
 const DRAWING_RETRY_MAX_MS = 5000;
 // The longest a measure's 202 may have the client wait before it asks again.
 const MEASURE_RETRY_MAX_MS = 2000;
+// The longest an engine document's 202 (the engine still reading it) may have the client wait.
+const ENGINE_RETRY_MAX_MS = 5000;
 
 /** `ms` of waiting that `signal` ends early, as an AbortError. */
 function pause(ms, signal) {
@@ -308,13 +310,27 @@ export function createCadClient({ origin = '', fetch: fetchImpl = globalThis.fet
       if (!file) return Promise.reject(new Error('Missing file'));
       return request('/__cad/robot', { file, signal, timeoutMs: 10_000, operation: 'robot' });
     },
-    engineDocument(file, { signal } = {}) {
-      // A cadgen engine document (`.xbf`) is served by the ENGINE, not by this server: the viewer
-      // asks the engine to serve it and answers where (`cadgen.viewer.xbf`), and the page reads
-      // its structure and part buffers from the engine directly. Starting the engine and reading
-      // a large document the first time can take a while; the server stays silent meanwhile.
-      if (!file) return Promise.reject(new Error('Missing file'));
-      return request('/__cad/xbf', { file, signal, timeoutMs: 120_000, operation: 'engine-document' });
+    async engineDocument(file, { signal } = {}) {
+      // A document the cadgen ENGINE reads -- an `.xbf`, or a STEP -- is served by the engine: the
+      // viewer asks it to serve the file (`cadgen.viewer.xbf`) and answers where the page reads it,
+      // through this server (`/__cad/xbf/api/doc/<id>`), so the reads travel as every request does
+      // (over the CAD app's tunnel too). Answered with the fetch they are made with. The engine's
+      // first read of a large STEP takes a while: the server answers 202 { state: 'reading',
+      // retryMs } until the engine holds it, and the client asks again after `retryMs`; each
+      // request's 10 s is the time the server may stay silent.
+      if (!file) throw new Error('Missing file');
+      for (;;) {
+        const reply = await request('/__cad/xbf', { file, signal, timeoutMs: 10_000, operation: 'engine-document' });
+        if (reply?.state !== 'reading') return { ...reply, url: viewerOriginUrl(origin, reply.url), fetch: fetchImpl };
+        await pause(Math.min(Math.max(Number(reply.retryMs) || 0, 0), ENGINE_RETRY_MAX_MS), signal);
+        if (disposed) throw abortError();
+      }
+    },
+    async engineHolds(file, { signal } = {}) {
+      // Whether the engine holds a read of the document now, asked without starting one.
+      if (!file) throw new Error('Missing file');
+      const reply = await request('/__cad/xbf', { file, signal, params: { held: '1' }, timeoutMs: 10_000, operation: 'engine-document' });
+      return reply?.held === true;
     },
     requestParts(body, { signal } = {}) {
       return request('/__cad/parts', {

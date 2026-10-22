@@ -21,8 +21,9 @@ never at namespace-import time) and the bundled runtime.
 Never app code, never JavaScript source at runtime.
 
 **DEPENDED ON BY** — every skill (as a pinned installed distribution). The
-CAD Viewer is not a dependent but a part: `cadgen.viewer` serves the client and
-submits a document's compile as a job to the same build pool every door uses.
+CAD Viewer is not a dependent but a part: `cadgen.viewer` serves the client, and
+has the cadgen engine (`cadgen.engine`, its daemon) serve every STEP and `.xbf` a
+page opens, relaying the page's reads of it.
 
 ## The rest of the package's documentation
 
@@ -677,13 +678,11 @@ src/cadgen/
                          #   source_sidecar, step_reemit
   viewer/                # the CAD Viewer's server: launcher (main),
                          #   routes (http_app), files by absolute path
-                         #   (backend), a file's catalog row (scanner; started
-                         #   when a watched build saves: warm), the explorer's
-                         #   reads (folders), the model library every CAD view
-                         #   shares (recents), status
-                         #   (artifact_status: not compiled / compiling /
-                         #   compiled / failed), build_progress (the daemon's
-                         #   job ledger, read over its socket)
+                         #   (backend), a file's catalog row (scanner), the
+                         #   explorer's reads (folders), the model library every
+                         #   CAD view shares (recents), and a STEP's and an
+                         #   .xbf's serve by the engine and the relay of its
+                         #   reads (xbf)
   mcp/                   # CAD for agent hosts: stdio JSON-RPC (protocol), the
                          #   tools and launches (server), open views (views),
                          #   the viewer routes in-process (tunnel), roots,

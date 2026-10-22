@@ -755,8 +755,9 @@ class Server:
         Up: the view's model, its state when it changed (what ``cad_view`` reads), ``focused``
         when a person just touched it, and ``closed`` once a newer view took its place. Down: the
         agent's requests for it (``show``, ``capture``), and for what it watches -- its model's
-        catalog entry and the build feed of any STEP it shows -- the entry's revision (the view
-        reads the catalog again only when that moves) and each feed's current status.
+        catalog entry -- the entry's revision (the view reads the catalog again only when that
+        moves). A STEP or an ``.xbf`` the view shows tells it of a new version itself, through the
+        engine's routes (``cadgen.viewer.xbf``): no build feed rides here.
         """
         view_id = self._register(arguments, context)
         self._mounting.pop(view_id, None)
@@ -785,10 +786,6 @@ class Server:
                 answer["catalog"] = {"revision": self.tunnel.catalog_revision(watch["file"])}
             except Exception as error:  # noqa: BLE001 - the view shows the catalog's own failure on its next read
                 answer["catalog"] = {"error": str(error) or type(error).__name__}
-            else:
-                files = [item for item in watch.get("previews") or [] if isinstance(item, str)][:4]
-                if files:
-                    answer["previews"] = [{"file": item, **self.tunnel.preview(item)} for item in files]
         if sidebar:
             # Every thread's agent can reach the sidebar (``sidebar_views.py``): it says what it shows
             # there, and takes what was left for it.

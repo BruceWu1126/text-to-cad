@@ -7,6 +7,7 @@ import { createDxfRenderer } from "./dxf/index.js";
 import { createGlbRenderer } from "./glb/index.js";
 import { createMeshRenderer } from "./mesh/index.js";
 import { createRobotRenderer } from "./robot/index.js";
+import { createXbfRenderer } from "./xbf/index.js";
 
 // A registration loads its component beside its document; these tests are about the document.
 vi.mock("./step/StepRenderer.js", () => ({ default: () => null }));
@@ -14,6 +15,7 @@ vi.mock("./dxf/DxfRenderer.jsx", () => ({ default: () => null }));
 vi.mock("./glb/GlbRenderer.jsx", () => ({ default: () => null }));
 vi.mock("./mesh/MeshRenderer.jsx", () => ({ default: () => null }));
 vi.mock("./robot/RobotRenderer.jsx", () => ({ default: () => null }));
+vi.mock("./xbf/XbfRenderer.jsx", () => ({ default: () => null }));
 
 const file = (path: string, mediaType: string, mime?: string): FileMetadata => ({
   path,
@@ -35,6 +37,15 @@ describe("viewer renderer registrations", () => {
     expect(selectRenderer([step, dxf], file("part.step", "cad"))).toBe(step);
     // Preview is each viewer's own mode, never a flag a registration offers a host.
     expect(["fullscreen", "preview", "previewing"].some(key => key in dxf || key in step)).toBe(false);
+  });
+
+  it("opens a STEP and an .xbf in the engine document's renderer, and nothing else in it", () => {
+    const renderers = [createDxfRenderer({ client }), createGlbRenderer({ client }), createMeshRenderer({ client }),
+      createRobotRenderer({ client }), createXbfRenderer({ client })];
+    for (const path of ["part.step", "PART.STP", "model.xbf"]) expect(selectRenderer(renderers, file(path, "cad"))?.id).toBe("xbf");
+    for (const [path, id] of [["plate.dxf", "dxf"], ["arm.glb", "glb"], ["arm.stl", "mesh"], ["bot.urdf", "robot"]]) {
+      expect(selectRenderer(renderers, file(path, "cad"))?.id).toBe(id);
+    }
   });
 
   it("prepares every workspace file from its catalog entry alone, and its document releases the render session it opened", async () => {

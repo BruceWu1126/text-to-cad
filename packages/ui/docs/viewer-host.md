@@ -323,10 +323,11 @@ On the home, a card on screen with no picture, or one taken before its file last
 changed (`pictured` against `modified`), is pictured out of sight wherever the host
 keeps pictures (`onThumbnail`): `CadViewer` mounts a viewer of its own for it, over
 its own client — its own renderers and live binding, compact, behind the page at the
-picture's size — one model at a time, each once per visit, and only a model whose
-artifact status is already `compiled`, and keeps the picture through `onThumbnail`
-as it keeps the file on screen's. The home never builds anything: an unbuilt model
-keeps its placeholder until a view shows it.
+picture's size — one model at a time, each once per visit, and a STEP only once the
+cadgen engine holds it (`client.engineHolds`), and keeps the picture through
+`onThumbnail` as it keeps the file on screen's. The home never starts the engine's
+read of a STEP (a large one's is long): one it does not hold keeps its placeholder
+until a view shows it.
 `readState().display` and `setDisplaySettings(patch)` use the same sparse display
 schema as snapshots: `mode` selects `solid`, `shaded`, `parts`, `xray`, `hidden-line`,
 or `wireframe` (each a look at its own defaults), `grid` switches the measuring grid,

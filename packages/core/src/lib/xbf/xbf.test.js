@@ -33,14 +33,16 @@ function partBytes(key) {
   return file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
 }
 
-/** An engine that answers the fixture: the structure (or `structure`), every part, a version, its look. */
-function engine({ structure = STRUCTURE, parts = {}, version = null } = {}) {
+/** An engine that answers the fixture: the structure (or `structure`), every part, a version, its look;
+ * under its own origin, or under `base` (the viewer's relay of it). */
+function engine({ structure = STRUCTURE, parts = {}, version = null, base = "http://127.0.0.1:9" } = {}) {
   const asked = [];
   const fetch = async (url) => {
     asked.push(url);
-    if (url === "http://127.0.0.1:9/api/look") return new Response(JSON.stringify(ENGINE_LOOK));
-    if (url === "http://127.0.0.1:9/api/look/environment") return new Response(ENGINE_ENVIRONMENT);
-    const rest = url.slice(URL_BASE.length);
+    if (url === `${base}/api/look`) return new Response(JSON.stringify(ENGINE_LOOK));
+    if (url === `${base}/api/look/environment`) return new Response(ENGINE_ENVIRONMENT);
+    if (!url.startsWith(`${base}/api/doc/abc123`)) return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+    const rest = url.slice(`${base}/api/doc/abc123`.length);
     if (rest === "") return new Response(JSON.stringify(structure));
     if (rest.startsWith("/version")) return new Response(JSON.stringify(version || { version: structure.version, patch: null }));
     const part = /^\/part\/([^/]+)$/.exec(rest);
@@ -89,8 +91,34 @@ test("a document is its structure and one fetch per part key, however many insta
   assert.equal(document.version, STRUCTURE.version);
   assert.equal(document.parts.size, 2);
   assert.deepEqual(asked.filter(url => url.includes("/part/")).length, 2, "three instances, two parts");
-  assert.deepEqual(document.source, { url: URL_BASE, origin: "http://127.0.0.1:9", doc: "abc123" });
+  assert.deepEqual(document.source, { url: URL_BASE, origin: "http://127.0.0.1:9", base: "http://127.0.0.1:9", doc: "abc123" });
+  assert.equal(document.fetch, fetch, "it says what it was read with");
   assert.throws(() => xbfDocumentSource("http://127.0.0.1:9/elsewhere"), /API URL/);
+  assert.throws(() => xbfDocumentSource("/__cad/xbf/api/doc/abc123"), /API URL/, "a page-relative URL needs a page");
+});
+
+test("a document read through the viewer's relay is read under it, every read of it with the fetch it was read with", async () => {
+  // The CAD app's page: every request is absolute on its tunnel's placeholder origin.
+  const relayed = "http://cad.invalid/__cad/xbf/api/doc/abc123";
+  const { fetch, asked } = engine({ base: "http://cad.invalid/__cad/xbf", version: { version: "9-9", patch: null } });
+  const document = await loadXbfDocument(relayed, { fetch });
+  assert.deepEqual(document.source, { url: relayed, origin: "http://cad.invalid", base: "http://cad.invalid/__cad/xbf", doc: "abc123" });
+  assert.equal(document.parts.size, 2);
+  assert.equal(asked.every(url => url.startsWith("http://cad.invalid/__cad/xbf/api/")), true, asked.join(" "));
+  assert.deepEqual(asked.filter(url => url.includes("/api/look")),
+    ["http://cad.invalid/__cad/xbf/api/look", "http://cad.invalid/__cad/xbf/api/look/environment"]);
+  assert.deepEqual(await fetchXbfElementFacts(document.source.url, PLATE.key, "face", 3, { fetch: document.fetch }),
+    { kind: "face", ordinal: 3, area: 12.5 });
+  assert.equal((await waitForXbfVersion(document.source.url, document.version, { fetch: document.fetch })).version, "9-9");
+  document.release();
+  // The viewer's own page: a page-relative URL, read against the page.
+  globalThis.location = { href: "http://127.0.0.1:3245/?file=/models/a.step" };
+  try {
+    assert.deepEqual(xbfDocumentSource("/__cad/xbf/api/doc/abc123"), { url: "http://127.0.0.1:3245/__cad/xbf/api/doc/abc123",
+      origin: "http://127.0.0.1:3245", base: "http://127.0.0.1:3245/__cad/xbf", doc: "abc123" });
+  } finally {
+    delete globalThis.location;
+  }
 });
 
 test("a new version fetches the parts it changed and keeps the rest, buffers and geometry alike", async () => {

@@ -272,7 +272,6 @@ export default defineConfig(async ({ command }) => ({
             const target = await startDevBackend();
             return {
               "/__cad": { target, changeOrigin: false },
-              "/__tess_cache": { target, changeOrigin: false },
             };
           })()
         : undefined,

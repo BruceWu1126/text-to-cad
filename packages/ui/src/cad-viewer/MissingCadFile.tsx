@@ -1,36 +1,27 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { FileX } from 'lucide-react';
-import type { CadEntry, CadWorkspaceService } from '@text-to-cad/core/client';
+import type { CadEntry } from '@text-to-cad/core/client';
 import { EmptyState } from '../file-viewer/navigation/index.js';
 import { useI18n } from '../i18n/index.js';
-import { ViewerLoadingOverlay } from '../file-viewer/presentation.js';
-import ViewerAlertCard from '../renderers/kit/status/ViewerAlertCard.jsx';
-import { useEditingPreview } from '../renderers/step/components/workbench/hooks/useEditingPreview.js';
-import { editingBuildActive } from '../renderers/step/workbench/editingPreview.js';
-import { buildViewerEditAlert } from '../renderers/step/workbench/viewerAlerts.js';
 
-/** A first save can fail before the requested file exists. Its status is still the output's
- * artifact-only build feed; no catalog entry or saved document is invented to show it. `title`
- * is the host's translation of "File does not exist", else the surrounding language's. */
-export function MissingCadFile({ file, client, entry, reload, action, title }: {
-  file: string; client: CadWorkspaceService; entry: CadEntry | null; reload?: () => void; action?: ReactNode; title?: string;
+/** A file that is not there (yet). When the catalog has it -- a build wrote it, or it was put back --
+ * the view opens it, once for each version of it: `reload` is the host's. Nothing else is watched:
+ * a document the cadgen engine builds is written whole, and the engine says nothing of a build
+ * before it is. `title` is the host's translation of "File does not exist", else the surrounding
+ * language's. */
+export function MissingCadFile({ file, entry, reload, action, title }: {
+  file: string; entry: CadEntry | null; reload?: () => void; action?: ReactNode; title?: string;
 }) {
   const { t } = useI18n();
-  const { state } = useEditingPreview(file, { client, enabled: /\.st(?:ep|p)$/i.test(file) });
-  const active = editingBuildActive(state);
-  const saved = !state.superseded && (active || state.state === 'done') ? state.saved?.documentHash || '' : '';
   const reloaded = useRef('');
   useEffect(() => {
-    // The saved event prompts the catalog read; reopen only once that read confirms these
-    // exact bytes at this path. A stale entry or another file's late reply cannot do it.
-    const identity = `${file}:${saved}`;
-    if (saved && entry?.file === file && entry.documentHash === saved && reload && reloaded.current !== identity) {
+    // Reopen only once the catalog confirms a file at this very path: a stale entry or another
+    // file's late reply cannot do it.
+    const identity = entry?.file === file ? `${file}:${entry.hash || ''}:${entry.bytes || 0}` : '';
+    if (identity && reload && reloaded.current !== identity) {
       reloaded.current = identity;
       reload();
     }
-  }, [file, saved, entry, reload]);
-  const alert = buildViewerEditAlert(state, false);
-  if (alert) return <div className="relative h-full"><ViewerAlertCard alert={{ ...alert, reload: Boolean(reload) }} hasContent={false} file={file} onReload={reload} /></div>;
-  if (active || state.saving || saved) return <div className="relative h-full"><ViewerLoadingOverlay viewerLoading /></div>;
+  }, [file, entry, reload]);
   return <EmptyState icon={FileX} title={title ?? t("file.missing")} description={file} tone="warn" action={action} />;
 }

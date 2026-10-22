@@ -98,10 +98,15 @@ export interface CadDrawingPayload {
  * What `GET /__cad/xbf` answers: the engine serving a cadgen engine document (`engine`, its origin),
  * the document's id there (`doc`) and its API URL (`url`, `<engine>/api/doc/<doc>`).
  */
+/**
+ * Where a page reads a document the cadgen engine serves (an `.xbf`, a STEP): its id, its API URL
+ * through the viewer (`/__cad/xbf/api/doc/<id>`, on the client's origin), and the fetch every read
+ * of it is made with (the client's own: the CAD app's travels over its tunnel).
+ */
 export interface CadEngineDocument {
-  engine: string;
   doc: string;
   url: string;
+  fetch: typeof fetch;
 }
 /**
  * What `GET /__cad/robot` answers: a URDF, SDF or SRDF resolved by cadgen into the articulation
@@ -272,11 +277,13 @@ export interface CadWorkspaceService {
   /** `GET /__cad/robot`: a robot description resolved for the page (`cadgen.robot_payload`). */
   robot(file: string, options?: CadRequestOptions): Promise<CadRobotPayload>;
   /**
-   * `GET /__cad/xbf`: where the cadgen engine serves an `.xbf` document, which the page then reads
-   * from the engine directly (`lib/xbf/xbfDocument.js`). A host without an engine leaves it out, and
-   * the xbf renderer says it cannot open the file.
+   * `GET /__cad/xbf`: where the page reads a document the cadgen engine serves (an `.xbf`, a STEP),
+   * through this server (`lib/xbf/xbfDocument.js`), once the engine holds it. A host without an
+   * engine leaves it out, and the xbf renderer says it cannot open the file.
    */
   engineDocument?(file: string, options?: CadRequestOptions): Promise<CadEngineDocument>;
+  /** Whether the engine holds a read of the document now (`GET /__cad/xbf?held=1`), asked without starting one. */
+  engineHolds?(file: string, options?: CadRequestOptions): Promise<boolean>;
   readonly resources: CadResourceProvider;
   /**
    * Each component's part row: its record, which cadgen derives in one job for a part the store
