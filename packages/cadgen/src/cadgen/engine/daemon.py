@@ -129,7 +129,9 @@ class Worker:
     answer to the waiting ``build`` call, and its closing ``settled`` to ``on_settled``,
     which lets the server look at those files again. ``where`` asks the worker what made
 one element of a document it built (``worker``): a request of its own, answered on the
-same pipe, even while a build runs."""
+same pipe, even while a build runs. Requests reach the worker on its original stdin, which it
+reads on a handle of its own; its standard input is the null device, so nothing a model loads
+or reads ever touches the request pipe (on Windows a DLL's C runtime would wait on it)."""
 
     def __init__(self, script: str, environment: dict[str, str],
                  on_patch: Callable[[dict[str, Any], bytes, float], None] = lambda *_args: None,

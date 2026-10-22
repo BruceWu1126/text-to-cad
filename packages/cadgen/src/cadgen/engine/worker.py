@@ -183,8 +183,14 @@ def resident_mb() -> float | None:
 
             counters = Counters()
             counters.cb = ctypes.sizeof(Counters)
-            process = ctypes.windll.kernel32.GetCurrentProcess()
-            if not ctypes.windll.psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
+            # Typed: the current process's pseudo-handle is -1, a HANDLE; passed as a C int the call
+            # fails, and a Windows worker had no memory cap.
+            current = ctypes.windll.kernel32.GetCurrentProcess
+            current.restype = wintypes.HANDLE
+            info = ctypes.windll.psapi.GetProcessMemoryInfo
+            info.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+            info.restype = wintypes.BOOL
+            if not info(current(), ctypes.byref(counters), counters.cb):
                 return None
             return counters.WorkingSetSize / 2**20
     except Exception:  # noqa: BLE001 - a platform that will not say has no cap
@@ -202,6 +208,21 @@ def _physical_mb() -> float | None:
             if system.sysctlbyname(b"hw.memsize", ctypes.byref(size), ctypes.byref(length), None, 0) == 0:
                 return size.value / 2**20
             return None
+        if os.name == "nt":  # no sysconf: GlobalMemoryStatusEx's ullTotalPhys
+            import ctypes
+            from ctypes import wintypes
+
+            class Status(ctypes.Structure):  # MEMORYSTATUSEX
+                _fields_ = [("dwLength", wintypes.DWORD), ("dwMemoryLoad", wintypes.DWORD),
+                            *((name, ctypes.c_uint64) for name in (
+                                "ullTotalPhys", "ullAvailPhys", "ullTotalPageFile", "ullAvailPageFile",
+                                "ullTotalVirtual", "ullAvailVirtual", "ullAvailExtendedVirtual"))]
+
+            status = Status()
+            status.dwLength = ctypes.sizeof(Status)
+            ask = ctypes.windll.kernel32.GlobalMemoryStatusEx
+            ask.argtypes, ask.restype = [ctypes.POINTER(Status)], wintypes.BOOL
+            return status.ullTotalPhys / 2**20 if ask(ctypes.byref(status)) else None
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**20
     except (AttributeError, OSError, ValueError):
         return None
