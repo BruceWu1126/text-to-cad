@@ -139,6 +139,22 @@ export function xbfAssemblyIds(tree) {
 }
 
 /**
+ * The fewest nodes that name the parts `partIds` (instances, `i3`), in the tree's order: an assembly
+ * every part of which is among them by its own id, else each of its parts -- so a hidden assembly is
+ * said once, not part by part. A folded group is no node: its parts are said.
+ */
+export function xbfCoveringIds(tree, partIds) {
+  const wanted = new Set(partIds);
+  const found = [];
+  const visit = (node) => {
+    if (node.selectionId && node.leafPartIds.length && node.leafPartIds.every(id => wanted.has(id))) found.push(node.selectionId);
+    else for (const child of node.children || []) visit(child);
+  };
+  if (wanted.size) for (const root of tree.roots) visit(root);
+  return found;
+}
+
+/**
  * The node a viewport press on instance `partId` reaches: the outermost owner the host has
  * shut (a collapsed assembly is picked as a unit), else the part. The wrapper is always open.
  */

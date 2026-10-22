@@ -1,8 +1,8 @@
 import { renderHook } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { parsePromptReference } from '@text-to-cad/core/prompt';
-import { useXbfSelectionChips, xbfCopyText } from '../../../dist/renderers/xbf/xbfChips.js';
-import { presentXbfTree } from '../../../dist/renderers/xbf/xbfTree.js';
+import { useXbfSelectionChips, xbfCopyText, xbfNodeRefs } from '../../../dist/renderers/xbf/xbfChips.js';
+import { presentXbfTree, xbfCoveringIds } from '../../../dist/renderers/xbf/xbfTree.js';
 
 // What an engine document's selection copies: the engine's canonical refs, one line each, the file's
 // path first -- what `cadgen where DOC REF` and `select(DOC, REF)` read (cadgen.engine.refs) -- and
@@ -61,6 +61,15 @@ it("an .xbf's selection copies the engine's canonical refs: a label, an occurren
   const { chips, references } = result.current;
   expect(references.map((reference: any) => parsePromptReference(`${resource.path}#${reference.target.selectors[0]}`))).toEqual(references);
   expect(chips.map((chip: any) => chip.selectors)).toEqual([['kit/hand/finger.2/f:finger.body.1', 'kit/hand/finger.2/face 7']]);
+});
+
+it('a view hides and isolates by the refs Copy Prompt copies, a hidden assembly by its own', () => {
+  const resource = at('/work/XBF/kit.xbf');
+  const refs = (ids: string[]) => xbfNodeRefs({ scene, tree, resource, ids });
+  expect(refs(xbfCoveringIds(tree, ['i3', 'i5', 'i1', 'i2']))).toEqual(['/work/XBF/kit.xbf#hand', '/work/XBF/kit.xbf#"face 3"']);
+  expect(refs(xbfCoveringIds(tree, ['i2', 'i0']))).toEqual(copied(resource, ['i0', 'i2']));
+  expect(refs(['n0.1', 'i4'])).toEqual(copied(resource, ['n0.1', 'i4']));
+  expect(xbfCoveringIds(tree, [])).toEqual([]);
 });
 
 it('a STEP drawn by the engine keeps its own grammar\'s references', () => {

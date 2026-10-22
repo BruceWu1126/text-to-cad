@@ -127,25 +127,47 @@ export function xbfCopyText({ scene, tree, resource, ids }) {
     .chips.map(chip => chip.copy).filter(Boolean).join("\n");
 }
 
+/**
+ * What the nodes `ids` (parts `i3`, subassemblies `n0.2`) copy, a string a node, each as its chip
+ * copies it -- and nothing else of a chip, so a long list costs no measuring: the part refs a
+ * prompt's view hides and isolates by.
+ */
+export function xbfNodeRefs({ scene, tree, resource, ids }) {
+  if (!scene) return [];
+  const { nodeCopy } = referencing({ scene, tree, resource });
+  return ids.filter(id => tree.nodes.has(id)).map(nodeCopy).filter(Boolean);
+}
+
+// How a node and an element are referenced in `resource`: by the engine's refs in an .xbf, by a
+// STEP's own grammar in a STEP the engine draws. A node's copy is its reference with the file's path.
+function referencing({ scene, tree, resource }) {
+  const workspace = resource?.kind === "workspace-file";
+  const engine = workspace && isEngineRefFile(resource.path);
+  const referenceTo = selector => ({ resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } });
+  const referenceOf = (selector) => {
+    if (!workspace || !selector) return null;
+    if (engine) return referenceTo(selector);
+    const parsed = parseCadRefSelector(selector);
+    return parsed && parsed.selectorType !== "opaque" ? referenceTo(parsed.canonical) : null;
+  };
+  // A STEP's part goes by its name in the document's paths (its label); a subassembly by its own.
+  const partSelector = id => String(scene.structure.instances[parseXbfElementId(id)?.instance]?.path || "").split("/").pop();
+  const nodeSelector = id => (engine ? tree.refOf(id) : isXbfAssemblyId(id) ? tree.nodes.get(id)?.label || "" : partSelector(id));
+  const elementSelector = (part, element) => (engine ? tree.elementRefOf(part, element.kind, element.ordinal, element.name)
+    : element.name ? `${partSelector(part)}/${element.name}` : "");
+  const copyOf = (references, fallback) => (references.length ? references.map(formatPromptReference).join("\n") : fallback);
+  const nodeCopy = id => {
+    const reference = referenceOf(nodeSelector(id));
+    return copyOf(reference ? [reference] : [], nodeSelector(id));
+  };
+  return { referenceOf, nodeSelector, elementSelector, copyOf, nodeCopy };
+}
+
 function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove, onHover }) {
   {
     if (!scene || !selectedIds.length) return { references: EMPTY, chips: EMPTY };
-    const workspace = resource?.kind === "workspace-file";
-    const engine = workspace && isEngineRefFile(resource.path);
-    const referenceTo = selector => ({ resource: { ...resource }, target: { kind: "cad-selector", selectors: [selector] } });
-    const referenceOf = (selector) => {
-      if (!workspace || !selector) return null;
-      if (engine) return referenceTo(selector);
-      const parsed = parseCadRefSelector(selector);
-      return parsed && parsed.selectorType !== "opaque" ? referenceTo(parsed.canonical) : null;
-    };
-    // A STEP's part goes by its name in the document's paths (its label); a subassembly by its own.
-    const partSelector = id => String(scene.structure.instances[parseXbfElementId(id)?.instance]?.path || "").split("/").pop();
-    const nodeSelector = id => (engine ? tree.refOf(id) : isXbfAssemblyId(id) ? tree.nodes.get(id)?.label || "" : partSelector(id));
-    const elementSelector = (part, element) => (engine ? tree.elementRefOf(part, element.kind, element.ordinal, element.name)
-      : element.name ? `${partSelector(part)}/${element.name}` : "");
+    const { referenceOf, nodeSelector, elementSelector, copyOf, nodeCopy } = referencing({ scene, tree, resource });
     const partName = id => tree.nodes.get(id)?.label || scene.describePart(id)?.name || id;
-    const copyOf = (references, fallback) => (references.length ? references.map(formatPromptReference).join("\n") : fallback);
     const chips = [];
     const references = [];
     const runs = new Map();
@@ -157,7 +179,7 @@ function xbfSelectionChips({ scene, tree, resource, selectedIds, facts, onRemove
         const reference = referenceOf(nodeSelector(id));
         if (reference) references.push(reference);
         chips.push({ key: `node:${id}`, label: node.label, glyph: "solid", id: reference?.target.selectors[0] || nodeSelector(id),
-          selectors: reference ? reference.target.selectors : EMPTY, copy: copyOf(reference ? [reference] : [], nodeSelector(id)),
+          selectors: reference ? reference.target.selectors : EMPTY, copy: nodeCopy(id),
           card: <PartDetail assembly={node.kind === "assembly"} parts={node.leafPartIds.length} measured={scene.measureParts(node.leafPartIds)} />,
           onRemove: () => onRemove([id]), onHover: on => onHover(on ? node.leafPartIds : null) });
         continue;

@@ -29,12 +29,12 @@ import XbfMeasureOverlay from "./XbfMeasure.jsx";
 import XbfModelTree from "./XbfModelTree.jsx";
 import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPoseGiven, xbfPositionRows } from "./XbfPositionSection.jsx";
 import { MeasureIcon, SelectIcon, SelectModeMenu, XBF_SELECT_DEFAULT, xbfSelectModes } from "./XbfSelectionModes.jsx";
-import { useXbfElementFacts, useXbfSelectionChips, xbfCopyText } from "./xbfChips.jsx";
+import { useXbfElementFacts, useXbfSelectionChips, xbfCopyText, xbfNodeRefs } from "./xbfChips.jsx";
 import { xbfJointHandles } from "./xbfJointHandles.js";
 import { viewportMenuEntries } from "./xbfMenuItems.js";
 import { xbfModelMenu, xbfPartMenu, xbfTopologyMenu } from "./xbfMenus.js";
 import { NO_CONNECTED_SELECTION, nextSelectionIds, selectGeometryMode, treeShape } from "./xbfSelectionFilter.js";
-import { isXbfAssemblyId, presentXbfTree, xbfAssemblyIds, xbfPickFrontier } from "./xbfTree.js";
+import { isXbfAssemblyId, presentXbfTree, xbfAssemblyIds, xbfCoveringIds, xbfPickFrontier } from "./xbfTree.js";
 import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js";
 import { xbfLookSubject } from "./xbfLookAt.js";
 import { readXbfView, xbfViewSignatures, xbfViewSlices } from "./xbfViewSlices.js";
@@ -164,11 +164,16 @@ function XbfSurface({ view, data }) {
     shellRef.current?.syncSceneBounds?.();
     requestRender();
   }, [scene, poseValues, poseApplied, requestRender]);
-  // A prompt's view, as a STEP's carried its pose: the pose Position holds off as built, as
-  // `cadgen snapshot --pose` takes it (`jointValues`), so the view ink was drawn in is posed again.
+  // A prompt's view, as a STEP's carried its pose and what it hid: the pose Position holds off as
+  // built, as `cadgen snapshot --pose` takes it (`jointValues`), and the parts hidden and isolated as
+  // its `--display` takes them (`hidden`, `isolated`), each node as Copy Prompt copies it and the
+  // hidden parts by the fewest nodes that name them -- so the view ink was drawn in is drawn as it was.
   const poseGiven = useMemo(() => (poseApplied && kinematics && poseValues ? xbfPoseGiven(kinematics, poseValues, poseCouplings) : null),
     [poseApplied, kinematics, poseValues, poseCouplings]);
-  const viewState = useCallback(() => ({ jointValues: poseGiven }), [poseGiven]);
+  const viewState = useCallback(() => {
+    const refs = ids => xbfNodeRefs({ scene, tree, resource: shellRef.current?.frame.resource, ids });
+    return { jointValues: poseGiven, hidden: refs(xbfCoveringIds(tree, hiddenIds)), isolated: refs(isolatedIds) };
+  }, [poseGiven, scene, tree, hiddenIds, isolatedIds]);
 
   // ---- this document's own slices of the file's view: the tree and the pose --------------------
   // As a STEP's were (`xbfViewSlices.js`): what is open, hidden and isolated in the Model tree, and

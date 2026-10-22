@@ -4,8 +4,9 @@ POST /__cad/prompt-files validates a snapshot packet in memory, then returns 200
 with compact inline JSON up to 1024 UTF-8 bytes, or writes one .snapshot.json and
 returns its path. Shared input, inline annotation and measurements are stored once;
 jobs reserve output names for an agent to render later (``cadgen snapshot`` reads the
-packet as ``--annotation``, and ``--camera authored`` draws a job's view). No PNG is
-produced by this route.
+packet as ``--annotation``, and ``--camera authored`` draws a job's view). A packet with
+ink also names the parts hidden and isolated where the ink was last drawn, which
+``--annotation`` leaves out of its stills. No PNG is produced by this route.
 POST /__cad/prompt-files/save writes an annotation or measurement chip's JSON.
 Guarded GET /__cad/prompt-files/<name> reads only JSON from this process's
 scratch directory. Files outlive the viewer until the system clears them.
@@ -150,6 +151,8 @@ class PromptFiles:
         packet: dict[str, object] = {"input": input_path, "jobs": jobs}
         if annotation is not None:
             packet["annotation"] = annotation
+            # What ``cadgen snapshot --annotation`` leaves out of the stills it draws the ink on.
+            packet.update(_drawn_in(annotation, views))
         if measurements:
             packet["measurements"] = measurements
         _accepted(packet)
@@ -228,14 +231,28 @@ def _checked(request) -> tuple[str, str, list[dict], dict | None, list | None]:
     return name or "", input_path, views, annotation, measurements
 
 
+def _drawn_in(annotation: dict, views: list[dict]) -> dict:
+    """The parts hidden and isolated in the view the ink was last drawn in -- the one ``--camera
+    authored`` draws, by the label the last mark names -- as its display says them
+    (``display.hidden``, ``display.isolated``): the packet's own, which ``--annotation`` reads
+    (``cadgen.engine.snapshot.packet_visibility``)."""
+    label = next((mark.get("view") for mark in reversed(annotation["marks"]) if mark.get("view")), None)
+    display = next((view.get("display") for view in views if view["label"] == label), None)
+    if not isinstance(display, dict):
+        return {}
+    return {key: display[key] for key in ("hidden", "isolated") if display.get(key) is not None}
+
+
 def _accepted(packet: dict) -> None:
     """The packet as ``cadgen snapshot`` reads it, checked before anything renders: its input a
-    file the snapshot draws, each job's camera and display, its annotation and its measurements,
-    by the snapshot's own parsers (``cadgen.engine.snapshot``). Their refusal is this request's 400.
+    file the snapshot draws, each job's camera and display, its annotation, the parts it hides and
+    isolates and its measurements, by the snapshot's own parsers (``cadgen.engine.snapshot``). Their
+    refusal is this request's 400.
     """
     from cadgen.engine.snapshot import (
         AUTHORED,
         SnapshotRefused,
+        packet_visibility,
         parse_annotation,
         parse_camera,
         parse_display,
@@ -257,6 +274,7 @@ def _accepted(packet: dict) -> None:
                     raise SnapshotRefused(f"jobs[{index}].display is the view's display object")
                 parse_display(json.dumps(job["display"]), False)
         parse_annotation(packet.get("annotation"))
+        packet_visibility(packet)
         parse_measurements(packet.get("measurements"))
     except SnapshotRefused as error:
         raise ValueError(str(error)) from None
