@@ -14,8 +14,16 @@ it. The OCCT makers a model may run itself past build123d -- a shape fix, a unif
 fillet, a transform, a copy (``_MAKER_TARGETS``) -- are handed to it as this layer's
 subclasses, each run of one an operation (``_maker_class``) and a feature
 (``_MAKER_FEATURES``), and a
-file the engine reads for a model (``wrap_function``) is an operation keyed by the
-file's bytes.
+file the engine reads for a model (``wrap_function``: ``read_step``, ``read_xbf``,
+``read_mesh``) is an operation keyed by the file's bytes.
+
+**Reads past the engine.** build123d's importers (``import_step``, ``import_brep``,
+``import_stl``: operations keyed by the file's bytes too) and the readers a model may drive
+itself (``_READER_TARGETS``: OCCT's, patched in place on their classes, and build123d's
+``Mesher.read``) read their file in C or C++, where the audit hook on Python's ``open`` hears
+nothing. A body that calls one is not kept, and its key says it cannot say all it read
+(``_bypassed``): it runs on every build, its closure has no key, and the build names the call
+and the file (``_Run.bypassed``).
 
 **Keys.** A call is keyed by its operation, every setting it runs with, its
 canonical parameters and the keys of the shapes it was given. The settings are what
@@ -282,10 +290,30 @@ _HELPER_TARGETS = (
     ("two_d", "_sew_topods_faces", "shell"),
 )
 _HELPER_CLASSMETHODS = (("Wire", "_make_wire", "wire"), ("Solid", "_make_solid", "solid"))
-_IMPORTER_TARGETS = ("import_step", "import_brep")
+_IMPORTER_TARGETS = ("import_step", "import_brep", "import_stl")
 # Operations whose first argument is a file, keyed by the file's bytes: the importers,
-# and the engine's own readers (``wrap_function``: ``read_step``, ``read_xbf``).
-_FILE_OPS = {"import_step", "import_brep", "read_step", "read_xbf"}
+# and the engine's own readers (``wrap_function``: ``read_step``, ``read_xbf``, ``read_mesh``).
+_FILE_OPS = {"import_step", "import_brep", "import_stl", "read_step", "read_xbf", "read_mesh"}
+_IMPORTERS = frozenset(_IMPORTER_TARGETS)
+# Readers past the engine's (see the module), patched in place on their classes: (module,
+# class, method, whether it is static). XSControl_Reader's is IGES's readers' too, and
+# RWMesh_CafReader's glTF's and OBJ's; ``Mesher.read`` is build123d's 3MF and STL reader (lib3mf).
+_READER_TARGETS = (
+    ("OCP.STEPControl", "STEPControl_Reader", "ReadFile", False),
+    ("OCP.STEPCAFControl", "STEPCAFControl_Reader", "ReadFile", False),
+    ("OCP.STEPCAFControl", "STEPCAFControl_Reader", "Perform", False),
+    ("OCP.XSControl", "XSControl_Reader", "ReadFile", False),
+    ("OCP.IGESCAFControl", "IGESCAFControl_Reader", "Perform", False),
+    ("OCP.RWStl", "RWStl", "ReadFile_s", True),
+    ("OCP.RWStl", "RWStl", "ReadAscii_s", True),
+    ("OCP.RWStl", "RWStl", "ReadBinary_s", True),
+    ("OCP.StlAPI", "StlAPI", "Read_s", True),
+    ("OCP.StlAPI", "StlAPI_Reader", "Read", False),
+    ("OCP.BRepTools", "BRepTools", "Read_s", True),
+    ("OCP.BinTools", "BinTools", "Read_s", True),
+    ("OCP.RWMesh", "RWMesh_CafReader", "Perform", False),
+    ("build123d.mesher", "Mesher", "read", False),
+)
 _BOOLEAN_LABELS = ("bool_op", "bool_op_list")
 _BOOLEANS = {"BRepAlgoAPI_Cut": "cut", "BRepAlgoAPI_Fuse": "fuse", "BRepAlgoAPI_Common": "common",
              "BRepAlgoAPI_Section": "section", "BRepAlgoAPI_Splitter": "split"}
@@ -356,6 +384,16 @@ def install() -> bool:
             original = getattr(module, class_name)
             if not getattr(original, "__kernel_memo__", False):
                 setattr(module, class_name, _maker_class(original, perform, idle, builds, setters))
+        for module_name, class_name, method, static in _READER_TARGETS:
+            cls = getattr(importlib.import_module(module_name), class_name)
+            if method not in cls.__dict__:
+                raise TypeError(f"{class_name}.{method} is not {class_name}'s own")
+            found = inspect.getattr_static(cls, method)
+            original = found.__func__ if static else found
+            if not getattr(original, "__kernel_memo__", False):
+                owner = "OCCT's" if module_name.startswith("OCP.") else "build123d's"
+                hooked = _reader(f"{owner} {class_name}.{method}", original, static)
+                setattr(cls, method, staticmethod(hooked) if static else hooked)
         _audit_reads()
         _installed = True
         return True
@@ -507,6 +545,57 @@ def _library_file(name: str) -> bool:
     return any(root in path.parents for root in _library_roots())
 
 
+# --- files read past the engine ---------------------------------------------------------------
+
+
+def _bypassed(state: "_Run", call: str, path: str | None) -> None:
+    """The running body read ``path`` through ``call``, a reader past the engine's (see the
+    module): it is not kept and its key cannot say all it read, so it runs on every build
+    (``keyed`` false: its closure has no key), and the build names the call and the file."""
+    if not state.bodies:
+        return
+    log = state.bodies[-1]
+    log.retainable = log.keyed = False
+    if (call, path) not in log.bypassed:
+        log.bypassed.append((call, path))
+
+
+def _path_argument(values: tuple, kwargs: dict) -> str | None:
+    """The file a reader is handed, absolute: its first argument that names one (a ``str``, a
+    path, OCCT's ``TCollection_AsciiString`` or ``OSD_Path``); None for a read of a stream."""
+    for value in (*values, *kwargs.values()):
+        if isinstance(value, (str, bytes, os.PathLike)):
+            return os.path.abspath(os.fsdecode(value))
+        kind = type(value).__name__
+        if kind == "TCollection_AsciiString":
+            return os.path.abspath(value.ToCString())
+        if kind == "OSD_Path":
+            from OCP.TCollection import TCollection_AsciiString
+
+            text = TCollection_AsciiString()
+            value.SystemName(text)
+            return os.path.abspath(text.ToCString())
+    return None
+
+
+def _reader(call: str, original: Any, static: bool) -> Any:
+    """``original``, a reader past the engine's (``_READER_TARGETS``), as a model meets it: a
+    file it reads from a model's body -- the body's own call, not the engine's, nor one inside
+    another patched call -- marks the body (``_bypassed``); a read of a stream is the stream's
+    reader's, and is not marked."""
+    @functools.wraps(original)
+    def hooked(*args: Any, **kwargs: Any) -> Any:
+        state = getattr(_LOCAL, "run", None)
+        if state is not None and not state.depth and state.bodies:
+            path = _path_argument(args if static else args[1:], kwargs)
+            if path is not None and state.trace.called_by_model():
+                _bypassed(state, call, path)
+        return original(*args, **kwargs)
+
+    hooked.__kernel_memo__ = True
+    return hooked
+
+
 def uninstall() -> bool:
     """Restore every attribute ``install`` replaced. Returns uninstalled-now;
     the memo's entries stay (``clear`` drops them)."""
@@ -548,6 +637,12 @@ def uninstall() -> bool:
             maker = getattr(module, class_name)
             if getattr(maker, "__kernel_memo__", False):
                 setattr(module, class_name, maker.__kernel_memo_class__)
+        for module_name, class_name, method, static in _READER_TARGETS:
+            cls = getattr(importlib.import_module(module_name), class_name)
+            found = inspect.getattr_static(cls, method)
+            hooked = found.__func__ if static else found
+            if getattr(hooked, "__kernel_memo__", False):
+                setattr(cls, method, staticmethod(hooked.__wrapped__) if static else hooked.__wrapped__)
         if getattr(topology.Shape.bounding_box, "__kernel_memo__", False):
             topology.Shape.bounding_box = topology.Shape.bounding_box.__wrapped__
         kernel_history.uninstall()
@@ -822,6 +917,9 @@ class _Run:
         # those that are no regular file, which keep it running.
         self.reads: dict[str, list[str]] = {}
         self.unread: dict[str, list[str]] = {}
+        # Per body, each file it read past the engine's readers, by the call that read it
+        # (``_bypassed``): what keeps it running.
+        self.bypassed: dict[str, list[tuple[str, str | None]]] = {}
         # Per body this run ran or replayed: what it is made of -- its source, its checks
         # (each file it read, held to its bytes), whether those say all it read, and the
         # bodies it called -- its key in a document (``build``); and how it went, ``run``
@@ -1011,7 +1109,7 @@ class _BodyLog:
     callable and what it answered), the keys it interned and, apart, their ids, and whether
     it can be replayed."""
 
-    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread", "keyed", "children")
+    __slots__ = ("events", "checks", "keys", "ids", "retainable", "reads", "unread", "keyed", "children", "bypassed")
 
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -1020,9 +1118,10 @@ class _BodyLog:
         self.ids = array.array("q")
         self.retainable = True
         # Whether the body's key -- its source and its checks -- says all it read: false for
-        # a body that read what has no bytes to hold (a pipe, a file that moved under it),
-        # or that called such a body. A body run plain is still keyed: it is not kept to
-        # replay, but what it makes is a function of its key (``Run.keys``).
+        # a body that read what has no bytes to hold (a pipe, a file that moved under it, a
+        # file read past the engine's readers), or that called such a body. A body run plain
+        # is still keyed: it is not kept to replay, but what it makes is a function of its
+        # key (``Run.keys``).
         self.keyed = True
         # The bodies it called, run, replayed or placed again, in order.
         self.children: list[str] = []
@@ -1030,6 +1129,8 @@ class _BodyLog:
         # opened (``None``: missing), and those that are no regular file.
         self.reads: dict[str, tuple | None] = {}
         self.unread: list[str] = []
+        # The files it read past the engine's readers, each with the call (``_bypassed``).
+        self.bypassed: list[tuple[str, str | None]] = []
 
 
 class _Body:
@@ -1114,6 +1215,8 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any], *, i
     state.statuses[name] = "run"
     if log.unread:
         state.unread[name] = list(dict.fromkeys(log.unread))
+    if log.bypassed:
+        state.bypassed[name] = list(log.bypassed)
     _STATS["bodies_run"] += 1
     state.tally["bodies_run"] += 1
     if logged is not None:
@@ -1499,6 +1602,10 @@ def _call(state: _Run, label: str, kind: str, function: Any, args: tuple, kwargs
     frame = state.trace.frame()
     if frame is None:
         return function(*args, **kwargs)
+    if label in _IMPORTERS:
+        # build123d's importer reads its file in C++: keyed by the file's bytes as an
+        # operation, but its body runs on every build (see the module).
+        _bypassed(state, f"build123d's {label}", _path_argument(args, kwargs))
     state.depth += 1
     try:
         op = _op_name(label, kind, args, kwargs)
@@ -3230,6 +3337,8 @@ def _snapshot(value: Any) -> Any:
         return _Mapping([(name, _snapshot(item)) for name, item in value.items()])
     if value is None or isinstance(value, (bool, int, float, str, bytes)):
         return _Literal(value)
+    if getattr(type(value), "__kernel_value__", False):
+        return _Literal(value)  # a read-only value (``reader.Mesh``): a hit hands back the same object
     raise _Unkeyable(f"a result that cannot be kept: {type(value).__name__}")
 
 

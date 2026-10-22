@@ -1,5 +1,5 @@
-"""What a model imports: a STEP or an xbf made a build123d compound tree, and the reader
-process a STEP is parsed in.
+"""What a model imports: a STEP or an xbf made a build123d compound tree, the reader
+process a STEP is parsed in, and a mesh file read as data (``read_mesh``).
 
 An XCAF document -- a STEP read by OCCT's XCAF reader, or an xbf -- is described as data
 (``describe``): its products, each once however often it is placed (a name, a colour, a
@@ -27,6 +27,12 @@ own for it.
 An xbf is read in the worker (``read_xbf``): its reader is the document's own retrieval
 driver, its working memory the document's.
 
+**A mesh is data, never a shape** (``read_mesh``, an ``.stl``): its vertices, its triangles
+and its name, as numbers (``Mesh``). A mesh has no B-rep -- no surface under a face, no curve
+under an edge -- so no document holds one: a model measures it and builds B-rep from its
+numbers. The memo keys the read by the file's bytes, as it keys ``read_step``'s, and hands a
+later build's read of the same bytes this very object.
+
 **A model never reads a file its own build writes** (``refuse_written``): its own xbf or
 export, a child's, a sibling's. Read, the file would be an input the build rewrites -- its
 key moving on every build, so the model would never be taken from its file -- or, keyed by
@@ -45,8 +51,11 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Iterator
 
-__all__ = ["Reader", "assemble", "describe", "main", "read_step", "read_xbf", "refuse_written", "session",
-           "written_by_build"]
+__all__ = ["MESH_SUFFIXES", "Mesh", "Reader", "assemble", "describe", "main", "read_mesh", "read_step", "read_xbf",
+           "refuse_written", "session", "written_by_build"]
+
+# What ``read_mesh`` reads.
+MESH_SUFFIXES = (".stl",)
 
 
 # --- a document described ---------------------------------------------------------------------
@@ -489,6 +498,121 @@ def read_xbf(path: Any) -> Any:
     doc = _read(path)
     header, shapes, locations = describe(doc, step=False)
     return assemble(header, shapes, locations)
+
+
+# --- a mesh read as data ------------------------------------------------------------------------
+
+
+class Mesh:
+    """A mesh file as data (see the module): ``vertices`` (N x 3, float64: the file's numbers as
+    millimetres -- an STL says no unit), ``triangles`` (M x 3, int64: each a row of indices into
+    ``vertices``, in the file's order) and ``name`` (an ASCII STL's solid's, else the file's
+    stem). Corners at one point are one vertex, in the order the file first has them. Both arrays
+    are read-only: a later build's read of the same bytes hands back this very object."""
+
+    __slots__ = ("vertices", "triangles", "name")
+    # A value the memo keeps as it is and hands back on a hit (``memo._snapshot``).
+    __kernel_value__ = True
+
+    def __init__(self, vertices: Any, triangles: Any, name: str) -> None:
+        vertices.flags.writeable = False
+        triangles.flags.writeable = False
+        self.vertices, self.triangles, self.name = vertices, triangles, name
+
+    def bounding_box(self) -> Any:
+        """The box of its vertices as build123d's ``BoundBox`` (``.size``, ``.min``, ``.max``,
+        ``.center()``): what a model sizes or places B-rep by."""
+        from build123d import BoundBox
+        from OCP.Bnd import Bnd_Box
+        from OCP.gp import gp_Pnt
+
+        if not len(self.vertices):
+            raise ValueError(f"the mesh {self.name!r} has no triangles, so no box")
+        low, high = self.vertices.min(axis=0), self.vertices.max(axis=0)
+        return BoundBox(Bnd_Box(gp_Pnt(*(float(value) for value in low)), gp_Pnt(*(float(value) for value in high))))
+
+    def __repr__(self) -> str:
+        return f"Mesh({self.name!r}: {len(self.vertices)} vertices, {len(self.triangles)} triangles)"
+
+
+def _stl(path: Any) -> tuple[Any, str]:
+    """An STL's corners, (M, 3, 3) float64, and its name. Binary or ASCII is told as three's
+    ``STLLoader`` tells it: binary when the size is the header, the count and that many 50-byte
+    facets; else ASCII when ``solid`` opens it (within its first five bytes); else binary. A
+    facet's own normal is not read."""
+    import re
+
+    import numpy as np
+
+    data = path.read_bytes()
+    count = int.from_bytes(data[80:84], "little") if len(data) >= 84 else -1
+    if 84 + 50 * count == len(data) or not any(data[at:at + 5] == b"solid" for at in range(5)):
+        if len(data) < 84:
+            raise ValueError(f"{path.name} is too short to be an STL")
+        facet = np.dtype([("normal", "<f4", 3), ("corners", "<f4", (3, 3)), ("attribute", "<u2")])
+        facets = np.frombuffer(data, facet, min(count, (len(data) - 84) // 50), 84)
+        return facets["corners"].astype(np.float64), path.stem
+    found = re.findall(rb"vertex\s+(\S+)\s+(\S+)\s+(\S+)", data)
+    if len(found) % 3:
+        raise ValueError(f"{path.name}: an ASCII STL's vertices come three to a facet, and it has {len(found)}")
+    try:
+        corners = np.array(found, dtype=np.float64).reshape(-1, 3, 3)
+    except ValueError:
+        raise ValueError(f"{path.name}: a vertex of it is not three numbers") from None
+    named = re.match(rb"[^s]{0,4}solid[ \t]*([^\r\n]*)", data)
+    name = named[1].strip().decode("utf-8", "replace") if named else ""
+    return corners, name or path.stem
+
+
+def _welded(corners: Any) -> tuple[Any, Any]:
+    """Triangle corners as vertices -- each point once, in the order the corners first hold it
+    -- and the triangles as rows of their indices."""
+    import numpy as np
+
+    points = corners.reshape(-1, 3)
+    if not len(points):
+        return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
+    unique, first, inverse = np.unique(points, axis=0, return_index=True, return_inverse=True)
+    order = np.argsort(first, kind="stable")
+    rank = np.empty(len(order), dtype=np.int64)
+    rank[order] = np.arange(len(order))
+    return np.ascontiguousarray(unique[order]), rank[inverse.reshape(-1)].reshape(-1, 3)
+
+
+def _read_mesh(path: str) -> Mesh:
+    from pathlib import Path
+
+    found = Path(path)
+    if not found.is_file():
+        raise FileNotFoundError(f"no mesh {found}")
+    corners, name = _stl(found)
+    vertices, triangles = _welded(corners)
+    return Mesh(vertices, triangles, name)
+
+
+_READ_MESH: Any = None
+
+
+def read_mesh(path: Any) -> Mesh:
+    """A mesh file (``MESH_SUFFIXES``: an ``.stl``) as data, never a shape (``Mesh``: its
+    vertices, triangles and name, and ``bounding_box()``): what a model sizes or places B-rep
+    by. In a build the read is the model's own, keyed by the file's bytes as ``read_step``'s is
+    (one of the closure's ``inputs``): a later build's read of the same bytes is this object, and
+    a changed file runs the body that reads it. A file a model of the build writes is refused."""
+    global _READ_MESH
+    from pathlib import Path
+
+    suffix = Path(os.fspath(path)).suffix.lower()
+    if suffix not in MESH_SUFFIXES:
+        other = {".step": "a STEP with read_step", ".stp": "a STEP with read_step", ".xbf": "an xbf with read_xbf"}
+        raise ValueError(f"read_mesh reads an .stl, not {Path(os.fspath(path)).name}"
+                         + (f": read {other[suffix]}" if suffix in other else ""))
+    refuse_written(path, "read_mesh")  # before the memo, as read_step's
+    if _READ_MESH is None:
+        from cadgen.engine.kernel.memo import wrap_function
+
+        _READ_MESH = wrap_function("read_mesh", _read_mesh)
+    return _READ_MESH(os.fspath(path))
 
 
 def main() -> int:

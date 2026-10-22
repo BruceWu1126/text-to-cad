@@ -144,8 +144,8 @@ def hinge():
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, couplings (`couple`), the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
 | `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
-| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
-| `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a read of a file the build writes refused (`refuse_written`) |
+| `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names; a mesh face refused, `mesh_faces`), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
+| `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a mesh file as data (`read_mesh`, `Mesh`); a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
 | `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
@@ -494,7 +494,10 @@ target and moved over it; a DXF only when its bytes change.
   `--part` (an occurrence's path, `board/rack`, or a node's name) writes that subtree as a
   document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
   of it (the links wholly inside, the pairs between them, their configurations). Every assembly
-  of a posed or parted document is an assembly of its own placement.
+  of a posed or parted document is an assembly of its own placement. A path several occurrences
+  share (siblings labelled alike: `kit2/axle/wheel` twice) is refused, each listed as the ref
+  grammar tells them apart (`kit2/axle.1/wheel, kit2/axle.2/wheel`), until `--part` reads that
+  grammar (**References**); a name several nodes bear is refused with their paths.
 - `--pose` (on `export` and `snapshot`) and `--part` (on `export`) are the verbs' alone: ad hoc, never cached, never
   declared.
 - **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
@@ -817,6 +820,33 @@ the name its file gives it (**Element names**). An xbf's joints, configurations 
 not imported: a part is a part. Linking between models is done by importing code, never by a
 file reference. Both are file reads the memo keys by the file's bytes, so a later build's read
 of the same bytes is the same objects, and both are the build closure's inputs.
+
+`read_mesh(path)` reads an `.stl` as data, never a shape: a `Mesh` of `vertices` (N x 3, the
+file's numbers as millimetres; a point the triangles share is one vertex), `triangles` (M x 3
+rows of indices into them), `name` (an ASCII STL's solid's, else the file's stem) and
+`bounding_box()` (build123d's `BoundBox`), its arrays read-only. A mesh has no B-rep -- no
+surface under a face, no curve under an edge -- so no document holds one: a model measures it
+and builds B-rep from its numbers. Its read is keyed by the file's bytes as the others' are,
+the same object again for the same bytes, and the file is one of the closure's inputs:
+
+```python
+@xbf
+def enclosure():
+    pcb = read_mesh(HERE / "scans/pcb.stl").bounding_box()   # keyed by the scan's bytes
+    return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
+```
+
+A result holding a mesh face -- a triangulation with no surface, as build123d's `import_stl`
+makes, or a face a model builds of `read_mesh`'s triangles -- is refused by the occurrence's
+path before its document is made (`document.mesh_faces`), and the worker builds on: `kit/scan
+is a mesh, not B-rep: face 1 is a triangulation with no surface (as build123d's import_stl
+makes), and a document holds B-rep alone. Read the mesh as data with read_mesh(path) ...`. The
+kernel's face modifier, which every part passes through (`document.direct`), crashed the
+process on one.
+
+build123d's own importers (`import_step`, `import_brep`, `import_stl`, `Mesher.read`) and
+OCCT's readers read a file past the engine: a body that calls one runs on every build
+(**Body retention**).
 
 **The fast input is an xbf.** Reading one is many times faster than parsing a STEP of the same
 geometry (tom-sized: seconds against most of a minute) and keeps the engine's names losslessly.
@@ -1145,7 +1175,7 @@ arguments -- is one coarse entry above its calls, kept in the worker's memory
   code reads counts as what it is bound to, by the module that holds it, so
   rebinding a name is an edit. The walk stops at what is not first-party (the
   standard library, build123d, OCP, numpy): the engine's own code covers those;
-- every file it reads through the engine, by its bytes: `read_step`, `read_xbf`;
+- every file it reads through the engine, by its bytes: `read_step`, `read_xbf`, `read_mesh`;
 - every file it reads itself, observed, by its bytes: an audit hook on `open`
   (`kernel/memo.py`, `_audited`) hears each file the body opens for reading
   (`open`, `json.load`, `Path.read_text`, `np.loadtxt`), Python's own files
@@ -1161,10 +1191,24 @@ arguments -- is one coarse entry above its calls, kept in the worker's memory
 - the engine's own code.
 
 A model's inputs are its code, what it reads through the engine, and every file
-its body reads, observed, by their bytes. What the engine cannot see is the
-author's: the clock, environment variables, randomness, a file only tested for
-(`Path.exists`, `os.stat`: an open is heard, a lookup is not), and OCCT's
-readers driven directly instead of through `read_step` or `read_xbf`.
+its body reads, observed, by their bytes. A file read past the engine's readers is read
+in C or C++, where the hook on `open` hears nothing: build123d's importers (`import_step`,
+`import_brep`, `import_stl`, `Mesher.read`) and the OCCT readers a model may drive itself
+(`STEPControl_Reader.ReadFile`, `STEPCAFControl_Reader.ReadFile` and `.Perform`, IGES's
+readers, `RWStl.ReadFile_s`, `StlAPI`, `BRepTools.Read_s` and `BinTools.Read_s` given a
+path, `RWMesh_CafReader.Perform`: glTF's and OBJ's; `kernel/memo.py`, `_READER_TARGETS`).
+A body that calls one runs on every build, its closure holds no key (a restart builds it),
+and `retention.fallbacks` names the call: `reads ../scans/pcb.stl through build123d's
+import_stl: it runs on every build; use read_step/read_xbf/read_mesh`. What the engine
+cannot see is the author's: the clock, environment variables, randomness, a file only
+tested for (`Path.exists`, `os.stat`: an open is heard, a lookup is not), a folder listed
+(`glob`, `os.listdir`: a file added to it is not heard), and a file a C library opens for
+a reader not on that list. cadgen's old native tracer (`_internal/filetrace.py`, an
+interposer on the C library's `open`) heard every open by any code -- an OCCT reader of any
+name, a C extension's own reader (trimesh's), FreeType loading a font outside a text --
+and every folder listing, environment variable and program a model's code used; the
+engine hears Python's `open`, its own readers and the calls on that list, and none of the
+rest.
 
 A module falls back to its bytes, and those of every first-party module it
 imports, wherever the walk cannot follow a reference by its value: a `getattr`,
@@ -1294,8 +1338,9 @@ hold (a path value inside the script's folder relative to it), and, for a module
 to its bytes (**Body retention**), each file of its import closure by its bytes. A comment or a
 blank line changes no digest; a module the model loads and does not reach holds the empty one.
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
-the importers), itself (`read`, a `null` digest for one it found missing), or a text's font
-(`font`) -- by its digest. The commit is the repository's at the script, `git rev-parse HEAD`,
+`read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing),
+or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
+null (**Body retention**). The commit is the repository's at the script, `git rev-parse HEAD`,
 null outside one; it names where the code was and is no part of the key. `cadgen where DOC`
 prints the closure, `cadgen.where(doc)` and `document.Loaded.closure` read it.
 

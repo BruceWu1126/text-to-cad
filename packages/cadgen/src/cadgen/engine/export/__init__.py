@@ -10,10 +10,11 @@ call, so the same document and the same options write the same bytes.
 ``pose`` (a configuration's name or ``{joint: value}``) places the mechanism's links by
 forward kinematics before anything is written; ``part`` (an occurrence's path or a node's
 name in the document's tree) writes that subtree alone, as a document of its own: its
-root at the subtree's frame. Meshes are never sources: there is no B-rep in them. An xbf
-is written from a STEP (read into a document first), or from an xbf with ``part`` (a
-sub-assembly extracted); a posed xbf is refused, since a pose is a request, never a
-document. A GLB carries every motion the document defines as a glTF animation of the same
+root at the subtree's frame. A path several occurrences share is refused, each named as the
+ref grammar names it, until ``part`` reads that grammar (``_subtree``). Meshes are never
+sources: there is no B-rep in them. An xbf is written from a STEP (read into a document
+first), or from an xbf with ``part`` (a sub-assembly extracted); a posed xbf is refused,
+since a pose is a request, never a document. A GLB carries every motion the document defines as a glTF animation of the same
 name, baked by forward kinematics (``export/motion.py``); STEP, STL and 3MF ignore motions. A
 DXF is drawn from a planar document alone (``export/dxf.py``): a 3D one is refused.
 
@@ -328,7 +329,9 @@ def _instances(node: dict[str, Any]) -> list[int]:
 def _subtree(structure: dict[str, Any], part: str) -> tuple[dict[str, Any], tuple[int, ...]]:
     """The node ``part`` names: an occurrence's path from the root (``board/peg1``, as the
     structure spells an instance's ``path``; the root's name may be left off), else a
-    node's name where one node bears it. Two alike, or none, are refused by name."""
+    node's name where one node bears it. None, or several, are refused by name: several
+    occurrences at one path (siblings labelled alike) listed as the ref grammar tells them apart
+    (``kit/axle.2/wheel``, ``refs``), which ``--part`` does not read yet."""
     nodes: list[tuple[str, dict[str, Any], tuple[int, ...]]] = []
 
     def visit(node: dict[str, Any], names: list[str], occurrence: tuple[int, ...]) -> None:
@@ -339,19 +342,41 @@ def _subtree(structure: dict[str, Any], part: str) -> tuple[dict[str, Any], tupl
     root = structure["tree"]
     visit(root, [root["name"]], ())
     wanted = part.strip().strip("/")
-    for full, node, occurrence in nodes:
-        if full == wanted or full == f"{root['name']}/{wanted}":
-            return node, occurrence
-    named = [(full, node, occurrence) for full, node, occurrence in nodes if node["name"] == wanted]
-    if len(named) == 1:
-        return named[0][1], named[0][2]
-    if named:
-        raise ExportRefused(f"--part {part!r} names {len(named)} nodes: "
-                            f"{', '.join(full for full, _node, _at in named[:6])}{', ...' if len(named) > 6 else ''}; "
-                            "give one's path")
+    found = ([entry for entry in nodes if entry[0] == wanted]
+             or [entry for entry in nodes if entry[0] == f"{root['name']}/{wanted}"]
+             or [entry for entry in nodes if entry[1]["name"] == wanted])
+    if len(found) == 1:
+        return found[0][1], found[0][2]
+    if found:
+        raise _ambiguous(structure, part, found)
     shown = [full for full, node, _at in nodes[1:] if "children" in node][:8] or [full for full, *_ in nodes[1:9]]
     raise ExportRefused(f"{structure['name']} has no part {part!r}" + (f"; its assemblies: {', '.join(shown)}"
                                                                       if shown else ""))
+
+
+def _ambiguous(structure: dict[str, Any], part: str, found: list[tuple[str, dict[str, Any], tuple[int, ...]]]
+               ) -> ExportRefused:
+    """``--part`` naming several nodes, refused with them: by their paths where those tell them
+    apart, else as the ref grammar names them -- a path two occurrences share is no part until
+    ``--part`` moves onto that grammar."""
+    def listed(texts: list[str]) -> str:
+        return ", ".join(texts[:6]) + (", ..." if len(texts) > 6 else "")
+
+    paths = [full for full, _node, _at in found]
+    if len(set(paths)) == len(paths):
+        return ExportRefused(f"--part {part!r} names {len(found)} nodes: {listed(paths)}; give one's path")
+    from cadgen.engine import refs
+
+    tree = refs.structure_tree(structure)
+    refs_paths = []
+    for _full, _node, occurrence in found:
+        node = tree
+        for at in occurrence:
+            node = node.children[at]
+        refs_paths.append(refs.path_text(tree, node))
+    return ExportRefused(f"--part {part!r} names {len(found)} occurrences a plain path cannot tell apart: "
+                         f"{listed(refs_paths)} in the ref grammar; --part reads plain paths until it moves onto that "
+                         "grammar, so label them apart to export one")
 
 
 # --- the one call ------------------------------------------------------------------------------

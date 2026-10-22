@@ -1,6 +1,8 @@
 """What a model imports: ``read_step`` and ``read_xbf`` copy a file's geometry with its names,
 colours and materials (an xbf's mechanism stays behind); a STEP is parsed in a reader process
-of the build's, so the parse's working memory never stays in the worker."""
+of the build's, so the parse's working memory never stays in the worker. ``read_mesh`` reads an
+STL as data, keyed by its bytes; a file read past the engine's readers runs its body on every
+build, and the build names the call."""
 
 from __future__ import annotations
 
@@ -177,6 +179,198 @@ class ImportTest(unittest.TestCase):
             grown[where] = json.loads(done.stdout.strip().splitlines()[-1])
         # Measured 62 MB here against 14 MB with the reader: the parse's memory is the reader's.
         self.assertLess(grown["reader"], grown["here"] * 0.5, grown)
+
+
+READS = """
+from pathlib import Path
+
+import build123d as bd
+from OCP.BRep import BRep_Builder
+from OCP.BRepTools import BRepTools
+from OCP.gp import gp_Pnt
+from OCP.Poly import Poly_Triangle, Poly_Triangulation
+from OCP.TopoDS import TopoDS_Face, TopoDS_Shape
+from cadgen.engine import read_mesh, xbf
+
+HERE = Path(__file__).resolve().parent
+
+
+@xbf
+def enclosure():
+    pcb = read_mesh(HERE / "scans" / "pcb.stl").bounding_box()
+    return bd.Box(pcb.size.X + 6, pcb.size.Y + 6, pcb.size.Z + 4)
+
+
+@xbf
+def by_import_stl():
+    return bd.Box(*bd.import_stl(HERE / "scans" / "pcb.stl").bounding_box().size)
+
+
+@xbf
+def by_import_step():
+    return bd.import_step(HERE / "part.step")
+
+
+@xbf
+def by_occt():
+    shape = TopoDS_Shape()
+    BRepTools.Read_s(shape, str(HERE / "part.brep"), BRep_Builder())
+    return bd.Solid(shape)
+
+
+@xbf
+def mesh_face():
+    mesh = read_mesh(HERE / "scans" / "pcb.stl")
+    triangulation = Poly_Triangulation(len(mesh.vertices), len(mesh.triangles), False)
+    for at, point in enumerate(mesh.vertices, 1):
+        triangulation.SetNode(at, gp_Pnt(*(float(value) for value in point)))
+    for at, corners in enumerate(mesh.triangles, 1):
+        triangulation.SetTriangle(at, Poly_Triangle(*(int(corner) + 1 for corner in corners)))
+    face = TopoDS_Face()
+    BRep_Builder().MakeFace(face, triangulation)  # its triangles alone, as import_stl makes a face
+    scan = bd.Face(face)
+    scan.label = "scan"
+    base = bd.Box(50, 40, 2)
+    base.label = "base"
+    return bd.Compound(children=[base, scan], label="kit")
+"""
+
+# A model sized from an STL by build123d's importer, as a user writes one.
+SIZED = """
+from pathlib import Path
+
+import build123d as bd
+from cadgen.engine import xbf
+
+HERE = Path(__file__).resolve().parent
+
+
+@xbf
+def sized():
+    scan = bd.import_stl(HERE / "cube.stl")
+    return bd.Box(*scan.bounding_box().size)
+"""
+
+
+class ReadsTest(unittest.TestCase):
+    """A mesh read as data, keyed by its bytes; a file read past the engine's readers, in C++
+    where no hook hears it, runs its body on every build."""
+
+    def setUp(self) -> None:
+        import build123d as bd
+
+        self.folder = Path(tempfile.mkdtemp(prefix="engine-reads-")).resolve()
+        self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
+        (self.folder / "scans").mkdir()
+        (self.folder / "reads.py").write_text(textwrap.dedent(READS), encoding="utf-8")
+        self.stl = self.folder / "scans" / "pcb.stl"
+        self.scan(40)
+        box = bd.Box(10, 10, 10)
+        bd.export_step(box, str(self.folder / "part.step"))
+        bd.export_brep(box, str(self.folder / "part.brep"))
+        self.restart()
+        self.addCleanup(self.restart)
+
+    def scan(self, length: float) -> None:
+        import build123d as bd
+
+        bd.export_stl(bd.Box(length, 30, 2), str(self.stl))
+
+    def restart(self) -> None:
+        """What a new worker holds: nothing."""
+        from cadgen.engine.kernel import memo
+
+        memo.clear()
+        engine_build._WRITTEN.clear()
+        engine_build._PARTS.clear()
+        engine_build._BUILT.clear()
+
+    def built(self, name: str) -> dict:
+        (report,) = engine_build.build(self.folder / "reads.py", [name], cwd=self.folder)
+        self.assertTrue(report["ok"], report)
+        return report
+
+    def size(self, name: str) -> tuple:
+        from OCP.Bnd import Bnd_Box
+        from OCP.BRepBndLib import BRepBndLib
+
+        box = Bnd_Box()
+        for prototype in document.Loaded(self.folder / f"XBF/{name}.xbf").prototypes:
+            BRepBndLib.Add_s(prototype.shape, box)
+        low, high = box.CornerMin(), box.CornerMax()
+        return tuple(round(b - a, 3) for a, b in ((low.X(), high.X()), (low.Y(), high.Y()), (low.Z(), high.Z())))
+
+    def test_read_mesh_is_data_keyed_by_the_file_s_bytes(self) -> None:
+        from cadgen.engine import previous, read_mesh
+
+        mesh = read_mesh(self.stl)
+        self.assertEqual((mesh.vertices.shape, mesh.triangles.shape, mesh.name), ((8, 3), (12, 3), "pcb"))
+        self.assertEqual(tuple(mesh.bounding_box().size), (40.0, 30.0, 2.0))
+        with self.assertRaises(ValueError):
+            mesh.vertices[0, 0] = 1.0  # read-only: a later build's read of the same bytes is this object
+        with self.assertRaisesRegex(ValueError, "read a STEP with read_step"):
+            read_mesh(self.folder / "part.step")
+        self.built("enclosure")
+        self.assertEqual(self.size("enclosure"), (46.0, 36.0, 6.0))
+        again = self.built("enclosure")
+        self.assertEqual((again["bodies"], again["retention"]["fallbacks"]), ({"reads.py::enclosure": "replayed"}, {}))
+        _writer, record = previous.scan(self.folder / "XBF/enclosure.xbf")
+        closure = json.loads(record)
+        self.assertEqual([row[:2] for row in closure["inputs"]], [["file", "../scans/pcb.stl"]])
+        self.assertIsNotNone(closure["key"])
+        # Another scan runs the body, warm and after a restart.
+        self.scan(50)
+        self.assertEqual(self.built("enclosure")["bodies"], {"reads.py::enclosure": "run"})
+        self.assertEqual(self.size("enclosure"), (56.0, 36.0, 6.0))
+        self.restart()
+        self.scan(60)
+        self.assertEqual(self.built("enclosure")["cache"]["changed"], ["../scans/pcb.stl changed"])
+        self.assertEqual(self.size("enclosure"), (66.0, 36.0, 6.0))
+
+    def test_a_file_read_past_the_engine_runs_its_body_on_every_build(self) -> None:
+        from cadgen.engine import previous
+
+        for name, call, path in (("by_import_stl", "build123d's import_stl", "scans/pcb.stl"),
+                                 ("by_import_step", "build123d's import_step", "part.step"),
+                                 ("by_occt", "OCCT's BRepTools.Read_s", "part.brep")):
+            for _build in range(2):
+                report = self.built(name)
+                self.assertEqual(report["bodies"], {f"reads.py::{name}": "run"}, name)
+                self.assertEqual(report["retention"]["fallbacks"], {f"reads.py::{name}": [
+                    f"reads {path} through {call}: it runs on every build; use read_step/read_xbf/read_mesh"]})
+            # No key: a restart builds it too.
+            _writer, record = previous.scan(self.folder / f"XBF/{name}.xbf")
+            self.assertIsNone(json.loads(record)["key"], name)
+
+    def test_a_model_sized_by_import_stl_builds_again_when_the_stl_changes(self) -> None:
+        """The probe: a model sized from cube.stl by build123d's import_stl kept its 40 mm box
+        once the STL was 25 mm -- replayed warm, taken from its xbf after a restart: the STL is
+        opened in C++, where nothing heard it. It builds again either way."""
+        import build123d as bd
+
+        (self.folder / "sized.py").write_text(textwrap.dedent(SIZED), encoding="utf-8")
+
+        def sized(edge: float) -> tuple:
+            bd.export_stl(bd.Box(edge, edge, edge), str(self.folder / "cube.stl"))
+            (report,) = engine_build.build(self.folder / "sized.py", ["sized"], cwd=self.folder)
+            self.assertTrue(report["ok"], report)
+            return self.size("sized"), report["cache"]["used"]
+
+        self.assertEqual(sized(40), ((40.0, 40.0, 40.0), False))
+        self.assertEqual(sized(25), ((25.0, 25.0, 25.0), False), "warm: it was replayed, 40 mm")
+        self.restart()
+        self.assertEqual(sized(30), ((30.0, 30.0, 30.0), False), "a fresh worker: it took the 25 mm xbf")
+
+    def test_a_mesh_face_is_refused_by_name_and_the_worker_builds_on(self) -> None:
+        """A face with no surface -- read_mesh's triangles made a face, as import_stl makes one --
+        crashed the process in the kernel's face modifier (``ShapeCustom.DirectFaces``). It is
+        refused by its occurrence's path, saying what to do, and the next build runs."""
+        (report,) = engine_build.build(self.folder / "reads.py", ["mesh_face"], cwd=self.folder)
+        self.assertFalse(report["ok"])
+        self.assertIn("kit/scan is a mesh, not B-rep: face 1 is a triangulation with no surface", report["error"])
+        self.assertIn("read_mesh(path)", report["error"])
+        self.assertFalse((self.folder / "XBF/mesh_face.xbf").exists())
+        self.assertTrue(self.built("enclosure")["ok"])
 
 
 if __name__ == "__main__":
