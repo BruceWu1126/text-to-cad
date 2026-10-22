@@ -47,7 +47,7 @@ An assembly's mechanism is build123d's joints: `RevoluteJoint`,
 `connect_to(..., angle=, position=, angles=)`. The values they are connected at are the
 as-built configuration, the pose every file of the model shows; `configuration(assembly, name,
 **values)` names another, by joint label, and never moves the build; `couple(assembly, name,
-...)` drives several joints from one control (**Kinematics**); `motion(assembly, name, ...)`
+**joints)` constrains several joints to move together by ratio (**Kinematics**); `motion(assembly, name, ...)`
 names a motion (**Motions**). Connect parts before putting them in the compound that holds
 them; where `connect_to` cannot place them (a nested assembly), give the two joints one label
 where the parts stand.
@@ -112,7 +112,7 @@ def hinge():
    opened with no such worker has none to give, and says so (`made_by: null`).
 8. **Poses and motion definitions, never frames.** The document carries
    kinematics -- the mechanism, its configurations (each a pose: where its parts
-   stand) and its motions (each a definition: waypoints, an ease, a loop) -- and
+   stand) and its motions (each a definition: waypoints and an ease) -- and
    the document holds poses and motion definitions, never baked frames or clips.
    A GLB export is the one place a motion is baked, into a clip of the GLB; the
    engine plays nothing.
@@ -133,6 +133,12 @@ def hinge():
    nothing: its flags (`--xbf/--step/--glb/--stl/--threemf/--dxf`, `--name`) are its only
    declarations, additive among themselves. A script is built by running it (law 11),
    so there is one way to build each.
+13. **The document's kinematics are AP242's, and cadgen stores no kinematic fact the
+   standard cannot name.** Every entity and attribute of the mechanism subtree is ISO
+   10303-105's as Part 21 writes it (edition 4's domain model's where Part 21 has none);
+   only the root says the schema and the units. What the standard cannot say is not
+   patched with an attribute of cadgen's own: it is dropped, or refused by name at document
+   time (`test_kinematics`' conformance test walks the subtree and holds it).
 
 ## Layout
 
@@ -546,18 +552,18 @@ target and moved over it; a DXF only when its bytes change.
 
 **Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
 CUBICSPLINE translation and rotation channels for each placement it moves, over one key time
-accessor (`export/motion.py`). The keys start at the motion's waypoints (a pingpong's way back
-too: its clip is twice the duration) and the halfway point between each two; at a key every
-moving placement is where forward kinematics through the mechanism (gears included) puts it,
+accessor (`export/motion.py`). The keys start at the motion's waypoints and the halfway point
+between each two; at a key every moving placement is where forward kinematics through the
+mechanism (its couplings included) puts it,
 its in- and out-tangents the one-sided derivatives there, so a step's speed may jump at a
 waypoint. A step is halved while at any eighth of it the Hermite strays from the true forward
 kinematics by more than 1e-3 of the model's size (the diagonal of what the GLB places) in a
 placement's origin or 1e-3 radian in its rotation, at most 4,097 keys. A moved placement's node
 stands by translation and rotation, every other by its matrix; the animation's
-`extras.cadgen` holds the loop (None, `loop`, `pingpong`) and the duration. STEP, STL and 3MF
-ignore motions, and neither `export` nor `@glb` takes an argument for them. On the corpus's
-motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° pingpong sweep of the head
-tube over 2 s, a 4 s clip) bakes to 5 keys on 15 placements, within 1.26 mm and 2.1e-4 rad of
+`extras.cadgen` holds the duration. A clip is the motion once, and a player repeats it. STEP,
+STL and 3MF ignore motions, and neither `export` nor `@glb` takes an argument for them. On the
+corpus's motorbike (2,053 mm across, so a 2.05 mm tolerance), `steer` (a ±20° sweep of the head
+tube and back over 4 s) bakes to 5 keys on 15 placements, within 1.26 mm and 2.1e-4 rad of
 forward kinematics at eight points inside every step.
 
 **Decorators carry only `out`.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf`
@@ -637,41 +643,48 @@ a mechanism in ISO 10303-105's terms (STEP AP242's kinematics):
   `link_1 · item_1 · M(v) · item_2⁻¹`, `M` a turn about Z, a slide along Z, both
   (cylindrical: angle, then distance) or build123d's intrinsic X-Y-Z rotation (spherical).
   Degrees and millimetres.
-- A **gear pair** drives one pair from another (`gear_ratio`, the second's value that times
-  the first's). build123d's joints cannot express one, so no model authors one; the
-  document, its readers and every pose honour it.
 - **Configurations**: the as-built values and each named configuration, as pair values.
-- **Couplings**: each `couple(...)`, one control driving several pairs by ratio (below).
+- **Couplings**: each `couple(...)`, a constraint among pairs, as AP242's couplers (below).
 - **Motions**: each named motion, as AP242's `INTERPOLATED_CONFIGURATION_SEQUENCE`: its
-  segments' times (`t_parameter`) and states (a configuration it names, or pair values).
+  segments' times (`t_parameter`), interpolation and states (a configuration it names, or pair
+  values).
 
-**Geometry is never held hostage by a mechanism.** What the harvest finds inconsistent is a
-warning, said by name, and the document is written all the same: a pair whose part stands
-where it cannot put it (moved after `connect_to`, connected after its compound was made, a
-rigid joint off the joint's axis) or that joins two parts rigid joints make one body is kept
-with its frames and limits, no value, and `inconsistent: <reason>` (the pair's
-`cadgen_inconsistent` string), and its links hold as built; a moving joint matching two rigid
-joints alike, a linear joint connected to a revolute one (a pin in a slot, which no AP242 lower
-pair is) and a configuration value a pair cannot take are left out; pairs that close a loop
-are kept and not posed. The warnings travel with the mechanism (a `TDataStd_ExtStringArray` on
-its label), in the structure's `kinematics.warnings` and the build report's
-`kinematics.warnings`; posing a warned pair is refused by name, and the viewer's Position says
-why beside it. The harvest's errors are a configuration, a motion or a coupling naming a joint
-its assembly does not hold, a coupling named as a joint is, and a joint a locked coupling
-drives that another coupling drives too: they mean nothing to store.
+**What AP242 cannot hold is refused or left out, never patched** (law 13). A pair the built
+tree contradicts fails the build by name: one whose part stands where it cannot put it (moved
+after `connect_to`, connected after its compound was made, a rigid joint off the joint's axis)
+or that joins two parts rigid joints make one body has no value the standard can hold. A moving
+joint matching two rigid joints alike, a linear joint connected to a revolute one (a pin in a
+slot, which no AP242 lower pair is) and a configuration value a pair cannot take are left out
+and warned; pairs that close a loop are kept and not posed. The warnings are the build's report
+(`kinematics.warnings`), never the document's. The harvest's errors are a configuration, a
+motion or a coupling naming a joint its assembly does not hold, a coupling named as a joint is,
+a coupling no coupler can hold (below), and a joint two couplings drive.
 
-**Couplings.** `couple(assembly, name, *, range=(0, 1), lock=False, **joints)` is one control
-driving several joints by ratio, each by the joint's label (a pair of several values takes a
-ratio per value, as `configuration` takes a value per value). At value `c` each joint stands at
-its as-built value plus its ratio times `c`: `c = 0` is as built, so a coupling never moves the
-build, and `range` holds 0. A control, not a constraint: each joint still poses alone. Its name
-poses wherever a joint's does -- `configuration(..., curl=0.5)`, a motion's waypoints and
-sweeps, `--pose '{"curl": 0.6}'` -- and configurations and motions resolve it to pair values at
-document time, so their AP242 states and a GLB's bake are as ever. Couplings sharing a joint
-add. `lock=True` makes a coupling its joints' only control, a gear train's: the viewer shows its
-slider and none of theirs, and a pose, a configuration or a motion setting one of them alone is
-refused by name. A gear pair cannot say a coupling: it couples single values of two pairs with
-no offset, so a door's turn and travel, or a 0-1 control, are out of its reach.
+**Couplings.** `couple(assembly, name, **joints)` is a constraint: its joints move together,
+each by its ratio, and only through it. Each joint is named by its label (a pair of several
+values takes a ratio per value, as `configuration` takes a value per value). At value `c` each
+joint stands at its as-built value plus its ratio times `c`: `c = 0` is as built, so a coupling
+never moves the build. Its range is derived, never given: the tightest interval of `c` in which
+every joint stays within its own limits (a joint with no limits bounds nothing; a side nothing
+bounds is open). Its name poses wherever a joint's does -- `configuration(..., curl=0.5)`, a
+motion's waypoints and sweeps, `--pose '{"curl": 0.6}'` -- and configurations and motions
+resolve it to pair values at document time, so their AP242 states and a GLB's bake are as ever;
+a pose, a configuration or a motion setting one of its joints alone is refused (a
+configuration's or a motion's value left out, and warned). `range=` and `lock=` are refused by
+name: a coupling's range is its joints' limits, and it is always its joints' only control.
+
+In the document a coupling is the standard's couplers, chained from its first-named value: AP242
+edition 4's `KinematicPairWithMotionCoupling` between two pairs' values, of `Kind` `gear_pair`
+(two revolute rotations, `CouplingRatios`), `rack_and_pinion_pair` (a revolute rotation and a
+prismatic translation, `CouplingRatios`) or `two_joint_coupler` (any other two values, `Scales`),
+with `CouplingTypes` saying which value of each pair; and Part 105's `SCREW_PAIR` (`pitch`,
+travel per 360 degrees of turn) for one cylindrical pair's turn and travel. Each holds
+`s1 · d1 + s2 · d2 = 0` over the two values' displacements from as built, so the ratios read
+back as written. A coupling of more than two values is chained as two-value couplers from its
+first-named value, never one `three_joint_coupler`. A coupling of one value alone, one driving
+a spherical pair (no coupler relates a ball's three angles) and one whose joints' limits leave
+it no range around as built fail the build by name. A function coupling, a cam or a loop is no
+part of the mechanism: a motion says it.
 
 ```python
 import build123d as bd
@@ -694,7 +707,7 @@ def index_finger():
         parent.joints[joint].connect_to(child.joints[joint], angle=0)  # as built: straight
     finger = bd.Compound(children=bones, label="index_finger")
     couple(finger, "index_curl", **CURL)                              # one control: 0 straight, 1 a fist
-    return motion(finger, "grip", sweep={"index_curl": (0, 1)}, duration=1.5, loop="pingpong")
+    return motion(finger, "grip", [(0, {"index_curl": 0}), (1.5, {"index_curl": 1}), (3, {"index_curl": 0})])
 
 SWEEP, TRAVEL = {"left": -70, "right": 70}, 40                       # a door's turn and travel when open
 
@@ -718,12 +731,13 @@ def hypercar():
 ```
 
 `cadgen snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
-knuckles at 54, 60 and 42 degrees: the picture of `--pose '{"index_mcp_flexion": 54,
-"index_pip": 60, "index_dip": 42}'`. `cadgen export XBF/hypercar.xbf half.step --pose
-'{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a locked
-coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`,
-a quasi-direct-drive actuator's. A coupling joint in no pair, or given as many ratios as its pair has
-no values, is left out of it and warned. A label names the joint in each placement of a
+knuckles at 54, 60 and 42 degrees: the picture of the same finger with no coupling at
+`--pose '{"index_mcp_flexion": 54, "index_pip": 60, "index_dip": 42}'`; its range, `[0, 1]`, is
+where every knuckle stays within its own. `cadgen export XBF/hypercar.xbf half.step --pose
+'{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a
+coupling: `couple(actuator, "drive", rotor_spin=360, output=80, ...)`, a quasi-direct-drive
+actuator's, ranged by its joints' limits. A coupling joint in no pair, or given as many ratios as
+its pair has no values, is left out of it and warned. A label names the joint in each placement of a
 sub-assembly placed several times, and a name two couplings share takes the path of the assembly
 holding each (`hand/index:curl`), as a label two pairs share does.
 
@@ -732,13 +746,12 @@ The xbf holds the mechanism as a subtree under `Main():100`, found by the
 label, `TDataStd_NamedData` for an entity's AP242 name (`entity`) and attributes (named as
 the standard names them), `TDataStd_ReferenceList` for references, `TDataStd_RealArray` and
 `TDataStd_IntegerArray` for a configuration's values, `XCAFDoc_AssemblyItemRef` for an
-occurrence (`mechanism.py` draws the tree); a motion's ease and loop are `cadgen_ease` and
-`cadgen_loop` strings in its `NamedData`, AP242 having no such attribute. A coupling is the
-engine's own entity, AP242 having no virtual degree of freedom: a label under `:6 "couplings"`
-with `NamedData{entity: cadgen_coupling, lower_limit, upper_limit, lock}` (`lock` 1, only when
-locked) and its terms as a state's rows, a ratio where a state holds a value. The structure
-serves them as `kinematics.couplings`: `{name: {range, lock, terms: [[pair, value index,
-ratio]]}}`. **STEP carries none of it**: OCCT reads AP242
+occurrence (`mechanism.py` draws the tree). A motion's segments say its ease as AP242's
+`interpolation` (`linear_interpolation_type`, `synchronous_interpolation_type`; the last
+segment's `discontinuous_interpolation_type`), and a coupling is its couplers under
+`:6 "couplings"`, a label per coupling holding them. The structure serves couplings as
+`kinematics.couplings`: `{name: {range, terms: [[pair, value index, ratio]]}}`, a side of the
+range null where nothing bounds it. **STEP carries none of it**: OCCT reads AP242
 kinematics but cannot write them, so every STEP, posed or not, is placements only.
 
 `--pose` on `cadgen snapshot` and `cadgen export` poses the mechanism at a
@@ -747,15 +760,14 @@ the rest as built): the engine places each link by composing its pairs from the 
 exact forward kinematics, and draws or writes that (a posed STEP is written from the document's
 tree with every placement its own). No flag is as built. An unknown configuration, joint or
 coupling, a value out of range (a joint's, a coupling's, or a joint's a coupling puts it at), a
-pair a gear drives, a locked coupling's joint set alone, a coupling set with one of its joints, a
-pair kept inconsistent and a pair of a loop are refused by name before anything renders or is
-written.
+coupling's joint set alone, a coupling set with one of its joints and a pair of a loop are
+refused by name before anything renders or is written.
 
 **The viewer's Position** shows a slider per coupling under the Pose row (0 as built, its range
-the coupling's): dragging it poses every joint it drives through the page's forward kinematics
-(`xbfKinematics.js`), their sliders following; moving one of them after leaves the coupling's
-slider where it was, and choosing a configuration puts it where that configuration stands on it
-(0 where it is off its line). A locked coupling's joints have no slider of their own.
+the coupling's, an open side spanning one turn or 100 mm of its first value): dragging it poses
+every joint it drives through the page's forward kinematics (`xbfKinematics.js`), and choosing a
+configuration puts it where that configuration stands on it (0 where it is off its line). A
+coupling's joints have no slider of their own.
 
 ## Motions
 
@@ -767,26 +779,28 @@ from cadgen.engine import configuration, motion
 configuration(arm, "folded", shoulder=0, elbow=0)
 configuration(arm, "reach", shoulder=45, elbow=90)
 motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])          # waypoints, eased
-motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+motion(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})], ease="linear")
 motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
 ```
 
-`motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None, ease="cubic",
-loop=None)` takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a
-configuration's name or `{joint: value}`, the rest as built; the last time is the duration), a
-sweep `{joint: (from, to)}` with `duration` (two waypoints), or a callable `t -> {joint: value}`
-with `duration`. `ease` is `cubic` (each step eased in and out, resting at every waypoint),
-`linear` or `spline` (a cubic Hermite through the waypoints, each one's slope its neighbours'
-secant); `loop` is None, `"loop"` or `"pingpong"`. A motion never moves the build.
+`motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None, ease="cubic")`
+takes one of: waypoints `[(t, pose), ...]` (seconds from 0, increasing; `pose` a configuration's
+name or `{joint: value}`, the rest as built; the last time is the duration), a sweep
+`{joint: (from, to)}` with `duration` (two waypoints), or a callable `t -> {joint: value}` with
+`duration`. `ease` is `cubic` (each step eased in and out, every pair arriving together at every
+waypoint: AP242's `synchronous_interpolation_type`) or `linear` (constant speed:
+`linear_interpolation_type`). A motion is a finite clip, and a player repeats it: one that comes
+back says its way back as waypoints. `loop=` and the `spline` ease are refused by name. A motion
+never moves the build.
 
 The document keeps the definition (**Kinematics**), never frames. A callable is stored as its
-samples, eased `spline`: eight equal steps over its duration, each step halved while the
-samples' spline strays from the function by more than the tolerance at a quarter, half or three
+samples, interpolated linearly: eight equal steps over its duration, each step halved while the
+samples' line strays from the function by more than the tolerance at a quarter, half or three
 quarters of it -- 1e-3 radian for an angle, 1e-3 of the model's size (its bounding box's
 diagonal, from the B-rep's geometry) for a distance -- at most 4,097 samples. The same code
 samples at the same times, so the file is a function of the code. A motion naming a
 configuration or a joint its assembly lacks fails the build by name; one setting a value its
-pair cannot take, or moving a pair kept inconsistent or closing a loop, is left out and warned.
+pair cannot take, or moving a pair that closes a loop, is left out and warned.
 A warm build that changes only a motion rewrites the mechanism's subtree and converts no
 prototype; the file is the cold build's bytes.
 
@@ -998,11 +1012,11 @@ colour, `faceNames`, `edgeNames`, `vertexNames`, `faceColors` by ordinal, `mater
 -- and once meshed `unmeshed`/`unmeshedCheck`), instances (prototype, path, a 4x4 world matrix,
 colour), the tree, the document's version, and for an assembly with joints `kinematics`: the
 links (name, the instances each moves, its frame as built), the pairs (label, type, the two
-links, the two frames as 4x4 matrices in their links' frames, limits and units per value; a
-gear's ratio and the two pairs it `drives`), the ground link, `asBuilt` and `configurations`
-(name → joint → value: a number, or a list for a cylindrical or spherical pair), `motions`
-(name → `{duration, ease, loop, keys}`, each key `{t, configuration}` or `{t, values}`), and
-`loop` (the pairs closing a loop, or null). A page poses the instances from it: each link's
+links, the two frames as 4x4 matrices in their links' frames, limits and units per value), the
+ground link, `asBuilt` and `configurations` (name → joint → value: a number, or a list for a
+cylindrical or spherical pair), `couplings` (name → `{range, terms}`), `motions` (name →
+`{duration, ease, keys}`, each key `{t, configuration}` or `{t, values}`), `loop` (the pairs
+closing a loop, or null) and the build's `warnings`. A page poses the instances from it: each link's
 placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.

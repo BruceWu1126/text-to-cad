@@ -4,11 +4,11 @@ import { add, armOffset, subtract } from "../kit/tools/pose/jointHandleMath.js";
 
 // What Position's knobs take hold of in an engine document: the kit's plain list, one
 // handle per row of the Position section that turns or slides -- a revolute pair's angle, a
-// prismatic pair's distance, a cylindrical pair's both, a geared pair's angle written through its
-// gear -- placed where the mechanism stands now: `pivot` on the pair's frame (a slide's where its
+// prismatic pair's distance, a cylindrical pair's both (a coupling's joints have no row, so no
+// knob) -- placed where the mechanism stands now: `pivot` on the pair's frame (a slide's where its
 // child now is), `axis` the frame's Z, `toward` a point on the carried parts that gives a turning
-// pair's arm its direction. `onChange` is the section's own write, so limits and the gear are
-// decided in one place.
+// pair's arm its direction. `onChange` is the section's own write, so limits are decided in one
+// place.
 
 function multiply(a, b) {
   const out = new Array(16).fill(0);
@@ -65,7 +65,7 @@ export function xbfJointHandles({ kinematics, rows, values, scene, onChange }) {
     const box = scene.selectionBounds(carried);
     const centre = box ? [0, 1, 2].map(at => (box.min[at] + box.max[at]) / 2) : null;
     const limits = pair.limits?.[row.index] || [null, null];
-    const continuous = kind === "revolute" && limits[0] == null && limits[1] == null && !row.driver;
+    const continuous = kind === "revolute" && limits[0] == null && limits[1] == null;
     handles.push({
       id: row.id, label: row.label, kind: continuous ? "continuous" : kind, pivot, axis,
       toward: kind === "prismatic" ? null : add(pivot, armOffset(axis, centre ? subtract(centre, pivot) : null)),

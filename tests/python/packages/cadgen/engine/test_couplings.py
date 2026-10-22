@@ -1,10 +1,11 @@
-"""Couplings: ``couple(assembly, name, *, range=(0, 1), lock=False, **joints)``, one control driving
-several joints by ratio from the as-built pose. Validated by name; kept in the document's mechanism
-(``:6 "couplings"``) and read back identically; served in the structure's ``kinematics.couplings``;
-forward kinematics at a coupling's value the joints set by hand, on ``--pose`` of an export and a
-snapshot; a door's turn and travel from one control; a locked coupling its joints' only control;
-configurations and motions naming a coupling resolved to pair values at document time; a warm edit
-patched to the cold build's bytes, the elements' names unchanged."""
+"""Couplings: ``couple(assembly, name, **joints)``, a constraint moving several joints by ratio
+from the as-built pose, their only way to move. Validated by name, the removed keywords refused;
+its range derived from its joints' limits; kept in the document's mechanism as AP242's couplers
+(``:6 "couplings"``: gear, rack-and-pinion and two-joint couplers, a screw pair) and read back
+identically; served in the structure's ``kinematics.couplings``; forward kinematics at a
+coupling's value the joints set by hand, on ``--pose`` of an export and a snapshot; a door's turn
+and travel from one coupling; configurations and motions naming a coupling resolved to pair values
+at document time; a warm edit patched to the cold build's bytes, the elements' names unchanged."""
 
 from __future__ import annotations
 
@@ -51,11 +52,13 @@ def index_finger():
     finger = bd.Compound(children=bones, label="index_finger")
     {couple}
     {extra}
-    return motion(finger, "grip", sweep={{"index_curl": (0, 1)}}, duration=1.5, loop="pingpong")
+    return motion(finger, "grip", sweep={{"index_curl": (0, 1)}}, duration=1.5)
 """
 CURL = 'couple(finger, "index_curl", **CURL)'
 RATIOS = {"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}  # the finger's, at a full curl
 BY_HAND = {"index_mcp_flexion": 54, "index_pip": 60, "index_dip": 42}  # its joints at index_curl 0.6
+# The finger with no coupling, nor the motion naming it: its joints are posed by hand.
+BARE = FINGER.format(couple="return finger", extra="")
 
 # The spec's hypercar door: a helical hinge, a cylindrical joint per side, one control turning
 # and sliding both doors.
@@ -86,7 +89,7 @@ def hypercar():
     return configuration(car, "open", doors=1)  # shut is as built
 """
 
-# A gear train: three wheels on a plate, one locked control turning them at fixed ratios.
+# A gear train: three wheels on a plate, one coupling turning them at fixed ratios.
 TRAIN = """
 import build123d as bd
 from cadgen.engine import configuration, couple, motion, xbf
@@ -108,10 +111,10 @@ def train():
         plate.joints[name].connect_to(wheel.joints[name], angle=0)
         wheels.append(wheel)
     train = bd.Compound(children=[plate, *wheels], label="train")
-    couple(train, "drive", range=(0, 360), lock=True, **RATIOS)
+    couple(train, "drive", **RATIOS)
     configuration(train, "quarter", drive=90)
     {extra}
-    return motion(train, "run", sweep={{"drive": (0, 360)}}, duration=4, ease="linear", loop="loop")
+    return motion(train, "run", sweep={{"drive": (0, 360)}}, duration=4, ease="linear")
 """
 
 # Two fingers, one function's: each placement's joints and coupling labelled alike.
@@ -159,6 +162,30 @@ def _vertices(loaded: document.Loaded, name: str) -> np.ndarray:
     matrix = np.array(instance.matrix).reshape(4, 4).T
     points = [BRep_Tool.Pnt_s(TopoDS.Vertex_s(mapped.FindKey(at))) for at in range(1, mapped.Extent() + 1)]
     return np.array(sorted((matrix @ np.array([p.X(), p.Y(), p.Z(), 1.0]))[:3].tolist() for p in points))
+
+
+def _couplers(loaded: document.Loaded) -> dict[str, list[tuple]]:
+    """Each coupling's couplers in the document's subtree, by the coupling's name: entity, kind,
+    ratios (or scales, or a screw's pitch), value types and the pairs it references, by name."""
+    from OCP.Standard import Standard_GUID
+
+    root = next(label for label in mechanism._children_of(loaded.doc.Main())
+                if label.IsAttribute(Standard_GUID(mechanism.GUID)))
+    top = root.FindChild(1, False)
+    pairs = {document._entry(label): document._label_name(label)
+             for label in mechanism._children_of(top.FindChild(2, False))}
+    found = {}
+    for held in mechanism._children_of(top.FindChild(6, False)):
+        rows = []
+        for label in mechanism._children_of(held):
+            data = mechanism._named(label)
+            entity = mechanism._string(data, "entity")
+            scales = (mechanism._real(data, "pitch") if entity == mechanism.SCREW
+                      else mechanism._array(data, "CouplingRatios") or mechanism._array(data, "Scales"))
+            rows.append((entity, mechanism._string(data, "Kind"), scales, mechanism._string(data, "CouplingTypes"),
+                         [pairs[entry] for entry in mechanism._references(label)]))
+        found[document._label_name(held)] = rows
+    return found
 
 
 def _run(*argv: str) -> tuple[int, str]:
@@ -213,14 +240,32 @@ class AuthoringTest(unittest.TestCase):
                 (lambda: couple(box, "c"), "coupling 'c' drives no joint"),
                 (lambda: couple(box, "c", j="x"), "joint 'j' takes a ratio"),
                 (lambda: couple(box, "c", j=float("nan")), "joint 'j' takes a ratio"),
-                (lambda: couple(box, "c", range=5, j=1), "range is \\(lower, upper\\)"),
-                (lambda: couple(box, "c", range=(1, 0), j=1), "lower below upper"),
-                (lambda: couple(box, "c", range=(0.2, 1), j=1), "its range holds 0, the as-built pose"),
-                (lambda: couple(box, "c", lock="yes", j=1), "lock is True or False")):
+                (lambda: couple(box, "c", j=0, k=1), "joint 'j' has no ratio but 0"),
+                (lambda: couple(box, "c", range=(0, 1), j=1),
+                 "coupling 'c': range= is gone: a coupling's range is its joints' limits"),
+                (lambda: couple(box, "c", lock=True, j=1),
+                 "coupling 'c': lock= is gone: a coupling is always a constraint")):
             with self.assertRaisesRegex((TypeError, ValueError), error):
                 call()
-        self.assertIs(couple(box, "c", range=(-1, 2), lock=True, j=2, k=(1, 3)), box)
-        self.assertEqual(box.__dict__[mechanism.COUPLINGS]["c"], ({"j": (2.0,), "k": (1.0, 3.0)}, (-1.0, 2.0), True))
+        self.assertIs(couple(box, "c", j=2, k=(1, 3)), box)
+        self.assertEqual(box.__dict__[mechanism.COUPLINGS]["c"], {"j": (2.0,), "k": (1.0, 3.0)})
+
+    def test_a_coupling_s_range_is_the_tightest_its_joints_limits_allow(self) -> None:
+        pairs = {"a": mechanism.Pair("a", "revolute", (0, 1), None, ((-30.0, 60.0),)),
+                 "b": mechanism.Pair("b", "prismatic", (0, 2), None, ((0.0, 100.0),)),
+                 "free": mechanism.Pair("free", "revolute", (0, 3), None, ((None, None),)),
+                 "door": mechanism.Pair("door", "cylindrical", (0, 4), None, ((None, None), (None, 40.0)))}
+        as_built = {"a": (10.0,), "b": (20.0,), "free": (0.0,), "door": (0.0, 10.0)}
+
+        def derived(**ratios):
+            return mechanism._derived_range(mechanism.Coupling("c", {k: tuple(v) for k, v in ratios.items()}),
+                                            pairs, as_built)
+
+        self.assertEqual(derived(a=[2], b=[1]), (-20.0, 25.0), "a's [-40, 50] over 2 within b's [-20, 80]")
+        self.assertEqual(derived(a=[-2], b=[1]), (-20.0, 20.0), "a negative ratio turns a's limits round")
+        self.assertEqual(derived(free=[1], b=[-1]), (-80.0, 20.0), "a joint with no limits bounds nothing")
+        self.assertEqual(derived(free=[1], door=[1, 0]), (None, None), "nothing bounds it")
+        self.assertEqual(derived(door=[0, 3], free=[1]), (None, 10.0), "a value with a ratio 0 bounds nothing")
 
 
 class FingerTest(_Folder):
@@ -233,24 +278,21 @@ class FingerTest(_Folder):
         loaded = document.Loaded(path)
         found = loaded.mechanism
         self.assertEqual(found.couplings, {"index_curl": mechanism.Coupling(
-            "index_curl", {label: (float(ratio),) for label, ratio in RATIOS.items()}, (0.0, 1.0), False)})
+            "index_curl", {label: (float(ratio),) for label, ratio in RATIOS.items()})})
         self.assertEqual(found.as_built, {label: (0.0,) for label in RATIOS})
         # The motion sweeping the coupling is its joints' values, resolved at document time.
         self.assertEqual(found.motions["grip"].keys, [(0.0, None, {label: (0.0,) for label in RATIOS}),
                                                       (1.5, None, {label: (float(r),) for label, r in RATIOS.items()})])
-        # The subtree: the engine's own entity at :6, its terms a state's rows.
-        from OCP.Standard import Standard_GUID
-
-        root = next(label for label in mechanism._children_of(loaded.doc.Main())
-                    if label.IsAttribute(Standard_GUID(mechanism.GUID)))
-        held = root.FindChild(1, False).FindChild(6, False).FindChild(1, False)
-        data = mechanism._named(held)
-        self.assertEqual((mechanism._string(data, "entity"), mechanism._real(data, "lower_limit"),
-                          mechanism._real(data, "upper_limit"), data.HasInteger(mechanism._text("lock"))),
-                         ("cadgen_coupling", 0.0, 1.0, False))
-        # The structure serves it, the same from the file as from the build's tree.
+        # The subtree: under :6 the coupling's couplers, two gear pairs from its first-named
+        # joint, each s1 * d1 + s2 * d2 = 0 over its two pairs' turns from as built.
+        self.assertEqual(_couplers(loaded), {"index_curl": [
+            ("KinematicPairWithMotionCoupling", "gear_pair", (100.0, -90.0), "rotation,rotation",
+             ["index_mcp_flexion", "index_pip"]),
+            ("KinematicPairWithMotionCoupling", "gear_pair", (70.0, -90.0), "rotation,rotation",
+             ["index_mcp_flexion", "index_dip"])]})
+        # The structure serves it, its range its joints' limits, the same from the file as from the build's tree.
         block = loaded.structure()["kinematics"]
-        self.assertEqual(block["couplings"], {"index_curl": {"range": [0.0, 1.0], "lock": False, "terms": [
+        self.assertEqual(block["couplings"], {"index_curl": {"range": [0.0, 1.0], "terms": [
             [label, 0, float(ratio)] for label, ratio in RATIOS.items()]}})
         self.assertEqual(block, document.tree_structure(document.saved(path), path)["kinematics"])
 
@@ -259,15 +301,19 @@ class FingerTest(_Folder):
         path = self.folder / self.XBF
         structure = document.Loaded(path).structure()
         values, named = mechanism.resolve(structure["kinematics"], {"index_curl": 0.6})
-        by_hand, _named = mechanism.resolve(structure["kinematics"], BY_HAND)
+        # The document's own values may set a coupling's joints (a motion's keys do).
+        by_hand, _named = mechanism.resolve(structure["kinematics"], BY_HAND, own=True)
         self.assertIsNone(named)
         for label in RATIOS:
             self.assertAlmostEqual(values[label][0], by_hand[label][0], places=12)
         np.testing.assert_allclose(mechanism.posed_instances(structure, values),
                                    mechanism.posed_instances(structure, by_hand), atol=1e-9)
-        # A posed STEP: the distal bone where the joints set by hand put it, and moved from as built.
+        # A posed STEP: the distal bone where the joints set by hand on the bare finger put it,
+        # and moved from as built.
         posed = {}
         for name, pose in (("coupled", '{"index_curl": 0.6}'), ("by_hand", json.dumps(BY_HAND))):
+            if name == "by_hand":
+                self.build("index_finger", BARE)
             out = self.folder / f"{name}.step"
             code, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
             self.assertEqual(code, 0, err)
@@ -280,8 +326,10 @@ class FingerTest(_Folder):
         path = str(self.folder / self.XBF)
         out = self.folder / "refused.step"
         for pose, words in (('{"index_curl": 1.5}', ["coupling 'index_curl' at 1.5 is outside its range [0, 1]"]),
+                            ('{"index_pip": 10}',
+                             ["joint 'index_pip' moves only with its coupling 'index_curl'; set 'index_curl'"]),
                             ('{"index_curl": 0.5, "index_pip": 10}',
-                             ["sets coupling 'index_curl' and its joint 'index_pip': set one of them"]),
+                             ["joint 'index_pip' moves only with its coupling 'index_curl'"]),
                             ('{"index_curl": [0.5, 1]}', ["coupling 'index_curl' takes a number"]),
                             ('{"crul": 1}', ["names no joint 'crul'", "its couplings: index_curl"])):
             code, err = _run("export", path, str(out), "--no-daemon", "--pose", pose)
@@ -308,12 +356,14 @@ class FingerTest(_Folder):
         # The posed structure the picture is drawn from: every instance where the joints set by hand put it.
         structure = document.Loaded(path).structure()
         coupled = mechanism.posed_structure(structure, {"index_curl": 0.6})
-        by_hand = mechanism.posed_structure(structure, BY_HAND)
-        np.testing.assert_allclose([i["matrix"] for i in coupled["instances"]],
-                                   [i["matrix"] for i in by_hand["instances"]], atol=1e-9)
+        by_hand = mechanism.posed_instances(structure, mechanism.resolve(structure["kinematics"], BY_HAND,
+                                                                         own=True)[0])
+        np.testing.assert_allclose([i["matrix"] for i in coupled["instances"]], by_hand, atol=1e-9)
         opengl.require(context.available(), "the posed structure is checked; drawing it needs an OpenGL context")
         drawn = {}
         for name, pose in (("rest", None), ("coupled", {"index_curl": 0.6}), ("by_hand", BY_HAND)):
+            if name == "by_hand":  # the bare finger, its joints set by hand
+                self.build("index_finger", BARE)
             report = snapshot(path, self.folder / f"{name}.png", camera="front", size=(160, 120), daemon=False,
                               pose=pose)
             drawn[name] = (self.folder / f"{name}.png").read_bytes()
@@ -324,7 +374,7 @@ class FingerTest(_Folder):
 
     def test_a_warm_edit_of_a_coupling_patches_to_the_cold_bytes_and_renames_nothing(self) -> None:
         path = self.folder / self.XBF
-        without = FINGER.format(couple="return finger", extra="")  # no coupling, nor the motion naming it
+        without = BARE
         self.build("index_finger", without)
         bare = document.Loaded(path).structure()
         self.finger()
@@ -332,19 +382,14 @@ class FingerTest(_Folder):
         self.assertEqual([(p["name"], p["faceNames"], p["edgeNames"]) for p in names["prototypes"]],
                          [(p["name"], p["faceNames"], p["edgeNames"]) for p in bare["prototypes"]],
                          "a coupling renames no element")
-        edited = 'couple(finger, "index_curl", range=(-0.1, 1), index_mcp_flexion=80, index_pip=100, index_dip=70)'
+        edited = 'couple(finger, "index_curl", index_mcp_flexion=80, index_pip=100, index_dip=70)'
         report = self.finger(couple=edited)
         self.assertTrue(report["converted"]["patched"], report["converted"])
         self.assertEqual(report["converted"]["converted"], 0, "a coupling edit converts no prototype")
         self.assertEqual(document.Loaded(path).mechanism.couplings["index_curl"].ratios["index_mcp_flexion"], (80.0,))
         warm = path.read_bytes()
         self.assertEqual(self.cold("index_finger", FINGER.format(couple=edited, extra="pass")), warm)
-        # A coupling made locked, then removed (the motion naming it with it): each warm file the cold one's.
-        locked = edited.replace("range=", "lock=True, range=")
-        self.finger(couple=locked)
-        self.assertTrue(document.Loaded(path).mechanism.couplings["index_curl"].lock)
-        warm = path.read_bytes()
-        self.assertEqual(self.cold("index_finger", FINGER.format(couple=locked, extra="pass")), warm)
+        # The coupling removed (the motion naming it with it): the warm file the cold one's.
         self.build("index_finger", without)
         warm = path.read_bytes()
         self.assertEqual(document.Loaded(path).mechanism.couplings, {})
@@ -359,6 +404,14 @@ class DoorTest(_Folder):
         self.assertEqual([(pair.label, pair.kind) for pair in found.pairs],
                          [("door_left", "cylindrical"), ("door_right", "cylindrical")])
         self.assertEqual(found.couplings["doors"].ratios, {"door_left": (-70.0, 40.0), "door_right": (70.0, 40.0)})
+        # Its couplers, from the left door's turn: that door's travel a screw pair, the right
+        # door's turn and travel two-joint couplers (a cylindrical pair's values are no gear's).
+        coupler = "KinematicPairWithMotionCoupling"
+        self.assertEqual(_couplers(loaded), {"doors": [
+            ("SCREW_PAIR", None, 360.0 * 40.0 / -70.0, None, ["door_left"]),
+            (coupler, "two_joint_coupler", (70.0, 70.0), "rotation,rotation", ["door_left", "door_right"]),
+            (coupler, "two_joint_coupler", (40.0, 70.0), "rotation,translation", ["door_left", "door_right"])]})
+        self.assertEqual(loaded.structure()["kinematics"]["couplings"]["doors"]["range"], [0.0, 1.0])
         # The configuration naming it holds its joints' values: the turn and the travel from shut.
         for label, turn in (("door_left", -70.0), ("door_right", 70.0)):
             np.testing.assert_allclose(found.configurations["open"][label], (turn, 40.0), atol=1e-9)
@@ -370,9 +423,15 @@ class DoorTest(_Folder):
         code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(half), "--no-daemon", "--pose",
                          '{"doors": 0.5}')
         self.assertEqual(code, 0, err)
+        # Its joints are posed through it alone; the car with no coupling poses them by hand.
         by_hand = self.folder / "by_hand.step"
+        pose = '{"door_left": [-35, 20], "door_right": [35, 20]}'
+        code, err = _run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose", pose)
+        self.assertEqual(code, 2)
+        self.assertIn("joint 'door_left' moves only with its coupling 'doors'", err)
+        self.build("hypercar", HYPERCAR.split("    couple(car")[0] + "    return car\n")
         self.assertEqual(_run("export", str(self.folder / "XBF/hypercar.xbf"), str(by_hand), "--no-daemon", "--pose",
-                              '{"door_left": [-35, 20], "door_right": [35, 20]}')[0], 0)
+                              pose)[0], 0)
         for door in ("door_left", "door_right"):
             np.testing.assert_allclose(_vertices(document.Loaded(half), door),
                                        _vertices(document.Loaded(by_hand), door), atol=1e-6)
@@ -385,20 +444,24 @@ class DoorTest(_Folder):
                          ["door_right"])
 
 
-class LockTest(_Folder):
-    def test_a_locked_coupling_is_its_joints_only_control(self) -> None:
+class ConstraintTest(_Folder):
+    def test_a_coupling_is_its_joints_only_way_to_move(self) -> None:
         report = self.build("train", TRAIN.format(extra='configuration(train, "jammed", idler=10)'))
-        self.assertIn("configuration 'jammed' of train: joint 'idler' moves only with the locked coupling 'drive'; "
+        self.assertIn("configuration 'jammed' of train: joint 'idler' moves only with its coupling 'drive'; "
                       "set 'drive': the value is left out", report["kinematics"]["warnings"])
         loaded = document.Loaded(self.folder / "XBF/train.xbf")
-        self.assertTrue(loaded.mechanism.couplings["drive"].lock)
+        coupler = "KinematicPairWithMotionCoupling"
+        self.assertEqual(_couplers(loaded), {"drive": [
+            (coupler, "gear_pair", (-2.0, -1.0), "rotation,rotation", ["sun", "idler"]),
+            (coupler, "gear_pair", (0.5, -1.0), "rotation,rotation", ["sun", "ring"])]})
+        # Its range: the idler's limits, turning twice as fast, bound it first.
+        self.assertEqual(loaded.structure()["kinematics"]["couplings"]["drive"]["range"], [-360.0, 360.0])
         quarter = {"sun": (90.0,), "idler": (-180.0,), "ring": (45.0,)}
         self.assertEqual(loaded.mechanism.configurations["quarter"], quarter)
         kinematics = loaded.structure()["kinematics"]
         self.assertEqual(mechanism.resolve(kinematics, {"drive": 10})[0],
                          {"sun": (10.0,), "idler": (-20.0,), "ring": (5.0,)})
-        with self.assertRaisesRegex(mechanism.KinematicsError,
-                                    "joint 'idler' moves only with the locked coupling 'drive'"):
+        with self.assertRaisesRegex(mechanism.KinematicsError, "joint 'idler' moves only with its coupling 'drive'"):
             mechanism.resolve(kinematics, {"idler": 5})
         # The document's own values pose it: a configuration, and the motion baked into a GLB.
         self.assertEqual(mechanism.resolve(kinematics, "quarter")[0]["ring"], (45.0,))
@@ -410,9 +473,10 @@ class LockTest(_Folder):
         translate(self.folder / "XBF/train.xbf", None, glb)
         self.assertGreater(glb.stat().st_size, 0)
 
-    def test_a_locked_joint_another_coupling_drives_fails_the_build_by_name(self) -> None:
-        report = self.build("train", TRAIN.format(extra='couple(train, "trim", ring=1)'), ok=False)
-        self.assertIn("joint 'ring' is driven by the locked coupling 'drive' and by 'trim'", report["error"])
+    def test_a_joint_two_couplings_drive_fails_the_build_by_name(self) -> None:
+        report = self.build("train", TRAIN.format(extra='couple(train, "trim", ring=1, sun=1)'), ok=False)
+        self.assertIn("joint 'sun' is driven by the couplings 'drive' and 'trim': a coupling is a constraint",
+                      report["error"])
 
 
 class HarvestTest(_Folder):
@@ -425,6 +489,15 @@ class HarvestTest(_Folder):
         report = self.finger(extra='configuration(finger, "fist", crul=1)', ok=False)
         self.assertIn("configuration 'fist' of index_finger names no joint 'crul'", report["error"])
         self.assertIn("its couplings are index_curl", report["error"])
+
+    def test_a_coupling_no_coupler_can_hold_fails_the_build_by_name(self) -> None:
+        # One value alone relates nothing; two joints pushed past their limits at once, either way.
+        report = self.finger(extra='couple(finger, "solo", index_pip=1)', ok=False)
+        self.assertIn("coupling 'solo' of index_finger moves one value alone; a coupling relates two or more",
+                      report["error"])
+        report = self.finger(extra='couple(finger, "spread", index_pip=1, index_dip=-1)', ok=False)
+        self.assertIn("coupling 'spread' of index_finger: its joints' limits leave it no range around as built "
+                      "([0, 0])", report["error"])
 
     def test_each_placement_s_coupling_is_kept_by_its_path_and_a_configuration_sets_them_all(self) -> None:
         self.build("hand", HAND)
@@ -441,16 +514,16 @@ class HarvestTest(_Folder):
         values, _named = mechanism.resolve(kinematics, {"hand/index:curl": 0.5})
         self.assertEqual([values[label] for label in ("hand/index/proximal:pip", "hand/index/middle:dip",
                                                       "hand/middle/proximal:pip")], [(50.0,), (35.0,), (0.0,)])
-        # A part of the document keeps its share of a coupling: the terms on the pairs it keeps (the
-        # middle and distal bones, moved by the knuckle between them; the proximal stands with the palm).
+        # A part of the document keeps a coupling whose joints it holds whole: a coupler relates two
+        # pairs, and the part holds one of this one's (the knuckle between the middle and distal
+        # bones; the proximal stands with the palm), so it keeps the pair and no coupling.
         from cadgen.engine.export import translate
 
         part = self.folder / "index.xbf"
         translate(path, None, part, part="hand/index")
         kept = document.Loaded(part).mechanism
         self.assertEqual([pair.label for pair in kept.pairs], ["hand/index/middle:dip"])
-        self.assertEqual(kept.couplings, {"hand/index:curl": mechanism.Coupling(
-            "hand/index:curl", {"hand/index/middle:dip": (70.0,)}, (0.0, 1.0), False)})
+        self.assertEqual(kept.couplings, {})
 
 
 if __name__ == "__main__":

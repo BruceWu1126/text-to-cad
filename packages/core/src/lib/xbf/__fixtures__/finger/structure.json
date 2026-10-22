@@ -289,7 +289,7 @@
   ]
  },
  "kinematics": {
-  "schema": "cadgen.kinematics/1",
+  "schema": "cadgen.kinematics/2",
   "name": "index_finger",
   "ground": 0,
   "links": [
@@ -569,7 +569,6 @@
      0.0,
      1.0
     ],
-    "lock": false,
     "terms": [
      [
       "index_mcp_flexion",
@@ -593,7 +592,6 @@
    "grip": {
     "duration": 1.5,
     "ease": "cubic",
-    "loop": "pingpong",
     "keys": [
      {
       "t": 0.0,

@@ -1,6 +1,6 @@
 // The CI gate for the hero: the committed GLB under public/hero/ must be the planetary gear model's
 // export and must still play on the page. It checks the file against the model's source (the motion
-// the model declares, by name, duration and loop) and against the page (the clip it plays), then reads
+// the model declares, by name and duration) and against the page (the clip it plays), then reads
 // it through @text-to-cad/core's GLB path, the one the page and the CAD Viewer read a GLB with, and
 // plays the clip there. A cadgen export or core format change that breaks the hero fails here instead
 // of in production. Refresh the GLB with scripts/sync-hero-glb.mjs.
@@ -30,15 +30,15 @@ const GLB_MAGIC = 0x46546c67; // "glTF"
 const JSON_CHUNK = 0x4e4f534a; // "JSON"
 const BIN_CHUNK = 0x004e4942; // "BIN\0"
 
-// The motion the model declares: `motion(assembly, "meshCycle", ..., duration=6, ..., loop="loop")`.
+// The motion the model declares: `motion(assembly, "meshCycle", ..., duration=6, ...)`. Its clip is the
+// motion once; the page repeats it.
 function declaredMotion(source) {
   const call = /\bmotion\(\s*\w+\s*,\s*"([^"]+)"([\s\S]*?)\)\s*$/m.exec(source);
   assert.ok(call, `${HERO_MODEL} declares no motion for the hero to play`);
   const [, name, rest] = call;
   const duration = /\bduration\s*=\s*([0-9.]+)/.exec(rest);
-  const loop = /\bloop\s*=\s*"([a-z]+)"/.exec(rest);
   assert.ok(duration, `${HERO_MODEL}: motion ${name} names no duration`);
-  return { name, duration: Number(duration[1]), loop: loop ? loop[1] : null };
+  return { name, duration: Number(duration[1]) };
 }
 
 // The GLB container: its JSON and its binary chunk.
@@ -65,12 +65,11 @@ export async function checkHeroGlb() {
   assert.equal(played[1], motion.name, `the page plays ${played[1]}, and ${HERO_MODEL} declares ${motion.name}`);
 
   // The file as cadgen's export writes it: its generator, and the motion as a clip of its name, its
-  // loop and duration as the model declares them, every channel on a node of the file.
+  // duration as the model declares it, every channel on a node of the file.
   const gltf = readGlb(bytes);
   assert.equal(gltf.asset?.generator, "cadgen engine", `${HERO_GLB} was not written by cadgen export`);
   const clip = (gltf.animations || []).find((animation) => animation.name === motion.name);
   assert.ok(clip, `${HERO_GLB} has no ${motion.name} animation: run node apps/docs/scripts/sync-hero-glb.mjs`);
-  assert.equal(clip.extras?.cadgen?.loop ?? null, motion.loop, `${motion.name}'s loop is not the model's`);
   assert.equal(clip.extras?.cadgen?.duration, motion.duration, `${motion.name}'s duration is not the model's`);
   assert.ok(clip.channels.length > 0, `${motion.name} moves nothing`);
   for (const channel of clip.channels) {

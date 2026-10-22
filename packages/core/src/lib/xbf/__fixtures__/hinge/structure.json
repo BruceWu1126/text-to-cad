@@ -131,7 +131,7 @@
   ]
  },
  "kinematics": {
-  "schema": "cadgen.kinematics/1",
+  "schema": "cadgen.kinematics/2",
   "name": "hinge",
   "ground": 0,
   "links": [

@@ -1,8 +1,7 @@
 """A motion baked into a glTF clip: keys where forward kinematics needs them, no more.
 
 Each motion of the document (``mechanism.Timeline``) is one clip of the same name. Its keys
-start at the motion's waypoints (each one, and a pingpong's way back, a key: there the speed
-may jump) and the halfway point between each two; at each key every moving placement's
+start at the motion's waypoints (each one a key: there the speed may jump) and the halfway point between each two; at each key every moving placement's
 translation and rotation is the true forward kinematics through the mechanism (couplings
 included), and its in- and out-tangents the one-sided derivatives of that FK there. Between
 two keys glTF's CUBICSPLINE (a cubic Hermite, the rotation normalized after) stands for the
@@ -29,12 +28,11 @@ CHECKS = tuple(step / 8 for step in range(1, 8))
 
 @dataclass
 class Clip:
-    """One motion baked: its name, loop, key times, and per moving instance (``instances``,
+    """One motion baked: its name, duration, key times, and per moving instance (``instances``,
     by instance index) its keys' translations and rotations, each ``(in-tangent, value,
     out-tangent)`` rows (k x 3 x 3 and k x 3 x 4); the worst deviation found at the checks."""
 
     name: str
-    loop: str | None
     duration: float
     times: np.ndarray
     instances: list[int]
@@ -208,7 +206,7 @@ def clips(view: Any, candidates: list[int], size: float) -> list[Clip]:
                 if len(times) > mechanism.MOST_KEYS:
                     raise ExportRefused(f"motion {name!r}: its clip does not settle within the tolerance in "
                                         f"{mechanism.MOST_KEYS} keys")
-        clip = Clip(name, motion.timeline.loop, motion.timeline.duration, np.array(times), motion.instances,
+        clip = Clip(name, motion.timeline.duration, np.array(times), motion.instances,
                     deviation=worst)
         rows = [keys.key(t) for t in times] if motion.instances else []
         for at in range(len(motion.instances)):

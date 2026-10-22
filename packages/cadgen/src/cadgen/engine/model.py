@@ -515,15 +515,16 @@ def configuration(assembly: Any, name: str, **values: Any) -> Any:
 
 
 def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any = None, duration: Any = None,
-           ease: str = "cubic", loop: str | None = None) -> Any:
+           ease: str = "cubic", **removed: Any) -> Any:
     """Name a motion of an assembly's mechanism, by joint label: waypoints ``[(t, pose),
     ...]`` (``t`` in seconds from 0, ``pose`` a configuration's name or ``{joint: value}``,
     the rest as built), ``sweep={joint: (from, to)}`` with ``duration``, or a function ``t ->
     {joint: value}`` with ``duration``. ``ease`` is ``cubic`` (eased in and out at every
-    waypoint), ``linear`` or ``spline``; ``loop`` None, ``"loop"`` or ``"pingpong"``::
+    waypoint: AP242's synchronous interpolation) or ``linear``. A motion is a finite clip; a
+    player repeats it::
 
         motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])
-        motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+        motion(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})])
         motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)
 
     The document keeps the definition, never frames (a function as its samples); a GLB
@@ -531,7 +532,7 @@ def motion(assembly: Any, name: str, waypoints_or_fn: Any = None, *, sweep: Any 
     moves the build: the model is as its joints connect it. Returns ``assembly``."""
     from cadgen.engine import mechanism
 
-    return mechanism.motion(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease, loop=loop)
+    return mechanism.motion(assembly, name, waypoints_or_fn, sweep=sweep, duration=duration, ease=ease, **removed)
 
 
 def _read_step(path: Any) -> Any:

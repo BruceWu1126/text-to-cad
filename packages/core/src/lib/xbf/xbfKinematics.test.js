@@ -16,7 +16,7 @@ import * as THREE from "three";
 
 import { createXbfScene } from "./xbfScene.js";
 import {
-  xbfCouplingControls, xbfCouplingValues, xbfCouplingWrite, xbfKinematics, xbfLinkPlacements, xbfOtherWarnings, xbfPoseControls,
+  xbfCouplingControls, xbfCouplingValues, xbfCouplingWrite, xbfKinematics, xbfLinkPlacements, xbfPoseControls,
   xbfPosedMatrices, xbfPoseValues, xbfUnposable
 } from "./xbfKinematics.js";
 import { readXbmPart, xbmUnmeshedFaces } from "./xbm.js";
@@ -66,17 +66,6 @@ test("a pose naming a joint wrong, or a value out of range, is refused by name",
   assert.deepEqual(xbfPoseControls(kinematics), [{ id: "elbow", pair: "elbow", index: 0, label: "elbow", unit: "deg", min: -10, max: 120 }]);
 });
 
-test("a pair the engine kept with no value holds its links as built and refuses a pose by name", () => {
-  const kinematics = xbfKinematics(STRUCTURE);
-  const broken = { ...STRUCTURE, kinematics: { ...kinematics, asBuilt: {}, warnings: ["joint 'elbow' is kept with no value"],
-    pairs: kinematics.pairs.map(pair => ({ ...pair, inconsistent: "hinge/arm is not where it can put it" })) } };
-  const held = xbfKinematics(broken);
-  assert.throws(() => xbfPoseValues(held, { elbow: 5 }), /joint 'elbow' cannot be posed: hinge\/arm is not where it can put it/);
-  assert.deepEqual(xbfPoseControls(held), []);
-  near(place(xbfPosedMatrices(broken, xbfPoseValues(held))[ARM], [120, 10, 10]), armTip(30), "the arm as built");
-  assert.deepEqual(xbfOtherWarnings(held), []);
-});
-
 test("a structure the engine served posed is posed from where it stands", () => {
   // The engine's posed structure: the arm's matrix at 90, and `kinematics.pose` saying so.
   const kinematics = xbfKinematics(STRUCTURE);
@@ -94,7 +83,8 @@ test("a coupling poses its joints as the engine does: at its value, the joints s
   const kinematics = xbfKinematics(FINGER);
   assert.deepEqual(kinematics.couplings.index_curl.terms, [[KNUCKLES[0], 0, 90], [KNUCKLES[1], 0, 100], [KNUCKLES[2], 0, 70]]);
   const coupled = xbfPoseValues(kinematics, { index_curl: 0.6 });
-  const byHand = xbfPoseValues(kinematics, { index_mcp_flexion: 54, index_pip: 60, index_dip: 42 });
+  // By hand: the same finger with no coupling, whose joints are its own to set.
+  const byHand = xbfPoseValues({ ...kinematics, couplings: {} }, { index_mcp_flexion: 54, index_pip: 60, index_dip: 42 });
   for (const label of KNUCKLES) near(coupled[label], byHand[label], label);
   // The page's forward kinematics at the coupling is the engine's, instance by instance.
   xbfPosedMatrices(FINGER, coupled).forEach((matrix, at) => near(matrix, FINGER_POSED.matrices[at], `instance ${at}`));
@@ -102,36 +92,40 @@ test("a coupling poses its joints as the engine does: at its value, the joints s
   // What a coupling pose names wrong is refused by name, as the engine refuses it.
   assert.throws(() => xbfPoseValues(kinematics, { index_curl: 1.5 }), /coupling 'index_curl' at 1.5 is outside its range \[0, 1\]/);
   assert.throws(() => xbfPoseValues(kinematics, { index_curl: 0.5, index_pip: 10 }),
-    /sets coupling 'index_curl' and its joint 'index_pip': set one of them/);
+    /joint 'index_pip' moves only with its coupling 'index_curl'; set 'index_curl'/);
   assert.throws(() => xbfPoseValues(kinematics, { index_curl: "x" }), /coupling 'index_curl' takes a number/);
   assert.throws(() => xbfPoseValues(kinematics, { crul: 1 }), /names no joint 'crul'/);
-  // The panel: one control for the coupling, and every joint's own while it is not locked.
+  // The panel: one control for the coupling over its derived range, and none for its joints.
   assert.deepEqual(xbfCouplingControls(kinematics), [{ id: "coupling:index_curl", coupling: "index_curl", label: "index_curl", unit: "",
-    min: 0, max: 1, lock: false, pairs: KNUCKLES }]);
-  assert.deepEqual(xbfPoseControls(kinematics).map(control => control.pair), KNUCKLES);
+    min: 0, max: 1, pairs: KNUCKLES }]);
 });
 
-test("a locked coupling is its joints' only control, and a pose's place on a coupling is read back", () => {
-  const finger = xbfKinematics(FINGER);
-  const kinematics = { ...finger, couplings: { index_curl: { ...finger.couplings.index_curl, lock: true } } };
-  assert.deepEqual(xbfPoseControls(kinematics), [], "no slider of a locked coupling's joints");
-  assert.throws(() => xbfPoseValues(kinematics, { index_pip: 10 }), /joint 'index_pip' moves only with the locked coupling 'index_curl'/);
+test("a coupling is its joints' only way to move, and a pose's place on a coupling is read back", () => {
+  const kinematics = xbfKinematics(FINGER);
+  assert.deepEqual(xbfPoseControls(kinematics), [], "no slider of a coupling's joints");
+  assert.throws(() => xbfPoseValues(kinematics, { index_pip: 10 }),
+    /joint 'index_pip' moves only with its coupling 'index_curl'; set 'index_curl'/);
   assert.deepEqual(xbfPoseValues(kinematics, { index_curl: 0.5 }), knuckles(45, 50, 35));
   // Where a pose stands on it: its value on its line, 0 off it.
   assert.deepEqual(xbfCouplingValues(kinematics, knuckles(45, 50, 35)), { index_curl: 0.5 });
   assert.deepEqual(xbfCouplingValues(kinematics, knuckles(45, 0, 35)), { index_curl: 0 });
-  // A coupling joint that cannot be posed takes its coupling with it, said by name.
-  const stuck = { ...kinematics, pairs: kinematics.pairs.map(pair => (pair.label === "index_dip"
-    ? { ...pair, inconsistent: "index_finger/distal is not where it can put it" } : pair)) };
+  // A coupling joint that cannot be posed (it closes a loop) takes its coupling with it, said by name.
+  const stuck = { ...kinematics, loop: ["index_dip", "x"] };
   assert.equal(xbfUnposable(stuck).get("index_curl"), "its joint 'index_dip' cannot be");
   assert.deepEqual(xbfCouplingControls(stuck), []);
 });
 
 test("a coupling's write holds its joints within their limits, and couplings sharing a joint add", () => {
   const hinge = xbfKinematics(STRUCTURE);
+  // `swing`'s range is open on both sides: its joint's limits alone hold it.
   const kinematics = { ...hinge, couplings: {
-    swing: { range: [0, 2], lock: false, terms: [["elbow", 0, 90]] },
-    nudge: { range: [-1, 1], lock: false, terms: [["elbow", 0, 10]] } } };
+    swing: { range: [null, null], terms: [["elbow", 0, 90]] },
+    nudge: { range: [-1, 1], terms: [["elbow", 0, 10]] } } };
+  // An open side spans one turn of its first value from the other; both open, half a turn each way.
+  assert.deepEqual(xbfCouplingControls(kinematics).map(({ coupling, min, max }) => [coupling, min, max]),
+    [["swing", -2, 2], ["nudge", -1, 1]]);
+  assert.deepEqual(xbfCouplingControls({ ...kinematics, couplings: { swing: { range: [null, 1], terms: [["elbow", 0, 90]] } } })
+    .map(({ min, max }) => [min, max]), [[-3, 1]]);
   const asBuilt = xbfPoseValues(kinematics);
   // Elbow is 30 as built and stops at 120: swing stops at 1 however far it is dragged.
   assert.deepEqual(xbfCouplingWrite(kinematics, asBuilt, {}, "swing", 2), { values: { elbow: [120] }, couplings: { swing: 1 } });

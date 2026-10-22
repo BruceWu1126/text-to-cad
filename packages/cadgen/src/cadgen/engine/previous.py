@@ -63,7 +63,9 @@ SCHEMA = "cadgen.engine closure/1"
 # Bumped deliberately, never by a release: when the document an engine writes, or what the
 # key covers, changes. A document of another format is built again once (``build._previous``).
 # xbf/2: the key covers the format alone of the engine, and no numpy; the closure holds no commit.
-FORMAT = "xbf/2"
+# xbf/3: the kinematics are AP242's alone: couplings as its couplers, motions' interpolation, no
+# cadgen-only attribute, no gear pair.
+FORMAT = "xbf/3"
 # The libraries a key covers: what decides the geometry.
 KEYED_LIBRARIES = ("build123d", "OCP")
 # The start of a closure's text: the schema first, so a head scan finds it.

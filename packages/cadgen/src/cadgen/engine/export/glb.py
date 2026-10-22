@@ -17,10 +17,10 @@ root node shows them in glTF's frame, Y up and metres, as cadgen's other GLBs do
 
 Every motion of the document is an animation of the same name (``export/motion.py``):
 CUBICSPLINE translation and rotation channels for each placement it moves, over one shared
-key time accessor, the motion's loop in the animation's ``extras`` (``{"cadgen": {"loop":
-None | "loop" | "pingpong", "duration": seconds}}``; a pingpong clip is the way out and the way
-back). A placement any motion moves stands by translation and rotation, as glTF asks of an
-animated node; every other one by its matrix.
+key time accessor, its duration in the animation's ``extras`` (``{"cadgen": {"duration":
+seconds}}``). A clip is the motion once; a player repeats it. A placement any motion moves
+stands by translation and rotation, as glTF asks of an animated node; every other one by its
+matrix.
 """
 
 from __future__ import annotations
@@ -264,7 +264,7 @@ def _animations(view: Any, held: dict[int, Any], shown: list[Any], node_of: dict
                 samplers.append({"input": times, "interpolation": "CUBICSPLINE", "output": values})
                 channels.append({"sampler": len(samplers) - 1, "target": {"node": node_of[index], "path": path}})
         found.append({"name": clip.name, "channels": channels, "samplers": samplers,
-                      "extras": {"cadgen": {"loop": clip.loop, "duration": clip.duration}}})
+                      "extras": {"cadgen": {"duration": clip.duration}}})
     return found
 
 

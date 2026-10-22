@@ -66,7 +66,7 @@ defines.
 | `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
 | `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
 | `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
-| `cadgen.couple(name, {dof: ratio}, limits=...)` | `couple(assembly, name, range=..., **ratios)` |
+| `cadgen.couple(name, {dof: ratio}, limits=...)` | `couple(assembly, name, **ratios)`, two or more joints, ranged by their limits |
 | `cadgen.clip(update, duration=...)` | `motion(assembly, name, ...)` |
 | `from cadgen import report, track` | `from cadgen.engine import report, track` |
 | `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
@@ -103,7 +103,6 @@ def arm():
     bd.RigidJoint("elbow", forearm, bd.Plane(origin=ELBOW.position, z_dir=ELBOW.direction).location)
     upper_arm.joints["elbow"].connect_to(forearm.joints["elbow"], angle=0)
     assembly = bd.Compound(children=[upper_arm, forearm], label="arm")
-    couple(assembly, "curl", range=(0, 90), elbow=1)
     return configuration(assembly, "bent", elbow=60)
 ```
 
@@ -117,6 +116,9 @@ def arm():
   keeps the parts where they were built.
 - `poses` become `configuration(assembly, name, **values)`, and a pose is drawn or
   written with `--pose` ([kinematics](kinematics.md)).
+- A coupling is a constraint among two or more joints, its range their limits
+  (`limits=` is gone: give the joints the limits instead). A coupling of one joint is
+  that joint, so `curl` above is dropped and `elbow` poses alone.
 - A mate's `axis` given as a ref becomes an `Axis` computed in the body, from the
   live shape (`select(part, ref)[0]`).
 
@@ -150,12 +152,13 @@ def demo(t, m):
 ANIMATION = {"demo": cadgen.clip(demo, duration=4)}
 
 # After, in the body, with a RevoluteJoint "platter" on the base
-motion(turntable, "demo", sweep={"platter": (0, 360)}, duration=4, ease="linear", loop="loop")
+motion(turntable, "demo", sweep={"platter": (0, 360)}, duration=4, ease="linear")
 ```
 
 Waypoints, a sweep or a function of time over joint values replace `update(t, m)`
-([motions](kinematics.md#motions)). Opacity, visibility and tube deformation have
-no motion form. A motion plays in a GLB export, not in the document's views.
+([motions](kinematics.md#motions)). A motion is a finite clip, and a player repeats
+it. Opacity, visibility and tube deformation have no motion form. A motion plays in a
+GLB export, not in the document's views.
 
 ## Refs name occurrences by path
 

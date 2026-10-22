@@ -1,7 +1,9 @@
 """Motions: definitions in a model's code (``motion``), kept in the document beside the
-configurations as data -- waypoints, a sweep, or a function's samples -- read back whole,
-patched by a warm build to the cold build's bytes; and a GLB export baking each motion into
-a glTF clip whose curves stay within the tolerance of forward kinematics."""
+configurations as AP242's interpolated configuration sequences -- waypoints, a sweep, or a
+function's samples, each segment's interpolation linear or synchronous -- read back whole,
+patched by a warm build to the cold build's bytes; the removed ``loop`` and ``spline`` refused by
+name; and a GLB export baking each motion into a finite glTF clip whose curves stay within the
+tolerance of forward kinematics."""
 
 from __future__ import annotations
 
@@ -44,8 +46,8 @@ def arm():
     base.joints["elbow"].connect_to(link.joints["mount"], angle=0)
     arm = bd.Compound(children=[base, link, tip], label="arm")
     configuration(arm, "raised", elbow=90)
-    {m}motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})], loop="loop")
-    {m}motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear", loop="pingpong")
+    {m}motion(arm, "lift", [(0, {{"elbow": 0}}), (1.5, "raised"), (3, {{"elbow": 0, "slide": 60}})])
+    {m}motion(arm, "wave", sweep={{"elbow": (-10, {reach})}}, duration=2, ease="linear")
     {m}{nod}motion(arm, "nod", lambda t: {{"elbow": 45 + 20 * math.sin(t), "slide": 40 + 30 * math.sin(2 * t)}}, duration=6)
     {more}
     return arm
@@ -104,7 +106,11 @@ class AuthoringTest(unittest.TestCase):
                 (lambda: motion(box, "m", lambda t: {}, duration=0), "duration is a number of seconds above 0"),
                 (lambda: motion(box, "m", lambda t: {}), "a function of time takes duration="),
                 (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, ease="bounce"), "ease is one of"),
-                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, loop="twice"), "loop is None"),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, loop="loop"),
+                 "motion 'm': loop= is gone: a motion is a finite clip, and a player repeats it"),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, ease="spline"),
+                 "motion 'm': ease 'spline' is gone: AP242 interpolates a motion linearly or synchronously"),
+                (lambda: motion(box, "m", sweep={"j": (0, 1)}, duration=1, speed=2), "motion\\(\\) takes no speed"),
                 (lambda: motion("arm", "m", sweep={"j": (0, 1)}, duration=1), "takes the assembly")):
             with self.assertRaisesRegex((TypeError, ValueError), error):
                 call()
@@ -120,9 +126,19 @@ class DocumentTest(_Folder):
         lift = motions["lift"]
         self.assertEqual(lift.keys, [(0.0, None, {"elbow": (0.0,)}), (1.5, "raised", {}),
                                      (3.0, None, {"elbow": (0.0,), "slide": (60.0,)})])
-        self.assertEqual((lift.ease, lift.loop), ("cubic", "loop"))
+        self.assertEqual(lift.ease, "cubic")
         self.assertEqual(motions["wave"].keys, [(0.0, None, {"elbow": (-10.0,)}), (2.0, None, {"elbow": (60.0,)})])
-        self.assertEqual((motions["wave"].ease, motions["wave"].loop), ("linear", "pingpong"))
+        self.assertEqual(motions["wave"].ease, "linear")
+        # Each segment's interpolation is AP242's: the ease to the next, the last's a discontinuity.
+        from OCP.Standard import Standard_GUID
+
+        root = next(label for label in mechanism._children_of(loaded.doc.Main())
+                    if label.IsAttribute(Standard_GUID(mechanism.GUID)))
+        sequences = {document._label_name(label): [mechanism._string(mechanism._named(segment), "interpolation")
+                                                   for segment in mechanism._children_of(label)]
+                     for label in mechanism._children_of(root.FindChild(1, False).FindChild(5, False))}
+        self.assertEqual(sequences["lift"], ["synchronous_interpolation_type"] * 2 + ["discontinuous_interpolation_type"])
+        self.assertEqual(sequences["wave"], ["linear_interpolation_type", "discontinuous_interpolation_type"])
         block = loaded.structure()["kinematics"]["motions"]
         self.assertEqual(block["lift"]["keys"][1], {"t": 1.5, "configuration": "raised"})
         self.assertEqual(block["wave"]["duration"], 2.0)
@@ -132,14 +148,14 @@ class DocumentTest(_Folder):
     def test_a_function_is_kept_as_samples_within_the_tolerance_at_times_the_code_chooses(self) -> None:
         self.arm()
         nod = document.Loaded(self.xbf).mechanism.motions["nod"]
-        self.assertEqual(nod.ease, "spline")
+        self.assertEqual(nod.ease, "linear", "a function's samples, interpolated linearly")
         times = np.array([t for t, _name, _values in nod.keys])
         self.assertEqual((times[0], times[-1]), (0.0, 6.0))
         self.assertLess(len(times), 200)
         table = np.array([[values["elbow"][0], values["slide"][0]] for _t, _name, values in nod.keys])
         worst = np.zeros(2)
         for t in np.linspace(0, 6, 997):
-            got = mechanism._interpolated(times, table, "spline", float(t))
+            got = mechanism._interpolated(times, table, "linear", float(t))
             truth = np.array([45 + 20 * math.sin(t), 40 + 30 * math.sin(2 * t)])
             worst = np.maximum(worst, np.abs(got - truth))
         size = math.dist((-50, -30, -10), (160, 30, 40))  # the arm's bounding box as built
@@ -282,10 +298,9 @@ class GlbTest(_Folder):
             self.assertTrue(np.all(np.diff(times) > 0))
             self.assertEqual(gltf["accessors"][first]["min"][0], 0.0)
         extras = {animation["name"]: animation["extras"]["cadgen"] for animation in gltf["animations"]}
-        self.assertEqual(extras["wave"], {"loop": "pingpong", "duration": 2.0})
-        self.assertEqual(extras["nod"]["loop"], None)
-        self.assertAlmostEqual(read(gltf["animations"][2]["samplers"][0]["input"])[-1, 0], 4.0, places=5,
-                               msg="a pingpong clip is the way out and the way back")
+        self.assertEqual(extras, {"lift": {"duration": 3.0}, "nod": {"duration": 6.0}, "wave": {"duration": 2.0}})
+        self.assertAlmostEqual(read(gltf["animations"][2]["samplers"][0]["input"])[-1, 0], 2.0, places=5,
+                               msg="a clip is the motion once: a player repeats it")
         size = math.dist((-50, -30, -10), (160, 30, 40))
         found = deviations(out, structure)
         for name, (keys, linear, angular) in found.items():

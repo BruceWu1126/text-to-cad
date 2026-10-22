@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { Slider } from "@text-to-cad/ui/primitives/slider";
 import {
-  xbfCouplingControls, xbfCouplingValues, xbfCouplingWrite, xbfCouplings, xbfDrivenPairs, xbfLockedPairs, xbfPoseControls,
+  xbfCoupledPairs, xbfCouplingControls, xbfCouplingValues, xbfCouplingWrite, xbfCouplings, xbfPoseControls,
   xbfPoseValues, xbfSamePose, xbfUnposable, xbfOtherWarnings
 } from "@text-to-cad/core/lib/xbf/xbfKinematics.js";
 import ToolPanel from "../kit/tools/ToolPanel.jsx";
@@ -13,12 +13,12 @@ import { DEFAULT_POSE_VALUE, KinematicsPoseRow, NO_PRESET_VALUE } from "../kit/i
 // An engine document's Position: the file sidebar's section exactly as a STEP's is (the STEP
 // renderer's `PoseControlsSection.js` and `MotionControlsSection.js`, copied: one again at the
 // renderers' migration) -- headed "Position", Reset in its heading, the Pose row (Default, the
-// document as built, then its configurations), then a slider per coupling (one control driving
-// several joints by ratio, 0 as built), then a slider per value of every pair: an angle for a
-// revolute pair, a distance for a prismatic one, both for a cylindrical one, three angles for a
-// spherical one, and a pair a gear drives too, written through its gear as a STEP's coupled row
-// is. A locked coupling's joints have no slider: it is their only control. Writes pose the scene
-// at once (the page's forward kinematics, `xbfKinematics.js`).
+// document as built, then its configurations), then a slider per coupling (a constraint moving
+// several joints by ratio, 0 as built, over the range its joints' limits leave it), then a slider
+// per value of every other pair: an angle for a revolute pair, a distance for a prismatic one,
+// both for a cylindrical one, three angles for a spherical one. A coupling's joints have no slider:
+// they move only through it. Writes pose the scene at once (the page's forward kinematics,
+// `xbfKinematics.js`).
 
 const NO_COUPLINGS = Object.freeze({});
 
@@ -45,70 +45,43 @@ function controlStep(control) {
   return Number(Math.max(10 ** Math.floor(Math.log10(range / 1000)), 0.000001).toPrecision(12));
 }
 
-/**
- * Every pair row of the section, in the pairs' order: each posable pair's values, and each pair a
- * gear drives (`driver`: what its row writes through, and the ratio). A locked coupling's joints
- * have none.
- */
+/** Every pair row of the section, in the pairs' order: each posable pair's values no coupling drives. */
 export function xbfPositionRows(kinematics) {
-  const own = xbfPoseControls(kinematics);
-  const driven = xbfDrivenPairs(kinematics);
-  const unposable = xbfUnposable(kinematics);
-  const rows = [];
-  for (const pair of kinematics?.pairs || []) {
-    if (pair.type === "gear" || unposable.has(pair.label)) continue;
-    if (driven.has(pair.label)) {
-      const { driver, ratio, gear } = driven.get(pair.label);
-      const source = own.find(control => control.pair === driver && control.index === 0);
-      if (!source || !ratio) continue;
-      const ends = [source.min * ratio, source.max * ratio];
-      rows.push({ id: pair.label, pair: pair.label, index: 0, label: pair.label, unit: pair.units?.[0] || "deg",
-        min: Math.min(...ends), max: Math.max(...ends), driver: { control: driver, ratio, gear } });
-      continue;
-    }
-    rows.push(...own.filter(control => control.pair === pair.label));
-  }
-  return rows;
+  return xbfPoseControls(kinematics);
 }
 
 /**
- * Every pair's values once `control` is set to `next` (within its limits), or null for no number:
- * a row a gear drives writes its driver, any other its own value. The section's sliders and
- * fields and Position's knobs all write through here.
+ * Every pair's values once `control` is set to `next` (within its limits), or null for no number.
+ * The section's sliders and fields and Position's knobs all write through here.
  */
 export function writeXbfPosition(values, control, next) {
   const value = Math.min(Math.max(Number(next), control.min), control.max);
   if (!Number.isFinite(value)) return null;
-  const pair = control.driver ? control.driver.control : control.pair;
-  const index = control.driver ? 0 : control.index;
-  const current = [...(values[pair] || [])];
-  current[index] = control.driver ? value / control.driver.ratio : value;
-  return { ...values, [pair]: current };
+  const current = [...(values[control.pair] || [])];
+  current[control.index] = value;
+  return { ...values, [control.pair]: current };
 }
 
 /**
  * A pose as `cadgen snapshot --pose` takes it (`{"<joint or coupling>": value}`): each pair a person
- * can set, its value (a number, or a pair's several values), and each locked coupling's value, which
- * drives its joints; what a gear or a coupling drives follows from them. A prompt's view carries it
- * as its `jointValues`, so the view the ink was drawn in is posed again as it was.
+ * can set, its value (a number, or a pair's several values), and each coupling's value, which moves
+ * its joints. A prompt's view carries it as its `jointValues`, so the view the ink was drawn in is
+ * posed again as it was.
  * @param {object} kinematics @param {Record<string, number[]>} values @param {Record<string, number> | null} [couplings]
  * @returns {Record<string, number | number[]>}
  */
 export function xbfPoseGiven(kinematics, values, couplings = null) {
-  const driven = xbfDrivenPairs(kinematics);
-  const locked = xbfLockedPairs(kinematics);
+  const coupled = xbfCoupledPairs(kinematics);
   const unposable = xbfUnposable(kinematics);
   const given = {};
   for (const pair of kinematics?.pairs || []) {
-    if (pair.type === "gear" || driven.has(pair.label) || locked.has(pair.label) || unposable.has(pair.label)) continue;
+    if (coupled.has(pair.label) || unposable.has(pair.label)) continue;
     const value = values?.[pair.label];
     if (!Array.isArray(value) || !value.length) continue;
     given[pair.label] = value.length === 1 ? value[0] : [...value];
   }
   const shown = couplings || xbfCouplingValues(kinematics, values);
-  for (const [name, coupling] of Object.entries(xbfCouplings(kinematics))) {
-    if (coupling.lock) given[name] = Number(shown?.[name]) || 0;
-  }
+  for (const name of Object.keys(xbfCouplings(kinematics))) given[name] = Number(shown?.[name]) || 0;
   return given;
 }
 
@@ -117,8 +90,8 @@ export function xbfPoseGiven(kinematics, values, couplings = null) {
  * hand; every pair's values at it (`values`), and whether that is not as built (`applied`); and
  * each coupling's slider (`couplings`), where the pose stands on it until a slider moves, then
  * where it was last set: moving a joint after leaves a coupling's slider where it was, as the Pose
- * row keeps what it chose. `setValues(values, couplings?)` takes every pair's values (a gear's and
- * a locked coupling's are their drivers'), `choosePreset(name)` a configuration, `reset()` as built.
+ * row keeps what it chose. `setValues(values, couplings?)` takes every pair's values (a coupling's
+ * joints' are its value's), `choosePreset(name)` a configuration, `reset()` as built.
  */
 export function useXbfPose(kinematics) {
   const key = kinematics ? JSON.stringify([kinematics.pairs, kinematics.configurations, kinematics.asBuilt, kinematics.couplings || null]) : "";
@@ -126,12 +99,12 @@ export function useXbfPose(kinematics) {
   const current = pose.key === key ? pose : { key, preset: DEFAULT_POSE_VALUE, given: null, couplings: null };
   const values = useMemo(() => {
     if (!kinematics) return null;
-    // A locked coupling's joints are its value's: the rest is what was set by hand.
-    const locked = Object.fromEntries(Object.entries(xbfCouplings(kinematics)).filter(([, coupling]) => coupling.lock)
-      .map(([name]) => [name, Number(current.couplings?.[name]) || 0]));
+    // A coupling's joints are its value's: the rest is what was set by hand.
+    const coupled = Object.fromEntries(Object.keys(xbfCouplings(kinematics))
+      .map(name => [name, Number(current.couplings?.[name]) || 0]));
     const preset = current.preset !== DEFAULT_POSE_VALUE && current.preset !== NO_PRESET_VALUE ? current.preset : null;
     try {
-      return xbfPoseValues(kinematics, current.given ? { ...current.given, ...locked } : preset);
+      return xbfPoseValues(kinematics, current.given ? { ...current.given, ...coupled } : preset);
     } catch {
       return xbfPoseValues(kinematics);
     }
@@ -143,10 +116,11 @@ export function useXbfPose(kinematics) {
   const couplings = useMemo(() => current.couplings || (kinematics && values ? xbfCouplingValues(kinematics, values) : NO_COUPLINGS),
     [kinematics, values, current.couplings]);
   const setValues = useCallback((next, nextCouplings = null) => {
-    const driven = xbfDrivenPairs(kinematics);
-    const locked = xbfLockedPairs(kinematics);
+    // What is set by hand: neither a coupling's joint (its value's) nor a pair that cannot be posed.
+    const coupled = xbfCoupledPairs(kinematics);
+    const unposable = xbfUnposable(kinematics);
     setPose({ key, preset: NO_PRESET_VALUE, couplings: nextCouplings || couplings,
-      given: Object.fromEntries(Object.entries(next).filter(([label]) => !driven.has(label) && !locked.has(label))) });
+      given: Object.fromEntries(Object.entries(next).filter(([label]) => !coupled.has(label) && !unposable.has(label))) });
   }, [kinematics, key, couplings]);
   const choosePreset = useCallback(name => setPose({ key, preset: name, given: null, couplings: null }), [key]);
   const reset = useCallback(() => setPose({ key, preset: DEFAULT_POSE_VALUE, given: null, couplings: null }), [key]);
@@ -189,10 +163,10 @@ export default function XbfPositionSection({ kinematics, values, couplings = nul
       {poseNames.length || controls.length || coupled.length ? <KinematicsPoseRow poses={poseNames.map(name => ({ value: name, label: name }))}
         activeValue={preset} onSelect={onPreset} onReset={onReset} /> : null}
       {coupled.map(control => slider(control, Number(shown[control.coupling]) || 0, couple,
-        `${control.label} · ${control.lock ? "drives" : "couples"} ${control.pairs.join(", ")}`))}
+        `${control.label} · couples ${control.pairs.join(", ")}`))}
       {controls.map((control) => {
         const currentValue = values[control.pair]?.[control.index] ?? 0;
-        return slider(control, currentValue, change, control.driver ? `${control.label} · driven by ${control.driver.control}` : control.label);
+        return slider(control, currentValue, change, control.label);
       })}
       {!controls.length && !coupled.length && !poseNames.length ? <FileSheetStatusText>No pose controls.</FileSheetStatusText> : null}
       {/* What the document's mechanism cannot pose, where a STEP's sidecar would have refused the joint. */}

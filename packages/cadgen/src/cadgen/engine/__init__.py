@@ -21,9 +21,9 @@ is marked ``@memo``: it writes no file, and a build whose edit does not reach it
 instead of running it. A part's material is a value set on the shape: ``part.material = materials.aluminium``
 (``Material`` for any other). An assembly's mechanism is build123d's joints, placed with
 ``connect_to``, as built where the joints place the parts; ``configuration(assembly, name,
-**values)`` names a configuration of it, ``couple(assembly, name, *, range=(0, 1), lock=False,
-**joints)`` one control driving several joints by ratio, and ``motion(assembly, name, ...)`` a
-motion, which a GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
+**values)`` names a configuration of it, ``couple(assembly, name, **joints)`` a constraint moving
+several joints by ratio (their only way to move, its range their limits'), and ``motion(assembly,
+name, ...)`` a motion, which a GLB export bakes into a clip. ``read_step(path)`` and ``read_xbf(path)`` copy a file's geometry into
 the model, named, coloured and given its materials as the file has them; ``read_mesh(path)`` reads
 an STL as data -- vertices, triangles, ``bounding_box()`` -- never a shape. ``select(source, ref,
 kind=None)`` is the geometry a ref names -- ``hand/finger.2/f:finger.tip.1``, ``base/face 3`` --

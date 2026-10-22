@@ -158,7 +158,7 @@ it("Select's menu is a STEP's single choice: All when a file opens, or one kind 
 // An engine document's Position over a hinge's mechanism: one revolute pair with one named configuration.
 const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const hingeKinematics = {
-  schema: 'cadgen.kinematics/1', name: 'rig', ground: 0, loop: null,
+  schema: 'cadgen.kinematics/2', name: 'rig', ground: 0, loop: null,
   links: [{ name: 'base', instances: [0], matrix: I }, { name: 'arm', instances: [1], matrix: I }],
   pairs: [{ label: 'hinge', type: 'revolute', links: [0, 1], frames: [I, I], limits: [[-180, 180]], units: ['deg'] }],
   asBuilt: { hinge: 0 }, configurations: { open: { hinge: 90 } },
@@ -210,7 +210,7 @@ it("Position is a STEP's -- its heading, its Pose row, a named slider and value 
     shown('Custom', '25.0°', false), shown('Default', '0.00°', true)]);
 });
 
-it('Position drives a cylindrical pair by both its values and a geared pair through its gear, and says what it cannot pose', async () => {
+it('Position drives a cylindrical pair by both its values, and says what it cannot pose', async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   const onPose = vi.fn();
   const rig = {
@@ -220,37 +220,36 @@ it('Position drives a cylindrical pair by both its values and a geared pair thro
       ...hingeKinematics.pairs,
       { label: 'slide', type: 'cylindrical', links: [0, 2], frames: [I, I], limits: [[-180, 180], [0, 50]], units: ['deg', 'mm'] },
       { label: 'spin', type: 'revolute', links: [0, 3], frames: [I, I], limits: [[null, null]], units: ['deg'] },
-      { label: 'mesh', type: 'gear', drives: ['hinge', 'spin'], ratio: 2 },
-      { label: 'knee', type: 'revolute', links: [0, 4], frames: [I, I], limits: [[0, 90]], units: ['deg'], inconsistent: 'rig/leg is not where it can put it' },
+      { label: 'knee', type: 'revolute', links: [0, 4], frames: [I, I], limits: [[0, 90]], units: ['deg'] },
+      { label: 'shin', type: 'revolute', links: [0, 4], frames: [I, I], limits: [[0, 90]], units: ['deg'] },
     ],
-    asBuilt: { hinge: 0, slide: [0, 10], spin: 0 }, configurations: {},
+    asBuilt: { hinge: 0, slide: [0, 10], spin: 0, knee: 0, shin: 0 }, configurations: {}, loop: ['knee', 'shin'],
   };
   render(<XbfPosition kinematics={rig} onPose={onPose} />);
   fireEvent.click(screen.getByRole('button', { name: 'Position' }));
   const panel = screen.getByRole('region', { name: 'Position controls' });
   expect(within(panel).getAllByRole('slider').map(thumb => [thumb.getAttribute('aria-label'), thumb.getAttribute('aria-valuemin'), thumb.getAttribute('aria-valuemax')]))
-    .toEqual([['hinge', '-180', '180'], ['slide angle', '-180', '180'], ['slide position', '0', '50'], ['spin', '-360', '360']]);
-  // The geared row writes its driver.
-  const spin = within(panel).getByLabelText('spin slider value') as HTMLInputElement;
-  await user.clear(spin);
-  await user.type(spin, '60{Enter}');
-  expect(onPose.mock.lastCall![0]).toMatchObject({ hinge: [30], spin: [60] });
-  // A pair the engine could not keep a value for is said, not drawn.
-  expect(within(panel).getByText(/knee cannot be posed: rig\/leg is not where it can put it/)).toBeTruthy();
+    .toEqual([['hinge', '-180', '180'], ['slide angle', '-180', '180'], ['slide position', '0', '50'], ['spin', '-180', '180']]);
+  const position = within(panel).getByLabelText('slide position slider value') as HTMLInputElement;
+  await user.clear(position);
+  await user.type(position, '30{Enter}');
+  expect(onPose.mock.lastCall![0]).toMatchObject({ hinge: [0], slide: [0, 30] });
+  // A loop's pairs, which have no pose without a solver, are said, not drawn.
+  expect(within(panel).getByText(/knee cannot be posed: pairs knee, shin close a loop/)).toBeTruthy();
 });
 
 // The spec's index finger: three knuckles from straight, one coupling curling them all, and a
 // configuration naming it.
 const KNUCKLES: [string, number][] = [['index_mcp_flexion', 90], ['index_pip', 100], ['index_dip', 70]];
 const JOINTS = KNUCKLES.map(([label]) => label);
-const fingerKinematics = (lock: boolean) => ({
+const fingerKinematics = {
   ...hingeKinematics,
   links: ['base', 'proximal', 'middle', 'distal'].map((name, at) => ({ name, instances: [at], matrix: I })),
   pairs: KNUCKLES.map(([label, top], at) => ({
     label, type: 'revolute', links: [at, at + 1], frames: [I, I], limits: [[0, top]], units: ['deg'] })),
   asBuilt: Object.fromEntries(JOINTS.map(label => [label, 0])), configurations: { fist: Object.fromEntries(KNUCKLES) },
-  couplings: { index_curl: { range: [0, 1], lock, terms: KNUCKLES.map(([label, ratio]) => [label, 0, ratio]) } },
-});
+  couplings: { index_curl: { range: [0, 1], terms: KNUCKLES.map(([label, ratio]) => [label, 0, ratio]) } },
+};
 // The joints' values in the knuckles' order.
 const pose = (...values: number[]) => Object.fromEntries(JOINTS.map((label, at) => [label, [values[at]]]));
 const sliders = (panel: HTMLElement) => within(panel).getAllByRole('slider').map(thumb =>
@@ -268,45 +267,28 @@ async function choose(user: ReturnType<typeof userEvent.setup>, panel: HTMLEleme
   await user.click(within(document.querySelector<HTMLElement>('[role=menu][aria-label="Pose"]')!).getByRole('menuitemradio', { name }));
 }
 
-it('Position shows a slider per coupling under the Pose row, posing every joint it drives', async () => {
+it("Position shows a slider per coupling under the Pose row and none for its joints: they move only through it", async () => {
   const user = userEvent.setup({ pointerEventsCheck: 0 });
   const onPose = vi.fn();
-  render(<XbfPosition kinematics={fingerKinematics(false)} onPose={onPose} />);
+  render(<XbfPosition kinematics={fingerKinematics} onPose={onPose} />);
   fireEvent.click(screen.getByRole('button', { name: 'Position' }));
   const panel = screen.getByRole('region', { name: 'Position controls' });
-  // Under the Pose row: the coupling, 0 as built over its range, then each joint's own.
-  expect(sliders(panel)).toEqual([['index_curl', '0', '1'], ...KNUCKLES.map(([label, top]) => [label, '0', String(top)])]);
+  // Under the Pose row: the coupling, 0 as built over its range; no joint of it has a slider.
+  expect(sliders(panel)).toEqual([['index_curl', '0', '1']]);
+  expect(within(panel).queryByLabelText('index_pip slider value')).toBeNull();
   expect(valueOf(panel, 'index_curl')).toBe('0.00');
   await setValue(user, panel, 'index_curl', '0.6');
   expect(onPose.mock.lastCall![0]).toEqual(pose(54, 60, 42));
-  expect(JOINTS.map(label => valueOf(panel, label))).toEqual(['54.0°', '60.0°', '42.0°']);
-  // A joint moved after leaves the coupling's slider where it was.
-  await setValue(user, panel, 'index_pip', '10');
-  expect(onPose.mock.lastCall![0]).toEqual(pose(54, 10, 42));
-  expect(valueOf(panel, 'index_curl')).toBe('0.60');
-  // A configuration puts it where that configuration stands on it, and Reset back at 0.
+  // A configuration puts it where that configuration stands on it; the coupling again moves the
+  // joints from there; Reset puts it back at 0.
   await choose(user, panel, 'fist');
   expect(valueOf(panel, 'index_curl')).toBe('1.00');
-  await user.click(within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }));
-  expect(valueOf(panel, 'index_curl')).toBe('0.00');
-  expect(onPose.mock.lastCall![0]).toEqual(pose(0, 0, 0));
-});
-
-it("Position hides a locked coupling's joints: it is their only control", async () => {
-  const user = userEvent.setup({ pointerEventsCheck: 0 });
-  const onPose = vi.fn();
-  render(<XbfPosition kinematics={fingerKinematics(true)} onPose={onPose} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Position' }));
-  const panel = screen.getByRole('region', { name: 'Position controls' });
-  expect(sliders(panel)).toEqual([['index_curl', '0', '1']]);
-  expect(within(panel).queryByLabelText('index_pip slider value')).toBeNull();
-  await setValue(user, panel, 'index_curl', '0.5');
-  expect(onPose.mock.lastCall![0]).toEqual(pose(45, 50, 35));
-  // A configuration naming it, then the coupling again: the joints follow it alone.
-  await choose(user, panel, 'fist');
   expect(onPose.mock.lastCall![0]).toEqual(pose(90, 100, 70));
   await setValue(user, panel, 'index_curl', '0.2');
   expect(onPose.mock.lastCall![0]).toEqual(pose(18, 20, 14));
+  await user.click(within(panel.querySelector<HTMLElement>('[data-sidebar-head]')!).getByRole('button', { name: 'Reset position' }));
+  expect(valueOf(panel, 'index_curl')).toBe('0.00');
+  expect(onPose.mock.lastCall![0]).toEqual(pose(0, 0, 0));
 });
 
 it("a face's and an edge's card rows are a STEP's for the same measurements", () => {

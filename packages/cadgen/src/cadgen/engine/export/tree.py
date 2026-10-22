@@ -147,8 +147,8 @@ def _mechanism(mechanism: Any, root: tuple[int, ...]) -> Any:
                if motion.labels() <= labels and all(configuration in configurations and set(
                    mechanism.configurations[configuration]) <= labels
                    for _t, configuration, _values in motion.keys if configuration is not None)}
-    couplings = {name: replace(coupling, ratios=share(coupling.ratios))
-                 for name, coupling in mechanism.couplings.items() if share(coupling.ratios)}
+    # A coupling every joint of which is in the subtree: a coupler relates its joints whole.
+    couplings = {name: coupling for name, coupling in mechanism.couplings.items() if set(coupling.ratios) <= labels}
     return Mechanism(mechanism.name, links, kept.get(mechanism.ground, 0), pairs, share(mechanism.as_built),
                      configurations, list(mechanism.warnings), motions, couplings)
 

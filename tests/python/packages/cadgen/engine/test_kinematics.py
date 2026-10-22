@@ -1,9 +1,9 @@
 """Kinematics: build123d's joints harvested into the xbf's mechanism (AP242's links, pairs,
-ground and configurations) and read back; a chain's links and a prismatic pair; a gear pair
-driving one pair from another; poses by a configuration's name and by joint values placing a
-part where the closed form says, in a posed STEP that carries no mechanism; what a pose names
-wrong refused by name; the structure's ``kinematics`` the same from the file and from the
-build; a document served at a pose."""
+ground and configurations) and read back; a chain's links and a prismatic pair; a pair the
+built tree contradicts refused by name; poses by a configuration's name and by joint values
+placing a part where the closed form says, in a posed STEP that carries no mechanism; what a pose
+names wrong refused by name; the structure's ``kinematics`` the same from the file and from the
+build; a document served at a pose; the mechanism subtree AP242's names and nothing else."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import tempfile
 import textwrap
@@ -231,13 +232,12 @@ class HingeTest(_Folder):
                       " ".join(report["kinematics"]["warnings"]))
         self.assertEqual(document.Loaded(self.folder / "XBF/hinge.xbf").mechanism.configurations["flat"], {})
 
-    def test_a_part_moved_after_it_was_connected_warns_and_its_joint_is_not_posed(self) -> None:
-        # Connected after the compound holding the arm was made: the document places the arm
-        # where it was, not where the joint put it. The geometry is written all the same.
-        report = self.hinge(connect="pass", after=CONNECT)
-        self.assertIn("joint 'elbow' is kept with no value and cannot be posed: hinge/arm is not where it can put it",
-                      " ".join(report["kinematics"]["warnings"]))
-        self.assertTrue(report["files"][str(self.folder / "XBF/hinge.xbf")]["written"])
+    def test_a_part_moved_after_it_was_connected_is_refused_by_name(self) -> None:
+        # Connected after the compound holding the arm was made: the arm is not where the joint
+        # put it, a pair AP242 has no value for. The document is refused, not written.
+        report = self.hinge(connect="pass", after=CONNECT, ok=False)
+        self.assertIn("joint 'elbow' cannot be kept: hinge/arm is not where it can put it", report["error"])
+        self.assertFalse((self.folder / "XBF/hinge.xbf").exists())
 
     def test_a_snapshot_draws_a_pose_and_refuses_a_bad_one_before_it_renders(self) -> None:
         from cadgen.engine.render import context
@@ -453,8 +453,9 @@ class NestedTest(_Folder):
         report = self.build("nested", NESTED.format(extra=SPARE))
         self.assertIn("joint 'elbow' on nested/base matches the rigid joints 'elbow'",
                       " ".join(report["kinematics"]["warnings"]))
+        # The warning is the build's report: the document holds what AP242 can say, no pair.
         kinematics = document.Loaded(self.folder / "XBF/nested.xbf").structure()["kinematics"]
-        self.assertEqual((kinematics["pairs"], len(kinematics["warnings"])), ([], 1))
+        self.assertEqual((kinematics["pairs"], kinematics["warnings"]), ([], []))
 
     def test_connect_to_wins_over_a_label(self) -> None:
         # The hinge connects `elbow` to the arm's `mount`; a spare's rigid `elbow` pairs with nothing.
@@ -515,37 +516,22 @@ def bike():
 """
 
 
-class InconsistencyTest(_Folder):
+class RefusalTest(_Folder):
     def test_a_child_frame_at_the_revolute_s_own_frame_is_joint_zero(self) -> None:
         # A rigid frame made of the world datum turns about the axis from the revolute's own by the
-        # angle between their X's: outside a narrow range, no value of the pair, and a warning.
-        report = self.build("bike", TURNED.format(at="bd.Plane(origin=point, z_dir=(0, 1, 0)).location"))
-        self.assertIn("joint 'pivot' is kept with no value", " ".join(report["kinematics"]["warnings"]))
+        # angle between their X's: outside a narrow range, no value of the pair, and refused.
+        report = self.build("bike", TURNED.format(at="bd.Plane(origin=point, z_dir=(0, 1, 0)).location"), ok=False)
+        self.assertIn("joint 'pivot' cannot be kept", report["error"])
         # At the revolute's own frame (its part's placement times its relative axis): joint zero.
         report = self.build("bike", TURNED.format(at='frame.location * frame.joints["pivot"].relative_axis.location'))
         self.assertNotIn("kinematics", report)
         self.assertEqual(document.Loaded(self.folder / "XBF/bike.xbf").mechanism.as_built, {"pivot": (0.0,)})
 
-    def test_a_rigid_joint_off_the_revolute_axis_builds_warns_and_its_joint_is_not_posed(self) -> None:
-        report = self.build("bike", PIVOT.format(at="bd.Location((55, 0, -30))", extra="pass"))  # 15 mm off the axis
-        path = self.folder / "XBF/bike.xbf"
-        self.assertTrue(report["files"][str(path)]["written"], "the geometry is written")
-        (warning,) = report["kinematics"]["warnings"]
-        self.assertIn("joint 'pivot' is kept with no value and cannot be posed: bike/engine is not where it can put it",
-                      warning)
-        loaded = document.Loaded(path)
-        (pair,) = loaded.mechanism.pairs
-        self.assertTrue(pair.inconsistent and pair.frames and pair.limits == ((-5.0, 12.0),))
-        kinematics = loaded.structure()["kinematics"]
-        self.assertEqual((kinematics["warnings"], kinematics["asBuilt"]), ([warning], {}))
-        self.assertEqual(kinematics["pairs"][0]["inconsistent"], pair.inconsistent)
-        self.assertEqual(kinematics, document.tree_structure(document.saved(path), path)["kinematics"])
-        out = self.folder / "posed.step"
-        code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", '{"pivot": 5}')
-        self.assertEqual(code, 2)
-        self.assertIn("joint 'pivot' cannot be posed: bike/engine is not where it can put it", err)
-        self.assertFalse(out.exists())
-        self.assertEqual(_run("export", str(path), str(out), "--no-daemon")[0], 0, "as built, it exports")
+    def test_a_rigid_joint_off_the_revolute_axis_is_refused_by_name(self) -> None:
+        report = self.build("bike", PIVOT.format(at="bd.Location((55, 0, -30))", extra="pass"), ok=False)  # 15 mm off
+        self.assertIn("joint 'pivot' cannot be kept: bike/engine is not where it can put it", report["error"])
+        self.assertIn("not one revolute motion apart within its range", report["error"])
+        self.assertFalse((self.folder / "XBF/bike.xbf").exists(), "a refused document is not written")
 
     def test_two_unmoved_parts_with_a_revolute_between_them_are_two_links(self) -> None:
         report = self.build("bike", PIVOT.format(at=ON_AXIS, extra="pass"))
@@ -555,14 +541,10 @@ class InconsistencyTest(_Folder):
         self.assertEqual(found.as_built, {"pivot": (0.0,)})
         self.assertEqual(found.warnings, [])
 
-    def test_a_pair_inside_one_rigid_body_warns_and_the_build_writes(self) -> None:
-        report = self.build("bike", PIVOT.format(at=ON_AXIS, extra=SHOCK))
-        (warning,) = report["kinematics"]["warnings"]
-        self.assertIn("joint 'pivot' is kept with no value and cannot be posed: it joins bike/frame to bike/engine, "
-                      "which rigid joints make one link with 1 other parts (the unmoved ground)", warning)
-        loaded = document.Loaded(self.folder / "XBF/bike.xbf")
-        self.assertEqual([link.members for link in loaded.mechanism.links], [[(0,), (1,), (2,)]])
-        self.assertIsNone(loaded.structure()["kinematics"]["loop"])
+    def test_a_pair_inside_one_rigid_body_is_refused_by_name(self) -> None:
+        report = self.build("bike", PIVOT.format(at=ON_AXIS, extra=SHOCK), ok=False)
+        self.assertIn("joint 'pivot' cannot be kept: it joins bike/frame to bike/engine, which rigid joints make one "
+                      "link with 1 other parts (the unmoved ground): the pair cannot move", report["error"])
 
 
 class ChainTest(_Folder):
@@ -606,41 +588,138 @@ class ChainTest(_Folder):
         np.testing.assert_allclose(top[1][:3, 3], [0, 0, 95], atol=1e-9)  # at lift 90 on the axis through z = 5
 
 
-class GearTest(_Folder):
-    def test_a_gear_pair_drives_one_pair_from_another(self) -> None:
-        import build123d as bd
+# Every kind of pair, coupler and motion segment on one plate: a pinion geared to a wheel and
+# driving a rack, a lead screw whose turn drives its own travel and a slide, a free ball.
+BENCH = """
+import math
 
-        base = bd.Box(100, 20, 10)
-        base.label = "base"
-        arms = []
-        for name, x in (("left", -30), ("right", 30)):
-            arm = bd.Box(4, 30, 4, align=(bd.Align.CENTER, bd.Align.MIN, bd.Align.CENTER))
-            arm.label = name
-            bd.RevoluteJoint(name, base, axis=bd.Axis((x, 0, 10), (0, 0, 1)), angular_range=(-180, 180))
-            bd.RigidJoint("hub", arm, bd.Location())
-            base.joints[name].connect_to(arm.joints["hub"], angle=0)
-            arms.append(arm)
-        tree = document.collect(bd.Compound(children=[base, *arms], label="gears"), "gears")
-        # build123d's joints cannot say a coupling: the gear pair is put in the mechanism here.
-        tree.mechanism.pairs.append(mechanism.Pair("mesh", "gear", (1, 2), None, (), ratio=-2.0))
-        path = self.folder / "XBF/gears.xbf"
-        document.save(document.to_xcaf(tree), path, compare=False)
-        loaded = document.Loaded(path)
-        gear = loaded.mechanism.pairs[-1]
-        self.assertEqual((gear.label, gear.kind, gear.links, gear.ratio), ("mesh", "gear", (1, 2), -2.0))
-        structure = loaded.structure()
-        self.assertEqual(structure["kinematics"]["pairs"][-1]["drives"], ["left", "right"])
-        values, _named = mechanism.resolve(structure["kinematics"], {"left": 30})
-        self.assertEqual(values["right"], (-60.0,))
-        driven = np.array(mechanism.posed_instances(structure, values)[2]).reshape(4, 4).T
-        # The right arm's +Y edge, turned -60 about +Z through (30, 0, 10).
-        tip = driven @ np.array([0.0, 30.0, 0.0, 1.0])
-        np.testing.assert_allclose(tip[:3], [30 + 30 * math.sin(math.radians(60)), 30 * math.cos(math.radians(60)), 10],
-                                   atol=1e-9)
-        with self.assertRaisesRegex(mechanism.KinematicsError, "'right' is driven by 'left' through gear 'mesh'"):
-            mechanism.resolve(structure["kinematics"], {"right": 10})
-        with self.assertRaisesRegex(mechanism.KinematicsError, "gear 'mesh' driving 'right' .* outside its range"):
-            mechanism.resolve(structure["kinematics"], {"left": 120})
+import build123d as bd
+from cadgen.engine import configuration, couple, motion, xbf
+
+
+@xbf
+def bench():
+    plate = bd.Box(300, 200, 10, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+    plate.label = "plate"
+    parts = [plate]
+
+    def mount(joint, part, at, axis, **connect):
+        bd.RigidJoint(joint.label, part, bd.Plane(origin=at, z_dir=axis).location)
+        joint.connect_to(part.joints[joint.label], **connect)
+        parts.append(part)
+
+    for name, at, limits in (("pinion", (0, 0, 0), (-360, 360)), ("wheel", (60, 0, 0), (-720, 720))):
+        wheel = bd.Pos(*at) * bd.Cylinder(20, 8, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        wheel.label = name
+        mount(bd.RevoluteJoint(name, plate, axis=bd.Axis(at, (0, 0, 1)), angular_range=limits), wheel, at, (0, 0, 1),
+              angle=0)
+    for name, at, axis in (("rack", (0, 40, 0), (1, 0, 0)), ("slide", (100, -40, 0), (0, 1, 0))):
+        bar = bd.Pos(*at) * bd.Box(40, 10, 10, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+        bar.label = name
+        mount(bd.LinearJoint(name, plate, axis=bd.Axis(at, axis), linear_range=(-50, 50)), bar, at, axis, position=0)
+    screw = bd.Pos(-60, 0, 0) * bd.Cylinder(5, 60, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    screw.label = "screw"
+    mount(bd.CylindricalJoint("screw", plate, axis=bd.Axis((-60, 0, 0), (0, 0, 1)), angular_range=(-720, 720),
+                              linear_range=(0, 10)), screw, (-60, 0, 0), (0, 0, 1), angle=0, position=0)
+    ball = bd.Pos(0, -60, 10) * bd.Sphere(10)
+    ball.label = "ball"
+    mount(bd.BallJoint("ball", plate, bd.Location((0, -60, 10)), angular_range=((-30, 30), (-30, 30), (-30, 30))),
+          ball, (0, -60, 10), (0, 0, 1), angles=(0, 0, 0))
+    bench = bd.Compound(children=parts, label="bench")
+    couple(bench, "drive", pinion=1, wheel=-0.5, rack=0.1)
+    couple(bench, "feed", screw=(36, 1), slide=2)
+    configuration(bench, "home", drive=10, ball=(5, 0, 0))
+    motion(bench, "run", [(0, "home"), (1, {"drive": 100}), (2, {"drive": -100, "feed": 5})], ease="linear")
+    motion(bench, "ease", sweep={"feed": (0, 10)}, duration=1)
+    return motion(bench, "wobble", lambda t: {"ball": (20 * math.sin(math.pi * t), 0, 0)}, duration=2)
+"""
+# AP242's names, as Part 21 writes them (edition 4's domain model's where Part 21 has none):
+# the entities the subtree may hold, each attribute it may set, and the enumerations' values.
+AP242_ENTITIES = {
+    "MECHANISM_REPRESENTATION", "KINEMATIC_LINK", "MECHANISM_STATE_REPRESENTATION",
+    "INTERPOLATED_CONFIGURATION_SEQUENCE", "INTERPOLATED_CONFIGURATION_SEGMENT", "SCREW_PAIR",
+    "KinematicPairWithMotionCoupling",
+    *(pair + suffix for pair in ("REVOLUTE_PAIR", "PRISMATIC_PAIR", "CYLINDRICAL_PAIR", "SPHERICAL_PAIR")
+      for suffix in ("", "_WITH_RANGE"))}
+AP242_ATTRIBUTES = {
+    "transform_item_1", "transform_item_2", "t_parameter", "interpolation", "pitch",
+    "Kind", "CouplingRatios", "Scales", "CouplingTypes",
+    *(f"{side}_limit_{value}" for side in ("lower", "upper")
+      for value in ("actual_rotation", "actual_translation", "yaw", "pitch", "roll"))}
+AP242_VALUES = {
+    "interpolation": {"discontinuous_interpolation_type", "synchronous_interpolation_type",
+                      "linear_interpolation_type", "cubic_interpolation_type"},
+    "Kind": {"gear_pair", "rack_and_pinion_pair", "two_joint_coupler", "three_joint_coupler"}}
+# The container's own: what the root says of the subtree, and the attribute types that hold it.
+CONTAINER_ATTRIBUTES = {"schema", "angle_unit", "length_unit"}
+OCAF_ATTRIBUTES = {"TDataStd_Name", "TDataStd_NamedData", "TDataStd_ReferenceList", "TDataStd_RealArray",
+                   "TDataStd_IntegerArray", "XCAFDoc_AssemblyItemRef"}
+
+
+class ConformanceTest(_Folder):
+    def test_the_mechanism_subtree_holds_ap242_names_and_nothing_else(self) -> None:
+        from OCP.Standard import Standard_GUID
+        from OCP.TDF import TDF_AttributeIterator, TDF_ChildIterator
+
+        report = self.build("bench", BENCH)
+        self.assertNotIn("kinematics", report, "no warning")
+        loaded = document.Loaded(self.folder / "XBF/bench.xbf")
+        found = loaded.mechanism
+        self.assertEqual(sorted(found.couplings), ["drive", "feed"])
+        self.assertEqual(sorted(found.motions), ["ease", "run", "wobble"])
+        root = next(label for label in mechanism._children_of(loaded.doc.Main())
+                    if label.IsAttribute(Standard_GUID(mechanism.GUID)))
+        labels = [root]
+        walk = TDF_ChildIterator(root, True)
+        while walk.More():
+            labels.append(walk.Value())
+            walk.Next()
+        entities, kinds, interpolations = set(), set(), set()
+        for label in labels:
+            where = document._entry(label)
+            types = set()
+            attributes = TDF_AttributeIterator(label)
+            while attributes.More():
+                types.add(attributes.Value().DynamicType().Name())
+                attributes.Next()
+            self.assertLessEqual(types - {"TDataStd_UAttribute"} if label.IsEqual(root) else types, OCAF_ATTRIBUTES,
+                                 where)
+            if "TDataStd_NamedData" not in types:
+                continue
+            data = mechanism._named(label)
+            allowed = CONTAINER_ATTRIBUTES if label.IsEqual(root) else {"entity", *AP242_ATTRIBUTES}
+            # Every key the label holds is an allowed one: of each kind, the count OCCT dumps is
+            # the allowed keys it has (OCP iterates none of the maps), and of the others none.
+            dumped = io.BytesIO()
+            data.DumpJson(dumped)
+            sizes = {kind: int(size)
+                     for kind, size in re.findall(rb'"(\w+)->Map\(\)\.Size": (\d+)', dumped.getvalue())}
+            for kind, one in ((b"Strings", data.HasString), (b"Reals", data.HasReal),
+                              (b"ArraysOfReals", data.HasArrayOfReals)):
+                self.assertEqual(sizes.pop(kind, 0), sum(bool(one(mechanism._text(key))) for key in allowed),
+                                 (where, kind))
+            self.assertEqual({kind: size for kind, size in sizes.items() if size}, {}, where)
+            if label.IsEqual(root):
+                continue
+            entity = mechanism._string(data, "entity")
+            self.assertIn(entity, AP242_ENTITIES, where)
+            entities.add(entity)
+            for key, values in AP242_VALUES.items():
+                value = mechanism._string(data, key)
+                if value is not None:
+                    self.assertIn(value, values, (where, key))
+            kinds.add(mechanism._string(data, "Kind"))
+            interpolations.add(mechanism._string(data, "interpolation"))
+            types_ = mechanism._string(data, "CouplingTypes")
+            if types_ is not None:
+                self.assertLessEqual(set(types_.split(",")), {"rotation", "translation"}, where)
+        # The walk saw every kind the bench makes: a vacuous pass proves nothing.
+        self.assertLessEqual({"REVOLUTE_PAIR_WITH_RANGE", "PRISMATIC_PAIR_WITH_RANGE", "CYLINDRICAL_PAIR_WITH_RANGE",
+                              "SPHERICAL_PAIR_WITH_RANGE", "SCREW_PAIR", "KinematicPairWithMotionCoupling",
+                              "INTERPOLATED_CONFIGURATION_SEGMENT"}, entities)
+        self.assertEqual(kinds - {None}, {"gear_pair", "rack_and_pinion_pair", "two_joint_coupler"})
+        self.assertEqual(interpolations - {None}, {"discontinuous_interpolation_type",
+                                                   "synchronous_interpolation_type", "linear_interpolation_type"})
 
 
 if __name__ == "__main__":

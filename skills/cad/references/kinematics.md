@@ -10,7 +10,7 @@ An assembly's mechanism is written in its body, and the document keeps it:
   connected at are the **as-built configuration**, the pose every file of the model
   shows.
 - **Configurations** name other poses: `configuration(assembly, name, **values)`.
-- **Couplings** drive several joints from one control: `couple(assembly, name, ...)`.
+- **Couplings** make several joints move together by ratio: `couple(assembly, name, **joints)`.
 - **Motions** are definitions over time: `motion(assembly, name, ...)`.
 
 None of them moves the build. The `.xbf` keeps the mechanism, its configurations,
@@ -62,14 +62,15 @@ def hinge():
   there with one label, and the engine pairs the moving joint with the `RigidJoint`
   of the same label nearest it in the tree. Two rigid joints of one label fasten their
   parts.
-- **Geometry is never held hostage by a mechanism.** A pair the engine cannot make
-  consistent (its part moved after `connect_to`, connected after its compound was
-  made, a rigid joint off the joint's axis) is written with its limits and no value,
-  and warned by name; posing it is refused, and the viewer's Position says why.
-  Pairs closing a loop are kept and not posed. A configuration, motion or coupling
-  naming a joint the assembly does not hold fails the build.
+- **The document keeps what STEP AP242 can say, and nothing else.** A pair the
+  built parts contradict (its part moved after `connect_to`, connected after its
+  compound was made, a rigid joint off the joint's axis, or two parts rigid joints
+  make one body) fails the build by name: fix where the part stands. Pairs closing
+  a loop are kept and not posed. A configuration, motion or coupling naming a joint
+  the assembly does not hold fails the build.
 - **No mates vocabulary**: placement and motion are build123d's joints, and nothing
-  else. A gear ratio between two joints is a locked coupling (below).
+  else. A gear ratio between two joints is a coupling (below); a cam, a non-linear
+  linkage or any other relation a ratio cannot say is a motion's function of time.
 
 ## Configurations
 
@@ -81,10 +82,14 @@ names.
 
 ## Couplings
 
-`couple(assembly, name, *, range=(0, 1), lock=False, **joints)` is one control
-driving several joints by ratio. At value `c` each joint stands at its as-built value
-plus its ratio times `c`, so `c = 0` is as built and `range` holds 0. Couplings that
-share a joint add.
+`couple(assembly, name, **joints)` is a constraint, never a control: two or more
+joints move together, each by its ratio, and only through it. At value `c` each joint
+stands at its as-built value plus its ratio times `c`, so `c = 0` is as built. Its
+range is its joints' limits: the tightest interval of `c` in which every joint stays
+within its own (a joint with no limits bounds nothing), so give the joints the limits
+the mechanism has. A joint takes at most one coupling, and a ball joint none. The
+document keeps it as AP242's couplers: a gear pair, a rack and pinion, a screw (one
+cylindrical joint's turn and travel) or a two-joint coupler.
 
 ```python
 from cadgen.engine import couple, motion, xbf
@@ -108,19 +113,17 @@ def index_finger():
         parent.joints[joint].connect_to(child.joints[joint], angle=0)   # as built: straight
     finger = bd.Compound(children=bones, label="index_finger")
     couple(finger, "index_curl", **CURL)                                # 0 straight, 1 a fist
-    return motion(finger, "grip", sweep={"index_curl": (0, 1)}, duration=1.5, loop="pingpong")
+    return motion(finger, "grip", [(0, {"index_curl": 0}), (1.5, {"index_curl": 1}), (3, {"index_curl": 0})])
 ```
 
-`--pose '{"index_curl": 0.6}'` poses the knuckles at 54, 60 and 42 degrees. A
-coupling is a control, not a constraint: each joint still poses alone, unless the
-coupling is **locked** (`lock=True`): then it is its joints' only control, as a
-gear train's drive is, the viewer shows its slider and none of theirs, and setting
-one of its joints alone is refused. A planetary stage turns its carrier and planets
-from the sun:
+`--pose '{"index_curl": 0.6}'` poses the knuckles at 54, 60 and 42 degrees; its
+range, `[0, 1]`, is where every knuckle stays within its own. The viewer shows the
+coupling's slider and none of its joints', and setting one of its joints alone is
+refused. A planetary stage turns its carrier and planets from the sun, ranged by the
+sun's limits:
 
 ```python
-couple(assembly, "drive", range=(0, 1260), lock=True,
-       sun=1.0, carrier=24 / 84, planet1=-0.952, planet2=-0.952, planet3=-0.952)
+couple(assembly, "drive", sun=1.0, carrier=24 / 84, planet1=-0.952, planet2=-0.952, planet3=-0.952)
 ```
 
 ## Motions
@@ -129,12 +132,12 @@ A motion is a definition in the body, beside the configurations:
 
 ```python
 motion(arm, "cycle", [(0, "folded"), (2, "reach"), (5, "folded")])          # waypoints, eased
-motion(arm, "wave", sweep={"wrist": (-30, 30)}, duration=2, loop="pingpong")
+motion(arm, "wave", [(0, {"wrist": -30}), (1, {"wrist": 30}), (2, {"wrist": -30})], ease="linear")
 motion(arm, "nod", lambda t: {"elbow": 45 + 20 * math.sin(t)}, duration=6)  # a function of time
 ```
 
 `motion(assembly, name, waypoints_or_fn=None, *, sweep=None, duration=None,
-ease="cubic", loop=None)` takes one of:
+ease="cubic")` takes one of:
 
 - waypoints `[(t, pose), ...]`: seconds from 0, increasing, each pose a
   configuration's name or `{joint: value}` (the rest as built); the last time is the
@@ -143,15 +146,16 @@ ease="cubic", loop=None)` takes one of:
 - a function `t -> {joint: value}` with `duration`, kept as samples close enough to
   it (1e-3 radian, 1e-3 of the model's size), the same code always the same samples.
 
-`ease` is `cubic` (each step eased in and out, resting at every waypoint), `linear`
-or `spline`; `loop` is `None`, `"loop"` or `"pingpong"` (out and back, a clip of
-twice the duration). A coupling's name poses in waypoints and sweeps like a joint's.
-A motion naming a configuration or joint the assembly lacks fails the build.
+`ease` is `cubic` (each step eased in and out, every joint arriving together at
+every waypoint) or `linear` (constant speed). A motion is a finite clip, and a player
+repeats it: one that comes back writes its way back as waypoints. A coupling's name
+poses in waypoints and sweeps like a joint's. A motion naming a configuration or joint
+the assembly lacks fails the build.
 
 Every `@glb` and `cadgen export ... model.glb` carries each motion as a glTF
 animation of its name, keyed so it stays within 1e-3 of the model's size of the true
-motion, its loop in the animation's `extras.cadgen`. Blender, three.js and the CAD
-Viewer's GLB view play it. Neither the decorator nor the export takes an argument
+motion, its duration in the animation's `extras.cadgen`. Blender, three.js and the
+CAD Viewer's GLB view play it, repeating. Neither the decorator nor the export takes an argument
 for it.
 
 ## Reviewing motion
@@ -165,12 +169,12 @@ cadgen export XBF/hinge.xbf STEP/hinge_open.step --pose open
 ```
 
 `--pose` takes a configuration's name, or joint and coupling values as JSON (the
-rest as built). An unknown configuration, joint or coupling, a value out of range, a
-locked coupling's joint set alone, and a pair warned as inconsistent are refused by
-name before anything renders or is written.
+rest as built). An unknown configuration, joint or coupling, a value out of range,
+and a coupling's joint set alone are refused by name before anything renders or is
+written.
 
-The viewer's Position poses a document live: a slider per joint and per coupling,
-and the configurations as presets. To watch a motion, open the GLB the model
+The viewer's Position poses a document live: a slider per coupling and per joint no
+coupling moves, and the configurations as presets. To watch a motion, open the GLB the model
 declares (or one `cadgen export` wrote) in the viewer: its clips play there.
 
 A pose or a clip shows motion; it does not measure it. Checks on the `.xbf` measure
