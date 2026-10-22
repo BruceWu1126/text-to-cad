@@ -111,13 +111,12 @@ function nodeDocument() {
     restBounds: { min: [-500, -500, -500], max: [2500, 500, 500] }, animatedBounds: null }, lit, unlit };
 }
 
-test("a GLB's nodes are what Select picks and Quick Edit names: `n<index>`, the file's `nodes[index]`, with the triangle hit", () => {
+test("a GLB's nodes are what Select picks and Quick Edit names: `n<index>`, the file's `nodes[index]`, with the point hit", () => {
   const { document, lit, unlit } = nodeDocument();
   const scene = createGlbScene(THREE, document);
   scene.object3D.updateMatrixWorld(true);
   const hit = scene.pick(new THREE.Ray(new THREE.Vector3(2000, 0, 5000), new THREE.Vector3(0, 0, -1)));
   assert.deepEqual([hit.id, hit.name, hit.point.map(Math.round)], ["n1", "part (n1)", [2000, 0, 500]]);
-  assert.equal(hit.triangle.length, 3, "the triangle under the pointer, for Measure");
   assert.deepEqual(scene.describePart("n0").facts.map(fact => fact.value), ["nodes[0]", "12"]);
   assert.deepEqual([scene.hasPart("n0"), scene.hasPart("n9"), scene.units], [true, false, { unit: "m", perWorld: 0.001 }]);
   assert.deepEqual([lit.userData.partId, unlit.userData.partId], ["n0", "n1"], "what Annotate hangs a mark on");

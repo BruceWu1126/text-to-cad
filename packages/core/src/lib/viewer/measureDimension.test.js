@@ -14,7 +14,6 @@ import {
   measureSeriesColor,
   measurementMark,
   measurementMarkLayout,
-  normalizeMeasurementMarks,
   screenDimensionLayout,
   screenSpaceDimensionLayout
 } from "./measureDimension.js";
@@ -313,7 +312,7 @@ test("the series palette is large enough to keep a full panel distinguishable", 
   assert.ok(MEASURE_SERIES_COLORS.length >= 10, "palette is too small to tell measurements apart");
 });
 
-test("a taken measurement is a mark a prompt and a snapshot carry: its dimension's ends, its words, its colour; one layout either way", () => {
+test("a taken measurement is a mark: its dimension's ends, its words, its colour; one layout either way", () => {
   const item = { colorIndex: 1, pickA: { point: [0, 0, 0] }, pickB: { point: [3, 4, 0] },
     measurement: { euclidean: 5, perpendicular: null, centerDistance: null, delta: [3, 4, 0], unit: "mm" } };
   const mark = measurementMark(item);
@@ -322,14 +321,5 @@ test("a taken measurement is a mark a prompt and a snapshot carry: its dimension
   const rect = { left: 0, top: 0, width: 400, height: 400 };
   // The mark lays out exactly as the measurement it came from does.
   assert.deepEqual(measurementMarkLayout(mark, camera, rect), screenSpaceDimensionLayout(item.pickA, item.pickB, item.measurement, camera, rect));
-  assert.deepEqual(normalizeMeasurementMarks([mark]), [mark]);
   assert.equal(measurementMark({ pickA: { point: [0, 0, 0] } }), null, "no second end, no mark");
-});
-
-test("a job's measurements are refused by what is wrong with them", () => {
-  const good = { start: [0, 0, 0], end: [1, 0, 0], label: "1.00 mm", color: "#d59090" };
-  for (const [value, said] of [
-    [{}, "a list"], [[{ ...good, start: [0, 0] }], "[0].start"], [[{ ...good, end: [0, Infinity, 0] }], "[0].end"],
-    [[{ ...good, color: "red" }], "[0].color"], [[{ ...good, label: 3 }], "[0].label"], [[{ ...good, extra: 1 }], "unknown field(s): extra"],
-  ]) assert.throws(() => normalizeMeasurementMarks(value), new RegExp(said.replace(/[[\]().]/g, "\\$&")));
 });

@@ -180,7 +180,7 @@ it("each section's panel is sized by its corner, on its own: width and cap in on
 it("the sidebar's tiles are there whatever the tool, a tool's own section coming and going with it; one section is open at a time, another tile taking its place, and its X or a second press of its tile closes it, its content kept", () => {
   const { preferences } = frame();
   expect(tool('Select').getAttribute('aria-pressed')).toBe('true');
-  fireEvent.click(tool('Annotate'));
+  fireEvent.click(tool('Pencil'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference']);
   fireEvent.click(tool('Pose'));
   expect(tileNames()).toEqual(['Harness tree', 'Reference', 'Position']);
@@ -211,7 +211,7 @@ it("the sidebar's tiles are there whatever the tool, a tool's own section coming
   expect([tileNames(), preferences.writes]).toEqual([['Harness tree', 'Reference'], 0]);
 });
 
-it("on a phone the file sidebar is one tile at the top-left, on the strip's line, the strip kept clear of it; it opens the panel on the section last open (the first, at first), headed by a tab per section and one X; Annotate's controls are its chevron's menu", () => {
+it("on a phone the file sidebar is one tile at the top-left, on the strip's line, the strip kept clear of it; it opens the panel on the section last open (the first, at first), headed by a tab per section and one X", () => {
   frame({ mobile: true });
   const strip = screen.getByRole('group', { name: 'Interaction tools' });
   const toggle = screen.getByRole('button', { name: 'Sidebar' });
@@ -242,9 +242,13 @@ it("on a phone the file sidebar is one tile at the top-left, on the strip's line
   expect([isOpen(), shownSection()]).toEqual([true, ['Harness reference']]);
   fireEvent.click(toggle);
   expect(isOpen()).toBe(false);
-  fireEvent.click(tool('Annotate'));
-  expect(tool('Annotate').getAttribute('aria-pressed')).toBe('true');
-  expect([screen.queryByRole('toolbar', { name: 'Annotation controls' }), Boolean(screen.getByRole('button', { name: 'Annotation settings' }))]).toEqual([null, true]);
+  fireEvent.click(tool('Pencil'));
+  expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
+  // The drawing row is the same row on a phone, its buttons 36px tiles (`data-touch`), wrapping where it must; there is no chevron.
+  const row = screen.getByRole('toolbar', { name: 'Annotation controls' });
+  expect(row.hasAttribute('data-touch')).toBe(true);
+  expect(screen.queryByRole('button', { name: /^(Pencil|Shapes) tools$/ })).toBeNull();
+  expect([...row.querySelectorAll('[role=group][aria-label$=" tools"] button')].map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Highlighter', 'Eraser']);
 });
 
 // Display: the current mode's tile and its menu, the modes and the Grid switch.
@@ -282,12 +286,12 @@ it('while the model loads the viewer shows none of its own chrome, and all of it
   expect(barButtons()).toEqual(['Projection', 'Display mode', 'Preview']);
   // With nothing to work on yet, the strip is idle together, and so are Projection, Display and Preview.
   stage('unready');
-  expect(strip()).toEqual(['Select', 'Annotate', 'Keep', 'Pose']);
+  expect(strip()).toEqual(['Select', 'Pencil', 'Shapes', 'Keep', 'Pose']);
   const idle = (name: string) => (name === 'Display' ? displayButton() : name === 'Projection' ? projectionButton()
     : name === 'Preview' ? screen.getByRole('button', { name }) : tool(name)).hasAttribute('disabled');
-  expect(['Select', 'Annotate', 'Projection', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true, true]);
+  expect(['Select', 'Pencil', 'Shapes', 'Projection', 'Display', 'Preview'].map(idle)).toEqual([true, true, true, true, true, true]);
   stage('idle');
-  expect(['Select', 'Annotate', 'Projection', 'Display', 'Preview'].map(idle)).toEqual([false, false, false, false, false]);
+  expect(['Select', 'Pencil', 'Shapes', 'Projection', 'Display', 'Preview'].map(idle)).toEqual([false, false, false, false, false, false]);
 });
 
 it("Display and Preview are a 3D view's, as its renderer declares: a view that does not declare it has neither, not disabled ones, and a request for Preview leaves it as it is", () => {
@@ -308,7 +312,7 @@ it("Display and Preview are a 3D view's, as its renderer declares: a view that d
   ask();
   expect(inPreview()).toBe(false);
   expect(document.querySelector('[data-preview-chrome]')!.hasAttribute('inert')).toBe(false);
-  expect(strip()).toEqual(['Annotate']);
+  expect(strip()).toEqual(['Pencil', 'Shapes']);
 });
 
 it('a load the model did not survive leaves only the card saying so, and a failed update it survives keeps the chrome', () => {
@@ -392,10 +396,10 @@ it('a host showing the view small gets the model alone: no tools, no view action
   expect(viewportProps.current.viewCube).toBe(false);
 });
 
-it("Projection, Display and Preview end the strip; Render is no mode of Display's, Projection a menu of its own, and Display's Grid leaves Annotate and kept tools in place", async () => {
+it("Projection, Display and Preview end the strip; Render is no mode of Display's, Projection a menu of its own, and Display's Grid leaves the drawing tools and kept tools in place", async () => {
   const user = userEvent.setup({ skipHover: true });
   const { remount } = frame();
-  expect([strip(), barButtons()]).toEqual([['Select', 'Annotate', 'Keep', 'Pose'], ['Projection', 'Display mode', 'Preview']]);
+  expect([strip(), barButtons()]).toEqual([['Select', 'Pencil', 'Shapes', 'Keep', 'Pose'], ['Projection', 'Display mode', 'Preview']]);
   // After the strip's rule.
   expect(document.querySelector('[data-cad-toolbar] [data-strip-rule] + [data-view-controls]')).not.toBeNull();
   const solid = render(<SolidModeIcon />).container.querySelector('svg')!;
@@ -418,7 +422,7 @@ it("Projection, Display and Preview end the strip; Render is no mode of Display'
   await waitFor(() => expect(projectionMenu()).toBeNull());
   expect(projectionButton().getAttribute('aria-label')).toBe('Projection: Perspective');
   await user.click(tool('Keep'));
-  await user.click(tool('Annotate'));
+  await user.click(tool('Pencil'));
   const stack = shown();
   const controls = screen.getByRole('toolbar', { name: 'Annotation controls' });
   await openDisplay(user);
@@ -429,7 +433,7 @@ it("Projection, Display and Preview end the strip; Render is no mode of Display'
   expect(displayButton().getAttribute('aria-label')).toBe('Display mode: Solid');
   await user.keyboard('{Escape}');
   await waitFor(() => expect(displayMenu()).toBeNull());
-  expect(tool('Annotate').getAttribute('aria-pressed')).toBe('true');
+  expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
   await openDisplay(user);
   await user.pointer({ keys: '[MouseLeft]', target: document.querySelector('[data-mock-viewport] canvas')! });
   await waitFor(() => expect(displayMenu()).toBeNull());
@@ -610,11 +614,11 @@ it("Orbit's speed is the file's: its view holds it and no Orbit on or off, it co
 it('Escape puts the tool in hand down and takes Select up, what it set kept', async () => {
   const user = userEvent.setup();
   frame({ viewer: true });
-  await user.click(tool('Annotate'));
-  expect(tool('Annotate').getAttribute('aria-pressed')).toBe('true');
+  await user.click(tool('Pencil'));
+  expect(tool('Pencil').getAttribute('aria-pressed')).toBe('true');
   act(() => { document.querySelector<HTMLElement>('[data-slot="cad-file-view"]')!.focus(); });
   await user.keyboard('{Escape}');
-  expect([tool('Annotate').getAttribute('aria-pressed'), tool('Select').getAttribute('aria-pressed')]).toEqual(['false', 'true']);
+  expect([tool('Pencil').getAttribute('aria-pressed'), tool('Select').getAttribute('aria-pressed')]).toEqual(['false', 'true']);
 });
 
 it('Escape closes the Display menu and gives its tile the focus back, the tool in hand kept', async () => {

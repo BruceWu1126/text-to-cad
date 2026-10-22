@@ -13,16 +13,19 @@ import { noGeometryAlert } from "../kit/status/loadAlerts.js";
 import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useMotionExclusion } from "../kit/tools/model-effects/motionExclusion.js";
 import { useMeasureSession } from "../kit/tools/measure/useMeasureSession.js";
-import { useQuickEditMeasurements } from "../kit/tools/measure/measurementChips.jsx";
+import { MeasurementsBar } from "../kit/tools/measure/measurementChips.jsx";
 import { measureSelectHandlers } from "../kit/tools/measure/measureSelection.js";
+import MeasureFilterMenu, { MEASURE_MODES } from "../kit/tools/measure/MeasureFilterMenu.jsx";
+import { MEASURE_FILTER_DEFAULT } from "../kit/tools/measure/measureFilter.js";
 import JointHandleOverlay from "../kit/tools/pose/JointHandleOverlay.jsx";
-import { selects } from "../kit/tools/select/selectFilter.js";
+import { pickModeOf, selects } from "../kit/tools/select/selectFilter.js";
+import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
 import { usePointerPick } from "../kit/tools/select/usePointerPick.js";
 import { useDeclinedSelectReference, useWorkspaceDocument, workspaceLoadAlert } from "../workspace/useWorkspaceDocument.js";
 import XbfMeasureOverlay from "./XbfMeasure.jsx";
 import XbfModelTree from "./XbfModelTree.jsx";
 import XbfPositionSection, { useXbfPose, writeXbfPosition, xbfPositionRows } from "./XbfPositionSection.jsx";
-import { MeasureIcon, SelectIcon, SelectModeMenu, XBF_SELECT_DEFAULT } from "./XbfSelectionModes.jsx";
+import { MeasureIcon, SelectIcon, SelectModeMenu, XBF_SELECT_DEFAULT, xbfSelectModes } from "./XbfSelectionModes.jsx";
 import { useXbfElementFacts, useXbfSelectionChips, xbfCopyText } from "./xbfChips.jsx";
 import { xbfJointHandles } from "./xbfJointHandles.js";
 import { viewportMenuEntries } from "./xbfMenuItems.js";
@@ -33,7 +36,7 @@ import { XBF_DECLINED_LIVE_COMMANDS, XBF_TOOL, XBF_TOOL_MODES } from "./tools.js
 import { useXbfScene } from "./useXbfScene.js";
 
 // An engine document in the viewer, exactly as a STEP is: the same tools in the same order
-// (Select with its filter, Annotate, Measure, Explode, Clip), the same selection (Parts, Faces and
+// (Select with its filter, Pencil, Shapes, Measure, Explode, Clip), the same selection (Parts, Faces and
 // Edges as the filter ticks them, a collapsed assembly picked as a unit, a part's faces and edges
 // once it is open, Group faces and Group edges), the same file sidebar (Model tree, Position), the
 // same menus, the same Quick Edit chips. What differs is underneath: the document is read from
@@ -100,12 +103,15 @@ function XbfSurface({ view, data }) {
   const tool = useMemo(() => ({ mode: toolMode, set: setToolMode }), [toolMode]);
   const measuring = !previewing && toolMode === XBF_TOOL.MEASURE;
   const measure = useMeasureSession({ fileKey: document.modelKey, revision: loaded.revision, picking: measuring });
-  const measurements = useQuickEditMeasurements(measure);
   const requestFrame = useCallback(() => shellRef.current?.requestFrame?.(), []);
   const requestRender = useCallback(() => shellRef.current?.requestRender?.(), []);
 
-  // ---- Select's filter: every kind ticked as the file opens ---------------------------------
+  // ---- Select's menu: All as the file opens, or one kind alone ---------------------------------
   const [selectFilter, setSelectFilter] = useState(XBF_SELECT_DEFAULT);
+  // Measure's menu, a STEP's (`kit/tools/measure/measureFilter.js`): All as the file opens, or
+  // Vertices, Edges or Faces alone. What a press takes is still the point on the model
+  // (`XbfMeasure.jsx`) until a STEP's entity Measure is carried over.
+  const [measureFilter, setMeasureFilter] = useState(MEASURE_FILTER_DEFAULT);
   const [connected, setConnected] = useState(NO_CONNECTED_SELECTION);
   const geometryFilter = useMemo(() => (assembly ? selectFilter : selectFilter.filter(id => id !== "parts")), [assembly, selectFilter]);
   const mode = selectGeometryMode(geometryFilter);
@@ -184,7 +190,7 @@ function XbfSurface({ view, data }) {
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
     load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
-    live, escape, measurements, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn,
+    live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"
   });
@@ -481,10 +487,17 @@ function XbfSurface({ view, data }) {
     onChange={value => { setSelectFilter(value); shellRef.current?.selectTool(XBF_TOOL.SELECT); }}
     connected={connected} onConnectedChange={(id, checked) => setConnected(now => ({ ...now, [id]: checked }))} />,
   [selectFilter, assembly, posable, shell.idle, connected]);
+  // Measure's chevron, a STEP's: a choice takes Measure up, as Select's takes Select up.
+  const measureFilterMenu = useMemo(() => <MeasureFilterMenu value={measureFilter} disabled={shell.idle}
+    onChange={value => { setMeasureFilter(value); shellRef.current?.selectTool(XBF_TOOL.MEASURE); }} />,
+  [measureFilter, shell.idle]);
   const strip = [
-    shell.tools.own({ id: XBF_TOOL.SELECT, label: "Select", icon: <SelectIcon className="size-3.5" aria-hidden="true" />, menu: selectModeMenu }),
-    { ...shell.tools.annotate, disabled: shell.idle },
-    shell.tools.own({ id: XBF_TOOL.MEASURE, label: "Measure", icon: <MeasureIcon className="size-3.5" aria-hidden="true" />,
+    // Each button badged with what its tool picks alone (its chevron's menu), none for All.
+    shell.tools.own({ id: XBF_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, menu: selectModeMenu,
+      icon: <SelectIcon mode={pickModeOf(selectFilter, xbfSelectModes({ assembly, posable })).id} className="size-3.5" aria-hidden="true" /> }),
+    ...shell.tools.drawing.map(tool => ({ ...tool, disabled: shell.idle })),
+    shell.tools.own({ id: XBF_TOOL.MEASURE, label: "Measure", shortcut: TOOL_SHORTCUTS.measure, menu: measureFilterMenu,
+      icon: <MeasureIcon mode={pickModeOf(measureFilter, MEASURE_MODES).id} className="size-3.5" aria-hidden="true" />,
       onSelect: () => { if (shell.toolMode !== XBF_TOOL.MEASURE) shell.selectTool(XBF_TOOL.MEASURE); } }),
     ...effects.tools
   ];
@@ -516,7 +529,7 @@ function XbfSurface({ view, data }) {
       changed={poseApplied} onValues={setPoseValues} onPreset={choosePreset} onReset={resetPose} /> : null}
   </> : null;
 
-  return <RendererShell shell={shell} tools={strip} subToolbar={measuring ? null : effects.subToolbar} sidebar={sidebar} previewView={previewView}
+  return <RendererShell shell={shell} tools={strip} subToolbar={measuring ? <MeasurementsBar measure={measure} /> : effects.subToolbar} sidebar={sidebar} previewView={previewView}
     references={previewing ? NO_REFERENCES : references} referenceChips={previewing ? NO_REFERENCES : chips} nameReference={nameReference}
     onClearReferences={() => { setChosen(EMPTY); measure.select([]); }} copySelection={copySelection}
     onSelectPress={measureSelect.press} onSelectHover={measureSelect.hover} selectsAnnotations={selects(selectFilter, "annotation")}

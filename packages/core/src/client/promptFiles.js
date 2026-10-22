@@ -2,12 +2,12 @@ import { cadApiUrl } from './client.js';
 
 /**
  * Prepare a Quick Edit snapshot: small packets inline, larger packets by path, without rendering.
- * `read` fetches a JSON file; `save` writes an annotation or measurement chip.
- * @typedef {{ name: string, input: string, views: object[], annotation: object | null, measurements?: object[] }} PromptFilesRequest
+ * `read` fetches a JSON file; `save` writes an annotation chip.
+ * @typedef {{ name: string, input: string, views: object[], annotation: object | null }} PromptFilesRequest
  * @typedef {{ snapshot: string, inline?: never } | { inline: string, snapshot?: never }} PromptFiles
  * @param {{ origin?: string, fetch?: typeof globalThis.fetch }} [options]
  * @returns {{ create(request: PromptFilesRequest): Promise<PromptFiles>, read(path: string): Promise<Blob>,
- *   save(request: { name: string, kind: 'annotation' | 'measurement', data: object }): Promise<string> }}
+ *   save(request: { name: string, kind: 'annotation', data: object }): Promise<string> }}
  */
 export function createHttpPromptFiles({ origin = '', fetch: fetchImpl = globalThis.fetch } = {}) {
   const headers = { 'x-cadgen-viewer': '1' };

@@ -2,7 +2,6 @@ import React, { Profiler } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import QuickEdit, { quickEditReferenceIds } from '../../../../../dist/renderers/kit/tools/quick-edit/QuickEdit.js';
-import { useQuickEditMeasurements } from '../../../../../dist/renderers/kit/tools/measure/measurementChips.js';
 import { ViewerHostContext } from '../../../../../dist/host/context.js';
 import { testHost } from '../../../../../dist/host/testing/host.js';
 
@@ -134,7 +133,7 @@ it('copies the note with its references by their files\' absolute paths, and its
     views: () => views,
     files: vi.fn(async () => ({ snapshot: '/tmp/p/bracket-1.snapshot.json' })),
     read: vi.fn(async () => new Blob()),
-    annotation: () => ({ units: 'mm', parts: {}, marks: [] }),
+    annotation: () => ({ units: 'mm', marks: [] }),
   };
   const clear = vi.fn();
   mount(host, { references: [face], annotation, prompt, onClear: clear });
@@ -176,44 +175,29 @@ it.each(['Copy Prompt', 'Queue', 'Send'])('%s creates the snapshot only at the p
   }
 });
 
-it('annotation and measurement chips keep details and removal without copying or saving individual files', async () => {
+it('the annotation chip keeps its removal without copying or saving individual files, and the prompt carries no measurements', async () => {
   const writeText = vi.fn(async (_text: string | PromiseLike<string>) => {}), save = vi.fn(), files = vi.fn();
-  const clearInk = vi.fn(), onDelete = vi.fn(), hover = vi.fn();
+  const clearInk = vi.fn();
   const host = testHost({ clipboard: { writeText, readText: async () => '', writeImage: async () => {} },
     promptFiles: { create: files, read: vi.fn(), save } });
-  const measure = { measurements: [{ id: 'm1', colorIndex: 0, pickA: { point: [0, 0, 0] },
-    pickB: { point: [3, 4, 0] }, measurement: { euclidean: 5, delta: [3, 4, 0], unit: 'mm' } }],
-    onDelete, hover, clear: vi.fn() };
-  const ink = { units: 'mm', parts: {}, marks: [] };
-  function Note() {
-    const measurements = useQuickEditMeasurements(measure);
-    return <QuickEdit resource={resource} annotation={{ present: true, clear: clearInk }} measurements={measurements}
+  const ink = { units: 'mm', marks: [] };
+  render(<ViewerHostContext.Provider value={host}>
+    <QuickEdit resource={resource} annotation={{ present: true, clear: clearInk }}
       prompt={{ views: () => [{ label: 'current view' }], save, files: async () => ({
-        inline: JSON.stringify({ input: resource.path, jobs: [], annotation: ink, measurements: measurements!.marks() })
-      }) }} />;
-  }
-  render(<ViewerHostContext.Provider value={host}><Note /></ViewerHostContext.Provider>);
+        inline: JSON.stringify({ input: resource.path, jobs: [], annotation: ink }) }) } as any} />
+  </ViewerHostContext.Provider>);
   fireEvent.click(screen.getByRole('button', { name: 'Annotation' }));
-  const chip = screen.getByRole('button', { name: 'Measurement 1: 5.00 mm' });
-  fireEvent.pointerDown(chip, { pointerType: 'touch' });
-  fireEvent.click(chip);
-  const card = document.querySelector<HTMLElement>('[data-quick-edit-ref-card="measure-m1"]')!;
-  expect(card).not.toBeNull();
-  expect(within(card).queryByRole('button', { name: /Copy reference/ })).toBeNull();
-  expect(card.textContent).toContain('Distance5.00 mm');
   expect(writeText).not.toHaveBeenCalled();
   expect(save).not.toHaveBeenCalled();
   expect(files).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Copy Prompt' }));
   await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
   const copied = await writeText.mock.calls[0][0];
-  expect(copied).toContain('"measurements":[{"start":[0,0,0],"end":[3,4,0],"label":"5.00 mm"');
   expect(copied).toContain('"annotation":');
+  expect(copied).not.toContain('measurements');
   expect(save).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Remove Annotation' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Remove Measurement 1: 5.00 mm' }));
   expect(clearInk).toHaveBeenCalledOnce();
-  expect(onDelete).toHaveBeenCalledWith('m1');
 });
 
 it('a click on a pill in the note selects it whole, highlighted as selected text, so a Backspace takes it', () => {
@@ -253,7 +237,7 @@ it('a pasted reference is a chip in the note, where it was pasted, and goes as t
   expect([note(), field().childNodes.length]).toEqual(['', 0]);
 });
 
-it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, the annotation, a named part', async () => {
+it('every chip\'s copy pasted is its pill, as its chip shows it: the annotation, a named part', async () => {
   let copied: Promise<string> | string = '';
   const host = testHost({ clipboard: { writeText: async text => { copied = text; }, readText: async () => '', writeImage: async () => {} } });
   const nameReference = () => ({ name: 'base', kind: 'solid' });
@@ -261,16 +245,13 @@ it('every chip\'s copy pasted is its pill, as its chip shows it: a measurement, 
   const paste = (text: string) => fireEvent.paste(field(), { clipboardData: { getData: () => text } });
   const pills = () => [...field().querySelectorAll('[data-quick-edit-note-ref]')]
     .map(pill => [pill.querySelector('svg')?.getAttribute('data-pick-glyph'), pill.textContent]);
-  const mark = { start: [0, 0, 0], end: [10, 0, 0], label: '10.00 mm', color: '#d59090' };
-  const annotation = { units: 'mm', parts: {}, marks: [{ id: 'a', kind: 'stroke' }] };
-  paste(JSON.stringify(mark));
+  const annotation = { units: 'mm', marks: [{ id: 'a', kind: 'stroke' }] };
   paste(JSON.stringify(annotation, null, 2));
   paste('/models/parts/bracket.step#o:1a2b3c4d5e6f');
-  expect(pills()).toEqual([['ruler', '10.00 mm'], ['pencil', 'Annotation'], ['solid', 'base']]);
-  // Each goes as what was copied: the measurement and the annotation as their JSON.
+  expect(pills()).toEqual([['pencil', 'Annotation'], ['solid', 'base']]);
+  // Each goes as what was copied: the annotation as its JSON.
   fireEvent.click(within(box()!).getByRole('button', { name: 'Copy Prompt' }));
   const text = await waitFor(() => copied);
-  expect(text).toContain(JSON.stringify(mark));
   expect(text).toContain(JSON.stringify(annotation));
 });
 

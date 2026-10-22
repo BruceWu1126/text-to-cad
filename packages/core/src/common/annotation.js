@@ -4,36 +4,29 @@ import { createScreenSpaceLineStrip } from "./renderEdges.js";
 // and writes it with a prompt; a snapshot job draws it over the model it renders (`job.annotation`),
 // with this same code, so what an agent renders is what the person drew.
 //
-// Each mark is fixed to one part (`part`, an occurrence id) and its points are in that part's own
-// frame, so it follows the part wherever the scene puts it — exploded, posed — hides when the part
-// is hidden and is cut by the same clip planes. A part the scene no longer has falls back to where
-// it was when the annotation was made (`parts[id].placement`). A mark on no part (`part: null`) is in
-// model coordinates and stays where it was drawn.
+// Every mark is in model coordinates and stays where it was drawn, whatever the scene does to the
+// parts — exploded, posed, hidden. Clip cuts it as it cuts the model.
 
 /**
  * @typedef {"stroke" | "area" | "text"} AnnotationMarkKind
  * @typedef {{
- *   id: string, kind: AnnotationMarkKind, part: string | null, placement?: "surface" | "space", view?: string,
+ *   id: string, kind: AnnotationMarkKind, view?: string,
  *   points: ArrayLike<number>, color: string, opacity?: number,
- *   width?: number, widths?: ArrayLike<number>, dash?: "solid" | "dashed" | "dotted", closed?: boolean, group?: string,
+ *   width?: number, widths?: ArrayLike<number>, closed?: boolean, group?: string,
  *   outline?: number, triangles?: ArrayLike<number>,
  *   text?: string, fontPx?: number,
- *   touches?: { part: string }[]
+ *   touches?: { part: string, ref?: string }[]
  * }} AnnotationMark
- *   `points`: x, y, z triples, in the frame of `part` (model coordinates for a mark on no part). A
- *   stroke's are its line; an area's (a fill) its outline (the first `outline`) then the points inside
+ *   `points`: x, y, z triples, in model coordinates. A stroke's are its line; an area's (a fill) its outline (the first `outline`) then the points inside
  *   it its `triangles` index; a text mark's its label's four corners. `width`: a stroke's thickness in
  *   screen pixels, at any zoom; `widths`: the pen's, each point's share of it. `fontPx`: a text mark's
- *   size on screen as it was written. `placement`: drawn on the model, or in space. `view`: the label
- *   of the view it was drawn in. `touches`: the parts under it as it was drawn.
- * @typedef {{ units: string, parts: Record<string, { placement: number[] }>, marks: AnnotationMark[] }} Annotation
- *   `parts[id].placement`: where the part was in the model when the annotation was made, a 4×4 matrix
- *   in column order.
+ *   size on screen as it was written. `view`: the label of the view it was drawn in. `touches`: what
+ *   it was drawn over, most first: a part, with the face or edge of it (`ref`, a prompt reference)
+ *   where the view could name one. What it touches says what it is about; its points alone say where.
+ * @typedef {{ units: string, marks: AnnotationMark[] }} Annotation
  */
 
 export const ANNOTATION_MARK_KINDS = Object.freeze(["stroke", "area", "text"]);
-const DASHES = new Set(["solid", "dashed", "dotted"]);
-const PLACEMENTS = new Set(["surface", "space"]);
 const COLOR = /^#[0-9a-f]{6}$/i;
 // A capture's ink is as heavy against its height as it was on a viewer this tall.
 export const ANNOTATION_REFERENCE_HEIGHT_PX = 900;
@@ -41,6 +34,9 @@ export const ANNOTATION_REFERENCE_HEIGHT_PX = 900;
 // 23–30): it writes no depth, so a part drawn after it would paint over it. Its own depth test still
 // hides it behind the model.
 export const ANNOTATION_RENDER_ORDER = 40;
+// Ink the model hides still shows, this faint: a mark lies exactly on its plane, which may run
+// through the model (a profile through a part's middle), and is never lost behind it.
+export const ANNOTATION_HIDDEN_OPACITY = 0.3;
 
 const fail = message => { throw new Error(`annotation: ${message}`); };
 const numbers = (value, label) => {
@@ -55,36 +51,27 @@ const numbers = (value, label) => {
  * @returns {Annotation}
  */
 export function normalizeAnnotation(raw) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("an annotation is an object with units, parts and marks");
-  for (const key of Object.keys(raw)) if (!["units", "parts", "marks"].includes(key)) fail(`unknown field "${key}"`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) fail("an annotation is an object with units and marks");
+  for (const key of Object.keys(raw)) if (!["units", "marks"].includes(key)) fail(`unknown field "${key}"`);
   const units = String(raw.units ?? "mm");
-  const parts = {};
-  for (const [id, part] of Object.entries(raw.parts ?? {})) {
-    const placement = numbers(part?.placement, `parts.${id}.placement`);
-    if (placement.length !== 16) fail(`parts.${id}.placement must be a 4×4 matrix of 16 numbers`);
-    parts[id] = { placement };
-  }
   if (!Array.isArray(raw.marks)) fail("marks must be an array");
   const ids = new Set();
   const marks = raw.marks.map((mark, index) => {
     const at = `marks[${index}]`;
     if (!mark || typeof mark !== "object") fail(`${at} must be an object`);
     for (const key of Object.keys(mark)) {
-      if (!["id", "kind", "part", "placement", "view", "points", "color", "opacity", "width", "widths", "dash", "closed", "group",
+      if (!["id", "kind", "view", "points", "color", "opacity", "width", "widths", "closed", "group",
         "outline", "triangles", "text", "fontPx", "touches"].includes(key)) fail(`${at}: unknown field "${key}"`);
     }
     const id = String(mark.id ?? "");
     if (!id || ids.has(id)) fail(`${at}.id must be a unique, non-empty string`);
     ids.add(id);
     if (!ANNOTATION_MARK_KINDS.includes(mark.kind)) fail(`${at}.kind must be one of ${ANNOTATION_MARK_KINDS.join(", ")}`);
-    if (mark.part != null && typeof mark.part !== "string") fail(`${at}.part must be an occurrence id or null`);
-    if (mark.placement != null && !PLACEMENTS.has(mark.placement)) fail(`${at}.placement must be "surface" or "space"`);
     if (!COLOR.test(String(mark.color ?? ""))) fail(`${at}.color must be a #rrggbb colour`);
     const points = numbers(mark.points, `${at}.points`);
     if (!points.length || points.length % 3) fail(`${at}.points must be x, y, z triples`);
     const count = points.length / 3;
-    const out = { id, kind: mark.kind, part: mark.part ?? null, points, color: mark.color };
-    if (mark.placement != null) out.placement = mark.placement;
+    const out = { id, kind: mark.kind, points, color: mark.color };
     if (mark.view != null) out.view = String(mark.view);
     if (mark.opacity != null) {
       if (!(mark.opacity >= 0 && mark.opacity <= 1)) fail(`${at}.opacity must be between 0 and 1`);
@@ -97,8 +84,6 @@ export function normalizeAnnotation(raw) {
         out.widths = numbers(mark.widths, `${at}.widths`);
         if (out.widths.length !== count) fail(`${at}.widths must have one value per point`);
       }
-      out.dash = mark.dash ?? "solid";
-      if (!DASHES.has(out.dash)) fail(`${at}.dash must be solid, dashed or dotted`);
       out.closed = Boolean(mark.closed);
       if (count < 2) fail(`${at}: a stroke has at least two points`);
     } else if (mark.kind === "area") {
@@ -116,26 +101,25 @@ export function normalizeAnnotation(raw) {
     }
     if (mark.group != null) out.group = String(mark.group);
     if (mark.touches != null) {
-      if (!Array.isArray(mark.touches) || mark.touches.some(touch => typeof touch?.part !== "string")) fail(`${at}.touches must list { part } entries`);
-      out.touches = mark.touches.map(touch => ({ part: touch.part }));
+      if (!Array.isArray(mark.touches) || mark.touches.some(touch => typeof touch?.part !== "string" || (touch.ref != null && typeof touch.ref !== "string"))) {
+        fail(`${at}.touches must list { part, ref? } entries`);
+      }
+      out.touches = mark.touches.map(touch => (touch.ref ? { part: touch.part, ref: touch.ref } : { part: touch.part }));
     }
     return out;
   });
-  return { units, parts, marks };
+  return { units, marks };
 }
 
 const rounded = values => Array.from(values, value => Math.round(value * 1e4) / 1e4);
 /**
  * An annotation as it is written: plain JSON, points to a ten-thousandth of a unit.
- * @param {{ units: string, marks: readonly AnnotationMark[], placements?: Map<string, ArrayLike<number>> | Record<string, ArrayLike<number>> }} annotation
+ * @param {{ units: string, marks: readonly AnnotationMark[] }} annotation
  * @returns {Annotation}
  */
-export function annotationDocument({ units, marks, placements = {} }) {
-  const entries = placements instanceof Map ? [...placements] : Object.entries(placements);
-  const used = new Set(marks.map(mark => mark.part).filter(part => part != null));
-  const parts = Object.fromEntries(entries.filter(([id]) => used.has(id)).map(([id, placement]) => [id, { placement: rounded(placement) }]));
+export function annotationDocument({ units, marks }) {
   return {
-    units, parts,
+    units,
     marks: marks.map(mark => {
       const out = { ...mark, points: rounded(mark.points) };
       if (mark.widths) out.widths = rounded(mark.widths);
@@ -147,21 +131,6 @@ export function annotationDocument({ units, marks, placements = {} }) {
 
 /** Whether an object and every parent of it is shown. */
 export const annotationObjectShown = object => { for (let node = object; node; node = node.parent) if (!node.visible) return false; return true; };
-
-/**
- * A part's own object under `root` (not an instanced draw of several), by occurrence id: what its
- * ink hangs on. The viewer's scene and a snapshot's both mark them `userData.partId`.
- * @returns {Map<string, import("three").Object3D>}
- */
-export function annotationPartObjects(root) {
-  const objects = new Map();
-  root?.traverse?.(object => {
-    if (object.isMesh && !object.isInstancedMesh && object.userData?.partId != null && !objects.has(String(object.userData.partId))) {
-      objects.set(String(object.userData.partId), object);
-    }
-  });
-  return objects;
-}
 
 // The pen's width along a stroke: three's screen-space line widens every segment by one uniform, so
 // each segment carries its two ends' shares of it, and the feather the core line adds
@@ -177,6 +146,16 @@ function taperedWidths(baseCompile) {
   };
 }
 let taperedCompile = null;
+// A once-only stroke's feather and cap rim (under half its coverage) is left undrawn, so the pixels it would
+// write into the stencil never shut out the body of the segment beside it.
+function withoutRim(baseCompile) {
+  return function inkOnceOnlyLine(shader, renderer) {
+    baseCompile?.call(this, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("gl_FragColor = vec4( diffuseColor.rgb, alpha );", "if ( alpha < opacity * 0.5 ) discard;\n\t\tgl_FragColor = vec4( diffuseColor.rgb, alpha );");
+  };
+}
+const rimless = new WeakMap();
 
 // A text mark's picture: its words as written, in the UI's face.
 function textCanvas(mark) {
@@ -198,16 +177,33 @@ function textCanvas(mark) {
   return canvas;
 }
 
+// A translucent stroke (the highlighter's) is drawn as overlapping round-capped segments, which would darken
+// where they meet. Each such stroke gets stencil references of its own (one for the stroke, one for its faint
+// hidden part) and draws only where its own reference is not yet written, so its pixels blend once; a
+// crossing stroke has another reference, and does blend with it. The references cycle through 1-251: odd for a stroke, even for its hidden part.
+let stencilRef = 0;
+function onceOnly(THREE, material, ref) {
+  const base = material.onBeforeCompile;
+  if (!rimless.has(base)) rimless.set(base, withoutRim(base));
+  material.onBeforeCompile = rimless.get(base);
+  material.stencilWrite = true;
+  material.stencilRef = ref;
+  material.stencilFunc = THREE.NotEqualStencilFunc;
+  material.stencilFail = THREE.KeepStencilOp;
+  material.stencilZFail = THREE.KeepStencilOp;
+  material.stencilZPass = THREE.ReplaceStencilOp;
+  material.needsUpdate = true;
+}
+
 /**
  * One mark's object: a stroke a screen-width line along its points, an area a flat mesh of its
- * triangles, a text mark its picture on a quad. Positioned by `placeAnnotationObject`.
+ * triangles, a text mark its picture on a quad, where its points are: in model coordinates.
  *
  * @param {{ THREE: typeof import("three"), Line2: any, LineGeometry: any, LineMaterial: any }} context
  * @param {AnnotationMark} mark
- * @param {{ radius: number, lineScale: number }} options  `radius`: the model's, which dashes are
- *   sized from. `lineScale`: device pixels per screen pixel of `width`.
+ * @param {{ lineScale: number }} options  `lineScale`: device pixels per screen pixel of `width`.
  */
-export function annotationMarkObject(context, mark, { radius, lineScale }) {
+export function annotationMarkObject(context, mark, { lineScale }) {
   const { THREE } = context;
   const positions = mark.points instanceof Float32Array ? mark.points : new Float32Array(mark.points);
   let object;
@@ -221,13 +217,6 @@ export function annotationMarkObject(context, mark, { radius, lineScale }) {
       // One callback for every tapered line, so they share a program.
       taperedCompile ??= taperedWidths(object.material.onBeforeCompile);
       object.material.onBeforeCompile = taperedCompile;
-      object.material.needsUpdate = true;
-    }
-    if (object && mark.dash && mark.dash !== "solid") {
-      object.computeLineDistances();
-      object.material.dashed = true;
-      object.material.dashSize = mark.dash === "dotted" ? radius * 0.0025 : radius * 0.02;
-      object.material.gapSize = radius * 0.012;
       object.material.needsUpdate = true;
     }
   } else {
@@ -252,33 +241,45 @@ export function annotationMarkObject(context, mark, { radius, lineScale }) {
     object.renderOrder = ANNOTATION_RENDER_ORDER;
   }
   if (object) {
-    // Its world matrix is its part's, set by `placeAnnotationObject`: never recomputed from its parent.
+    // Its points are in model coordinates: its world matrix is the identity, never recomputed.
     object.matrixAutoUpdate = false;
     object.matrixWorldAutoUpdate = false;
+    object.matrixWorld.identity();
     object.frustumCulled = false;
+    // Its hidden part: the same mark drawn faint over everything, before the mark itself is drawn
+    // where nothing hides it.
+    const hidden = object.clone(false);
+    hidden.material = object.material.clone();
+    hidden.material.onBeforeCompile = object.material.onBeforeCompile;
+    // A screen-space line reads its resolution off the renderer as it is drawn (`renderEdges.js`).
+    hidden.onBeforeRender = object.onBeforeRender;
+    hidden.material.depthTest = false;
+    hidden.material.transparent = true;
+    hidden.material.opacity = (object.material.opacity ?? 1) * ANNOTATION_HIDDEN_OPACITY;
+    hidden.renderOrder = object.renderOrder - 1;
+    if (mark.kind === "stroke" && (mark.opacity ?? 1) < 1 && THREE.NotEqualStencilFunc !== undefined) {
+      stencilRef = (stencilRef + 2) % 250;
+      onceOnly(THREE, object.material, stencilRef + 1);
+      onceOnly(THREE, hidden.material, stencilRef + 2);
+    }
+    hidden.matrixWorld.identity();
+    hidden.userData = { annotationHidden: true };
+    object.add(hidden);
   }
   return object;
 }
 
 /**
- * Puts a mark's object where its part is now: the part's frame as the scene has it, shown with it
- * and cut by `planes`; the part's placement when the annotation was made if the scene has no such part;
- * the model's own frame for a mark on no part.
+ * Cuts a mark's object with `planes` (Clip's), as the model is cut.
  * @param {import("three").Object3D} object
- * @param {AnnotationMark} mark
- * @param {Map<string, import("three").Object3D>} parts  `annotationPartObjects`
- * @param {{ placements?: Record<string, { placement: ArrayLike<number> }>, planes?: import("three").Plane[], visible?: boolean }} [options]
+ * @param {import("three").Plane[]} [planes]
  */
-export function placeAnnotationObject(object, mark, parts, { placements = {}, planes = [], visible = true } = {}) {
-  const part = mark.part != null ? parts.get(String(mark.part)) : null;
-  const fallback = mark.part != null && !part ? placements[mark.part]?.placement : null;
-  object.visible = visible && (mark.part == null || (part ? annotationObjectShown(part) : true));
-  if (part) object.matrixWorld.copy(part.matrixWorld);
-  else if (fallback?.length === 16) object.matrixWorld.fromArray(Array.from(fallback));
-  else object.matrixWorld.identity();
-  const material = object.material;
-  if (material && (material.clippingPlanes?.length || 0) !== planes.length) material.needsUpdate = true;
-  if (material) material.clippingPlanes = planes.length ? planes : null;
+export function clipAnnotationObject(object, planes = []) {
+  for (const part of [object, ...object.children.filter(child => child.userData?.annotationHidden)]) {
+    const material = part.material;
+    if (material && (material.clippingPlanes?.length || 0) !== planes.length) material.needsUpdate = true;
+    if (material) material.clippingPlanes = planes.length ? planes : null;
+  }
 }
 
 /** Frees a mark's object. */
@@ -288,15 +289,17 @@ export function disposeAnnotationObject(object) {
   object.geometry?.dispose?.();
   object.material?.map?.dispose?.();
   object.material?.dispose?.();
+  // Its hidden part shares its geometry and picture.
+  for (const child of object.children.filter(part => part.userData?.annotationHidden)) child.material?.dispose?.();
 }
 
 /**
- * A whole annotation drawn into a scene once, for a still: every mark's object under one group, placed
- * by its part under `partsRoot` as the scene has it when `place()` runs.
+ * A whole annotation drawn into a scene once, for a still: every mark's object under one group, cut
+ * by the clip planes the scene has when `place()` runs.
  *
  * @param {object} context  `THREE` and the screen-space line classes (`annotationMarkObject`).
  * @param {Annotation} annotation  `normalizeAnnotation`'s.
- * @param {{ radius: number, lineScale: number }} options
+ * @param {{ lineScale: number }} options
  */
 export function createAnnotationLayer(context, annotation, options) {
   const { THREE } = context;
@@ -306,10 +309,8 @@ export function createAnnotationLayer(context, annotation, options) {
   for (const { object } of entries) group.add(object);
   return {
     group,
-    place(partsRoot, planes = []) {
-      const parts = annotationPartObjects(partsRoot);
-      partsRoot?.updateMatrixWorld?.(true);
-      for (const { mark, object } of entries) placeAnnotationObject(object, mark, parts, { placements: annotation.parts, planes });
+    place(planes = []) {
+      for (const { object } of entries) clipAnnotationObject(object, planes);
     },
     dispose() {
       for (const { object } of entries) disposeAnnotationObject(object);

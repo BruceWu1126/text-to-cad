@@ -144,8 +144,8 @@ it('Quick Edit is there once something is picked, with what the host can do, is 
   expect(container.querySelector('[data-preview-chrome]')!.contains(container.querySelector('[data-quick-edit]'))).toBe(true);
 });
 
-// A stroke as Annotate puts one into the model.
-const ink = (id: string) => ({ id, kind: 'stroke', part: null, placement: 'surface', points: new Float32Array([0, 0, 0, 1, 0, 0]), color: '#ff2d55', width: 2, dash: 'solid', touches: [] });
+// A stroke as the drawing tools put one into the model.
+const ink = (id: string) => ({ id, kind: 'stroke', points: new Float32Array([0, 0, 0, 1, 0, 0]), color: '#ff2d55', width: 2, touches: [] });
 
 it("an annotation opens Quick Edit, which sends the note with the files made of its view and its annotation, and goes with them", async () => {
   const destination = { kind: 'composer', available: true } as const;
@@ -156,7 +156,7 @@ it("an annotation opens Quick Edit, which sends the note with the files made of 
   };
   const host = testHost({ promptContext: { getSnapshot: () => destination, subscribe: () => () => {}, deliver: async () => ({ status: 'added', partIds: [] }), send } as any, promptFiles });
   mount(host);
-  fireEvent.click(screen.getByRole('button', { name: 'Annotate' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
   act(() => viewport.props.annotation.add([ink('a')]));
   const box = screen.getByRole('region', { name: 'Quick Edit' });
   expect(box.querySelector('[data-quick-edit-ref="annotation"]')).not.toBeNull();
@@ -192,7 +192,7 @@ it('a clipboard destination has no snapshot in the navbar; the annotation is Qui
     clipboard: { writeText: async () => {}, writeImage },
   }));
   expect(navigation.mock.calls.flatMap(([actions]) => actions)).toEqual([]);
-  fireEvent.click(screen.getByRole('button', { name: 'Annotate' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Pencil' }));
   act(() => viewport.props.annotation.add([ink('a')]));
   const chip = screen.getByRole('region', { name: 'Quick Edit' }).querySelector('[data-quick-edit-ref="annotation"]')!;
   expect(chip.querySelector('svg[data-pick-glyph="pencil"]')).not.toBeNull();
@@ -231,27 +231,58 @@ it("under Select a press on the annotation picks its mark before anything under 
   viewport.annotationAt = null;
 });
 
-it("Annotate is one tool on the strip; its controls, a row under the strip, have every tool a button, then Undo, Redo and Clear, disabled with nothing to do", async () => {
+it("Pencil and Shapes are two plain tools on the strip; one row under the strip is theirs both: the tools of the one that is up, then Color, Stroke width, Placement and Clear, disabled with nothing to do", async () => {
   mount(testHost(), undefined, 'panel-one.harness');
   const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
-  fireEvent.click(strip.getByRole('button', { name: 'Annotate' }));
+  expect(strip.queryByRole('button', { name: 'Annotate' })).toBeNull();
+  // No chevron, no menu: a button each.
+  expect(strip.getAllByRole('button').map(button => button.getAttribute('aria-label')).slice(0, 4)).toEqual(['Select', 'Pencil', 'Shapes', 'Keep']);
+  expect(strip.getByRole('button', { name: 'Pencil' }).querySelector('svg')!.getAttribute('class')).toContain('lucide-pencil');
+  expect(strip.getByRole('button', { name: 'Shapes' }).querySelector('svg')!.getAttribute('class')).toContain('lucide-square');
+  expect(screen.queryByRole('toolbar', { name: 'Annotation controls' })).toBeNull();
+  fireEvent.click(strip.getByRole('button', { name: 'Pencil' }));
+  expect([viewport.props.annotation.tool, strip.getByRole('button', { name: 'Pencil' }).getAttribute('aria-pressed')]).toEqual(['freedraw', 'true']);
   // Not a panel of the tool stack: a toolbar of its own, hung under the strip.
   const row = screen.getByRole('toolbar', { name: 'Annotation controls' });
   expect([row.closest('[data-cad-tool-stack]'), row.closest('[data-tool-panel]')]).toEqual([null, null]);
   const panel = () => within(screen.getByRole('toolbar', { name: 'Annotation controls' }));
-  const tools = () => within(panel().getByRole('group', { name: 'Annotation tools' }));
-  const history = () => within(panel().getByRole('group', { name: 'Annotation history' }));
-  expect(tools().getAllByRole('button').map(button => button.getAttribute('aria-label'))).toEqual(['Pen', 'Line', 'Arrow', 'Rectangle', 'Ellipse', 'Text', 'Eraser']);
-  const disabled = () => ['Undo', 'Redo', 'Clear annotations'].map(name => history().getByRole('button', { name }).hasAttribute('disabled'));
-  expect(disabled()).toEqual([true, true, true]);
-  fireEvent.click(tools().getByRole('button', { name: 'Text' }));
-  expect([viewport.props.annotation.tool, tools().getByRole('button', { name: 'Text' }).getAttribute('aria-pressed')]).toEqual(['text', 'true']);
-  // A step to take back enables Undo and Clear; taking it back enables Redo.
+  expect(panel().getAllByRole('button').map(button => button.getAttribute('aria-label')))
+    .toEqual(['Pen', 'Highlighter', 'Eraser', 'Color', 'Stroke width', 'Placement', 'Clear annotations']);
+  const clear = () => panel().getByRole('button', { name: 'Clear annotations' }).hasAttribute('disabled');
+  expect(clear()).toBe(true);
+  // Ink enables Clear. Undo and Redo are the keyboard's, ⌘Z and ⇧⌘Z (below), with no buttons.
   act(() => viewport.props.annotation.add([ink('a')]));
-  expect(disabled()).toEqual([false, true, false]);
-  fireEvent.click(history().getByRole('button', { name: 'Undo' }));
-  expect(viewport.props.annotation.items).toEqual([]);
-  expect(disabled()).toEqual([true, false, true]);
+  expect(clear()).toBe(false);
+  // Shapes' row starts with its own tools.
+  fireEvent.click(strip.getByRole('button', { name: 'Shapes' }));
+  expect(panel().getAllByRole('button').slice(0, 5).map(button => button.getAttribute('aria-label'))).toEqual(['Rectangle', 'Line', 'Arrow', 'Ellipse', 'Text']);
+});
+
+it("choosing the Highlighter in Pencil's row makes the strip's Pencil show it, and a press on Pencil takes up what it last drew with; Shapes opens on the Rectangle; switching shows each kind's own colour, weight and placement", async () => {
+  mount(testHost(), undefined, 'panel-one.harness');
+  const strip = within(screen.getByRole('group', { name: 'Interaction tools' }));
+  const icon = (name: string) => strip.getByRole('button', { name }).querySelector('svg')!.getAttribute('class') ?? '';
+  const row = () => within(screen.getByRole('toolbar', { name: 'Annotation controls' }));
+  fireEvent.click(strip.getByRole('button', { name: 'Pencil' }));
+  fireEvent.click(row().getByRole('button', { name: 'Highlighter' }));
+  expect(viewport.props.annotation.tool).toBe('highlighter');
+  expect(row().getByRole('button', { name: 'Highlighter' }).getAttribute('aria-pressed')).toBe('true');
+  expect(icon('Pencil')).toContain('lucide-highlighter');
+  // The highlighter's own settings, set while it is up: yellow to start.
+  expect(viewport.props.annotation.style).toEqual({ color: '#ffe600', strokeWidth: 2, placement: 'surface' });
+  act(() => { viewport.props.annotation.selectColor('#39ff14'); viewport.props.annotation.selectStrokeWidth(4); viewport.props.annotation.selectPlacement('plane'); });
+  // Shapes takes up the Rectangle; Pencil keeps the Highlighter.
+  fireEvent.click(strip.getByRole('button', { name: 'Shapes' }));
+  expect(viewport.props.annotation.tool).toBe('rectangle');
+  expect(strip.getByRole('button', { name: 'Pencil' }).getAttribute('aria-pressed')).toBe('false');
+  expect(icon('Pencil')).toContain('lucide-highlighter');
+  expect(viewport.props.annotation.style).toEqual({ color: '#ff2d55', strokeWidth: 2, placement: 'surface' });
+  fireEvent.click(row().getByRole('button', { name: 'Rectangle' }));
+  expect(icon('Shapes')).toContain('lucide-square');
+  fireEvent.click(strip.getByRole('button', { name: 'Pencil' }));
+  expect(viewport.props.annotation).toMatchObject({ tool: 'highlighter', style: { color: '#39ff14', strokeWidth: 4, placement: 'plane' } });
+  fireEvent.click(strip.getByRole('button', { name: 'Shapes' }));
+  expect(viewport.props.annotation.tool).toBe('rectangle');
 });
 
 it('⌘Z and ⇧⌘Z walk the annotation\'s history from anywhere in the viewer; a text field keeps its own', () => {

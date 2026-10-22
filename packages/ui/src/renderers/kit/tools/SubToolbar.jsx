@@ -4,8 +4,9 @@ import { useStripTouch } from "./stripTouch.js";
 
 // On a phone a row's buttons are the strip's 36px tiles, their icons 18px, and its slider is as tall,
 // its thumb big enough to take with a finger.
+// A chip in the row (Measure's measurements, `ReferenceChips.jsx`) keeps its own size.
 const TOUCH_CLASS = [
-  "[&_button]:h-9 [&_button]:min-w-9 [&_button]:rounded-md [&_button_svg]:size-4.5!",
+  "[&_button:not([data-quick-edit-refs]_*)]:h-9 [&_button:not([data-quick-edit-refs]_*)]:min-w-9 [&_button:not([data-quick-edit-refs]_*)]:rounded-md [&_button:not([data-quick-edit-refs]_*)_svg]:size-4.5!",
   "[&_[data-slot=slider]]:h-9 [&_[data-slot=slider-thumb]]:size-4!"
 ].join(" ");
 
@@ -26,9 +27,9 @@ export default function SubToolbar({ label, className, children, ...props }) {
   </div>;
 }
 
-// Every sub-toolbar is one width, the drawing toolbar's (Annotate's tools, style and history at
-// their natural size, 202px): a slider tool's row takes it too, so the column under the
-// strip never changes width from one tool to the next.
+// The slider tools' sub-toolbars (the model effects') are one width, 202px, so the column under the
+// strip does not change width from one of them to the next. The drawing tools' row is as wide as its
+// controls are (colour, stroke width, placement, history).
 export const SUB_TOOLBAR_WIDTH_CLASS = "w-[202px]";
 
 /**

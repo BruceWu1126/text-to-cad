@@ -32,13 +32,13 @@ import { TreeFilterInput } from "@text-to-cad/ui/primitives/tree-filter";
 // COMPILED package. When STEP moves onto the shell, delete this and drive those
 // cases through STEP.
 
-// Annotate and nothing else: with no tool taken up, "" is the mode, exactly as the
+// Pencil and Shapes and nothing else: with no tool taken up, "" is the mode, exactly as the
 // shell records for a renderer that hands over no tools at all.
-const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.ANNOTATE]: {} } });
+const HARNESS_TOOL_MODES = createToolModes({ defaultMode: "", modes: { [SHELL_TOOL.PENCIL]: {}, [SHELL_TOOL.SHAPES]: {} } });
 // A file with a tool stack (`panel*.harness`) opens in Select, as STEP and robots do: the tool
 // whose tree a person can close, and whose press while it is up opens it again.
 const SELECT_TOOL = "select";
-const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.ANNOTATE]: {} } });
+const PANEL_TOOL_MODES = createToolModes({ defaultMode: SELECT_TOOL, modes: { [SELECT_TOOL]: {}, [SHELL_TOOL.PENCIL]: {}, [SHELL_TOOL.SHAPES]: {} } });
 const LIVE = Object.freeze({ declined: {
   select: "The shell harness has nothing to select: it draws one triangle and reads no file.",
   clearSelection: "The shell harness has no selection to clear."
@@ -221,7 +221,7 @@ function HarnessSurface({ view, data }) {
     [previewScene, data.previewAnimation, onCameraSettled]);
 
   // Its test controls sit at the bottom centre, clear of the view cube (bottom-right) and the file sidebar (down the left).
-  return <RendererShell shell={shell} tools={withPanel ? [selectTool, shell.tools.annotate, keepTool, poseTool] : [shell.tools.annotate]}
+  return <RendererShell shell={shell} tools={withPanel ? [selectTool, ...shell.tools.drawing, keepTool, poseTool] : shell.tools.drawing}
     previewView={previewView}
     toolPanels={toolPanels} sidebar={sidebar} references={references} onClearReferences={() => setPicked("")}
     contextMenuItems={contextMenuItems} onContextMenuOpenChange={setMenuUp}

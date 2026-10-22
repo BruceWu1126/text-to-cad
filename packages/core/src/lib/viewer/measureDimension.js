@@ -1,4 +1,4 @@
-import { formatMeasurement } from "./measurement.js";
+import { formatMeasurement, formatMeasurementAngle } from "./measurement.js";
 import { dimensionEndpoints } from "./measureLines.js";
 import { projectWorldPointToClient } from "./measureRuler.js";
 
@@ -55,7 +55,19 @@ const LABEL_PADDING_X = 6;
 const LABEL_PADDING_Y = 3;
 const LABEL_MIN_MARGIN = 4;
 
+/**
+ * A measurement in words, as its dimension is labelled: what the pair of entities makes (`measurementFromPicks`):
+ * "⟂ 8.00 mm" the distance between parallel planes or from a vertex to an edge, "C-C 60.00 mm" between
+ * two holes' centres, "∠ 90.0°" the angle of two planes or two edges, "min 4.20 mm" the shortest distance
+ * between two shapes, and a plain "50.00 mm" between two points.
+ */
 export function measureLabelText(measurement, { precision = 2 } = {}) {
+  if (measurement?.kind === "angle") {
+    const angle = formatMeasurementAngle(measurement);
+    if (angle) {
+      return `∠ ${angle}`;
+    }
+  }
   const formatted = formatMeasurement(measurement, { precision });
   if (!formatted) {
     return "";
@@ -66,6 +78,9 @@ export function measureLabelText(measurement, { precision = 2 } = {}) {
   // C-C is the standard shorthand for a centre-to-centre (hole spacing) reading.
   if (measurement?.centerDistance !== null && measurement?.centerDistance !== undefined) {
     return `C-C ${formatted}`;
+  }
+  if (measurement?.kind === "min" && measurement.minDistance !== null && measurement.minDistance !== undefined) {
+    return `min ${formatted}`;
   }
   return formatted;
 }
@@ -497,17 +512,14 @@ export function drawMeasureSnapChip(context, point, text, {
 }
 
 
-// ---- a measurement as a prompt and a snapshot carry it ----------------------------------------
+// ---- a taken measurement as a mark the overlay draws -------------------------------------------
 
 /**
- * A measurement as Quick Edit hands it on and a snapshot job draws it (`measurements`): the two
+ * A taken measurement as the overlay draws it: the two
  * ends its dimension is drawn between (a face-to-face reading's along the faces' normal), its words
  * as the viewer labels it, and its colour. World coordinates, the model's own units.
  * @typedef {{ start: [number, number, number], end: [number, number, number], label: string, color: string }} MeasurementMark
  */
-const MARK_KEYS = new Set(["start", "end", "label", "color"]);
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-export const MAX_MEASUREMENT_MARKS = 64;
 
 /** A taken measurement (`{ pickA, pickB, measurement, colorIndex }`) as a mark; null when it has no ends. */
 export function measurementMark(item) {
@@ -517,28 +529,6 @@ export function measurementMark(item) {
     color: measureSeriesColor(item?.colorIndex) };
 }
 
-const finiteTriple = value => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
-
-/**
- * A job's `measurements`, checked: a list of marks, each `{start, end, label, color}`, at most
- * `MAX_MEASUREMENT_MARKS`. Throws `measurements: [i].start …`, by what is wrong.
- * @returns {MeasurementMark[]}
- */
-export function normalizeMeasurementMarks(value) {
-  if (!Array.isArray(value)) throw new Error("measurements: a list of {start, end, label, color}");
-  if (value.length > MAX_MEASUREMENT_MARKS) throw new Error(`measurements: at most ${MAX_MEASUREMENT_MARKS}`);
-  return value.map((mark, index) => {
-    const at = `measurements: [${index}]`;
-    if (!mark || typeof mark !== "object" || Array.isArray(mark)) throw new Error(`${at} is {start, end, label, color}`);
-    const unknown = Object.keys(mark).filter(key => !MARK_KEYS.has(key));
-    if (unknown.length) throw new Error(`${at} has unknown field(s): ${unknown.join(", ")}`);
-    for (const key of ["start", "end"]) if (!finiteTriple(mark[key])) throw new Error(`${at}.${key} is [x, y, z]`);
-    if (typeof mark.label !== "string") throw new Error(`${at}.label is its words`);
-    if (typeof mark.color !== "string" || !HEX_COLOR.test(mark.color)) throw new Error(`${at}.color is #rrggbb`);
-    return { start: [...mark.start], end: [...mark.end], label: mark.label, color: mark.color };
-  });
-}
-
 /** Where a mark's dimension falls on a screen `rect` seen by `camera` (`screenSpaceDimensionLayout`); null off it. */
 export function measurementMarkLayout(mark, camera, rect) {
   return mark ? screenSpaceDimensionLayout({ point: mark.start }, { point: mark.end }, null, camera, rect) : null;
@@ -546,8 +536,7 @@ export function measurementMarkLayout(mark, camera, rect) {
 
 /**
  * A mark's dimension drawn as the viewer draws a taken measurement: in its colour, the one in hand
- * (`active`) full and labelled, the others fainter and lighter. The viewer's overlay and a
- * snapshot's picture draw with this one function.
+ * (`active`) full and labelled, the others fainter and lighter.
  */
 export function drawMeasurementMark(context, layout, mark, { active = true, bounds = null } = {}) {
   drawMeasureDimension(context, layout, {

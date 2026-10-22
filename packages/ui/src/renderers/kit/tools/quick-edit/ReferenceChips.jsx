@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Copy, X } from "lucide-react";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@text-to-cad/ui/primitives/popover";
 import { ScrollArea } from "@text-to-cad/ui/primitives/scroll-area";
@@ -148,8 +148,13 @@ function CardTitle({ chip }) {
 // A chip's card: its name, its id, then what the renderer says of it (or its picture).
 // Beside the box, a card opens to its left, over the view; on a phone the box is the bottom sheet
 // across the screen, so the card opens above the chip, inside the screen.
+// Where the chips hang: "below", under the strip (Measure's row), opens every card under its chip.
+const ChipsBelowContext = createContext(false);
+
 function useCardPlace() {
-  return useViewerMobile() ? { side: "top", align: "start", sideOffset: 6 } : { side: "left", align: "start", sideOffset: 14 };
+  const mobile = useViewerMobile();
+  if (useContext(ChipsBelowContext)) return { side: "bottom", align: "start", sideOffset: 6 };
+  return mobile ? { side: "top", align: "start", sideOffset: 6 } : { side: "left", align: "start", sideOffset: 14 };
 }
 
 function ChipCard({ chip, state }) {
@@ -222,14 +227,53 @@ function MoreChips({ chips }) {
  * reference on a click (and opens the card on a touch), and its X drops them from the selection. A
  * card's title copies the reference too, and a click on one of its values copies that value.
  *
- * @param {{ chips: readonly ReferenceChip[], className?: string }} props
+ * Measure's row lists its measurements with these chips too (`measure/measurementChips.jsx`), named by `label`,
+ * its cards opening `below` its chips rather than to their left, and as many chips as fit in `rows`
+ * rows at its width before "+N more" (measured, again when the chips or the width change), rather
+ * than a fixed few.
+ *
+ * @param {{ chips: readonly ReferenceChip[], className?: string, label?: string, below?: boolean, rows?: number }} props
  */
-export default function ReferenceChips({ chips, className }) {
+export default function ReferenceChips({ chips, className, label = "References", below = false, rows = 0 }) {
+  const box = useRef(null);
+  const key = chips.map(chip => chip.key).join("\n");
+  // With `rows`: how many chips fit in that many rows with "+N more" after them, for these chips.
+  const [fit, setFit] = useState(null);
+  const measured = rows && fit?.key === key ? fit.count : null;
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!rows || !element) return;
+    if (measured === null) {
+      // Every chip is on the page, at the room it is given: the first one that starts a row past the
+      // last allowed is where they stop, one before it to leave the room "+N more" takes.
+      element.style.width = "";
+      const tops = [...element.children].map(child => child.offsetTop);
+      const lines = [...new Set(tops)].sort((a, b) => a - b);
+      const past = lines.length > rows ? tops.findIndex(top => top >= lines[rows]) : -1;
+      setFit({ key, count: past < 0 ? chips.length : Math.max(1, past - 1) });
+      return;
+    }
+    // The chips kept, then as wide as their widest row, so what they sit in is no wider than they are.
+    const left = element.getBoundingClientRect().left;
+    const right = Math.max(...[...element.children].map(child => child.getBoundingClientRect().right));
+    element.style.width = `${Math.ceil(right - left + parseFloat(getComputedStyle(element).paddingRight || "0"))}px`;
+  });
+  // A new width for the view measures them again.
+  useEffect(() => {
+    if (!rows) return undefined;
+    const again = () => setFit(null);
+    window.addEventListener("resize", again);
+    return () => window.removeEventListener("resize", again);
+  }, [rows]);
   if (!chips.length) return null;
-  const shown = chips.length > VISIBLE_REFERENCE_CHIPS + 1 ? chips.slice(0, VISIBLE_REFERENCE_CHIPS) : chips;
+  const count = rows ? measured ?? chips.length
+    : chips.length > VISIBLE_REFERENCE_CHIPS + 1 ? VISIBLE_REFERENCE_CHIPS : chips.length;
+  const shown = chips.slice(0, count);
   const rest = chips.slice(shown.length);
-  return <div className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label="References" data-quick-edit-refs="">
-    {shown.map(chip => <Chip key={chip.key} chip={chip} />)}
-    {rest.length ? <MoreChips chips={rest} /> : null}
-  </div>;
+  return <ChipsBelowContext.Provider value={below}>
+    <div ref={box} className={cn("flex min-w-0 flex-wrap gap-1", className)} aria-label={label} data-quick-edit-refs="">
+      {shown.map(chip => <Chip key={chip.key} chip={chip} />)}
+      {rest.length ? <MoreChips chips={rest} /> : null}
+    </div>
+  </ChipsBelowContext.Provider>;
 }

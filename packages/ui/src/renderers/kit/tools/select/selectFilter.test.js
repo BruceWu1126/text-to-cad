@@ -1,26 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { selects, toggleSelectAll, toggleSelectFilter } from "./selectFilter.js";
+import { pickModeOf, selects } from "./selectFilter.js";
 
-const KINDS = ["parts", "faces", "edges", "position", "annotation", "measurement"];
+const MODES = [
+  { id: "all", label: "All", kinds: ["parts", "faces", "edges", "position", "annotation", "measurement"] },
+  { id: "faces", label: "Faces", kinds: ["faces"] },
+  { id: "edges", label: "Edges", kinds: ["edges"] },
+];
 
-test("each kind is ticked and unticked on its own, every one of them off if need be", () => {
-  assert.deepEqual(toggleSelectFilter(KINDS, "faces", false), ["parts", "edges", "position", "annotation", "measurement"]);
-  assert.deepEqual(toggleSelectFilter(["edges"], "faces", true), ["edges", "faces"]);
-  assert.deepEqual(toggleSelectFilter(["faces"], "faces", true), ["faces"], "ticking a ticked kind keeps it once");
-  assert.deepEqual(toggleSelectFilter(["links"], "links", false), []);
+test("a filter is the mode whose kinds it picks, in any order, else All", () => {
+  assert.equal(pickModeOf(["faces"], MODES).id, "faces");
+  assert.equal(pickModeOf(["measurement", "annotation", "position", "edges", "faces", "parts"], MODES).id, "all");
+  assert.equal(pickModeOf(["faces", "edges"], MODES).id, "all", "no mode picks two kinds alone");
+  assert.equal(pickModeOf([], []), null);
 });
 
-test("Select all ticks every kind, and with every kind ticked already, none", () => {
-  assert.deepEqual(toggleSelectAll([], KINDS), KINDS);
-  assert.deepEqual(toggleSelectAll(["faces", "position"], KINDS), KINDS);
-  assert.deepEqual(toggleSelectAll(KINDS, KINDS), []);
-  // A kind the menu does not offer (Parts in a part file) is not needed for "every kind".
-  assert.deepEqual(toggleSelectAll(KINDS, ["faces", "edges"]), []);
-});
-
-test("a filter picks what it ticks", () => {
+test("a filter picks what its mode picks", () => {
   assert.equal(selects(["faces", "measurement"], "measurement"), true);
   assert.equal(selects(["faces"], "measurement"), false);
   assert.equal(selects([], "faces"), false);

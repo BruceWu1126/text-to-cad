@@ -1,9 +1,9 @@
 import { createToolModes } from "../kit/tools/toolModes.js";
 
 // A GLB's tools: Select picks its nodes — what Quick Edit names (`model.glb#n12`, the file's
-// `nodes[12]`) — Annotate, Measure (approximate, in glTF's metres), Explode where it has several
+// `nodes[12]`) — Pencil, Shapes, Measure (approximate, in glTF's metres), Explode where it has several
 // rigid nodes that draw, and Clip. Its clips play from the file sidebar's Animation section.
-export const GLB_TOOL = Object.freeze({ SELECT: "select", ANNOTATE: "annotate", MEASURE: "measure", EXPLODE: "exploded", CLIP: "clip" });
+export const GLB_TOOL = Object.freeze({ SELECT: "select", PENCIL: "pencil", SHAPES: "shapes", MEASURE: "measure", EXPLODE: "exploded", CLIP: "clip" });
 
 export const GLB_TOOL_MODES = createToolModes({
   defaultMode: GLB_TOOL.SELECT,

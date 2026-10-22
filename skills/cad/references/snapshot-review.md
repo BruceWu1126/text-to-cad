@@ -165,8 +165,14 @@ cadgen snapshot STEP/bracket_v2.step --job views.job.json
 ### Annotations and Quick Edit views
 
 `--annotation FILE` (a job's `annotation`: a path or the object) draws a person's ink
-over the model as they drew it in the CAD Viewer: each mark sits on its part,
-follows it when the view explodes or poses the model, and is cut by a clip.
+over the model as they drew it in the CAD Viewer: its marks are in model
+coordinates and stay put whatever explodes or poses the model, and are cut by a clip; what
+the model hides of them is drawn faint through it. A mark lies on the surface it was
+drawn on, or on that surface's plane (flat across a curved face, carried on in the air past the
+model's edge), so its points need not be coplanar.
+Each mark's `touches` says what it was drawn over, most first: the faces and edges
+as `@cad[...]` references (`ref`) where the Viewer could name them, each with its
+part — read those to know what a mark is about.
 A DXF annotation lies on the drawing plane; `--mode list` takes none.
 
 A Quick Edit prompt carries a snapshot packet captured only when Copy, Queue or
@@ -178,20 +184,14 @@ annotations before editing. A view without annotations is optional context: rend
 only when useful to the request; its presence alone does not require inspection.
 The `jobs` list includes the current view and every distinct drawn view with
 remaining ink. A matching drawn view uses the exact current framing in the export;
-otherwise `current view` is appended. Text, selections and measurements without
-ink still capture the current view. Shared `input`, inline `annotation` and
-`measurements` live at the top level once. An individual job can override any
-shared field (whole-value replacement, not a merge); empty `marks` or `measurements`
+otherwise `current view` is appended. Text and selections without
+ink still capture the current view. Shared `input` and inline `annotation`
+live at the top level once. An individual job can override any
+shared field (whole-value replacement, not a merge); empty `marks`
 suppress shared marks. Captured 3D views preserve projection and lens. No PNGs are
 rendered or attached at handoff. Input and output paths are absolute, so the packet
-can be replayed from another working folder. Annotation and measurement chips do not
-export individual references; their data travels in the snapshot packet. The job's `measurements` are
-the distances they measured, each `{start, end, label, color}`. Read these from the
-JSON when interpreting the prompt: endpoints are world coordinates in the model's
-units, and `label` is the displayed value and unit. These are reference dimensions,
-not constraints applied to the CAD model. They are drawn over every
-view as the viewer drew them; a label starting `≈` was measured on a mesh's triangles and
-is approximate. A Quick Edit from any 3D file replays: a robot's job carries its
+can be replayed from another working folder. Annotation chips do not
+export individual references; their data travels in the snapshot packet. A Quick Edit from any 3D file replays: a robot's job carries its
 `jointValues` and the parts hidden in its Links panel (`selection.hide`), a GLB's or a
 3MF's its `display.clip`, and a multi-part GLB's its `display.exploded`. `cadgen snapshot --job <job
 file>` renders those views again: after an edit, run it to see the change from

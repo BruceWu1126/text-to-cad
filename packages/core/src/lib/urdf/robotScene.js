@@ -1,4 +1,3 @@
-import { hitTriangle } from "../viewer/meshMeasure.js";
 import { shareGeometry, releaseGeometry } from "../render/sharedGeometry.js";
 import { ROBOT_SCENE_UNITS } from "../viewer/sceneUnits.js";
 import { resolveCadEdgeSettings } from "../../common/cadInk.js";
@@ -412,8 +411,12 @@ export function createRobotScene(THREE, { robot, parts }, { shareFrom = null } =
       const hit = raycaster.intersectObjects(pickable, false).find(candidate => candidate.object.visible && clipPlanes.every(plane => plane.distanceToPoint(candidate.point) >= 0));
       if (!hit) return null;
       const componentId = hit.object.userData.componentId || "";
-      const linkName = hit.object.userData.linkName || "";
-      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point, triangle: hitTriangle(hit) };
+      // The link that owns the hit: the mesh's own, else its nearest ancestor's.
+      let owner = hit.object;
+      while (owner && !owner.userData.linkName) owner = owner.parent;
+      const linkName = owner?.userData.linkName || "";
+      // The point hit, in the scene's coordinates, for Measure (`meshMeasure.js`).
+      return { id: componentId || `link:${linkName}`, kind: componentId ? "component" : "link", linkName, componentId, point: hit.point };
     },
     dispose() {
       if (disposed) return;

@@ -124,8 +124,8 @@ Top-level `--camera` and `--joint-values` remain active in every display mode.
 (`{"clip":{"axis":"x","at":0.05}}`, `at` in metres); `exploded`, and `shaded`, `xray`,
 `hidden-line` and `wireframe`, describe a STEP model's CAD edges and parts, and are
 refused by name here. A Quick Edit job from the viewer replays as it is: its `jointValues`, its
-`selection.hide` (the parts hidden in the Links panel, by their ids), its clip, annotation and
-measurements (`cadgen snapshot --job <file>`). Quick Edit supplies inline JSON or a
+`selection.hide` (the parts hidden in the Links panel, by their ids), its clip and
+annotation (`cadgen snapshot --job <file>`). Quick Edit supplies inline JSON or a
 `.snapshot.json` path; save inline JSON to a temporary file before using `--job`.
 Inspect supplied annotations before editing. Without annotations, the captured
 view is optional context; render it when useful to the request.

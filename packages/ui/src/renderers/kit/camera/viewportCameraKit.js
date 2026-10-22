@@ -249,20 +249,6 @@ export function getKeyboardOrbitCommand(event) {
   if (event.key === "ArrowDown") {
     return { direction: "down", keyId: "ArrowDown" };
   }
-
-  const key = String(event.key || "").toLowerCase();
-  if (key === "a" || event.code === "KeyA") {
-    return { direction: "left", keyId: event.code || "KeyA" };
-  }
-  if (key === "d" || event.code === "KeyD") {
-    return { direction: "right", keyId: event.code || "KeyD" };
-  }
-  if (key === "w" || event.code === "KeyW") {
-    return { direction: "up", keyId: event.code || "KeyW" };
-  }
-  if (key === "s" || event.code === "KeyS") {
-    return { direction: "down", keyId: event.code || "KeyS" };
-  }
   return null;
 }
 

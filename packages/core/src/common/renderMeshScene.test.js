@@ -15,6 +15,7 @@ import {
   renderJobContext,
   resolveOutputCameraProjection,
   resolveOutputCameraSpec,
+  snapshotStudioSamples,
   stepParametersForSnapshotOutput
 } from "./renderMeshScene.js";
 import { evaluateAnimationClip, normalizeAnimationClips } from "./animationRuntime.js";
@@ -748,4 +749,44 @@ test("capture diagnostics separate readiness, pose, tight framing, draw submissi
   const listing = { meshData: model.meshData, bounds: model.bounds, listParts: () => [] };
   await captureModel({ model: listing, context: { ...context, mode: "list" } }, { job, stageTimings: listStages });
   assert.deepEqual(listStages, {}, "a list does not report image stages");
+});
+
+test("a snapshot draws the job's annotation where it was drawn, whatever the exploded view does, cut by its clip, as heavy as on the viewer", async () => {
+  const annotation = { units: "mm", marks: [
+    { id: "1", kind: "stroke", points: [2, 0, 0, 3, 1, 0], color: "#ff2d55", width: 3 },
+    { id: "2", kind: "area", points: [0, 0, 1, 1, 0, 1, 1, 1, 1], triangles: [0, 1, 2], color: "#00aa44" }
+  ] };
+  const job = { mode: "view", kind: "step", annotation, display: { mode: "solid", exploded: { enabled: true, amount: 1 }, clip: { axis: "x" } },
+    outputs: [{ path: "a.png", width: 64, height: 450, camera: "iso" }, { path: "b.png", width: 64, height: 450, camera: "top" }] };
+  const meshData = twoPartMeshData();
+  const context = renderJobContext(meshData, job);
+  const model = buildModel(THREE, { kind: "step", meshData }, modelOptionsForRenderJob(context, job));
+  const scene = new THREE.Scene();
+  scene.add(model.root);
+  const viewport = { ...stubViewport(model, scene), context };
+  viewport.renderer.domElement = { ...viewport.renderer.domElement, height: 450 };
+  try {
+    await captureModel(viewport, { job });
+    const layer = scene.getObjectByName("annotation");
+    assert.ok(layer, "the annotation is in the scene");
+    const [stroke] = layer.children;
+    const right = model.root.getObjectsByProperty("isMesh", true).find(object => object.userData.partId === "right" && !object.isInstancedMesh);
+    assert.ok(right.matrixWorld.elements[12] !== 0 || right.matrixWorld.elements[13] !== 0, "the exploded view moved the part");
+    for (const mark of layer.children) assert.deepEqual(mark.matrixWorld.elements, new THREE.Matrix4().elements, "the ink stays put");
+    assert.equal(viewport.clipRuntime.activeClipPlanes.length, 1);
+    for (const mark of layer.children) assert.deepEqual(mark.material.clippingPlanes, viewport.clipRuntime.activeClipPlanes, "cut as the model is");
+    // A 450-pixel output is half the viewer's reference height: its ink is drawn half as wide.
+    assert.equal(stroke.material.linewidth, 1.5);
+    assert.equal(layer.children.length, 2, "one layer serves every output of a height");
+  } finally {
+    viewport.annotationLayer?.layer.dispose();
+    model.dispose();
+  }
+});
+
+test("a snapshot's Render still converges over every sample of its studio frame; a video frame and a software renderer draw one", () => {
+  assert.equal(snapshotStudioSamples(), PHOTOGRAPHIC_STUDIO_FRAME.stillSamples);
+  assert.ok(PHOTOGRAPHIC_STUDIO_FRAME.stillSamples > 1);
+  assert.equal(snapshotStudioSamples({ video: true }), 1);
+  assert.equal(snapshotStudioSamples({ softwareRendering: true }), 1);
 });

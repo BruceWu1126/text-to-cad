@@ -1,12 +1,15 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { annotationAt, penMark, shapeMarks, textMark, withGroups } from "../../../../annotation/geometry.js";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { annotationAt, highlighterMark, penMark, shapeMarks, textMark, withGroups } from "../../../../annotation/geometry.js";
 import { DEFAULT_OVERLAY_ANNOTATION_COLOR } from "../../../../annotation/toolbar.jsx";
 import { capturePointer } from "../../../../lib/pointerCapture.js";
 import { annotationsOnScreen, projectAnnotations } from "./annotation3d.js";
 import { TOUCH_HIT_PX } from "../../viewport/dom.js";
 
-// Someone who pressed Annotate came to draw: Annotate opens on the pen.
-export const CAD_ANNOTATION_DEFAULTS = Object.freeze({ tool: "freedraw", color: DEFAULT_OVERLAY_ANNOTATION_COLOR });
+// Someone who took up a drawing tool came to draw: Pencil opens on the pen, Shapes on the rectangle, each in the neon red
+// (the highlighter, in the session's yellow).
+export const CAD_ANNOTATION_DEFAULTS = Object.freeze({
+  styles: Object.freeze({ pen: Object.freeze({ color: DEFAULT_OVERLAY_ANNOTATION_COLOR }), shapes: Object.freeze({ color: DEFAULT_OVERLAY_ANNOTATION_COLOR }) }),
+});
 
 const SHAPES = new Set(["line", "arrow", "rectangle", "ellipse"]);
 const ERASER_RADIUS = 8;
@@ -14,7 +17,6 @@ const ERASER_RADIUS = 8;
 const eraserRadius = pointerType => pointerType === "touch" ? TOUCH_HIT_PX : ERASER_RADIUS;
 const FONT_PX = Object.freeze({ 1: 16, 2: 20, 4: 28 });
 const fontOf = px => `500 ${px}px ui-sans-serif, system-ui, sans-serif`;
-const DASH = Object.freeze({ solid: [], dashed: [8, 6], dotted: [1.5, 5] });
 
 // A mark's path on the preview canvas: its points, at its width (a pen's, point by point).
 function paintMark(context, mark) {
@@ -39,7 +41,6 @@ function paintMark(context, mark) {
     }
   } else {
     context.lineWidth = mark.width;
-    context.setLineDash(DASH[mark.dash] || []);
     context.beginPath();
     mark.points.forEach((point, index) => (index ? context.lineTo(point.x, point.y) : context.moveTo(point.x, point.y)));
     context.stroke();
@@ -62,11 +63,12 @@ function paintOutline(context, ink, { color }) {
 }
 
 /**
- * Annotate's surface over the viewport: every tool's gesture, its ink previewed as it is made (on a
- * canvas of its own, in screen space) and put into the model as it ends (`annotation3d.js`): the pen, the
+ * The drawing tools' surface over the viewport (Pencil and Shapes): every tool's gesture, its ink previewed as it is made (on a
+ * canvas of its own, in screen space) and put into the model as it ends (`annotation3d.js`): the pen, the highlighter, the
  * line, the arrow, the rectangle and the ellipse drawn; text written in place; the eraser dragged
- * over ink. Each mark lies on the model or in space, as the session's
- * placement was when it was put down. All of it works on the whole annotation, whatever view each piece
+ * over ink. Every mark lies on the surface it starts on (`annotation3d.js`'s `levelOf`: that
+ * surface's plane), each point on the surface under it or on that plane, by the session's `placement`. What each
+ * mark touches comes from `touchesAt` (the renderer's `inkTouches`). All of it works on the whole annotation, whatever view each piece
  * was drawn from. Picking ink is the viewer's Select's, not Annotate's (`RendererShell.jsx`); ink Select
  * picked is restyled on its selection's bar, and Delete deletes it here too.
  * The camera is the person's between strokes: the wheel zooms, a right or middle drag orbits (the
@@ -80,10 +82,10 @@ function paintOutline(context, ink, { color }) {
  * into the viewport's scene (`runtimeRef`).
  *
  * @param {{ annotation: import("../../../../annotation/session.js").AnnotationSession, runtimeRef?: { current: any },
- *   viewOf?: (() => object | null) | null, surface?: { place(marks: object[], size: { width: number, height: number }): object[],
+ *   viewOf?: (() => object | null) | null, touchesAt?: ((clientX: number, clientY: number) => { part: string, ref?: string }[]) | null, surface?: { place(marks: object[], size: { width: number, height: number }): object[],
  *     onScreen(items: readonly object[], size: { width: number, height: number }): object[], view(): Element | null } | null }} props
  */
-export default function AnnotationOverlay({ annotation, runtimeRef = null, viewOf = null, surface = null }) {
+export default function AnnotationOverlay({ annotation, runtimeRef = null, viewOf = null, touchesAt = null, surface = null }) {
   const root = useRef(null);
   const canvas = useRef(null);
   const gesture = useRef(null);
@@ -96,9 +98,11 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
   textRef.current = text;
   const annotationRef = useRef(annotation);
   annotationRef.current = annotation;
-  const style = { color: annotation.color, width: annotation.strokeWidth, dash: annotation.strokeStyle };
+  const style = { color: annotation.style.color, width: annotation.style.strokeWidth };
   const styleRef = useRef(style);
   styleRef.current = style;
+  // The freehand gesture's mark: the pen's, tapered by pressure, or the highlighter's, broad and translucent.
+  const inkOf = current => (current.highlight ? highlighterMark(current.points, styleRef.current) : penMark(current.points, styleRef.current, current.pressures));
 
   const size = () => ({ width: root.current?.clientWidth || 0, height: root.current?.clientHeight || 0 });
   const point = event => {
@@ -115,14 +119,20 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
   viewOfRef.current = viewOf;
   // The view ink is going down in, as the session labels it.
   const viewNow = () => annotationRef.current.noteView?.(viewOfRef.current?.() ?? null);
-  // Each mark put down lies where the session's placement says: on the model, or in space.
+  const touchesAtRef = useRef(touchesAt);
+  touchesAtRef.current = touchesAt;
+  // Each mark put down lies on the surface it starts on (`annotation3d.js`), and names what it touches.
   const put = marks => {
     const runtime = runtimeRef?.current, session = annotationRef.current, flat = surfaceRef.current;
     if ((!flat && !runtime) || !marks.length) return;
-    const placement = session.placement ?? "surface", view = viewNow();
-    const placed = marks.map(mark => ({ ...mark, placement, ...(view ? { view } : {}) }));
-    session.add(flat ? flat.place(placed, size()) : projectAnnotations(runtime, placed, size()));
+    const view = viewNow();
+    const placed = marks.map(mark => ({ ...mark, ...(view ? { view } : {}) }));
+    if (flat) { session.add(flat.place(placed, size())); return; }
+    const rect = root.current.getBoundingClientRect(), lookup = touchesAtRef.current;
+    session.add(projectAnnotations(runtime, placed, size(), { placement: session.style.placement,
+      touchesAt: lookup ? at => lookup(rect.left + at.x, rect.top + at.y) : null }));
   };
+
   // A mark drawn stays on the preview until the frame after the one that draws it in the model,
   // so it never blinks out between the two.
   const land = marks => {
@@ -153,7 +163,7 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
     for (const mark of landing.current || []) paintMark(context, mark);
     if (!current) return;
     if (current.kind === "pen") {
-      const mark = penMark(current.points, styleRef.current, current.pressures);
+      const mark = inkOf(current);
       if (mark) paintMark(context, mark);
     } else if (current.kind === "shape") {
       for (const mark of shapeMarks(current.tool, current.from, current.to, styleRef.current)) paintMark(context, mark);
@@ -212,13 +222,14 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
     capturePointer(event.currentTarget, event.pointerId);
     const pressure = event.pointerType === "pen" ? event.pressure : null;
     if (session.tool === "freedraw") gesture.current = { kind: "pen", points: [at], pressures: pressure == null ? null : [pressure] };
+    else if (session.tool === "highlighter") gesture.current = { kind: "pen", highlight: true, points: [at], pressures: null };
     else if (SHAPES.has(session.tool)) gesture.current = { kind: "shape", tool: session.tool, from: at, to: at };
     else if (session.tool === "eraser") {
       const screen = onScreen();
       const radius = eraserRadius(event.pointerType);
       gesture.current = { kind: "erase", screen, path: [at], radius, hits: new Set(annotationAt(at, screen, radius).map(ink => ink.id)) };
     } else if (session.tool === "text") {
-      setText({ at, value: "", color: session.color, fontPx: FONT_PX[session.strokeWidth] ?? 20 });
+      setText({ at, value: "", color: session.style.color, fontPx: FONT_PX[session.style.strokeWidth] ?? 20 });
     }
     paint();
   };
@@ -239,7 +250,7 @@ export default function AnnotationOverlay({ annotation, runtimeRef = null, viewO
   const onPointerUp = () => {
     const current = gesture.current, session = annotationRef.current;
     gesture.current = null;
-    if (current?.kind === "pen") { const mark = penMark(current.points, styleRef.current, current.pressures); if (mark) land([mark]); }
+    if (current?.kind === "pen") { const mark = inkOf(current); if (mark) land([mark]); }
     else if (current?.kind === "shape") land(shapeMarks(current.tool, current.from, current.to, styleRef.current));
     else if (current?.kind === "erase") session.remove(withGroups([...current.hits], session.items));
     paint();

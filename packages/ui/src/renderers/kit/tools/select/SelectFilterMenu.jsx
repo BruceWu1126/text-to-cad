@@ -1,36 +1,32 @@
-import { DropdownMenuCheckboxItem, DropdownMenuLabel, DropdownMenuSeparator } from "@text-to-cad/ui/primitives/dropdown-menu";
+import { DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from "@text-to-cad/ui/primitives/dropdown-menu";
 import { ToolSettingsMenu } from "../ToolModeMenu.jsx";
-import { toggleSelectAll, toggleSelectFilter } from "./selectFilter.js";
+import { pickModeOf } from "./selectFilter.js";
 
 /**
- * Select's selection filter, as a CAD tool's is: the chevron after Select's button on the strip,
- * whose dropdown is headed "Selection filter" and lists a checkbox per kind of thing Select picks
- * (`kinds`, each on its own), under Select all — ticked when every kind is, a dash when some are,
- * and pressing it ticks them all (or, with all ticked, none). Ticking leaves the menu open, so
- * several can be changed in one go. Whatever follows (`children`: how a pick grows, Group faces and
- * Group edges) comes after a rule.
+ * What a picking tool takes, as a CAD tool's selection priority is: the chevron after its button on
+ * the strip, whose dropdown is headed "Pick" and lists the tool's modes (`modes`, `selectFilter.js`)
+ * as ONE choice — All first, then each kind alone. Choosing one puts the menu away. Whatever
+ * follows (`children`: how a pick grows, Group faces and Group edges) comes after a rule. Measure's
+ * menu is this one too (`MeasureFilterMenu.jsx`): `name` marks its trigger and rows
+ * (`data-<name>-filter-trigger`, `data-<name>-filter`) and `triggerName` names its chevron
+ * ("Measure filter"), so the two chevrons on the strip are told apart. The strip's button shows the
+ * mode chosen as a badge on the tool's glyph (`modeGlyphs.jsx`'s `ToolModeIcon`).
  *
  * @param {{ value: readonly string[], onChange(filter: readonly string[]): void,
- *   kinds: { id: string, label: string, icon?: import("react").ReactNode }[],
- *   disabled?: boolean, children?: import("react").ReactNode }} props
+ *   modes: { id: string, label: string, kinds: readonly string[], icon?: import("react").ReactNode }[],
+ *   disabled?: boolean, children?: import("react").ReactNode, name?: string, triggerName?: string }} props
  */
-export default function SelectFilterMenu({ value, onChange, kinds, disabled = false, children = null }) {
-  const ids = kinds.map(kind => kind.id);
-  const ticked = kinds.filter(kind => value.includes(kind.id));
-  const all = ticked.length === kinds.length, some = ticked.length > 0;
+export default function SelectFilterMenu({ value, onChange, modes, disabled = false, children = null, name = "select", triggerName = "Selection filter" }) {
+  const mode = pickModeOf(value, modes);
   return <ToolSettingsMenu label="Selection filter"
-    triggerLabel={`Selection filter: ${all ? "everything" : some ? ticked.map(kind => kind.label).join(", ") : "nothing"}`}
-    disabled={disabled} trigger="chevron" triggerProps={{ "data-select-filter-trigger": all ? "all" : value.join(" ") }}>
-    <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Selection filter</DropdownMenuLabel>
-    <DropdownMenuCheckboxItem checked={all ? true : some ? "indeterminate" : false} data-select-filter="all"
-      onSelect={event => event.preventDefault()} onCheckedChange={() => onChange(toggleSelectAll(value, ids))}>
-      Select all
-    </DropdownMenuCheckboxItem>
-    <DropdownMenuSeparator />
-    {kinds.map(({ id, label, icon }) => <DropdownMenuCheckboxItem key={id} checked={value.includes(id)} data-select-filter={id}
-      onSelect={event => event.preventDefault()} onCheckedChange={checked => onChange(toggleSelectFilter(value, id, checked === true))}>
-      {icon}{label}
-    </DropdownMenuCheckboxItem>)}
+    triggerLabel={`${triggerName}: ${mode === modes[0] ? "everything" : mode.label}`}
+    disabled={disabled} trigger="chevron" triggerProps={{ [`data-${name}-filter-trigger`]: mode === modes[0] ? "all" : mode.id }}>
+    <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">Pick</DropdownMenuLabel>
+    <DropdownMenuRadioGroup value={mode.id} onValueChange={id => onChange([...modes.find(candidate => candidate.id === id).kinds])}>
+      {modes.map(({ id, label, icon }, index) => <DropdownMenuRadioItem key={id} value={id} {...{ [`data-${name}-filter`]: index === 0 ? "all" : id }}>
+        {icon}{label}
+      </DropdownMenuRadioItem>)}
+    </DropdownMenuRadioGroup>
     {children ? <><DropdownMenuSeparator />{children}</> : null}
   </ToolSettingsMenu>;
 }

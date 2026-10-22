@@ -1,9 +1,9 @@
 import { createToolModes } from "../kit/tools/toolModes.js";
 
-export const ROBOT_TOOL = Object.freeze({ SELECT: "select", ANNOTATE: "annotate", MEASURE: "measure", CLIP: "clip" });
+export const ROBOT_TOOL = Object.freeze({ SELECT: "select", PENCIL: "pencil", SHAPES: "shapes", MEASURE: "measure", CLIP: "clip" });
 
 // A robot's tools: Select picks links and drags the joints' knobs, as its filter says
-// (`RobotRenderer.jsx`); Annotate; Measure (approximate, in the description's metres, each mesh
+// (`RobotRenderer.jsx`); Pencil and Shapes; Measure (approximate, in the description's metres, each mesh
 // as its `scale` draws it); and Clip. A robot is posed, never exploded. The tool in hand is never
 // saved; joint values come back with the file.
 export const ROBOT_TOOL_MODES = createToolModes({

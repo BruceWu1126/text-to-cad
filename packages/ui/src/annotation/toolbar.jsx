@@ -1,45 +1,56 @@
 import { useEffect, useRef } from 'react';
-import { Circle, Eraser, MoveUpRight, Pencil, Redo2, Slash, Square, Trash2, Type, Undo2 } from 'lucide-react';
+import { Circle, Eraser, Highlighter, MoveUpRight, Pencil, Slash, Square, Trash2, Type } from 'lucide-react';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
-  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger
 } from '@text-to-cad/ui/primitives/dropdown-menu';
 import { ToolbarButton } from '@text-to-cad/ui/primitives/toolbar-button';
 import { cn } from '@text-to-cad/ui/utils';
 import { FLOATING_SURFACE_CLASS } from '../lib/floatingSurface.js';
-import SubToolbar, { SUB_TOOLBAR_WIDTH_CLASS } from '../renderers/kit/tools/SubToolbar.jsx';
-import { ToolSettingsMenu } from '../renderers/kit/tools/ToolModeMenu.jsx';
+import SubToolbar, { SubToolbarSeparator } from '../renderers/kit/tools/SubToolbar.jsx';
+import { DRAWING_SHORTCUTS } from '../renderers/kit/tools/toolShortcuts.js';
+import { toolFamily } from './tools.js';
 
 /**
- * Annotate's sub-toolbar (`AnnotationToolbar`): its tools — the pen, each shape, the eraser — the colour,
- * weight and line style of what is drawn next and where it is drawn (on the model or in space), and
- * its history and Clear, all the annotation session's (`session.js`). The same colour, weight and line
- * style dropdowns (`AnnotationStylePickers`) restyle the ink Select has picked, on its selection's bar.
+ * The drawing tools' sub-toolbar (`AnnotationToolbar`): one row, shared by the two strip tools that
+ * draw, Pencil (the pen, the highlighter, the eraser) and Shapes (the line, arrow, rectangle, ellipse
+ * and text). The row starts with the tools of the strip tool that is up — what it draws with, a button
+ * each — then the colour, stroke width and placement (on the surface under each point, or on the plane of
+ * the surface the mark starts on) of what is drawn next, and Clear, all the annotation
+ * session's (`session.js`). The style is the tool in hand's own — the pen's, the highlighter's, Shapes' —
+ * and the eraser, which puts nothing down, has none: its three are greyed out. The same colour and stroke width dropdowns (`AnnotationStylePickers`) restyle
+ * the ink Select has picked, on its selection's bar.
  */
 
-/**
- * The annotation editor's tools a host offers. Its lock, image, frame, embed and laser tools are left out.
- * @typedef {'freedraw' | 'line' | 'arrow' | 'rectangle' | 'ellipse' | 'text' | 'eraser'} AnnotationTool
- */
+/** @typedef {import('./tools.js').AnnotationTool} AnnotationTool */
 /** @typedef {{ id: AnnotationTool, label: string, Icon: typeof Pencil }} AnnotationToolEntry */
-// The pen, what Annotate opens on, and the eraser.
-const PEN = { id: 'freedraw', label: 'Pen', Icon: Pencil };
-const ERASER = { id: 'eraser', label: 'Eraser', Icon: Eraser };
-// The shapes, the line first; text with them, a mark put down in place.
+// What Pencil draws with, the pen first, then the highlighter and the eraser.
 /** @type {readonly AnnotationToolEntry[]} */
-export const ANNOTATION_SHAPE_TOOLS = [
+export const PENCIL_TOOL_ENTRIES = [
+  { id: 'freedraw', label: 'Pen', Icon: Pencil },
+  { id: 'highlighter', label: 'Highlighter', Icon: Highlighter },
+  { id: 'eraser', label: 'Eraser', Icon: Eraser },
+];
+// What Shapes draws with, the line first; text with them, a mark put down in place.
+/** @type {readonly AnnotationToolEntry[]} */
+export const SHAPE_TOOL_ENTRIES = [
+  { id: 'rectangle', label: 'Rectangle', Icon: Square },
   { id: 'line', label: 'Line', Icon: Slash },
   { id: 'arrow', label: 'Arrow', Icon: MoveUpRight },
-  { id: 'rectangle', label: 'Rectangle', Icon: Square },
   { id: 'ellipse', label: 'Ellipse', Icon: Circle },
   { id: 'text', label: 'Text', Icon: Type },
 ];
-/** @type {readonly AnnotationToolEntry[]} */
-const ANNOTATION_TOOL_ENTRIES = [PEN, ...ANNOTATION_SHAPE_TOOLS, ERASER];
-/** @type {readonly AnnotationTool[]} */
-export const ANNOTATION_TOOLS = ANNOTATION_TOOL_ENTRIES.map(tool => tool.id);
-/** The icon of an annotation tool (the pen's for one it does not know): the strip's Annotate shows the tool in hand. */
-export const annotationToolIcon = id => (ANNOTATION_TOOL_ENTRIES.find(tool => tool.id === id) || PEN).Icon;
+/**
+ * The two strip tools that draw: their ids are the tool modes', their variants what each draws with.
+ * @type {readonly { id: import('./tools.js').AnnotationFamily, label: string, entries: readonly AnnotationToolEntry[] }[]}
+ */
+export const DRAWING_TOOLS = [
+  { id: 'pencil', label: 'Pencil', entries: PENCIL_TOOL_ENTRIES },
+  { id: 'shapes', label: 'Shapes', entries: SHAPE_TOOL_ENTRIES },
+];
+/** The icon of a drawing tool (the pen's for one it does not know): a strip tool shows the variant it draws with. */
+export const annotationToolIcon = id => ([...PENCIL_TOOL_ENTRIES, ...SHAPE_TOOL_ENTRIES].find(tool => tool.id === id) || PENCIL_TOOL_ENTRIES[0]).Icon;
+/** The tool a drawing strip tool draws with now: `annotation.pencil` for Pencil, `annotation.shape` for Shapes. */
+export const drawingToolVariant = (family, annotation) => (family === 'shapes' ? annotation.shape : annotation.pencil);
 
 // Saturated enough to stand out from a shaded model in either theme; black and
 // white for the cases a neon cannot cover (a white page, a dark render).
@@ -68,22 +79,16 @@ export function annotationColors(colorScheme) {
 }
 
 // A shape's stroke in px; the pen draws a little heavier at the same weight (`geometry.js`).
+// Each keeps a name for assistive technology; the menu shows the line alone.
 /** @type {readonly { value: number, label: string }[]} */
 export const ANNOTATION_STROKE_WIDTHS = [
   { value: 1, label: 'Thin' },
   { value: 2, label: 'Medium' },
   { value: 4, label: 'Bold' },
+  { value: 6, label: 'Heavy' },
 ];
-/** @typedef {'solid' | 'dashed' | 'dotted'} AnnotationStrokeStyle */
-// How a shape's line is stroked; the pen's freehand ink is always solid.
-/** @type {readonly { value: AnnotationStrokeStyle, label: string }[]} */
-export const ANNOTATION_STROKE_STYLES = [
-  { value: 'solid', label: 'Solid' },
-  { value: 'dashed', label: 'Dashed' },
-  { value: 'dotted', label: 'Dotted' },
-];
-// Where ink lies, as its glyph: a sphere, in three dimensions, for ink drawn on the model's surface;
-// a flat sheet seen in perspective, a CAD tool's plane, for ink drawn on a plane.
+// How ink lies, as its glyph: a sphere, in three dimensions, for ink drawn on the surface under it; a
+// flat sheet seen in perspective for ink drawn on a plane.
 const GLYPH = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round' };
 function SurfaceGlyph({ strokeWidth = 2, ...props }) {
   return <svg {...GLYPH} strokeWidth={strokeWidth} {...props}>
@@ -98,53 +103,48 @@ function PlaneGlyph({ strokeWidth = 2, ...props }) {
     <path d="M14.5 6.5l-5 11M5 12h14" strokeWidth={1.25} strokeOpacity="0.5" />
   </svg>;
 }
-/** @typedef {'surface' | 'space'} AnnotationPlacement */
-// Where ink lies: on the model under it (carried with its part), or in space, on a plane facing the
-// view through the orbit point, on no part. Only what is drawn next: ink already down stays put.
+/** @typedef {'surface' | 'plane'} AnnotationPlacement */
+// How ink lies: on the surface of the model under each point, or on the plane of the surface the mark
+// starts on (`annotation3d.js`'s `levelOf`). Only what is drawn next: ink already down stays put.
 /** @type {readonly { value: AnnotationPlacement, label: string, Icon: typeof Pencil }[]} */
 export const ANNOTATION_PLACEMENTS = [
-  { value: 'surface', label: 'Draw on surface', Icon: SurfaceGlyph },
-  { value: 'space', label: 'Draw on plane', Icon: PlaneGlyph },
+  { value: 'surface', label: 'On surface', Icon: SurfaceGlyph },
+  { value: 'plane', label: 'On plane', Icon: PlaneGlyph },
 ];
 const placementGlyph = placement => {
   const { Icon } = ANNOTATION_PLACEMENTS.find(option => option.value === placement) ?? ANNOTATION_PLACEMENTS[0];
   return <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
 };
-// The style as a 2px line across a button, on the diagonal, dashed or dotted as it draws.
-const STYLE_DASHES = Object.freeze({ solid: undefined, dashed: '4 2.5', dotted: '0.01 3.5' });
-const styleGlyph = style => <svg aria-hidden="true" viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor"
-  strokeWidth="2" strokeLinecap="round"><path d="M2 10L10 2" strokeDasharray={STYLE_DASHES[style]} /></svg>;
-// The weight as a dot, 3px, 5px or 7px across, whatever it draws on the model: a dot, so it never
-// reads as a line style.
-const strokeGlyph = width => {
-  const size = width === 1 ? 3 : width === 2 ? 5 : 7;
-  return <span aria-hidden="true" className="block rounded-full bg-current" style={{ width: `${size}px`, height: `${size}px` }} />;
-};
+// The weight as a straight line, drawn at the weight itself (1, 2, 4 or 6px), round-ended, whatever it draws on the model.
+const strokeGlyph = width => <svg {...GLYPH} aria-hidden="true" className="h-4 w-[18px]" viewBox="0 0 18 16" strokeWidth={width} data-stroke-weight={width}>
+  <path d="M3 8h12" />
+</svg>;
 const swatch = color => ({ backgroundColor: color, boxShadow: 'inset 0 0 0 1px color-mix(in oklab, currentColor 35%, transparent)' });
 const ROW = 'flex min-w-0 flex-wrap items-center gap-0.5';
 
+// A menu's heading, as the strip's menus have one (Select's and Measure's "Selection filter", Display's).
+const menuHeading = text => <DropdownMenuLabel className="text-tiny font-normal text-muted-foreground">{text}</DropdownMenuLabel>;
+
 /**
- * One of a mark's styles as a dropdown: its button shows the value (no chevron), and opens a menu
- * of the choices — each its glyph and its name, or, where the glyph says it all (`glyphsOnly`: a
- * weight, a line style), a row of the glyphs alone, the current one marked, each keeping its name
- * for assistive technology. One chosen closes it.
+ * One of a mark's styles as a dropdown, laid out as the strip's menus are: its button shows the
+ * value (no chevron), and opens a menu headed with its name, a row per choice, its glyph and its
+ * name, the check on the right of the current one. One chosen closes it. `bare`: no heading and no
+ * names, the glyphs alone (Stroke width: a line per weight), each choice keeping its name for
+ * assistive technology.
  */
-function StyleMenu({ label, options, value, glyph, onChange, disabled, glyphsOnly = false }) {
+function StyleMenu({ label, options, value, glyph, onChange, disabled, bare = false }) {
   return <DropdownMenu modal={false}>
     <DropdownMenuTrigger asChild>
       <ToolbarButton tooltip={false} label={label} disabled={disabled}>{glyph(value)}</ToolbarButton>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start" sideOffset={4} collisionPadding={8} aria-label={label}
-      className={cn(FLOATING_SURFACE_CLASS, glyphsOnly ? 'w-auto min-w-0 p-1.5' : 'w-40', 'data-[state=closed]:animate-none!')}>
-      {glyphsOnly ? <div className="flex gap-1">
-        {options.map(option => <DropdownMenuItem key={option.value} aria-label={option.label} data-style-option={option.value}
-          data-checked={String(option.value) === String(value) ? '' : undefined} onSelect={() => onChange(option.value)}
-          className="size-7 justify-center rounded-md p-0 data-[checked]:bg-accent">{glyph(option.value)}</DropdownMenuItem>)}
-      </div> : <DropdownMenuRadioGroup value={String(value)} onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
-        {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} aria-label={option.label}>
-          <span className="grid size-3.5 place-items-center">{glyph(option.value)}</span>{option.label}
+      className={cn(FLOATING_SURFACE_CLASS, bare ? 'w-auto min-w-0' : 'w-40', 'data-[state=closed]:animate-none!')}>
+      {bare ? null : menuHeading(label)}
+      <DropdownMenuRadioGroup value={String(value)} onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
+        {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} aria-label={option.label} data-style-option={option.value}>
+          <span className="grid min-w-3.5 place-items-center">{glyph(option.value)}</span>{bare ? null : option.label}
         </DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>}
+      </DropdownMenuRadioGroup>
     </DropdownMenuContent>
   </DropdownMenu>;
 }
@@ -153,17 +153,13 @@ const colorGlyph = color => <span className="size-3 rounded-full" style={swatch(
 const WHEEL = { background: 'conic-gradient(#ff2d55, #ffe600, #39ff14, #00e5ff, #2979ff, #d500f9, #ff2d55)' };
 
 /**
- * The colour: its button shows the colour in hand, and opens a grid of swatches, unnamed (each
- * keeps its name for assistive technology) — the palette, then the colour wheel, which opens the
- * system's colour picker for any other colour, kept once the picker closes (one change, one step
- * of the history, however long it is dragged). A colour off the palette shows on the button as it
- * is, and no swatch is marked.
+ * The system's colour picker, behind a hidden input: `open()` shows it, `input` is the element to render. Its colour is taken as it
+ * closes (`change`), not as it is dragged (`input`): one change, one step of the history, however long it is dragged.
  */
-function ColorMenu({ value, colors, onChange, disabled }) {
+function useColorPicker(value, onChange) {
   const picker = useRef(null);
   const commit = useRef(onChange);
   commit.current = onChange;
-  // The picker's colour is taken as it closes (`change`), not as it is dragged (`input`).
   useEffect(() => {
     const input = picker.current;
     if (!input) return undefined;
@@ -171,11 +167,25 @@ function ColorMenu({ value, colors, onChange, disabled }) {
     input.addEventListener('change', changed);
     return () => input.removeEventListener('change', changed);
   }, []);
-  const pick = () => {
+  const open = () => {
     const input = picker.current;
     if (!input) return;
     try { input.showPicker(); } catch { input.click(); }
   };
+  const input = <input ref={picker} type="color" value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#ff2d55'} onChange={() => {}}
+    tabIndex={-1} aria-hidden="true" className="pointer-events-none absolute size-0 opacity-0" data-color-picker="" />;
+  return { input, open };
+}
+
+/**
+ * The colour, as a dropdown: its button shows the colour in hand, and opens a grid of swatches, with no
+ * heading, unnamed (each
+ * keeps its name for assistive technology) — the palette, then the colour wheel, which opens the
+ * system's colour picker for any other colour. A colour off the palette shows on the button as it
+ * is, and no swatch is marked.
+ */
+function ColorMenu({ value, colors, onChange, disabled }) {
+  const { input, open: pick } = useColorPicker(value, onChange);
   return <>
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
@@ -195,30 +205,27 @@ function ColorMenu({ value, colors, onChange, disabled }) {
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
-    <input ref={picker} type="color" value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#ff2d55'} onChange={() => {}}
-      tabIndex={-1} aria-hidden="true" className="pointer-events-none absolute size-0 opacity-0" data-color-picker="" />
+    {input}
   </>;
 }
 
 /**
- * The colour, weight and line style dropdowns (`StyleMenu`) — the ink picked, on its selection's bar. Each is left out where it has nothing to set (`width`/`dash`
+ * The colour and weight dropdowns (`StyleMenu`) — the ink picked, on its selection's bar. Each is left out where it has nothing to set (`width`
  * null: no stroke picked); `placement` only where Annotate puts ink down. `children` follow them on
  * their row.
  *
- * @param {{ color: string, width?: number | null, dash?: AnnotationStrokeStyle | null, placement?: AnnotationPlacement | null,
- *   onColor(value: string): void, onWidth?(value: number): void, onDash?(value: AnnotationStrokeStyle): void,
+ * @param {{ color: string, width?: number | null, placement?: AnnotationPlacement | null,
+ *   onColor(value: string): void, onWidth?(value: number): void,
  *   onPlacement?(value: AnnotationPlacement): void, colors?: readonly { value: string, label: string }[],
  *   disabled?: boolean, label: string, className?: string,
  *   children?: import('react').ReactNode }} props
  */
-export function AnnotationStylePickers({ color, width = null, dash = null, placement = null, onColor, onWidth, onDash, onPlacement,
+export function AnnotationStylePickers({ color, width = null, placement = null, onColor, onWidth, onPlacement,
   colors = ANNOTATION_COLORS, disabled = false, label, className = ROW, children = null }) {
   return <div role="group" aria-label={label} className={className}>
     <ColorMenu value={color.toLowerCase()} colors={colors} onChange={onColor} disabled={disabled} />
-    {width == null ? null : <StyleMenu label="Stroke width" options={ANNOTATION_STROKE_WIDTHS} value={width} glyph={strokeGlyph}
-      onChange={value => onWidth?.(value)} disabled={disabled} glyphsOnly />}
-    {dash == null ? null : <StyleMenu label="Line style" options={ANNOTATION_STROKE_STYLES} value={dash} glyph={styleGlyph}
-      onChange={value => onDash?.(value)} disabled={disabled} glyphsOnly />}
+    {width == null ? null : <StyleMenu bare label="Stroke width" options={ANNOTATION_STROKE_WIDTHS} value={width} glyph={strokeGlyph}
+      onChange={value => onWidth?.(value)} disabled={disabled} />}
     {placement == null ? null : <StyleMenu label="Placement" options={ANNOTATION_PLACEMENTS} value={placement} glyph={placementGlyph}
       onChange={value => onPlacement?.(value)} disabled={disabled} />}
     {children}
@@ -226,81 +233,40 @@ export function AnnotationStylePickers({ color, width = null, dash = null, place
 }
 
 const icon = Icon => <Icon className="size-3" strokeWidth={2} aria-hidden="true" />;
+const GROUP = 'flex items-center gap-1';
 
 /**
- * Annotate's sub-toolbar (`kit/tools/SubToolbar.jsx`), one row under the strip while Annotate is the tool:
- * its tools, every one a button — the pen, the line, the arrow, the rectangle, the ellipse, text,
- * the eraser; then what is drawn next — its colour (`annotationColors`, for the viewer's
- * `colorScheme`, or any from the wheel), weight, line style and placement, each a dropdown — and
- * Undo, Redo (the annotation's history, `history`) and Clear, with no rule between them. In a view
- * too narrow for the row, the seven tools and the seven after them are two rows.
- * A flat view, where ink has nowhere to lie but the sheet, has no placement to choose (`placements={false}`).
- * @param {{ annotation: import('./session.js').AnnotationSession, colorScheme?: 'light' | 'dark', placements?: boolean,
- *   history: { canUndo: boolean, canRedo: boolean, undo(): void, redo(): void } }} props
+ * The drawing tools' sub-toolbar (`kit/tools/SubToolbar.jsx`), under the strip while Pencil or Shapes is the tool: one
+ * row, the same for both, from the left — the tools of the one that is up as buttons, the one in hand pressed (Pencil's
+ * Pen, Highlighter and Eraser; Shapes' Rectangle, Line, Arrow, Ellipse and Text; choosing one is all
+ * the strip tool needs to draw with it); a rule; what is drawn next, its Color (`annotationColors`, for the viewer's `colorScheme`,
+ * or any from the wheel), Stroke width and Placement, each a dropdown laid out as the strip's are (kept per drawing kind: the pen's, the
+ * highlighter's, Shapes'; greyed out under the Eraser), then Clear annotations.
+ * Undo and Redo are the keyboard's (⌘Z, ⇧⌘Z: `useViewerShortcuts.js`), not buttons. A flat view, where ink has nowhere to lie but
+ * the drawing, has no placement to choose (`placements={false}`). On a phone, where the row is as wide as the
+ * view, it wraps rather than scrolls.
+ * @param {{ annotation: import('./session.js').AnnotationSession, colorScheme?: 'light' | 'dark', placements?: boolean }} props
  */
-export function AnnotationToolbar({ annotation, history, colorScheme = 'light', placements = true }) {
+export function AnnotationToolbar({ annotation, colorScheme = 'light', placements = true }) {
   const disabled = !annotation.ready;
-  const toolButton = ({ id, label, Icon }) => <ToolbarButton key={id} tooltip={false} label={label} disabled={disabled}
-    active={!disabled && annotation.tool === id} aria-pressed={!disabled && annotation.tool === id} onClick={() => annotation.selectTool(id)}>
-    {icon(Icon)}
-  </ToolbarButton>;
-  // Seven tools, then seven settings and actions: two rows of seven, one over the other, their
-  // buttons column for column — the sub-toolbars' one width (`SUB_TOOLBAR_WIDTH_CLASS`), whatever
-  // the view's.
-  return <SubToolbar label="Annotation controls" data-annotation-controls=""
-    className={cn("text-to-cad-annotation-toolbar flex-col flex-nowrap items-stretch", SUB_TOOLBAR_WIDTH_CLASS)}>
-    <div role="group" aria-label="Annotation tools" className="flex items-center gap-1">{[PEN, ...ANNOTATION_SHAPE_TOOLS, ERASER].map(toolButton)}</div>
-
-    <div className="flex items-center gap-1">
-      <AnnotationStylePickers label="Annotation style" className="contents" disabled={disabled} colors={annotationColors(colorScheme)}
-        color={annotation.color} width={annotation.strokeWidth ?? 2} dash={annotation.strokeStyle ?? 'solid'} placement={placements ? annotation.placement ?? 'surface' : null}
-        onColor={annotation.selectColor} onWidth={annotation.selectStrokeWidth} onDash={annotation.selectStrokeStyle} onPlacement={annotation.selectPlacement} />
-      <div role="group" aria-label="Annotation history" className="contents">
-        <ToolbarButton tooltip={false} label="Undo" disabled={disabled || !history.canUndo} onClick={() => history.undo()}>{icon(Undo2)}</ToolbarButton>
-        <ToolbarButton tooltip={false} label="Redo" disabled={disabled || !history.canRedo} onClick={() => history.redo()}>{icon(Redo2)}</ToolbarButton>
-        <ToolbarButton tooltip={false} label="Clear annotations" disabled={disabled || !annotation.hasContent} onClick={() => annotation.clear()}>{icon(Trash2)}</ToolbarButton>
-      </div>
+  const family = toolFamily(annotation.tool);
+  const tool = DRAWING_TOOLS.find(entry => entry.id === family) ?? DRAWING_TOOLS[0];
+  const { style } = annotation;
+  // The eraser draws nothing: Color, Stroke width and Placement stay on the row, greyed out, so it does not jump.
+  const erasing = annotation.tool === 'eraser';
+  return <SubToolbar label="Annotation controls" data-annotation-controls="" className="text-to-cad-annotation-toolbar flex-nowrap data-[touch]:flex-wrap">
+    <div role="group" aria-label={`${tool.label} tools`} className={GROUP}>
+      {/* Each its name and its key in a tooltip ("Rectangle R"): the row's way to learn the letters. */}
+      {tool.entries.map(({ id, label, Icon }) => <ToolbarButton key={id} shortcut={DRAWING_SHORTCUTS[id]} label={label} disabled={disabled}
+        active={!disabled && annotation.tool === id} aria-pressed={!disabled && annotation.tool === id} onClick={() => annotation.selectTool(id)}>
+        {icon(Icon)}
+      </ToolbarButton>)}
     </div>
+    <SubToolbarSeparator />
+    <AnnotationStylePickers label="Annotation style" className={GROUP} disabled={disabled || erasing} colors={annotationColors(colorScheme)}
+      color={style.color} width={style.strokeWidth} placement={placements ? style.placement : null}
+      onColor={annotation.selectColor} onWidth={annotation.selectStrokeWidth} onPlacement={annotation.selectPlacement}>
+      <ToolbarButton tooltip={false} label="Clear annotations" disabled={disabled || !annotation.hasContent} onClick={() => annotation.clear()}>{icon(Trash2)}</ToolbarButton>
+    </AnnotationStylePickers>
   </SubToolbar>;
-}
-
-const swatchGlyph = color => <span aria-hidden="true" className="block size-3.5 rounded-full shadow-[inset_0_0_0_1px_color-mix(in_oklab,currentColor_35%,transparent)]" style={{ backgroundColor: color }} />;
-const keepOpen = event => event.preventDefault();
-
-/**
- * Annotate on a phone, where its sub-toolbar would cover the model: the chevron after its tile on the
- * strip, as Select's filter is, and the menu it opens — the tools (choosing one takes Annotate up,
- * `onTakeUp`), then what is drawn next, its Colour, Stroke width, Line style and Placement each a
- * submenu, then Undo, Redo and Clear annotations. A choice of style or history keeps the menu open.
- * A flat view has no Placement (`placements={false}`).
- * @param {{ annotation: import('./session.js').AnnotationSession, colorScheme?: 'light' | 'dark', onTakeUp?: () => void,
- *   placements?: boolean, history: { canUndo: boolean, canRedo: boolean, undo(): void, redo(): void } }} props
- */
-export function AnnotationMenu({ annotation, history, colorScheme = 'light', onTakeUp, placements = true }) {
-  const ready = annotation.ready;
-  const sub = (label, options, value, glyph, onChange) => <DropdownMenuSub>
-    <DropdownMenuSubTrigger className="gap-2">{glyph(value)}{label}</DropdownMenuSubTrigger>
-    <DropdownMenuSubContent aria-label={label} className={cn(FLOATING_SURFACE_CLASS, 'w-44')}>
-      <DropdownMenuRadioGroup value={String(value)} onValueChange={next => onChange(options.find(option => String(option.value) === next).value)}>
-        {options.map(option => <DropdownMenuRadioItem key={option.value} value={String(option.value)} onSelect={keepOpen}>
-          {glyph(option.value)}{option.label}
-        </DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>
-    </DropdownMenuSubContent>
-  </DropdownMenuSub>;
-  const colors = annotationColors(colorScheme);
-  return <ToolSettingsMenu label="Annotation" triggerLabel="Annotation settings" trigger="chevron">
-    <DropdownMenuRadioGroup value={annotation.tool} onValueChange={id => { annotation.selectTool(id); onTakeUp?.(); }} aria-label="Annotation tools">
-      {ANNOTATION_TOOL_ENTRIES.map(({ id, label, Icon }) => <DropdownMenuRadioItem key={id} value={id}>{icon(Icon)}{label}</DropdownMenuRadioItem>)}
-    </DropdownMenuRadioGroup>
-    <DropdownMenuSeparator />
-    {sub('Color', colors, String(annotation.color).toLowerCase(), swatchGlyph, annotation.selectColor)}
-    {sub('Stroke width', ANNOTATION_STROKE_WIDTHS, annotation.strokeWidth ?? 2, strokeGlyph, annotation.selectStrokeWidth)}
-    {sub('Line style', ANNOTATION_STROKE_STYLES, annotation.strokeStyle ?? 'solid', styleGlyph, annotation.selectStrokeStyle)}
-    {placements ? sub('Placement', ANNOTATION_PLACEMENTS, annotation.placement ?? 'surface', placementGlyph, annotation.selectPlacement) : null}
-    <DropdownMenuSeparator />
-    <DropdownMenuItem disabled={!ready || !history.canUndo} onSelect={event => { keepOpen(event); history.undo(); }}>{icon(Undo2)}Undo</DropdownMenuItem>
-    <DropdownMenuItem disabled={!ready || !history.canRedo} onSelect={event => { keepOpen(event); history.redo(); }}>{icon(Redo2)}Redo</DropdownMenuItem>
-    <DropdownMenuItem disabled={!ready || !annotation.hasContent} onSelect={() => annotation.clear()}>{icon(Trash2)}Clear annotations</DropdownMenuItem>
-  </ToolSettingsMenu>;
 }

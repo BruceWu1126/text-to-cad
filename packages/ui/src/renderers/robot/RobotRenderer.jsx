@@ -29,15 +29,20 @@ import { ROBOT_DECLINED_LIVE_COMMANDS, ROBOT_TOOL, ROBOT_TOOL_MODES } from "./to
 import { useLinkSelection } from "./useLinkSelection.js";
 import { useRobotVisibility } from "./useRobotVisibility.js";
 import { useRobotDocument } from "./useRobotDocument.js";
+import { TOOL_SHORTCUTS } from "../kit/tools/toolShortcuts.js";
 
 const NO_HANDLES = Object.freeze([]);
 const NO_REFERENCES = Object.freeze([]);
 const SELECT_ICON = <MousePointer2 className="size-3" strokeWidth={2} aria-hidden="true" />;
 const menuIcon = Icon => <Icon className="size-3.5" strokeWidth={2} aria-hidden="true" />;
-// What a robot's Select picks (`kit/tools/select/selectFilter.js`): its links, and its joints'
-// knobs, each on its own; it opens with both.
-const ROBOT_SELECT_KINDS = Object.freeze([{ id: "links", label: "Links", icon: menuIcon(Box) }, { id: "position", label: "Position", icon: menuIcon(PositionIcon) }]);
-const ROBOT_SELECT_DEFAULT = Object.freeze(ROBOT_SELECT_KINDS.map(kind => kind.id));
+// What a robot's Select picks (`kit/tools/select/selectFilter.js`): All, its links and its
+// joints' knobs, as it opens; its links alone; or its knobs alone (a press on the model picks nothing).
+const ROBOT_SELECT_DEFAULT = Object.freeze(["links", "position"]);
+const ROBOT_SELECT_MODES = Object.freeze([
+  { id: "all", label: "All", kinds: ROBOT_SELECT_DEFAULT, icon: menuIcon(MousePointer2) },
+  { id: "links", label: "Links", kinds: ["links"], icon: menuIcon(Box) },
+  { id: "position", label: "Position", kinds: ["position"], icon: menuIcon(PositionIcon) },
+]);
 // Solid, cut by Clip: a robot is posed, never exploded.
 const CLIP_OFF = Object.freeze({ clip: { enabled: false, axis: "x", invert: false } });
 // Whether a pose has a joint off its opening pose: Position is set.
@@ -164,7 +169,7 @@ function RobotSurface({ view, data }) {
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: robot?.revision || "",
     features, toolModes: ROBOT_TOOL_MODES, tool: tools.tool, previewable: true, preview, scene, sceneEffects: true,
-    sceneScaleMode: VIEWER_SCENE_SCALE.URDF, measurements: tools.measurements, deleteSelection: measure.removeSelected,
+    sceneScaleMode: VIEWER_SCENE_SCALE.URDF, deleteSelection: measure.removeSelected,
     load: { busy: (loaded.busy && !scene) || (Boolean(robot) && !scene), updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
     live, escape, rendererState,
     // A prompt's view: the robot's pose and the parts hidden. A robot is drawn in metres.
@@ -291,8 +296,9 @@ function RobotSurface({ view, data }) {
   // the robot has loaded that is not known, and it is offered meanwhile); then Annotate, Measure and Clip.
   const sceneTools = useSceneTools({ shell, scene, features, state: tools, measurable: true, clearParts: clearSelection });
   const strip = [
-    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", icon: SELECT_ICON,
-      menu: <SelectFilterMenu value={selectFilter} kinds={!robot || posable ? ROBOT_SELECT_KINDS : ROBOT_SELECT_KINDS.slice(0, 1)}
+    shell.tools.own({ id: ROBOT_TOOL.SELECT, label: "Select", shortcut: TOOL_SHORTCUTS.select, icon: SELECT_ICON,
+      // A robot with nothing to pose has one thing to pick, and no menu.
+      menu: robot && !posable ? null : <SelectFilterMenu value={selectFilter} modes={ROBOT_SELECT_MODES}
         onChange={value => { setSelectFilter(value); selectTool(ROBOT_TOOL.SELECT); }} /> }),
     ...sceneTools.tools
   ];

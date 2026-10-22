@@ -37,15 +37,16 @@ const fixtures = [
   // `tools` is the file's own tool strip; unavailable tools are hidden. `threeD` has
   // Projection, Display and Preview at the strip's end; `sections`
   // are file sidebar tiles it must have (what there is to read of the file, whatever the tool).
-  { format: "stl", file: "smoke.stl", parts: false, tools: ["Annotate", "Clip"], sections: [], threeD: true },
+  { format: "stl", file: "smoke.stl", parts: false, tools: ["Pencil", "Shapes", "Clip"], sections: [], threeD: true },
   // A STEP: read by the engine, drawn as an engine document is.
-  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Model tree"], threeD: true },
+  { format: "step", file: "assembly.step", parts: true, tools: ["Select", "Pencil", "Shapes", "Measure", "Clip"], sections: ["Model tree"], threeD: true },
   // A drawing is line work, not shaded surfaces: its outline covers a fraction of what a solid does.
-  { format: "dxf", file: "smoke.dxf", parts: false, tools: ["Select", "Annotate", "Measure"], sections: [], threeD: false, minCoverage: 0.003 },
-  { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Links"], threeD: true },
+  { format: "dxf", file: "smoke.dxf", parts: false, tools: ["Select", "Pencil", "Shapes", "Measure"], sections: [], threeD: false, minCoverage: 0.003 },
+  { format: "urdf", file: "smoke.urdf", parts: false, tools: ["Select", "Pencil", "Shapes", "Measure", "Clip"], sections: ["Links"], threeD: true },
   // A cadgen engine document: served by the engine, read by the page from it, and picked,
-  // measured and laid out as a STEP's is.
-  { format: "xbf", file: "smoke.xbf", parts: true, tools: ["Select", "Annotate", "Measure", "Clip"], sections: ["Model tree"], threeD: true },
+  // measured and laid out as a STEP's is, with a STEP's pick menus on Select's and Measure's chevrons.
+  { format: "xbf", file: "smoke.xbf", parts: true,
+    tools: ["Select", "Selection filter: everything", "Pencil", "Shapes", "Measure", "Measure filter: everything", "Clip"], sections: ["Model tree"], threeD: true },
 ];
 // Small enough that software WebGL and the PNG encode stay cheap on CI, large enough for the
 // layout to be the desktop one.
