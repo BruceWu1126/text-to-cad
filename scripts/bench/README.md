@@ -33,7 +33,10 @@ the difference, 1800 px wide). Its hue check reads the metal faces that face up
 chroma 10 or more) in each Solid iso picture and prints, per renderer, how far
 their CIELab hue turns from the authored colour's and the share of its chroma
 they keep: a washed-out top face is a hue near 0 at a chroma ratio well under 1.
-`--only chromium` keeps the OCCT pictures already there while the viewer side is
+`--preview` adds Preview at each camera, OCCT's as `cadgen xbf snapshot --preview`
+draws it and the page's with the job's `"preview": true`; its studio is no flat
+backdrop, so its colour difference is measured where OCCT's picture leaves its own
+studio drawn without the model, and its IoU is n/a. `--only chromium` keeps the OCCT pictures already there while the viewer side is
 tuned. macOS only: the prototype's GL context is.
 
 ## The 0.8.0 migration measurements

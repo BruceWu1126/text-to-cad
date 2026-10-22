@@ -21,6 +21,12 @@ points the camera sees (no triangle in front of them), sampled in Solid and Shad
 point's hue against its material's colour (CIELab hue angle, degrees) and its chroma over the
 colour's, per renderer -- a metal washed out to cream or white keeps neither.
 
+``--preview`` adds Preview at each camera (``preview-iso``, ...): OCCT's drawn as ``cadgen xbf
+snapshot --preview`` draws it (``render/service.py``'s ``Held``), the page's with the job's
+``"preview": true``. Its studio is no flat backdrop, so the model's pixels are those where OCCT's
+picture differs from its own studio drawn without the model (``preview-<camera>-studio.png``), and
+ΔE is measured there alone: a difference of studio or shadow is not the model's, and IoU is n/a.
+
 It writes each picture, ``metrics.json`` (``hue`` beside the rows) and a contact sheet per document
 (Chromium, OCCT and the ΔE map side by side, at most 1800 px wide), and prints both tables.
 
@@ -43,6 +49,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -68,20 +75,31 @@ def srgb_to_lab(pixels: np.ndarray) -> np.ndarray:
     return np.stack([116 * f[..., 1] - 16, 500 * (f[..., 0] - f[..., 1]), 200 * (f[..., 1] - f[..., 2])], -1)
 
 
-def silhouette(pixels: np.ndarray, backdrop: tuple[int, int, int]) -> np.ndarray:
-    return np.abs(np.asarray(pixels, int) - np.array(backdrop)).max(-1) > SILHOUETTE_TOLERANCE
+def silhouette(pixels: np.ndarray, backdrop: Any) -> np.ndarray:
+    """Where ``pixels`` are the model's: off the backdrop, a colour or a picture of it alone."""
+    return np.abs(np.asarray(pixels, int) - np.asarray(backdrop, int)).max(-1) > SILHOUETTE_TOLERANCE
 
 
-def compare(left: np.ndarray, right: np.ndarray, backdrop: tuple[int, int, int]) -> dict[str, float]:
-    """The measures of one picture pair (two HxWx3 uint8 arrays of one size)."""
+def compare(left: np.ndarray, right: np.ndarray, backdrop: Any, *, mask: np.ndarray | None = None) -> dict[str, float]:
+    """The measures of one picture pair (two HxWx3 uint8 arrays of one size) over ``backdrop``.
+    ``mask``: the model's pixels given (Preview's, OCCT's own), measured there alone, IoU n/a."""
+    de = np.linalg.norm(srgb_to_lab(left) - srgb_to_lab(right), axis=-1)
+    if mask is not None:
+        return {"iou": float("nan"),
+                "de_median": float(np.median(de[mask])) if mask.any() else float("nan"),
+                "de_p95": float(np.percentile(de[mask], 95)) if mask.any() else float("nan"),
+                "line_diff": float((de[mask] > VISIBLE_DE).mean()) if mask.any() else 0.0}
     a, b = silhouette(left, backdrop), silhouette(right, backdrop)
     union, both = np.logical_or(a, b), np.logical_and(a, b)
-    de = np.linalg.norm(srgb_to_lab(left) - srgb_to_lab(right), axis=-1)
     found = {"iou": float(both.sum() / union.sum()) if union.any() else 1.0,
              "de_median": float(np.median(de[both])) if both.any() else float("nan"),
              "de_p95": float(np.percentile(de[both], 95)) if both.any() else float("nan"),
              "line_diff": float((de[union] > VISIBLE_DE).mean()) if union.any() else 0.0}
     return found
+
+
+def iou(found: dict[str, float]) -> str:
+    return "n/a" if math.isnan(found["iou"]) else f"{found['iou']:.3f}"
 
 
 def linear_to_srgb(values: np.ndarray) -> np.ndarray:
@@ -185,7 +203,8 @@ def delta_map(left: np.ndarray, right: np.ndarray, scale: float = 20.0) -> np.nd
 # --- drawing ----------------------------------------------------------------------------------
 
 
-def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int]) -> None:
+def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int],
+              preview: bool = False) -> None:
     from cadgen.engine.render.meshes import from_daemon
     from cadgen.engine.render.occt import Scene
 
@@ -199,19 +218,40 @@ def draw_occt(doc: Path, folder: Path, modes: list[str], cameras: list[str], siz
     scene.show({"mode": "solid"})  # framed as Solid is (Wireframe frames the box's corners)
     scene.frame("iso", "orthographic")
     (folder / "metal-tops.json").write_text(json.dumps(metal_tops(structure, buffers, scene)))
+    if not preview:
+        return
+    from PIL import Image
+
+    from cadgen.engine.render.service import Held
+    from cadgen.engine.snapshot import Still
+
+    held = Held(doc)
+    try:
+        held.hold(structure, buffers)
+        for camera in cameras:
+            data, _report = held.draw(Still({"mode": "solid"}, camera, False, True, tuple(size)))
+            (folder / f"preview-{camera}-occt.png").write_bytes(data)
+            shown = held.scenes[True]
+            for presentation in shown.shown:  # the next picture shows the model again
+                shown.canvas.context.Erase(presentation, False)
+            Image.fromarray(shown.canvas.frame()).save(folder / f"preview-{camera}-studio.png")
+    finally:
+        held.close()
 
 
-def draw_chromium(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int]) -> None:
+def draw_chromium(doc: Path, folder: Path, modes: list[str], cameras: list[str], size: tuple[int, int],
+                  preview: bool = False) -> None:
     from cadgen.engine import snapshot as snap
 
     served = snap._Served(doc.resolve(), daemon=True)
     try:
         snap._get_json(f"{served.url}/mesh", method="POST")
-        for mode in modes:
+        for mode in [*modes, *(["preview"] if preview else [])]:
             outputs = [{"path": str(folder / f"{mode}-{camera}-chromium.png"), "width": size[0], "height": size[1],
                         "camera": camera} for camera in cameras]
-            job = {"kind": "xbf", "mode": "view", "display": {"mode": mode}, "outputs": outputs,
-                   "resolved": {"kind": "xbf", "url": served.url, "inputPath": str(doc)}}
+            job = {"kind": "xbf", "mode": "view", "display": {"mode": "solid" if mode == "preview" else mode},
+                   "outputs": outputs, "resolved": {"kind": "xbf", "url": served.url, "inputPath": str(doc)},
+                   **({"preview": True} if mode == "preview" else {})}
             result, _timings = snap._render(job, snap._runtime(), size)
             for output, drawn in zip(outputs, result["outputs"]):
                 Path(output["path"]).write_bytes(base64.b64decode(str(drawn["dataUrl"]).partition(",")[2]))
@@ -238,7 +278,7 @@ def sheet(folder: Path, name: str, rows: list[tuple[str, dict[str, float]]], out
         y = head + at * cell[1]
         draw.line([(0, y), (image.width, y)], fill="#999999")
         draw.text((10, y + 10), row, fill="black", font=font)
-        lines = [f"IoU {found['iou']:.3f}", f"ΔE median {found['de_median']:.2f}", f"ΔE p95 {found['de_p95']:.2f}",
+        lines = [f"IoU {iou(found)}", f"ΔE median {found['de_median']:.2f}", f"ΔE p95 {found['de_p95']:.2f}",
                  f"line diff {found['line_diff']:.3f}"]
         for n, text in enumerate(lines):
             draw.text((10, y + 44 + n * 22), text, fill="#333333", font=small)
@@ -259,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cameras", default=",".join(CAMERAS))
     parser.add_argument("--size", default="1200x900")
     parser.add_argument("--only", choices=("occt", "chromium"), help="draw one side; keep the other's pictures")
+    parser.add_argument("--preview", action="store_true", help="Preview at each camera too")
     args = parser.parse_args(argv)
     try:
         from cadgen.engine.render.look import LOOK
@@ -277,18 +318,22 @@ def main(argv: list[str] | None = None) -> int:
         folder.mkdir(parents=True, exist_ok=True)
         started = time.perf_counter()
         if args.only != "chromium":
-            draw_occt(doc, folder, modes, cameras, size)
+            draw_occt(doc, folder, modes, cameras, size, args.preview)
         if args.only != "occt":
-            draw_chromium(doc, folder, modes, cameras, size)
+            draw_chromium(doc, folder, modes, cameras, size, args.preview)
         from PIL import Image
 
         rows = []
-        for mode in modes:
+        for mode in [*modes, *(["preview"] if args.preview else [])]:
             for camera in cameras:
                 row = f"{mode}-{camera}"
                 left = np.asarray(Image.open(folder / f"{row}-chromium.png").convert("RGB"))
                 right = np.asarray(Image.open(folder / f"{row}-occt.png").convert("RGB"))
-                rows.append((row, compare(left, right, backdrop)))
+                if mode == "preview":  # the model is where OCCT's picture leaves its own bare studio
+                    studio = np.asarray(Image.open(folder / f"{row}-studio.png").convert("RGB"))
+                    rows.append((row, compare(left, right, backdrop, mask=silhouette(right, studio))))
+                else:
+                    rows.append((row, compare(left, right, backdrop)))
         table[name] = dict(rows)
         tops = json.loads((folder / "metal-tops.json").read_text()) if (folder / "metal-tops.json").is_file() else []
         hues[name] = {f"{mode}-{side}": hue_check(tops, np.asarray(Image.open(folder / f"{mode}-iso-{side}.png").convert("RGB")))
@@ -300,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
     print("| --- | --- | --- | --- | --- | --- |")
     for name, rows in table.items():
         for row, found in rows.items():
-            print(f"| {name} | {row} | {found['iou']:.3f} | {found['de_median']:.2f} | {found['de_p95']:.2f} | "
+            print(f"| {name} | {row} | {iou(found)} | {found['de_median']:.2f} | {found['de_p95']:.2f} | "
                   f"{found['line_diff']:.3f} |")
     print("\n| document | picture | metal tops | hue off (median, max, degrees) | chroma kept (median) |")
     print("| --- | --- | --- | --- | --- |")
