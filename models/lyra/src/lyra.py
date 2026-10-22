@@ -7,174 +7,91 @@ knuckle clevises with visible pivot pins, tendon-driven architecture
 tactile pads (palm array, per-phalanx strips, soft-touch fingertip caps),
 an amber-ringed palm sensor, and a bolt-circle wrist flange. No logos.
 
-Degrees of freedom (16, statically posed in the baked STEP):
+Degrees of freedom (16, one build123d revolute joint each):
   - each finger (index/middle/ring/pinky): MCP, PIP, DIP flexion -> 12
   - thumb: CMC yaw (opposition swing), CMC flex, MP, IP           -> 4
 
 Coordinates: RIGHT hand; wrist-flange mount face center = origin,
 +Z distal (fingers up), +Y palmar, +X radial (thumb side). Units mm.
 
-Chain offsets, joint limits, and the baked "relaxed" pose live in
-src/lib/chain.py and are shared with the authored URDF/SRDF artifacts
-(lyra.urdf / lyra.srdf ledger comments) and the `ANIMATION` clips below,
-which drive the same FK; edit the choreography there.
+Chain offsets, joint travel and the named poses live in lib/chain.py,
+which ../lyra.urdf and ../lyra.srdf mirror, and so do the motions below;
+edit the choreography there and here, then rerun `python -m lib.clearance`.
+
+The models of this script:
+
+- `lyra` (XBF/lyra.xbf): the hand. Its 17 links are placed by their joints,
+  connected at the relaxed pose: that pose is the as-built configuration,
+  every joint's value its absolute angle, every range the URDF's travel, the
+  SRDF's seven hand group states are configurations, and the five clips are
+  motions (functions of time over the joints).
+- one model per URDF link (`palm` ... `thumb_distal`): the link alone in its
+  part-local frame, whose 3MF ../lyra.urdf references (XBF/<link>.3mf).
+
+Every link is made once a build. `links()` is the one `@memo` stage: all 17
+links, which the hand and each link model call. The first call in a build
+runs it (or replays it, when no edit reaches a builder) and every other call
+is a new placement of its result.
 """
 
 from __future__ import annotations
 
+from cadgen.engine import configuration, memo, motion, threemf, xbf
+
 import math
 
-import cadgen
-from cadgen import build123d as bd
-from cadgen import step
-from cadgen.assembly import AssemblyHelper
-
-from index_distal import index_distal
-from index_middle import index_middle
-from index_proximal import index_proximal
-from middle_distal import middle_distal
-from middle_middle import middle_middle
-from middle_proximal import middle_proximal
-from palm import palm
-from pinky_distal import pinky_distal
-from pinky_middle import pinky_middle
-from pinky_proximal import pinky_proximal
-from ring_distal import ring_distal
-from ring_middle import ring_middle
-from ring_proximal import ring_proximal
-from thumb_base import thumb_base
-from thumb_distal import thumb_distal
-from thumb_metacarpal import thumb_metacarpal
-from thumb_proximal import thumb_proximal
+import build123d as bd
 
 from lib import chain
 from lib.common import revolute_attach
+from lib.digits import (
+    build_finger_distal,
+    build_finger_middle,
+    build_finger_proximal,
+    build_thumb_base,
+    build_thumb_distal,
+    build_thumb_metacarpal,
+    build_thumb_proximal,
+)
+from lib.palm import build_palm
 
-# Every link is a sibling MODEL (one script per URDF link, part-local frame),
-# keyed by the chain's link name. Calling one inside the body builds it if
-# stale — on its own worker, alongside the rest — or loads it, and the hand
-# links its tree. Rebuilding a link alone does not rebuild the hand: rerun
-# this script.
-LINKS = {
-    "palm": palm,
-    "index_proximal": index_proximal, "index_middle": index_middle, "index_distal": index_distal,
-    "middle_proximal": middle_proximal, "middle_middle": middle_middle, "middle_distal": middle_distal,
-    "ring_proximal": ring_proximal, "ring_middle": ring_middle, "ring_distal": ring_distal,
-    "pinky_proximal": pinky_proximal, "pinky_middle": pinky_middle, "pinky_distal": pinky_distal,
-    "thumb_base": thumb_base, "thumb_metacarpal": thumb_metacarpal,
-    "thumb_proximal": thumb_proximal, "thumb_distal": thumb_distal,
-}
+_NAMED_POSES = chain.named_poses_deg()
+RELAXED = _NAMED_POSES[chain.BAKED_POSE_NAME]
+
+
+@memo
+def links():
+    """All 17 links, each in its own part-local frame, keyed by its URDF name."""
+    made = {"palm": build_palm()}
+    for finger in chain.FINGERS:
+        made[f"{finger}_proximal"] = build_finger_proximal(finger)
+        made[f"{finger}_middle"] = build_finger_middle(finger)
+        made[f"{finger}_distal"] = build_finger_distal(finger)
+    made["thumb_base"] = build_thumb_base()
+    made["thumb_metacarpal"] = build_thumb_metacarpal()
+    made["thumb_proximal"] = build_thumb_proximal()
+    made["thumb_distal"] = build_thumb_distal()
+    return made
 
 
 def _xref_for(axis) -> tuple:
     return (0.0, 1.0, 0.0) if abs(axis[0]) > 0.9 else (1.0, 0.0, 0.0)
 
 
-def assemble() -> bd.Compound:
-    """Labeled assembly baked in the chain's relaxed pose.
-
-    Occurrence order in the generated STEP is palm first, then
-    chain.all_joints() child order: index, middle, ring, pinky
-    (proximal/middle/distal each), then thumb base/metacarpal/proximal/
-    distal. The mates and the animation clips name links by label, so
-    neither relies on this order.
-    """
-    asm = AssemblyHelper(chain.ROBOT_NAME)
-    pose = chain.named_poses_deg()[chain.BAKED_POSE_NAME]
-
-    parts = {"palm": asm.add(LINKS["palm"](), "palm")}
-    for joint in chain.all_joints():
-        child = asm.add(LINKS[joint["child"]](), joint["child"])
-        axis = joint["axis"]
-        xref = _xref_for(axis)
-        revolute_attach(
-            asm,
-            parts[joint["parent"]],
-            child,
-            joint["name"],
-            joint["origin_mm"],
-            axis,
-            xref,
-            (0.0, 0.0, 0.0),
-            axis,
-            xref,
-            pose[joint["name"]],
-        )
-        parts[joint["child"]] = child
-    return asm.build()
-
-
 # ---------------------------------------------------------------------------
-# Kinematics: the 16-DOF chain as typed mates
+# Motions: the old clips, as joint values over time
 # ---------------------------------------------------------------------------
-# ZERO IS THE ARTIFACT AS WRITTEN. The STEP is baked in chain.BAKED_POSE_NAME
-# ("relaxed"), so every mate's rest value is the RELAXED angle, not the chain's
-# own zero. Limits and pose presets are therefore expressed as DELTAS from the
-# baked pose — writing the chain's absolute angles here would double-offset
-# every joint.
+# Every clip was joint-space already (chain FK at each sample, applied as a
+# rigid delta against the relaxed build): a motion poses the joints directly,
+# so the values below are absolute joint angles. Poses blend in JOINT space
+# with smoothstep easing: every intermediate state of a serial digit chain is
+# itself a valid pose, so a blend can never break the mechanism. Every loop
+# starts and ends on the exact pose it began with.
 #
-# Axis origins and directions are taken from FK through the baked pose, so each
-# mate names the joint where the written geometry actually put it. The instance
-# tree is FLAT (every link is a top-level `asm.add`), so the parent/child
-# relationships have to be declared: a mate is what makes the fingertip ride
-# its knuckle.
-
-
-def _mates_and_poses():
-    baked = chain.named_poses_deg()[chain.BAKED_POSE_NAME]
-    frames = chain.fk_frames(baked)
-
-    mates = []
-    for joint in chain.all_joints():
-        name = joint["name"]
-        rot_parent, _ = frames[joint["parent"]]
-        _, origin = frames[joint["child"]]
-        direction = chain._mat_vec(rot_parent, joint["axis"])
-        lo, hi = joint["range_deg"]
-        rest = baked[name]
-        mates.append(
-            cadgen.revolute(
-                name,
-                parent=f"#{joint['parent']}",
-                child=f"#{joint['child']}",
-                origin=origin,
-                direction=direction,
-                limits=(lo - rest, hi - rest),
-            )
-        )
-
-    poses = {
-        pose_name: {j: values[j] - baked[j] for j in values}
-        for pose_name, values in chain.named_poses_deg().items()
-    }
-    return mates, poses
-
-
-_MATES, _POSES = _mates_and_poses()
-
-KINEMATICS = {"mates": _MATES, "poses": _POSES}
-
-
-# ---------------------------------------------------------------------------
-# Animation: clips sampled to keyframes when the model builds
-# ---------------------------------------------------------------------------
-# The STEP geometry is baked in the "relaxed" pose (chain.BAKED_POSE_NAME).
-# Each clip computes full-chain FK at its target pose — lib/chain.py's own FK,
-# offsets and named poses — and applies, per link, the rigid delta
-# T_target * inverse(T_relaxed). The STATIC space (joint limits, the named
-# poses as viewer presets) is the `kinematics=` block above; the clips are the
-# motion. Poses are blended in JOINT space with smoothstep easing: every
-# intermediate state of a serial digit chain is itself a valid pose, so a
-# blend can never break the mechanism. Every loop starts and ends on the exact
-# pose it began with.
-#
-# Key orders are capsule-verified collision-free (src/lib/clearance.py, which
+# Key orders are capsule-verified collision-free (lib/clearance.py, which
 # mirrors them) — re-run that check after changing a pose or a key order.
 
 _JOINT_NAMES = [joint["name"] for joint in chain.all_joints()]
-_LINKS = chain.all_links()
-_NAMED_POSES = chain.named_poses_deg()
-_BAKED_FRAMES = chain.fk_frames(_NAMED_POSES[chain.BAKED_POSE_NAME])
 
 
 def _hand_pose(curls: dict[str, tuple], thumb: tuple) -> dict[str, float]:
@@ -201,22 +118,6 @@ def _blend(a: dict[str, float], b: dict[str, float], u: float) -> dict[str, floa
 
 def _add_scaled(pose: dict[str, float], d: dict[str, float], scale: float) -> dict[str, float]:
     return {name: pose[name] + d[name] * scale for name in _JOINT_NAMES}
-
-
-def _apply(m, pose: dict[str, float]) -> None:
-    """Carry each link from its baked frame to its FK frame at `pose`."""
-    frames = chain.fk_frames(pose)
-    for link in _LINKS:
-        baked_rot, baked_pos = _BAKED_FRAMES[link]
-        rot, pos = frames[link]
-        turn = chain._mat_mul(rot, [list(column) for column in zip(*baked_rot)])
-        moved = chain._mat_vec(turn, baked_pos)
-        m.get(f"#{link}").transform([
-            [*turn[0], pos[0] - moved[0]],
-            [*turn[1], pos[1] - moved[1]],
-            [*turn[2], pos[2] - moved[2]],
-            [0.0, 0.0, 0.0, 1.0],
-        ])
 
 
 # Keyframe cycle through the showpiece poses; each segment blends for 65% of
@@ -276,7 +177,7 @@ _RIPPLE_WINDOW = 0.45
 def _ripple_pose(phase: float) -> dict[str, float]:
     p = phase % 1.0
     step = (1 - _RIPPLE_WINDOW) / (len(_RIPPLE_ORDER) - 1)
-    pose = dict(_NAMED_POSES[chain.BAKED_POSE_NAME])
+    pose = dict(RELAXED)
     for i, digit in enumerate(_RIPPLE_ORDER):
         u = (p - i * step) / _RIPPLE_WINDOW
         if u <= 0 or u >= 1:
@@ -334,39 +235,139 @@ def _count_pose(phase: float) -> dict[str, float]:
     return _blend(_COUNT_KEYS[seg], _COUNT_KEYS[(seg + 1) % count], u / 0.6)
 
 
-def _pose_tour(t: float, m) -> None:
-    _apply(m, _tour_pose(t / 11.5))
+def _over_time(pose_at, duration):
+    """A motion's function of time: the pose at its phase, ``t / duration``."""
+    return lambda t: pose_at(t / duration)
 
 
-def _grasp_loop(t: float, m) -> None:
-    _apply(m, _grasp_pose(t / 2.6))
-
-
-def _pinch_loop(t: float, m) -> None:
-    _apply(m, _pinch_pose(t / 2.8))
-
-
-def _ripple_loop(t: float, m) -> None:
-    _apply(m, _ripple_pose(t / 2.6))
-
-
-def _count_loop(t: float, m) -> None:
-    _apply(m, _count_pose(t / 7.0))
-
-
-ANIMATION = {
-    "poseTour": cadgen.clip(_pose_tour, duration=11.5, label="Pose tour"),
-    "graspLoop": cadgen.clip(_grasp_loop, duration=2.6, label="Power grasp"),
-    "pinchLoop": cadgen.clip(_pinch_loop, duration=2.8, label="Precision pinch"),
-    "rippleLoop": cadgen.clip(_ripple_loop, duration=2.6, label="Finger ripple"),
-    "countLoop": cadgen.clip(_count_loop, duration=7.0, label="Count to five"),
+# name: (the pose at a phase 0..1, the clip's duration in seconds)
+MOTIONS = {
+    "poseTour": (_tour_pose, 11.5),
+    "graspLoop": (_grasp_pose, 2.6),
+    "pinchLoop": (_pinch_pose, 2.8),
+    "rippleLoop": (_ripple_pose, 2.6),
+    "countLoop": (_count_pose, 7.0),
 }
 
 
-@step(out="../STEP/lyra.step", kinematics=KINEMATICS, animation=ANIMATION)
+@xbf(out="../XBF/lyra.xbf")
 def lyra():
-    return assemble()
+    link = links()
+    # Root to leaf: each joint on its parent link, connected at the relaxed pose.
+    for joint in chain.all_joints():
+        axis = joint["axis"]
+        xref = _xref_for(axis)
+        revolute_attach(link[joint["parent"]], link[joint["child"]], joint["name"], joint["origin_mm"],
+                        axis, xref, (0.0, 0.0, 0.0), axis, xref, RELAXED[joint["name"]], joint["range_deg"])
+
+    hand = bd.Compound(children=[link[name] for name in chain.all_links()], label="lyra")
+    for name, pose in _NAMED_POSES.items():
+        configuration(hand, name, **pose)
+    for name, (pose_at, duration) in MOTIONS.items():
+        motion(hand, name, _over_time(pose_at, duration), duration=duration, loop="loop")
+    return hand
 
 
-if __name__ == "__main__":
-    lyra()
+# --- the URDF's link meshes: each link alone, in its part-local frame -------------------------
+
+
+@xbf(out="../XBF/palm.xbf")
+@threemf(out="../XBF/palm.3mf")
+def palm():
+    return links()["palm"]
+
+
+@xbf(out="../XBF/index_proximal.xbf")
+@threemf(out="../XBF/index_proximal.3mf")
+def index_proximal():
+    return links()["index_proximal"]
+
+
+@xbf(out="../XBF/index_middle.xbf")
+@threemf(out="../XBF/index_middle.3mf")
+def index_middle():
+    return links()["index_middle"]
+
+
+@xbf(out="../XBF/index_distal.xbf")
+@threemf(out="../XBF/index_distal.3mf")
+def index_distal():
+    return links()["index_distal"]
+
+
+@xbf(out="../XBF/middle_proximal.xbf")
+@threemf(out="../XBF/middle_proximal.3mf")
+def middle_proximal():
+    return links()["middle_proximal"]
+
+
+@xbf(out="../XBF/middle_middle.xbf")
+@threemf(out="../XBF/middle_middle.3mf")
+def middle_middle():
+    return links()["middle_middle"]
+
+
+@xbf(out="../XBF/middle_distal.xbf")
+@threemf(out="../XBF/middle_distal.3mf")
+def middle_distal():
+    return links()["middle_distal"]
+
+
+@xbf(out="../XBF/ring_proximal.xbf")
+@threemf(out="../XBF/ring_proximal.3mf")
+def ring_proximal():
+    return links()["ring_proximal"]
+
+
+@xbf(out="../XBF/ring_middle.xbf")
+@threemf(out="../XBF/ring_middle.3mf")
+def ring_middle():
+    return links()["ring_middle"]
+
+
+@xbf(out="../XBF/ring_distal.xbf")
+@threemf(out="../XBF/ring_distal.3mf")
+def ring_distal():
+    return links()["ring_distal"]
+
+
+@xbf(out="../XBF/pinky_proximal.xbf")
+@threemf(out="../XBF/pinky_proximal.3mf")
+def pinky_proximal():
+    return links()["pinky_proximal"]
+
+
+@xbf(out="../XBF/pinky_middle.xbf")
+@threemf(out="../XBF/pinky_middle.3mf")
+def pinky_middle():
+    return links()["pinky_middle"]
+
+
+@xbf(out="../XBF/pinky_distal.xbf")
+@threemf(out="../XBF/pinky_distal.3mf")
+def pinky_distal():
+    return links()["pinky_distal"]
+
+
+@xbf(out="../XBF/thumb_base.xbf")
+@threemf(out="../XBF/thumb_base.3mf")
+def thumb_base():
+    return links()["thumb_base"]
+
+
+@xbf(out="../XBF/thumb_metacarpal.xbf")
+@threemf(out="../XBF/thumb_metacarpal.3mf")
+def thumb_metacarpal():
+    return links()["thumb_metacarpal"]
+
+
+@xbf(out="../XBF/thumb_proximal.xbf")
+@threemf(out="../XBF/thumb_proximal.3mf")
+def thumb_proximal():
+    return links()["thumb_proximal"]
+
+
+@xbf(out="../XBF/thumb_distal.xbf")
+@threemf(out="../XBF/thumb_distal.3mf")
+def thumb_distal():
+    return links()["thumb_distal"]

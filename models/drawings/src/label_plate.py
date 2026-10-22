@@ -9,8 +9,9 @@
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
-from cadgen import dxf
+from cadgen.engine import dxf
+
+import build123d as bd
 
 PLATE_LENGTH_MM = 120.0
 PLATE_WIDTH_MM = 50.0
@@ -42,8 +43,9 @@ def label_plate():
 
     score = bd.Polyline(*SCORE_POINTS_MM)
 
-    return {"CUT": cut.sketch, "ENGRAVE": [serial.sketch, score]}
+    # A part per layer, named by its label: the serial and the score one part of both.
+    plate = cut.sketch
+    marks = bd.Compound([serial.sketch, score])
+    plate.label, marks.label = "CUT", "ENGRAVE"
+    return bd.Compound(children=[plate, marks], label="label_plate")
 
-
-if __name__ == "__main__":
-    label_plate()

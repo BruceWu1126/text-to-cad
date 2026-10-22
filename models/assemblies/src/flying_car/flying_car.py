@@ -1,10 +1,10 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 
 import math
 from collections.abc import Sequence
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 DISPLAY_NAME = "Roadable VTOL flying car concept"
@@ -120,17 +120,11 @@ def cylinder_z(label: str, center: Vector3, radius: float, length: float, color_
 
 
 def cylinder_between(label: str, p1: Vector3, p2: Vector3, radius: float, color_name: str) -> bd.Shape:
-    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
-    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
     axis = (p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2])
     length = math.sqrt(axis[0] ** 2 + axis[1] ** 2 + axis[2] ** 2)
     direction = (axis[0] / length, axis[1] / length, axis[2] / length)
-    wrapped = BRepPrimAPI_MakeCylinder(
-        gp_Ax2(gp_Pnt(*p1), gp_Dir(*direction)),
-        radius,
-        length,
-    ).Shape()
-    return style(bd.Shape(obj=wrapped), label, color_name)
+    cylinder = bd.Cylinder(radius, length, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+    return style(cylinder.moved(bd.Plane(origin=p1, z_dir=direction).location), label, color_name)
 
 
 def annular_z(label: str, center: Vector3, outer_radius: float, inner_radius: float, height: float, color_name: str) -> bd.Shape:
@@ -396,7 +390,7 @@ def road_gear() -> bd.Compound:
     )
 
 
-@step(out="../../STEP/flying_car/flying_car.step")
+@xbf(out="../../XBF/flying_car/flying_car.xbf")
 def flying_car():
     return group(
         MODEL_LABEL,

@@ -1,5 +1,7 @@
 """Exact solid tendon and translucent reaction liner for cubic Bowden paths."""
-from cadgen import build123d as bd,srgb
+import build123d as bd
+
+from lib.color import srgb
 from lib.bowden_transport import cubic_derivative
 
 

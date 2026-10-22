@@ -6,7 +6,9 @@ clearance. Side beams and deep inter-row ribs provide a load path around the
 open rotor and tendon corridors. No actuator or route coordinate is changed.
 """
 from math import cos, sin, radians, atan2, degrees, hypot
-from cadgen import build123d as bd, report
+from cadgen.engine import report
+
+import build123d as bd
 from .finish import finish
 
 STATION_X=(-27.,-9.,9.,27.)

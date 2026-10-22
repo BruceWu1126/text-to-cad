@@ -1,8 +1,8 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 from math import atan2, cos, degrees, radians, sin, tau
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 # Units: millimeters.
@@ -29,9 +29,8 @@ WRIST_PITCH_CENTER = (174.0, 0.0, 128.0)
 TOOL_ROLL_CENTER = (196.0, 0.0, 128.0)
 TOOL_FLANGE_CENTER = (216.0, 0.0, 128.0)
 
-# Plain RGB(A) tuples / sRGB hex strings, not bd.Color objects: build123d's
-# Shape.color setter builds the Color on assignment, and a module-level
-# bd.Color(...) would import the CAD kernel before the @step freshness gate.
+# Plain RGB(A) tuples / sRGB hex strings: build123d's Shape.color setter
+# builds the Color on assignment.
 MATTE_WHITE = (0.91, 0.92, 0.90, 1.0)
 LIGHT_GRAY = (0.73, 0.76, 0.76, 1.0)
 DARK_GRAPHITE = (0.10, 0.11, 0.12, 1.0)
@@ -534,7 +533,7 @@ def _make_axis_label_ring_set(parts: list):
     parts.append(_make_axis_ring("orange_accent_ring_axis6_tool_roll_x", "x", (196.0, 0.0, 128.0), 14.0, 12.0, 2.0, ORANGE_ACCENT))
 
 
-@step(out="../../STEP/six_axis_industrial_robot_arm/six_axis_industrial_robot_arm.step")
+@xbf(out="../../XBF/six_axis_industrial_robot_arm/six_axis_industrial_robot_arm.xbf")
 def six_axis_industrial_robot_arm():
     """Return a labeled six-axis industrial robot arm display assembly in millimeters."""
     parts = [

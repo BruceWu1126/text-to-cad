@@ -3,7 +3,11 @@
 World datums; palm-facing +Z. The fifth ray is procedural; the single-body main frame is a validated native integration input.
 Rounded load paths remain peripheral to the open tendon fan-out corridors.
 """
-from cadgen import build123d as bd, srgb, report, read_step
+from cadgen.engine import read_step, report
+
+import build123d as bd
+
+from lib.color import srgb
 from pathlib import Path
 from .layout import MCP_PALM_SUPPORT_PLANES, CMC_PALM_SUPPORT_PLANES
 

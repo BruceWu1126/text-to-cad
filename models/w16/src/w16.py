@@ -1,12 +1,10 @@
 """Quad-turbo 8.0 L W16 — full sectioned assembly.
 
-Thirteen system models, each its own file under `src/` with its own STEP,
-composed here by CALLING them (occurrence order = explode order). The clips,
-`ANIMATION` from `lib/animation.py`, move whole systems by these group names
-and the block casting by its own (`#block_2`: it shares the block system's
-name); the build bakes them to keyframes in the sidecar. Rebuilding a system
-alone does not rebuild the engine — rerun this script to pick it up. The
-section flag is `lib/spec.py:SECTIONED`.
+Thirteen systems, each a `@memo` stage in its own file under `src/`, composed
+here by CALLING them (occurrence order = the original's explode order). The
+museum section is one flag, `lib/spec.py:SECTIONED`, read by every system: the
+cutaway is the model's own geometry. The engine is one xbf (`XBF/w16.xbf`) and
+one GLB (`XBF/w16.glb`), whose `crank` clip is the `crank` motion below.
     block          block + main caps + shells
     crank          crankshaft, damper, flywheel
     pistons        16 x piston/rings/pin/circlips/rod/cap/bolts/shells
@@ -24,8 +22,9 @@ section flag is `lib/spec.py:SECTIONED`.
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
-from cadgen import step
+from cadgen.engine import glb, motion, track, xbf
+
+import build123d as bd
 
 from ancillaries import ancillaries
 from block import block
@@ -41,33 +40,36 @@ from pistons import pistons
 from turbos import turbos
 from valvetrain import valvetrain
 
-from lib.animation import ANIMATION
+from lib import kinematics
+from lib.palette import apply_finishes
+
+# Order here IS the occurrence order.
+SYSTEMS = [
+    block,
+    crank,
+    pistons,
+    heads,
+    valvetrain,
+    cams,
+    camdrive,
+    covers,
+    oil_system,
+    turbos,
+    exhaust,
+    induction,
+    ancillaries,
+]
 
 
-@step(out="../STEP/w16.step",
-      animation=ANIMATION,
-)
+@xbf(out="../XBF/w16.xbf")
+@glb(out="../XBF/w16.glb")
 def w16():
-    # Each call submits that system's build to the pool and returns at once;
-    # the Compound below is where the assembly first reads geometry, so the
-    # thirteen systems build in parallel and the assembly LINKS their trees.
-    systems = [
-        block(),
-        crank(),
-        pistons(),
-        heads(),
-        valvetrain(),
-        cams(),
-        camdrive(),
-        covers(),
-        oil_system(),
-        turbos(),
-        exhaust(),
-        induction(),
-        ancillaries(),
-    ]
-    return bd.Compound(children=systems, label="w16")
-
-
-if __name__ == "__main__":
-    w16()
+    systems = [system() for system in track(SYSTEMS, label=lambda system: system.__name__)]
+    engine = bd.Compound(children=systems, label="w16")
+    apply_finishes(engine)
+    kinematics.author_joints(engine)
+    # One full four-stroke cycle, 720 deg in 6 s, looping: the pistons and rods in
+    # the firing order, the cams at half speed, 64 valves and their followers, the
+    # oil pump, the turbo rotors and every accessory pulley.
+    cycle = kinematics.crank_cycle(kinematics.turbos(engine))
+    return motion(engine, "crank", cycle, duration=kinematics.CRANK_SECONDS, loop="loop")

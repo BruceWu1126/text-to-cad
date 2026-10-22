@@ -1,16 +1,17 @@
 """Engineering drawing of the electronics enclosure base.
 
-Documents the STEP that `electronics_enclosure_base.py` writes, beside it in this
+Documents the xbf that `electronics_enclosure_base.py` writes, beside it in this
 project: run that model first (`python electronics_enclosure_base.py`), then this
-script. Every view and measured value follows that artifact, and every constant a
+script. Every view and measured value follows that document, and every constant a
 dimension references is imported from the model, so moving a standoff in the model
 moves the dimension here.
 """
 
 from pathlib import Path
 
-import cadgen
+from cadgen import read_xbf
 from cadgen.eng_drawing import Sheet, eng_drawing
+
 from electronics_enclosure_base import (
     FLOOR_THICKNESS,
     OUTER_HEIGHT,
@@ -23,12 +24,12 @@ from electronics_enclosure_base import (
     WALL_THICKNESS,
 )
 
-STEP = Path(__file__).parent / "../STEP/electronics_enclosure_base.step"
+XBF = Path(__file__).parent / "../XBF/electronics_enclosure_base.xbf"
 
 
 @eng_drawing(out="../PDF/electronics_enclosure_base_drawing.pdf")
 def electronics_enclosure_base_drawing():
-    part = cadgen.read_step(STEP)
+    part = read_xbf(XBF)
     sheet = Sheet(
         "A3", title="ELECTRONICS ENCLOSURE BASE", part_number="ENC-001", material="ABS",
         revision="A", author="text-to-cad", general_tolerance="ISO 2768-m",

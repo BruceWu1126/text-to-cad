@@ -8,7 +8,9 @@ The default driven D bore clears a 2 mm D shaft by 0.03 radially, with its
 torque flat on native +X at x=0.75. Set keyed=False for a round idler.
 """
 
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 
 
 def make_pulley(pitch_radius=3.5, rope_radius=0.30, width=1.50,

@@ -23,13 +23,13 @@ Parts
 """
 
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 
 from math import cos, radians, sin, tau
 
-from cadgen import build123d as bd
+import build123d as bd
 
-from cadgen import srgb
+from lib.color import srgb
 
 from lib.mx_switch_socket import MX_POCKET_DEPTH, mx_socket_cutter
 
@@ -70,8 +70,7 @@ VALVE_R = 1.5
 VALVE_LEN = 9.0
 
 
-# (sRGB hex, alpha) pairs: _part() turns them into Colors with srgb() at use, so
-# importing this module never loads the CAD kernel (srgb() builds a bd.Color).
+# (sRGB hex, alpha) pairs: _part() turns them into linear colours with srgb().
 COLORS = {
     "rubber": ("#1A1A1E", 1.0),
     "graphite": ("#2E3742", 1.0),
@@ -151,7 +150,7 @@ def _make_parts():
     return parts
 
 
-@step(out="../../STEP/motorcycle_fidgets/motorcycle_wheel_fidget.step")
+@xbf(out="../../XBF/motorcycle_fidgets/motorcycle_wheel_fidget.xbf")
 def motorcycle_wheel_fidget():
     compound = bd.Compound(children=_make_parts())
     compound.label = "motorcycle_wheel_fidget"

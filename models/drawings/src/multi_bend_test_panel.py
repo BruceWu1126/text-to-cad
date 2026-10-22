@@ -24,8 +24,9 @@
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
-from cadgen import dxf
+from cadgen.engine import dxf
+
+import build123d as bd
 
 PANEL_WIDTH_MM = 180.0
 PANEL_HEIGHT_MM = 90.0
@@ -83,7 +84,7 @@ def multi_bend_test_panel():
         with bd.Locations(*HOLE_CENTRES_MM):
             bd.Circle(HOLE_DIAMETER_MM / 2.0, mode=bd.Mode.SUBTRACT)
 
-    bends = [
+    bends = bd.Compound([
         # 1 and 2: the parallel pair, bottom edge to top edge.
         *(bd.Line((x, 0.0), (x, PANEL_HEIGHT_MM)) for x in (BEND_1_X_MM, BEND_2_X_MM)),
         # 3: the tab fold, spanning exactly the gap the tab leaves in the bottom edge.
@@ -94,10 +95,10 @@ def multi_bend_test_panel():
             (PANEL_WIDTH_MM, PANEL_HEIGHT_MM - CORNER_FOLD_MM),
             (PANEL_WIDTH_MM - CORNER_FOLD_MM, PANEL_HEIGHT_MM),
         ),
-    ]
+    ])
 
-    return {"CUT": cut.sketch, "BEND": bends}
+    # A part per layer, named by its label: the four bends one part of them all.
+    blank = cut.sketch
+    blank.label, bends.label = "CUT", "BEND"
+    return bd.Compound(children=[blank, bends], label="multi_bend_test_panel")
 
-
-if __name__ == "__main__":
-    multi_bend_test_panel()

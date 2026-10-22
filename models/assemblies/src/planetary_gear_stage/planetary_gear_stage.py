@@ -1,8 +1,8 @@
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 from math import tau
 
-from cadgen import build123d as bd
+import build123d as bd
 
 from lib.gear_teeth import polar_point, trapezoid_tooth_profile
 
@@ -135,7 +135,7 @@ def _planet_center(index: int) -> tuple[float, float]:
     return polar_point(PLANET_CENTER_RADIUS, tau * index / PLANET_COUNT)
 
 
-@step(out="../../STEP/planetary_gear_stage/planetary_gear_stage.step")
+@xbf(out="../../XBF/planetary_gear_stage/planetary_gear_stage.xbf")
 def planetary_gear_stage():
     """Return the simplified planetary gear assembly in millimeters."""
     parts = [

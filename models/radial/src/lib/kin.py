@@ -497,7 +497,7 @@ def apply_point(pose, p):
 
 def place(shape, pose):
     """Copy of `shape` moved by `pose` (build123d)."""
-    from cadgen import build123d as bd
+    import build123d as bd
     M = pose_matrix(pose)
     from OCP.gp import gp_Trsf
     tr = gp_Trsf()

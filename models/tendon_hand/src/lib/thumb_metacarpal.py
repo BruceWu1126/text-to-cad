@@ -4,7 +4,9 @@ Four slender curved machined load paths surround a broad uninterrupted window.
 The distal fixed bearing eyes run along Z rather than the X pin eyes used by
 ordinary phalanges. No member crosses the central six-liner corridor.
 """
-from cadgen import build123d as bd, srgb
+import build123d as bd
+
+from lib.color import srgb
 from .phalanx import _drive_bore
 
 LENGTH=36.

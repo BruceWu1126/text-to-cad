@@ -1,7 +1,7 @@
 """W16 kinematics — pure math, no build123d.
 
 Everything that moves is positioned by these functions, both when the STEP is
-authored (theta = 0, the rest pose) and when it is animated (`lib/animation.py`
+authored (theta = 0, the rest pose) and when it is posed (`lib/kinematics.py`
 samples them when the engine builds). The collision harness samples them too.
 
 Frames: engine frame per lib/spec.py. Rotations about +X are right-handed:

@@ -1,8 +1,8 @@
 from __future__ import annotations
-from cadgen import glb, step, stl, threemf
+from cadgen.engine import xbf
 from math import cos, radians, sin
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 # Units: millimeters.
@@ -151,12 +151,9 @@ def _make_baluster(index: int):
     return part
 
 
-@step(out="../../STEP/miniature_spiral_staircase/miniature_spiral_staircase.step")
-@stl(out="../../STL/miniature_spiral_staircase/miniature_spiral_staircase_highres.stl", mesh_tolerance=4e-4)
-@threemf(out="../../3MF/miniature_spiral_staircase/miniature_spiral_staircase_highres.3mf", mesh_tolerance=4e-4)
-@glb(out="../../GLB/miniature_spiral_staircase/miniature_spiral_staircase_highres.glb", mesh_tolerance=4e-4)
+@xbf(out="../../XBF/miniature_spiral_staircase/miniature_spiral_staircase.xbf")
 def miniature_spiral_staircase():
-    """Return a labeled miniature spiral staircase STEP compound in millimeters."""
+    """Return a labeled miniature spiral staircase compound in millimeters."""
     parts = [
         _make_base(),
         _make_column(),

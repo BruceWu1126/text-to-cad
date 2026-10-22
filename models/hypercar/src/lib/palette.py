@@ -14,7 +14,7 @@ only leaf occurrences carry colour.  Use :func:`style` on every leaf.
 
 from __future__ import annotations
 
-from cadgen import build123d as bd
+import build123d as bd
 
 
 def _to_linear(channel_8bit):

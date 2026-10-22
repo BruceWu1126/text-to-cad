@@ -23,11 +23,11 @@ Parts
 """
 
 from __future__ import annotations
-from cadgen import step
+from cadgen.engine import xbf
 
-from cadgen import build123d as bd
+import build123d as bd
 
-from cadgen import srgb
+from lib.color import srgb
 
 from lib.mx_switch_socket import MX_POCKET_DEPTH, mx_socket_cutter
 
@@ -76,8 +76,7 @@ LENS_H = 2.5
 LENS_X = -28.5
 
 
-# (sRGB hex, alpha) pairs: _part() turns them into Colors with srgb() at use, so
-# importing this module never loads the CAD kernel (srgb() builds a bd.Color).
+# (sRGB hex, alpha) pairs: _part() turns them into linear colours with srgb().
 COLORS = {
     "trim_black": ("#17191C", 1.0),
     "tan_leather": ("#8A6642", 1.0),
@@ -152,7 +151,7 @@ def _make_parts():
     return parts
 
 
-@step(out="../../STEP/motorcycle_fidgets/motorcycle_seat_fidget.step")
+@xbf(out="../../XBF/motorcycle_fidgets/motorcycle_seat_fidget.xbf")
 def motorcycle_seat_fidget():
     compound = bd.Compound(children=_make_parts())
     compound.label = "motorcycle_seat_fidget"

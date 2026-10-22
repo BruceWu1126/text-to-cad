@@ -39,7 +39,7 @@ import functools
 import math
 from functools import lru_cache
 
-from cadgen import build123d as bd
+import build123d as bd
 
 from lib import geometry as G
 from lib import palette as P

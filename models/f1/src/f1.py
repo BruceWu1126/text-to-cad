@@ -6,135 +6,82 @@ only: carbon, exposed metal, and one vermillion accent.
 Coordinates, package dimensions, suspension hardpoints, the DRS four-bar and
 the material palette all live in `lib/spec.py`; the shared surface vocabulary
 (airfoil family, blade family, body lofts) lives in `lib/surfaces.py`. Read
-those two before changing anything here. Every child below is its own model
-file under `src/` (`front_wing.py`, `corner_fl.py`, ...), built from `lib/`
-and composed here by CALLING it.
-
---------------------------------------------------------------------------
-CHILDREN ARE ADDRESSED BY NAME
---------------------------------------------------------------------------
-The `ANIMATION` clips address children by name (`#drs_flap`): each child's
-name is its model's, and the car links them in the order below, which
-carries nothing. Adding or removing a child means updating their table
-(`_CHILDREN`) in the same change.
+those two before changing anything here. Every child below is a function in
+its own file under `src/` (`front_wing.py`, `corner_fl.py`, ...), built from
+`lib/`; the car's body calls them through its `@memo` stages (`stages.py`, and
+the four children that are stages of their own: `power_unit`, `drivetrain`,
+`suspension_rear`, `details`) and holds each, labelled with its name, in this
+order:
 
   front_wing        rear_wing
-  nose              drs_flap        <- rotates (DRS)
-  monocoque         drs_actuator    <- four-bar (DRS)
+  nose              drs_flap        <- turns (drs_flap joint)
+  monocoque         drs_actuator    <- turns (drs_crank joint)
   halo              beam_wing
   cockpit           suspension_front
   sidepod_left      suspension_rear
-  sidepod_right     corner_fl       <- rotates (steering)
-  engine_cover      corner_fr       <- rotates (steering)
-  airbox            track_rod_left  <- re-aimed (steering)
-  floor             track_rod_right <- re-aimed (steering)
+  sidepod_right     corner_fl       <- turns (steer_left joint)
+  engine_cover      corner_fr       <- turns (steer_right joint)
+  airbox            track_rod_left  <- swivels on the rack (ball joint)
+  floor             track_rod_right <- swivels on the rack (ball joint)
   diffuser          corner_rl
   cooling           corner_rr
-  power_unit        steering_rack   <- translates (steering)
+  power_unit        steering_rack   <- slides (rack joint)
   drivetrain        details
+
+The car is one xbf (`XBF/f1.xbf`) and one GLB (`XBF/f1.glb`), whose `drs` and
+`steering` clips are the two motions below.
 """
 
 from __future__ import annotations
 
+from cadgen.engine import configuration, glb, motion, xbf
+
 import math
 
-import cadgen
-from cadgen import build123d as bd
-from cadgen import step
-from cadgen.assembly import AssemblyHelper
+import build123d as bd
 
-from airbox import airbox
-from beam_wing import beam_wing
-from cockpit import cockpit
-from cooling import cooling
-from corner_fl import corner_fl
-from corner_fr import corner_fr
-from corner_rl import corner_rl
-from corner_rr import corner_rr
 from details import details
-from diffuser import diffuser
 from drivetrain import drivetrain
-from drs_actuator import drs_actuator
-from drs_flap import drs_flap
-from engine_cover import engine_cover
-from floor import floor
-from front_wing import front_wing
-from halo import halo
 from lib import spec
-from monocoque import monocoque
-from nose import nose
 from power_unit import power_unit
-from rear_wing import rear_wing
-from sidepod_left import sidepod_left
-from sidepod_right import sidepod_right
-from steering_rack import steering_rack
-from suspension_front import suspension_front
+from stages import (corners, engine_bodywork, front_end, front_suspension, rear_aero, sidepods,
+                    survival_cell, underbody)
 from suspension_rear import suspension_rear
-from track_rod_left import track_rod_left
-from track_rod_right import track_rod_right
 
-
-def assemble() -> bd.Compound:
-    """Every child is a sibling MODEL under `src/`, added in the frozen order.
-
-    Calling a model inside this body submits its build (if stale) to the pool
-    and returns at once; the car links each child's tree, so a part edit is
-    picked up by rerunning this script and nothing else is rebuilt.
-    """
-    asm = AssemblyHelper("f1_concept_car")
-    asm.add(front_wing(), "front_wing")
-    asm.add(nose(), "nose")
-    asm.add(monocoque(), "monocoque")
-    asm.add(halo(), "halo")
-    asm.add(cockpit(), "cockpit")
-    asm.add(sidepod_left(), "sidepod_left")
-    asm.add(sidepod_right(), "sidepod_right")
-    asm.add(engine_cover(), "engine_cover")
-    asm.add(airbox(), "airbox")
-    asm.add(floor(), "floor")
-    asm.add(diffuser(), "diffuser")
-    asm.add(cooling(), "cooling")
-    asm.add(power_unit(), "power_unit")
-    asm.add(drivetrain(), "drivetrain")
-    asm.add(rear_wing(), "rear_wing")
-    asm.add(drs_flap(), "drs_flap")
-    asm.add(drs_actuator(), "drs_actuator")
-    asm.add(beam_wing(), "beam_wing")
-    asm.add(suspension_front(), "suspension_front")
-    asm.add(suspension_rear(), "suspension_rear")
-    asm.add(corner_fl(), "corner_fl")
-    asm.add(corner_fr(), "corner_fr")
-    asm.add(track_rod_left(), "track_rod_left")
-    asm.add(track_rod_right(), "track_rod_right")
-    asm.add(corner_rl(), "corner_rl")
-    asm.add(corner_rr(), "corner_rr")
-    asm.add(steering_rack(), "steering_rack")
-    asm.add(details(), "details")
-    return asm.build()
+# The car's children, in the order it holds them.
+CHILDREN = (
+    "front_wing", "nose", "monocoque", "halo", "cockpit", "sidepod_left", "sidepod_right",
+    "engine_cover", "airbox", "floor", "diffuser", "cooling", "power_unit", "drivetrain",
+    "rear_wing", "drs_flap", "drs_actuator", "beam_wing", "suspension_front", "suspension_rear",
+    "corner_fl", "corner_fr", "track_rod_left", "track_rod_right", "corner_rl", "corner_rr",
+    "steering_rack", "details",
+)
 
 
 # ---------------------------------------------------------------------------
-# Animation: clips sampled to keyframes when the car builds.
+# Kinematics: the DRS and the steering.
 #
-# No `kinematics=`: both of this car's mechanisms are CLOSED LOOPS. The DRS is
-# a planar four-bar and the steering solves each wheel against a fixed-length
-# track rod, and typed mates evaluate pure forward kinematics on a TREE — a
-# loop needs a solver. Both solves therefore live in the clips below, which is
-# where the teardown belongs anyway. Every hardpoint and pivot they use is the
-# `lib/spec.py` constant the geometry is built from.
+# Both mechanisms are CLOSED LOOPS: the DRS is a planar four-bar, and the
+# steering solves each wheel against a fixed-length track rod. The joints below
+# are the loops' tree -- every moving child on a joint to a part that holds it
+# -- and the closing links are left unjointed; the motions and configurations
+# solve each loop in Python, from the `lib/spec.py` hardpoints the geometry is
+# built from, and set every joint of it. Each joint is authored where its parts
+# stand as built and paired by its label, so no build moves a child.
 #
 # WHAT STEERING MOVES, AND WHY IT IS NOT EVERYTHING. The upright, wheel,
 # brake, track rod and rack move. The pushrods and rockers deliberately DO
 # NOT: both front ball joints sit exactly on the steer axis (spec.F_LOWER_BALL
 # and spec.F_UPPER_BALL define it), which is precisely why steering does not
-# disturb the wishbones or anything inboard of them. That is the real
-# geometry — animating the rockers would look busier and be wrong.
+# disturb the wishbones or anything inboard of them.
 # ---------------------------------------------------------------------------
 
 # Rack shift at full lock, measured with the solve below: the inside wheel
 # reaches spec.MAX_STEER_DEG here (the outside one, 20.5 deg).
 _MAX_RACK_TRAVEL = 55.4
 _Y_AXIS = (0.0, 1.0, 0.0)
+# Each track rod's ball swivels this far about each axis on the rack.
+_BALL_RANGE = 10.0
 
 
 def _sub(a, b):
@@ -166,18 +113,36 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return min(max(v, lo), hi)
 
 
-def _ramp(a: float, b: float, u: float) -> float:
-    """Eased window: 0 before `a`, 1 after `b`, smooth between."""
-    return spec.smoothstep((u - a) / max(b - a, 1e-6))
+def _rotation(axis, deg: float):
+    """The 3x3 rotation of `deg` about `axis` (right-handed), as rows."""
+    a = math.radians(deg)
+    x, y, z = _unit(axis)
+    c, s = math.cos(a), math.sin(a)
+    k = 1.0 - c
+    return ((c + x * x * k, x * y * k - z * s, x * z * k + y * s),
+            (y * x * k + z * s, c + y * y * k, y * z * k - x * s),
+            (z * x * k - y * s, z * y * k + x * s, c + z * z * k))
 
 
 def _rotate_about_axis(p, origin, axis, deg: float):
     """Rodrigues rotation of `p` about the axis through `origin` along `axis`."""
-    a = math.radians(deg)
-    k = _unit(axis)
+    r = _rotation(axis, deg)
     v = _sub(p, origin)
-    c, s = math.cos(a), math.sin(a)
-    return _add(origin, _add(_add(_scale(v, c), _scale(_cross(k, v), s)), _scale(k, _dot(k, v) * (1.0 - c))))
+    return _add(origin, tuple(_dot(row, v) for row in r))
+
+
+def _ball_angles(r):
+    """A ball joint's three angles for the rotation `r`: build123d's intrinsic X-Y-Z
+    turns, the frame's own axes, as the document reads a spherical pair."""
+    pitch = math.degrees(math.asin(_clamp(r[0][2], -1.0, 1.0)))
+    roll = math.degrees(math.atan2(-r[1][2], r[2][2]))
+    yaw = math.degrees(math.atan2(-r[0][1], r[0][0]))
+    return (roll, pitch, yaw)
+
+
+def _pingpong(u: float) -> float:
+    """Symmetric there-and-back on a raised cosine, so a loop closes exactly."""
+    return 0.5 * (1.0 - math.cos(math.tau * (u % 1.0)))
 
 
 # ---- DRS -------------------------------------------------------------------
@@ -205,7 +170,8 @@ def _rot_incidence(p, pivot, deg: float):
 
 def _solve_drs(t: float) -> tuple[float, float]:
     """The DRS four-bar at normalized travel `t` (0 shut, 1 fully open): the
-    flap's turn and the crank's turn from shut, in degrees.
+    flap's turn and the crank's turn from shut, in degrees, each right-handed
+    about +Y (the joints' axis).
 
     The circle-circle solve has two roots; we lock to the branch that
     reproduces the closed pose so the linkage never snaps through.
@@ -232,8 +198,15 @@ def _solve_drs(t: float) -> tuple[float, float]:
         # branch lock: at t = 0 this must reproduce the closed crank end
         end = s1 if math.dist(s1, _CRANK_END_CLOSED) <= math.dist(s2, _CRANK_END_CLOSED) else s2
 
+    # The crank end's angle is measured from +X toward +Z, which is a turn about
+    # -Y: the joint's turn about +Y is its negative.
     crank_deg = math.degrees(math.atan2(end[1] - cz, end[0] - cx))
-    return flap_deg, crank_deg - spec.DRS_CRANK_ANGLE_CLOSED_DEG
+    return flap_deg, spec.DRS_CRANK_ANGLE_CLOSED_DEG - crank_deg
+
+
+def _drs_pose(t: float) -> dict:
+    flap, crank = _solve_drs(t)
+    return {"drs_flap": flap, "drs_crank": crank}
 
 
 # ---- steering --------------------------------------------------------------
@@ -288,316 +261,88 @@ def _solve_steer_angle(side: int, d: float) -> float:
     return 0.5 * (lo + hi)
 
 
-def _reaim(handle, a0, b0, a1, b1):
-    """Carry a two-ended member from (a0, b0) to (a1, b1) on a handle: rotate
-    about the member's own first end, then translate that end onto its new
-    position. Exact whenever the two lengths match, which the rack solve
+def _track_rod_ball(side: int, rack_dy: float, deg: float):
+    """The track rod's swivel on the rack as its ball joint's angles: the turn that
+    carries the rod from (rack end, arm ball) at rest to where the rack and the
+    upright put them. Exact whenever the two lengths match, which the solve
     guarantees."""
-    n0, n1 = _unit(_sub(b0, a0)), _unit(_sub(b1, a1))
-    axis = _cross(n0, n1)
-    s = math.hypot(*axis)
-    if s > 1e-9:
-        handle.rotate(axis, math.degrees(math.atan2(s, _clamp(_dot(n0, n1), -1.0, 1.0))), a0)
-    t = _sub(a1, a0)
-    if abs(t[0]) + abs(t[1]) + abs(t[2]) > 1e-9:
-        handle.translate(t)
-    return handle
+    rack_end, arm = _on_side(spec.F_RACK_END, side), _on_side(spec.F_TRACKROD_OUT, side)
+    origin, axis = _steer_axis(side)
+    moved_end = (rack_end[0], rack_end[1] + rack_dy, rack_end[2])
+    moved_arm = _rotate_about_axis(arm, origin, axis, deg)
+    n0, n1 = _unit(_sub(arm, rack_end)), _unit(_sub(moved_arm, moved_end))
+    turn = _cross(n0, n1)
+    s = math.hypot(*turn)
+    if s <= 1e-12:
+        return (0.0, 0.0, 0.0)
+    return _ball_angles(_rotation(turn, math.degrees(math.atan2(s, _clamp(_dot(n0, n1), -1.0, 1.0)))))
 
 
-# ---------------------------------------------------------------------------
-# CHILDREN
-# Every child is addressed by its name, which is its model's: what assemble()
-# links it as. See the CHILDREN block in this module's docstring.
-# ---------------------------------------------------------------------------
+def _steer_pose(steer: float) -> dict:
+    """The steering at `steer` (-1 full right lock .. 1 full left lock).
 
-_CHILDREN = (
-    "front_wing", "nose", "monocoque", "halo", "cockpit", "sidepod_left", "sidepod_right",
-    "engine_cover", "airbox", "floor", "diffuser", "cooling", "power_unit", "drivetrain",
-    "rear_wing", "drs_flap", "drs_actuator", "beam_wing", "suspension_front", "suspension_rear",
-    "corner_fl", "corner_fr", "track_rod_left", "track_rod_right", "corner_rl", "corner_rr",
-    "steering_rack", "details",
-)
-
-# ---------------------------------------------------------------------------
-# EXPLODE STAGING
-#
-# Each group gets a direction, a distance and a TIME WINDOW. Windows overlap
-# only slightly and run in a deliberate order — bodywork, then cooling and rear
-# aero, then running gear, then power unit and drivetrain last. That sequencing
-# is what keeps the teardown readable. The direction is in car coordinates (+X
-# forward, +Y left, +Z up) and is normalized before use.
-#
-# PURE TRANSLATION. An earlier pass also spun each part a few degrees about its
-# own centroid and turntabled the whole car; both are gone. A rotating subject
-# and a rotating part fight the one thing the viewer is meant to be reading.
-#
-# Distances are sized so parts clear each other in PROJECTION, not just in
-# space: at 500-900 mm they still overlapped in silhouette from a three-quarter
-# view and the frame read as a pile.
-#
-# THE POWER UNIT DELIBERATELY BARELY MOVES sideways. Everything else evacuates
-# around it, which leaves the engine sitting alone at the centre of the frame
-# as the hero — then it takes itself apart.
-#
-# Entries are (child, direction, distance mm, (window start, window end)).
-# ---------------------------------------------------------------------------
-
-_BODYWORK = (
-    # Both are pushed off the centreline: the column straight above the car is
-    # reserved for the power unit, which rises into it as the hero.
-    ("engine_cover", (-0.22, -0.72, 0.72), 1150, (0.0, 0.3)),
-    ("airbox", (0.18, -0.78, 0.7), 1180, (0.03, 0.33)),
-    ("sidepod_left", (0, 1, 0.34), 1320, (0.05, 0.33)),
-    ("sidepod_right", (0, -1, 0.34), 1320, (0.05, 0.33)),
-    ("floor", (0, 0, -1), 980, (0.08, 0.33)),
-    ("diffuser", (-0.45, 0, -1), 1020, (0.1, 0.33)),
-)
-
-_INTERNALS = (
-    ("cooling", (0, 1, 0.55), 1860, (0.33, 0.52)),
-    ("rear_wing", (-0.34, 0, 1), 1160, (0.33, 0.52)),
-    ("drs_flap", (-0.34, 0, 1), 1420, (0.33, 0.52)),
-    ("drs_actuator", (-0.34, 0, 1), 1280, (0.33, 0.52)),
-    ("beam_wing", (-1, 0, 0.25), 980, (0.36, 0.55)),
-    ("front_wing", (1, 0, -0.08), 1420, (0.36, 0.55)),
-    ("nose", (1, 0, 0.22), 1680, (0.38, 0.58)),
-
-    ("corner_fl", (0, 1, 0.05), 1180, (0.5, 0.72)),
-    ("corner_fr", (0, -1, 0.05), 1180, (0.5, 0.72)),
-    ("corner_rl", (0, 1, 0.05), 1180, (0.5, 0.72)),
-    ("corner_rr", (0, -1, 0.05), 1180, (0.5, 0.72)),
-    ("track_rod_left", (0, 1, 0.18), 820, (0.53, 0.74)),
-    ("track_rod_right", (0, -1, 0.18), 820, (0.53, 0.74)),
-    ("suspension_front", (0.35, 0, 0.85), 880, (0.55, 0.76)),
-    ("suspension_rear", (-0.35, 0, 0.85), 880, (0.55, 0.76)),
-    ("steering_rack", (1, 0, 0.2), 980, (0.57, 0.78)),
-    ("details", (0, 1, 0.62), 1320, (0.62, 0.84)),
-
-    ("halo", (0.42, 0.55, 0.68), 940, (0.62, 0.82)),
-    ("cockpit", (0.12, 0.85, 0.62), 1180, (0.64, 0.86)),
-    ("drivetrain", (-1, 0, 0.32), 1560, (0.7, 0.92)),
-
-    # THE HERO. It lifts straight up and OUT of the car, early, into the column
-    # everything else was pushed clear of — so by the time the teardown settles
-    # the engine is hanging in open air above the wreck with nothing in front of
-    # it. Sitting it in the middle of the spread (the first attempt, a 150 mm
-    # token lift late in the sequence) buried it: geometrically exploded and
-    # visually invisible.
-    ("power_unit", (0, 0, 1), 1080, (0.08, 0.34)),
-)
-
-_EXPLODE_GROUPS = _BODYWORK + _INTERNALS
-
-# ---------------------------------------------------------------------------
-# ENGINE SUB-EXPLODE
-#
-# Addressed BY NAME, like every other target: a name that matches nothing
-# RAISES, and so does one that two parts share, listing both.
-#
-# The 100 leaves are collapsed into 12 SYSTEMS plus a static core. Exploding
-# 100 individual bodies is the "cloud of debris" failure: what a viewer can
-# actually read is induction lifting off the vee, the heads splitting outward,
-# the split turbo separating fore and aft, the exhaust sweeping back. The
-# crankcase, sump, bearing webs and joint rails never move — they are the spine
-# everything else is measured against.
-#
-# Entries are (system, part names, direction, distance mm).
-# ---------------------------------------------------------------------------
-
-
-def _seq(base: str, n: int) -> list[str]:
-    return [f"{base}:{i}" for i in range(1, n + 1)]
-
-
-_ENGINE_GROUPS = (
-    ("eng_induction",
-     ["plenum", "charge_pipe", "charge_pipe_clamp", "airbox_trunk",
-      *_seq("trumpet:left", 3), *_seq("trumpet:right", 3)],
-     (0, 0, 1), 760),
-
-    ("eng_head_left",
-     ["cylinder_head:left", "cam_cover:left", "fuel_rail:left", "head_joint_rail:left",
-      *_seq("coil_pack:left", 3)],
-     (0, 1, 0.5), 620),
-    ("eng_head_right",
-     ["cylinder_head:right", "cam_cover:right", "fuel_rail:right", "head_joint_rail:right",
-      *_seq("coil_pack:right", 3)],
-     (0, -1, 0.5), 620),
-
-    # split turbo: compressor forward, turbine aft — the layout reads instantly
-    ("eng_compressor", ["compressor_volute", "compressor_housing"], (1, 0, 0.2), 620),
-    ("eng_turbine", ["turbine_volute", "turbine_housing", "turbine_inlet"], (-1, 0, 0.2), 620),
-    ("eng_mguh", ["turbo_shaft", "mgu_h", "mgu_h_gland", "mgu_h_cable"], (0, 0, 1), 380),
-
-    ("eng_exhaust_left",
-     [*_seq("exhaust_primary:left", 3), "collector:left", "heat_shield:collector"],
-     (-0.45, 1, 0.45), 760),
-    ("eng_exhaust_right",
-     [*_seq("exhaust_primary:right", 3), "collector:right"],
-     (-0.45, -1, 0.45), 760),
-    ("eng_tailpipe",
-     ["collector_merge", "tailpipe", "tailpipe_tip", "heat_shield:tailpipe",
-      "wastegate_body", "wastegate_flange", "wastegate_pipe", "wastegate_tip"],
-     (-1, 0, 0.15), 900),
-
-    ("eng_mguk",
-     ["mgu_k", "mgu_k_ring", "mgu_k_drive_housing", *_seq("mgu_k_cable", 2)],
-     (0.35, 1, -0.3), 700),
-
-    ("eng_ers",
-     ["ers_battery_case", "ers_battery_lid", "ers_terminal_block",
-      *_seq("ers_bracket", 4), *_seq("ers_bus_bar", 6), *_seq("ers_coolant", 2)],
-     (1, 0, -0.35), 860),
-
-    ("eng_ancillaries",
-     ["water_pump", "oil_pump", "oil_tank", "ecu_box", "ecu_connector",
-      "water_feed", "water_return", "oil_feed", "oil_return",
-      "fuel_line", "fuel_crossover",
-      *_seq("ecu_pin", 3), *_seq("line_bracket", 4)],
-     (0, -1, -0.28), 780),
-)
-
-# Children whose transform is authored explicitly below; everything else gets
-# its explode offset and nothing more.
-_DRIVEN = {"drs_flap", "drs_actuator", "corner_fl", "corner_fr", "steering_rack", "track_rod_left", "track_rod_right"}
-
-
-def _frame(m, *, drs: float = 0.0, steer: float = 0.0, explode: float = 0.0, engine: float = 0.0) -> None:
-    """One pose of the car.
-
-    The explode translation is applied LAST on every handle, so a part can be
-    simultaneously articulated (DRS, steering) and exploded without the
-    articulation dragging the offset around with it — successive handle calls
-    PREMULTIPLY, which is exactly that ordering.
+    Positive steers LEFT (the car's +Y side is the inside of the turn). The
+    rack is one bar, so both wheels take the same shift and each wheel's
+    angle is solved against its OWN track rod — the two sides differ
+    slightly, which is where the anti-Ackermann comes from.
     """
-    offset = {}
-    for name, direction, dist, (start, end) in _EXPLODE_GROUPS:
-        amount = _ramp(start, end, explode)
-        if amount <= 0:
-            continue
-        d0 = _unit(direction)
-        offset[name] = (d0[0] * dist * amount, d0[1] * dist * amount, d0[2] * dist * amount)
-
-    def shift(handle, name: str):
-        if name in offset:
-            handle.translate(offset[name])
-        return handle
-
-    # Engine sub-explode runs on its OWN clock, so the engine can come apart
-    # while the car around it is already fully spread and stationary. Sub-parts
-    # ride the power unit's own offset — its translate below reaches every part
-    # under it — so only their own spread is added here.
-    for _system, names, direction, dist in _ENGINE_GROUPS:
-        d0 = _unit(direction)
-        t = (d0[0] * dist * engine, d0[1] * dist * engine, d0[2] * dist * engine)
-        for name in names:
-            m.get(f"#{name}").translate(t)
-
-    # ---- DRS ---------------------------------------------------------------
-    flap_deg, crank_deg = _solve_drs(drs)
-    shift(m.get("#drs_flap").rotate(_Y_AXIS, flap_deg, spec.DRS_PIVOT), "drs_flap")
-    shift(m.get("#drs_actuator").rotate(_Y_AXIS, crank_deg, spec.DRS_CRANK_PIVOT), "drs_actuator")
-
-    # ---- steering ----------------------------------------------------------
-    # Positive steers LEFT (the car's +Y side is the inside of the turn). The
-    # rack is one bar, so both wheels take the same shift and each wheel's
-    # angle is solved against its OWN track rod — the two sides differ
-    # slightly, which is where the anti-Ackermann comes from.
     rack_dy = _clamp(steer, -1.0, 1.0) * _MAX_RACK_TRAVEL
-    for side, corner, rod in ((1, "corner_fl", "track_rod_left"), (-1, "corner_fr", "track_rod_right")):
-        origin, axis = _steer_axis(side)
+    pose = {"rack": rack_dy}
+    for side, wheel, rod in ((1, "steer_left", "track_rod_left"), (-1, "steer_right", "track_rod_right")):
         deg = _solve_steer_angle(side, rack_dy)
-        shift(m.get(f"#{corner}").rotate(axis, deg, origin), corner)
-        rack_end, arm = _on_side(spec.F_RACK_END, side), _on_side(spec.F_TRACKROD_OUT, side)
-        moved_end = (rack_end[0], rack_end[1] + rack_dy, rack_end[2])
-        moved_arm = _rotate_about_axis(arm, origin, axis, deg)
-        shift(_reaim(m.get(f"#{rod}"), rack_end, arm, moved_end, moved_arm), rod)
-    shift(m.get("#steering_rack").translate((0.0, rack_dy, 0.0)), "steering_rack")
-
-    # ---- everything else: explode offset only -------------------------------
-    for name in _CHILDREN:
-        if name not in _DRIVEN:
-            shift(m.get(f"#{name}"), name)
+        pose[wheel] = deg
+        pose[rod] = _track_rod_ball(side, rack_dy, deg)
+    return pose
 
 
-# ---------------------------------------------------------------------------
-# SHOWCASE — one loop-closed timeline
-#
-# Built so showcase(1) is IDENTICAL to showcase(0): a looping clip runs its
-# last pose straight back into its first, so a plain 0->1 explode sweep would
-# snap shut on the wrap. Every segment is a there-and-back, so the loop is
-# seamless by construction rather than by trimming frames.
-#
-# The beat sheet, in seconds against the 22.5 s loop:
-#    0.0 -  1.5  hold assembled — a showcase needs a moment of the whole object
-#                before it starts taking itself apart, or the viewer never
-#                registers what is being disassembled
-#    1.5 - 10.5  CAR opens (9.0 s — deliberately slow; at half this length the
-#                panels moved faster than the eye could follow one of them)
-#   10.5 - 11.2  short handover (long enough to register the engine as a
-#                subject, short enough not to stall)
-#   11.2 - 14.8  ENGINE opens
-#   14.8 - 16.3  hold at full spread — the money frame
-#   16.3 - 18.8  engine closes
-#   18.8 - 22.3  car closes
-#   22.3 - 22.5  settle, closing the loop exactly
-#
-# The two piecewise switch points (0.70 / 0.69) each sit inside a plateau where
-# both branches evaluate to 1, so neither introduces a step.
-# ---------------------------------------------------------------------------
+# ---- the joints -------------------------------------------------------------
 
 
-def _showcase_at(u: float) -> tuple[float, float]:
-    """The showcase clock as (explode, engine); at u=0 and u=1 both are exactly 0."""
-    u = _clamp(u, 0.0, 1.0)
-    explode = _ramp(0.067, 0.467, u) if u < 0.7 else 1.0 - _ramp(0.836, 0.991, u)
-    engine = _ramp(0.498, 0.658, u) if u < 0.69 else 1.0 - _ramp(0.724, 0.836, u)
-    # DRS and steering are deliberately absent: this clip is the exploded view
-    # and nothing else.
-    return _clamp(explode, 0.0, 1.0), _clamp(engine, 0.0, 1.0)
+def _revolute(label, fixed, moving, point, direction, limits):
+    """A revolute joint on `fixed` and its rigid mate on `moving`, coincident as built."""
+    bd.RevoluteJoint(label, fixed, axis=bd.Axis(point, direction), angular_range=limits)
+    bd.RigidJoint(label, moving, bd.Plane(origin=point, z_dir=direction).location)
 
 
-def _pingpong(u: float) -> float:
-    """Symmetric there-and-back on a raised cosine, so a loop closes exactly."""
-    return 0.5 * (1.0 - math.cos(math.tau * (u % 1.0)))
+def _joints(parts):
+    """The DRS and steering joints on the car's children, by name."""
+    # DRS: the flap turns about its pivot on the endplates, the crank (and with it
+    # the whole linkage) about the crank pivot, both along Y.
+    flap_open, crank_open = _solve_drs(1.0)
+    _revolute("drs_flap", parts["rear_wing"], parts["drs_flap"], spec.DRS_PIVOT, _Y_AXIS, (flap_open, 0.0))
+    _revolute("drs_crank", parts["rear_wing"], parts["drs_actuator"], spec.DRS_CRANK_PIVOT, _Y_AXIS,
+              (0.0, crank_open))
+
+    # Steering: each corner turns about its steer axis on the wishbones; the rack
+    # slides across the tub; each track rod swivels on its ball at the rack end.
+    for side, wheel, corner, rod in ((1, "steer_left", "corner_fl", "track_rod_left"),
+                                     (-1, "steer_right", "corner_fr", "track_rod_right")):
+        origin, axis = _steer_axis(side)
+        lock = sorted(_solve_steer_angle(side, travel) for travel in (-spec.F_RACK_TRAVEL, spec.F_RACK_TRAVEL))
+        _revolute(wheel, parts["suspension_front"], parts[corner], origin, axis, tuple(lock))
+        ball = bd.Location(_on_side(spec.F_RACK_END, side))
+        bd.BallJoint(rod, parts["steering_rack"], ball, angular_range=((-_BALL_RANGE, _BALL_RANGE),) * 3)
+        bd.RigidJoint(rod, parts[rod], ball)
+    rack_axis = bd.Axis((spec.F_RACK_X, 0.0, spec.F_RACK_Z), _Y_AXIS)
+    bd.LinearJoint("rack", parts["monocoque"], axis=rack_axis,
+                   linear_range=(-spec.F_RACK_TRAVEL, spec.F_RACK_TRAVEL))
+    bd.RigidJoint("rack", parts["steering_rack"], bd.Location(rack_axis.position))
 
 
-def _showcase(t: float, m) -> None:
-    explode, engine = _showcase_at((t / 22.5) % 1.0)
-    _frame(m, explode=explode, engine=engine)
-
-
-def _drs(t: float, m) -> None:
-    # The one mechanism you can show while the car is still whole.
-    _frame(m, drs=_pingpong(t / 4.0))
-
-
-def _steering(t: float, m) -> None:
-    # Left, through centre, to right and back — the car "looking around".
-    _frame(m, steer=math.sin(math.tau * ((t / 6.0) % 1.0)))
-
-
-def _teardown(t: float, m) -> None:
-    _frame(m, explode=_pingpong(t / 12.0))
-
-
-def _engine(t: float, m) -> None:
-    _frame(m, engine=_pingpong(t / 8.0))
-
-
-ANIMATION = {
-    "showcase": cadgen.clip(_showcase, duration=22.5, label="Showcase"),
-    "drs": cadgen.clip(_drs, duration=4, label="DRS"),
-    "steering": cadgen.clip(_steering, duration=6, label="Steering"),
-    "teardown": cadgen.clip(_teardown, duration=12, label="Teardown"),
-    "engine": cadgen.clip(_engine, duration=8, label="Engine explode"),
-}
-
-
-@step(out="../STEP/f1.step", animation=ANIMATION)
+@xbf(out="../XBF/f1.xbf")
+@glb(out="../XBF/f1.glb")
 def f1():
-    return assemble()
-
-
-if __name__ == "__main__":
-    f1()
+    parts = {**front_end(), **survival_cell(), **sidepods(), **engine_bodywork(), **underbody(),
+             "power_unit": power_unit(), "drivetrain": drivetrain(), **rear_aero(), **front_suspension(),
+             "suspension_rear": suspension_rear(), **corners(), "details": details()}
+    for name, part in parts.items():
+        part.label = name
+    _joints(parts)
+    car = bd.Compound(children=[parts[name] for name in CHILDREN], label="f1_concept_car")
+    configuration(car, "drs_open", **_drs_pose(1.0))
+    configuration(car, "full_lock_left", **_steer_pose(1.0))
+    configuration(car, "full_lock_right", **_steer_pose(-1.0))
+    # The one mechanism you can show while the car is still whole: open and shut, 4 s.
+    motion(car, "drs", lambda t: _drs_pose(_pingpong(t / 4.0)), duration=4, loop="loop")
+    # Left, through centre, to right and back — the car "looking around", 6 s.
+    return motion(car, "steering", lambda t: _steer_pose(math.sin(math.tau * t / 6.0)), duration=6, loop="loop")

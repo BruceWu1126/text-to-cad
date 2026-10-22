@@ -26,7 +26,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from cadgen import build123d as bd
+import build123d as bd
 
 from lib import geo, kin, palette as P, spec as S
 
