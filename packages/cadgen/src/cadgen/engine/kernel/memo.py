@@ -827,6 +827,9 @@ class _Run:
         # or ``replayed``.
         self.keys: dict[str, tuple[str, list, bool, list[str]]] = {}
         self.statuses: dict[str, str] = {}
+        # Per body this run replayed, or ran and kept: its record, whose snapshot is the result
+        # as the body returned it (``placement``).
+        self.records: dict[str, _Body] = {}
         # The TShapes no operation made that a placement shares (``_note_placed``).
         self.placed: set = set()
         # Per file key and site, the read of this build that decoded it (``_read_again``).
@@ -876,6 +879,13 @@ class _Run:
         from OCP.TopLoc import TopLoc_Location
 
         return self.trace.account(handle.Located(TopLoc_Location()), self.made_by, self.holder)
+
+    def placement(self, name: str) -> Any:
+        """A new placement of what body ``name`` returned in this run, as it returned it (its
+        record's snapshot, ``_ShapeState.fresh``), leaving the objects it returned as the run
+        holds them now; None for a body this run neither replayed nor ran and kept."""
+        record = self.records.get(name)
+        return None if record is None else record.snapshot.fresh()
 
     def holder(self, shape: Any) -> int | None:
         """The feature of this run whose result holds ``shape`` as a sub-shape (``_SUBS``,
@@ -1128,8 +1138,10 @@ def body(name: str, source: Callable[[], str], function: Callable[[], Any], *, i
     with _LOCK:
         if snapshot is None:
             _BODIES.pop(name, None)
+            state.records.pop(name, None)
         else:
-            _BODIES[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0, inputs)
+            _BODIES[name] = state.records[name] = _Body(name, source, log, snapshot, _MARKS[-1] if _MARKS else 0,
+                                                        inputs)
     if state.bodies:
         parent = state.bodies[-1]
         # Its checks are the caller's too, kept or not: the caller's key says all it read.
@@ -1443,6 +1455,7 @@ def _replay(record: _Body, state: _Run) -> Any:
             _KEY_IDS[key] = found
             _KEY_IDS.move_to_end(key)
     record.generation = generation
+    state.records[record.name] = record
     state.done.add(record.name)
     state.keys[record.name] = (record.source, list(record.log.checks), record.log.keyed, list(record.log.children))
     state.statuses[record.name] = "replayed"

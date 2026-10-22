@@ -292,9 +292,9 @@ def merge(tree: Tree) -> None:
 
 @contextmanager
 def unchecked(shapes: Iterable[Any]) -> Iterator[None]:
-    """Every sub-shape of ``shapes`` with its ``Checked`` flag cleared, and set again
-    after: what the document writes of a shape, with the model's shapes left as they
-    were.
+    """Every sub-shape of ``shapes`` with its ``Checked`` flag cleared, and each of
+    ``shapes`` free, set back after: what the document writes of a shape, with the
+    model's shapes left as they were.
 
     ``Checked`` is bookkeeping, not geometry: the kernel's face makers leave it set on
     the faces they make, a modifier walking a shape clears it on the faces it visits
@@ -303,12 +303,20 @@ def unchecked(shapes: Iterable[Any]) -> Iterator[None]:
     value its replay last set. The flag is written with the shape, so a cold build and
     a warm build of the same sources wrote different bytes -- and the first build after
     a restart rewrote every file for nothing. Written cleared, it is one value on
-    every path. No other flag differs between the two."""
+    every path. No other flag differs between the two. ``Free`` is bookkeeping too: a
+    shape added to a compound is no longer free, so a part as its own model's result and
+    the same part placed in an assembly -- a child model's document, written by a build
+    of it and by its parent's -- wrote other bytes. Each part is written free."""
     from OCP.TopExp import TopExp
     from OCP.TopTools import TopTools_IndexedMapOfShape
 
     cleared = []
+    held = []
     for shape in shapes:
+        root = shape.TShape()
+        if not root.Free():
+            root.Free(True)
+            held.append(root)
         mapped = TopTools_IndexedMapOfShape()
         TopExp.MapShapes_s(shape, mapped)
         find = mapped.FindKey
@@ -322,6 +330,8 @@ def unchecked(shapes: Iterable[Any]) -> Iterator[None]:
     finally:
         for tshape in cleared:
             tshape.Checked(True)
+        for tshape in held:
+            tshape.Free(False)
 
 
 def direct(shape: Any) -> Any:

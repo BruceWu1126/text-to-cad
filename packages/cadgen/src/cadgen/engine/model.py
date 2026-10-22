@@ -25,7 +25,9 @@ labelled with the child's function name when its body gave it no label. A model 
 a pure function of its source, so a second call in one build hands back a new
 placement of the same result -- new objects sharing the first call's geometry --
 rather than running the body again: a child used four times is one prototype placed
-four times. Called outside a build, a model is its function.
+four times. A child writes the files it declares, as a target does: once a build, from
+its own document (``BuildContext.children``, ``build``). Called outside a build, a model
+is its function.
 """
 
 from __future__ import annotations
@@ -49,6 +51,10 @@ KINDS = tuple(SUFFIXES)
 XBF_FOLDER = "XBF"
 
 _CONTEXT = threading.local()
+# Every model defined since a build began, by its identity (``script::function``): a body
+# a replay ran is known by its name alone, and this says which of them are models
+# (``BuildContext.children``). A build forgets them before it loads the script.
+_MODELS: dict[str, "Model"] = {}
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,7 @@ class Model:
         self.script = Path(source).resolve()
         self.outputs: list[Output] = []
         self.__xbf_model__ = True
+        _MODELS[f"{self.script}::{self.name}"] = self
         if getattr(function, "__module__", None) == "__main__":
             _run_as_program(self.script)
 
@@ -601,6 +608,14 @@ class BuildContext:
         self.symbols: Any = None
         self.key_seconds = 0.0
         self.fallbacks: dict[str, list[str]] = {}
+        # The script the build loaded (``build`` sets it): a model of another file is closed
+        # over as a build of its own script closes it (``modules``).
+        self.script: Path | None = None
+        # The models the running target's body called, each once, in the order first called
+        # (``child``): with those a replay ran, what the build writes after the run (``children``).
+        self.called: dict[str, Model] = {}
+        # Per script of a child model from another file: the resolution its closure is made with.
+        self.others: dict[Path, Any] = {}
 
     def source(self, model: Model) -> str:
         """What a model's body is made of: the symbols its function reaches, a module's
@@ -624,9 +639,29 @@ class BuildContext:
         return found
 
     def modules(self, model: Model) -> tuple[dict[str, str], bool]:
-        """A model's closure by file (``sources.Symbols.modules``), worked out with its key."""
+        """A model's closure by file (``sources.Symbols.modules``), worked out with its key. A
+        child model of another script is closed over as a build of that script closes it: from
+        its folder, over the modules of this load that its script imports
+        (``sources.closure_files``), so its document is the one a build of its own writes."""
         self.source(model)
-        return self.symbols.modules(model.function)
+        if self.script is None or model.script == self.script:
+            return self.symbols.modules(model.function)
+        symbols = self.others.get(model.script)
+        if symbols is None:
+            import sys
+
+            from cadgen.engine.sources import Symbols, closure_files
+
+            module = getattr(model.function, "__module__", None) or model.script.stem
+            own = set(closure_files(model.script, module, self.resolved))
+
+            def imported(name: str) -> bool:
+                file = getattr(sys.modules.get(name), "__file__", None)
+                return bool(file) and Path(file).resolve() in own
+
+            loaded = {name for name in self.loaded or () if imported(name)}
+            symbols = self.others[model.script] = Symbols(self.resolved, loaded, model.script.parent)
+        return symbols.modules(model.function)
 
     def __enter__(self) -> "BuildContext":
         self.previous = getattr(_CONTEXT, "build", None)
@@ -667,6 +702,7 @@ class BuildContext:
 
     def child(self, model: Model) -> Any:
         key = str(model.script) + "::" + model.name
+        self.called.setdefault(key, model)
         found = self.results.get(key)
         if found is not None:
             from cadgen.engine.kernel import memo
@@ -679,6 +715,25 @@ class BuildContext:
         if not made.__dict__.get("label"):
             made.label = model.name
         return made
+
+    def children(self, model: Model, run: Any, before: set[str]) -> list[tuple[Model, Any]]:
+        """The models that ran as children in ``model``'s run, each once, in the order they
+        first ran, each with a new placement of its result as its body returned it: those
+        its body called (``child``), and those a replay ran without a call -- the bodies
+        ``run`` ran or replayed that it had not before (``before``), the models among them
+        known by identity (``_MODELS``)."""
+        key = str(model.script) + "::" + model.name
+        names = list(self.called) + [name for name in run.statuses if name not in before and name not in self.called]
+        found = []
+        for name in names:
+            child = self.called.get(name) or _MODELS.get(name)
+            if name == key or child is None:
+                continue  # the target itself, or a @memo call
+            held = self.results.get(name)
+            made = instance(held[1]) if held is not None else run.placement(name)
+            if made is not None:
+                found.append((child, made))
+        return found
 
     def memo(self, marked: Memo, args: tuple, kwargs: dict) -> Any:
         """A ``@memo`` call: a body named by the function and its arguments' digest, run or

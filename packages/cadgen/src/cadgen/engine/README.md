@@ -118,16 +118,20 @@ def hinge():
    target its result is assigned to, or a label), never from a line or a file:
    moving code renames nothing, and the file holds no line to go stale. A line
    is what the worker serves, now.
+10. **A file decorator defines an output file.** Whenever the model it decorates
+   runs in a build -- the build's target, or a child another model's body calls --
+   that file is written, once per build, from the model's own document: a declared
+   file is what the code that last ran makes, whichever model ran it (**Exports**).
 
 ## Layout
 
 | Module | What it is |
 | --- | --- |
-| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run; `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
+| `model.py` | the decorators (`out` alone); `Model` (`.build`, `.export`, `.snapshot`, `.document`); identity `script.py::function`; a child model called in a body is a sub-assembly built in the same run, and the models a target's run ran (`BuildContext.children`); `@memo` and its calls; `python model.py` asking the daemon; a script's module and package (`module_of`); `paint`, `configuration`, `motion`; `read_step`, `read_xbf` |
 | `api.py` | the verbs as functions, through the daemon: `build`, `export`, `snapshot`, `serve`, `where`, `status`, `stop`, `daemon` (`cadgen.build`, ...) |
 | `materials.py` | `Material`, a physical material and its look (OpenPBR's glTF subset), and the catalogue of common ones: the module, called |
 | `mechanism.py` | kinematics: build123d's joints harvested into AP242's links and pairs, the document's subtree, the structure's `kinematics`, poses (forward kinematics from the ground), and motions (`motion`, a function's samples, `Timeline`: a motion's pair values over time) |
-| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files |
+| `build.py` | one build: load the script (as Python imports it: a package's module by its dotted name) or code afresh, one memo run, document, element names, files: every model's that ran |
 | `previous.py` | the model's build closure on its xbf's main label (`manifest`), the release from the version beside the code, and the closure made again before the body runs (`again`) |
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in |
@@ -384,9 +388,24 @@ the built document (`<function><suffix>` beside the script). No decorator takes 
 a model's material, colours, joints, the pose its joints connect its parts at, its
 configurations and its motions are written in its body. Every declared file shows the model as
 built: where its joints' `connect_to` placed the parts. A model that wants a second pose on
-every build is a second model function with other joint values. A child model's files are
-written only when it is built as a target. A model with no `@xbf` writes its derived files and
-nothing else.
+every build is a second model function with other joint values. A model with no `@xbf` writes
+its derived files and nothing else.
+
+**Every model that runs writes its files** (law 10). A child model -- one another model's body
+calls, in its file or another -- writes the files it declares after its target's are written,
+once per build, from its own document: the result its body returned, before its caller placed
+or labelled it, its closure the one a build of its own script makes (its folder, the modules its
+script imports). So its xbf is the one its own build writes, byte for byte; a later build of it
+takes that file (**Build closure**), and a file whose bytes are unchanged is kept. A child called
+twice is one model, written once; a child that is also a target of the build writes as the
+target; a child run inside a replayed body writes as one its caller ran; one that ran before its
+caller raised writes all the same. A child writes what its decorators declare, never what the
+build's flags name: those are its target's. A model taken from its file ran nothing, and nor did
+its children. The target's report holds each child's under its identity (`child_models`: its
+files, parts and timings; `--json` prints it with the target's), and a child whose file cannot be
+written fails the build. A part is written free (`document.unchecked`): OCCT marks a shape put in
+a compound as no longer free, which would make a child's part, placed in its caller's assembly,
+other bytes than its own build's.
 
 **Build flags** are additive and select and override on a script: no flag writes what the
 decorators declare; `--xbf` alone writes the xbf alone; `--xbf --step out.step --glb` the xbf,

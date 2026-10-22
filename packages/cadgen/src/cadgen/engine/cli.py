@@ -105,16 +105,25 @@ def _targets(values: list[str], verb: str) -> list[tuple[str, list[str] | None]]
     return [(str(path), functions) for path, functions in grouped.items()]
 
 
+def _files(report: dict[str, Any]) -> list[str]:
+    found = []
+    for path, row in (report.get("files") or {}).items():
+        state = "written" if row.get("written") else "kept"
+        found.append(f"{os.path.relpath(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
+    return found
+
+
 def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
+    # Each child model the run ran, and the files it wrote (``child_models``).
+    children = "".join(f"\n  {name}, a child{'' if row.get('ok') else ': failed'}"
+                       + "".join(f"\n    {text}" for text in _files(row))
+                       for name, row in (report.get("child_models") or {}).items())
     if not report.get("ok"):
-        return f"failed {report.get('model')}"
+        return f"failed {report.get('model')}" + children
     timings = report.get("timings", {})
     memo = report.get("memo", {})
     bodies = list((report.get("bodies") or {}).values())
-    files = []
-    for path, row in (report.get("files") or {}).items():
-        state = "written" if row.get("written") else "kept"
-        files.append(f"{os.path.relpath(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
+    files = _files(report)
     worker = "" if fresh is None else (" cold" if fresh else " warm")
     if memo.get("bodies_loaded"):
         line = (f"took {report['model']}{worker} in {wall:.2f}s: its file holds the model's key, "
@@ -131,7 +140,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
             line += f"\n  rebuilt: {report['cache']['reason']}"
     if report.get("retired"):
         files.append(f"retired: {report['retired']}")
-    return (line + "".join(f"\n  {text}" for text in files)
+    return (line + "".join(f"\n  {text}" for text in files) + children
             + "".join(f"\n  warning: kinematics: {text}" for text in report.get("kinematics", {}).get("warnings", ()))
             + _verified(report.get("verify")))
 

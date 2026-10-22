@@ -365,11 +365,12 @@ class BuildFilesTest(unittest.TestCase):
     def test_file_flags_select_and_override_what_the_decorators_declare(self) -> None:
         script = self.write("board.py", BOARD.format(lift=6))
         [report] = engine_build.build(script, ["board"], cwd=self.folder, outputs={"xbf": {}})
-        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf"}, "--xbf alone: the xbf alone")
+        # The flags are the target's: its peg, a child, writes what it declares.
+        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf", "XBF/peg.xbf"}, "--xbf alone: the xbf alone")
         [report] = engine_build.build(script, ["board"], cwd=self.folder,
                                       outputs={"xbf": {}, "step": {"out": "elsewhere/b.step"}, "glb": {}})
         self.assertTrue(report["ok"], report)
-        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf", "elsewhere/b.step", "board.glb"})
+        self.assertEqual(self.files(), {"board.py", "XBF/board.xbf", "XBF/peg.xbf", "elsewhere/b.step", "board.glb"})
         self.assertFalse(report["files"][str(self.folder / "XBF/board.xbf")]["written"], "the document did not change")
         with self.assertRaisesRegex(engine_build.BuildError, "a flag names one file"):
             engine_build.build(script, None, cwd=self.folder, outputs={"step": {"out": "x.step"}})

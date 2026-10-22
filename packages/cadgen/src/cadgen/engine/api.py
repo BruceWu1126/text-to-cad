@@ -36,9 +36,20 @@ class EngineError(RuntimeError):
     """A request the engine refused or could not run: its words."""
 
 
+def _files(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every file a model's build wrote or kept: the model's own, then each child model's
+    (``child_models``, the models its run ran, each of which writes its own files)."""
+    found = dict(report.get("files") or {})
+    for child in (report.get("child_models") or {}).values():
+        found.update(child.get("files") or {})
+    return found
+
+
 @dataclass
 class Report:
-    """A build of one script: each model's report (``models``), in order."""
+    """A build of one script: each model's report (``models``), in order; each holds the
+    reports of the child models its run ran (``child_models``), each of which wrote its own
+    files."""
 
     models: list[dict[str, Any]]
     wall: float = 0.0
@@ -50,7 +61,7 @@ class Report:
 
     @property
     def files(self) -> dict[str, dict[str, Any]]:
-        return {path: row for report in self.models for path, row in (report.get("files") or {}).items()}
+        return {path: row for report in self.models for path, row in _files(report).items()}
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         return iter(self.models)
@@ -105,7 +116,8 @@ class Built:
 
     @property
     def files(self) -> dict[str, dict[str, Any]]:
-        return dict(self.report.get("files") or {})
+        """Every file the build wrote or kept: the code's, then each child model's."""
+        return _files(self.report)
 
     @property
     def document(self) -> Any:
