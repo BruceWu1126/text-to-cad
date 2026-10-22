@@ -201,6 +201,12 @@ models' profiles, `export-logos.mjs` exports every other logo file from them.
 Run by hand when the brand changes; ordinary builds use the committed files. See
 [the brand recipe](brand/README.md).
 
+`look/` — `bake-environment.mjs` bakes the engine's look's reflection environment
+(`packages/cadgen/src/cadgen/engine/render/studio.hdr`, committed): core's neutral
+studio scene ray-cast into a small equirectangular Radiance image, which the viewer
+and the OCCT prototype both light an engine document's regular modes with. Run by
+hand when the studio or the look changes.
+
 `bench/` — manual edit, warm-build and viewer performance commands
 ([benchmark usage](bench/cadgen-performance/README.md)), the mesh
 scoreboard ([`bench/mesh-scoreboard/`](bench/mesh-scoreboard/README.md)): every
@@ -208,7 +214,8 @@ solid of a STEP corpus scored on the properties a display mesh must have and on
 cost, the table a mesher change opens its pull request with; and the 0.8.0
 migration's measurements ([`bench/README.md`](bench/README.md)):
 `compare_commits.py` (cold builds and the moonwatch edit loop between two
-commits, interleaved, each in its own worktree). Reports and profiler captures
+commits, interleaved, each in its own worktree) and `occt_parity.py` (the viewer
+against the OCCT prototype, mode by mode). Reports and profiler captures
 are local output under `tmp/`, never committed here. The drivers are manual;
 their `*.test.mjs` helper units run in `test-js.sh`.
 

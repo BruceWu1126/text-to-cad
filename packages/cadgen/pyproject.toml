@@ -108,3 +108,6 @@ cadgen = ["py.typed", "*.pyi", "_runtime/**/*"]
 # The viewer server's catalog ordering is ICU root collation, read from this table at
 # runtime; it ships beside the code that reads it.
 "cadgen.viewer" = ["collation.json"]
+# The engine's look lights the regular display modes with this environment image, which the
+# engine serves to the viewer and the OCCT prototype reads (cadgen.engine.render.look).
+"cadgen.engine.render" = ["studio.hdr"]
