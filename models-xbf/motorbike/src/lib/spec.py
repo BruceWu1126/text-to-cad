@@ -28,6 +28,8 @@ Modeling rules (repo memory):
 
 from math import cos, sin, radians
 
+from cadgen.engine import Material, materials
+
 # ---------------------------------------------------------------------------
 # Palette (linear RGBA). Theme does not override source colors.
 # ---------------------------------------------------------------------------
@@ -47,6 +49,42 @@ AMBER = (0.960, 0.520, 0.070, 0.95)       # turn-signal lenses
 RED_LENS = (0.720, 0.055, 0.060, 0.95)    # tail-light lens
 LENS_CLEAR = (0.930, 0.950, 0.960, 0.30)  # headlight lens
 STEEL = (0.600, 0.610, 0.630, 1.0)        # axles, fasteners, pipes
+
+# ---------------------------------------------------------------------------
+# Materials: what each part is made of, in the finish it wears. Every one is
+# `color=None`, so the palette above stays the colour that shows and the
+# material adds the finish. Paint is a dielectric (metallic 0) under a coat.
+# ---------------------------------------------------------------------------
+
+PAINTED_STEEL = materials.steel_1018.but(          # frame, fork, stand, bar, damper
+    color=None, metallic=0.0, roughness=0.5, coat=1.0, coat_roughness=0.1,
+    description="Steel tube, gloss black paint")
+PAINTED_ABS = materials.abs.but(                   # cream bodywork and fenders
+    color=None, roughness=0.45, coat=1.0, coat_roughness=0.06,
+    description="Moulded ABS panel, painted and clear-coated")
+LEATHER = Material(                                # saddle
+    "Leather", 860, family="other", source="typical: vegetable-tanned cowhide",
+    description="Saddle leather over the seat foam", roughness=0.65, coat=0.2, coat_roughness=0.4)
+TYRE_RUBBER = materials.nbr_70a.but(color=None)    # tires
+GRIP_RUBBER = materials.tpu_95a.but(color=None)    # bar grips
+CAST_ALUMINIUM = materials.aluminium_6061.but(     # rims, crankcase, covers, drum hub
+    color=None, roughness=0.6, anisotropy=0.0, description="Cast aluminium, as cast")
+FORGED_ALUMINIUM = materials.aluminium_6061.but(color=None)  # brake levers, machined
+POLISHED_STAINLESS = materials.stainless_304.but(  # exhaust, lamp, signal and mirror shells
+    color=None, roughness=0.1, anisotropy=0.0, description="Polished stainless")
+CHROMED_STEEL = materials.steel_4140.but(          # axles, damper rod
+    color=None, roughness=0.12, description="Hard-chromed alloy steel")
+DISC_STEEL = materials.steel_4140.but(             # brake disc
+    color=None, roughness=0.3, description="Ground brake disc")
+SPRING_STEEL = materials.steel_spring_1095.but(    # shock spring, powder-coated
+    color=None, metallic=0.0, roughness=0.35, coat=0.8, coat_roughness=0.15,
+    description="Spring steel, yellow powder coat")
+ABS_HOUSING = materials.abs.but(color=None)        # tail-light housing
+HEADLIGHT_LENS = materials.polycarbonate.but(color=None)
+SIGNAL_LENS = materials.acrylic_pmma.but(color=None)  # tail light and turn signals
+MIRROR_GLASS = materials.glass.but(                # silvered: a mirror reflects, it does not transmit
+    color=None, metallic=1.0, roughness=0.03, transmission=0.0,
+    description="Silvered mirror glass")
 
 # ---------------------------------------------------------------------------
 # Wheels / axles

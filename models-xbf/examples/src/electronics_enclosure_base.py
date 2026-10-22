@@ -1,5 +1,5 @@
 from __future__ import annotations
-from cadgen.engine import xbf
+from cadgen.engine import materials, xbf
 import build123d as bd
 
 
@@ -67,6 +67,7 @@ def electronics_enclosure_base():
 
     part = enclosure.part
     part.label = "electronics_enclosure_base"
+    part.material = materials("ABS")  # a moulded enclosure, its colour the catalogue's
     return part
 
 

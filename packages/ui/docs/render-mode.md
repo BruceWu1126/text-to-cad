@@ -76,8 +76,13 @@ scene. The shared UI discovers no host APIs.
 The photographic rig stays lazy. Preview's Render creates its photographic
 softbox environment; the other modes use neutral CAD lighting, but for an engine document
 (`.xbf`), whose scene brings its engine's look as its own rig (core's `lib/xbf/xbfLook.js`,
-`lib/viewer/sceneRig.js`): the viewport lights it by that in place of the theme's lights, under
-the look's own tone curve. Authored materials are read-only. Color
+`lib/viewer/sceneRig.js`): the viewport lights it by that in place of the theme's lights, with
+the look's environment and under its own tone curve. Authored finishes show in Solid and Shaded:
+a file's reflect a small neutral environment; an engine document's reflect its look's
+environment, the studio image its engine serves beside the look (`GET /api/look/environment`),
+which lights every surface of the document and which the engine's OCCT stills reflect too, and
+every surface of it answers light as OCCT's PBR program does (core's `lib/viewer/surfaceBrdf.js`,
+the look's `brdf`), not by three's own physical model. X-ray and Parts draw a plain finish. Authored materials are read-only. Color
 overrides are presentation settings, not edits to the model or its material
 assignments.
 

@@ -23,8 +23,8 @@ its own (``<id>~<digest>``): its structure's instances where the mechanism place
 every other route the document's; what the pose names wrong is refused by name (400).
 The structure carries the document's mechanism as ``kinematics`` (``mechanism.block``),
 from which a page poses it itself. ``GET /api/look`` is the look the regular display modes
-draw a document in (``render/look.py``, the OCCT raster's), which a page lights and dresses
-its scene by. ``/`` is a page that shows
+draw a document in (``render/look.py``), which a page lights and dresses its scene by, and
+``GET /api/look/environment`` the image its environment is. ``/`` is a page that shows
 one (``page/``), with three.js served from a ``node_modules`` folder (``--three``, or the
 nearest one above the working directory).
 
@@ -591,6 +591,8 @@ class Server:
                 return self.json(handler, self.listing())
             if parts == ["api", "look"]:
                 return self.json(handler, LOOK.json())
+            if parts == ["api", "look", "environment"]:
+                return self.send(handler, 200, LOOK.environment_path.read_bytes(), "image/vnd.radiance")
             ident, pose = self.poses.get(parts[2], (parts[2], None)) if len(parts) >= 3 else ("", None)
             if parts[:2] == ["api", "doc"] and ident in self.served:
                 if len(parts) == 4 and parts[3] == "version":

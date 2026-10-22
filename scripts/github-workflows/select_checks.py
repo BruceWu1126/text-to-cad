@@ -307,10 +307,12 @@ RULES: tuple[Rule, ...] = (
 
     # Read by the policy contracts alone (light, always) -- or by nothing a test runs: the
     # release scripts and workflows the contracts pin, the plugin manifests, configs and
-    # root prose, the deploy, and the sample models no test may read (the xbf migration
-    # corpus, models-xbf/, too).
+    # root prose, the deploy, the manual bake of the look's environment (its image is
+    # packages/cadgen's), and the sample models no test may read (the xbf migration corpus,
+    # models-xbf/, too).
     Rule((
         "scripts/release/**", "scripts/install/**", "scripts/github-workflows/deploy-vercel-app.sh",
+        "scripts/look/**",
         "scripts/git-hooks/**", "scripts/bench/cadgen-performance/**", "scripts/bench/mesh-scoreboard/**",
         "scripts/bench/README.md", "scripts/bench/*.py", "scripts/README.md",
         ".github/workflows/release-publish.yml", ".github/workflows/release-prepare.yml",

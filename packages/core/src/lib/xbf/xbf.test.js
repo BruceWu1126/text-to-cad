@@ -14,13 +14,15 @@ import { isKitScene } from "../viewer/sceneContract.js";
 import { fetchXbfElementFacts, loadXbfDocument, placeXbfFacts, waitForXbfVersion, xbfDocumentSource } from "./xbfDocument.js";
 import { parseXbfLook, xbfLookRig, xbfLookSurface } from "./xbfLook.js";
 import { XBF_EDGE_CLASS, readXbmPart, xbmTriangleFaceRows, xbmUnmeshedFaces } from "./xbm.js";
-import { XBF_REFLECTION_INTENSITY, createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline,
-  xbfLookParameters } from "./xbfScene.js";
+import { createXbfScene, parseXbfElementId, xbfElementId, xbfFaceEdges, xbfFaceOutline, xbfLookParameters } from "./xbfScene.js";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixtures__", "bracket");
 const STRUCTURE = JSON.parse(fs.readFileSync(path.join(FIXTURE, "structure.json"), "utf8"));
-// The engine's look of the regular modes, as `GET /api/look` serves it (`render/look.py`).
+// The engine's look of the regular modes, as `GET /api/look` serves it (`render/look.py`), and an
+// environment image for it: 1 x 1, radiance 1 (RGBE 255, 255, 255, e 128).
 const ENGINE_LOOK = JSON.parse(fs.readFileSync(path.join(path.dirname(FIXTURE), "look.json"), "utf8"));
+const ENGINE_ENVIRONMENT = new Uint8Array([...new TextEncoder().encode("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n"),
+  255, 255, 255, 128]).buffer;
 const URL_BASE = "http://127.0.0.1:9/api/doc/abc123";
 const [PLATE, PEG] = STRUCTURE.prototypes;
 // What a surface the document gave no finish wears in the regular modes, under the engine's look.
@@ -37,6 +39,7 @@ function engine({ structure = STRUCTURE, parts = {}, version = null } = {}) {
   const fetch = async (url) => {
     asked.push(url);
     if (url === "http://127.0.0.1:9/api/look") return new Response(JSON.stringify(ENGINE_LOOK));
+    if (url === "http://127.0.0.1:9/api/look/environment") return new Response(ENGINE_ENVIRONMENT);
     const rest = url.slice(URL_BASE.length);
     if (rest === "") return new Response(JSON.stringify(structure));
     if (rest.startsWith("/version")) return new Response(JSON.stringify(version || { version: structure.version, patch: null }));
@@ -168,7 +171,7 @@ test("a look's parameters: a colour alone without a material, the material's who
   assert.equal("transmission" in lacquer, false);
 });
 
-test("a document's materials: a physical material per look, worn in Preview; the regular modes draw the engine's plain surface", async () => {
+test("a document's materials: a physical material per look, kept in the shaded looks, the engine's plain one in X-ray and Parts", async () => {
   const structure = structuredClone(STRUCTURE);
   structure.prototypes[0].material = BRUSHED;
   structure.prototypes[0].faceMaterials = { 2: LACQUER };
@@ -187,28 +190,23 @@ test("a document's materials: a physical material per look, worn in Preview; the
   assert.ok(Math.abs(pegOne.material.thickness - Math.min(pegBox.x, pegBox.y, pegBox.z)) < 1e-6, "as thick as the part");
   assert.equal(plate.geometry.getAttribute("tangent")?.itemSize, 4, "an anisotropic look brushes along tangents");
   assert.equal(pegOne.geometry.getAttribute("tangent"), undefined);
-  // Preview: the finish kept, reflecting the environment the host hands the scene (the studio's own
-  // under Render, which hands none), the lacquer's glow too.
-  const studio = new THREE.Texture();
-  scene.setReflection(studio);
-  scene.setSurfaceLook({ ...LOOK, authored: true });
-  let [worn, coat] = plate.material;
-  assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap, worn.envMapIntensity],
-    [1, 0.35, 0.3, studio, XBF_REFLECTION_INTENSITY]);
-  assert.deepEqual([coat.clearcoat, coat.emissiveIntensity], [1, 2]);
-  assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [1, studio]);
-  // Solid, X-ray and Parts: the engine's look draws no finish, as OCCT's Phong draws none: the
-  // look's plain surface over the material's colour, no coat, no glow, nothing reflected.
-  for (const look of [LOOK, { ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
+  // Solid: the finish kept, its colour as authored, reflecting the scene's environment (the rig's).
+  scene.setSurfaceLook(LOOK);
+  let [worn] = plate.material;
+  assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap, worn.envMapIntensity], [1, 0.35, 0.3, null, 1]);
+  assert.equal(worn.color.getHex(), new THREE.Color().setRGB(...PLATE.color.slice(0, 3), THREE.LinearSRGBColorSpace).getHex(),
+    "a part with a material keeps its colour as authored, not raised to the look's power");
+  assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [1, null]);
+  // X-ray and Parts: the engine's look's finish, as any other surface's.
+  for (const look of [{ ...LOOK, surface: { style: "shaded", opacity: 0.22 } },
     { ...LOOK, materialSettings: { ...LOOK.materialSettings, overrideSourceColors: true } }]) {
     scene.setSurfaceLook(look);
-    [worn, coat] = plate.material;
+    [worn] = plate.material;
     assert.deepEqual([worn.metalness, worn.roughness, worn.anisotropy, worn.envMap], [0, PLAIN.roughness, 0, null]);
-    assert.deepEqual([coat.clearcoat, coat.emissiveIntensity], [0, 0]);
     assert.deepEqual([pegOne.material.transmission, pegOne.material.envMap], [0, null]);
   }
-  scene.setSurfaceLook({ ...LOOK, authored: true });
-  assert.equal(plate.material[0].metalness, 1, "and Preview's again");
+  scene.setSurfaceLook(LOOK);
+  assert.equal(plate.material[0].metalness, 1, "and Solid again");
   // Its mass: the mesh volume by the density, the peg's glass too; a part with none says so.
   const one = scene.measureParts(["i0"]);
   assert.ok(Math.abs(one.mass - one.volume * 1e-9 * 2700) < 1e-12);
@@ -218,11 +216,10 @@ test("a document's materials: a physical material per look, worn in Preview; the
   const plain = await loadXbfDocument(URL_BASE, { fetch: engine().fetch });
   const unmade = createXbfScene(THREE, plain);
   assert.deepEqual([unmade.measureParts(["i0", "i1"]).mass, unmade.measureParts(["i0", "i1"]).unweighed], [null, 2]);
-  unmade.setReflection(studio);
   unmade.setSurfaceLook(LOOK);
   const surface = unmade.object3D.children[0].children[0].children.find(child => child.isMesh).material[0];
   assert.deepEqual([surface.envMap, surface.metalness, surface.roughness], [null, 0, PLAIN.roughness],
-    "no material: the engine's look's surface, no reflection");
+    "no material: the engine's look's plain surface");
   unmade.dispose();
   plain.release();
 });
@@ -398,12 +395,14 @@ test("a sibling draws the same geometry with its own objects; versions and facts
 test("the engine's look is read beside the document, once per engine", async () => {
   const first = engine();
   const v1 = await loadXbfDocument(URL_BASE, { fetch: first.fetch });
-  assert.deepEqual(v1.look, parseXbfLook(ENGINE_LOOK));
-  assert.equal(first.asked.filter(url => url.endsWith("/api/look")).length, 1);
+  const { image, ...environment } = v1.look.environment;
+  assert.deepEqual({ ...v1.look, environment }, { ...parseXbfLook(ENGINE_LOOK) });
+  assert.deepEqual([image.width, image.height, ...image.data], [1, 1, 1, 1, 1, 1], "its environment's image, decoded");
+  assert.deepEqual(first.asked.filter(url => url.includes("/api/look")), ["http://127.0.0.1:9/api/look", "http://127.0.0.1:9/api/look/environment"]);
   const second = engine();
   const v2 = await loadXbfDocument(URL_BASE, { fetch: second.fetch, previous: v1 });
   assert.equal(v2.look, v1.look, "a later version keeps the look its engine served");
-  assert.equal(second.asked.some(url => url.endsWith("/api/look")), false);
+  assert.equal(second.asked.some(url => url.includes("/api/look")), false);
   v1.release();
   v2.release();
   const lookless = async url => (url.endsWith("/api/look") ? new Response("{}", { status: 404 }) : engine().fetch(url));
@@ -422,8 +421,8 @@ test("an engine document's scene brings the engine's rig; its regular modes wear
   const [own] = plate.material;
   const squared = PLATE.color.slice(0, 3).map(value => value ** 2);
   own.color.toArray().forEach((value, at) => assert.ok(Math.abs(value - squared[at]) < 1e-6, "the colour, linear, squared"));
-  assert.deepEqual([own.roughness, own.metalness, own.specularIntensity, own.clearcoat, own.envMapIntensity, own.emissiveIntensity],
-    [PLAIN.roughness, 0, PLAIN.specularIntensity, 0, 0, 0], "the Phong highlight's lobe, and no lift");
+  assert.deepEqual([own.roughness, own.metalness, own.clearcoat, own.envMapIntensity, own.emissiveIntensity],
+    [PLAIN.roughness, 0, 0, 1, 0], "the look's plain finish, and no lift");
   const fill = new THREE.Color(LOOK.materialSettings.defaultColor);
   peg.material.color.toArray().forEach((value, at) => assert.ok(Math.abs(value - fill.toArray()[at] ** 2) < 1e-6,
     "an uncoloured part: the fill, squared"));
@@ -431,7 +430,7 @@ test("an engine document's scene brings the engine's rig; its regular modes wear
   scene.setSurfaceLook({ ...LOOK, authored: true });
   const [previewed] = plate.material;
   assert.equal(previewed.color.getHex(), new THREE.Color().setRGB(...PLATE.color.slice(0, 3), THREE.LinearSRGBColorSpace).getHex());
-  assert.deepEqual([previewed.roughness, previewed.specularIntensity, previewed.emissiveIntensity], [0.58, 1, 0.02]);
+  assert.deepEqual([previewed.roughness, previewed.emissiveIntensity], [0.58, 0.02]);
   scene.dispose();
   // A document read without the look (none of the engine's pages): the theme's rig, as before.
   const bare = createXbfScene(THREE, { ...document, look: null });

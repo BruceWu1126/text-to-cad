@@ -27,7 +27,8 @@ The flags are ``cadgen xbf snapshot``'s where it has them, and mean what the vie
   Measure's dimensions painted over the frame in screen space (``overlay.py``).
 - ``--preview``: physically based raster (PBR, an image-based environment, a key light with
   shadows on a floor that runs past the frame, the backdrop the floor's own colour as drawn, so
-  the two meet without an edge); ``--path-trace N``: OCCT's path tracer, N samples.
+  the two meet without an edge), a part with a material in the material the modes draw it in
+  (``finish.py``); ``--path-trace N``: OCCT's path tracer, N samples.
 """
 
 from __future__ import annotations
@@ -203,22 +204,11 @@ class Scene:
     # --- the view ------------------------------------------------------------------------
 
     def _setup_view(self) -> None:
-        from OCP.Graphic3d import Graphic3d_TypeOfShadingModel
-
-        from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
-        from OCP.V3d import V3d_AmbientLight, V3d_DirectionalLight
-        from OCP.gp import gp_Dir
+        from cadgen.engine.render.finish import put_up
 
         view = self.canvas.view
         viewer = self.canvas.viewer
-        white = Quantity_Color(1, 1, 1, Quantity_TOC_RGB)
-        self.lights = [V3d_AmbientLight(white), *(V3d_DirectionalLight(gp_Dir(*light.direction), white) for light in LOOK.lights)]
-        for light, intensity in zip(self.lights, (LOOK.ambient, *(light.radiance for light in LOOK.lights))):
-            light.SetIntensity(intensity)
-            viewer.AddLight(light)
-            viewer.SetLightOn(light)
-        view.SetBackgroundColor(_color(BACKGROUND))
-        view.SetShadingModel(Graphic3d_TypeOfShadingModel.Graphic3d_TypeOfShadingModel_Phong)
+        self.lights = put_up(view, viewer, _color(BACKGROUND))  # the look's PBR rig: its key, its environment
         params = view.ChangeRenderingParams()
         params.NbMsaaSamples = 8
         drawer = self.canvas.context.DefaultDrawer()
@@ -244,8 +234,8 @@ class Scene:
         material.SetColor(color)
         material.SetAmbientColor(color)
         material.SetDiffuseColor(color)
-        material.SetSpecularColor(_color((LOOK.specular,) * 3))
-        material.SetShininess(LOOK.shininess)
+        material.SetSpecularColor(_color((0.08, 0.08, 0.08)))
+        material.SetShininess(0.35)
         pbr = Graphic3d_PBRMaterial()
         pbr.SetColor(Quantity_ColorRGBA(color, 1.0))
         pbr.SetMetallic(0.0)
@@ -263,7 +253,18 @@ class Scene:
         from OCP.Graphic3d import Graphic3d_TypeOfShadingModel
 
         source = AIS_Shape(self.parts[index].faces[group])
-        material, color = self._material(rgba, look)
+        from cadgen.engine.render.finish import face_material, linear
+
+        own = None if isinstance(rgba, str) else self._material_of(index, group)
+        if look == "hidden" or (look == "pbr" and own is None):
+            # Hidden line's faces hide what is behind them whatever their finish (the viewer's are
+            # depth alone), so they are opaque; Preview's surface without a material is its own.
+            material, color = self._material(rgba, look)
+        else:  # the part's material as the look draws it (``finish.py``): in Preview as in the modes
+            if isinstance(rgba, str):  # a fill (Parts) keeps the part's opacity, as the viewer's does
+                part = self.prototypes[index].get("color") or ()
+                rgba = (*linear(rgba), float(part[3]) if len(part) > 3 else 1.0)
+            material, color = face_material(rgba, own, plain=look == "xray")
         source.SetMaterial(material)
         source.SetColor(color)
         aspect = source.Attributes().ShadingAspect().Aspect()
@@ -275,6 +276,15 @@ class Scene:
             source.SetTransparency(1 - LOOK.mode("xray").opacity)
         self.sources[key] = source
         return source
+
+    def _material_of(self, index: int, group: Any) -> Any:
+        """The structure's material for a part's face group: the part's, or a paint's own."""
+        prototype = self.prototypes[index]
+        if group is None:
+            return prototype.get("material")
+        paints = prototype.get("faceMaterials") or {}
+        ordinal = next((key for key, value in (prototype.get("faceColors") or {}).items() if tuple(value) == group), None)
+        return paints.get(ordinal)  # a paint without a material of its own is its colour alone, as the viewer's
 
     def _edges(self, index: int, line: str) -> Any:
         key = ("edges", index, line)

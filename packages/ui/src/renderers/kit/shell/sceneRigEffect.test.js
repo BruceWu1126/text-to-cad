@@ -10,8 +10,9 @@ import { normalizeThemeSettings } from '@text-to-cad/core/common/themeSettings.j
 const traverse = traverseModule.default || traverseModule;
 
 // The viewport's look effect (`ShellViewport.jsx`): a scene that brings its own rig (an engine
-// document's) is lit by it in place of the theme's lights, under its own tone curve; any other scene
-// (a STEP model's) is lit by the theme as ever. Read out of the component and run against real lights.
+// document's) is lit by it in place of the theme's lights, its environment the scene's, under its own
+// tone curve; any other scene (a STEP model's) is lit by the theme as ever. Read out of the component
+// and run against real lights, with a PMREM generator that needs no WebGL.
 function lookEffect() {
   const source = fs.readFileSync(new URL('./ShellViewport.jsx', import.meta.url), 'utf8');
   const ast = parse(source, { sourceType: 'module', plugins: ['jsx'] });
@@ -34,15 +35,25 @@ function lookEffect() {
 
 const THEME_LIGHTS = ['hemisphereLight', 'ambientLight', 'keyLight', 'fillLight', 'rimLight', 'spotLight', 'pointLight'];
 const RIG = Object.freeze({
-  id: 'engine', ambient: { color: '#ffffff', intensity: Math.PI / 2 },
-  lights: [{ name: 'key', towards: [0.29, -0.46, 0.84], color: '#ffffff', intensity: Math.PI }],
-  environment: 0, exposure: 1, toneCurve: 'clamp'
+  id: 'engine', ambient: null,
+  lights: [{ name: 'key', towards: [0.29, -0.46, 0.84], color: '#ffffff', intensity: 4 }],
+  environment: { width: 2, height: 1, data: new Float32Array([1, 1, 1, 1, 2, 2, 2, 1]), intensity: 0.5, rotation: [Math.PI / 2, 0, 0] },
+  exposure: 1, toneCurve: 'clamp'
 });
 
 function stage() {
   const scene = new THREE.Scene();
+  const made = [];
+  class PMREMGenerator {
+    fromEquirectangular() {
+      const target = { texture: new THREE.Texture(), disposed: false, dispose() { this.disposed = true; } };
+      made.push(target);
+      return target;
+    }
+    dispose() {}
+  }
   const runtime = {
-    THREE, scene, stageGroup: new THREE.Group(), hasVisibleModel: false, softwareRendering: false,
+    THREE: { ...THREE, PMREMGenerator }, made, scene, stageGroup: new THREE.Group(), hasVisibleModel: false, softwareRendering: false,
     renderer: { toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1 },
     hemisphereLight: new THREE.HemisphereLight(), ambientLight: new THREE.AmbientLight(), keyLight: new THREE.DirectionalLight(),
     fillLight: new THREE.DirectionalLight(), rimLight: new THREE.DirectionalLight(), spotLight: new THREE.SpotLight(),
@@ -65,7 +76,7 @@ function scopeFor(runtime, sceneRig) {
 
 const rigGroup = runtime => runtime.scene.children.find(child => child.name === 'Scene rig') || null;
 
-test("a scene's own rig lights it in place of the theme's, under its own tone curve", () => {
+test("a scene's own rig lights it in place of the theme's, its environment the scene's, under its own tone curve", () => {
   const run = lookEffect();
   const runtime = stage();
   const theme = normalizeThemeSettings({}).lighting;
@@ -74,17 +85,27 @@ test("a scene's own rig lights it in place of the theme's, under its own tone cu
   assert.equal(runtime.keyLight.castShadow, false);
   const group = rigGroup(runtime);
   assert.ok(group, "the rig's lights are up");
-  assert.deepEqual(group.children.map(light => [light.type, light.intensity]),
-    [['AmbientLight', Math.PI / 2], ['DirectionalLight', Math.PI]]);
+  assert.deepEqual(group.children.map(light => [light.type, light.intensity]), [['DirectionalLight', 4]]);
+  assert.deepEqual([runtime.scene.environment, runtime.scene.environmentIntensity], [runtime.made[0].texture, 0.5],
+    "what every surface reflects, the authored finishes among them");
   assert.equal(runtime.renderer.toneMapping, THREE.CustomToneMapping);
   assert.equal(runtime.renderer.toneMappingExposure, 1);
   assert.match(THREE.ShaderChunk.tonemapping_pars_fragment, /CustomToneMapping\( vec3 color \) \{ return saturate\( toneMappingExposure \* color \); \}/);
-  // Run again for the same scene (a setting changed): one rig, put up afresh.
+  // Run again for the same scene (a setting changed): the rig stays up, its exposure over the theme's.
   run(scopeFor(runtime, RIG));
+  assert.equal(rigGroup(runtime), group);
+  assert.equal(runtime.renderer.toneMappingExposure, 1);
+  // The scene's next version brings a rig of the same look: up in the first's place, on its PMREM.
+  const next = { ...RIG, id: 'engine, again' };
+  run(scopeFor(runtime, next));
   assert.equal(runtime.scene.children.filter(child => child.name === 'Scene rig').length, 1);
-  // A scene that brings none in its place: the theme's lights and the renderer as the theme sets it.
+  assert.equal(runtime.sceneRig.rig, next);
+  assert.deepEqual([runtime.made.length, runtime.made[0].disposed, runtime.scene.environment], [1, false, runtime.made[0].texture]);
+  // A scene that brings none in its place: the theme's lights, no environment of the rig's, and the
+  // renderer as the theme sets it.
   run(scopeFor(runtime, null));
   assert.equal(rigGroup(runtime), null);
+  assert.deepEqual([runtime.made[0].disposed, runtime.scene.environment], [true, null]);
   assert.equal(runtime.renderer.toneMapping, THREE.ACESFilmicToneMapping);
   assert.equal(runtime.renderer.toneMappingExposure, theme.toneMappingExposure);
   assert.deepEqual([runtime.hemisphereLight.visible, runtime.keyLight.visible, runtime.keyLight.castShadow],

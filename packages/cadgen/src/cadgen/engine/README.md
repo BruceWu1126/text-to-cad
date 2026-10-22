@@ -210,18 +210,27 @@ moment the engine has it. Every answer names a loopback page's origin as an allo
 (`access.py`: `localhost`, `127.0.0.1`, `[::1]`, any port); a page from anywhere else gets no
 such header and its browser keeps the answer from it.
 
-**The look.** The regular display modes draw a document as OCCT's raster draws it, one frozen
-record (`render/look.py`) that the OCCT prototype (`render/occt.py`) draws by too: each face's
-colour, linear, squared (OCCT's ASPECT material: the part's colour times itself), lit by an
-ambient 0.5 and two white directional lights at radiance 1 (a key travelling (-0.35, 0.55, -1),
-a fill (0.6, 0.2, -0.3)) with a faint Phong highlight (0.08, exponent 44.8), and no environment,
-exposure or tone curve: the sum is clamped and sRGB-encoded. Edges are unlit in their class's ink,
-1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's are the backdrop's colour. Phong draws
-no material's finish, so the look has none: a metal, a glass, a coat or a glow is drawn in Preview,
-its colour in the regular modes. The engine serves the record as `GET /api/look`; the page reads
-it once per engine, beside the document, and the document's scene brings it as its own lighting
-and surface rule (the bundled `@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's
-viewport and the snapshot page put up in place of the theme's. Preview is drawn as any file's is.
+**The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
+record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in
+`render/finish.py`) draws by too: one white directional key at radiance 4 travelling
+(-0.35, 0.55, -1), and one environment lighting every surface at 0.5, the viewer's neutral studio
+baked as a 512 x 256 Radiance image beside the record (`render/studio.hdr`); no ambient term, fill,
+shadow, exposure or tone curve: the sum is clamped and sRGB-encoded. Every surface answers that
+light as OCCT's PBR program does (the record's `brdf`, `occt`): single scattering, Schlick-GGX
+geometry, the roughness as given, which the viewer draws in place of three's own physical model
+(the bundled `@text-to-cad/core`'s `lib/viewer/surfaceBrdf.js`). A part without a material,
+and every fill (Parts), wears a plain dielectric finish (roughness 0.5) over its colour, linear,
+squared, which keeps the saturated colours of OCCT's old Phong look. A part with a material wears
+its finish in Solid and Shaded on both renderers, its colour as authored, reflecting that
+environment; X-ray draws it in the plain finish. What OCCT's raster has no term for it
+approximates (`render/finish.py`): a clear coat eases the base's roughness toward the coat's,
+anisotropy is dropped, transmission is opacity over the colour tinted by the transmission colour.
+Edges are unlit in their class's ink, 1 px; X-ray's faces are lit at 0.22 opacity, Hidden line's
+are the backdrop's colour. The engine serves the record as `GET /api/look` and its image as
+`GET /api/look/environment`; the page reads both once per engine, beside the document, and the
+document's scene brings them as its own lighting and surface rule (the bundled
+`@text-to-cad/core`'s `lib/xbf/xbfLook.js`), which the viewer's viewport and the snapshot page put
+up in place of the theme's. Preview is drawn as any file's is.
 
 `cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
 daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
@@ -517,9 +526,11 @@ other field in one `TDataStd_NamedData` on the material's label, named as the sc
 the same bytes. The structure serves every field of each part's and each painted face's material;
 a GLB writes the look as glTF's extensions (the volume's thickness the part's, the smallest extent
 of its box; anisotropy along a tangent the mesh carries for it). The viewer draws the look in
-Preview; its regular modes draw the material's colour in the engine's look, which draws no finish
-(**The viewer and the snapshot**). A part's chip card and `cadgen where` weigh it: volume by
-density, summed over an assembly.
+Solid, Shaded and Preview, and a plain finish in X-ray and Parts. In Solid and Shaded a file's
+finishes reflect the studio's neutral environment on those surfaces alone, so a part with no
+material is drawn as ever; an engine document's reflect its look's environment, which lights every
+surface of it, and OCCT's stills draw them the same way (**The look**). A part's chip card and
+`cadgen where` weigh it: volume by density, summed over an assembly.
 
 ## Imports
 
@@ -655,7 +666,8 @@ placement at the values over its placement as built, applied to its instances.
 `POST /api/doc/<id>/pose` (`{"pose": NAME | {joint: value}}`) answers the id of the
 document served at that pose, its `kinematics.pose` the values it stands at.
 `GET /api/look` is the look the regular display modes are drawn in (**The viewer and the
-snapshot**), the same for every document.
+snapshot**), the same for every document; `GET /api/look/environment` is its environment, the
+Radiance image `render/studio.hdr`.
 `GET /api/doc/<id>/version?after=V&wait=S` answers as soon as the version is not
 `V` (or after `S` seconds, at most 60): the page waits on it, so a build's patch
 reaches it at once. The answer carries the patch's timings.
