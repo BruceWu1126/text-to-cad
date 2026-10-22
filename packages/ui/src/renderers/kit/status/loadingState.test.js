@@ -57,7 +57,9 @@ test("a file being imported reads as importing, and a cold open's meshing as mes
     { label: "Importing model", detail: "", counts: "120/256", percent: 47, connectionLost: null });
   // A model script's own build is not an import, nor a read: every phase of it is building,
   // the parts it stores included.
-  for (const [phase, label] of [["generate", "Building geometry"], ["package", "Collecting parts"], ["components", "Storing parts"], ["finalize", "Writing outputs"], ["mesh", "Meshing parts"]]) {
+  for (const [phase, label] of [["generate", "Building geometry"], ["package", "Collecting parts"], ["components", "Storing parts"], ["finalize", "Writing outputs"], ["mesh", "Meshing parts"],
+    // The engine's stages (`progress.PHASES`).
+    ["load", "Loading the script"], ["body", "Building geometry"], ["names", "Naming elements"], ["document", "Making the document"], ["write", "Writing files"]]) {
     assert.equal(loadingProgress({ phase, label }).label, "Building model");
   }
   // "Reading model" is a read; a wait with nothing to say is opening.

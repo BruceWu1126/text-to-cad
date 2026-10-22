@@ -68,6 +68,32 @@ export function failureAlert(fileRef, error, failure, compile = false) {
   };
 }
 
+/**
+ * The file's last build failed (`failed`: the engine's record of it -- the model, its error and the
+ * stage it reached): over a model on screen, the last version that built, the card is no block and
+ * can be put away; the error is said, and held whole in the details. The view updates by itself
+ * when a build succeeds, so there is nothing to retry here.
+ * @param {string} fileRef
+ * @param {{ model?: string, error?: string, progress?: { label?: string, detail?: string } | null }} failed
+ * @param {boolean} hasModel  A version of the file is on screen.
+ */
+export function buildFailedAlert(fileRef, failed, hasModel) {
+  const error = String(failed?.error || "").trim() || "The build returned no diagnostic.";
+  const stage = [failed?.progress?.label, failed?.progress?.detail].filter(Boolean).join(" · ");
+  const details = [`File: ${fileRef}`, failed?.model && `Model: ${failed.model}`, stage && `Stage: ${stage}`,
+    "Operation: building the model", error].filter(Boolean).join("\n");
+  // What was raised, the traceback's last line; the traceback itself is in the details.
+  const raised = error.split("\n").map(line => line.trim()).filter(Boolean).at(-1);
+  return {
+    severity: "error", kind: "build", details, reason: raised,
+    summary: hasModel ? "Update failed" : "Build failed",
+    title: hasModel ? "Couldn’t update the model" : "Couldn’t build the model",
+    message: hasModel ? "The model’s latest build failed. You’re still viewing the previous version." : `“${fileRef}” could not be built.`,
+    recovery: "Correct the error in the model’s source: the view updates when a build succeeds.",
+    ...(hasModel ? { blocking: false } : {})
+  };
+}
+
 /** The file is listed, loading raised nothing, and nothing came out of it. */
 export function noGeometryAlert(fileRef) {
   return {

@@ -219,6 +219,11 @@ class XbfRouteTest(unittest.TestCase):
                 answer = documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25"})
             self.assertEqual(answer, (200, b'{"version":"1-1","patch":null}', "application/json"))
             self.assertEqual(asked.pop(), f"/api/doc/abc/version?after=0-0&wait={expected}")
+        # The build count the page heard goes on to the engine, which answers when the build moves.
+        with mock.patch("cadgen.viewer.xbf._get", engine):
+            documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25", "progress": "3"})
+            documents.relay("/__cad/xbf/api/doc/abc/version", {"after": "0-0", "wait": "25", "progress": "x"})
+        self.assertEqual(asked, ["/api/doc/abc/version?after=0-0&wait=0&progress=3", "/api/doc/abc/version?after=0-0&wait=0"])
 
     def test_the_cad_apps_tunnel_carries_an_engine_document(self) -> None:
         from cadgen.mcp.tunnel import ViewerTunnel

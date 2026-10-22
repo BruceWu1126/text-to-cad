@@ -10,7 +10,7 @@ import RendererShell from "../kit/shell/RendererShell.jsx";
 import { usePreviewState, useRendererShell } from "../kit/shell/useRendererShell.js";
 import { usePreviewScene } from "../kit/shell/usePreviewScene.js";
 import { useViewportLoadStatus } from "../kit/shell/useViewportLoadStatus.js";
-import { noGeometryAlert } from "../kit/status/loadAlerts.js";
+import { buildFailedAlert, noGeometryAlert } from "../kit/status/loadAlerts.js";
 import { useModelTools } from "../kit/tools/model-effects/ModelTools.jsx";
 import { useMotionExclusion } from "../kit/tools/model-effects/motionExclusion.js";
 import { useMeasureSession } from "../kit/tools/measure/useMeasureSession.js";
@@ -86,10 +86,13 @@ function XbfSurface({ view, data }) {
   const source = loaded.document?.source?.url || "";
   // What every later read of the document's engine is made with: the fetch it was read with.
   const engineFetch = loaded.document?.fetch;
+  // A failed build of the file is said over the version on screen, the last that built; the view
+  // updates by itself when one succeeds.
   const loadAlert = useMemo(() => workspaceLoadAlert({
     catalogError: document.catalogError, error: loaded.error, modelKey: document.modelKey, hasScene: Boolean(scene)
-  }) || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
-  [document.catalogError, loaded.error, loaded.empty, document.modelKey, scene]);
+  }) || (loaded.failed ? buildFailedAlert(document.modelKey, loaded.failed, Boolean(scene)) : null)
+    || (loaded.empty ? noGeometryAlert(document.modelKey) : null),
+  [document.catalogError, loaded.error, loaded.failed, loaded.empty, document.modelKey, scene]);
   const tree = useMemo(() => presentXbfTree(scene?.structure || null), [scene?.structure]);
   // The model's two readiness moments, as a STEP's are published (`window.__cadViewerLoad`): its
   // first scene, and the whole of it -- one moment here, every part is in the first scene.
@@ -227,7 +230,10 @@ function XbfSurface({ view, data }) {
   const shell = useRendererShell({
     view, services: document.services, resource: document.resource, modelKey: document.modelKey, revisionKey: loaded.revision,
     features, toolModes: XBF_TOOL_MODES, tool, previewable: true, preview, scene, sceneEffects: true,
-    load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), progress: loaded.progress, alert: loadAlert },
+    // A build writing the file is the model on screen updating, its stage the progress
+    // (`progress.py`'s frame), until it lands or fails.
+    load: { busy: loaded.busy && !scene, updating: loaded.busy && Boolean(scene), editPending: Boolean(loaded.building),
+      progress: loaded.progress || loaded.building, alert: loadAlert },
     live, escape, deleteSelection: measure.removeSelected, preserveInteractionPixelRatio: edgesDrawn, viewState, rendererState,
     // A prompt's annotation is in the scene's coordinates: the document's millimetres.
     annotationUnits: scene?.units?.unit || "mm"

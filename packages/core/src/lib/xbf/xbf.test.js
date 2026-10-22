@@ -470,8 +470,18 @@ test("a sibling draws the same geometry with its own objects; versions and facts
   assert.notEqual(meshOf(sibling, 0), meshOf(scene, 0));
   assert.deepEqual(sibling.hiddenParts(), ["i2"]);
   sibling.dispose();
-  assert.deepEqual(await waitForXbfVersion(URL_BASE, STRUCTURE.version, { fetch, wait: 5 }), { version: "9-9", patch: { seconds: 0.1 } });
+  assert.deepEqual(await waitForXbfVersion(URL_BASE, STRUCTURE.version, { fetch, wait: 5 }),
+    { version: "9-9", patch: { seconds: 0.1 }, building: null, failed: null, progress: null });
   assert.match(asked.at(-1), /\/version\?after=.*&wait=5$/);
+  // A build of the document: its stage while it runs, its error once it fails, and the count to wait past.
+  const frame = { phase: "body", label: "Building geometry", detail: "peg", done: 1, total: 2, determinate: true };
+  const failed = { model: "bracket.py::bracket", error: "ValueError: no peg", progress: frame };
+  for (const build of [{ building: frame, failed: null, progress: 3 }, { building: null, failed, progress: 4 }]) {
+    const building = engine({ version: { version: STRUCTURE.version, patch: null, ...build } });
+    assert.deepEqual(await waitForXbfVersion(URL_BASE, STRUCTURE.version, { fetch: building.fetch, wait: 5, progress: 2 }),
+      { version: STRUCTURE.version, patch: null, ...build });
+    assert.match(building.asked.at(-1), /\/version\?after=.*&wait=5&progress=2$/);
+  }
   assert.deepEqual(await fetchXbfElementFacts(URL_BASE, PLATE.key, "face", 3, { fetch }), { kind: "face", ordinal: 3, area: 12.5 });
   await assert.rejects(fetchXbfElementFacts(URL_BASE, PLATE.key, "solid", 1, { fetch }), /face, an edge or a vertex/);
   scene.dispose();
