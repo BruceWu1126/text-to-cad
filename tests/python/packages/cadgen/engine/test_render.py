@@ -184,15 +184,6 @@ class ContextTest(unittest.TestCase):
         self.assertEqual(found.shape, (120, 200, 3))
 
 
-class SwitchTest(unittest.TestCase):
-    def test_occt_draws_a_document_only_when_asked_until_the_cut_over(self) -> None:
-        from cadgen.engine.snapshot import renderer
-
-        for value, expected in (("occt", "occt"), (" OCCT ", "occt"), ("chromium", "chromium"), ("", "chromium")):
-            with mock.patch.dict(os.environ, {"CADGEN_SNAPSHOT_RENDERER": value}):
-                self.assertEqual(renderer(), expected, value)
-
-
 class StillTest(unittest.TestCase):
     def test_a_still_travels_as_json(self) -> None:
         still = Still({"mode": "xray"}, {"position": [1, 2, 3], "target": [0, 0, 0], "up": [0, 0, 1],
@@ -532,7 +523,7 @@ class DaemonRenderTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-render-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state), "CADGEN_ENGINE_IDLE": "60",
-                    "CADGEN_ENGINE_MESH": "inline", "CADGEN_SNAPSHOT_RENDERER": "occt"}
+                    "CADGEN_ENGINE_MESH": "inline"}
         self.addCleanup(shutil.rmtree, self.folder, ignore_errors=True)
         self.addCleanup(shutil.rmtree, self.state, ignore_errors=True)
         self.addCleanup(self.cli, "stop")

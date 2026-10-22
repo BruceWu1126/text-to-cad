@@ -135,7 +135,7 @@ def hinge():
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
-| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by the CAD Viewer's own scene builder, or a mesh file by its mesh renderers, into a PNG; a script's model drawn from its worker's memory; `CADGEN_SNAPSHOT_RENDERER=occt` draws a document with `render/` |
+| `snapshot.py` | `cadgen xbf snapshot`: a document drawn by OCCT (`render/`), or a mesh file by the CAD Viewer's mesh renderers, into a PNG; a script's model drawn from its worker's memory |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
 | `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
@@ -234,17 +234,15 @@ document's scene brings them as its own lighting and surface rule (the bundled
 up in place of the theme's. Preview is drawn as any file's is.
 
 `cadgen xbf snapshot` draws a document as the viewer does. The engine serves and meshes it (the
-daemon's meshes, or `--no-daemon` a server of this process), and a headless browser opens
-cadgen's snapshot page (the package's built `_runtime/browser`, read as files) with one job for
-the xbf family: the page loads the document from the engine and builds the viewer's own scene
-of it, dressed in the look the viewer resolves for the same display settings. `--display` takes
+daemon's meshes, or `--no-daemon` a server of this process), and OCCT draws it from those meshes
+(`render/`, below), in the look the viewer resolves for the same display settings. `--display` takes
 a mode (`solid`, `shaded`, `parts`, `xray`, `hidden-line`, `wireframe`), `exploded=A` (the parts
 moved apart as the viewer's Explode moves them, by an amount from 0 to 1; with a mode,
 `hidden-line,exploded=0.6`), or the display object (`mode`, `grid`, `appearance`, `camera`,
 `clip`, `exploded`: `{"enabled", "amount"}`, 0.5 unless given); `--json` reports what was drawn
-and each stage's milliseconds (`serveMs`, `meshMs`, `browserMs`, `loadSourceMs`, `buildModelMs`,
-`captureMs`, `totalMs`). `parts` and `exploded` for a document that places one part are refused
-by name before any browser starts. `--annotation FILE` draws the viewer's annotation over the
+and each stage's milliseconds (`serveMs`, `meshMs`, `sceneMs` when a scene is made, `presentMs`,
+`frameMs`, `drawMs`, `renderMs`, `totalMs`). `parts` and `exploded` for a document that places one
+part are refused by name before anything renders. `--annotation FILE` draws the viewer's annotation over the
 model -- each mark on the part it was drawn on, wherever the picture places that part -- from an
 annotation file or the Quick Edit packet that carries one (the `.snapshot.json` the viewer writes),
 and `--measurements FILE` Measure's dimensions (`[{start, end, label, color}]`). A mark names the
@@ -256,9 +254,8 @@ packet given as `--annotation`, else the newest packet beside the annotation fil
 document; with none, it is refused by name. A face the mesher left without triangles is named in a
 warning. Nothing is written but OUT.
 
-**The OCCT stills.** With `CADGEN_SNAPSHOT_RENDERER=occt` (until the cut-over, which makes it the
-only way: `snapshot.renderer` is the switch) a document is drawn by OCCT's own OpenGL renderer from
-the engine's meshes instead of by the page (`render/`): one presentation per part and look, each
+**The OCCT stills.** A document is drawn by OCCT's own OpenGL renderer from the engine's meshes
+(`render/`): one presentation per part and look, each
 instance a connected object of it; the modes, the camera fit, clip, grid and Preview are the
 page's, Explode is the viewer's layout ported to Python (held to the viewer by one golden its own
 scene made), and the annotation's ink and the measurements are drawn over the picture. Through the daemon, a served document a snapshot asks
@@ -275,7 +272,8 @@ process. The context is a hidden window: Cocoa on macOS, an X server's (Xvfb on 
 screen) or OCCT's EGL on Linux, a hidden window on Windows; where none can be made the snapshot
 fails saying so. Nothing is written but OUT.
 
-`SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it, the page reads its
+`SRC` may also be a mesh file (`.glb`, `.stl`, `.3mf`): nothing meshes it; a headless browser opens
+cadgen's snapshot page (the package's built `_runtime/browser`, read as files), which reads its
 bytes and draws them with the mesh renderers the viewer's GLB and mesh tabs call (the bundle's
 `headlessScene.js` families); `--pose` is refused for it, a mesh has no mechanism. `SRC` may be a script's model too
 (`SCRIPT.py::MODEL`, `cadgen.snapshot(model, ...)`, `Model.snapshot`): the model is built in its

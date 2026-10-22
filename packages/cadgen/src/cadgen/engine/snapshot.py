@@ -5,17 +5,16 @@ Viewer draws it. SRC is an ``.xbf`` or a ``.step`` (a document), or a ``.glb``, 
 A document is served by the engine (the daemon, so its meshes are the ones the viewer and
 every build share, or ``--no-daemon`` a server in this process; a model's own document, which
 ``Model.snapshot`` and ``cadgen.snapshot(model, ...)`` draw, from its worker's memory over its one
-mesh cache) and
-meshed there. A mesh file is meshed by nobody: the page reads its bytes and draws them with the
-mesh renderers the viewer's GLB and mesh tabs call (``headlessScene.js``'s mesh families). A headless
-browser opens the snapshot page of cadgen's browser runtime -- ``render.html`` and
-``snapshot-render.js`` in the package's built ``_runtime/browser``, read as files, never
-imported -- and hands it one render job for the ``xbf`` family. The page reads the structure and
-every part buffer from the engine itself and draws them with the scene builder the viewer's xbf
-renderer calls (``@text-to-cad/core`` ``lib/xbf/xbfScene.js``, routed by ``headlessScene.js``),
-dressed in the look the viewer's viewport resolves for the same display settings. So a snapshot
-cannot show a document differently from the viewer: only the camera fit, the size and the PNG
-encoding are its own.
+mesh cache), meshed there, and drawn by OCCT from those meshes (``render/service.py``): through the
+daemon by the served document's render process, warm; with ``--no-daemon``, or a model's document
+in its worker, in that process. The modes, the camera fit, clip, grid and Preview are the viewer's,
+in the look the viewer's viewport resolves for the same display settings. The answer is PNG bytes,
+which this writes to OUT.
+
+A mesh file is meshed by nobody: a headless browser opens the snapshot page of cadgen's browser
+runtime -- ``render.html`` and ``snapshot-render.js`` in the package's built ``_runtime/browser``,
+read as files, never imported -- which reads the file's bytes and draws them with the mesh renderers
+the viewer's GLB and mesh tabs call (``headlessScene.js``'s mesh families).
 
 The request is the snapshot contract's where it applies (``--display`` mode or JSON, ``--grid``,
 ``--camera``, ``--preview``, ``clip``, the sizes, ``--json``), and what an engine document's view
@@ -30,14 +29,9 @@ the view -- its camera, size and projection -- is a job of the packet (``authore
 written but OUT.
 
 ``--pose`` draws the document's mechanism at a configuration (its name) or at joint values (a JSON
-object, the rest as built): the engine serves the document at that pose, each link placed by its
-pairs from the ground, and the page draws what it is served. An unknown configuration or joint, a
-value out of range and a mechanism that is not a tree are refused by name before anything renders.
-
-``CADGEN_SNAPSHOT_RENDERER=occt`` (``renderer``, until the cut-over) draws a document with OCCT
-instead (``render/service.py``): through the daemon, by the served document's render process, warm;
-with ``--no-daemon``, or a model's document in its worker, in that process. The same request
-(``Still``) and the same refusals; the answer is PNG bytes, which this writes to OUT.
+object, the rest as built): each link placed by its pairs from the ground. An unknown configuration
+or joint, a value out of range and a mechanism that is not a tree are refused by name before
+anything renders.
 """
 
 from __future__ import annotations
@@ -405,6 +399,8 @@ def parse_size(width: int | None, height: int | None, profile: str | None) -> tu
 
 
 # --- the engine ----------------------------------------------------------------------------
+# A document served for the snapshot page to read: no picture of the verb's is drawn so; the
+# page-against-OCCT comparisons (``render/compare.py`` and the parity bench) are.
 
 
 def _get_json(url: str, *, method: str = "GET", timeout: float = 600.0) -> Any:
@@ -554,7 +550,7 @@ class Still:
     """What a picture is asked to show, checked: the display (mode, grid, clip, Explode, the
     projection), the camera and whether it is drawn exactly so (``exact``: ``--camera authored``,
     no fit), Preview, the size, the pose, the annotation and the measurements drawn over it. The
-    one request both renderers draw, and what a renderer process is handed (``as_json``)."""
+    request OCCT draws, and what a renderer process is handed (``as_json``)."""
 
     display: dict[str, Any] = field(default_factory=dict)
     camera: Any = None
@@ -710,17 +706,7 @@ def snapshot(document: Path, out: Path, *, display: dict[str, Any] | None = None
         out.parent.mkdir(parents=True, exist_ok=True)
     if suffix in MESH_KINDS:
         return _mesh_file(document, out, still, started)
-    if renderer() == "occt":
-        return _occt(document, out, still, daemon, source, started)
-    return _chromium(document, out, still, daemon, source, started)
-
-
-def renderer() -> str:
-    """TEMPORARY, until the cut-over: which renderer draws a document. ``CADGEN_SNAPSHOT_RENDERER=occt``
-    draws it with OCCT (``_occt``, ``engine/render``); anything else with the snapshot page
-    (``_chromium``). The cut-over deletes this function, the branch on it in ``snapshot`` and
-    ``_chromium``, and calls ``_occt``; the page stays for mesh files (``_mesh_file``)."""
-    return "occt" if os.environ.get("CADGEN_SNAPSHOT_RENDERER", "").strip().lower() == "occt" else "chromium"
+    return _occt(document, out, still, daemon, source, started)
 
 
 def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
@@ -746,49 +732,6 @@ def _occt(document: Path, out: Path, still: Still, daemon: bool, source: Any, st
     write_png(out, data)
     report["timings"]["totalMs"] = round((time.perf_counter() - started) * 1000)
     return {"ok": True, "document": str(document), "output": str(out), **report, "bytes": out.stat().st_size}
-
-
-def _chromium(document: Path, out: Path, still: Still, daemon: bool, source: Any, started: float) -> dict[str, Any]:
-    """A document drawn by the snapshot page: served (and meshed) by the engine, read and drawn by
-    the viewer's own scene builder in a headless browser."""
-    runtime = _runtime()
-    timings: dict[str, Any] = {}
-    clock = time.perf_counter()
-    served = _Served(document, daemon=daemon, source=source)
-    posed = None
-    try:
-        url = served.url
-        if still.pose is not None:
-            url, posed = _posed(served, still.pose)
-        structure = _get_json(url)
-        timings["serveMs"] = round((time.perf_counter() - clock) * 1000)
-        refusals(still, structure, document.name)
-        # Every part meshed by the engine before the page asks, so the page's load is the bytes alone.
-        clock = time.perf_counter()
-        meshed = _get_json(f"{url}/mesh", method="POST")
-        timings["meshMs"] = round((time.perf_counter() - clock) * 1000)
-        unmeshed = _unmeshed(_get_json(url))
-        result, page = _render(_job("xbf", url, document, out, still), runtime, still.size)
-    finally:
-        served.close()
-    timings.update(page)
-    drawn = _png(result, out, timings)
-    timings["totalMs"] = round((time.perf_counter() - started) * 1000)
-    return {"ok": True, "document": str(document), "output": str(out), "width": drawn.get("width"),
-            "height": drawn.get("height"), "camera": drawn.get("camera"), "projection": drawn.get("projection"),
-            "displayMode": still.display.get("mode", "solid"), "preview": still.preview,
-            "parts": len(structure["prototypes"]), "instances": len(structure.get("instances") or []),
-            "unmeshed": unmeshed, "pose": posed, "exploded": exploded_amount(still.display) or None,
-            "renderer": "chromium",
-            # The engine's account of the meshing this snapshot asked for: none where it held every part.
-            "mesh": {key: meshed.get(key) for key in ("parts", "meshed", "seconds", "triangles", "mode")},
-            "bytes": out.stat().st_size, "timings": timings}
-
-
-def _unmeshed(structure: dict[str, Any]) -> dict[str, list[int]]:
-    """The faces the mesher left without triangles, by part, each warned of (``_warn``)."""
-    return _warn({prototype.get("name") or prototype["key"]: prototype["unmeshed"]
-                  for prototype in structure["prototypes"] if prototype.get("unmeshed")})
 
 
 def _warn(unmeshed: dict[str, list[int]]) -> dict[str, list[int]]:

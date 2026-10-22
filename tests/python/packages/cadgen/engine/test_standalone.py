@@ -19,7 +19,7 @@ SRC = ENGINE.parent.parent
 # rasteriser (a dependency of the cadgen wheel already).
 LIBRARIES = {"OCP", "build123d", "numpy", "PIL"}
 # By module, what one imports beyond those: the snapshot page's browser, which snapshot.py drives
-# for a still OCCT does not draw.
+# for a mesh file (a GLB, STL or 3MF), the one picture OCCT does not draw.
 BESIDES = {"snapshot.py": {"playwright"}}
 
 

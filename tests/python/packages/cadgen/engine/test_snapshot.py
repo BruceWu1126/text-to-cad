@@ -1,7 +1,10 @@
-"""`cadgen xbf snapshot`: a document drawn by the viewer's scene builder into a PNG, its
-timings reported, and what an engine document's view does not offer refused by name before
-anything renders, with OUT untouched. A page on this machine may read a served document; a
-page from anywhere else may not."""
+"""`cadgen xbf snapshot`: a document drawn by OCCT (`engine/render`) into a PNG, its timings
+reported, and what an engine document's view does not offer refused by name before anything
+renders, with OUT untouched; a mesh file drawn by the viewer's mesh renderers. A page on this
+machine may read a served document; a page from anywhere else may not.
+
+A test that draws a document makes an OpenGL context and is skipped, saying why, where none can be
+made (`test_render.py` says where that is); the refusals need none."""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from pathlib import Path
 
 from cadgen.engine import build as engine_build
 from cadgen.engine.access import loopback_origin
+from cadgen.engine.render import context
 from cadgen.engine.serve import Server
 from cadgen.engine.snapshot import (SnapshotRefused, authored, parse_annotation, parse_camera, parse_display,
                                     parse_measurements, snapshot)
@@ -45,6 +49,13 @@ def peg():
 """
 
 
+def gl() -> None:
+    """Skip, saying why, where no OpenGL context can be made."""
+    reason = context.available()
+    if reason is not None:
+        raise unittest.SkipTest(f"no OpenGL context: {reason}")
+
+
 class SnapshotTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -70,12 +81,14 @@ class SnapshotTest(unittest.TestCase):
     def test_a_document_is_drawn_into_a_png_with_its_timings(self) -> None:
         from PIL import Image
 
+        gl()
         out = self.folder / "solid.png"
         report = snapshot(self.document, out, display=parse_display("solid", grid=False), camera=parse_camera("iso"),
                           size=(320, 240), daemon=False)
         self.assertEqual((report["width"], report["height"], report["camera"]), (320, 240, "iso"))
-        self.assertEqual((report["parts"], report["instances"], report["unmeshed"]), (2, 3, {}))
-        for stage in ("serveMs", "meshMs", "browserMs", "pageMs", "loadSourceMs", "buildModelMs", "captureMs", "totalMs"):
+        self.assertEqual((report["parts"], report["instances"], report["unmeshed"], report["renderer"]),
+                         (2, 3, {}, "occt"))
+        for stage in ("serveMs", "meshMs", "sceneMs", "presentMs", "frameMs", "drawMs", "renderMs", "totalMs"):
             self.assertIsInstance(report["timings"][stage], int, stage)
         with Image.open(out) as image:
             self.assertEqual(image.size, (320, 240))
@@ -90,6 +103,7 @@ class SnapshotTest(unittest.TestCase):
         self.assertTrue(any(r - b > 60 for r, g, b in drawn))
 
     def test_the_cli_prints_what_it_drew_and_its_timings(self) -> None:
+        gl()
         out = self.folder / "wire.png"
         env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_MESH": "inline"}
         done = subprocess.run([sys.executable, "-m", "cadgen.engine", "snapshot", str(self.document), str(out),
@@ -121,7 +135,7 @@ class SnapshotTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, r"\.png"):
             snapshot(self.document, self.folder / "out.jpg", daemon=False)
         # Parts colours placed parts apart, and Explode moves them apart: a document of one is
-        # refused before the page opens.
+        # refused before anything renders.
         with self.assertRaisesRegex(SnapshotRefused, "parts .* places 1 part"):
             snapshot(self.single, out, display={"mode": "parts"}, daemon=False)
         with self.assertRaisesRegex(SnapshotRefused, "exploded .* peg.xbf places 1 part"):
@@ -192,6 +206,7 @@ class SnapshotTest(unittest.TestCase):
         with self.assertRaisesRegex(SnapshotRefused, "'view 2'"):
             authored("authored", {"marks": [{**mark, "view": "view 2"}]}, str(file), self.document)
         # The verb draws from it: the view's size unless one is asked, over the exploded parts, ink and dimension on.
+        gl()
         out = folder / "annotated.png"
         report = snapshot(self.document, out, display=parse_display("exploded=0.6", grid=False), camera="authored",
                           daemon=False, annotation=annotation, annotation_source=str(file),
@@ -227,6 +242,7 @@ class SnapshotTest(unittest.TestCase):
     def test_a_model_is_drawn_from_its_worker_and_nothing_else_is_written(self) -> None:
         from cadgen.engine import api
 
+        gl()
         folder = Path(tempfile.mkdtemp(prefix="engine-drawn-")).resolve()
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
         script = folder / "stand.py"
@@ -243,6 +259,7 @@ class SnapshotTest(unittest.TestCase):
         from cadgen.engine import api
         from cadgen.engine.kernel import memo
 
+        gl()
         folder = Path(tempfile.mkdtemp(prefix="engine-taken-")).resolve()
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
         script = folder / "stand.py"

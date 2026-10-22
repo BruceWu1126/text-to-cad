@@ -239,6 +239,7 @@ class HingeTest(_Folder):
         self.assertTrue(report["files"][str(self.folder / "XBF/hinge.xbf")]["written"])
 
     def test_a_snapshot_draws_a_pose_and_refuses_a_bad_one_before_it_renders(self) -> None:
+        from cadgen.engine.render import context
         from cadgen.engine.snapshot import SnapshotRefused, snapshot
 
         self.hinge()
@@ -254,6 +255,9 @@ class HingeTest(_Folder):
             with self.assertRaisesRegex(SnapshotRefused, words):
                 snapshot(path, out, pose=pose, size=(160, 120), daemon=False)
         self.assertEqual(out.read_bytes(), b"before")
+        reason = context.available()
+        if reason is not None:
+            self.skipTest(f"the pose is refused; drawing it needs an OpenGL context: {reason}")
         rest = snapshot(path, self.folder / "rest.png", camera="front", size=(160, 120), daemon=False)
         raised = snapshot(path, self.folder / "raised.png", camera="front", size=(160, 120), daemon=False, pose="raised")
         self.assertIsNone(rest["pose"])
