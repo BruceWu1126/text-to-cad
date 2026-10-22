@@ -18,7 +18,8 @@ built tree. The pairs make a mechanism in ISO 10303-105's terms, the kinematics 
 - **Links** are sets of occurrences moving as one rigid body: two parts whose rigid joints
   are connected are one link. The **ground** link is every link no ``connect_to`` moved
   (the joint whose ``connect_to`` was called stays put; the other's part moves), with every
-  part placed by no joint; a part below a jointed sub-assembly moves with it.
+  part placed by no joint; a part below a jointed sub-assembly moves with it, the one
+  holding an inner pair's moving joint (its base) too (``_enclose``).
 - **Pairs** join two links: a revolute joint is a ``REVOLUTE_PAIR``, a linear one a
   ``PRISMATIC_PAIR``, a cylindrical one a ``CYLINDRICAL_PAIR``, a ball a ``SPHERICAL_PAIR``,
   each ``_WITH_RANGE`` where the joint has finite limits. A pair is named by its moving
@@ -659,6 +660,35 @@ def _by_label(jointed: list, used: set[int], tree: Any, warnings: list[str]) -> 
     return found
 
 
+def _enclose(parent: dict, find: Callable[[tuple[int, ...]], tuple[int, ...]], moving_pairs: list) -> None:
+    """A class of joint-holding parts no pair moves, standing below a part of another class in
+    the tree, moves with that class: a sub-assembly mounted on a joint carries every part of
+    it, the one holding an inner pair's moving joint (its base) too, not only those a pair
+    moves. Each such class joins the class of its members' nearest joint-holding ancestor,
+    deepest first, when every member has the same one; a class whose members stand under
+    different ones, or under none, keeps its own place."""
+    while True:
+        moved = {find(moves) for _moving, held_by, _rigid, rigid_by, moves in moving_pairs
+                 if find(held_by) != find(rigid_by)}
+        classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
+        for path in sorted(parent):
+            classes.setdefault(find(path), []).append(path)
+        joined = False
+        for root, members in sorted(classes.items(), key=lambda item: -max(len(path) for path in item[1])):
+            if root in moved:
+                continue
+            enclosing = set()
+            for path in members:
+                ancestor = next((path[:depth] for depth in range(len(path) - 1, -1, -1) if path[:depth] in parent), None)
+                enclosing.add(None if ancestor is None else find(ancestor))
+            if len(enclosing) == 1 and None not in enclosing and root not in enclosing:
+                parent[root] = enclosing.pop()
+                joined = True
+                break
+        if not joined:
+            return
+
+
 def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | None:
     """The mechanism of a model's result (see the module docstring), or None for one with no
     connected joint. ``root_path`` is the result's own occurrence in ``tree`` (``()``, or
@@ -784,6 +814,7 @@ def harvest(result: Any, tree: Any, root_path: tuple[int, ...]) -> Mechanism | N
             warnings.append("the configurations, couplings or motions name joints, and no moving joint is paired")
         return Mechanism(tree.root.name, [], 0, [], {}, {}, warnings) if warnings else None
 
+    _enclose(parent, find, moving_pairs)
     classes: dict[tuple[int, ...], list[tuple[int, ...]]] = {}
     for path in sorted(parent):
         classes.setdefault(find(path), []).append(path)

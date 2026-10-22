@@ -387,6 +387,30 @@ SPARE = """spare = bd.Pos(0, 0, -40) * bd.Box(5, 5, 5)
     more.append(spare)"""
 
 
+MOUNTED = """
+import build123d as bd
+from cadgen.engine import xbf
+
+
+@xbf
+def mounted():
+    base = bd.Box(60, 60, 4)
+    base.label = "base"
+    # A sub-assembly whose plate holds the inner pair's moving joint, its wheel the rigid one,
+    # mounted on the base by a hinge about X at z 10.
+    plate = bd.Pos(0, 0, 10) * bd.Box(30, 30, 2)
+    plate.label = "plate"
+    wheel = bd.Pos(5, 0, 12) * bd.Cylinder(6, 1)
+    wheel.label = "wheel"
+    sub = bd.Compound(children=[plate, wheel], label="sub")
+    spin = bd.RevoluteJoint("spin", plate, axis=bd.Axis((5, 0, 0), (0, 0, 1)), angular_range=(-360, 360))
+    bd.RigidJoint("spin", wheel, spin.location)
+    mount = bd.RevoluteJoint("mount", base, axis=bd.Axis((0, 0, 10), (1, 0, 0)), angular_range=(-180, 180))
+    bd.RigidJoint("mount", sub, mount.location)
+    return bd.Compound(children=[base, sub], label="mounted")
+"""
+
+
 class NestedTest(_Folder):
     def test_joints_in_a_nested_assembly_pair_by_label_and_pose_exactly(self) -> None:
         self.build("nested", NESTED.format(extra="pass"))
@@ -406,6 +430,23 @@ class NestedTest(_Folder):
             code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", pose)
             self.assertEqual(code, 0, err)
             self.assertTrue(_has_point(_vertices(document.Loaded(out), "arm"), _arm_tip(q)), pose)
+
+    def test_a_mounted_sub_assembly_carries_its_inner_pairs_base(self) -> None:
+        # The plate holds the inner pair's moving joint and no pair moves it: it is the
+        # sub-assembly's, so posing the mount carries it (not left on the ground).
+        self.build("mounted", MOUNTED)
+        path = self.folder / "XBF/mounted.xbf"
+        found = document.Loaded(path).mechanism
+        links = {link.name: link.members for link in found.links}
+        self.assertEqual(links, {"base": [(0,)], "sub": [(1,), (1, 0)], "wheel": [(1, 1)]})
+        self.assertEqual({pair.label: pair.links for pair in found.pairs}, {"mount": (0, 1), "spin": (1, 2)})
+        out = self.folder / "posed.step"
+        code, _out, err = _run("export", str(path), str(out), "--no-daemon", "--pose", '{"mount": 90}')
+        self.assertEqual(code, 0, err)
+        plate = _vertices(document.Loaded(out), "plate")
+        # A quarter turn about +X through z 10: the plate's corner (15, 15, 11) stands at (15, -1, 25).
+        self.assertTrue(_has_point(plate, np.array([15.0, -1.0, 25.0])), plate)
+        self.assertFalse(_has_point(plate, np.array([15.0, 15.0, 11.0])), "the plate left where it was built")
 
     def test_a_moving_joint_matching_two_rigid_joints_alike_warns_and_pairs_with_neither(self) -> None:
         # A second rigid `elbow` as near the base's as the arm's: the pair is ambiguous.
