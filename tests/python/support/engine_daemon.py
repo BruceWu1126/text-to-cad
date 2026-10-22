@@ -17,6 +17,7 @@ The message counts the daemons started and says whether the first one ever liste
 
 from __future__ import annotations
 
+import locale
 import os
 import shutil
 import subprocess
@@ -100,7 +101,9 @@ def communicate(process: subprocess.Popen, env: dict[str, str],
 
 
 def _text(data: bytes) -> str:
-    return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    """As ``text=True`` reads a command's output: in the locale's encoding (cp1252 on the Windows
+    runner, where cadgen's ``·`` is 0xB7), with universal newlines."""
+    return data.decode(locale.getpreferredencoding(False), errors="replace").replace("\r\n", "\n")
 
 
 def _state(env: dict[str, str]) -> Path | None:
