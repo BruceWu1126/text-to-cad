@@ -41,7 +41,9 @@ The migration a user makes, and nothing more:
   cadgen's build123d proxy -> `import build123d as bd`.
 - `@step(out="../STEP/x.step", ...)` -> `@xbf(out="../XBF/x.xbf")`, and nothing
   else: the original's `@step`/`@stl`/`@threemf` are dropped (`cadgen xbf export`
-  writes any of them from the xbf). A STEP another model reads is an input,
+  writes any of them from the xbf), unless the project reads the file: juno's
+  link models declare the 3MF its URDF references, and the planetary gear the
+  GLB whose clip the docs hero plays. A STEP another model reads is an input,
   committed beside its source: `examples/STEP/` holds the two that
   `electronics_enclosure_base_import.py` reads. Decorators take `out=` and nothing else.
 - `materials=` finishes -> `Material` values set on the parts
@@ -91,6 +93,8 @@ piece. Nested `@xbf` is never needed for caching.
 | `tom` | tom-cad `main` (7f79c52): 119 files, one model, 6 `@memo` stages and parts (each earns it) | a 619-part arm built from stages, 8 occurrences of Tom rev3's arm extracted once to xbf (`read_xbf`, never the 354 MB STEP) and 11 `read_step` vendor files (139 MB of local, uncommitted inputs: see its `src/README.md`); mates kept as data and authored as build123d joints; materials by finish; many-body retention |
 | `examples` | `l_bracket`, `basic_shape_mating_test_fixture`, `electronics_enclosure_base`, `electronics_enclosure_base_import` | fillets; an assembly placed by joints (`connect_to` moving parts); `read_step` of a part and of an assembly (imported naming), from STEP inputs committed in `examples/STEP/` |
 | `drawings` | `gasket_plate`, `clamp_plate` | `@dxf` drawings of planar documents: a layer per part (`CUT`, an open `ENGRAVE`), and a profile laid out from a solid's top face; byte-for-byte the old emitter's for the gasket |
+| `juno` | one script: the robot and its 28 URDF links, 29 models | 27 revolute joints connected at the athletic stance (absolute angles, the URDF's travel as ranges) and the SRDF's five group states as configurations; each link a model writing the 3MF `juno.urdf` references; one `@memo` stage, `links()`, shared by all 29 (30.8 s cold against 56.2 s without it) |
+| `assemblies` | 23 models in 21 groups | the demo assemblies: `AssemblyHelper` frames as build123d joints, the planetary gear's locked `drive` coupling and `meshCycle` motion (its GLB, the docs hero), the mars rover's 27 joints, 7 couplings and 4 configurations; no `@memo`, no model calling another |
 
 Each model's `src/README.md` says what was ported and what was dropped.
 
