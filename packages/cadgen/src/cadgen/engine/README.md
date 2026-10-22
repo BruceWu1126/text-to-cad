@@ -243,7 +243,8 @@ place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
 previous files stay. Builds run in the daemon's warm workers, at most one per core alive
 (**The daemon and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock.
-`CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
+`CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_VIEWER_WARM=0` keeps `cadgen viewer`
+from warming the engine at its launch (**The viewer and the snapshot**). `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
 processes started with the server, each handed one part's shape as bytes,
 largest first, a large part meshed with the kernel's face parallelism too.
@@ -395,7 +396,8 @@ nothing waits on): the daemon starts, and with it its server, its meshing pool a
 (`Server.warm`), so a page's first document waits on no process start. On a 24-part assembly
 (each part filleted and drilled) the first open of its `.xbf` took 0.14 s warm against 2.4 s cold,
 and of its STEP 0.27 s against 5.8 s (a fresh daemon each, the median of three). A daemon that
-cannot start is the first open's to report.
+cannot start is the first open's to report. `CADGEN_VIEWER_WARM=0` skips the warm (the launcher
+tests set it: each launch otherwise starts an engine, 3-11 s apiece under load).
 
 **The look.** The regular display modes draw a document as OCCT's PBR raster draws it, one frozen
 record (`render/look.py`) that the OCCT prototype (`render/occt.py`, its finishes and light in

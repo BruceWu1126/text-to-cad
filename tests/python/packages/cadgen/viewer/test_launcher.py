@@ -167,6 +167,8 @@ class LauncherFixture(unittest.TestCase):
                 "TEMP": self.home,
                 "TMP": self.home,
                 "CADGEN_STATE_DIR": self.state,
+                # No launch here warms an engine (3-11 s each), but the one that tests it.
+                "CADGEN_VIEWER_WARM": "0",
             }
         )
         env.update(overrides)
@@ -322,7 +324,7 @@ class WarmsTheEngine(LauncherFixture):
                     wait_gone()
         self.addCleanup(stop)
         child = self.launch(["--dist", self.make_dist(), "--port", str(free_port()), "--json"],
-                            CADGEN_ENGINE_DIR=engine, CADGEN_ENGINE_MESH="inline")
+                            CADGEN_ENGINE_DIR=engine, CADGEN_ENGINE_MESH="inline", CADGEN_VIEWER_WARM="1")
         self.wait_for_url_line(child)
         serving, deadline = None, time.monotonic() + 60
         with mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": engine}):
@@ -331,6 +333,13 @@ class WarmsTheEngine(LauncherFixture):
                 time.sleep(0.1)
         self.assertIsNotNone(serving, "the launch warmed no engine")
         self.assertEqual(serving["documents"], [])
+
+    def test_cadgen_viewer_warm_0_skips_the_warm(self) -> None:
+        for value, wanted in ((None, True), ("1", True), ("0", False), (" 0 ", False)):
+            with mock.patch.dict(os.environ, {} if value is None else {"CADGEN_VIEWER_WARM": value}):
+                if value is None:
+                    os.environ.pop("CADGEN_VIEWER_WARM", None)
+                self.assertEqual(main_module._prewarm_wanted(), wanted, value)
 
     def test_an_engine_that_cannot_start_is_the_first_open_s_to_report(self) -> None:
         with mock.patch("cadgen.engine.client.request", side_effect=ConnectionError("no daemon")) as asked:

@@ -433,6 +433,12 @@ class _LateApp:
         response.send_json(503, {"ok": False, "error": "server starting"})
 
 
+def _prewarm_wanted() -> bool:
+    """Whether the launch warms the engine: always, but where ``CADGEN_VIEWER_WARM=0`` says not
+    (an engine switch, never a flag: a test that launches many viewers sets it)."""
+    return os.environ.get("CADGEN_VIEWER_WARM", "").strip() != "0"
+
+
 def _prewarm_engine() -> None:
     """Warm the engine (``{"op": "warm"}``: its daemon started, its server, meshing processes and a
     STEP reader with it). Best-effort: a daemon that cannot start is the first open's to report."""
@@ -764,7 +770,8 @@ def serve(argv: list[str], *, prog: str = DEFAULT_PROG) -> int:
     # nobody waits: a page's first document otherwise pays for every one of them. After the
     # announcement, never before it: the URL line is the readiness signal and waits for nothing.
     # The viewer builds nothing itself; this only warms what serves its documents.
-    threading.Thread(target=_prewarm_engine, name="cadgen-viewer-prewarm", daemon=True).start()
+    if _prewarm_wanted():
+        threading.Thread(target=_prewarm_engine, name="cadgen-viewer-prewarm", daemon=True).start()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
