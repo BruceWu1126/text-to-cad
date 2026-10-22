@@ -110,10 +110,19 @@ rigid mount would close a loop through the shock and weld the engine to the
 frame, so `engine_pivot` could not move. The old kinematics left the shock
 unmated for the same reason; it stays put while the engine swings.
 
+The old `KINEMATICS` presets are configurations on these joints, by the joint that
+carries each old mate now (`steering` is `head_tube_axis`, `engine_swing`
+`engine_pivot`, `center_stand_pivot` `stand_bracket`; same axes and senses):
+
+| Configuration | Joint values |
+|---------------|--------------|
+| `stand_down`  | `stand_bracket` -76.2 deg (the foot on the floor) |
+| `turned_left` | `head_tube_axis` 32 deg |
+| `bump`        | `engine_pivot` 12 deg |
+
+`ride`, which set no joint, is the bike as built, so it is no configuration.
+
 One motion is in the model's code: `steer`, `head_tube_axis` swept from -20 to
 20 degrees over 2 s and back (`motion(bike, "steer", sweep=..., duration=2,
 loop="pingpong")`). The xbf keeps it as a definition; `cadgen export
 ../XBF/motorbike.xbf bike.glb` bakes it into a glTF clip named `steer`.
-
-Not ported: the old `KINEMATICS` presets (`ride`, `turned_left`, `stand_down`,
-`bump`); each would be a `configuration(...)` in the body.
