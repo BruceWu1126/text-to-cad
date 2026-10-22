@@ -465,6 +465,7 @@ class SdfArticulation(_Workspace):
         self.assertEqual(visuals["ball:v1"]["label"], "sphere")
         links = {link["name"]: link for link in self.payload["links"]}
         self.assertEqual(links["ball"]["collisions"][0]["type"], "plane", "an undrawn collision is described, never refused")
+        self.assertEqual(self.payload["sdf"]["unsupportedCollisionCount"], 1, "and counted")
         self.assertEqual(self.payload["sdf"]["documentKind"], "world")
         self.assertEqual((self.payload["sdf"]["worldName"], self.payload["sdf"]["modelName"], self.payload["sdf"]["rootLink"]), ("lab", "swing", "base"))
         self.assertEqual((self.payload["sdf"]["linkCount"], self.payload["sdf"]["jointCount"], self.payload["sdf"]["frameCount"]), (3, 2, 1))

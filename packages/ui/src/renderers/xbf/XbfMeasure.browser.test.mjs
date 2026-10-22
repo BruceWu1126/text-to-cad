@@ -4,7 +4,8 @@ import { serveXbfHarness } from '../harness/xbfScenario.mjs';
 
 // An engine document's Measure and Look at under real pointers, over core's bracket (a 40 x 20 x 4
 // plate on z = -2..2, a Ø6 peg 12 tall standing at x = 12): two presses take two faces whole and
-// read what they make; a double-click on a face turns the view square to it and picks nothing.
+// read what they make, a step Undo takes back; a double-click on a face turns the view square to it
+// and picks nothing.
 
 const unit = v => { const length = Math.hypot(...v); return v.map(c => c / length); };
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -39,6 +40,11 @@ test('Measure takes two faces whole and reads them square across; a double-click
     await page.mouse.click(at.x, at.y);
   }
   const row = pane.locator('[data-measurements]');
+  await row.getByText('⟂ 12.00 mm').waitFor();
+  // Taking it was a step of the view's history, as ink is: ⌘Z takes it away, ⇧⌘Z brings it back.
+  await page.keyboard.press('ControlOrMeta+KeyZ');
+  await row.waitFor({ state: 'detached' });
+  await page.keyboard.press('ControlOrMeta+Shift+KeyZ');
   await row.getByText('⟂ 12.00 mm').waitFor();
 
   // Select picking Faces (in an assembly, All takes a part whose row is shut whole); from up and off

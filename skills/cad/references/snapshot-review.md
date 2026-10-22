@@ -121,11 +121,14 @@ absolute path of a `.snapshot.json`. Save inline JSON to a temporary
 - `input`: the absolute path of the file the person looked at;
 - `jobs`: one per view they captured (the current view and each view they drew
   in), each with the view's `camera`, its `display` and an output `label`; a posed
-  document's or a robot's carries its pose as `jointValues`;
+  document's or a robot's carries its pose as `jointValues`. A document's display
+  names the parts that view hid and isolated, as `hidden` and `isolated` refs;
 - `annotation`: their ink, when they drew any. Each mark is in model coordinates,
   on the part it was drawn on, and its `touches` lists what it was drawn over, most
   first: faces and edges as refs where the viewer could name them, each with its
   part. Read those to know what a mark is about;
+- `hidden` and `isolated`: with ink, the parts the view it was last drawn in hid
+  and isolated, which `--annotation` leaves out of the picture;
 - `measurements`: Measure's dimensions, when they took any.
 
 Draw the view a person drew their ink in, with the ink on the model:
@@ -138,7 +141,8 @@ cadgen snapshot XBF/bracket.xbf tmp/quick_edit.png --annotation tmp/bracket.snap
 picture places that part (posed or exploded); it takes the packet or an annotation
 file. `--camera authored` draws exactly the view the last mark was drawn in (no fit),
 at its size and projection unless other flags say otherwise. Pass the job's
-`display` object as `--display` to draw in the person's mode, a job's
+`display` object as `--display` to draw in the person's mode with the parts they
+hid left out, a job's
 `jointValues` as `--pose`, and the packet's `measurements` list (as a file, or inline
 JSON) as `--measurements` to draw the dimensions. A view without ink is drawn from
 its `camera`, given as `--camera '<its JSON>'`.

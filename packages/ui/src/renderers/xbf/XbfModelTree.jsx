@@ -164,9 +164,12 @@ function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedI
   const visibleRoots=implicitRoots.length ? implicitRoots.at(-1).children : tree;
   const availability=useMemo(()=>availabilityOf(partControls.hiddenPartIds,partControls.selectableNodeIds),[partControls.hiddenPartIds,partControls.selectableNodeIds]);
   const implicitOwner=useMemo(()=>implicitRoots.reduce((owner,node)=>nodeAvailability(node,availability,owner.hiddenByOwner,owner.outsideFrontier),{hiddenByOwner:false,outsideFrontier:false}),[implicitRoots,availability]);
+  // The host's open rows: an assembly by its selection id, a folded group (which selects nothing) by
+  // its row's own id, so the file's view keeps a group's expansion with the rest of the tree.
   const expanded=useMemo(()=>lockedExpansion
     ? new Set([...lockedExpansion,...implicitRoots.map(node=>node.id)])
-    : new Set([...localExpanded,...implicitRoots.map(node=>node.id),...(partControls.expandedTreeNodeIds || EMPTY).map(id=>`model:${id}`)]),
+    : new Set([...localExpanded,...implicitRoots.map(node=>node.id),
+      ...(partControls.expandedTreeNodeIds || EMPTY).map(id=>(String(id).startsWith('model:') ? id : `model:${id}`))]),
   [lockedExpansion,localExpanded,implicitRoots,partControls.expandedTreeNodeIds]);
   // An implicit root (an assembly that is the tree's one choice) is open in the host as well, so
   // viewport picking reaches what the tree shows under it.
@@ -232,7 +235,7 @@ function XbfModelTree({ tree: presented, active, disabled, mode='all', selectedI
   },[]);
   const toggle=useCallback(node=>{
     const {partControls}=latest.current;
-    if(node.selectionId && partControls.onToggleTreeNode){partControls.onToggleTreeNode(node.selectionId);return;}
+    if(partControls.onToggleTreeNode){partControls.onToggleTreeNode(node.selectionId || node.id);return;}
     setLocalExpanded(current=>{const next=new Set(current);if(next.has(node.id))next.delete(node.id);else next.add(node.id);return next;});
   },[]);
   const selectedNodeIds=useMemo(()=>selectedIds.filter(id=>!String(id).includes('/')),[selectedIds]);

@@ -15,7 +15,7 @@ import threading
 import unittest
 from pathlib import Path
 
-from cadgen.engine.snapshot import _view_of, parse_annotation, parse_measurements
+from cadgen.engine.snapshot import _view_of, packet_visibility, parse_annotation, parse_measurements
 from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app
 from cadgen.viewer.prompt_files import PromptFiles
@@ -81,6 +81,27 @@ class PromptFilesRouteTest(unittest.TestCase):
         ]})
         status, _, content_type = self.call("GET", "/__cad/prompt-files/part-1.snapshot.json")
         self.assertEqual((status, content_type), (200, "application/json; charset=utf-8"))
+
+    def test_the_parts_hidden_where_the_ink_was_drawn_are_the_packets_and_each_views_own(self) -> None:
+        """Each view's display says what it hid and isolated (part refs, as ``--display`` takes them);
+        the packet's own are the view the last mark was drawn in, which ``--annotation`` reads."""
+        ink = {"units": "mm", "parts": {}, "marks": [{**ANNOTATION["marks"][0], "points": [0, 0, 0, 1, 1, 1], "view": "view 2"}]}
+        plain = {"mode": "solid", "grid": False}
+        hid = {**plain, "hidden": ["/w/kit.xbf#lid"], "isolated": ["/w/kit.xbf#hand"]}
+
+        def packet(annotation, *displays):
+            views = [{"label": f"view {at + 1}", "camera": CAMERA, "display": display} for at, display in enumerate(displays)]
+            status, body, _ = self.call("POST", "/__cad/prompt-files", self.request(annotation=annotation, views=views))
+            self.assertEqual(status, 200, body)
+            answer = json.loads(body)
+            return json.loads(answer["inline"] if "inline" in answer else Path(answer["snapshot"]).read_text(encoding="utf-8"))
+
+        drawn = packet(ink, plain, hid)
+        self.assertEqual([job["display"] for job in drawn["jobs"]], [plain, hid])
+        self.assertEqual((drawn["hidden"], packet_visibility(drawn)), (hid["hidden"], {"hidden": hid["hidden"], "isolated": hid["isolated"]}))
+        # Ink drawn where nothing was hidden leaves the packet nothing to hide; no ink, nothing at all.
+        self.assertEqual(packet_visibility(packet(ink, hid, plain)), {})
+        self.assertNotIn("hidden", packet(None, plain, hid))
 
     def test_a_prompts_measurements_are_drawn_over_every_view_its_job_renders(self) -> None:
         mark = {"start": [0, 0, 0], "end": [10, 0, 0], "label": "10.00 mm", "color": "#d59090"}
@@ -172,6 +193,7 @@ class PromptFilesRouteTest(unittest.TestCase):
             # snapshot's own parsers: a camera key it does not take, a display it does not draw
             (self.request(views=[{"label": "a", "camera": {"projection": "perspective"}}]), "camera has no projection"),
             (self.request(views=[{"label": "a", "camera": "iso", "display": {"mode": "sketch"}}]), "no display mode"),
+            (self.request(views=[{"label": "a", "camera": "iso", "display": {"hidden": "lid"}}]), "display.hidden is a list of part refs"),
             (self.request(views=[{"label": "a", "camera": "authored"}]), "the view's own camera"),
             (self.request(measurements={}), "measurements is null or a list"),
             # a measurement snapshot would not draw: its own check

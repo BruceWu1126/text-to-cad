@@ -57,6 +57,9 @@ export async function serveXbfHarness(t) {
     if (server) await new Promise(resolve => server.close(resolve));
   });
   const { bundle, bundledCss } = await harnessBundle();
+  // The document as it is served now: its version moves with each `update` of an open page.
+  let served = { version: VERSION, structure: STRUCTURE };
+  let updates = 0;
   const css = await readFile(new URL('../../../dist/styles.css', import.meta.url));
   const json = (response, body) => { response.setHeader('Content-Type', 'application/json'); response.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)); };
   const binary = (response, bytes) => { response.setHeader('Content-Type', 'application/octet-stream'); response.end(bytes); };
@@ -81,9 +84,9 @@ export async function serveXbfHarness(t) {
       const rest = path.slice(relayed);
       if (rest === '/__cad/xbf/api/look') { json(response, LOOK); return; }
       if (rest === '/__cad/xbf/api/look/environment') { binary(response, ENVIRONMENT); return; }
-      if (rest === DOC) { json(response, STRUCTURE); return; }
+      if (rest === DOC) { json(response, served.structure); return; }
       // The engine answers a version wait at once with the version it holds: the page paces its next ask.
-      if (rest === `${DOC}/version`) { json(response, { version: VERSION, patch: null }); return; }
+      if (rest === `${DOC}/version`) { json(response, { version: served.version, patch: null }); return; }
       const part = /^\/part\/([0-9a-f]+)$/.exec(rest.slice(DOC.length));
       if (part) {
         try { binary(response, readFileSync(join(FIXTURES, 'bracket', `${part[1]}.xbm`))); } catch { notFound(response); }
@@ -103,7 +106,11 @@ export async function serveXbfHarness(t) {
   browser = await chromium.launch({ headless: true, args: (process.platform === 'darwin' && process.env.CAD_TEST_SWIFTSHADER !== '1')
     ? ['--use-angle=metal'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 
-  /** One page over the bracket. `deviceScaleFactor: 1` keeps a screenshot's pixels the viewport's. */
+  /**
+   * One page over the bracket. `deviceScaleFactor: 1` keeps a screenshot's pixels the viewport's.
+   * Its `update()` serves a new version of the document, as a build that changed none of its parts
+   * writes one, and settles once the page shows it.
+   */
   const open = async ({ timeout = 30000 } = {}) => {
     const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
     t.after(() => page.close().catch(() => {}));
@@ -113,7 +120,14 @@ export async function serveXbfHarness(t) {
     // No Worker: what a worker would build is built on the main thread, as for a host without one.
     await page.addInitScript(() => { window.Worker = undefined; });
     await page.goto(`http://127.0.0.1:${server.address().port}/?file=${FILE}`);
-    return { page, errors, pane: page.getByTestId('one') };
+    const update = async () => {
+      const next = JSON.parse(STRUCTURE);
+      next.version = `${VERSION}-${(updates += 1)}`;
+      served = { version: next.version, structure: Buffer.from(JSON.stringify(next)) };
+      // The page hears it on its next wait (about a second), reads it and puts it on screen.
+      await page.waitForFunction(version => window.__cadViewerLoad?.complete && window.__cadViewerLoad.modelKey.endsWith(`:${version}`), next.version);
+    };
+    return { page, errors, pane: page.getByTestId('one'), update };
   };
   return { open };
 }

@@ -710,7 +710,9 @@ test('an SDF is the same robot with a section of its own; a snapshot depicts the
   await robot.openSection('SDF');
   assert.equal(await robot.linksPanel().isVisible(), false, 'one section at a time');
   const text = (await robot.section('SDF').innerText()).replace(/\s+/g, ' ');
-  for (const fact of ['Version 1.9', 'Document world', 'World lab', 'Root link base', 'Model swing', 'Links 2', 'Joints 1', 'Lights 1', 'sun / directional']) assert.ok(text.includes(fact), `${fact} in: ${text}`);
+  // The ground plane under the base is a collision the viewer cannot draw: counted, never refused.
+  for (const fact of ['Version 1.9', 'Document world', 'World lab', 'Root link base', 'Model swing', 'Links 2', 'Joints 1', 'Lights 1',
+    'Unsupported geom. 1', 'sun / directional']) assert.ok(text.includes(fact), `${fact} in: ${text}`);
   // Its joint frame and its child link frame differ (the child sits at an offset): the knob still drives it.
   await robot.type('hinge', 40);
   const links = await robot.links();

@@ -186,14 +186,22 @@ export async function loadXbfDocument(source, { previous = null, fetch: fetchImp
 /**
  * Wait on the engine for a version of the document other than `after`: the engine answers at
  * once when it has one, else when a build's patch lands, else after `wait` seconds with the
- * same version.
- * @returns {Promise<{ version: string, patch: object | null }>}
+ * same version. Given `progress` (the count of the document's build last heard), it answers too
+ * when that count moves: a build writing the document reports its stage, or fails.
+ * @returns {Promise<{ version: string, patch: object | null, building: object | null,
+ *   failed: { model?: string, error?: string, progress?: object | null } | null, progress: number | null }>}
+ *   `building`: the last progress frame of the build writing the document now (`progress.py`'s);
+ *   `failed`: the last build of it that failed, until one succeeds or another begins; `progress`:
+ *   the count to wait past next.
  */
-export async function waitForXbfVersion(source, after, { wait = XBF_VERSION_WAIT_SECONDS, fetch: fetchImpl = globalThis.fetch, signal } = {}) {
+export async function waitForXbfVersion(source, after, { wait = XBF_VERSION_WAIT_SECONDS, progress = null, fetch: fetchImpl = globalThis.fetch, signal } = {}) {
   const where = xbfDocumentSource(source);
-  const query = `after=${encodeURIComponent(after || "")}&wait=${encodeURIComponent(wait)}`;
+  const counted = Number.isInteger(progress) && progress >= 0 ? `&progress=${progress}` : "";
+  const query = `after=${encodeURIComponent(after || "")}&wait=${encodeURIComponent(wait)}${counted}`;
   const answer = await getJson(fetchImpl, `${where.url}/version?${query}`, "the document's version", signal);
-  return { version: String(answer?.version || ""), patch: answer?.patch || null };
+  const record = value => (value && typeof value === "object" && !Array.isArray(value) ? value : null);
+  return { version: String(answer?.version || ""), patch: answer?.patch || null, building: record(answer?.building),
+    failed: record(answer?.failed), progress: Number.isInteger(answer?.progress) ? answer.progress : null };
 }
 
 const placePoint = (m, p) => [0, 1, 2].map(row => m[row] * p[0] + m[4 + row] * p[1] + m[8 + row] * p[2] + m[12 + row]);

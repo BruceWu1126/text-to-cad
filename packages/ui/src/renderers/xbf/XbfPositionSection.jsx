@@ -124,7 +124,13 @@ export function useXbfPose(kinematics) {
   }, [kinematics, key, couplings]);
   const choosePreset = useCallback(name => setPose({ key, preset: name, given: null, couplings: null }), [key]);
   const reset = useCallback(() => setPose({ key, preset: DEFAULT_POSE_VALUE, given: null, couplings: null }), [key]);
-  return { values, asBuilt, applied, preset, couplings, setValues, choosePreset, reset };
+  // What the pose was made of, as the file's view keeps it (`xbfViewSlices.js`): the Pose row's choice,
+  // the values set by hand and the couplings' sliders; and the same handed back, for this mechanism.
+  const saved = useMemo(() => ({ preset: current.preset, given: current.given, couplings: current.couplings }),
+    [current.preset, current.given, current.couplings]);
+  const restore = useCallback(stored => setPose({ key, preset: stored?.preset || DEFAULT_POSE_VALUE,
+    given: stored?.given || null, couplings: stored?.couplings || null }), [key]);
+  return { values, asBuilt, applied, preset, couplings, setValues, choosePreset, reset, saved, restore };
 }
 
 /**

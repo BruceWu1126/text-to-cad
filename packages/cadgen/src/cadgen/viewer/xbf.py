@@ -215,6 +215,11 @@ class EngineDocuments:
             except ValueError:
                 wait = 0.0
             target = f"{rest}?after={quote(query.get('after') or '', safe='')}&wait={wait:g}"
+            # The count of the document's build the page last heard, so a build's progress, or its
+            # failure, answers the wait as a new version does.
+            progress = str(query.get("progress") or "")
+            if progress.isdigit():
+                target += f"&progress={progress}"
             timeout = wait + 60.0
         found = _DOC.match(rest)
         ident = found.group(1) if found else ""
