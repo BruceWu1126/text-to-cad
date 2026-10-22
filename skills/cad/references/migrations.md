@@ -1,255 +1,168 @@
 # Migrations
 
-Read this file when source, command syntax or sidecars target a different
-cadgen version. `cadgen doctor <skill-dir>` compares the installed version with
-the skill's pin. cadgen cuts interfaces over with no compatibility layer: a
-retired command, flag, argument, key or import is gone, and fails the way an
-unknown one does (an unknown command, an unrecognized argument, an unknown key,
-an `ImportError`) without naming what replaced it. The sections below map old
-forms to current ones.
+Read this file when source or commands written for an older cadgen fail.
+`cadgen doctor <skill-dir>` compares the installed version with the skill's pin.
+cadgen cuts interfaces over with no compatibility layer: a retired command, flag,
+argument, key or import is gone, and fails the way an unknown one does (an unknown
+command, an unrecognized argument, an unknown key, an `ImportError`) without naming
+what replaced it. The sections below map old forms to current ones.
 
-## Migration messages
+## Models build into documents in 0.8
 
-A build, snapshot or check names one migration itself: a sidecar refused for
-its schema version. Source or commands written for an older cadgen fail with the
-current contract's ordinary errors instead; compare them with the sections
-below. The CAD Viewer does not flag a model whose sidecar is refused: until it is
-migrated it shows as a plain part, without its kinematics, materials or
-animation.
-
-- A refused sidecar (`unsupported sidecar schema N (expected M)`) is replaced by
-  rerunning the model's script (`python <model>.py`). An imported STEP with no
-  script is re-annotated with `cadgen step build`; clips need a model script.
-  Editing `schemaVersion` by hand does not migrate the content.
-- A migrated sidecar declares the current schema and the document's hash, the
-  build prints no migration warning, a `cadgen step snapshot --kinematics …`
-  pose differs from rest, and the Viewer shows the Position tool (and, for a
-  model with clips, the Animation tool).
-- Rebuilding or re-annotating a document replaces outputs an older cadgen wrote.
-
-## Sidecar schema 10: animation is Python clips
-
-A schema-10 sidecar carries animation as keyframes the build samples from
-Python clips. A schema-9 sidecar is refused, and `@step(animation=...)` refuses
-a JavaScript module string (`@step animation= must be a dict of clip id ->
-cadgen.clip(update, duration=...), got str`). Port each clip in the module's
-`export const clips` to a Python function:
+cadgen 0.8 builds models with its engine: a model's result is an `.xbf` document,
+and STEP, GLB, STL and 3MF are translations of it. A model written for 0.7 with no
+decorator options still builds, writing its STEP and no document. Port it so it has
+one:
 
 ```python
-# Before: a JavaScript module in a string
-ANIMATION = r"""
-export const clips = {
-  demo: {
-    label: "Demo",
-    duration: 8,
-    loop: false,
-    update(t, m) {
-      const angle = 60 * (1 - Math.cos(2 * Math.PI * t / 8));
-      m.get("forearm").rotate([0, 0, 1], angle, [0, 0, 0]);
-      m.get("#o1.3,#o1.4").opacity(0.5);
-    },
-  },
-};
-"""
+# Before
+from cadgen import build123d as bd
+from cadgen import step
+
+
+@step(out="../STEP/bracket.step")
+def bracket():
+    ...
+
+
+if __name__ == "__main__":
+    bracket()
 ```
 
 ```python
-# After: Python clips
-import math
+# After
+from cadgen.engine import step, xbf   # the engine first
+import build123d as bd
 
-import cadgen
 
+@xbf(out="../XBF/bracket.xbf")
+@step(out="../STEP/bracket.step")     # keep it only if something reads the STEP
+def bracket():
+    ...
+```
 
+The document is what the viewer follows build by build, what refs and
+`cadgen where` read, and the model's cache across a daemon restart. The
+`__main__` block is no longer needed: running the script builds every model it
+defines.
+
+| 0.7 | 0.8 |
+| --- | --- |
+| `@step(out=..., kinematics=..., materials=..., animation=...)` | `@step(out=...)`: `out` is every decorator's only argument; the rest is written in the body (below) |
+| `@stl(mesh_tolerance=..., mesh_angular_tolerance=...)`, `--mesh-tolerance` | none: every mesh is made at FreeCAD's default tolerance |
+| `python model.py --force`, `--json`, `--verbose`, `--profile` | `python model.py` takes no options. `CADGEN_ENGINE_MEMO=0` builds without memo hits; `Model.build()` returns the report as data; `Model.build(verify=True)` checks every replay |
+| `python model.py --no-daemon` | `Model.build(daemon=False)` from Python |
+| `cadgen step build IN.step OUT.step` | `cadgen export IN.step OUT.step`, or `OUT.xbf` to read it in models |
+| `cadgen step compile` | none: the viewer and snapshots read a STEP as it is |
+| `cadgen stl build`, `cadgen 3mf build`, `cadgen glb build` | `cadgen export XBF/model.xbf OUT.stl` (`.3mf`, `.glb`), or from a STEP |
+| `cadgen glb build --animation CLIP` | every GLB carries every motion of its model |
+| `cadgen step snapshot`, `cadgen stl snapshot`, `cadgen 3mf snapshot`, `cadgen glb snapshot` | `cadgen snapshot SRC OUT.png`, one command for every kind |
+| `cadgen snapshot --job FILE` | `cadgen snapshot DOC OUT.png --annotation FILE --camera authored`, a view per command |
+| snapshot `--kinematics` | `--pose` |
+| snapshot `--animation`, `--time`, `--video` | none: export a GLB and play its clips |
+| snapshot `--mode list`, `--focus`, `--hide` | none: list parts with `read_xbf(path).leaves`, and pick them with `select` |
+| `cadgen store why`, `store where`, `store forget`, `store gc`, `store info` | none: no store. `cadgen where DOC` prints a document's build closure, `cadgen where DOC REF` what made an element |
+| `cadgen daemon status` | `cadgen status` (and `cadgen stop`) |
+| `CADGEN_CACHE_DIR`, `CADGEN_STORE_MAX`, `CADGEN_DAEMON_STATE_DIR` | none; `CADGEN_ENGINE_DIR` moves the engine daemon's socket |
+| `read_scene(path).resolve(ref).shape()` | `select(path, ref)[0]` |
+| `cadgen.revolute`, `slider`, `cylindrical`, `fastened`, `MateTarget`, `AssemblyHelper` | build123d joints in the body |
+| `cadgen.couple(name, {dof: ratio}, limits=...)` | `couple(assembly, name, range=..., **ratios)` |
+| `cadgen.clip(update, duration=...)` | `motion(assembly, name, ...)` |
+| `from cadgen import report, track` | `from cadgen.engine import report, track` |
+| `<name>.step.json` sidecars, `.params.js` | none: the document carries the mechanism; delete them |
+
+An older cadgen's cache is no longer read: `CADGEN_CACHE_DIR`, else
+`~/.cache/cadgen` (`$XDG_CACHE_HOME/cadgen`, `%LOCALAPPDATA%\cadgen` on Windows).
+Delete it to reclaim its space.
+
+## Mates become build123d joints
+
+```python
+# Before
+KINEMATICS = {
+    "mates": [cadgen.revolute("elbow", parent="#upper_arm", child="#forearm",
+                              origin=(80, 0, 0), direction=(0, 0, 1), limits=(0, 150))],
+    "couplings": [cadgen.couple("curl", {"elbow": 1}, limits=(0, 90))],
+    "poses": {"bent": {"elbow": 60}},
+}
+
+@step(out="../STEP/arm.step", kinematics=KINEMATICS)
+def arm():
+    ...
+    return bd.Compound(children=[upper_arm, forearm], label="arm")
+```
+
+```python
+# After
+ELBOW = bd.Axis((80, 0, 0), (0, 0, 1))
+
+@xbf(out="../XBF/arm.xbf")
+def arm():
+    ...
+    bd.RevoluteJoint("elbow", upper_arm, axis=ELBOW, angular_range=(0, 150))
+    bd.RigidJoint("elbow", forearm, bd.Plane(origin=ELBOW.position, z_dir=ELBOW.direction).location)
+    upper_arm.joints["elbow"].connect_to(forearm.joints["elbow"], angle=0)
+    assembly = bd.Compound(children=[upper_arm, forearm], label="arm")
+    couple(assembly, "curl", range=(0, 90), elbow=1)
+    return configuration(assembly, "bent", elbow=60)
+```
+
+- `revolute` is a `RevoluteJoint` on the parent's part with its rigid partner on the
+  child's, `slider` a `LinearJoint` (`linear_range`), `cylindrical` a
+  `CylindricalJoint` (`(angle, distance)` where `.turn` and `.travel` were two DOFs),
+  and `fastened` two connected `RigidJoint`s. Targets were labels (`"#forearm"`); a
+  joint is attached to the part itself.
+- A rest value of 0 was the artifact as written; now the as-built configuration is the
+  value each joint is connected at, so connecting at 0, with both frames on the axis,
+  keeps the parts where they were built.
+- `poses` become `configuration(assembly, name, **values)`, and a pose is drawn or
+  written with `--pose` ([kinematics](kinematics.md)).
+- A mate's `axis` given as a ref becomes an `Axis` computed in the body, from the
+  live shape (`select(part, ref)[0]`).
+
+## Materials are values on the parts
+
+```python
+# Before
+@step(materials={"definitions": {"cast": {"name": "As-cast steel", "roughness": 0.85, "metalness": 0.2}},
+                 "assignments": [{"targets": ["#housing"], "material": "cast"}]})
+
+# After, in the body
+housing.material = materials.steel.but(name="As-cast steel", roughness=0.85, metallic=0.2)
+```
+
+A definition becomes a `Material` (or a catalogue entry, [materials](build123d-modeling.md#colour-and-materials)):
+`metalness` is `metallic`, `baseColor` a linear RGBA `color` (`cadgen.srgb("#RRGGBB")`),
+`clearcoat` and `clearcoatRoughness` are `coat` and `coat_roughness`, and `opacity`
+is the colour's alpha. An assignment to a group is the material set on that assembly,
+the default of every part below it that has none.
+
+## Clips become motions
+
+A clip moved occurrences directly through `m.get("#part").rotate(...)`. A motion
+drives the mechanism's joints, so model what moves with joints first, then:
+
+```python
+# Before
 def demo(t, m):
-    angle = 60 * (1 - math.cos(2 * math.pi * t / 8))
-    m.get("#forearm").rotate((0, 0, 1), angle, (0, 0, 0))
-    m.get("#o:e8a03d5b61f4", "#o:19c7f2d4a8b5").opacity(0.5)
+    m.get("#platter").rotate((0, 0, 1), 90 * t)
 
+ANIMATION = {"demo": cadgen.clip(demo, duration=4)}
 
-ANIMATION = {"demo": cadgen.clip(demo, duration=8, loop=False, label="Demo")}
+# After, in the body, with a RevoluteJoint "platter" on the base
+motion(turntable, "demo", sweep={"platter": (0, 360)}, duration=4, ease="linear", loop="loop")
 ```
 
-- `rotate`, `translate`, `opacity` and `visible` keep their names and
-  arguments. `deformTube({rest, path, twistDeg, maxSegmentLength, braid})`
-  becomes `deform_tube(rest=..., path=..., twist_deg=...,
-  max_segment_length=..., braid=...)`; the paths keep their shape.
-- Every target starts with `#`: a bare label becomes `"#label"`, an occurrence
-  is named by its token (`"#o:e8a03d5b61f4"`, below), and a comma list becomes
-  one argument per target. A label
-  several parts share moved them all; now it fails, listing numbered aliases
-  (`#wheel_1`, `#wheel_2`) to pass instead.
-- A group's name moves every part beneath it, and the module's helpers and
-  constants become ordinary Python.
-- A document annotated with `cadgen step build --animation` has no script to
-  rebuild: wrap it in a model script that reads it with `read_step`, and
-  declare the clips there.
+Waypoints, a sweep or a function of time over joint values replace `update(t, m)`
+([motions](kinematics.md#motions)). Opacity, visibility and tube deformation have
+no motion form. A motion plays in a GLB export, not in the document's views.
 
-Rebuilding the model (`python <model>.py`) writes a current sidecar; a target
-no part carries fails the build, naming the clip and the time.
+## Refs name occurrences by path
 
-## Refs name geometry in 0.8
-
-A ref was positional: `#o1.2.f7` named the second occurrence under the first and
-its seventh face, numbers one saved revision gave them and the next could give to
-other geometry. A ref now names what it points at: an occurrence by a **token**
-minted from its place in the tree (`#o:4b1f9e2a7c03`) and an element by its
-**name**, how the model's operations made it as the CAD kernel reported it: the
-element an operation made from nothing (`#o:4b1f9e2a7c03/f:bracket.make_box1.6`,
-the sixth face of the first box the function `bracket` made) and a step for each
-operation that made it out of another (`f:bracket.make_box1.6;M:bracket.cut1`
-once the first cut trimmed it; `e:sk.make_rect1.2;Ge:part.extrude1`, the side an
-extrusion generated from a profile edge). A long name is folded to its last
-operation and a digest (`e:bracket.cut1~5d1e0c2f9a3b`), which the build's record
-spells out for `cadgen store where`. A label may stand for the occurrence
-(`#housing/f:bracket.make_box1.6`). An element of an imported file, which no
-operation of a model made, is named by its geometry instead (`f:9d2e8c1b5a70`).
-The old spellings resolve to nothing, as any unknown string does: `resolve()`
-raises, a mate's `parent`, `child` or `axis` fails the build, and a clip's
-`m.get("#o1.3")` fails the bake. Take the new ones where they are shown -- the
-CAD Viewer's copy button, each entity's `ref` from
-`read_scene(...).resolve(...).entities(...)`, and for occurrences the `ref` of
-each row `cadgen step snapshot --mode list` prints -- and prefer labels, which
-need no renaming. The sidecar is schema 11: its mate ends, material assignments
-and animation tracks name occurrences by token. A schema-10 sidecar is refused
-and is rebuilt by rerunning the model, which binds them anew.
-
-A ref by geometry (`f:` and twelve hexadecimal characters, how an imported
-file's elements are named) also finds an element of a part a model made, by its
-geometry: `resolve()`, a mate's `axis` and `cadgen store where` take it, and
-the viewer and `store where` give the element's name. An element's name moves
-when an operation starts or stops changing it, or when the code that made it
-moves to another operation (an earlier call of the same operation added in the
-same function, in making that part, renumbers the later ones; an edit to another
-part renames nothing); a label keeps it in what a later operation makes of the
-labelled shape: with `boss.label = "boss"`, the faces `boss` brings to `plate +
-boss` are named from `boss` (`f:boss.1`, or `f:boss.1;M:model.fuse1` where the
-fuse changed it). A label set after the
-shape was used renames nothing already made of it. A labelled part placed in an
-assembly keeps its own names, its label naming the occurrence (`#lid`), so parts
-made alike and labelled apart are one part.
-
-Names took their last form late in 0.8: a name that numbered the pieces of a
-split face (`f:bracket.make_box1.6.2`) or kept a trimmed face's first name
-(`f:bracket.make_box1.6` for the box face a cut had holed) is now
-`f:bracket.make_box1.6;M2:bracket.cut1` and
-`f:bracket.make_box1.6;M:bracket.cut1`. Every model rebuilds once on upgrading
-(`producer changed`), which renames its elements and writes its STEP again; take
-refs saved before that again from the viewer or `read_scene`.
-
-## Meshes come from cadgen in 0.8
-
-cadgen 0.8 meshes every component itself -- OCCT's triangulation at one display
-tolerance, each face checked against its exact surface and meshed again where it
-strays -- and every client draws those meshes: the CAD Viewer, snapshots and the
-CAD app no longer tessellate, and nothing cadgen runs needs Node.
-
-- `@step` takes no mesh tolerance: delete `mesh_tolerance=` and
-  `mesh_angular_tolerance=` from it (`@step got an unexpected keyword argument`).
-  A model run (`python <model>.py`) takes no `--mesh-tolerance` or
-  `--mesh-angular-tolerance`, and a snapshot job no `quality` key: every view
-  and snapshot draws the display tolerance.
-- `@stl`/`@glb`/`@threemf` and the export commands keep both tolerances, in the
-  same units. An export that names none is written at the display tolerance
-  (chord `5e-4` of the bounding diagonal, angle `0.35`), from the meshes the
-  viewer draws; a declared export no longer inherits anything from `@step`.
-
-- The first build or export after upgrading rewrites every STL, 3MF and GLB
-  once, with OCCT's triangles: the same surfaces within the same tolerances, in
-  different bytes. Compare meshes by geometry, not hash.
-- A tolerance outside what cadgen meshes is refused before anything builds:
-  `mesh_tolerance` below `5e-5` of the bounding diagonal, or
-  `mesh_angular_tolerance` below `0.05` or above `1.5708` radians.
-- `CADGEN_MESH_CACHE` is gone: a mesh is an ordinary store entry.
-- A build asks for display jobs as its result is recorded. The build service
-  runs them while the build goes on and after it answers, and the files land
-  once they are done, so later views read the stored parts. Each model's first
-  `python <model>.py` after upgrading, current or not,
-  derives its parts again, once; a STEP no build has touched since
-  is meshed on its first view or snapshot. `cadgen store gc` reclaims what the
-  older cadgen stored.
-
-## Saved STEP files are exports in 0.8
-
-- A model's STEP is written from its result by the build pool, and the file is
-  that result: its bytes map to it the moment it is saved, and every view,
-  snapshot and export of the file reads it. The file carries the result's names
-  -- each part's key in its product's description, each face's and edge's name
-  on its entity -- for any reader.
-- Every model rebuilds once after the upgrade and writes its STEP again; a
-  rebuild whose result is unchanged keeps the file.
-
-## Snapshot and GLB requests in 0.8
-
-- Section mode is gone: `--mode section` is refused (`Unsupported render mode:
-  section. Modes: list, view`), and so are `--section` and a job's `section`
-  key. Clip a view and look straight at the cut
-  ([cross-sections](snapshot-review.md#cross-sections)): the section plane's
-  normal is the clip's `axis` (`XY` is `z`, `XZ` is `y`, `YZ` is `x`), its
-  offset is the clip's `at`, and the camera faces the cut (`top`, `back`,
-  `right`). A view writes `.png`; nothing writes an SVG outline. So
-  `--mode section --section XZ:12.5` becomes:
-
-  ```bash
-  cadgen step snapshot STEP/housing.step tmp/cut.png --camera back --display '{"clip": {"axis": "y", "at": 12.5}}'
-  ```
-
-- `display.clip` places its plane with `at`, the plane's coordinate on its axis
-  in millimetres, in the model's own frame. `offset` and `offsets`, fractions of
-  the model's extent along the axis, are refused (`display.clip has unknown
-  key(s): offset`). `{"axis": "y", "offset": 0.25}` becomes `{"axis": "y", "at":
-  Y}` with `Y = min + 0.25 × (max − min)` over the model's Y extent, which the
-  `bounds` that `--mode list` prints give. With no `at` the plane goes through
-  the middle. `offsets` kept a fraction for each axis; a clip cuts across its
-  one `axis`, so name that axis and its `at`.
-- `cadgen glb build --animation` takes no `fps`, `deform` or `deformTolerance`
-  (`--animation has unknown key(s): fps; supported keys: clip, drop, seconds,
-  start`). The file carries the clip's own keys, not samples at a rate, and
-  every bending tube as a glTF skin, so there is no rate or mode to choose:
-  delete the keys. `clip`, `seconds`, `start` and `drop` keep their meaning.
-
-## Every build runs on the daemon in 0.8
-
-`CADGEN_DAEMON=0` is gone, and nothing reads it: `python <model>.py`, `cadgen
-step build|compile` and `cadgen stl|3mf|glb build` hand their job to the warm
-daemon, which the first command that needs one starts, and no command builds in
-its own process unless it is given `--no-daemon`. Where no daemon can start -- no
-local IPC family, a socket folder another user owns, a state directory this user
-cannot write -- the command fails naming why and what to set; `cadgen doctor` says
-whether one can start here, and the CAD Viewer does not start without one. A
-script that set `CADGEN_DAEMON=0` where no daemon can run passes `--no-daemon`
-instead ([progress and runtime
-diagnostics](step-generation.md#progress-and-runtime-diagnostics)); one that wants
-a daemon to itself sets `CADGEN_DAEMON_STATE_DIR`, and `CADGEN_DAEMON_IDLE_TIMEOUT`
-for how long it stays once idle.
-
-## Children build serially, and a parent follows its children by key, in 0.8
-
-A child a parent's body calls is decoded from its stored result when the store
-holds one for its inputs as they are, else built there and then, in the parent's
-own process, before the call returns. Children build one at a time, in the order
-the body calls them; nothing runs in parallel, and the time line counts a child's
-build under `children`. A child's STEP is written while its parent's body runs,
-and the command returns once every result is recorded: in the build tree a model's
-`done` says its result is recorded. The build service derives display data and
-writes the files, during the build and after the answer; a document reader
-waits for its in-flight write before reading it.
-
-A parent records each child by its **key** -- a hash of the child (its script and
-function) and everything it was built from: its sources, data files, constants,
-its own children and the cadgen and kernel versions that built it -- so:
-
-- editing a child's source rebuilds the child AND its parent, even when the
-  child's geometry is unchanged. The parent's rerun decodes the child's stored
-  result; only the parent's own body runs. `cadgen store why <parent.py>` says
-  `child rebuilt: <child.py>`; a child not yet rebuilt reads `child stale`.
-- upgrading cadgen or the CAD kernel rebuilds every model once:
-  `producer changed: cadgen 0.7.21 -> 0.8.0`.
-- bringing a source back to a state already built is a hit: the stored result is
-  restored and nothing runs -- for a child too, whose parent is then a hit as well
-  and restores the child with its own files.
-- deleting a model's STEP (or a declared mesh) beside a current model exports it
-  again from the stored result, without running the model.
-
-The record's `children` entries read `{"model", "key"}`; a record from 0.7.21
-is not read (its schema is in the key), so the first run of each model after
-the upgrade builds it.
+A ref was `#o:4b1f9e2a7c03/f:bracket.make_box1.6`: an occurrence by a token and an
+element by the operations' call counts. It is now
+`/work/XBF/robot.xbf#robot/bracket/f:bracket.body.6`: an occurrence by the labels on
+its way from the root, and an element by the function and the variable that made it
+([references](inspection-and-validation.md#references)). The old spellings resolve to
+nothing. Take refs again from the viewer's copy, or from the `label` of what `select`
+returns, after rebuilding the model.

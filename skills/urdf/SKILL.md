@@ -15,13 +15,12 @@ Use this skill for URDF robot-description outputs. Treat URDF work as constraine
 ## Setup
 
 Run cadgen through [uv](https://docs.astral.sh/uv/), so this skill's commands share
-one installation, and its warm build daemon, with the CAD app's server:
+one installation, and its engine daemon, with the CAD app's server:
 
 - `cadgen` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 cadgen`
 - `python` below means `uvx --no-config --managed-python --python 3.13 --from cadgen==0.8.0 python`
 
-The first run downloads that installation and the first snapshot its headless
-browser; later runs reuse both.
+The first run downloads that installation; later runs reuse it.
 
 ## Core Rules
 
@@ -71,7 +70,7 @@ report any checks you could not perform.
 
 ## Commands
 
-Run `cadgen` as Setup defines it. `cadgen doctor <skill-dir>` reports the installation in use and checks that it is the one this skill pins — docs drift silently on another. Validation itself needs nothing beyond the Python standard library; only snapshots need the browser. Use `cadgen <verb> --help` for the complete current interface.
+Run `cadgen` as Setup defines it. `cadgen doctor <skill-dir>` reports the installation in use and checks that it is the one this skill pins — docs drift silently on another. Validation itself needs nothing beyond the Python standard library; a snapshot draws with the CAD kernel. Use `cadgen <verb> --help` for the complete current interface.
 
 The validator shape is:
 
@@ -80,7 +79,7 @@ cadgen urdf validate path/to/robot.urdf
 cadgen urdf validate path/to/robot.urdf --strict
 cadgen urdf validate path/to/robot.urdf --json
 cadgen urdf validate path/to/robot.urdf --packages robot_description=/path/to/pkg
-cadgen urdf snapshot path/to/robot.urdf review.png
+cadgen snapshot path/to/robot.urdf review.png
 ```
 
 The validator collects all findings in one pass (severity, code, XML path) across XML structure, tree topology, joint semantics (limits, mimic, dynamics), geometry, mesh references, materials, inertial physics, and misspelled elements, and prints a summary. One run validates ONE file: `--strict` treats warnings as failures; `--json` prints one line of `{"ok", "path", "issues": [{"severity", "code", "message", "element", "hint"}], "summary"}`, where `element` is the XML path; `--packages NAME=PATH` resolves `package://` mesh URIs and repeats for several roots. It exits nonzero if the target fails. Relative targets resolve from the current working directory; run from the workspace that owns the files.
@@ -89,44 +88,37 @@ Validation is a guardrail, not spatial proof: a URDF can pass every structural c
 
 ## Snapshot Tool
 
-`cadgen urdf snapshot` renders the robot to a PNG still, using the same shared
-CLI and headless browser runtime every rendering skill uses — so a snapshot matches what
-the CAD Viewer shows.
+`cadgen snapshot` draws the robot to a PNG still, as the CAD Viewer shows it,
+rendered by OCCT:
 
 ```bash
-cadgen urdf snapshot path/to/robot.urdf review.png
+cadgen snapshot path/to/robot.urdf review.png
+cadgen snapshot path/to/robot.urdf review.png --pose '{"shoulder_pitch": 30, "gripper_slide": 0.02}'
 ```
 
-It accepts `.urdf` only. Pose the robot with `--joint-values` — `{joint: value}` JSON in degrees (metres for a
-prismatic joint), each naming a joint a person can drive, within its limits, or the request is
-refused before anything renders: a fixed joint, a `<mimic>` follower or a `<tcad:four_bar>`
-crank is refused by name, with the joint to set instead (a follower follows its leader, a crank
-its driver, so the refusal names the driven joint a chain of them ends at), and so is a
-leader value that would push a follower past the follower's own limits, or a four-bar driver
-outside the range the linkage was solved over (its limits). Joints you do not name stay at their defaults, where the CAD Viewer
-opens the robot (the `"jointValues"` job field is the same thing in a packet). The snapshot
-draws the robot with the viewer's own scene, so it shows what the viewer shows: cadgen
-resolves the description first, meshes a `box`, `cylinder` or `sphere` itself, and refuses by
-name a visual it cannot draw — a mesh that is not an STL, 3MF or GLB file beside the
-description (`.dae`, `.obj` and `.ply` files are not drawn; `package://` and remote URIs are
-not resolved) or a mesh file that is missing. A link mesh that cannot be loaded fails the
-snapshot rather than leaving the link out. Robots are authored in metres and are framed on the
-robot scene scale automatically.
+The robot opens where the CAD Viewer opens it, every joint at zero. `--pose` gives
+joint values over that, in degrees (metres for a prismatic joint), each naming a
+joint a person can drive, within its limits, or the request is refused before
+anything renders: a fixed joint, a `<mimic>` follower or a `<tcad:four_bar>` input
+is refused by name (a follower follows its leader, an input its driver). Each link
+is placed by the viewer's own forward kinematics, mimic joints and four-bar
+linkages followed, and drawn in one colour of the Parts palette.
 
-A normal snapshot uses Solid mode and Light appearance. The display mode is `solid`
-(the default) or `parts` (each link its own colour), each at its own defaults;
-`--grid` draws the measuring grid under the robot, and `--preview` draws Preview's
-shared photographic scene instead, in perspective. Inline display JSON and JSON files
-are the Viewer's display object: `mode`, `grid`, `appearance` (`light`, the default,
-or `dark`), `camera` (projection and focal length) and `clip`.
-Top-level `--camera` and `--joint-values` remain active in every display mode.
-`display.clip` cuts the robot as the viewer's Clip does
-(`{"clip":{"axis":"x","at":0.05}}`, `at` in metres); `exploded`, and `shaded`, `xray`,
-`hidden-line` and `wireframe`, describe a STEP model's CAD edges and parts, and are
-refused by name here. A Quick Edit job from the viewer replays as it is: its `jointValues`, its
-`selection.hide` (the parts hidden in the Links panel, by their ids), its clip and
-annotation (`cadgen snapshot --job <file>`). Quick Edit supplies inline JSON or a
-`.snapshot.json` path; save inline JSON to a temporary file before using `--job`.
+A visual is a `box`, `cylinder` or `sphere`, which cadgen meshes itself, or a mesh
+file beside the description: an STL or a 3MF (its numbers scaled by the mesh's
+`scale`, which must be even) or a GLB (metres). A mesh in another format (`.dae`,
+`.obj`), a `package://` or remote URI, or a missing file is refused by name, and a
+link mesh that cannot be loaded fails the snapshot rather than leaving the link out.
+
+A normal snapshot uses Solid mode and Light appearance. `--display` takes any of the
+viewer's display modes (`parts`, `xray`, `hidden-line`, `wireframe`, ...),
+`exploded=AMOUNT`, or the display object: `appearance` (`light` or `dark`),
+`camera` (projection and focal length) and `clip` (`{"clip": {"axis": "x", "at":
+0.05}}`, `at` in metres). `--grid` draws the measuring grid, `--preview` draws
+Preview's photographic look, and `--camera`, `--size-profile`, `--width` and
+`--height` frame and size it. A Quick Edit packet from the viewer (inline JSON, saved
+to a temporary `.snapshot.json`, or its path) replays with
+`--annotation <packet> --camera authored`, its job's `jointValues` given as `--pose`.
 Inspect supplied annotations before editing. Without annotations, the captured
 view is optional context; render it when useful to the request.
 
@@ -134,9 +126,8 @@ Link meshes are resolved relative to the description, so they must be present: a
 unhydrated Git LFS pointer is not a mesh and fails the snapshot. Run
 `git lfs checkout <mesh dir>` first.
 
-The grammar is `cadgen urdf snapshot TARGET [OUT] [flags]`, the same one every
-format door uses. Use `cadgen urdf snapshot --help` for the complete current
-interface — the flags a robot cannot act on are absent from it, not refused by it.
+OUT is written exactly as given and must be a `.png`; check the exit status before
+reading it. Use `cadgen snapshot --help` for the complete current interface.
 
 ## References
 

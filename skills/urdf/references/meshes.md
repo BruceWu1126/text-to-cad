@@ -10,7 +10,7 @@ The unit of export is the **link**, not the assembly and not the CAD feature tre
 2. Never point multiple links at one combined assembly mesh with compensating origins. If two links share a source body, the body must be split at the joint in CAD before export.
 3. Export each link's mesh **in that link's own frame** — the frame the ledger defines, coincident with the parent joint frame at zero position. Done right, every `<visual><origin>` is identity (`0 0 0`, `0 0 0`), which is the convention to follow and the easiest state to audit.
 4. If an export cannot be re-framed (vendor mesh, scanned part), a nonzero visual origin is acceptable but must be recorded in the ledger with its source; it is a per-link constant, not a tuning knob.
-5. Splitting, re-framing, and exporting STEP/STL/3MF/GLB assets belongs to the owning CAD workflow (`$cad`, `$step-parts` when installed). Do not attempt to fix a wrong split by editing URDF origins.
+5. Splitting, re-framing, and exporting STEP/STL/3MF/GLB assets belongs to the owning CAD workflow (`$cad`, `$step-parts` when installed): with `$cad`, each link is a model declaring its mesh (`@stl` or `@threemf`), or `cadgen export model.xbf link.stl --part <link>` writes one part in its own frame. Do not attempt to fix a wrong split by editing URDF origins.
 
 Checklist after export, before authoring:
 
@@ -36,7 +36,7 @@ Checklist after export, before authoring:
 
 Keep mesh files under the same model directory tree as the URDF, so the file and its assets move together.
 
-What the CAD Viewer and `cadgen urdf snapshot` draw is narrower than what the validator accepts: a local STL, 3MF or GLB file beside the description, and the `box`, `cylinder` and `sphere` primitives, which cadgen meshes itself. A `.dae`, `.obj` or `.ply` mesh, a `package://` or remote URI, or a missing file is refused by name before anything renders — convert the mesh, or keep a rendering copy of the robot whose meshes sit beside it.
+What the CAD Viewer and `cadgen snapshot` draw is narrower than what the validator accepts: a local STL, 3MF or GLB file beside the description, and the `box`, `cylinder` and `sphere` primitives, which cadgen meshes itself. A `.dae`, `.obj` or `.ply` mesh, a `package://` or remote URI, or a missing file is refused by name before anything renders — convert the mesh, or keep a rendering copy of the robot whose meshes sit beside it.
 
 ## Visual vs Collision Assets
 

@@ -14,96 +14,85 @@ right.label = "spacer_right"
 assembly = bd.Compound(children=[left, right], label="spacer_pair")
 ```
 
-A placed child model stays linked to its tree; `.located()` replaces the
-placement and loses the link. Labels identify roles and repeated occurrences,
-such as `m3_screw:front_left`; a functional group can be a nested labeled
-`Compound`.
+A placement shares its shape: `Pos(...) * part`, `.moved()` and `.located()` place
+the same geometry again, so a part placed many times is one part in the document.
+`.located()` replaces the placement where `.moved()` composes it. Labels name roles
+and repeated placements, and a functional group is a nested labelled `Compound`.
 
-Mirroring changes geometry, so an inline mirrored child belongs to the parent
-rather than linking to the original child's tree. It remains cached with that
-parent. A separate mirrored model is useful for independent outputs or reuse,
-not a requirement; see [mirroring and caching](step-generation.md#mirrored-geometry-and-reusable-models).
+Mirroring makes new geometry, not a placement: `bd.mirror(left, about=bd.Plane.YZ)`
+inline is a part of its own. A separate mirrored model suits a part that needs its
+own files or reuse across assemblies; a shared factory in `lib/` serves both hands.
 
 ## Native joints
 
-Joints can express a relationship between reusable datums without hand-solving
-its placement. They perform source-level placement; they are not persistent
-STEP constraints or a replacement for the separate [kinematics](kinematics.md)
-interface. Call `connect_to()` on the fixed joint with the moving joint as its
-argument.
+Joints express a relationship between datums without hand-solving the placement,
+and the engine keeps them as the assembly's mechanism. Call `connect_to()` on the
+joint that stays, with the moving part's joint as its argument.
 
-For example, `src/enclosure.py` places a lid above a base with a specified gap:
+For example, `src/enclosure.py` seats a lid on a base with a gasket gap:
 
 ```python
-from cadgen import build123d as bd, step
+from cadgen.engine import xbf
+import build123d as bd
 
 BASE_HEIGHT = 30.0
 LID_THICKNESS = 3.0
 GASKET_GAP = 0.5
 
 
-@step(out="../STEP/enclosure.step")
+@xbf(out="../XBF/enclosure.xbf")
 def enclosure():
     base = bd.Box(80, 50, BASE_HEIGHT)
     lid = bd.Box(80, 50, LID_THICKNESS)
     base.label, lid.label = "base", "lid"
-    bd.RigidJoint(
-        "lid_target", to_part=base,
-        joint_location=bd.Location((0, 0, BASE_HEIGHT / 2 + GASKET_GAP)),
-    )
-    bd.RigidJoint(
-        "underside", to_part=lid,
-        joint_location=bd.Location((0, 0, -LID_THICKNESS / 2)),
-    )
-    base.joints["lid_target"].connect_to(lid.joints["underside"])
+    bd.RigidJoint("lid_seat", base, bd.Location((0, 0, BASE_HEIGHT / 2 + GASKET_GAP)))
+    bd.RigidJoint("lid_seat", lid, bd.Location((0, 0, -LID_THICKNESS / 2)))
+    base.joints["lid_seat"].connect_to(lid.joints["lid_seat"])
     return bd.Compound(children=[base, lid], label="enclosure")
-
-
-if __name__ == "__main__":
-    enclosure()
 ```
 
-Native joint options include `RigidJoint` for fixed placement, `RevoluteJoint`
-for rotation, `LinearJoint` for translation, `CylindricalJoint` for combined
-rotation/translation and `BallJoint` for spherical orientation. Use `Location`
-for rigid/ball joint frames and `Axis` for revolute/linear/cylindrical joints.
+The joint kinds are `RigidJoint` for fixed placement, `RevoluteJoint` for rotation,
+`LinearJoint` for translation, `CylindricalJoint` for both about one axis and
+`BallJoint` for spherical orientation. Use a `Location` for rigid and ball joint
+frames and an `Axis` for revolute, linear and cylindrical joints. Two parts whose
+rigid joints are connected move as one; a moving joint makes a pair the viewer's
+Position, `--pose` and the model's motions drive ([kinematics](kinematics.md)).
 
-Creating joints reads the child's placement and may materialize it earlier
-than a deferred transform. Cached child models return geometry, labels,
-appearance and placements, not Python joint objects, so the joints a parent
-needs are defined in its source.
+Connect parts before putting them in the compound that holds them. `connect_to`
+cannot place a part inside a nested assembly: there, put each part where it stands
+and give the two joints one label, and the engine pairs them by it. A child model's
+joints stay in its own document, so the joints an assembly needs are authored in the
+assembly's body, on the parts it places.
 
 ## Child models and imported components
 
-A project model is composed by calling it; `cadgen.read_step` reads a vendor
-document or an explicitly decoupled export, an input like every file a build
-reads. See the [model contract](step-generation.md) for dependency tracking.
-
-An imported part keeps its vendor's origin and orientation; `read_scene` shows
-them and its functional features. Measured offsets or joint frames go in the
-source.
+A project model is composed by calling it; `read_xbf` reads a vendor part converted
+once from its STEP (`cadgen export vendor.step vendor.xbf`), and `read_step` a STEP
+as it is. Both are inputs, like every file a build reads
+([inputs](model-contract.md#inputs)). An imported part keeps its vendor's origin and
+orientation; a snapshot or `select` shows them and its functional features, and the
+measured offsets or joint frames go in the source.
 
 ## Alignment and measurement checks
 
 There is no generic alignment mode that guesses which points or axes the design
-means: a check names the mating features (from `read_scene`) and states the
-relationship in Python. See `inspection-and-validation.md` for the reader and
-native measurement interfaces.
+means: a check names the mating features by their refs and states the relationship
+in Python ([inspection](inspection-and-validation.md)).
 
-For example, for two planar mating faces (with their refs already identified):
+For example, for the enclosure's two mating faces:
 
 ```python
-from cadgen import read_scene
+from cadgen.engine import read_xbf, select
 
-scene = read_scene("STEP/assembly.step")
-moving = scene.resolve("#moving/f:plate.make_box1.5").shape()
-fixed = scene.resolve("#fixed/f:base.make_box1.6").shape()
+doc = read_xbf("XBF/enclosure.xbf")
+fixed = select(doc, "base/f:enclosure.base.6")[0]     # the base's top
+moving = select(doc, "lid/f:enclosure.lid.5")[0]      # the lid's underside
 n = fixed.normal_at().normalized()
 m = moving.normal_at().normalized()
 signed_gap_mm = (moving.center() - fixed.center()).dot(n)
 parallel_error_deg = min(n.get_angle(m), n.get_angle(-m))
 print(signed_gap_mm, parallel_error_deg)
-assert abs(signed_gap_mm) < 0.01
+assert abs(signed_gap_mm - 0.5) < 0.01
 assert parallel_error_deg < 0.1
 ```
 
