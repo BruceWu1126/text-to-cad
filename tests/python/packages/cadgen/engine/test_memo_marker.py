@@ -256,6 +256,28 @@ class MemoTest(MemoCase):
         self.assertEqual(self.statuses(report)["parts.py::jitter"], ["run"])
         self.assertEqual(report["cache"]["reason"], "it calls parts.py::jitter, which a verification found impure")
 
+    def test_verify_reads_an_order_only_difference_as_the_same_geometry(self) -> None:
+        # One shape's sub-shapes in another order (as a parallel boolean or a replay can write
+        # them): another BRep, the same geometry -- `same`. Moved, it is other geometry.
+        import build123d as bd
+        from OCP.BRep import BRep_Builder
+        from OCP.TopoDS import TopoDS_Compound
+
+        def compound(*solids):
+            made, builder = TopoDS_Compound(), BRep_Builder()
+            builder.MakeCompound(made)
+            for solid in solids:
+                builder.Add(made, solid.wrapped)
+            return made
+
+        box, ball = bd.Box(4, 5, 6), bd.Pos(10, 0, 0) * bd.Sphere(2)
+        one, other = compound(box, ball), compound(ball, box)
+        self.assertNotEqual(document.geometry_key(one), document.geometry_key(other), "another BRep")
+        self.assertTrue(memo._Leaf(one).same(memo._Leaf(other)))
+        self.assertIsNone(memo._differs(memo._Leaf(one), memo._Leaf(other)))
+        moved = compound(box, bd.Pos(10, 0, 0.5) * bd.Sphere(2))
+        self.assertEqual(memo._differs(memo._Leaf(one), memo._Leaf(moved)), "the result has other geometry")
+
     def test_verify_reaches_the_build_through_the_api(self) -> None:
         import contextlib
         import io
@@ -330,6 +352,24 @@ class MemoNamesTest(MemoCase):
                                                  "staged.py::stage_two": ["replayed"]})
         found = self.names()
         self.assertEqual({name: found[name] for name in ("one", "two")}, {name: plain[name] for name in ("one", "two")})
+        replayed = self.measured(plain)
+        # A second cold build, in a worker that holds nothing: each ref measures the same again.
+        self.restart()
+        (self.folder / "XBF" / "staged.xbf").unlink()
+        report = self.build("staged.py")
+        self.assertEqual(report["memo"]["hits"], 0, "cold: nothing replayed, nothing taken from a file")
+        self.assertEqual(self.measured(plain), replayed)
+
+    def measured(self, names: dict) -> list:
+        """What `cadgen where` measures of each named face of stage two, by its ref."""
+        from cadgen.engine import api
+
+        xbf = self.folder / "XBF" / "staged.xbf"
+        found = []
+        for name in sorted(names["two"][0].values()):
+            facts = dict(api.where(xbf, f"two/{name}"))
+            found.append((facts["ref"], round(facts["area"], 9), facts.get("kind")))
+        return found
 
 
 if __name__ == "__main__":

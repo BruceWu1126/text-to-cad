@@ -68,9 +68,9 @@ def hinge():
 ## Laws
 
 1. **An xbf carries its build closure as pointers and digests** -- script and
-   function, modules, data inputs, versions, the key, and the repository commit when
-   there is one; never source, never lines on elements, never input contents; names
-   remain the per-element tie to code (**Build closure**).
+   function, modules, data inputs, versions and the key; never source, never lines on
+   elements, never input contents, and nothing of a version control's (the engine calls
+   no git); names remain the per-element tie to code (**Build closure**).
 2. **Nothing to disk.** The engine writes the files a model declares -- the xbf
    and the exports its decorators name, nothing beside them -- and the operating
    system's coordination for its warm process: a socket and a lock in
@@ -90,7 +90,7 @@ def hinge():
    `TDataStd_NamedData` beside it for the rest; `XCAFDoc_VisMaterial`: PBR), element names
    on face, edge and vertex sub-shape
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
-   Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
+   Kinematics); its main label names what wrote it (`cadgen.engine xbf/2 (cadgen
    <release>)`, `document.Loaded.writer`) and holds the model's build closure
    (**Build closure**). No code location is on an element. STEP, GLB, STL, 3MF and,
    of a planar document, DXF are translations of it (**Exports**).
@@ -533,8 +533,7 @@ target and moved over it; a DXF only when its bytes change.
 - **A `.cadz`** (`export/cadz.py`) packages an xbf for delivery: the xbf, its build closure's
   source files (the script and every module the closure lists) and, unless `--no-inputs`, its
   inputs, zipped at their places relative to one another, with sorted entries and one fixed
-  date. Extracted and built, a drift-free model writes the xbf's bytes again (the closure's
-  `commit` aside, which names the repository the original was built in). Self-contained
+  date. Extracted and built, a drift-free model writes the xbf's bytes again. Self-contained
   delivery is this export, never a property of the document.
 
 **Motions in a GLB.** Each motion (**Motions**) is baked into a glTF animation of its name:
@@ -1336,11 +1335,42 @@ the operation-level memo handles every kernel call in any model, markers or not.
 A verifying build (`Model.build(verify=True)`, `cadgen build SOURCE --verify`) runs every
 body the memo would replay -- a model's and every `@memo` call's -- and compares each fresh
 result with the logged one: per shape its class, label, colour, paints, material and
-placement, and each leaf's geometry (the same TShape, else the same binary BRep digest). The report's `verify` gives each body checked
+placement, and each leaf's geometry: the same TShape, else the same binary BRep digest, else the
+same geometry in another order of the BRep's entries (each face's area and centre, each edge's
+length and centre, each vertex, sorted: what an order-only difference leaves alone, see **Known
+and accepted**), which is `same`. The report's `verify` gives each body checked
 as `same`, `differs: <where>`, or `follows <function>` for one whose result holds a body
 that differs. A function whose result differs is marked to run on every call for the
 worker's life (`memo.always()`), the bodies that call it with it, and a model that calls it
 is not taken from its file. A verifying build does not ask the previous document.
+
+## Known and accepted
+
+Two byte-level drifts are accepted, on one condition: no bug and no major impact. Each is
+the same geometry and the same names written in another order.
+
+- **A replayed body's BRep order.** A body the memo replays can write its BRep entries in
+  another order than its cold run did (the f1's casing, the f14d, the radial's barrels).
+- **Parallel booleans on a cold build.** OCCT's parallel booleans can order one result's
+  sub-shapes differently from one cold build to the next (the w16, 3 of 794 parts; tom's
+  yokes; the moonwatch's tachymeter).
+
+Why that holds, checked:
+
+- **Nothing keys on a document's bytes.** The restart key is digests of the model's code
+  and inputs and the format (**Build closure**); a derived file is translated from the
+  document, and the write compares bytes only to leave an identical file untouched. The one
+  place a document's bytes count is a document *read as an input* (`read_xbf`, `read_step`
+  of another model's file), which is keyed by its bytes like any input: an order-only rewrite
+  of that file builds the reading model once more, to the same result.
+- **Names and refs resolve alike.** On the moonwatch's case (its tachymeter one of these),
+  a cold build, a body re-run whose 2,673 kernel calls all replayed, and a second cold build
+  in a new daemon wrote three different files of one size; their 15,646 element names are the
+  same set, each on the same geometry (a face's area and centre, an edge's length and
+  centre, a vertex's point), and refs resolve to the same elements through `cadgen where`.
+  `test_memo_marker.py` holds the same for a cold build, a replay and a second cold build.
+- **`--verify` reads it as `same`.** A leaf whose BRep differs only in order measures alike
+  (**Memo functions**): a verification reports it `same`, never `differs`.
 
 ## Build closure
 
@@ -1351,15 +1381,16 @@ closure/1`), pointers and digests only:
 
 ```
 schema   "cadgen.engine closure/1"
-engine   {"release": "cadgen 0.8.0", "format": "xbf/1", "digest": ...}   the version VERSION stamps; the engine's code
-libs     {"build123d": ..., "OCP": ..., "numpy": ...}
-source   {"kind": "script", "path": "../src/tom.py", "function": "tom", "commit": "<sha>" | null}
+engine   {"release": "cadgen 0.8.0", "format": "xbf/2", "digest": ...}   the format (keyed); the release and
+                                                                    the engine's code digest (information only)
+libs     {"build123d": ..., "OCP": ...}                             what decides the geometry
+source   {"kind": "script", "path": "../src/tom.py", "function": "tom"}
          | {"kind": "code", "name": "bracket", "digest": ...}             code's text is never written
 modules  [["../src/lib/arm_parts.py", "9f3c..."], ...]
 inputs   [["file", "../STEP/gripper.step", "c0de..."], ["read", "../src/lib/ids.json", "77ab..."], ...]
 bodies   how many bodies the model is
-key      one digest over engine, libs, source (but its commit), modules and inputs; null where
-         the closure cannot say all the model is made of
+key      one digest over the format, libs, source, modules and inputs; null where the
+         closure cannot say all the model is made of
 ```
 
 Every path is relative to the xbf's folder. `modules` lists each first-party module the
@@ -1371,9 +1402,17 @@ blank line changes no digest; a module the model loads and does not reach holds 
 `inputs` lists every file a body read -- through the engine (`file`: `read_step`, `read_xbf`,
 `read_mesh`, build123d's importers), itself (`read`, a `null` digest for one it found missing),
 or a text's font (`font`) -- by its digest; a file read past the engine's readers leaves the key
-null (**Body retention**). The commit is the repository's at the script, `git rev-parse HEAD`,
-null outside one; it names where the code was and is no part of the key. `cadgen where DOC`
-prints the closure, `cadgen.where(doc)` and `document.Loaded.closure` read it.
+null (**Body retention**). `cadgen where DOC` prints the closure, `cadgen.where(doc)` and
+`document.Loaded.closure` read it.
+
+**When the format moves.** The key takes the engine's `format` alone (`previous.FORMAT`),
+not the release that wrote a document nor a digest of the engine's code: a cadgen release,
+or an engine edit, that leaves the written document alone keeps every xbf current. `FORMAT`
+is bumped by hand (`xbf/1` to `xbf/2`), the way the old cache store's version was, when what
+an engine writes changes -- the document's structure, the attributes on its labels, the
+closure's fields, or what the key covers -- and then every xbf builds once, cleanly: a
+document of another format is "written by" another engine (`cache.reason`). `xbf/2`: the
+key left the release, the engine digest and numpy, and the closure its commit.
 
 Before a body the memo would not replay runs, the build makes the closure again -- the script
 loaded, its modules digested, each input hashed again -- and compares its key with the xbf's.
@@ -1386,7 +1425,7 @@ replay. Anything else builds as before, and `cache.reason` says why: no file yet
 export missing, written by another engine or program, a file that does not read, no key in it,
 replayed from memory, or what changed, by name (`cache.changed`, each change; the CLI prints
 `rebuilt: ../src/lib/arm_parts.py changed`): a module changed, is new or is no longer imported,
-an input changed or is missing, the engine, a library or the source moved.
+an input changed or is missing, the format, a library or the source moved.
 `CADGEN_ENGINE_MEMO=0` and `CADGEN_ENGINE_BODIES=0` turn it off with the rest of retention.
 
 The document is taken whole or not at all, never one body's part of it. OCCT's BinXCAF

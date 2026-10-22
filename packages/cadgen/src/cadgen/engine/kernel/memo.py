@@ -1409,7 +1409,9 @@ def _shape_geometry(kind: str, attrs: dict, wrapped: Any, children: list) -> tup
 
 class _Leaf:
     """A leaf shape a verification compares: the same TShape is the same geometry; another
-    is compared by its binary BRep's digest (``document.geometry_key``)."""
+    the same binary BRep (``document.geometry_key``), else the same geometry in another order
+    of the BRep's entries (``_measured``): OCCT's parallel booleans and a replayed body can
+    write one shape's sub-shapes in another order, the faces, edges and vertices alike."""
 
     __slots__ = ("shape",)
 
@@ -1421,7 +1423,42 @@ class _Leaf:
             return True
         from cadgen.engine.document import geometry_key
 
-        return geometry_key(self.shape) == geometry_key(other.shape)
+        return geometry_key(self.shape) == geometry_key(other.shape) or _measured(self.shape) == _measured(other.shape)
+
+
+def _measured(shape: Any) -> tuple:
+    """A shape's geometry with no order: its solids, shells, faces, edges and vertices
+    counted, and per face its area and centre, per edge its length and centre, per vertex its
+    point, each rounded to 1e-6 and sorted. Two shapes alike but for the order of their BRep's
+    entries measure alike; a value one unit in its last place apart may round apart, which
+    reads as other geometry (the safe side)."""
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepGProp import BRepGProp
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL, TopAbs_SOLID, TopAbs_VERTEX
+    from OCP.TopExp import TopExp
+    from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    def each(kind: Any) -> list:
+        found = TopTools_IndexedMapOfShape()
+        TopExp.MapShapes_s(shape, kind, found)
+        return [found.FindKey(index) for index in range(1, found.Size() + 1)]
+
+    def rounded(*values: float) -> tuple:
+        return tuple(round(value, 6) + 0.0 for value in values)
+
+    def props(sub: Any, surface: bool) -> tuple:
+        found = GProp_GProps()
+        (BRepGProp.SurfaceProperties_s if surface else BRepGProp.LinearProperties_s)(sub, found)
+        centre = found.CentreOfMass()
+        return rounded(found.Mass(), centre.X(), centre.Y(), centre.Z())
+
+    counts = tuple(len(each(kind)) for kind in (TopAbs_SOLID, TopAbs_SHELL))
+    faces = sorted(props(face, True) for face in each(TopAbs_FACE))
+    edges = sorted(props(edge, False) for edge in each(TopAbs_EDGE))
+    points = sorted(rounded(*BRep_Tool.Pnt_s(TopoDS.Vertex_s(vertex)).Coord()) for vertex in each(TopAbs_VERTEX))
+    return counts, tuple(faces), tuple(edges), tuple(points)
 
 
 def _differs(logged: Any, fresh: Any, where: str = "the result") -> str | None:
