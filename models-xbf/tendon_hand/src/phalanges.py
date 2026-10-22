@@ -3,26 +3,57 @@
 `anatomy_layout` is the hand's skeleton: every phalanx and every joint's two drive
 pulleys at the neutral pose, with the finger joints authored as build123d joints
 (below). The other models are phalanx and fingertip reviews, each its own xbf. Each
-model was its own script in `models/tendon_hand/src/`; they share nothing expensive,
-so none is a `@memo` and no model calls another.
+model was its own script in `models/tendon_hand/src/`, and no model calls another:
+`phalanx_continuous_representative_r5` read the supports model's STEP, and here both
+place `continuous_supports()`, the one `@memo` stage (about 20 s of kernel work).
 """
 
-from cadgen.engine import configuration, couple, xbf
+import copy
+
+from cadgen.engine import configuration, couple, memo, xbf
 
 import build123d as bd
 
 from lib.assembly import matrix_location
 from lib.fingernail import fingernail_bodies
 from lib.fingertip_bridge_repair import bridge_bodies
+from lib.finish import finish
 from lib.fingertip_pad import fingertip_pad_bodies, make_fingertip_pad
+from lib.fixed_guide_mounts_continuous_r5 import make_fixed_outlet_pair as make_continuous_outlet_pair
+from lib.guide_mounts_continuous_r5 import make_phalanx_comb as make_continuous_comb
 from lib.layout import FINGERS, JOINT_BY_NAME, JOINTS, THUMB_CMC, THUMB_LENGTHS, finger_fan_matrix
 from lib.phalanx import make_phalanx
 from lib.phalanx_continuous_r5 import make_phalanx as make_continuous_phalanx
+from lib.phalanx_r5_host import warm_host
 from lib.pulley import make_pulley
 
 ROLES = ("proximal", "middle", "distal")
 THUMB_ROLES = ("metacarpal", "proximal", "distal")
 THUMB_WIDTHS = (19., 16., 13.)
+
+
+def _leaves(node):
+    return [leaf for child in node.children for leaf in _leaves(child)] if node.children else [node]
+
+
+def _middle_place():
+    """The middle finger's base in the assembled neutral fan."""
+    f = FINGERS[1]
+    return matrix_location(finger_fan_matrix(f)) * bd.Pos(f.x, f.base_y, 0)
+
+
+@memo
+def continuous_supports():
+    """The guide combs and fixed outlets matched to the continuous rail, clipped
+    against its STEP reconstruction (`lib/phalanx_r5_host.py`)."""
+    # Avoid OCCT same-domain unification runaway; all strict checks remain required.
+    with bd.SkipClean():
+        parts = make_continuous_comb(45, 18, 12.25, [-4.2, -3, 3, 4.2], "middle_mcp_outlet_comb")
+        parts += make_continuous_comb(45, 18, 32.75, [-4.2, 4.2], "middle_pip_inlet_comb")
+        parts += make_continuous_outlet_pair(45, 18, 4.5, "middle_pip_drive_guide")
+        place = _middle_place()
+        supports = bd.Compound(label="continuous_rail_matched_guide_supports", children=[place * s for s in parts])
+    return supports
 
 
 def _hinge(parent, child, name):
@@ -142,6 +173,20 @@ def phalanx_variants_review():
 def phalanx_continuous_r5():
     """The continuous-waist middle proximal phalanx, candidate R5."""
     return make_continuous_phalanx(45, 18, label="middle_proximal_frame")
+
+
+@xbf(out="../XBF/phalanx_continuous_supports_r5.xbf")
+def phalanx_continuous_supports_r5():
+    """The R5 rail's matched guide supports, in the assembled neutral fan."""
+    return continuous_supports()
+
+
+@xbf(out="../XBF/phalanx_continuous_representative_r5.xbf")
+def phalanx_continuous_representative_r5():
+    """The continuous rail, as STEP gives it back, with its actual guide supports."""
+    host = finish(_middle_place() * warm_host(), "aluminum", "middle_proximal_frame")
+    return bd.Compound(label="continuous_rail_and_actual_guide_supports",
+                       children=[host, *[copy.copy(s) for s in _leaves(continuous_supports())]])
 
 
 @xbf(out="../XBF/fingertip_pad_review.xbf")

@@ -3,9 +3,9 @@
 `models/tendon_hand` ported to `cadgen.engine`: the tendon-driven right-hand research
 project (24 joint degrees of freedom, 48 antagonistic tendon actuators; millimetres,
 fingers along +Y, palm side +Z, thumb on -X). The old project was 112 one-model
-scripts. The 54 that build from the project's code are models here, folded into five
+scripts. The 56 that build from the project's code are models here, folded into five
 scripts by subsystem, each model keeping its name and writing `XBF/<name>.xbf`. Of the
-other 58, 57 read frozen checkpoints or generated validation output that no program in
+other 56, 55 read frozen checkpoints or generated validation output that no program in
 the project recreates, and one fails after twenty minutes; they are left in
 `models/tendon_hand` and listed below.
 
@@ -23,25 +23,26 @@ python -m cadgen.engine snapshot ../XBF/anatomy_layout.xbf fist.png --pose fist
 | Script | Models |
 | --- | --- |
 | `components.py` (20) | `axle_review`, `driven_axle_review`, `bushing_review`, `retaining_ring_review`, `pulley_review`, `pulley_hub_review`, `universal_carrier_review`, `wrist_review`, `palm_cradle_clearance_review`, `thumb_metacarpal_review`, `motor_review`, `gearbox_review`, `capstan_review`, `capstan_index_overlay`, `tension_cartridge_review`, `tension_cartridge_bank_review`, `drive_terminal_review`, `drive_terminal_macro`, `drive_terminal_placements`, `runtime_fixture` |
-| `phalanges.py` (9) | `anatomy_layout` (joints and curl couplings, below), `phalanx_review`, `phalanx_variants_review`, `phalanx_continuous_r5`, `fingertip_pad_review`, `fingertip_pad_export_repair`, `fingertip_bridge_repair_review`, `fingernail_export_repair_review`, `fingernail_review` |
+| `phalanges.py` (11) | `anatomy_layout` (joints and curl couplings, below), `phalanx_review`, `phalanx_variants_review`, `phalanx_continuous_r5`, `phalanx_continuous_supports_r5`, `phalanx_continuous_representative_r5`, `fingertip_pad_review`, `fingertip_pad_export_repair`, `fingertip_bridge_repair_review`, `fingernail_export_repair_review`, `fingernail_review` |
 | `routing.py` (5) | `bowden_review`, `transport_review`, `middle_routing_review`, `thumb_cmc_transport_review`, `thumb_cmc_candidate_review` |
 | `guide_mounts.py` (14) | `index_guide_mounts`, `middle_guide_mounts`, `ring_guide_mounts`, `little_guide_mounts`, `phalanx_guide_mounts_review`, `guide_comb_review`, `fixed_outlet_review`, `fixed_outlet_mounts_review`, `yaw_reaction_mounts_review`, `yaw_outlet_mount_review`, `yaw_guide_macro_review`, `thumb_cmc_negative_jaw_repair_review`, `thumb_downstream_mounts_review`, `thumb_reaction_arm_context_candidate` |
 | `forearm.py` (6) | `forearm_frame_review`, `forearm_guide_banks_review`, `forearm_mount_system_review`, `forearm_housing_review`, `actuator_fasteners_review`, `forearm_housing_context` |
 
-Measured on 2026-10-22 (one machine, its load 20-38 from other work; the five scripts
-built at once, each in a fresh worker): cold `components` 155 s, `routing` 34 s,
-`phalanges` 299 s, `guide_mounts` 313 s, `forearm` 144 s. A no-op takes 0.7-1.8 s per
-script and rewrites nothing (all 54 xbfs keep their bytes). An edit to the capstan's
+Measured on 2026-10-22 (one machine, its load 20-50 from other work; the five scripts
+built at once, each in a fresh worker): cold `components` 163 s, `routing` 34 s,
+`phalanges` 303 s, `guide_mounts` 281 s, `forearm` 153 s. A no-op takes 0.4-1.8 s per
+script and rewrites nothing (all 56 xbfs keep their bytes). An edit to the capstan's
 hub height (`lib/capstan.py`) runs the three models that place a capstan -- `capstan_review`
-and `capstan_index_overlay` (9.8 s for `components`) and `forearm_housing_context` (13.3 s
-for `forearm`) -- and replays the other 51; reverting it writes the cold build's bytes
-again, all 54.
+and `capstan_index_overlay` (6.3 s for `components`) and `forearm_housing_context` (11.8 s
+for `forearm`) -- and replays the other 53; reverting it writes the cold build's bytes
+again, all 56. (An xbf's closure names the repository's commit, so the first build after
+a commit rewrites every xbf, those bytes aside the same.)
 
 ## The port
 
 - `@step(out="../STEP/x.step")` became `@xbf(out="../XBF/x.xbf")`, the engine imported
   first; `build123d` is imported directly, `cadgen.srgb` is `lib/color.py`'s, and
-  `cadgen.report` and `read_step` are the engine's. `lib/` holds the 53 factory
+  `cadgen.report` and `read_step` are the engine's. `lib/` holds the 56 factory
   modules these models reach, unchanged but for those imports, and the JSON data they
   read. `lib/assembly.integration_bodies` and `lib/palm_frame.make_palm_frame_bodies`
   still read the frozen inputs listed below; no ported model calls them.
@@ -50,9 +51,17 @@ again, all 54.
   `forearm_housing_context` read the mount system's and the fasteners' STEP. The
   pieces several models place are `@memo` stages: `finger_guide_mounts(finger)` (18-35 s
   and about 1,240 kernel calls each, placed by its finger's model and the four-finger
-  review) and `forearm_frame()` and `forearm_guide_banks()` (about 40 s, 3,100 and 5,300
-  calls, placed by three models each). Nothing else is: the housing and the fasteners
-  (2.4 s and 0.9 s) are plain functions, and each model makes its own.
+  review), `forearm_frame()` and `forearm_guide_banks()` (about 40 s, 3,100 and 5,300
+  calls, placed by three models each) and `continuous_supports()` (about 25 s, 1,160
+  calls, placed by both R5 support models). Nothing else is: the housing and the
+  fasteners (2.4 s and 0.9 s) are plain functions, and each model makes its own.
+- The R5 supports clip against `phalanx_continuous_r5` as STEP gives it back ("native
+  STEP reconstruction is required for reliable clipping"): the original read that
+  model's STEP output with build123d's `import_step`. `lib/phalanx_r5_host.py` writes
+  the same phalanx to STEP and reads it back in memory now. Its shape and the raw
+  `BRepAlgoAPI` booleans of `lib/phalanx_r5_boolean.py` are no operations the memo
+  keys, so the two R5 models never replay from the worker's memory: a no-op takes their
+  xbfs (their key holds), and any edit their code reaches runs them whole (about 27 s).
 - Materials: `capstan_index_overlay` declared `materials=` (the palette's aluminium
   bucket); each of its parts carries `lib/palette.py`'s `MATERIALS` entry for its bucket
   now (`lib.assembly.compound`), a catalogue material in the old finish's look with
@@ -118,11 +127,6 @@ make:
   (`secondary_hardware_diagnostic.json`), `positive_yaw_bushing_review`,
   `radial_bank_screw_clearance_candidate`, `static_clearance_relief_review`,
   `thumb_reaction_arm_clearance_r6` (8).
-- **A STEP round trip of another model's output**: `phalanx_continuous_supports_r5`
-  and `phalanx_continuous_representative_r5` read `phalanx_continuous_r5`'s STEP back
-  with build123d's `import_step` ("native STEP reconstruction is required for reliable
-  clipping") for raw `BRepAlgoAPI` booleans; ported, the read and the booleans would
-  run on every build, so the clipping wants a code change first (2).
 - **Broken in `models/`**: `phalanx_comb_clearance_review` imports a name
   `lib/native_integration.py` no longer defines (1).
 - **Too slow, then failing**: `palm_little_review`, the fifth metacarpal, the one palm
