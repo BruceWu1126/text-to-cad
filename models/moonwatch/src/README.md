@@ -97,6 +97,19 @@ build123d joints, placed where the parts stand and paired by label:
   where the old showcase moved the face stack sideways and the reveal lifted it, both
   lift it now (the showcase higher, clear of the rising movement), and the crown and
   pushers, whose joints are their own travel, stay in the case.
+- **The tier fan** (`showcase`, `grand_tour`) runs as the old clips meant it. Their tier
+  offsets are in the cased watch frame, negative toward the caseback (the bridge side),
+  which the movement's flip turns upward; the tier and train-wheel joints slide in the
+  movement's own frame, which the casing flips (watch z = MOVT_Z_OFFSET - local z), so
+  each slides by the offset's negative. Fixed 2026-10-22: the first port slid them by
+  the offset itself, so after the flip the bridge-side tiers fell through the main plate
+  into the case and the keyless works rose into it. Now, open, the barrel, the pallet,
+  train and barrel bridges, the winding, the balance cock and the chronograph works stand
+  above the plate in that order (the chronograph works' top about 48 mm up, the plate's
+  13-17 mm), the keyless works about 7 mm below it, and no tier meets another; the face
+  stack's extra 32 mm in `grand_tour` clears the chronograph works. As in the old clip,
+  the chronograph works fan as one tier: the hour recorder they carry on the dial side
+  passes up through the plate and the winding tier while the fan opens and closes.
 
 New finishes for the dial, hands and bracelet follow the same rules as the case's:
 `black_lacquer` and `lume_plot` are own materials (coatings, no density),

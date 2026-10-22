@@ -144,8 +144,9 @@ _HAND_RIDERS = (
 )
 
 # The movement's turning parts that also fan with their tier: one cylindrical joint each,
-# its turn about the arbor and its slide along it (local -Z: + is toward the bridges' side
-# lifting off after the flip). label, part, position, range, tier slide.
+# its turn about the arbor and its slide along it (local -Z, the dial side: a negative
+# slide is toward the bridges, local +z, which the movement's own flip turns upward).
+# label, part, position, range.
 _WHEELS = (
     ("center", "#center_wheel", S.CENTER_WHEEL_POS, (-4320.0, 4320.0)),
     ("third", "#third_wheel", S.THIRD_WHEEL_POS, (-3600.0, 3600.0)),
@@ -176,7 +177,8 @@ _CHRONO_RIDERS = (
     ("runner_arbor_rides", "#chrono_runner_wheel", "#chrono_runner_arbor"),
 )
 
-# The tier slide each turning part takes in the showcase fan (local z, from the old tiers).
+# The tier offset each turning part takes in the fan: the old tiers' z, in the CASED watch
+# frame (negative is the bridge side, toward the caseback), as `_TIERS` holds them.
 _WHEEL_TIER = {"center": -5.0, "third": -5.0, "fourth": -5.0, "escape": -5.0, "pallet": -5.0, "balance": -24.0}
 
 
@@ -192,7 +194,7 @@ def _hands(parts: _Parts, dial) -> None:
 def _train(parts: _Parts, caliber, chrono) -> None:
     for label, wheel, pos, limits in _WHEELS:
         axis = bd.Axis(_local(pos), _DOWN)
-        joint = bd.CylindricalJoint(label, caliber, axis=axis, angular_range=limits, linear_range=(0.0, 30.0))
+        joint = bd.CylindricalJoint(label, caliber, axis=axis, angular_range=limits, linear_range=(-30.0, 0.0))
         bd.RigidJoint(label, parts[wheel], joint.location)
     for label, carrier, rider in _WHEEL_RIDERS:
         _rides(label, parts[carrier], parts[rider])
@@ -242,10 +244,13 @@ _LIFTS = (
     ("lift_spring_bar_6", "#spring_bar:6", (0.0, -1.0, 0.0)),
 )
 
-# Movement tiers, as the old showcase fanned them (local z; negative is the bridge side,
-# which the flip turns upward): each group slides on one prismatic joint, its first part
-# the lead and the rest fastened to it. The turning parts fan on their own joints
-# (`_WHEEL_TIER`); a fastened rider goes with its wheel.
+# Movement tiers, as the old showcase fanned them: each group's z offset in the CASED
+# watch frame, where the old clip applied it (negative is the bridge side, toward the
+# caseback, which the movement's flip turns upward; the keyless works, on the dial side,
+# goes the other way). Each group slides on one prismatic joint along the movement's own
+# +z, its first part the lead and the rest fastened to it. The casing flips the movement
+# (watch z = MOVT_Z_OFFSET - local z), so a tier slides by -dz along its joint. The
+# turning parts fan on their own joints (`_WHEEL_TIER`); a fastened rider goes with its wheel.
 _PALLET_BRIDGE = ("#pallet_bridge", "#pallet_bridge:stripe_shadow:0", "#pallet_bridge:stripe_shadow:1",
                   "#pallet_bridge:anglage", "#bridge_jewel:pallet", "#chaton:pallet", "#screw:pallet_bridge")
 _TRAIN_BRIDGE = (
@@ -462,7 +467,7 @@ def _choreograph(*, run: float = 0.0, reveal: float = 0.0, showcase: float = 0.0
         for joint in _TOUR_HEADROOM_JOINTS:
             add(joint, _TOUR_HEADROOM * tour_fan)
     for joint, _targets, dz in _TIERS:
-        add(joint, dz * fan)
+        add(joint, -dz * fan)   # the old watch-frame offset, in the movement's flipped frame
 
     # The movement rises out of the case and flips in place about its own centre.
     reveal_rise, reveal_flip = _reveal_stages(rv)
@@ -485,7 +490,8 @@ def _choreograph(*, run: float = 0.0, reveal: float = 0.0, showcase: float = 0.0
         "center": 0.0,
     }
     for joint, angle in turns.items():
-        values[joint] = (angle, -_WHEEL_TIER[joint] * fan)   # turn, then the tier's slide
+        # turn, then the tier's slide: along the joint's local -Z, so the watch-frame offset as is
+        values[joint] = (angle, _WHEEL_TIER[joint] * fan)
     # The small seconds ride the fourth wheel; the chronograph runs, one turn a loop.
     values["sub_seconds"] = -144.0 * run
     values["chrono_runner"] = -360.0 * run
