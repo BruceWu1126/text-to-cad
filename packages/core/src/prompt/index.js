@@ -1,4 +1,4 @@
-import { buildCadRefToken, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
+import { buildCadRefToken, isEngineRefFile, isEngineSelector, parseCadRefSelector, parseCadRefToken } from '../lib/cadRefs.js';
 
 let operationSequence = 0;
 const operationNamespace = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -25,7 +25,10 @@ export function validatePromptReference(reference) {
     requireValue(target.end.line > target.start.line || (target.end.line === target.start.line && target.end.character >= target.start.character), 'range end precedes its start');
   } else if (target.kind === 'cad-selector') {
     requireValue(resource.kind === 'workspace-file', 'CAD selectors require a workspace file');
+    // An .xbf's selectors are the engine's grammar; any other file's are a STEP's (cadRefs.js).
+    const engine = isEngineRefFile(resource.path);
     requireValue(Array.isArray(target.selectors) && target.selectors.length > 0 && target.selectors.every(selector => {
+      if (engine) return isEngineSelector(selector);
       const parsed = typeof selector === 'string' && selector === selector.trim() ? parseCadRefSelector(selector) : null;
       return parsed && parsed.selectorType !== 'opaque';
     }), 'invalid CAD selector');

@@ -6,19 +6,25 @@ import test from "node:test";
 import {
   buildCadRefToken,
   elementRef,
+  engineSelectorText,
   isElementName,
+  isEngineRefFile,
+  isEngineSelector,
   isNativeCadSelector,
   isOccurrenceToken,
   normalizeCadRefSelectors,
   parseCadRefSelector,
   parseCadRefToken,
+  parseEngineRef,
   sortCadRefSelectors,
+  spellEngineRefs,
   splitElementRef
 } from "./cadRefs.js";
 
-// The same fixture the Python suite reads. It is the only thing keeping the two grammars --
-// this module and cadgen/cad_ref_syntax.py -- from drifting, which they had already done four
-// copies deep before it existed.
+// The same fixture the Python suites read. It is the only thing keeping each grammar's two
+// parsers -- this module and cadgen/engine/refs.py for an .xbf's, this module and
+// cadgen/cad_ref_syntax.py for a STEP's -- from drifting, which they had already done four copies
+// deep before it existed.
 const FIXTURE = JSON.parse(
   readFileSync(fileURLToPath(new URL("./cadRefs.parity.json", import.meta.url)), "utf8")
 );
@@ -133,4 +139,60 @@ test("imported file tokens quote and round-trip filename delimiters", () => {
     const token = buildCadRefToken({cadPath, selectors:[O2, O1]});
     assert.deepEqual(parseCadRefToken(token), {token, cadPath, selectors:[O2, O1]});
   }
+});
+
+// A parsed engine selector as the fixture writes it: its owner's segments, a quoted one as
+// { quoted, index }, and its element's text.
+const engineShape = ({ owner, element }) => ({
+  owner: owner ? owner.map(segment => (!segment.quoted ? segment.text : segment.index === null ? { quoted: segment.text } : { quoted: segment.text, index: segment.index })) : null,
+  element: element === null || typeof element === "string" ? element : `${element.kind} ${element.ordinal}`
+});
+
+test("an .xbf's refs parse as cadgen.engine.refs parses them, case for case", () => {
+  assert.ok(FIXTURE.refCases.length);
+  for (const testCase of FIXTURE.refCases) {
+    const parsed = parseEngineRef(testCase.ref);
+    if (testCase.refused) {
+      assert.equal(parsed, null, `${JSON.stringify(testCase.ref)}: ${testCase.why}`);
+      continue;
+    }
+    assert.ok(parsed, `${JSON.stringify(testCase.ref)}: ${testCase.why}`);
+    assert.equal(parsed.file, testCase.file, testCase.ref);
+    assert.deepEqual(parsed.selectors.map(engineShape), testCase.selectors, testCase.ref);
+    assert.deepEqual(parsed.selectors.map(engineSelectorText), testCase.printed, testCase.ref);
+  }
+});
+
+test("an .xbf's occurrences and elements are spelled as cadgen where answers them", () => {
+  assert.ok(FIXTURE.spellingCases.length);
+  for (const { structure, occurrences, elements, why } of FIXTURE.spellingCases) {
+    const spell = spellEngineRefs(structure.tree);
+    const entryAt = at => at.reduce((entry, index) => entry.children[index], structure.tree);
+    for (const row of occurrences) assert.equal(spell.occurrence(entryAt(row.at)), row.ref, why);
+    for (const row of elements) {
+      const entry = entryAt(row.at);
+      const name = structure.prototypes[entry.prototype][`${row.kind}Names`][String(row.ordinal)] || "";
+      assert.equal(spell.element(entry, row.kind, row.ordinal, name), row.ref, why);
+    }
+    assert.equal(spell.occurrence({ name: "elsewhere" }), "", "an entry of another tree has no ref here");
+  }
+});
+
+test("an .xbf's copied line is the engine's whole ref, round-tripped; a STEP's keeps its own grammar", () => {
+  const cadPath = "/work/my parts/kit.xbf";
+  const selectors = ["kit/hand/finger.2/face 7", "\"M3, M4\"/e:screw.body.2", "palm"];
+  const token = buildCadRefToken({ cadPath, selectors });
+  // Written in the order given, a comma inside a quoted label left whole.
+  assert.equal(token, `"${cadPath}"#kit/hand/finger.2/face 7,"M3, M4"/e:screw.body.2,palm`);
+  assert.deepEqual(parseCadRefToken(`${token}\nmore text`), { token, cadPath, selectors });
+  // The line runs to its end: a label's spaces are its own, and the engine refuses what it refuses.
+  assert.deepEqual(parseCadRefToken("/w/kit.xbf#kit/v1.5 bracket/face 2").selectors, ["kit/v1.5 bracket/face 2"]);
+  assert.deepEqual(parseCadRefToken("/w/kit.xbf#hand/finger.2,face 3").selectors, ["hand/finger.2", "hand/finger.2/face 3"]);
+  assert.equal(parseCadRefToken("/w/kit.xbf#kit//face 1"), null);
+  assert.ok(isEngineRefFile("/w/KIT.XBF") && !isEngineRefFile("/w/kit.step") && !isEngineRefFile("/w/kit.xbf.step"));
+  assert.ok(isEngineSelector("kit/\"M3, M4\"/face 1") && !isEngineSelector("a,b") && !isEngineSelector(" a") && !isEngineSelector(""));
+  // A STEP's token is unchanged: it stops at a blank, and its selectors sort.
+  assert.deepEqual(parseCadRefToken("/w/kit.step#o:4b1f9e2a7c03/f:dial.extrude1.3 note").selectors, ["o:4b1f9e2a7c03/f:dial.extrude1.3"]);
+  assert.equal(buildCadRefToken({ cadPath: "/w/kit.step", selectors: ["o:4b1f9e2a7c03/f:9d2e8c1b5a70", "o:4b1f9e2a7c03"] }),
+    "/w/kit.step#o:4b1f9e2a7c03,o:4b1f9e2a7c03/f:9d2e8c1b5a70");
 });

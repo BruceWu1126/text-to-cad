@@ -1084,7 +1084,10 @@ JSON-quoted where it holds one) must be the document resolved in: the same file,
 segments of its path. A canonical ref -- what `select` labels a shape with and `where` answers --
 spells the element by its name (its ordinal only where it has none) under its part's label where
 that label names one occurrence, else under the occurrence's path from the root; in a document of
-one part, under the document's name.
+one part, under the document's name. It is also what the CAD Viewer copies of an `.xbf`'s selection,
+the file's path first (`/work/XBF/kit.xbf#kit/hand/finger.2/face 7`): the viewer's parser and speller
+of this grammar (`cadRefs` in the bundled runtime) are held to this module's, case for case, by a
+fixture both suites assert.
 
 `select(source, ref, kind=None)` (`cadgen.engine.select`) is the geometry a ref names, as a
 build123d `ShapeList` in world coordinates, one per selector: an element a `Face`, `Edge` or

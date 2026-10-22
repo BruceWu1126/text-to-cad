@@ -647,6 +647,17 @@ pairs (`xbfKinematics.js`), a geared pair written through its gear, and its knob
 a STEP's are (`xbfJointHandles.js`). A pair the engine could not keep a value for is said in the
 section, under the rows; a STEP's sidecar refuses such a joint at build time instead.
 
+What an `.xbf`'s selection copies -- a chip, Copy Reference, a double-click, Copy Prompt -- is the
+engine's canonical ref of each thing, the file's path first, the ref `cadgen where` answers and
+`select` labels its shapes with (`cadgen.engine.refs`): a part or subassembly by its label where that
+names it alone in the document, else by its occurrence path, each segment its label numbered among the
+siblings sharing it (`/work/XBF/kit.xbf#kit/hand/finger.2`); an element by its name, else its kind and
+number, under it (`…#palm/f:palm.body.3`, `…#kit/hand/finger.2/face 7`); a label a plain segment
+would misread JSON-quoted (`…#"M3/M4 screw"`). `xbfTree.js` spells them (`refOf`, `elementRefOf`)
+with core's `cadRefs.js`, whose parser and speller are held to the engine's by one fixture, and a
+pasted line is parsed back in the same grammar, to the end of the line. A STEP the renderer draws keeps
+its own grammar's references.
+
 ## Tools on a scene of triangles
 
 A GLB, a 3MF, an STL and a robot have the kit's tools as their matrix allows them

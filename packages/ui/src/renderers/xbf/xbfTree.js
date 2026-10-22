@@ -1,3 +1,4 @@
+import { spellEngineRefs } from "@text-to-cad/core/lib/cadRefs.js";
 import { xbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 
 // An engine document's tree as a STEP's model tree presents an assembly (the STEP renderer's
@@ -11,6 +12,10 @@ import { xbfElementId } from "@text-to-cad/core/lib/xbf/xbfScene.js";
 // at and under it: what its eye hides and its selection lights. The document's own wrapper is not
 // a row (its children are the tree's first rows), and sibling parts of one prototype that share a
 // name's stem fold into one row carrying the count, as a STEP's repeated components do.
+//
+// Each node, and each element of a part, is also a ref into the document as the engine spells it
+// (`spellEngineRefs`, `cadgen.engine.refs`): `refOf` and `elementRefOf`, over the engine's tree
+// itself, never the rows a fold made.
 
 /**
  * @typedef {object} XbfTreeNode
@@ -71,11 +76,16 @@ function foldRepeatedParts(nodes, ownerId) {
  * owners (outermost first), and each instance's own node.
  * @param {object | null} structure  The engine's structure.
  * @returns {{ roots: XbfTreeNode[], wrapper: XbfTreeNode | null, nodes: Map<string, XbfTreeNode>,
- *   owners: Map<string, string[]>, partOf: Map<string, string> }}
+ *   owners: Map<string, string[]>, refOf: (id: string) => string,
+ *   elementRefOf: (partId: string, kind: string, ordinal: number, name?: string) => string }}
+ *   `refOf`: a node's canonical ref by its selection id (`palm`, `hand/finger.2`); `elementRefOf`: an
+ *   element's of the part `partId` (`hand/finger.2/face 7`, by its name where it has one). "" for an
+ *   id the tree does not hold.
  */
 export function presentXbfTree(structure) {
   const nodes = new Map();
   const owners = new Map();
+  const entries = new Map();
   const prototypes = structure?.prototypes || [];
   const visit = (source, path, chain) => {
     const children = Array.isArray(source?.children) ? source.children : null;
@@ -87,6 +97,7 @@ export function presentXbfTree(structure) {
       component: placed ? String(prototypes[source.prototype]?.key ?? source.prototype) : null, leafPartIds: [], children: [] };
     nodes.set(selectionId, node);
     owners.set(selectionId, chain);
+    entries.set(selectionId, source);
     if (children) {
       const kids = children.map((child, at) => visit(child, `${path}.${at}`, [...chain, selectionId])).filter(Boolean);
       node.leafPartIds = [...new Set(kids.flatMap(child => child.leafPartIds))];
@@ -101,7 +112,12 @@ export function presentXbfTree(structure) {
   const top = structure?.tree ? visit(structure.tree, "0", []) : null;
   // The document's wrapper is a STEP's assembly root: its children are the tree's rows.
   const wrapper = top?.kind === "assembly" ? top : null;
-  return { roots: wrapper ? wrapper.children : top ? [top] : [], wrapper, nodes, owners };
+  const spelled = spellEngineRefs(structure?.tree || null);
+  return {
+    roots: wrapper ? wrapper.children : top ? [top] : [], wrapper, nodes, owners,
+    refOf: id => spelled.occurrence(entries.get(id)),
+    elementRefOf: (partId, kind, ordinal, name = "") => spelled.element(entries.get(partId), kind, ordinal, name)
+  };
 }
 
 /**
