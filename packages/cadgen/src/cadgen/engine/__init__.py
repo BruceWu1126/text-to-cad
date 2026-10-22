@@ -35,8 +35,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "report",
-           "select", "step", "stl", "threemf", "track", "xbf"]
+__all__ = ["Material", "configuration", "dxf", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf",
+           "report", "select", "step", "stl", "threemf", "track", "xbf"]
 
 
 def _main_in_a_package() -> None:

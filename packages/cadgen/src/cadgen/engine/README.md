@@ -3,14 +3,15 @@
 A model is a parameterless function that returns a build123d shape, decorated
 with `@xbf`. The engine runs it in a warm worker, saves the result as an XCAF
 document (`.xbf`, BinXCAF), and writes the derived files the model declares,
-each a translation of that document.
+each a translation of that document. A drawing is a model like any other: its body
+returns 2D geometry (a sketch, a face, wires or edges), and `@dxf` declares its DXF.
 
 ```python
 import build123d as bd
 from cadgen.engine import xbf, step
 
 @xbf                      # XBF/arm.xbf beside the script; @xbf(out="path.xbf") to choose
-@step("arm.step")         # also @glb, @stl, @threemf; stacked or alone; out= is every decorator's only argument
+@step("arm.step")         # also @glb, @stl, @threemf, @dxf; stacked or alone; out= is every decorator's only argument
 def arm():
     return bd.Box(10, 20, 30)
 ```
@@ -78,8 +79,9 @@ def hinge():
    but for the xbf itself: a model whose xbf holds the closure the model has now is
    not run (**Build closure**).
 3. **Standalone.** `cadgen.engine` imports nothing of cadgen outside itself:
-   OCP, build123d, numpy, Pillow (the renderer's rasteriser) and the standard library
-   only. A test holds it.
+   OCP, build123d (and ezdxf, build123d's own DXF library, which the DXF export writes
+   and checks a drawing with), numpy, Pillow (the renderer's rasteriser) and the standard
+   library only. A test holds it.
 4. **The file is the document.** The xbf is the native document: units in
    millimetres, prototypes and instances with placements, a name on every part
    and instance, colours per part and per painted face, materials per part and
@@ -89,8 +91,8 @@ def hinge():
    labels, and an assembly's mechanism (links, pairs, ground, configurations: see
    Kinematics); its main label names what wrote it (`cadgen.engine xbf/1 (cadgen
    <release>)`, `document.Loaded.writer`) and holds the model's build closure
-   (**Build closure**). No code location is on an element. STEP, GLB, STL and 3MF
-   are translations of it (**Exports**).
+   (**Build closure**). No code location is on an element. STEP, GLB, STL, 3MF and,
+   of a planar document, DXF are translations of it (**Exports**).
    `cadgen xbf export` writes any of them from the xbf alone.
 5. **The memo is the only cache, and it lives in the worker.** Every kernel
    operation a model runs is keyed by its inputs. A hit hands back the objects
@@ -127,7 +129,7 @@ def hinge():
    the script says what is on disk after it runs, and nothing on a command line can
    say otherwise. Engine switches are environment variables, never script options.
 12. **`cadgen build` takes code only.** Its one argument is source text, which declares
-   nothing: its flags (`--xbf/--step/--glb/--stl/--threemf`, `--name`) are its only
+   nothing: its flags (`--xbf/--step/--glb/--stl/--threemf/--dxf`, `--name`) are its only
    declarations, additive among themselves. A script is built by running it (law 11),
    so there is one way to build each.
 
@@ -144,7 +146,7 @@ def hinge():
 | `document.py` | result to XCAF (prototypes, instances, names, colours, materials, element names), a warm build's patch of the document it kept, atomic BinXCAF save, read-back of an xbf or a foreign STEP |
 | `reader.py` | what a model imports: an XCAF document described as data and assembled into a build123d tree (`read_step`, `read_xbf`); the reader process a build's STEP files are parsed in; a read of a file the build writes refused (`refuse_written`) |
 | `refs.py` | references to geometry: the ref grammar, occurrence paths, resolution by name in the latest build, `select` (**References**) |
-| `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
+| `export/` | `translate` and the kind registry (`__init__`); an xbf packaged with its closure's files (`cadz`); STEP through the XCAF writer (`step`); placements and meshes from the one mesh cache (`mesh`); GLB, 3MF, binary STL (`glb`, `threemf`, `stl`); a planar document's drawing through build123d's DXF exporter, with the drawing checks (`dxf`); a motion baked into a glTF clip (`motion`); a view made a document again, for a posed or parted STEP and an xbf (`tree`) |
 | `mesh.py` | per-part tessellation at FreeCAD's default tolerance, edge classes, element facts, and the wire format |
 | `serve.py`, `page/` | HTTP: structure JSON and one binary buffer per part; a STEP read in a reader process, held by its bytes; a minimal three.js page |
 | `access.py` | which pages may read a served document from another origin: loopback ones |
@@ -161,7 +163,7 @@ def hinge():
 ```
 python SCRIPT.py                                 every model of the script, as its decorators declare
 cadgen xbf build SOURCE | - [--name N]           one model from source text (stdin with -), its files
-    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--verify] [--no-daemon]
+    [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify] [--no-daemon]
 cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs] [--no-daemon]
 cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--camera C|authored] [--preview]
                     [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
@@ -431,11 +433,11 @@ decorator and no build flag draws one.
 
 ## Exports
 
-The xbf is the model's result; STEP, GLB, STL and 3MF are exports of a document, and an xbf
-can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,
+The xbf is the model's result; STEP, GLB, STL, 3MF and DXF are exports of a document, and an
+xbf can be one too. One writer, `export.translate(document, kind, path, pose=, part=)`,
 writes every one, whether a decorator declares the file or `cadgen xbf export` asks for it: the
 same document and the same options write the same bytes. Every file is written beside its
-target and moved over it.
+target and moved over it; a DXF only when its bytes change.
 
 - **Sources are documents**: an `.xbf`, a `.step` (read into a document first), or a script's
   model (`SCRIPT.py::MODEL`, built first, in its worker). A mesh is never a source: it has no
@@ -463,6 +465,21 @@ target and moved over it.
   properties, painted triangles naming their own); **STL**: binary, every placed triangle.
   Their meshes are the process's one mesh cache's (`serve.MESHES`), the viewer's: a part the
   build meshed for the viewer is not meshed again for a GLB, nor the other way round.
+- **DXF** (`export/dxf.py`): a planar document -- a model whose body returns a sketch, a face,
+  wires or edges -- drawn by build123d's own `ExportDXF` (ezdxf), in millimetres, each edge
+  where the document places it one entity, so a curve stays an ARC, CIRCLE, ELLIPSE or SPLINE.
+  A document placing one part is the layer `CUT`; any other is a layer per part, named by its
+  occurrence's name (`cut.label, bend.label = "CUT", "BEND"` in the compound returned), parts
+  of one name sharing it; a layer of several shapes is one part of them all
+  (`bd.Compound([a, b], label="ENGRAVE")`). A solid is refused (`tom.xbf is 3D`), and so is an edge with a point
+  off z=0, by its element name. Layers are written in name order and edges in an order of
+  their content (curve kind, sampled points, length), never the kernel's traversal, and
+  ezdxf's provenance is pinned and its classes sorted: the same geometry is the same bytes in
+  any process on any day, so a declared DXF is the bytes `cadgen xbf export flat.xbf flat.dxf`
+  writes. The drawing checks run on the document before it is written -- units set, no
+  zero-length or duplicate entity, every cut profile closed, something drawn; open geometry
+  only on a layer its name's whole tokens make a bend, engrave or reference one -- and an
+  error refuses the file, saying which. `export.dxf.validate_dxf_file` runs them on any DXF.
 - `--pose` places the mechanism's links by forward kinematics before anything is written;
   `--part` (an occurrence's path, `board/rack`, or a node's name) writes that subtree as a
   document of its own, its root at the subtree's frame, an xbf of it with the mechanism's share
@@ -494,9 +511,9 @@ tube over 2 s, a 4 s clip) bakes to 5 keys on 15 placements, within 1.26 mm and 
 forward kinematics at eight points inside every step.
 
 **Decorators carry only `out`.** `@xbf(out=None)` makes the function a model (`XBF/<function>.xbf`
-beside the script); `@step(out=None)`, `@glb`, `@stl` and `@threemf` declare translations of
-the built document (`<function><suffix>` beside the script). No decorator takes anything else:
-a model's material, colours, joints, the pose its joints connect its parts at, its
+beside the script); `@step(out=None)`, `@glb`, `@stl`, `@threemf` and `@dxf` declare
+translations of the built document (`<function><suffix>` beside the script). No decorator takes
+anything else: a model's material, colours, joints, the pose its joints connect its parts at, its
 configurations and its motions are written in its body. Every declared file shows the model as
 built: where its joints' `connect_to` placed the parts. A model that wants a second pose on
 every build is a second model function with other joint values. A model with no `@xbf` writes

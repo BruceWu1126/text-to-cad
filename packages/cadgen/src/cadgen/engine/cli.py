@@ -2,7 +2,8 @@
 the functions of ``api``; and ``python SCRIPT.py``'s run (``run_script``).
 
     cadgen xbf build SOURCE | - [--name N]           one model from source text (stdin with -), its files
-        [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] [--verify] [--no-daemon]
+        [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] [--json] [--verify]
+        [--no-daemon]
     python SCRIPT.py                                 every model of a script, as its decorators declare
     cadgen xbf export SRC DST [DST ...] [--pose NAME|JSON] [--part NAME] [--no-inputs]
     cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--camera PRESET|az:el|JSON|authored] [--grid]
@@ -27,11 +28,11 @@ from typing import Any
 
 __all__ = ["build_parser", "main", "run_script", "weighed", "where_main", "where_parser"]
 
-FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf")
-_SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
+FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf", "dxf")
+_SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf"}
 # Where a file flag with no path writes, in the working folder: where a decorator with none puts it.
 _DEFAULT = {"xbf": "XBF/<name>.xbf", "step": "<name>.step", "glb": "<name>.glb", "stl": "<name>.stl",
-            "threemf": "<name>.3mf"}
+            "threemf": "<name>.3mf", "dxf": "<name>.dxf"}
 
 
 def build_parser(prog: str = "cadgen xbf") -> argparse.ArgumentParser:
@@ -44,8 +45,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     verbs = parser.add_subparsers(dest="verb", required=True)
     build = verbs.add_parser(
         "build", help="build source text into the files its flags name (a script builds by running it)",
-        usage="%(prog)s SOURCE [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--json] "
-              "[--verify] [--no-daemon]",
+        usage="%(prog)s SOURCE [--name N] [--xbf [F]] [--step [F]] [--glb [F]] [--stl [F]] [--threemf [F]] [--dxf [F]] "
+              "[--json] [--verify] [--no-daemon]",
         description="Build source text: one model, which assigns its final shape to `result`. Code declares "
                     "nothing, so its file flags are its declarations, additive among themselves; a child model it "
                     "calls writes the files that model declares. A script builds by running it: python SCRIPT.py.")
@@ -59,12 +60,13 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     build.add_argument("--verify", action="store_true",
                        help="run every function the engine would replay and compare its result with the logged one")
     build.add_argument("--no-daemon", action="store_true", help="build in this process (cold, no worker kept)")
-    export = verbs.add_parser("export", help="write a document to STEP, GLB, STL, 3MF or xbf files, by suffix; a GLB "
-                                             "carries the document's motions as clips")
+    export = verbs.add_parser("export", help="write a document to STEP, GLB, STL, 3MF, DXF or xbf files, by suffix; a "
+                                             "GLB carries the document's motions as clips, a DXF draws a planar one")
     export.add_argument("source", metavar="SRC", help="an .xbf, a .step, or SCRIPT.py::MODEL (built first)")
     export.add_argument("destinations", nargs="+", metavar="DST",
-                        help=".xbf (from a STEP, or with --part), .step, .glb, .stl or .3mf; or .cadz (from an "
-                             "xbf: it, its build closure's source files and its inputs, zipped)")
+                        help=".xbf (from a STEP, or with --part), .step, .glb, .stl, .3mf or .dxf (of a planar "
+                             "document); or .cadz (from an xbf: it, its build closure's source files and its inputs, "
+                             "zipped)")
     export.add_argument("--no-inputs", action="store_true", help="a .cadz without the closure's input files")
     export.add_argument("--pose", help="a configuration's name, or joint values as JSON ('{\"elbow\": 45}'): the "
                                        "mechanism posed there; as built without it")
@@ -118,7 +120,7 @@ def _describe(report: dict[str, Any], wall: float, fresh: bool | None) -> str:
         counted = {status: bodies.count(status) for status in ("run", "replayed") if bodies.count(status)}
         shown = ", ".join(f"{count} {status}" for status, count in counted.items()) or "none"
         stages = ", ".join(f"{name} {timings[name]:.2f}s" for name in ("body", "names", "document", "xbf", "step",
-                                                                        "glb", "stl", "threemf")
+                                                                        "glb", "stl", "threemf", "dxf")
                            if timings.get(name))
         line = (f"built {report['model']}{worker} in {wall:.2f}s: bodies {shown}; {memo.get('misses', 0)} misses, "
                 f"{memo.get('hits', 0)} hits" + (f"; {stages}" if stages else ""))
