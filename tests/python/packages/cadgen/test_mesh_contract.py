@@ -30,7 +30,12 @@ AREA_TOLERANCE = 1e-2
 # A round body meshed at the display angle tolerance (0.35 rad between a vertex's normal and its
 # neighbour's) loses up to half a per cent of its volume to its facets.
 VOLUME_TOLERANCE = 1e-2
-TRIANGLE_BUDGET = 4.0  # against OCCT's BRepMesh at the same tolerances
+# Against OCCT's BRepMesh at the same tolerances. OCCT grids a torus without measuring it, and
+# its pass at the display deflection lies 4.5 deflections off the surface; the mesher meshes the
+# part again at half (still off) and then a quarter of it, the last of its retries, where OCCT's
+# grid takes four times its first pass's triangles and a little more for rounding (25,592 against
+# 6,392). So four is the cost the retries are built to spend, and the margin is that rounding.
+TRIANGLE_BUDGET = 4.05
 # A triangle is folded when its facet points against the normal it is drawn with by more than the
 # rounding of a sliver seen edge-on: the cosine between them below this.
 FOLDED_COSINE = -1e-3
