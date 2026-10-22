@@ -124,10 +124,12 @@ their rocker covers 60 mm further, the crankcase halves, cam section, nose and
 propeller forward, the blower and accessory case back). `lib/explode.py` turns them
 into joints:
 
-- **One link per unit**, its parts fastened to its first, on a prismatic joint
+- **One link per unit** (per exploded-running group, where a unit's parts are in
+  several: the crankcase front half leaves with the cam ring and the nose case's rear),
+  its parts fastened to its first, on a prismatic joint
   `x_<part>` along its own move, held by its host's link (a fastener rides its host, as
   it did) or by the root, the ground; units that move alike (one holder, line and
-  timing) share a link, 823 moving joints in all. A slide's value
+  timing) share a link, 825 moving joints in all. A slide's value
   at each instant is the old offset's projection on its line: exact wherever the
   unit's moves relative to its holder lie on one line, so 1,356 of the 1,360 units
   follow their old tracks exactly where nothing below forces otherwise; the other four

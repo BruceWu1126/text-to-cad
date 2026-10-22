@@ -272,9 +272,18 @@ class Plan:
         # with no host first, then the fasteners on their hosts.
         static_units = []
         for i, labels in units.items():
-            statics = [label for label in labels if label not in group_of]
-            if statics:
-                static_units.append((i, statics))
+            # a unit's parts in different exploded-running groups are links of their own
+            # (the parts it hid go with the first)
+            parts: dict = {}
+            for label in labels:
+                if label not in group_of:
+                    held = xr(label)
+                    key = None if held is None else tuple(np.round(held, 6))
+                    parts.setdefault(key, []).append(label)
+            hid = parts.pop(None, [])
+            subsets = list(parts.values()) or [[]]
+            subsets[0] += hid
+            static_units += [(i, statics) for statics in subsets if statics]
         for i, statics in static_units:
             if tracks[i][0] >= 0:
                 continue
