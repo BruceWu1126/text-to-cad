@@ -200,13 +200,28 @@ def driver() -> Any:
     return made
 
 
+_DRAWS: list[str | None] = []
+
+
 def available() -> str | None:
-    """None when a canvas can be made in this process; else why not (asked once, remembered)."""
+    """None when a canvas can be made in this process and draws a picture that leaves it; else why
+    not (asked once, remembered). A context that is made but draws nothing -- Windows' GDI Generic
+    OpenGL 1.1, on a machine with no GPU driver -- is no canvas either."""
     try:
-        Canvas(16, 16).close()
+        canvas = Canvas(16, 16)
     except Unavailable as error:
         return str(error)
-    return None
+    try:
+        if not _DRAWS:
+            try:
+                pixels(canvas.pixmap())
+                _DRAWS.append(None)
+            except RuntimeError as error:
+                _DRAWS.append(f"OpenGL on {platform()} draws no picture here ({error}): a software 1.1 context, "
+                              "no GPU driver")
+        return _DRAWS[0]
+    finally:
+        canvas.close()
 
 
 class Canvas:

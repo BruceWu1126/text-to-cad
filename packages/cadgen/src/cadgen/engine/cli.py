@@ -133,11 +133,20 @@ def _pose(value: str | None) -> Any:
     return parse_pose(value)
 
 
+def _shown(path: Any) -> str:
+    """A path relative to the working folder, or whole where none can be: on Windows, a path on
+    another drive than the folder's."""
+    try:
+        return os.path.relpath(path)
+    except ValueError:
+        return str(path)
+
+
 def _files(report: dict[str, Any]) -> list[str]:
     found = []
     for path, row in (report.get("files") or {}).items():
         state = "written" if row.get("written") else "kept"
-        found.append(f"{os.path.relpath(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
+        found.append(f"{_shown(path)} ({state}, {row.get('bytes', 0) / 1e6:.1f} MB)")
     return found
 
 
@@ -258,7 +267,7 @@ def _export(args: argparse.Namespace, prog: str) -> int:
         print(f"{prog}: {error}", file=sys.stderr)
         return 1
     for row in written:
-        print(f"wrote {os.path.relpath(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
+        print(f"wrote {_shown(row.path)} ({row.bytes / 1e6:.1f} MB) in {row.seconds:.2f}s")
     return 0
 
 

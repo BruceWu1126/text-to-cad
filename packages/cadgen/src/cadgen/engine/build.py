@@ -520,6 +520,8 @@ def _written(model: Any, result: Any, run: Any, report: dict[str, Any], log: Cal
 
 
 def _shown(script: Path, cwd: Path | None) -> str:
+    """A path relative to ``cwd`` (the working folder by default), or whole where none can be: on
+    Windows, a path on another drive than the folder's."""
     try:
         return os.path.relpath(script, cwd or Path.cwd())
     except ValueError:
@@ -658,7 +660,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
             timings[target.kind] = round(seconds, 4)
             written[str(target.path)] = {"kind": target.kind, "written": fresh, "seconds": round(seconds, 4),
                                          "bytes": size}
-            log(f"{'wrote' if fresh else 'kept'} {os.path.relpath(target.path)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
+            log(f"{'wrote' if fresh else 'kept'} {_shown(target.path, None)} ({size / 1e6:.1f} MB) in {seconds:.2f}s")
     _WRITTEN[key] = _Written(signature, {str(target.path): _stat(target.path) for target in plan}, kept, tree.closure,
                              files, tree)
     report["files"] = {str(target.path): written[str(target.path)] for target in plan}
@@ -788,7 +790,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
             return {"used": False, "reason": "the file does not hold the closure its head shows"}, None
         timings["read"] = round(time.perf_counter() - keyed, 4)
         _WRITTEN[name] = _Written(("loaded", found["key"]), stats, None, text)
-    log(f"took {os.path.relpath(xbf)}: its key is the model's ({found['bodies']} bodies), nothing ran")
+    log(f"took {_shown(xbf, None)}: its key is the model's ({found['bodies']} bodies), nothing ran")
     report = {"ok": True, "model": f"{shown}::{model.name}",
               "memo": {"hits": 0, "misses": 0, "uncached": 0, "bodies_run": 0, "bodies_skipped": 0,
                        "bodies_loaded": found["bodies"]},

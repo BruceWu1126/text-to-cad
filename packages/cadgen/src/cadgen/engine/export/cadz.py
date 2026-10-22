@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import zipfile
 from pathlib import Path
+from typing import Any
 
 from cadgen.engine.atomic_replace import replace_atomic
 from cadgen.engine.export import ZIP_DATE
@@ -23,6 +24,14 @@ from cadgen.engine.export import ZIP_DATE
 __all__ = ["SUFFIX", "files", "write"]
 
 SUFFIX = ".cadz"
+
+
+def _shown(path: Any, folder: Path) -> str:
+    """``path`` relative to ``folder``, or whole on another drive."""
+    try:
+        return os.path.relpath(path, folder)
+    except ValueError:
+        return str(path)
 
 
 def files(xbf: Path, *, inputs: bool = True) -> list[Path]:
@@ -49,7 +58,7 @@ def files(xbf: Path, *, inputs: bool = True) -> list[Path]:
     unique = list(dict.fromkeys(found))
     missing = [path for path in unique if not path.is_file()]
     if missing:
-        raise ExportRefused(f"cannot package {xbf.name}: {os.path.relpath(missing[0], folder)} is missing")
+        raise ExportRefused(f"cannot package {xbf.name}: {_shown(missing[0], folder)} is missing")
     return unique
 
 

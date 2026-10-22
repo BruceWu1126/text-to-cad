@@ -14,7 +14,11 @@ link's world transform (row-major, metres) at three poses, made by origin/main's
 port was written; the port must agree to 1e-9.
 
 The pictures (`formats_golden/*.png`, 320x240, macOS) match as `test_render.py`'s do: at most 1.5%
-of the pixels more than 32 levels from every golden pixel within one pixel. A test that draws makes
+of the pixels more than 32 levels from every golden pixel within one pixel. Where a platform's
+OpenGL draws a row apart -- Linux CI's llvmpipe sets a drawing's hairlines a pixel off over more
+than that -- the row has a golden of the platform's own (`formats_golden/<platform>/<row>.png`),
+held to the same bound. A row missed in CI prints the picture it drew (`GOLDEN <platform>/<row>`,
+base64), which is that platform's golden once a person has looked at it. A test that draws makes
 an OpenGL context and is skipped, saying why, where none can be made. A deliberate change to the
 look makes them again: `CADGEN_RENDER_GOLDENS=write`.
 """
@@ -41,6 +45,7 @@ from cadgen.engine.render import context
 from cadgen.engine.snapshot import SnapshotRefused, Still, snapshot
 
 GOLDEN = Path(__file__).resolve().parent / "formats_golden"
+PLATFORM = context.platform()
 WRITE = os.environ.get("CADGEN_RENDER_GOLDENS") == "write"
 SIZE = (320, 240)
 
@@ -710,11 +715,16 @@ class PictureTest(FixtureTest):
             with self.subTest(row=name):
                 data, report = self.draw(path, **fields)
                 self.assertEqual((report["renderer"], report["width"], report["height"]), ("occt", *SIZE))
-                golden = GOLDEN / f"{name}.png"
+                own = GOLDEN / PLATFORM / f"{name}.png"
+                golden = own if own.is_file() else GOLDEN / f"{name}.png"
                 if WRITE:
                     golden.write_bytes(data)
                     continue
                 share = mismatch(pixels(data), pixels(golden.read_bytes()))
+                if share > 0.015 and os.environ.get("GITHUB_ACTIONS") == "true":
+                    import base64
+
+                    print(f"GOLDEN {PLATFORM}/{name} {base64.b64encode(data).decode()}")
                 self.assertLessEqual(share, 0.015, f"{name}: {share:.1%} of its pixels are not the golden's")
         if not WRITE:
             self.assertEqual(sorted(path.stem for path in GOLDEN.glob("*.png")), sorted(self.rows))
