@@ -28,6 +28,9 @@ const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "__fixt
 const GOLDEN = JSON.parse(fs.readFileSync(path.join(FIXTURES, "explode.json"), "utf8"));
 // The engine's look, which a document is read with (`xbfLook.js`); Explode does not depend on it.
 const LOOK = fs.readFileSync(path.join(FIXTURES, "look.json"), "utf8");
+// Its environment image: 1 x 1, radiance 1 (RGBE 255, 255, 255, e 128).
+const ENVIRONMENT = new Uint8Array([...new TextEncoder().encode("#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n"),
+  255, 255, 255, 128]).buffer;
 const URL_BASE = "http://127.0.0.1:9/api/doc/explode";
 const TOLERANCE = 1e-6;
 
@@ -55,6 +58,7 @@ async function sceneOf(fixture) {
   };
   const fetch = async (url) => {
     if (url.endsWith("/api/look")) return new Response(LOOK);
+    if (url.endsWith("/api/look/environment")) return new Response(ENVIRONMENT);
     const rest = url.slice(URL_BASE.length);
     if (rest === "") return new Response(JSON.stringify(structure));
     const part = /^\/part\/p(\d+)$/.exec(rest);

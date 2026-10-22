@@ -12,19 +12,18 @@ import { resolveMaterialFillBaseColor, shapeSourceColor } from "./surfaceMateria
 // A look is plain data:
 //   { materialSettings,     resolved display material settings
 //                           (`resolveDisplayMaterialSettings`): fills, colour
-//                           grading and the finish channels (a `specularIntensity`
-//                           among them replaces the authored one)
+//                           grading and the finish channels
 //     authored: boolean,    true: keep each material's own finish, sidedness and
 //                           source colours (photographic Render)
 //     surface: { style: "shaded" | "flat", opacity },
-//     colorPower?: number } each surface's colour, linear, raised to this power (1, as
-//                           written, unless a scene's own look says otherwise:
-//                           `lib/xbf/xbfLook.js`)
+//     colorPower?: number } the colour of every surface without a finish of its own, and
+//                           of every fill, linear, raised to this power (1: as written,
+//                           unless a scene's own look says otherwise: `lib/xbf/xbfLook.js`)
 //
 // A material marked `userData.cadAuthoredFinish` (a finish its file authored, which the
 // scene asks to keep) keeps it in the shaded looks too -- opaque, its source colour shown --
-// reflecting the environment `setReflection` hands it; in every other look (a fill, X-ray, Flat)
-// it wears the look's finish like any other surface.
+// reflecting the scene's environment; in every other look (a fill, X-ray, Flat) it wears the
+// look's finish like any other surface.
 //
 // Colour modes are the material settings' own: `overrideSourceColors` paints every
 // part with a fill (one colour, or the palette cycled per mesh: in traversal
@@ -72,9 +71,6 @@ function plainFinish(THREE) {
   return found;
 }
 
-// How strongly an authored material answers light specularly (a standard one: three's default).
-const authoredSpecular = (material) => (material.isMeshPhysicalMaterial ? material.specularIntensity : 1);
-
 function inspectStandIn(THREE, authored) {
   if (authored.isMeshPhysicalMaterial) return authored.clone();
   const material = new THREE.MeshPhysicalMaterial();
@@ -90,12 +86,11 @@ function inspectStandIn(THREE, authored) {
  * Textures stay with whoever authored them. Clip's planes (`setClipPlanes`) cut every material under
  * `root`, the stand-ins a later look puts on included.
  *
- * @returns {{ apply(look: object | null): void, setReflection(texture: object | null, intensity?: number): void,
- *   setClipPlanes(planes: object[]): void, dispose(): void, meshCount: number }}
+ * @returns {{ apply(look: object | null): void, setClipPlanes(planes: object[]): void, dispose(): void,
+ *   meshCount: number }}
  */
 export function createSurfaceLook(THREE, root) {
   let clipPlanes = [];
-  let reflection = { texture: null, intensity: 0 };
   let plain = null;
   const slots = [];
   const seen = new Set();
@@ -142,7 +137,9 @@ export function createSurfaceLook(THREE, root) {
       let color = filled ? resolveMaterialFillBaseColor(THREE, settings, fillIndex)
         : authoredLook || authored.vertexColors ? authored.color
           : shapeSourceColor(THREE, authored.color, settings);
-      if (power !== 1) color = new THREE.Color(color.r ** power, color.g ** power, color.b ** power);
+      if (power !== 1 && (filled || lit.userData?.cadAuthoredFinish !== true)) {
+        color = new THREE.Color(color.r ** power, color.g ** power, color.b ** power);
+      }
       const opacity = clamp01(authored.opacity * opacityScale, 1);
       const next = {
         map: forceFill ? null : authored.map,
@@ -160,22 +157,17 @@ export function createSurfaceLook(THREE, root) {
         target = entry.inspect ||= inspectStandIn(THREE, lit);
         const finish = lit.userData?.cadAuthoredFinish === true;
         if (finish && !forceFill && opacityScale >= 0.999) {
-          // A finish the file authored, kept, reflecting the environment it is handed.
+          // A finish the file authored, kept, reflecting the scene's environment.
           for (const key of FINISH_KEYS) target[key] = lit[key];
           target.attenuationColor.copy(lit.attenuationColor);
-          target.specularIntensity = authoredSpecular(lit);
-          // With none handed to it (photographic Render), the scene's own environment, in full.
-          if (target.envMap !== reflection.texture) { target.envMap = reflection.texture; target.needsUpdate = true; }
-          target.envMapIntensity = reflection.texture ? reflection.intensity : 1;
+          target.envMapIntensity = 1;
         } else {
           if (finish) {
             plain ||= plainFinish(THREE);
             for (const key of FINISH_KEYS) target[key] = plain[key];
             target.attenuationColor.copy(plain.attenuationColor);
-            if (target.envMap) { target.envMap = null; target.needsUpdate = true; }
           }
           for (const key of ["roughness", "metalness", "clearcoat", "clearcoatRoughness"]) target[key] = clamp01(settings[key]);
-          target.specularIntensity = settings.specularIntensity === undefined ? authoredSpecular(lit) : clamp01(settings.specularIntensity);
           target.envMapIntensity = Math.max(Number(settings.envMapIntensity) || 0, 0);
         }
         // The viewer lifts its surfaces by a trace of their own colour. A part that
@@ -198,13 +190,6 @@ export function createSurfaceLook(THREE, root) {
 
   return {
     apply,
-    /**
-     * The environment an authored finish reflects in a shaded look, and how strongly; null for
-     * none. Takes effect at the next `apply`.
-     */
-    setReflection(texture, intensity = 1) {
-      reflection = { texture: texture || null, intensity: Math.max(Number(intensity) || 0, 0) };
-    },
     setClipPlanes(planes) {
       clipPlanes = Array.isArray(planes) ? planes : [];
       // The caps' own stencils are cut by the planes they cap (`sectionCaps.js`).

@@ -20,12 +20,15 @@
  *   Surfaces section's style and opacity. `resolveSceneSurfaceLook` (`common/sceneSettings.js`)
  *   is the one place a look is resolved from display settings.
  *
- * @typedef {{ id: string, ambient: { color: string, intensity: number },
+ * @typedef {{ id: string, ambient: { color: string, intensity: number } | null,
  *   lights: { name: string, towards: [number, number, number], color: string, intensity: number }[],
- *   environment: number, exposure: number, toneCurve: string }} SceneRig
- *   A scene's own lighting, in three's units (`sceneRig.js`): an ambient light, directional lights
- *   shining from `towards` (world frame) that cast no shadow, the scene's environment intensity,
- *   the renderer's exposure and a tone curve of `SCENE_RIG_TONE_CURVES`.
+ *   environment: { width: number, height: number, data: Float32Array, intensity: number,
+ *     rotation: [number, number, number] } | null,
+ *   exposure: number, toneCurve: string }} SceneRig
+ *   A scene's own lighting, in three's units (`sceneRig.js`): an ambient light or none, directional
+ *   lights shining from `towards` (world frame) that cast no shadow, an equirectangular environment
+ *   image the stage turns into its PMREM and lights the scene with, the renderer's exposure and a
+ *   tone curve of `SCENE_RIG_TONE_CURVES`.
  *
  * @typedef {object} KitScene
  * @property {import("three").Object3D} object3D  What the host adopts under its model group.
@@ -45,14 +48,10 @@
  * @property {SceneRig | null} [rig]  The lighting the scene is drawn under in the regular display
  *   modes, in place of the theme's: a scene drawn as its source's own renderer draws it (an engine
  *   document: `lib/xbf/xbfLook.js`). Outside Preview's Render the host hides the theme's lights and
- *   puts this up instead (`sceneRig.js`, `applySceneRig`): its lights, its exposure, its tone curve
- *   as three's `CustomToneMapping` and its environment intensity; Render lights every scene alike.
- *   Absent or null: the theme's rig, as ever.
- * @property {(texture: import("three").Texture | null) => void} [setReflection]  The scene keeps
- *   authored finishes on some surfaces only, and reflects an environment on those alone: outside
- *   photographic Render the host hands it the studio's neutral environment (Preview's, at its
- *   default lighting) and leaves the scene's own environment unset, so every other surface is lit
- *   as it always was; under Render, null, the scene lit by the studio's environment as a whole.
+ *   puts this up instead (`sceneRig.js`, `applySceneRig`): its lights, its environment as the
+ *   scene's (every surface, an authored finish included, reflects it), its exposure and its tone
+ *   curve as three's `CustomToneMapping`; Render lights every scene alike. Absent or null: the
+ *   theme's rig, as ever.
  * @property {(ray: import("three").Ray) => ({ id: string, point: import("three").Vector3 } | null)} [pick]
  *   Only scenes that select.
  * @property {boolean} [complete]  `false` while `restBounds` may still GROW: a large model published

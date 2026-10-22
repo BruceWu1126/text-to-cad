@@ -87,11 +87,6 @@ function linearColor(THREE, rgba) {
   return new THREE.Color().setRGB(Number(rgba[0]) || 0, Number(rgba[1]) || 0, Number(rgba[2]) || 0, THREE.LinearSRGBColorSpace);
 }
 
-// How strongly an authored finish reflects the neutral studio environment the host hands the
-// scene in the shaded modes (`setReflection`): enough for a metal to read as metal, not so much
-// that it outshines the theme's lights. Preview draws it in the studio's full environment.
-export const XBF_REFLECTION_INTENSITY = 0.5;
-
 // A material's look as the structure serves it (`cadgen.engine.materials`, camelCase): the
 // fields a look's identity is made of.
 const LOOK_FIELDS = Object.freeze(["metallic", "roughness", "ior", "anisotropy", "anisotropyRotation", "transmission",
@@ -789,9 +784,10 @@ export function createXbfScene(THREE, document) {
     /** The lighting of the regular modes (`sceneContract.js`): the engine's look's (`xbfLookRig`). */
     rig,
     // A part or face the document gave a material keeps its finish in the shaded modes and in
-    // Preview; every other surface wears the look's finish over its colour, as a STEP's does. In
-    // the regular modes every colour follows the engine's look (its power, ungraded) and the
-    // finish of a surface without one is the look's (`xbfLookSurface`); photographic Render's look
+    // Preview, reflecting the scene's environment (the rig's in the regular modes, the studio's in
+    // Preview); every other surface wears the look's finish over its colour. In the regular modes
+    // that is the engine's look (`xbfLookSurface`): its plain finish, the colour of a surface
+    // without a finish raised to its power, nothing graded; photographic Render's look
     // (`authored`) is worn as any scene wears it.
     setSurfaceLook(next) {
       if (disposed) return;
@@ -802,17 +798,6 @@ export function createXbfScene(THREE, document) {
         lastLook.materialSettings = { ...next.materialSettings, ...lookSurface.materialSettings };
       }
       surfaceStyle = next?.surface?.style === "hidden" || next?.surface?.style === "off" ? next.surface.style : "shaded";
-      applySurfaces();
-    },
-    /**
-     * The environment an authored finish reflects in the shaded modes, the host's neutral studio
-     * (`XBF_REFLECTION_INTENSITY`), or null: the reflection source of those finishes alone, so a
-     * surface the document gave no material is lit as it always was. Preview lights the scene
-     * with the studio's own environment instead.
-     */
-    setReflection(texture) {
-      if (disposed) return;
-      look.setReflection(texture || null, XBF_REFLECTION_INTENSITY);
       applySurfaces();
     },
     /** The edges the display mode draws (`resolveViewSettings`'s `edges`): on or off, through the surfaces or not, their ink. */
