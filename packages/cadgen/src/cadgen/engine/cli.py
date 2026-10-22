@@ -10,7 +10,7 @@ the functions of ``api``; and ``python SCRIPT.py``'s run (``run_script``).
         [--size-profile P] [--json]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
     cadgen xbf status [--json] | stop | daemon
-    cadgen where DOC [REF]                           a document's build closure, or what made one element
+    cadgen where DOC [REF]                           a document's build closure, or what a ref names (``refs``)
 
 ``where`` is the first verb at the top level of ``cadgen`` (``where_main``); the others move up
 when the ``xbf`` level goes.
@@ -21,12 +21,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
-__all__ = ["build_parser", "elements", "main", "run_script", "where_main", "where_parser"]
+__all__ = ["build_parser", "main", "run_script", "weighed", "where_main", "where_parser"]
 
 FILE_FLAGS = ("xbf", "step", "glb", "stl", "threemf")
 _SUFFIX = {"xbf": ".xbf", "step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf"}
@@ -249,90 +248,51 @@ def _serve(args: argparse.Namespace) -> int:
     return 0
 
 
-_REF = re.compile(r"(?P<part>.+?)/(?P<kind>face|edge|vertex)[ /]?(?P<ordinal>[1-9][0-9]*)")
-_LETTERS = {"f": "face", "e": "edge", "v": "vertex"}
+def weighed(structure: dict[str, Any], hit: Any, volumes: dict[str, float]) -> dict[str, Any]:
+    """What the occurrence a ref names (``refs.Hit``, from ``refs.resolve_structure``) weighs: each
+    part below it, its instance's volume (its prototype's, mm^3, by key in ``volumes``) times its
+    material's density, in kg, summed; ``mass`` None when no part of it has a material with a
+    density, and the parts that have none listed by their occurrence paths."""
+    from cadgen.engine.refs import path_text
 
-
-def elements(structure: dict[str, Any], ref: str) -> list[tuple[dict[str, Any], str, int]]:
-    """The elements ``ref`` names in a document's structure: ``(prototype, kind, ordinal)``
-    for ``PART/face N`` -- PART a prototype's name, else an instance's path -- or for every
-    element bearing an element name."""
-    prototypes = structure["prototypes"]
-    found = _REF.fullmatch(ref.strip())
-    if found is not None:
-        part, kind, ordinal = found["part"], found["kind"], int(found["ordinal"])
-        named = [p for p in prototypes if p["name"] == part]
-        if not named:
-            named = [prototypes[i["prototype"]] for i in structure["instances"] if i["path"] == part][:1]
-        if not named and part == structure["name"] and len(prototypes) == 1:
-            named = prototypes  # a document of one part: the model's own name
-        return [(prototype, kind, ordinal) for prototype in named]
-    from cadgen.engine.kernel.trace import ELEMENT_NAME
-
-    if not ELEMENT_NAME.fullmatch(ref):
-        raise ValueError(f"{ref!r} is neither PART/face N (edge, vertex) nor an element name")
-    kind = _LETTERS[ref[0]]
-    return [(prototype, kind, int(ordinal)) for prototype in prototypes
-            for ordinal, text in prototype.get(f"{kind}Names", {}).items() if text == ref]
-
-
-def placements(structure: dict[str, Any], ref: str) -> list[dict[str, Any]]:
-    """The instances ``ref`` names as a part or an assembly: those at the path it names or
-    below it (``kit/arm``), those of the prototype of that name, or every one for the
-    document's own name; none for an element's ref."""
-    ref = ref.strip().strip("/")
-    instances = structure["instances"]
-    if ref == structure["name"]:
-        return list(instances)
-    found = [i for i in instances if i["path"] == ref or i["path"].startswith(ref + "/")]
-    if not found:
-        named = {at for at, p in enumerate(structure["prototypes"]) if p["name"] == ref}
-        found = [i for i in instances if i["prototype"] in named]
-    if not found:  # a path below the root, given without the root's name
-        found = [i for i in instances if i["path"].partition("/")[2] == ref
-                 or i["path"].partition("/")[2].startswith(ref + "/")]
-    return found
-
-
-def weighed(structure: dict[str, Any], held: list[dict[str, Any]], volumes: dict[str, float],
-            ref: str) -> dict[str, Any]:
-    """What ``held`` (``placements``) weighs: each instance's volume (its prototype's, mm^3, by
-    key in ``volumes``) times its material's density, in kg, summed; ``mass`` None when no part
-    of it has a material with a density, and the parts that have none listed by path."""
     prototypes = structure["prototypes"]
     total_volume = 0.0
     mass = 0.0
     weighed_any = False
     unweighed = []
-    for instance in held:
+    held = [(structure["instances"][node.payload["instance"]], path_text(hit.root, node)) for node in hit.node.parts()]
+    for instance, path in held:
         prototype = prototypes[instance["prototype"]]
         volume = volumes[prototype["key"]]
         total_volume += volume
         density = (prototype.get("material") or {}).get("density")
         if density is None:
-            unweighed.append(instance["path"])
+            unweighed.append(path)
             continue
         mass += volume * 1e-9 * density
         weighed_any = True
-    found: dict[str, Any] = {"ref": ref, "parts": len(held), "volume": total_volume,
+    found: dict[str, Any] = {"ref": hit.ref, "parts": len(held), "volume": total_volume,
                              "mass": mass if weighed_any else None, "unweighed": unweighed}
     if len(held) == 1:
-        material = prototypes[held[0]["prototype"]].get("material")
-        found.update(part=prototypes[held[0]["prototype"]]["name"], path=held[0]["path"],
+        instance, path = held[0]
+        material = prototypes[instance["prototype"]].get("material")
+        found.update(part=prototypes[instance["prototype"]]["name"], path=path,
                      material=material["name"] if material else None,
                      density=material.get("density") if material else None)
     return found
 
 
 def where_parser(prog: str = "cadgen where") -> argparse.ArgumentParser:
-    """``cadgen where``'s parser: a document, and an element of it or none."""
+    """``cadgen where``'s parser: a document, and a ref into it or none."""
     parser = argparse.ArgumentParser(prog=prog, description="A document's build closure (its source, modules, inputs "
-                                                            "and key), or what made one element of it.")
+                                                            "and key), or what one thing a ref names is and what made it.")
     parser.add_argument("document", help="an .xbf")
-    parser.add_argument("ref", nargs="?", help="PART/face N (or edge, vertex), PART a part's or an instance's name (or "
-                                               "the document's, for a document of one part); an element name "
-                                               "(f:..., e:..., v:...); or a part or an assembly (its name or path): "
-                                               "its volume and mass. Without it: the build closure")
+    parser.add_argument("ref", nargs="?", help="[FILE#][OWNER/]ELEMENT or [FILE#]OWNER (cadgen.engine.refs): OWNER a "
+                                               "part's or an assembly's label, or its occurrence path (hand/finger.2); "
+                                               "ELEMENT an element name (f:..., e:..., v:...) or face N (edge, vertex). "
+                                               "An element answers what the kernel measures of it, placed where its "
+                                               "occurrence stands, and what made it; a part or an assembly its volume "
+                                               "and mass. Without it: the build closure")
     return parser
 
 

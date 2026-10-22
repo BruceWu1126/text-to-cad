@@ -21,7 +21,7 @@ from pathlib import Path
 
 from cadgen.engine import Material, materials
 from cadgen.engine import build as engine_build
-from cadgen.engine import cli, document, export
+from cadgen.engine import cli, document, export, refs
 from cadgen.engine.serve import Server
 
 MODEL = """
@@ -385,10 +385,10 @@ class MaterialFixtureTest(unittest.TestCase):
 
         volumes = {p["key"]: volume(p["key"]) for p in self.structure["prototypes"]}
         self.assertAlmostEqual(volumes[self.prototype("block")["key"]], 27000.0, places=6)
-        block = cli.weighed(self.structure, cli.placements(self.structure, "block"), volumes, "block")
+        block = cli.weighed(self.structure, refs.resolve_structure(self.structure, "block")[0], volumes)
         self.assertEqual((block["part"], block["material"], block["parts"]), ("block", materials.steel_1018.name, 1))
         self.assertAlmostEqual(block["mass"], 27000e-9 * 7870.0)
-        whole = cli.weighed(self.structure, cli.placements(self.structure, "bench"), volumes, "bench")
+        whole = cli.weighed(self.structure, refs.resolve_structure(self.structure, "bench")[0], volumes)
         expected = sum(volumes[self.structure["prototypes"][i["prototype"]]["key"]] * 1e-9
                        * self.structure["prototypes"][i["prototype"]]["material"]["density"]
                        for i in self.structure["instances"])
@@ -397,7 +397,7 @@ class MaterialFixtureTest(unittest.TestCase):
         self.assertEqual(whole["unweighed"], [])
         unweighed = json.loads(json.dumps(self.structure))
         self.prototype_of(unweighed, "block")["material"] = None
-        found = cli.weighed(unweighed, cli.placements(unweighed, "block"), volumes, "block")
+        found = cli.weighed(unweighed, refs.resolve_structure(unweighed, "block")[0], volumes)
         self.assertEqual((found["mass"], found["material"], found["unweighed"]), (None, None, ["bench/block"]))
 
     @staticmethod

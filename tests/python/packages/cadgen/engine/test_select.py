@@ -1,13 +1,16 @@
-"""References to geometry: ``select`` resolves a ref -- a part's label or an
+"""References to geometry: ``select`` and ``cadgen where`` resolve a ref -- a part's label or an
 occurrence's path (``hand/finger.2``), and an element's name or ordinal -- by name in the latest
 build, into build123d shapes in world coordinates; a model never reads a file its own build
 writes."""
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -19,6 +22,8 @@ import build123d as bd
 from cadgen.engine import build as engine_build
 from cadgen.engine import previous, read_xbf, select
 from cadgen.engine.refs import RefError
+
+SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
 PLATE = """
 import build123d as bd
@@ -341,6 +346,74 @@ class BuildSelectTest(_Folder):
         self.assertEqual(self.built("own.py")["memo"]["bodies_run"], 0, "its own xbf, rewritten, changed nothing")
         self.restart()
         self.assertEqual(self.built("own.py")["cache"], {"used": True, "from": "file"})
+
+
+class WhereTest(unittest.TestCase):
+    """``cadgen where`` resolves the same grammar, through a daemon of the test's own."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.folder = Path(tempfile.mkdtemp(prefix="engine-where-")).resolve()
+        cls.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
+        cls.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.state),
+                   "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}
+        (cls.folder / "hand.py").write_text(textwrap.dedent(HAND), encoding="utf-8")
+        (report,) = engine_build.build(cls.folder / "hand.py", cwd=cls.folder)
+        assert report["ok"], report
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        subprocess.run([sys.executable, "-m", "cadgen.engine", "stop"], cwd=cls.folder, env=cls.env,
+                       capture_output=True, timeout=120)
+        shutil.rmtree(cls.folder, ignore_errors=True)
+        shutil.rmtree(cls.state, ignore_errors=True)
+
+    def where(self, ref: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/hand.xbf", ref], cwd=self.folder,
+                              env=self.env, capture_output=True, text=True, timeout=300)
+
+    def test_where_takes_an_occurrence_path(self) -> None:
+        done = self.where("hand/finger.2/face 1")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        face = json.loads(done.stdout)
+        self.assertEqual((face["path"], face["kind"], face["ordinal"], face["part"]), ("hand/finger.2", "face", 1, "finger"))
+        self.assertEqual(face["ref"], f"hand/finger.2/{face['name']}")
+        self.assertEqual([round(value, 6) for value in face["centroid"]], [-2.0, 0.0, 12.0], "where finger 2 stands")
+        # The line the viewer copies -- the file, its canonical ref -- names the same element.
+        copied = self.where(f"{self.folder / 'XBF/hand.xbf'}#{face['ref']}")
+        self.assertEqual(copied.returncode, 0, copied.stderr)
+        self.assertEqual({k: v for k, v in json.loads(copied.stdout).items() if k != "made_by"},
+                         {k: v for k, v in face.items() if k != "made_by"})
+        weighed = json.loads(self.where("hand/finger.3").stdout)
+        self.assertEqual((weighed["ref"], weighed["parts"], weighed["path"]), ("hand/finger.3", 1, "hand/finger.3"))
+        self.assertEqual(json.loads(self.where("hand").stdout)["unweighed"],
+                         ["hand/palm", "hand/finger.1", "hand/finger.2", "hand/finger.3"])
+        for ref, said in (("finger", "finger names 3 occurrences in hand.xbf: hand/finger.1, hand/finger.2, "
+                                     "hand/finger.3"),
+                          ("finger_2/face 1", "hand.xbf has no part or assembly finger_2"),
+                          ("hand/finger.2/face 99", "hand/finger.2 has no face 99 (it has 8)")):
+            refused = self.where(ref)
+            self.assertEqual(refused.returncode, 2, refused.stdout)
+            self.assertIn(said, refused.stderr)
+
+    def test_a_model_is_built_through_the_daemon_and_selected_from_its_document(self) -> None:
+        probe = textwrap.dedent("""
+            import json, sys
+            sys.path.insert(0, sys.argv[1])
+            from hand import hand
+            from cadgen.engine import select
+            (face,) = select(hand, "hand/finger.3/face 1")
+            print(json.dumps([face.label, [round(v, 6) for v in face.center(__import__("build123d").CenterOf.MASS)]]))
+        """)
+        done = subprocess.run([sys.executable, "-c", probe, str(self.folder)], cwd=self.folder, env=self.env,
+                              capture_output=True, text=True, timeout=300)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        label, point = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertTrue(label.startswith("hand/finger.3/f:"))
+        self.assertEqual(point, [8.0, 0.0, 12.0])
+        status = json.loads(subprocess.run([sys.executable, "-m", "cadgen.engine", "status"], cwd=self.folder,
+                                           env=self.env, capture_output=True, text=True, timeout=120).stdout)
+        self.assertIn("hand.py", [Path(worker["script"]).name for worker in status["workers"]])
 
 
 if __name__ == "__main__":
