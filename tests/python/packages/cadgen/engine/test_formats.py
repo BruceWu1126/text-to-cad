@@ -1,11 +1,12 @@
-"""The files no document that the stills draw (`engine/formats`): each kind read into what a
-renderer holds -- a mesh file's parts, colours, materials and placements; a GLB's node tree and
-textures through OCCT's glTF reader; a robot posed by the viewer's forward kinematics -- and each
-drawn as its golden picture.
+"""The files no document that the stills draw (`engine/formats`, `render/drawing.py`): each kind read
+into what a renderer holds -- a mesh file's parts, colours, materials and placements; a GLB's node
+tree and textures through OCCT's glTF reader; a robot posed by the viewer's forward kinematics; a
+DXF's pens and curves -- and each drawn as its golden picture.
 
 The fixtures are made here, small: a binary and an ASCII STL, a 3MF of colour groups, base
 materials and components, a GLB of a node tree, two materials and a base colour texture, a URDF
-of every joint kind (a mimic and a four-bar among them), an SRDF and an SDF over it.
+of every joint kind (a mimic and a four-bar among them), an SRDF and an SDF over it, a DXF of
+lines, arcs, bulges, a block, a solid and a hatch.
 
 `formats_golden/kinematics.json` is the viewer's own forward kinematics on `KINEMATICS`: each
 link's world transform (row-major, metres) at three poses, made by origin/main's
@@ -91,6 +92,193 @@ SDF = """<?xml version="1.0"?>
 </sdf>
 """
 
+DXF = """0
+SECTION
+2
+TABLES
+0
+TABLE
+2
+LAYER
+0
+LAYER
+2
+CUT
+62
+7
+0
+LAYER
+2
+BEND
+62
+1
+0
+LAYER
+2
+HIDDEN
+62
+-3
+0
+ENDTAB
+0
+ENDSEC
+0
+SECTION
+2
+BLOCKS
+0
+BLOCK
+2
+TAB
+10
+0
+20
+0
+0
+LINE
+8
+0
+10
+0
+20
+0
+11
+6
+21
+3
+0
+ENDBLK
+0
+ENDSEC
+0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+8
+CUT
+90
+4
+70
+1
+10
+0
+20
+0
+10
+80
+20
+0
+42
+0.5
+10
+80
+20
+40
+10
+0
+20
+40
+0
+CIRCLE
+8
+CUT
+10
+20
+20
+20
+40
+8
+0
+ARC
+8
+CUT
+10
+55
+20
+20
+40
+10
+50
+180
+51
+360
+0
+LINE
+8
+BEND
+10
+40
+20
+2
+11
+40
+21
+38
+0
+LINE
+8
+HIDDEN
+10
+0
+20
+50
+11
+80
+21
+50
+0
+SOLID
+8
+CUT
+62
+5
+10
+5
+20
+30
+11
+15
+21
+30
+12
+5
+22
+35
+13
+15
+23
+35
+0
+INSERT
+8
+CUT
+2
+TAB
+10
+60
+20
+32
+50
+90
+0
+TEXT
+8
+CUT
+10
+0
+20
+-5
+40
+3
+1
+NOTE
+0
+ENDSEC
+0
+EOF
+"""
 
 
 def gl() -> None:
@@ -439,6 +627,46 @@ class RobotTest(FixtureTest):
         np.testing.assert_allclose(door[:3, 3], (800, 0, 500), atol=1e-6)  # turned about z through the joint: the door's frame
 
 
+# --- DXF -------------------------------------------------------------------------------------------
+
+
+class DxfTest(FixtureTest):
+    def test_a_dxf_is_read_in_its_pens_and_what_it_does_not_draw_is_counted(self) -> None:
+        path = self.folder / "plate.dxf"
+        path.write_text(DXF.replace("0\nENDSEC\n0\nEOF", "0\nPOINT\n8\nCUT\n10\n1\n20\n1\n0\nENDSEC\n0\nEOF"),
+                        encoding="ascii")
+        drawing = formats.read(path)
+        pens = sorted((pen or "ink") for _points, pen in drawing.lines)
+        self.assertEqual(pens, ["#ff0000", "ink", "ink", "ink", "ink"], "the hidden layer draws nothing; BEND is red")
+        self.assertEqual([pen for _triangles, pen in drawing.fills], ["#0000ff"])
+        self.assertEqual(drawing.skipped, {"POINT": 1})
+        (note,) = drawing.texts
+        self.assertEqual((note.lines, note.starts, note.direction, note.height), (["NOTE"], [(0.0, -5.0)], (1.0, 0.0), 3.0))
+        # The bulge (0.5 on a 40 chord) bows out 10; the words reach a quarter of their height below their baseline.
+        np.testing.assert_allclose(drawing.bounds, (0, -5.75, 90, 40), atol=1e-6)
+        outline = max((points for points, _pen in drawing.lines), key=len)
+        self.assertGreater(len(outline), 40, "the bulge drawn as an arc")
+        tab = [points for points, _pen in drawing.lines if len(points) == 2 and np.allclose(points[0], (60, 32))]
+        np.testing.assert_allclose(tab[0][1], (57, 38), atol=1e-9)  # the block's line turned 90 degrees at (60, 32)
+
+    def test_a_spline_of_fit_points_is_the_cubic_cad_programs_make(self) -> None:
+        """Through every fit point, ezdxf's ``fit_points_to_cad_cv`` -- the curve the viewer's
+        reader draws -- unbent at its ends, or leaving them along the tangents the entity gives."""
+        from ezdxf.math import fit_points_to_cad_cv
+
+        from cadgen.engine.formats.dxf import Entity, _interpolated
+
+        fits = [(5, 55), (20, 65), (35, 52), (50, 66), (75, 56)]
+        for codes, tangents in (([], None), ([(12, "1"), (22, "1"), (13, "1"), (23, "-0.5")], [(1, 1, 0), (1, -0.5, 0)])):
+            curve = _interpolated(Entity("SPLINE", codes), fits)
+            for point in fits:
+                self.assertLess(float(np.linalg.norm(curve - point, axis=1).min()), 1e-9, point)
+            theirs = fit_points_to_cad_cv([(x, y, 0) for x, y in fits], tangents=tangents).approximate(2000)
+            theirs = np.array([(point.x, point.y) for point in theirs])
+            apart = np.linalg.norm(curve[:, None] - theirs[None], axis=2).min(1).max()
+            self.assertLess(float(apart), 0.05, f"{tangents}: {apart} from ezdxf's curve")
+
+
 # --- pictures --------------------------------------------------------------------------------------
 
 
@@ -454,6 +682,7 @@ class PictureTest(FixtureTest):
         write_3mf(folder / "kit.3mf")
         write_glb(folder / "rig.glb")
         (folder / "kinematics.urdf").write_text(KINEMATICS, encoding="utf-8")
+        (folder / "plate.dxf").write_text(DXF, encoding="ascii")
         cls.rows = {
             "stl": (folder / "part.stl", {}),
             "stl-wireframe": (folder / "part.stl", {"display": {"mode": "wireframe"}}),
@@ -461,6 +690,8 @@ class PictureTest(FixtureTest):
             "3mf-parts": (folder / "kit.3mf", {"display": {"mode": "parts", "grid": True}}),
             "glb": (folder / "rig.glb", {}),
             "urdf": (folder / "kinematics.urdf", {"pose": {"spin": 75, "lift": 40, "reach": 0.03, "output_joint": 20}}),
+            "dxf": (folder / "plate.dxf", {}),
+            "dxf-dark": (folder / "plate.dxf", {"display": {"appearance": "dark"}}),
         }
 
     def draw(self, path: Path, **fields) -> tuple[bytes, dict]:
@@ -505,6 +736,8 @@ class PictureTest(FixtureTest):
         for path, options, why in (
                 (self.folder / "part.stl", {"pose": {"a": 1}}, "is a mesh and has none"),
                 (self.folder / "part.stl", {"display": {"mode": "parts"}}, "places 1 part"),
+                (self.folder / "plate.dxf", {"display": {"mode": "xray"}}, "is a drawing.*display.mode does not apply"),
+                (self.folder / "plate.dxf", {"camera": "iso"}, "is a drawing.*--camera does not apply"),
                 (self.folder / "kinematics.urdf", {"pose": {"lift": 200}}, "--pose: joint 'lift' at 200 is past its limits")):
             with self.subTest(path=path.name, options=options), self.assertRaisesRegex(SnapshotRefused, why):
                 snapshot(path, out, size=SIZE, daemon=False, **options)

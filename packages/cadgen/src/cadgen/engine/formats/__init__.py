@@ -2,7 +2,8 @@
 the renderer -- a structure (prototypes, instances, a tree) and a part buffer per prototype
 (``mesh.Mesh``, XBM2) -- so a mesh file or a robot is drawn by the documents' own path
 (``render/service.py``'s ``Held``): the look, the modes, the camera fit, the grid, clip,
-Explode, Preview, the annotation and the size are theirs.
+Explode, Preview, the annotation and the size are theirs. A DXF is a drawing, read here and
+drawn by ``render/drawing.py``.
 
 | suffix | reader | what it is |
 | --- | --- | --- |
@@ -10,6 +11,7 @@ Explode, Preview, the annotation and the size are theirs.
 | ``.3mf`` | ``threemf.py`` (zip + XML) | its objects placed by its build, each triangle's colour, its unit |
 | ``.glb`` | ``glb.py`` (OCCT's ``RWGltf_CafReader``) | its node tree, meshes, materials and textures |
 | ``.urdf``, ``.sdf``, ``.srdf`` | ``robot.py`` (XML) | the link meshes placed by forward kinematics |
+| ``.dxf`` | ``dxf.py`` (text) | lines, arcs, circles, polylines, splines, ellipses, solids |
 
 Nothing is written, nothing is cached on disk: a reader's answer lives in the process that drew
 it (the daemon's render process for the file keeps it, warm, until a file it read changes:
@@ -27,12 +29,13 @@ import numpy as np
 
 from cadgen.engine.mesh import Mesh
 
-__all__ = ["Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
+__all__ = ["DRAWING", "Foreign", "FormatError", "KINDS", "MESHES", "Part", "Placed", "ROBOTS", "assemble", "files_of",
            "read", "stale"]
 
-KINDS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf"}
+KINDS = {".stl": "stl", ".3mf": "3mf", ".glb": "glb", ".urdf": "urdf", ".sdf": "sdf", ".srdf": "srdf", ".dxf": "dxf"}
 MESHES = (".stl", ".3mf", ".glb")
 ROBOTS = (".urdf", ".sdf", ".srdf")
+DRAWING = ".dxf"
 
 
 class FormatError(ValueError):
@@ -142,8 +145,8 @@ def assemble(kind: str, path: Path, name: str, parts: list[Part], placed: list[P
 
 
 def read(path: Path) -> Any:
-    """The file at ``path`` read by its suffix's reader: a ``Foreign``. Raises ``FormatError``
-    naming what it cannot read."""
+    """The file at ``path`` read by its suffix's reader: a ``Foreign`` (a mesh file, a robot), or a
+    ``dxf.Drawing``. Raises ``FormatError`` naming what it cannot read."""
     path = Path(path).resolve()
     suffix = path.suffix.lower()
     if suffix not in KINDS:
@@ -162,6 +165,10 @@ def read(path: Path) -> Any:
         from cadgen.engine.formats.glb import glb_file
 
         return glb_file(path)
-    from cadgen.engine.formats.robot import robot_file
+    if suffix in ROBOTS:
+        from cadgen.engine.formats.robot import robot_file
 
-    return robot_file(path)
+        return robot_file(path)
+    from cadgen.engine.formats.dxf import read_dxf
+
+    return read_dxf(path)

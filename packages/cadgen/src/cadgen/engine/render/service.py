@@ -35,9 +35,9 @@ workers' cap.
 **In process** (``draw_here``): ``--no-daemon`` and a model drawn from its worker's memory serve
 the document from a server of this process, and draw it once.
 
-**A file that is not a document** -- a mesh file, a robot (``formats/``) -- is read by its
-reader in the process that draws it, into a structure and part buffers as a document's are: a
-render process of its own per file in the daemon
+**A file that is not a document** -- a mesh file, a robot, a DXF (``formats/``) -- is read by its
+reader in the process that draws it, into a structure and part buffers as a document's are (a
+DXF: a drawing, ``drawing.py``): a render process of its own per file in the daemon
 (``{"op": "open", "path"}`` answered ``{"opened": {...}}``, again whenever a file it read has
 changed: ``formats.stale``), or once in this process (``draw_here``).
 
@@ -333,7 +333,14 @@ class Held:
 
 
 def holder(path: Path) -> Any:
-    """What holds the file at ``path`` that is no document, for ``open`` and ``draw``."""
+    """What holds the file at ``path`` that is no document, for ``open`` and ``draw``: a drawing's
+    (a DXF, ``drawing.Held``), else a document's."""
+    from cadgen.engine import formats
+
+    if Path(path).suffix.lower() == formats.DRAWING:
+        from cadgen.engine.render.drawing import Held as Drawing
+
+        return Drawing(Path(path))
     return Held(Path(path))
 
 

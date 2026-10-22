@@ -58,6 +58,10 @@ half-float target and encoded once, the edges drawn over them after, as OCCT dra
 over the model; core's ``lib/viewer/sceneRig.js``). The two order the faces apart: three sorts
 each part back to front, OCCT draws them as displayed.
 
+A drawing (a DXF, ``drawing.py``) has no light: ``DRAWING`` is the viewer's DXF pane's look, its paper
+and its ink (the pen ACI 7 draws in) for the light and the dark appearance (core's ``lib/appTheme.js``),
+its lines one pixel wide, the drawing fitted within the pane's margin.
+
 Edges are unlit lines in their class's colour, 1 px; Hidden line's faces are unlit in the
 backdrop's colour, hiding what is behind them; Wireframe draws edges alone. The grid is the viewer's measuring grid (core's
 ``lib/viewer/stageGrid.js``, drawn by ``grid.py``): graph paper on z = 0 through the origin, the
@@ -130,6 +134,20 @@ class Grid:
     cells: float  # minor cells across the model's framing: the cell is the round step nearest framing / cells
     extent: float  # framings from the origin by which the paper has faded out
     axes: bool  # a red X and a green Y axis line
+
+
+@dataclass(frozen=True)
+class Drawing:
+    """The look of a drawing: paper and ink by appearance, the lines' width, the fit's margin (pixels)."""
+
+    light: tuple[str, str]
+    dark: tuple[str, str]
+    line_width: float
+    margin: float
+
+    def paper(self, appearance: str) -> tuple[str, str]:
+        """``(paper, ink)`` for ``light`` or ``dark``."""
+        return self.dark if appearance == "dark" else self.light
 
 
 @dataclass(frozen=True)
@@ -206,3 +224,5 @@ LOOK = Look(
     xray=ColourOnly(ambient=0.5, lights=(Light("key", (-0.35, 0.55, -1.0), 1.0), Light("fill", (0.6, 0.2, -0.3), 1.0)),
                     specular=0.08, shininess=0.35),
 )
+
+DRAWING = Drawing(light=("#ffffff", "#171717"), dark=("#27292d", "#fafafa"), line_width=1.0, margin=16.0)
