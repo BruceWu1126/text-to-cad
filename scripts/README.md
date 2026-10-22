@@ -201,9 +201,13 @@ studio scene ray-cast into a small equirectangular Radiance image, which the vie
 and the OCCT prototype both light an engine document's regular modes with. Run by
 hand when the studio or the look changes.
 
-`bench/` — `occt_parity.py`, a manual measurement of the viewer against the OCCT
-prototype, mode by mode ([`bench/README.md`](bench/README.md)). Its reports are
-local output under `tmp/`, never committed here.
+`bench/` — manual measurements, never run in CI ([`bench/README.md`](bench/README.md)):
+`corpus_bench.py`, the corpus batch (the xbf engine's cold, no-op, edit, revert and
+restart builds of the models in `corpus.json`, then each document's whole mesh and a
+snapshot); `compare.py`, a batch beside the old engine's recorded numbers
+(`old-engine-numbers.json`), model by model; and `occt_parity.py`, the viewer against
+OCCT, mode by mode. Their reports are local output under `tmp/`, never committed here;
+only their pure helpers are tested (`tests/python/global/test_bench_helpers.py`).
 
 ## CI
 
