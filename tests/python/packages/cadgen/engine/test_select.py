@@ -22,6 +22,7 @@ import build123d as bd
 from cadgen.engine import build as engine_build
 from cadgen.engine import previous, read_xbf, select
 from cadgen.engine.refs import RefError
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -419,8 +420,8 @@ class WhereTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.folder = Path(tempfile.mkdtemp(prefix="engine-where-")).resolve()
         cls.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        cls.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.state),
-                   "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}
+        cls.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(cls.state),
+                                         "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, cls.addClassCleanup)
         (cls.folder / "hand.py").write_text(textwrap.dedent(HAND), encoding="utf-8")
         (report,) = engine_build.build(cls.folder / "hand.py", cwd=cls.folder)
         assert report["ok"], report
@@ -433,8 +434,8 @@ class WhereTest(unittest.TestCase):
         shutil.rmtree(cls.state, ignore_errors=True)
 
     def where(self, ref: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/hand.xbf", ref], cwd=self.folder,
-                              env=self.env, capture_output=True, text=True, timeout=300)
+        return engine_daemon.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/hand.xbf", ref], cwd=self.folder,
+                                 env=self.env)
 
     def test_where_takes_an_occurrence_path(self) -> None:
         done = self.where("hand/finger.2/face 1")
@@ -469,8 +470,7 @@ class WhereTest(unittest.TestCase):
             (face,) = select(hand, "hand/finger.3/face 1")
             print(json.dumps([face.label, [round(v, 6) for v in face.center(__import__("build123d").CenterOf.MASS)]]))
         """)
-        done = subprocess.run([sys.executable, "-c", probe, str(self.folder)], cwd=self.folder, env=self.env,
-                              capture_output=True, text=True, timeout=300)
+        done = engine_daemon.run([sys.executable, "-c", probe, str(self.folder)], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         label, point = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertTrue(label.startswith("hand/finger.3/f:"))

@@ -17,6 +17,7 @@ import unittest
 import urllib.request
 from pathlib import Path
 from unittest import mock
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
@@ -224,8 +225,8 @@ class DaemonProgressTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-progress-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                    "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline"}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         # This process asks the test's daemon what it holds (``busy``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
         self.addCleanup(self._stop)
@@ -236,8 +237,7 @@ class DaemonProgressTest(unittest.TestCase):
         shutil.rmtree(self.state, ignore_errors=True)
 
     def cli(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=self.env,
-                              capture_output=True, text=True, timeout=300)
+        return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=self.env)
 
     def write(self, size: int = 2, last: str = "lid", fail: bool = False) -> None:
         for gate in self.folder.glob("*.go"):
@@ -257,7 +257,7 @@ class DaemonProgressTest(unittest.TestCase):
     def _reap(process: subprocess.Popen) -> None:
         if process.poll() is None:
             process.kill()
-        process.communicate()
+        engine_daemon.reap(process)
 
     def busy(self) -> dict | None:
         """The busy worker's last frame, as ``cadgen status`` has it."""
@@ -279,7 +279,7 @@ class DaemonProgressTest(unittest.TestCase):
                 self.assertIn("building slow.py::slow · Building geometry · 1/3 two", text)
             (self.folder / f"{name}.go").touch()
         self.assertEqual(seen, [("body", 0, 3, "one"), ("body", 1, 3, "two"), ("body", 2, 3, "three")])
-        out, err = building.communicate(timeout=300)
+        out, err = engine_daemon.communicate(building, self.env)
         self.assertEqual(building.returncode, 0, err)
         report = json.loads(out.strip().splitlines()[-1])
         last = report["progress"]
@@ -292,7 +292,7 @@ class DaemonProgressTest(unittest.TestCase):
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         failed = self.start()
-        out, _err = failed.communicate(timeout=300)
+        out, _err = engine_daemon.communicate(failed, self.env)
         report = json.loads(out.strip().splitlines()[-1])
         self.assertFalse(report["ok"])
         self.assertEqual((report["progress"]["phase"], report["progress"]["detail"]), ("body", "lid seal"))
@@ -310,8 +310,7 @@ class DaemonProgressTest(unittest.TestCase):
                               "env": dict(os.environ)}, on_progress=frames.append)
             print(json.dumps({"ok": all(report["ok"] for report in answer["done"]), "frames": frames}))
         """)
-        done = subprocess.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env, capture_output=True,
-                              text=True, timeout=300)
+        done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         found = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertTrue(found["ok"])
@@ -331,7 +330,7 @@ class DaemonProgressTest(unittest.TestCase):
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         running = self.start("slow.py")
-        _out, err = running.communicate(timeout=300)
+        _out, err = engine_daemon.communicate(running, self.env)
         self.assertEqual(running.returncode, 0, err)
         self.assertIn("wrote XBF/slow.xbf", err)
         self.assertFalse({"\r", "▕", "✓"} & set(err), err)
@@ -341,7 +340,7 @@ class DaemonProgressTest(unittest.TestCase):
         for name in ("one", "two", "three"):
             (self.folder / f"{name}.go").touch()
         first = self.start("slow.py")
-        first.communicate(timeout=300)
+        engine_daemon.communicate(first, self.env)
         self.assertEqual(first.returncode, 0)
         served = self.cli("serve", "XBF/slow.xbf")
         self.assertEqual(served.returncode, 0, served.stderr)
@@ -375,7 +374,7 @@ class DaemonProgressTest(unittest.TestCase):
             if answer["version"] != version:
                 moved, version = True, answer["version"]
         self.assertIsNone(answer["failed"])
-        building.communicate(timeout=300)
+        engine_daemon.communicate(building, self.env)
         self.assertEqual(building.returncode, 0)
         # A build that fails says so to the page, and where it was.
         self.write(size=5, last="lid seal", fail=True)
@@ -389,7 +388,7 @@ class DaemonProgressTest(unittest.TestCase):
         self.assertEqual(answer["failed"]["model"], "slow.py::slow")
         self.assertIn("RuntimeError: no", answer["failed"]["error"])
         self.assertEqual(answer["failed"]["progress"]["detail"], "lid seal")
-        failed.communicate(timeout=300)
+        engine_daemon.communicate(failed, self.env)
         self.assertEqual(failed.returncode, 1)
 
 

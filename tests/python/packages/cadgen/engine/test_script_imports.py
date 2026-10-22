@@ -19,6 +19,7 @@ from pathlib import Path
 
 from cadgen.engine import build as engine_build
 from cadgen.engine import previous, read_xbf
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -170,8 +171,8 @@ class PackageScriptRunTest(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="engine-package-run-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                    "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         self.addCleanup(self._stop)
 
     def _stop(self) -> None:
@@ -183,8 +184,7 @@ class PackageScriptRunTest(unittest.TestCase):
         shutil.rmtree(self.state, ignore_errors=True)
 
     def python(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, *args], cwd=self.root, env=self.env, capture_output=True, text=True,
-                              timeout=300)
+        return engine_daemon.run([sys.executable, *args], cwd=self.root, env=self.env)
 
     def run_script(self) -> str:
         done = self.python("proj/parts/model.py")

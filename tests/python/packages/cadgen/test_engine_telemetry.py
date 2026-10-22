@@ -21,6 +21,7 @@ from unittest import mock
 
 from cadgen import analytics
 from cadgen._internal import engine_telemetry, telemetry_send
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[4] / "packages" / "cadgen" / "src"
 WORKER = {"fresh": None, "retired": False, "died": None}
@@ -205,9 +206,10 @@ class ThroughTheDaemonTest(unittest.TestCase):
         self.folder = Path(tempfile.mkdtemp(prefix="engine-telemetry-models-")).resolve()
         self.engine = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
         self.state = self.folder / "state"
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_STATE_DIR": str(self.state),
-                    "CADGEN_ENGINE_DIR": str(self.engine), "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline",
-                    "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": ""}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_STATE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_DIR": str(self.engine), "CADGEN_ENGINE_IDLE": "60",
+                                          "CADGEN_ENGINE_MESH": "inline", "DO_NOT_TRACK": "", "CADGEN_TELEMETRY": ""},
+                                         self.addCleanup)
         self.addCleanup(self._stop)
         analytics.choose(True, by="cli", path=self.state / "settings.json")
 
@@ -217,8 +219,7 @@ class ThroughTheDaemonTest(unittest.TestCase):
         shutil.rmtree(self.engine, ignore_errors=True)
 
     def run_in(self, *args: str) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, *args], cwd=self.folder, env=self.env, capture_output=True, text=True,
-                              timeout=300)
+        return engine_daemon.run([sys.executable, *args], cwd=self.folder, env=self.env)
 
     def test_a_model_script_and_a_command_are_counted_by_who_asked(self) -> None:
         (self.folder / "plate.py").write_text(textwrap.dedent("""

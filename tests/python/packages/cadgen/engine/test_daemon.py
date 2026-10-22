@@ -14,6 +14,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -120,8 +121,8 @@ class DaemonTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-daemon-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                    "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_IDLE": "60", "CADGEN_ENGINE_MESH": "inline"}, self.addCleanup)
         self.addCleanup(self._stop)
         self.script = self.folder / "block.py"
 
@@ -137,19 +138,16 @@ class DaemonTest(unittest.TestCase):
             time.sleep(0.05)
 
     def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env,
-                              capture_output=True, text=True, timeout=300)
+        return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env)
 
     def run_script(self, name: str, env: dict | None = None) -> subprocess.CompletedProcess:
         """``python NAME``: the script asks the daemon to build its models."""
-        return subprocess.run([sys.executable, name], cwd=self.folder, env=env or self.env, capture_output=True,
-                              text=True, timeout=300)
+        return engine_daemon.run([sys.executable, name], cwd=self.folder, env=env or self.env)
 
     def built(self, name: str, env: dict | None = None) -> dict:
         """Model ``name`` of ``name.py`` built through the daemon by ``Model.build()``: its report."""
         probe = f"import json, {name}; print(json.dumps({name}.{name}.build().models[0]))"
-        done = subprocess.run([sys.executable, "-B", "-c", probe], cwd=self.folder, env=env or self.env,
-                              capture_output=True, text=True, timeout=300)
+        done = engine_daemon.run([sys.executable, "-B", "-c", probe], cwd=self.folder, env=env or self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout.strip().splitlines()[-1])
 
@@ -239,8 +237,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(self.built("pair")["meshed"], 0)
 
     def where(self, ref: str) -> dict:
-        found = subprocess.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
-                               env=self.env, capture_output=True, text=True, timeout=300)
+        found = engine_daemon.run([sys.executable, "-m", "cadgen.cli", "where", "XBF/block.xbf", ref], cwd=self.folder,
+                                  env=self.env)
         self.assertEqual(found.returncode, 0, found.stderr)
         return json.loads(found.stdout)
 
@@ -301,8 +299,8 @@ class DaemonTest(unittest.TestCase):
         workers = json.loads(self.cli("status", "--json").stdout)["workers"]
         self.assertEqual([(Path(w["script"]).name, w["builds"]) for w in workers], [("block.py", 1)],
                          "the daemon's worker built it, not the script's own process")
-        done = subprocess.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder, env=self.env,
-                              capture_output=True, text=True, timeout=300)
+        done = engine_daemon.run([sys.executable, "block.py", "--step", "b.step", "--json"], cwd=self.folder,
+                                 env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(sorted(path.relative_to(self.folder).as_posix() for path in self.folder.rglob("*") if path.is_file()),
                          ["XBF/block.xbf", "block.py", "peg.stl"])
@@ -384,9 +382,8 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(self.cli("export", "pair.glb", "x.step").returncode, 2, "a mesh is no source")
         self.assertEqual(self.cli("export", "pair.py::pair", "x.step").returncode, 2, "nor is a script")
         code = "import build123d as bd\nresult = bd.Box(2, 2, 2) - bd.Cylinder(0.5, 3)\n"
-        built = subprocess.run([sys.executable, "-m", "cadgen.engine", "build", "-", "--name", "plug", "--stl",
-                                "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env,
-                               capture_output=True, text=True, timeout=300)
+        built = engine_daemon.run([sys.executable, "-m", "cadgen.engine", "build", "-", "--name", "plug", "--stl",
+                                   "plug.stl", "--json"], input=code, cwd=self.folder, env=self.env)
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertTrue((self.folder / "plug.stl").is_file())
         # From Python: the code's document and shape, asked of the worker that holds them.
@@ -397,8 +394,7 @@ class DaemonTest(unittest.TestCase):
             print(json.dumps({{"bodies": built.report["bodies"], "name": built.document.name,
                                "volume": round(shape.volume, 3)}}))
         """)
-        done = subprocess.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env, capture_output=True,
-                              text=True, timeout=300)
+        done = engine_daemon.run([sys.executable, "-c", probe], cwd=self.folder, env=self.env)
         self.assertEqual(done.returncode, 0, done.stderr)
         found = json.loads(done.stdout.strip().splitlines()[-1])
         self.assertEqual(found["bodies"], {"plug.py::plug": "replayed"}, "the code's warm worker")

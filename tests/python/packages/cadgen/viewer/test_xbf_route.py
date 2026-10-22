@@ -33,6 +33,7 @@ from cadgen.viewer import handler as handler_module
 from cadgen.viewer.http_app import create_cad_app
 from cadgen.viewer.scanner import catalog_entry
 from cadgen.viewer.xbf import EngineDocuments
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 
@@ -66,10 +67,9 @@ class XbfRouteTest(unittest.TestCase):
         # The daemon this test starts is its own: its own socket folder, one part meshed at a time.
         os.environ.update({"CADGEN_ENGINE_DIR": str(cls.state), "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_IDLE": "60"})
         (cls.base / "models.py").write_text(textwrap.dedent(MODEL), encoding="utf-8")
-        env = {**os.environ, "PYTHONPATH": str(SRC)}
+        env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC)}, cls.addClassCleanup)
         # Built as a script runs: through this test's own engine daemon.
-        done = subprocess.run([sys.executable, "models.py"], cwd=cls.base, env=env, capture_output=True, text=True,
-                              timeout=300)
+        done = engine_daemon.run([sys.executable, "models.py"], cwd=cls.base, env=env)
         assert done.returncode == 0, done.stderr
         cls.document = cls.base / "XBF" / "block.xbf"
         cls.step = cls.base / "pair.step"

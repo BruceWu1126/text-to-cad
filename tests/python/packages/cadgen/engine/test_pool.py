@@ -17,6 +17,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest import mock
+from tests.python.support import engine_daemon
 
 SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
@@ -181,8 +182,9 @@ class DaemonPoolTest(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = Path(tempfile.mkdtemp(prefix="engine-pool-")).resolve()
         self.state = Path(tempfile.mkdtemp(prefix="eng-", dir="/tmp" if os.name != "nt" else None)).resolve()
-        self.env = {**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
-                    "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline", "CADGEN_ENGINE_WORKERS": "1"}
+        self.env = engine_daemon.watched({**os.environ, "PYTHONPATH": str(SRC), "CADGEN_ENGINE_DIR": str(self.state),
+                                          "CADGEN_ENGINE_IDLE": "120", "CADGEN_ENGINE_MESH": "inline",
+                                          "CADGEN_ENGINE_WORKERS": "1"}, self.addCleanup)
         # This process asks the test's daemon what it holds (``status``), never starting one.
         self.enterContext(mock.patch.dict(os.environ, {"CADGEN_ENGINE_DIR": str(self.state)}))
         self.addCleanup(self._stop)
@@ -193,8 +195,7 @@ class DaemonPoolTest(unittest.TestCase):
         shutil.rmtree(self.state, ignore_errors=True)
 
     def cli(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env,
-                              capture_output=True, text=True, timeout=300)
+        return engine_daemon.run([sys.executable, "-m", "cadgen.engine", *args], cwd=self.folder, env=env or self.env)
 
     def status(self) -> dict:
         from cadgen.engine.client import request
@@ -212,7 +213,7 @@ class DaemonPoolTest(unittest.TestCase):
 
     def build(self, name: str, env: dict | None = None) -> str:
         running = self.launch(name, env)
-        out, err = running.communicate(timeout=300)
+        out, err = engine_daemon.communicate(running, self.env)
         self.assertEqual(running.returncode, 0, err)
         return out
 
@@ -228,7 +229,7 @@ class DaemonPoolTest(unittest.TestCase):
         self.assertIn("waiting  2 builds", self.cli("status").stdout)
         (self.folder / "a.go").touch()
         for name, process in builds.items():
-            out, err = process.communicate(timeout=300)
+            out, err = engine_daemon.communicate(process, self.env)
             self.assertEqual(process.returncode, 0, err)
             self.assertIn(" cold ", out, f"{name}: a worker of its own, started in its turn")
         status = self.status()
