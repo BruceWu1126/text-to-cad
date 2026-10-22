@@ -52,7 +52,7 @@ the two disagree, the engine's README is right.
 ## The design laws
 
 These are LAWS, not conventions: a change that violates them is wrong even when it works.
-Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
+Laws 1 to 13 and 19 are the engine's; 14 to 18 hold for the whole package.
 
 1. **An xbf carries its build closure as pointers and digests** -- script and function,
    modules, data inputs, versions and the key; never source, never lines on elements, never
@@ -145,6 +145,11 @@ Laws 1 to 13 are the engine's; 14 to 18 hold for the whole package.
     port), and again with every request hanging, start a server, open a view, call each tool,
     and run a build and a snapshot: each works, and nothing waits on a request beyond the one
     wait above.
+
+19. **Connected means warm.** A served document's outstanding version wait or recent
+    sync protects the worker that built it from idle retirement. The engine outlives its
+    clients; a page closing never stops a worker. Memory and worker-count caps still apply
+    (the engine's **Architecture** and **The daemon and its workers**).
 
 ## The shape of the package
 

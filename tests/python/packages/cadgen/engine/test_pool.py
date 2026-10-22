@@ -23,7 +23,7 @@ SRC = Path(__file__).resolve().parents[5] / "packages" / "cadgen" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from cadgen.engine.daemon import Pool  # noqa: E402
+from cadgen.engine.daemon import Daemon, Pool  # noqa: E402
 
 _PIDS = itertools.count(1)
 
@@ -158,6 +158,73 @@ class PoolTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pool.lease("bad.py", {})
         self.assertEqual(pool.lease("good.py", {}).script, "good.py")
+
+
+class ConnectedPoolTest(unittest.TestCase):
+    """The real version-wait lifecycle holds the builder, not unrelated workers."""
+
+    def test_version_wait_and_recent_sync_keep_the_builder_warm(self) -> None:
+        from cadgen.engine.serve import LIVE, Server
+
+        with tempfile.TemporaryDirectory() as folder:
+            daemon = Daemon(3600, cap=2, retire_after=1)
+            daemon.pool.start = Fake
+            server = daemon.server = Server(mesh_mode="inline")
+            self.addCleanup(daemon.shutdown)
+            path = Path(folder).resolve() / "part.xbf"
+            ident = server.put(path, {"version": "one", "prototypes": []}, {})
+            builder, other = daemon.pool.lease("a.py", {}), daemon.pool.lease("b.py", {})
+            daemon.builders[os.path.normcase(str(path))] = builder
+            daemon.pool.release(builder)
+            daemon.pool.release(other)
+            waiting = threading.Event()
+            original = server.changed.wait_for
+
+            def wait_for(*args, **kwargs):
+                waiting.set()
+                return original(*args, **kwargs)
+
+            with mock.patch.object(server.changed, "wait_for", side_effect=wait_for):
+                thread = threading.Thread(target=server.wait, args=(ident, "one", 60), daemon=True)
+                thread.start()
+                try:
+                    self.assertTrue(waiting.wait(5), "the page is waiting on the version")
+                    # Advance past both clocks: an outstanding wait still wins over LIVE.
+                    with mock.patch("time.monotonic", return_value=builder.used + LIVE + 10):
+                        self.assertEqual(daemon.pool.retire_idle(), [other])
+                        self.assertFalse(builder.stopped)
+                finally:
+                    server.put(path, {"version": "two", "prototypes": []}, {})
+                    thread.join(5)
+                self.assertFalse(thread.is_alive())
+            self.assertFalse(server.watchers, "the completed wait releases its watcher")
+            synced = server.synced[path]
+            with mock.patch("time.monotonic", return_value=synced + LIVE - 1):
+                self.assertEqual(daemon.pool.retire_idle(), [], "recent sync keeps the worker warm")
+            with mock.patch("time.monotonic", return_value=synced + LIVE):
+                self.assertEqual(daemon.pool.retire_idle(), [builder], "no watcher: idle retirement")
+
+    def test_failed_wait_releases_watcher_and_memory_cap_still_retires(self) -> None:
+        from cadgen.engine.serve import Server
+
+        daemon = Daemon(3600, cap=1)
+        daemon.pool.start = Fake
+        server = daemon.server = Server(mesh_mode="inline")
+        self.addCleanup(daemon.shutdown)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder).resolve() / "part.xbf"
+            ident = server.put(path, {"version": "one", "prototypes": []}, {})
+            worker = daemon.pool.lease("a.py", {})
+            daemon.builders[os.path.normcase(str(path))] = worker
+            with mock.patch.object(server, "document", side_effect=ValueError("unreadable")):
+                with self.assertRaisesRegex(ValueError, "unreadable"):
+                    server.wait(ident, "one", 60)
+            self.assertFalse(server.watchers)
+            self.assertTrue(daemon.connected(worker))
+            worker.retired = True
+            daemon.pool.release(worker)
+            self.assertTrue(worker.stopped)
+            self.assertEqual(daemon.pool.retired[0]["reason"], "RSS")
 
 
 GATED = """

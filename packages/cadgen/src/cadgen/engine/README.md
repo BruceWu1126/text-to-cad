@@ -140,6 +140,22 @@ def hinge():
    patched with an attribute of cadgen's own: it is dropped, or refused by name at document
    time (`test_kinematics`' conformance test walks the subtree and holds it).
 
+14. **Connected means warm.** A worker is not retired for idleness while any served
+    document it built has a version wait outstanding or completed a sync within `serve.LIVE`
+    seconds. The memory cap still applies. Closing a page never stops the engine or its
+    worker; once its last sync expires, ordinary idle retirement applies.
+
+## Architecture
+
+One daemon per installation owns the worker pool and the served documents. A model's
+worker is a separate process, holding its memo and live kernel objects. The daemon maps
+each built document to its worker; the HTTP server tracks outstanding version waits and
+recent syncs, so the pool's idle sweep preserves the worker behind a connected page.
+Watcher accounting has its own lock, independent of document reads and pool admission.
+The daemon itself remains alive while any document is watched, even with an idle timeout
+shorter than a version wait. The worker-count cap still uses LRU eviction to admit a new
+script, and the per-worker memory cap remains enforced after each build.
+
 ## Layout
 
 | Module | What it is |
@@ -289,8 +305,9 @@ guess, no refusal; the operating system does the rest.
   exits -- and its slot is the new one's. With every worker busy, the build waits for the first
   to come free, and every build that needs a slot after it waits behind it. A build that waits
   for its own script's busy worker takes no slot.
-- **Idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default: the
-  daemon's idle time, an hour) is retired.
+- **Unwatched idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default:
+  the daemon's idle time, an hour) is retired only when none of its served documents has
+  an outstanding version wait or a sync within `serve.LIVE` (90 seconds).
 - **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
   a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
   retired: the report says so (`retired`), and the worker exits once it has answered.

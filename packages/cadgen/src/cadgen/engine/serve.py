@@ -96,6 +96,8 @@ PAGE = Path(__file__).resolve().parent / "page"
 PARALLEL_BYTES = 500_000
 # How long a version request waits for a new version at most, in seconds.
 WAIT_LIMIT = 60.0
+# A page remains connected between successive version reads, including a suspended poll.
+LIVE = 90.0
 # A file this engine did not write, read by a reader process (the module docstring).
 FOREIGN = (".step", ".stp")
 # How many STEP reads are held by their bytes: a read a served document holds stays in memory
@@ -348,6 +350,9 @@ class Server:
         self.load_lock = threading.RLock()
         self.held: dict[Path, int] = {}
         self.changed = threading.Condition()
+        self.watch_lock = threading.Lock()
+        self.watchers: dict[Path, int] = {}
+        self.synced: dict[Path, float] = {}
         self.generation = 0
         self.topologies: "OrderedDict[str, Any]" = OrderedDict()
         self.topology_lock = threading.Lock()
@@ -721,6 +726,34 @@ class Server:
     def wait(self, ident: str, after: str | None, seconds: float, progress: int | None = None) -> Served:
         """The document once its version is not ``after``, or its build's ``progress`` count is
         not ``progress`` (when given), or after ``seconds``."""
+        path = self.served[ident].path
+        with self.watch_lock:
+            self.watchers[path] = self.watchers.get(path, 0) + 1
+            self.synced[path] = time.monotonic()
+        try:
+            return self._wait(ident, after, seconds, progress)
+        finally:
+            with self.watch_lock:
+                left = self.watchers[path] - 1
+                if left:
+                    self.watchers[path] = left
+                else:
+                    del self.watchers[path]
+                self.synced[path] = time.monotonic()
+            self.touch()
+
+    def watched(self) -> set[Path]:
+        """Documents with an outstanding version read or a sync in the last LIVE seconds.
+
+        This lock is independent of document loading and the worker pool: retirement must
+        not wait for a document's reader, nor take their locks in the opposite order.
+        """
+        now = time.monotonic()
+        with self.watch_lock:
+            self.synced = {path: at for path, at in self.synced.items() if now - at < LIVE}
+            return set(self.watchers) | self.synced.keys()
+
+    def _wait(self, ident: str, after: str | None, seconds: float, progress: int | None) -> Served:
         deadline = time.monotonic() + seconds
         while True:
             generation = self.generation

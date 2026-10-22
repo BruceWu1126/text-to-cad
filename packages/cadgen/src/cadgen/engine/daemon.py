@@ -374,10 +374,12 @@ class Pool:
     a slot after it. A worker idle ``idle`` seconds is retired (``retire_idle``), as is one that is
     gone or over its memory cap when let go. ``start(key, environment, cwd)`` starts a worker."""
 
-    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any]) -> None:
+    def __init__(self, cap: int, idle: float, start: Callable[[str, dict[str, str], str | None], Any],
+                 connected: Callable[[Any], bool] = lambda worker: False) -> None:
         self.cap = max(1, int(cap))
         self.idle = idle
         self.start = start
+        self.connected = connected
         self.lock = threading.Condition()
         self.live: dict[str, Any] = {}  # by key
         self.starting: set[str] = set()  # the keys whose worker is being started, each holding a slot
@@ -426,10 +428,11 @@ class Pool:
             worker.stop()
 
     def retire_idle(self, now: float | None = None) -> list[Any]:
-        """Retire every worker idle ``idle`` seconds or more; the retired."""
+        """Retire workers idle ``idle`` seconds with no connected document; the retired."""
         now = time.monotonic() if now is None else now
         with self.lock:
-            gone = [worker for worker in self.live.values() if not worker.leased and now - worker.used >= self.idle]
+            gone = [worker for worker in self.live.values()
+                    if not worker.leased and now - worker.used >= self.idle and not self.connected(worker)]
             for worker in gone:
                 del self.live[worker.key]
                 self._note(worker, "idle")
@@ -526,7 +529,7 @@ class Daemon:
     def __init__(self, idle: float, cap: int | None = None, retire_after: float | None = None) -> None:
         self.idle = idle
         self.pool = Pool(cap or worker_cap(), retire_after if retire_after is not None else worker_idle(idle),
-                         self._start)
+                         self._start, self.connected)
         self.workers_lock = threading.Lock()  # each worker's ``held``
         self.born = time.time()
         self.last = time.monotonic()
@@ -543,6 +546,12 @@ class Daemon:
 
     def touch(self) -> None:
         self.last = time.monotonic()
+
+    def connected(self, worker: Worker) -> bool:
+        """A page watching any document this worker built keeps its memo warm."""
+        server = self.server
+        return server is not None and any(self.builders.get(os.path.normcase(str(path))) is worker
+                                          for path in server.watched())
 
     def _start(self, script: str, environment: dict[str, str], cwd: str | None) -> Worker:
         return Worker(script, environment, self.patched, self.settled, cwd=cwd, on_progress=self.progressed)
@@ -819,7 +828,8 @@ class Daemon:
             self.pool.retire_idle()
             if self.renders is not None:
                 self.renders.retire_idle(self.pool.idle)
-            if self.busy == 0 and time.monotonic() - self.last > self.idle:
+            if (self.busy == 0 and time.monotonic() - self.last > self.idle
+                    and not (self.server is not None and self.server.watched())):
                 self.stopping.set()
 
     def shutdown(self) -> None:
