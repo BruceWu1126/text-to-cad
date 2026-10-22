@@ -1,12 +1,12 @@
 {
  "pose": {
-  "curl": 0.6
+  "index_curl": 0.6
  },
  "kinematics": {
   "values": {
-   "mcp": 54.0,
-   "pip": 60.0,
-   "dip": 42.0
+   "index_mcp_flexion": 54.0,
+   "index_pip": 60.0,
+   "index_dip": 42.0
   },
   "configuration": null
  },

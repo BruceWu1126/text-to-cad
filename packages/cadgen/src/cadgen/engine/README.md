@@ -637,11 +637,11 @@ no offset, so a door's turn and travel, or a 0-1 control, are out of its reach.
 import build123d as bd
 from cadgen.engine import configuration, couple, motion, xbf
 
-CURL = {"mcp": 90, "pip": 100, "dip": 70}                        # degrees at a full curl
-BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}  # lengths along +X
+CURL = {"index_mcp_flexion": 90, "index_pip": 100, "index_dip": 70}  # degrees at a full curl
+BONES = {"base": 30, "proximal": 40, "middle": 25, "distal": 20}     # lengths along +X
 
 @xbf
-def finger():
+def index_finger():
     bones, x = [], -BONES["base"]
     for name, length in BONES.items():
         bone = bd.Pos(x, 0, 0) * bd.Box(length, 16, 12, align=(bd.Align.MIN, bd.Align.CENTER, bd.Align.CENTER))
@@ -652,11 +652,11 @@ def finger():
         bd.RevoluteJoint(joint, parent, axis=knuckle, angular_range=(0, CURL[joint]))
         bd.RigidJoint(joint, child, bd.Plane(origin=knuckle.position, z_dir=knuckle.direction).location)
         parent.joints[joint].connect_to(child.joints[joint], angle=0)  # as built: straight
-    finger = bd.Compound(children=bones, label="finger")
-    couple(finger, "curl", **CURL)                                    # one control: 0 straight, 1 a fist
-    return motion(finger, "grip", sweep={"curl": (0, 1)}, duration=1.5, loop="pingpong")
+    finger = bd.Compound(children=bones, label="index_finger")
+    couple(finger, "index_curl", **CURL)                              # one control: 0 straight, 1 a fist
+    return motion(finger, "grip", sweep={"index_curl": (0, 1)}, duration=1.5, loop="pingpong")
 
-SWEEP, TRAVEL = {"left": -70, "right": 70}, 40                    # a door's turn and travel when open
+SWEEP, TRAVEL = {"left": -70, "right": 70}, 40                       # a door's turn and travel when open
 
 @xbf
 def hypercar():
@@ -674,17 +674,18 @@ def hypercar():
         doors.append(door)
     car = bd.Compound(children=[chassis, *doors], label="hypercar")
     couple(car, "doors", door_left=(SWEEP["left"], TRAVEL), door_right=(SWEEP["right"], TRAVEL))
-    return configuration(car, "open", doors=1)                     # shut is as built
+    return configuration(car, "open", doors=1)                        # shut is as built
 ```
 
-`cadgen xbf snapshot XBF/finger.xbf c.png --pose '{"curl": 0.6}'` draws the knuckles at 54, 60
-and 42 degrees, the picture of `--pose '{"mcp": 54, "pip": 60, "dip": 42}'`; `cadgen xbf export
-XBF/hypercar.xbf half.step --pose '{"doors": 0.5}'` writes the doors a half turn and a half travel
-open. A gear train is a locked coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True,
-rotor_spin=360, output=80, ...)` (`models-xbf/qdd_actuator`). A coupling joint in no pair, or given
-as many ratios as its pair has no values, is left out of it and warned. A label names the joint in
-each placement of a sub-assembly placed several times, and a name two couplings share takes the
-path of the assembly holding each (`hand/index:curl`), as a label two pairs share does.
+`cadgen xbf snapshot XBF/index_finger.xbf c.png --pose '{"index_curl": 0.6}'` draws the
+knuckles at 54, 60 and 42 degrees: the picture of `--pose '{"index_mcp_flexion": 54,
+"index_pip": 60, "index_dip": 42}'`. `cadgen xbf export XBF/hypercar.xbf half.step --pose
+'{"doors": 0.5}'` writes the doors a half turn and a half travel open. A gear train is a locked
+coupling: `couple(actuator, "drive", range=(0, 4.5), lock=True, rotor_spin=360, output=80, ...)`
+(`models-xbf/qdd_actuator`). A coupling joint in no pair, or given as many ratios as its pair has
+no values, is left out of it and warned. A label names the joint in each placement of a
+sub-assembly placed several times, and a name two couplings share takes the path of the assembly
+holding each (`hand/index:curl`), as a label two pairs share does.
 
 The xbf holds the mechanism as a subtree under `Main():100`, found by the
 `TDataStd_UAttribute` of its GUID, of standard attributes only: `TDataStd_Name` on every

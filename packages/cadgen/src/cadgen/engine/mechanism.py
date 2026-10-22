@@ -81,7 +81,8 @@ In the document the mechanism is a subtree under ``Main():100``, marked by a
                                ReferenceList[the configuration it names], or as "as built"
         :6 "couplings"
           :c <name>            NamedData{entity: cadgen_coupling, lower_limit, upper_limit, lock (1 when locked)},
-                               ReferenceList[pair per term], RealArray[ratio per term], IntegerArray[value index per term]
+                               ReferenceList[pair per term], RealArray[ratio per term],
+                               IntegerArray[value index per term]
 
 STEP carries none of it: OCCT reads AP242 kinematics but cannot write them.
 """
@@ -895,9 +896,10 @@ def _couplings(coupled: list, pairs: list[Pair], joint_labels: list, name_of: Ca
                     warnings.append(f"{where} drives joint {key!r}, which is in no pair: the joint is left out of it")
                 for pair in matches:
                     if len(value) != pair.dofs:
-                        need = "a ratio" if pair.dofs == 1 else f"{pair.dofs} ratios ({', '.join(_dof_names(pair.kind))})"
-                        warnings.append(f"{where}: joint {pair.label!r} ({pair.kind}) takes {need}, not {_shown(value)}: "
-                                        "the joint is left out of it")
+                        need = ("a ratio" if pair.dofs == 1
+                                else f"{pair.dofs} ratios ({', '.join(_dof_names(pair.kind))})")
+                        warnings.append(f"{where}: joint {pair.label!r} ({pair.kind}) takes {need}, not "
+                                        f"{_shown(value)}: the joint is left out of it")
                         continue
                     ratios[pair.label] = tuple(float(ratio) for ratio in value)
             if not ratios:
@@ -933,7 +935,8 @@ def _locked(couplings: dict[str, Any]) -> dict[str, str]:
 
 
 def _coupled(given: dict[str, Any], couplings: dict[str, Any], as_built: dict[str, tuple[float, ...]],
-             checked: Callable[[str, tuple[float, ...], str], tuple[float, ...]], where: str) -> dict[str, tuple[float, ...]]:
+             checked: Callable[[str, tuple[float, ...], str], tuple[float, ...]],
+             where: str) -> dict[str, tuple[float, ...]]:
     """The pair values couplings put their joints at: ``given`` is each coupling's value by name,
     ``couplings`` the structure's. Each joint stands at its as-built values plus each coupling's
     ratio times its value (couplings sharing a joint add). A value that is no number or is outside
@@ -1586,7 +1589,8 @@ def block(mechanism: Mechanism, instance_paths: list[tuple[int, ...]],
             "asBuilt": {label: _json_value(values) for label, values in mechanism.as_built.items()},
             "configurations": {name: {label: _json_value(values) for label, values in values_.items()}
                                for name, values_ in mechanism.configurations.items()},
-            "couplings": {name: _coupling_json(coupling, mechanism.pairs) for name, coupling in mechanism.couplings.items()},
+            "couplings": {name: _coupling_json(coupling, mechanism.pairs)
+                          for name, coupling in mechanism.couplings.items()},
             "motions": {name: _motion_json(motion) for name, motion in mechanism.motions.items()},
             "loop": loop, "warnings": warnings}
 
