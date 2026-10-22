@@ -100,6 +100,45 @@ class PackageScriptTest(unittest.TestCase):
         module = sys.modules["plate"]
         self.assertEqual((Path(module.__file__), module.__package__), (script, ""))
 
+    def test_two_edits_in_one_second_run_the_second_not_a_pyc_another_tool_left(self) -> None:
+        """CPython takes a ``.pyc`` as current by the source's whole-second mtime and its size: an
+        edit of the same length inside the second a tool compiled the file would run that tool's
+        bytecode. The worker compiles the model's own modules from the bytes on disk."""
+        import py_compile
+
+        def same_second_edit(relative: str, old: str, new: str) -> None:
+            path = self.root / relative
+            stat = path.stat()
+            py_compile.compile(str(path), doraise=True)  # another tool compiles the first edit
+            text = path.read_text(encoding="utf-8")
+            assert len(old) == len(new) and text.count(old) == 1
+            path.write_text(text.replace(old, new), encoding="utf-8")  # the same length...
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))  # ...inside the same second
+
+        self.build(self.script)
+        same_second_edit("proj/common/dims.py", "HEIGHT = 5", "HEIGHT = 8")  # a module the script imports
+        self.build(self.script)
+        self.assertAlmostEqual(read_xbf(self.xbf).bounding_box().size.Z, 8)
+        same_second_edit("proj/parts/model.py", "bd.Box(WIDTH, 10,", "bd.Box(WIDTH, 30,")  # the script itself
+        self.build(self.script)
+        self.assertAlmostEqual(read_xbf(self.xbf).bounding_box().size.Y, 30)
+        # A loose script is compiled from its source too.
+        write(self.root, {"proj/tools/plate.py": """
+            import build123d as bd
+            from cadgen.engine import xbf
+
+
+            @xbf
+            def plate():
+                return bd.Box(10, 10, 2)
+        """})
+        loose = self.root / "proj/tools/plate.py"
+        plate = self.root / "proj/tools/XBF/plate.xbf"
+        self.build(loose)
+        same_second_edit("proj/tools/plate.py", "bd.Box(10, 10, 2)", "bd.Box(10, 10, 6)")
+        self.build(loose)
+        self.assertAlmostEqual(read_xbf(plate).bounding_box().size.Z, 6)
+
 
 class PackageScriptRunTest(unittest.TestCase):
     def setUp(self) -> None:

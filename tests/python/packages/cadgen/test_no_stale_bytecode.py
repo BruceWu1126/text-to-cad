@@ -43,13 +43,20 @@ class NoStaleBytecodeTest(unittest.TestCase):
             '''),
             encoding="utf-8",
         )
-        self._env = {k: os.environ.get(k) for k in ("CADGEN_CACHE_DIR",)}
+        self._env = {k: os.environ.get(k) for k in ("CADGEN_CACHE_DIR", "PYTHONDONTWRITEBYTECODE")}
         os.environ["CADGEN_CACHE_DIR"] = str(self.root / "cache")
+        # Python writes bytecode here unless the window stops it: a shell that sets
+        # PYTHONDONTWRITEBYTECODE (or -B) would make every absence below vacuous, and the
+        # mutation check would find no bytecode with the window gone.
+        os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
+        self._dont_write = sys.dont_write_bytecode
+        sys.dont_write_bytecode = False
         self._cwd = os.getcwd()
         os.chdir(self.root)
 
     def tearDown(self) -> None:
         os.chdir(self._cwd)
+        sys.dont_write_bytecode = self._dont_write
         for key, value in self._env.items():
             if value is None:
                 os.environ.pop(key, None)

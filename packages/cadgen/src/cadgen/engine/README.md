@@ -179,7 +179,11 @@ under `python -m`; and `python proj/parts/model.py` takes its package the moment
 imports the engine (`model.as_package_module`), so a relative import written above that
 import fails as Python's own does. A script in a folder with no `__init__.py` is the module
 its stem names. An edit to any module the script imports is read on the next build, which
-re-runs the bodies that reach it (**Body retention**).
+re-runs the bodies that reach it (**Body retention**). The script and every first-party module
+it imports are compiled from their bytes on disk, never from a `__pycache__` `.pyc`, and a
+build writes no bytecode: CPython takes a `.pyc` as current by the source's whole-second mtime
+and its size, so a same-length edit inside the second another tool compiled the file would
+otherwise run that tool's code.
 A warm build does not make the document again: the worker holds the XCAF
 document it last wrote and patches it (`document.Kept`). A prototype whose label
 holds what a cold build would make of it keeps that label untouched; one that

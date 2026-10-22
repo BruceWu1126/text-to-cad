@@ -24,6 +24,8 @@ not run, nor any file written.
 from __future__ import annotations
 
 import importlib
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -95,6 +97,41 @@ def _first_party_modules() -> list[str]:
             if name != "__main__" and first_party_file(getattr(module, "__file__", None) or "")]
 
 
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    """A first-party module compiled from the bytes on disk, never from a ``.pyc``: CPython
+    takes a ``__pycache__`` file as current by the source's whole-second mtime and its size,
+    so two same-length edits inside one second -- an agent's edit loop -- would run the first
+    edit's bytecode while the closure keys the second's source."""
+
+    def get_code(self, fullname: str) -> Any:
+        path = self.get_filename(fullname)
+        return compile(self.get_data(path), path, "exec", dont_inherit=True)
+
+
+class _FirstPartyFromSource(importlib.abc.MetaPathFinder):
+    """Every first-party module (``trace.first_party_file``) through ``_SourceOnlyLoader``.
+    It asks the path finder itself, never the rest of ``sys.meta_path`` (two finders that
+    each ask the other would hand one lookup back and forth), and answers nothing else."""
+
+    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+        from cadgen.engine.kernel.trace import first_party_file
+
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
+        if (spec is None or type(spec.loader) is not importlib.machinery.SourceFileLoader or not spec.origin
+                or not first_party_file(spec.origin)):
+            return None
+        spec.loader = _SourceOnlyLoader(spec.loader.name, spec.loader.path)
+        return spec
+
+
+def _from_source() -> None:
+    """The model's code runs from its source: no bytecode written for anything a build
+    imports, none read for a first-party module. Once per process, first on the meta path."""
+    sys.dont_write_bytecode = True
+    if not any(isinstance(finder, _FirstPartyFromSource) for finder in sys.meta_path):
+        sys.meta_path.insert(0, _FirstPartyFromSource())
+
+
 def load_script(script: Path) -> Any:
     """The script as a fresh module, after every first-party module a previous build loaded is
     forgotten: the model's code as it is on disk now, imported as Python imports it. Its
@@ -102,10 +139,11 @@ def load_script(script: Path) -> Any:
     (``model.module_of``) is imported by its dotted name (``proj.parts.model``), as ``python -m``
     imports it: its packages first, from their root, which the search path holds next, so a
     relative import, a module beside it by its own name and the package by its name all
-    resolve. A loose script is the module its stem names. No bytecode is written."""
+    resolve. A loose script is the module its stem names. Every module of the model's own is
+    compiled from its source on disk (``_from_source``): no bytecode is written or read."""
     from cadgen.engine.model import module_of, seat
 
-    sys.dont_write_bytecode = True
+    _from_source()
     for name in _first_party_modules():
         sys.modules.pop(name, None)
     importlib.invalidate_caches()
@@ -117,7 +155,7 @@ def load_script(script: Path) -> Any:
         if not found or Path(found).resolve() != Path(script).resolve():
             raise BuildError(f"{script} is module {name} of its package, but importing {name} finds {found}")
         return module
-    spec = importlib.util.spec_from_file_location(name, script)
+    spec = importlib.util.spec_from_file_location(name, script, loader=_SourceOnlyLoader(name, str(script)))
     if spec is None or spec.loader is None:
         raise BuildError(f"cannot load {script}")
     module = importlib.util.module_from_spec(spec)
@@ -193,7 +231,7 @@ def load_code(script: Path, name: str, code: str, outputs: dict[str, dict[str, A
     from cadgen.engine.model import Model, Output
 
     text = code_source(name, code)
-    sys.dont_write_bytecode = True
+    _from_source()
     for module_name in _first_party_modules():
         sys.modules.pop(module_name, None)
     importlib.invalidate_caches()
