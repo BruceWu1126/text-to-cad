@@ -177,5 +177,25 @@ class PackageScriptRunTest(unittest.TestCase):
                          "one warm worker built both, not the script's own process")
 
 
+
+class LibraryRootsTest(unittest.TestCase):
+    """What counts as the model's own code: a site-packages folder another environment lends this
+    one -- a ``.pth`` line or PYTHONPATH, as a scratch venv borrowing the repo's OCP and build123d
+    has it -- is library code, as this interpreter's own site-packages is."""
+
+    def test_a_borrowed_site_packages_is_library_code(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="engine-roots-")).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        write(root, {"lent/lib/python3/site-packages/borrowed.py": "", "model/own.py": ""})
+        probe = ("import sys; from cadgen.engine.kernel.trace import first_party_file; "
+                 "print(first_party_file(sys.argv[1]), first_party_file(sys.argv[2]))")
+        lent = root / "lent" / "lib" / "python3" / "site-packages"
+        done = subprocess.run([sys.executable, "-c", probe, str(lent / "borrowed.py"), str(root / "model" / "own.py")],
+                              env={**os.environ, "PYTHONPATH": os.pathsep.join([str(SRC), str(lent)])},
+                              capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split(), ["False", "True"])
+
+
 if __name__ == "__main__":
     unittest.main()

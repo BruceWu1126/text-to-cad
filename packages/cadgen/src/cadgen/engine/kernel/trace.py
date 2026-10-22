@@ -2208,7 +2208,12 @@ def _library_roots() -> tuple[Path, ...]:
         value = sysconfig.get_paths().get(key)
         if value:
             found.add(Path(value).resolve())
-    for value in (sys.prefix, sys.base_prefix, sys.exec_prefix, *site.getsitepackages(), site.getusersitepackages()):
+    # And every installed-packages folder on the module search path, whoever put it there: a
+    # ``.pth`` line or PYTHONPATH reaching another environment's packages (numpy, build123d)
+    # makes them no less a library than this interpreter's own.
+    entries = [entry for entry in sys.path if entry and Path(entry).name in ("site-packages", "dist-packages")]
+    for value in (sys.prefix, sys.base_prefix, sys.exec_prefix, *site.getsitepackages(), site.getusersitepackages(),
+                  *entries):
         if value:
             try:
                 found.add(Path(value).resolve())
