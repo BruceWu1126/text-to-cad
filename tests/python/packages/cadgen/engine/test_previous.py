@@ -137,8 +137,8 @@ class PreviousTest(unittest.TestCase):
         self.restart()
         self.source(peg=12)
         report = self.kit()
-        self.assertEqual(report["cache"]["reason"], "../kit.py changed")
-        self.assertEqual(report["cache"]["changed"], ["../kit.py changed"])
+        self.assertEqual(report["cache"]["reason"], "../kit.py: peg changed")
+        self.assertEqual(report["cache"]["changed"], ["../kit.py: peg changed"])
         self.assertEqual(report["bodies"], {"kit.py::kit": "run", "kit.py::peg": "run", "kit.py::cap": "run"})
         edited = self.xbf.read_bytes()
         self.assertEqual(edited, self.cold(peg=12))
@@ -212,9 +212,11 @@ class PreviousTest(unittest.TestCase):
         self.assertEqual(self.kit()["cache"]["reason"], "no file yet")
         self.assertEqual(self.xbf.read_bytes(), first)
         # Its head whole, the rest gone: the closure shows, the document does not read. (Cut
-        # at a third: OCCT's reader aborts the process on some cuts of a shape section
-        # rather than failing, an uncaught Standard_NullObject -- measured at a half of this one.)
-        head = first[: len(first) // 3]
+        # right after the closure, in the main label's attributes: OCCT's reader aborts the
+        # process on some cuts of a shape section rather than failing, an uncaught
+        # Standard_NullObject -- measured at a half of this one, and at a third once the
+        # closure grew by its symbols.)
+        head = first[: first.index(b"\x00", first.index(b'{"schema":"cadgen.engine closure/1",')) + 1]
         self.xbf.write_bytes(head)
         self.restart()
         report = self.kit()
@@ -323,7 +325,8 @@ class ClosureTest(unittest.TestCase):
 
         self.plate()
         record = previous.of(self.xbf)
-        self.assertEqual(list(record), ["schema", "engine", "libs", "source", "modules", "inputs", "bodies", "key"])
+        self.assertEqual(list(record), ["schema", "engine", "libs", "source", "modules", "symbols", "inputs", "bodies",
+                                        "key"])
         self.assertEqual(record["schema"], "cadgen.engine closure/1")
         version = (Path(__file__).resolve().parents[5] / "VERSION").read_text(encoding="utf-8").strip()
         self.assertEqual(record["engine"]["release"], f"cadgen {version}", "the release VERSION stamps")
@@ -348,7 +351,7 @@ class ClosureTest(unittest.TestCase):
         self.assertEqual(self.plate()["cache"], {"used": True, "from": "file"})
         self.helper(width=24)
         report = self.plate()
-        self.assertEqual(report["cache"]["changed"], ["../dims.py changed"])
+        self.assertEqual(report["cache"]["changed"], ["../dims.py: WIDTH changed"])
         after = dict(map(tuple, previous.of(self.xbf)["modules"]))
         self.assertEqual({path for path in before if before[path] != after[path]}, {"../dims.py"})
 

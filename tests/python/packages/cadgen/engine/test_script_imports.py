@@ -79,7 +79,7 @@ class PackageScriptTest(unittest.TestCase):
         write(self.root, {"proj/common/dims.py": "HEIGHT = 7\n"})
         edited = self.build(self.script)
         self.assertEqual(edited["bodies"], {"model.py::bracket": "run"})
-        self.assertIn("../../common/dims.py changed", edited["cache"]["changed"])
+        self.assertIn("../../common/dims.py: HEIGHT changed", edited["cache"]["changed"])
         self.assertAlmostEqual(read_xbf(self.xbf).bounding_box().size.Z, 7)
 
     def test_a_namespace_package_s_modules_are_the_model_s_imported_again_and_keyed(self) -> None:
@@ -105,7 +105,7 @@ class PackageScriptTest(unittest.TestCase):
         write(self.root, {"craft/lib/empennage.py": "SPAN = 9\n"})
         edited = self.build(script)
         self.assertEqual(edited["bodies"], {"f14.py::f14": "run"})
-        self.assertIn("../lib/empennage.py changed", edited["cache"]["changed"])
+        self.assertIn("../lib/empennage.py: SPAN changed", edited["cache"]["changed"])
         self.assertAlmostEqual(read_xbf(xbf).bounding_box().size.Y, 9)
 
     def test_a_loose_script_is_the_module_its_stem_names(self) -> None:
@@ -197,7 +197,7 @@ class PackageScriptRunTest(unittest.TestCase):
         write(self.root, {"proj/common/dims.py": "HEIGHT = 7\n"})
         edited = self.run_script()
         self.assertIn("bodies 1 run", edited)
-        self.assertIn("rebuilt: ../../common/dims.py changed", edited)
+        self.assertIn("rebuilt: ../../common/dims.py: HEIGHT changed", edited)
         workers = json.loads(self.python("-m", "cadgen.engine", "status", "--json").stdout)["workers"]
         self.assertEqual([(Path(worker["script"]).name, worker["builds"]) for worker in workers], [("model.py", 2)],
                          "one warm worker built both, not the script's own process")

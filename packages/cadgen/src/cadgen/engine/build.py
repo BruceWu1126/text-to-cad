@@ -543,7 +543,7 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
 
         modules, unkeyable = context.modules(model)
         tree.closure = previous.text(previous.manifest(run.keys, f"{model.script}::{model.name}", Path(xbf).parent,
-                                                       model, modules, unkeyable))
+                                                       model, modules, unkeyable, context.named(model)))
     timings["collect"] = round(time.perf_counter() - clock, 4)
     # What the joints' harvest found inconsistent: said, and the document written all the same.
     if tree.mechanism is not None and tree.mechanism.warnings:
@@ -769,7 +769,7 @@ def _previous(model: Any, context: Any, shown: str, log: Callable[[str], None]) 
     if found.get("key") is None:
         return {"used": False, "reason": "the file holds no key"}, None
     modules, _unkeyable = context.modules(model)
-    now, changes = previous.again(found, model, xbf.parent, modules)
+    now, changes = previous.again(found, model, xbf.parent, modules, context.named(model))
     keyed = time.perf_counter()
     if now != found["key"]:
         changes = changes or ["its closure changed"]

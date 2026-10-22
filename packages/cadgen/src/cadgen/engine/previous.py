@@ -15,6 +15,9 @@ When a build writes a model's xbf, the document's main label carries its closure
   model reaches, each a digest of what the model reaches in it (its functions' code objects
   with no line tables, its classes, the values its bindings hold: ``sources.Symbols.modules``);
   a comment or a blank line changes none;
+- ``symbols``: per module of ``modules``, a short digest of each binding and each function and
+  class the model reaches in it, by name (``sources.Symbols.symbols``): not in the key, what a
+  build names when that module changed (``lib/geometry.py: _CACHE changed``);
 - ``inputs``: ``[kind, path, digest]`` per file a body read -- through the engine
   (``file``: ``read_step``, ``read_xbf``, the importers) or itself (``read``) -- by its path
   relative to the document's folder (``null`` digest: a file it found missing), and a text's
@@ -192,7 +195,7 @@ def _recipe(row: list, folder: Path) -> tuple:
 
 
 def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, modules: dict[str, str],
-             unkeyable: bool) -> dict[str, Any]:
+             unkeyable: bool, symbols: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
     """The closure a model's document carries (see the module), its paths relative to
     ``folder``, the document's: ``keys`` the run's bodies (``memo``), ``name`` the model's
     body, ``modules`` and ``unkeyable`` its closure by file (``sources.Symbols.modules``)."""
@@ -214,9 +217,16 @@ def manifest(keys: dict[str, tuple], name: str, folder: Path, model: Any, module
     record: dict[str, Any] = {
         "schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
         "modules": sorted([_relative(path, folder), digest] for path, digest in modules.items()),
+        "symbols": _named(symbols or {}, folder),
         "inputs": inputs, "bodies": len(closure(keys, name)) if found is not None else None}
     record["key"] = key(record) if keyed else None
     return record
+
+
+def _named(symbols: dict[str, dict[str, str]], folder: Path) -> dict[str, dict[str, str]]:
+    """``symbols`` by each module's path relative to ``folder``, in order."""
+    return {_relative(path, folder): dict(sorted(found.items()))
+            for path, found in sorted(symbols.items(), key=lambda item: _relative(item[0], folder))}
 
 
 def key(record: dict[str, Any]) -> str:
@@ -231,10 +241,12 @@ def text(record: dict[str, Any]) -> str:
     return json.dumps(record, ensure_ascii=True, separators=(",", ":"))
 
 
-def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, str]) -> tuple[str, list[str]]:
+def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, str],
+          symbols: dict[str, dict[str, str]] | None = None) -> tuple[str, list[str]]:
     """The closure ``record`` names, made again now: its key, and what differs from the
-    record, each said by name (``../src/arm.py changed``, ``../STEP/gripper.step is
-    missing``). ``modules`` is the model's closure by file now."""
+    record, each said by name (``../src/arm.py: WIDTH, plate changed``, ``../STEP/gripper.step
+    is missing``). ``modules`` is the model's closure by file now, ``symbols`` what it reaches in
+    each by name (a changed module names what changed in it where the record holds its names)."""
     from cadgen.engine.kernel import memo
 
     now = {"schema": SCHEMA, "engine": _engine(), "libs": _libraries(), "source": _source(model, folder),
@@ -253,13 +265,17 @@ def again(record: dict[str, Any], model: Any, folder: Path, modules: dict[str, s
         changes.append("the code changed" if source["kind"] == "code"
                        else f"the model is now {source['path']}::{source['function']}")
     held, current = dict(map(tuple, record["modules"])), dict(map(tuple, now["modules"]))
+    named = _named(symbols or {}, folder)
     for path in sorted(set(held) | set(current)):
         if path not in current:
             changes.append(f"{path} is no longer imported")
         elif path not in held:
             changes.append(f"{path} is new")
         elif held[path] != current[path]:
-            changes.append(f"{path} changed")
+            was, now_named = (record.get("symbols") or {}).get(path), named.get(path, {})
+            differ = [] if was is None else sorted(name for name in set(was) | set(now_named)
+                                                   if was.get(name) != now_named.get(name))
+            changes.append(f"{path}: {', '.join(differ)} changed" if differ else f"{path} changed")
     inputs = []
     for row in record["inputs"] or []:
         recipe = _recipe(row, folder)

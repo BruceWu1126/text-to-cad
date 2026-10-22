@@ -729,6 +729,12 @@ class BuildContext:
             symbols = self.others[model.script] = Symbols(self.resolved, loaded, model.script.parent)
         return symbols.modules(model.function)
 
+    def named(self, model: Model) -> dict[str, dict[str, str]]:
+        """What ``modules`` digests per file, by name (``sources.Symbols.symbols``)."""
+        self.modules(model)
+        held = self.symbols if self.script is None or model.script == self.script else self.others[model.script]
+        return held.symbols(model.function)
+
     def __enter__(self) -> "BuildContext":
         self.previous = getattr(_CONTEXT, "build", None)
         _CONTEXT.build = self

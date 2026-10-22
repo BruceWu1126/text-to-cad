@@ -772,6 +772,35 @@ class Symbols:
             found[file] = hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()[:32]
         return found, unkeyable
 
+    def symbols(self, function: Any) -> dict[str, dict[str, str]]:
+        """What ``modules`` digests per file, by name: each binding the body reaches
+        (``_CACHE``, a value or what it is bound to) and each function and class of its code
+        (``plate``), a short digest of each -- what a build's closure names when a file changed
+        (``previous.again``)."""
+        from cadgen.engine.kernel.trace import first_party_file
+
+        pairs, owners, _fallbacks = self._reach(function)
+        root = self._module_file(getattr(function, "__module__", None)) or str(
+            Path(function.__code__.co_filename).resolve())
+        # A name is every pair it stands for: a model's binding (``kit:peg``) and its code
+        # (``kit.peg``) are one ``peg``, digested together, in an order no hash seed sets.
+        rows: dict[str, dict[str, list[str]]] = {}
+        for pair in pairs:
+            if pair[0] == "unkeyable":
+                continue
+            owner = owners.get(pair)
+            file = self._module_file(owner) or root
+            if file in MEMORY or not first_party_file(file):
+                continue
+            name = str(pair[0])
+            for prefix in ((f"{owner}:", f"{owner}.") if owner else ()):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                    break
+            rows.setdefault(file, {}).setdefault(name, []).append(repr(pair))
+        return {file: {name: hashlib.sha256("\n".join(sorted(found)).encode()).hexdigest()[:12]
+                       for name, found in named.items()} for file, named in rows.items()}
+
     def _module_file(self, name: str | None) -> str | None:
         """The file a first-party module was loaded from, or None."""
         if not name or not self._first_party_module(name):

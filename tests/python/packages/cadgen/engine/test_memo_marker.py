@@ -302,7 +302,7 @@ class MemoTest(MemoCase):
         self.write("parts.py", PARTS.format(thickness=3))
         self.restart()
         report = self.build()
-        self.assertEqual(report["cache"]["reason"], "../parts.py changed")
+        self.assertEqual(report["cache"]["reason"], "../parts.py: plate changed")
 
 
 class MemoNamesTest(MemoCase):
