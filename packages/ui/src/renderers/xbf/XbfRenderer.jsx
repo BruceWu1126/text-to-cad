@@ -392,7 +392,7 @@ function XbfSurface({ view, data }) {
   const copySelection = selected.length && !previewing ? () => copy(chips.map(chip => chip.copy).filter(Boolean).join("\n")) : null;
   const nameReference = useCallback((reference) => {
     const selector = reference?.target?.kind === "cad-selector" ? reference.target.selectors?.[0] : "";
-    const chip = selector ? chips.find(item => String(item.id || "").split(", ").includes(selector)) : null;
+    const chip = selector ? chips.find(item => item.selectors?.includes(selector)) : null;
     if (!chip) return "";
     return chip.compact || { name: chip.label, kind: chip.glyph };
   }, [chips]);

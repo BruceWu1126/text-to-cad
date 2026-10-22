@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
+import { createPromptContext, createPromptDeliveryLedger, referencePart, textPart, validatePromptContext, formatPromptContextText, formatPromptMessage, formatPromptReference, parsePromptReference, promptReferenceIds, resolveAttachmentPaths } from './index.js';
 
 // A ref is `<occurrence token>/<element name>`, as cadgen and the viewer compose it.
 const FACE = 'o:3f2a9c1d7e5b/f:bracket.extrude1.3';
@@ -34,6 +34,18 @@ test('a file already saved says where, as soon as it is; one that never will be 
   assert.equal(formatPromptMessage(context, { attachmentPath: part => paths.get(part.id) }),
     'Thicker.\n\nFile: "/work/STEP/my part.step"\nViews: /tmp/p/part-1.job.json');
   assert.throws(() => validatePromptContext({ ...context, parts: [...context.parts.slice(0, 2), { ...views, path: 7 }] }), /attachment path/);
+});
+test('an .xbf is referenced in the engine\'s grammar: one line per reference, pasted back as it was copied', () => {
+  // The canonical refs Copy Prompt writes (`cadgen.engine.refs`): an occurrence path, a quoted label, an element by number.
+  const selectors = ['kit/hand/finger.2/face 7', '"M3, M4 screw"/e:screw.body.2', 'v1.5 bracket'];
+  const resource = { kind: 'workspace-file', path: '/work/XBF/kit.xbf' };
+  const lines = selectors.map(selector => formatPromptReference({ resource, target: { kind: 'cad-selector', selectors: [selector] } }));
+  assert.deepEqual(lines, selectors.map(selector => `/work/XBF/kit.xbf#${selector}`));
+  for (const [index, line] of lines.entries()) assert.deepEqual(parsePromptReference(line), { resource, target: { kind: 'cad-selector', selectors: [selectors[index]] } });
+  // What the engine refuses is no reference, and a STEP's selectors are still its own grammar's.
+  assert.throws(() => referencePart({ resource, target: { kind: 'cad-selector', selectors: ['kit//face 1'] } }), /invalid CAD/);
+  assert.equal(parsePromptReference('/work/XBF/kit.xbf#kit/'), null);
+  assert.throws(() => referencePart({ ...reference, target: { kind: 'cad-selector', selectors: ['kit/hand/finger.2/face 7'] } }), /invalid CAD/);
 });
 test('code targets preserve explicit ranges rather than borrowing the CAD fragment grammar', () => {
   const code = { resource: { kind: 'workspace-file', path: '/work/src/bracket.py' }, target: { kind: 'text-range', start: { line: 4, character: 2 }, end: { line: 6, character: 0 } } };

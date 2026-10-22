@@ -152,7 +152,9 @@ src/
                    #   drawing2d/ (a cadgen drawing payload, a DXF's ->
                    #   Canvas 2D, text by fillText:
                    #   fit/pan/zoom maths, batched Path2D, screen-width strokes),
-                   #   cadRefs (grammar, parity-tested against cad_ref_syntax.py)
+                   #   cadRefs (the ref grammars: an .xbf's, parity-tested
+                   #   against engine/refs.py; a STEP's, against
+                   #   cad_ref_syntax.py)
 scripts/           # chunk-ids.mjs (the pages' builds: a chunk's debug id) and
                    #   source-maps.mjs (the pages' builds: maps into the packages'
                    #   src/), beside the package's own build and test runners
@@ -160,7 +162,9 @@ docs/              # subsystem docs (the map below)
 ```
 
 Contract mirrors that must stay in lockstep (each has a sync test):
-`lib/cadRefs.js` ↔ `cadgen/cad_ref_syntax.py`;
+`lib/cadRefs.js` ↔ `cadgen/engine/refs.py` (an `.xbf`'s refs: their parse and their
+canonical spelling) and ↔ `cadgen/cad_ref_syntax.py` (a STEP's), one fixture,
+`lib/cadRefs.parity.json`, for both;
 part keys and records, GLB bodies (their canonical JSON and tables)
 (`lib/parts/tessellationCache.js`, a reader only: cadgen is the one writer) ↔
 `cadgen/store/meshes.py` and `cadgen/store/parts.py`.
