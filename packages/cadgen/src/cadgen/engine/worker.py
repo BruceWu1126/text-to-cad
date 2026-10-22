@@ -7,11 +7,13 @@ path and the version served of it), ``served_keys`` (each served path and the ke
 parts its served document holds), ``held`` (the geometry keys it holds a mesh for) and
 ``shapes`` (the keys it holds a shape for). The answers are frames: a JSON object on one
 line and, when it has ``bytes``, exactly that many bytes after it. A build is answered by
-``{"id", "log"}`` frames while it builds, a ``{"id", "patch", "bytes"}`` frame (below) for
+``{"id", "log"}`` frames while it builds and ``{"id", "progress"}`` frames saying where it is
+(``progress.py``: each stage, ``report`` and ``track``), a ``{"id", "patch", "bytes"}`` frame (below) for
 each served xbf the moment the build has put it in place -- before the build goes on to
-its exports -- one ``{"id", "done"}`` (the build's reports) or ``{"id", "failed"}``, and
-last ``{"id", "settled"}``. What the model prints goes to the worker's stderr, which the
-daemon passes on. The worker exits when its stdin closes.
+its exports -- one ``{"id", "done", "rssMb"}`` (the build's reports, and the worker's resident
+memory after it, in MiB) or ``{"id", "failed"}``, and last ``{"id", "settled"}``. What the
+model prints goes to the worker's stderr, which the daemon passes on. The worker exits when
+its stdin closes: the daemon's pool closes it to retire the worker (``daemon.Pool``).
 
 A ``{"id", "op": "where", "path", "key", "kind", "ordinal"}`` request asks what made one
 element of a document this worker built (``build.made_by``): it is answered at once,
@@ -220,11 +222,12 @@ def rss_cap_mb() -> float | None:
     return None if physical is None else max(physical / 4, 2048.0)
 
 
-def retirement(reports: list[dict[str, Any]]) -> bool:
-    """After a build: this worker's resident memory against its cap. Over it, each report says
-    so (``retired``) and the worker is retired: it exits once it has answered, and the next
-    build is a fresh worker's -- a restart, which takes a model's xbf when nothing changed."""
-    resident, cap = resident_mb(), rss_cap_mb()
+def retirement(reports: list[dict[str, Any]], resident: float | None = None) -> bool:
+    """After a build: this worker's resident memory (``resident``, else measured now) against its
+    cap. Over it, each report says so (``retired``) and the worker is retired: it exits once it
+    has answered, and the next build is a fresh worker's -- a restart, which takes a model's xbf
+    when nothing changed."""
+    resident, cap = resident if resident is not None else resident_mb(), rss_cap_mb()
     if resident is None or cap is None or resident <= cap:
         return False
     for report in reports:
@@ -329,6 +332,11 @@ def main() -> int:
 
     from cadgen.engine import document
     from cadgen.engine.build import BuildError, build, made_by
+    from cadgen.engine.progress import Progress, building
+
+    def progress(ident: Any, **where: Any) -> Progress:
+        """A request's progress, each frame sent as ``{"id", "progress"}`` (``progress.py``)."""
+        return Progress(lambda frame: send({"id": ident, "progress": frame}), **where)
 
     requests: "queue.Queue[dict[str, Any] | None]" = queue.Queue()
 
@@ -369,9 +377,15 @@ def main() -> int:
                 if cwd:
                     os.chdir(cwd)
                 if op == "export":
-                    done = _export(request, lambda text: send({"id": ident, "log": text}))
-                    retire = retirement(done.get("reports") or []) if done.get("reports") else False
-                    send({"id": ident, "done": done})
+                    source = request["source"]
+                    said = progress(ident, script=source.get("script"), cwd=cwd, code="code" in source)
+                    said.model = said.name(source.get("script") or source.get("path"))
+                    with building(said):
+                        done = _export(request, lambda text: send({"id": ident, "log": text}))
+                    said.attach(done.get("reports") or [])
+                    resident = resident_mb()
+                    retire = retirement(done.get("reports") or [], resident) if done.get("reports") else False
+                    send({"id": ident, "done": done, "rssMb": None if resident is None else round(resident)})
                 else:
                     answer, payload = _result(request)
                     send({"id": ident, "done": answer}, payload)
@@ -401,13 +415,20 @@ def main() -> int:
             if cwd:
                 os.chdir(cwd)
             script = Path(request["script"])
-            reports = build(script, request.get("functions") or None,
-                            log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
-                            outputs=request.get("outputs"), code=request.get("code"),
-                            verify=bool(request.get("verify")))
+            # Where the build is, frame by frame; each report holds its model's last.
+            said = progress(ident, script=script, cwd=cwd, code=request.get("code") is not None)
+            with building(said):
+                said.load()
+                reports = build(script, request.get("functions") or None,
+                                log=lambda text: send({"id": ident, "log": text}), cwd=Path(cwd) if cwd else None,
+                                outputs=request.get("outputs"), code=request.get("code"),
+                                verify=bool(request.get("verify")))
+            said.attach(reports)
             patcher.finish(reports)
-            retire = retirement(reports)
-            send({"id": ident, "done": reports})
+            resident = resident_mb()
+            retire = retirement(reports, resident)
+            # Its memory now, which the daemon's status shows (``rssMb``).
+            send({"id": ident, "done": reports, "rssMb": None if resident is None else round(resident)})
         except BuildError as error:
             send({"id": ident, "failed": str(error)})
         except BaseException as error:  # noqa: BLE001 - the worker answers every request

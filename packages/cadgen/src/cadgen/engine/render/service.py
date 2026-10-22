@@ -25,9 +25,12 @@ the buffers of the parts it lacks) answered ``{"held": {...}}``; ``{"op": "frame
 answered ``{"done": report, "bytes"}`` and the PNG, ``{"refused": why}`` (a request the document
 does not offer, before anything is drawn) or ``{"failed": why}``. When the served document is
 patched -- a build of it, or its file rewritten -- the daemon sends the new version at once, with
-the buffers of the parts the process lacks: the next picture is warm. It goes with the daemon, and
-after a frame that leaves it over the workers' memory cap (``CADGEN_ENGINE_WORKER_RSS_MB``,
-``worker.rss_cap_mb``) it says so (``retired``) and exits; the next snapshot starts another.
+the buffers of the parts the process lacks: the next picture is warm. It goes with the daemon,
+after drawing nothing for as long as a worker may sit idle (``Renders.retire_idle``, the daemon's
+``CADGEN_ENGINE_WORKER_IDLE``), and after a frame that leaves it over the workers' memory cap
+(``CADGEN_ENGINE_WORKER_RSS_MB``, ``worker.rss_cap_mb``), when it says so (``retired``) and exits;
+the next snapshot starts another. A render process is no worker: it does not count toward the
+workers' cap.
 
 **In process** (``draw_here``): ``--no-daemon`` and a model drawn from its worker's memory serve
 the document from a server of this process, as the snapshot page's path does, and draw it once.
@@ -458,6 +461,7 @@ class RenderProcess:
         self.frames = 0
         self.rss: int | None = None
         self.retired = False
+        self.used = time.monotonic()  # when it last drew: idle as long as a worker may be, it is stopped
         self.meshed: dict[str, Any] | None = None  # the engine's account of the meshing its last version took
         self.held: dict[str, Any] | None = None  # what it made and kept of its last version's parts
         self.said: list[str] = []  # its last lines on stderr, for a failure's report
@@ -581,6 +585,7 @@ class Renders:
             raise RuntimeError(answer.get("failed") or "the renderer drew nothing")
         report = answer["done"]
         render.frames += 1
+        render.used = time.monotonic()
         render.rss = (report.get("process") or {}).get("rssMb")
         if report.get("retired"):
             render.retired = True
@@ -609,6 +614,18 @@ class Renders:
         return [{"document": str(render.path), "pid": render.pid, "version": render.version, "held": render.held,
                  "frames": render.frames, "rssMb": render.rss, "alive": render.alive(), "busy": render.lock.locked()}
                 for render in self.processes.values()]
+
+    def retire_idle(self, seconds: float) -> None:
+        """Stop each render process that has drawn nothing for ``seconds``: the next snapshot of
+        its document starts another."""
+        now = time.monotonic()
+        with self.lock:
+            idle = {ident: render for ident, render in self.processes.items()
+                    if not render.lock.locked() and now - render.used >= seconds}
+            for ident in idle:
+                del self.processes[ident]
+        for render in idle.values():
+            render.stop()
 
     def stop(self) -> None:
         with self.lock:

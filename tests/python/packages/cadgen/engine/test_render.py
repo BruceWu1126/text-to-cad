@@ -546,7 +546,7 @@ class DaemonRenderTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def renders(self) -> list[dict]:
-        return json.loads(self.cli("status").stdout)["renders"]
+        return json.loads(self.cli("status", "--json").stdout)["renders"]
 
     def test_a_served_document_is_drawn_warm_and_follows_its_builds(self) -> None:
         self.build(10)

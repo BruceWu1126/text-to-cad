@@ -164,10 +164,11 @@ class Built:
 # --- reaching the daemon ---------------------------------------------------------------------
 
 
-def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+def _ask(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] | None = None,
+         on_progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     from cadgen.engine.client import request
 
-    answer = request({**message, "env": dict(os.environ)}, on_log or (lambda _message: None))
+    answer = request({**message, "env": dict(os.environ)}, on_log or (lambda _message: None), on_progress=on_progress)
     if answer is None:
         raise EngineError("no engine daemon")
     _heard("worker", answer.get("worker"))
@@ -203,36 +204,54 @@ def _outputs(flags: dict[str, Any]) -> dict[str, dict[str, Any]] | None:
 
 def _built(script: Path, functions: list[str] | None, *, code: str | None = None, name: str | None = None,
            outputs: dict[str, dict[str, Any]] | None = None, verify: bool = False,
-           log: Callable[[str], None] | None = None, daemon: bool = True) -> tuple[list[dict[str, Any]], Any, float]:
+           log: Callable[[str], None] | None = None, daemon: bool = True,
+           progress: Any = None) -> tuple[list[dict[str, Any]], Any, float]:
     """One build -- of code, or of a script's models -- in the warm worker that holds it, or in
-    this process: its reports, whether the worker was started for it, and its wall time."""
+    this process: its reports, whether the worker was started for it, and its wall time. Where
+    the build is goes, frame by frame, to ``progress`` (``progress.py``): by default a bar on
+    stderr when it is a terminal and nowhere when it is not; ``False`` nowhere; a callable takes
+    each frame. Each model's report holds its last (``progress``)."""
+    from cadgen.engine import progress as progressing
     from cadgen.engine.build import BuildError
 
+    bar = progressing.Bar() if progress is None else None
+    frames = bar.frame if bar is not None else (progress or None)
     shown = log or (lambda _text: None)
+    if bar is not None:
+        shown = bar.around(shown)  # a line of the log goes above the bar
     cwd = Path.cwd()
     started = time.perf_counter()
-    if not daemon:
-        from cadgen.engine import build as engine_build
+    try:
+        if not daemon:
+            from cadgen.engine import build as engine_build
 
-        try:
-            reports = engine_build.build(script, functions, log=shown, cwd=cwd, outputs=outputs, code=code,
-                                         verify=verify)
-        except BuildError as error:
-            raise EngineError(str(error)) from None
-        fresh = None
-    else:
-        def relay(message: dict[str, Any]) -> None:
-            shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
+            said = progressing.Progress(frames or (lambda _frame: None), script=script, cwd=cwd,
+                                        code=code is not None)
+            try:
+                with progressing.building(said):
+                    said.load()
+                    reports = engine_build.build(script, functions, log=shown, cwd=cwd, outputs=outputs, code=code,
+                                                 verify=verify)
+            except BuildError as error:
+                raise EngineError(str(error)) from None
+            said.attach(reports)
+            fresh = None
+        else:
+            def relay(message: dict[str, Any]) -> None:
+                shown(message["log"] if message.get("stream") == "model" else f"  {message['log']}")
 
-        answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
-                       "outputs": outputs, "code": code, "name": name, "verify": verify}, relay)
-        reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
+            answer = _ask({"op": "build", "script": str(script), "functions": functions, "cwd": str(cwd),
+                           "outputs": outputs, "code": code, "name": name, "verify": verify}, relay, frames)
+            reports, fresh = answer["done"], answer.get("worker", {}).get("fresh")
+    finally:
+        if bar is not None:
+            bar.close()
     return reports, fresh, time.perf_counter() - started
 
 
 def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = None, glb: Any = None,
           stl: Any = None, threemf: Any = None, verify: bool = False, log: Callable[[str], None] | None = None,
-          daemon: bool = True) -> Built:
+          daemon: bool = True, progress: Any = None) -> Built:
     """Build source text, ``cadgen build SOURCE`` (law 12): ``code`` assigns its final shape to
     ``result``, and is built as ``name`` (``model`` by default) in the warm worker of that name.
     Code declares nothing, so its file flags are its declarations, additive among themselves:
@@ -240,8 +259,8 @@ def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = No
     (``XBF/<name>.xbf``, ``<name>.step``, ...), a path writes it there; no flag, no file. A child
     model the code calls writes the files it declares (law 10). ``verify`` runs every body the
     memo would replay and compares it with the logged one (``build.build``); ``daemon=False``
-    builds in this process. Returns once every file is on disk. A script's models build by
-    running the script, or by ``Model.build()``."""
+    builds in this process; ``progress`` as ``_built`` has it. Returns once every file is on
+    disk. A script's models build by running the script, or by ``Model.build()``."""
     from cadgen.engine.build import code_script
 
     outputs = _outputs({"xbf": xbf, "step": step, "glb": glb, "stl": stl, "threemf": threemf})
@@ -249,17 +268,19 @@ def build(code: str, *, name: str | None = None, xbf: Any = None, step: Any = No
     cwd = Path.cwd()
     script = code_script(name, cwd)
     reports, _fresh, wall = _built(script, [name], code=code, name=name, outputs=outputs, verify=verify, log=log,
-                                   daemon=daemon)
+                                   daemon=daemon, progress=progress)
     return Built(name, script, {**reports[0], "wall": round(wall, 4)}, cwd)
 
 
 def build_script(script: Path, functions: list[str] | None = None, *, verify: bool = False,
-                 log: Callable[[str], None] | None = None, daemon: bool = True) -> Report:
+                 log: Callable[[str], None] | None = None, daemon: bool = True, progress: Any = None) -> Report:
     """A script's models -- ``functions``, or every one it defines -- each built as its
     decorators declare, and every child model each calls as its own declare (law 10): what
     ``python script.py`` (every model) and ``Model.build()`` (one) ask. A script takes no file
-    flags: its decorators are the whole definition of what it writes (law 11)."""
-    reports, fresh, wall = _built(Path(script).resolve(), functions, verify=verify, log=log, daemon=daemon)
+    flags: its decorators are the whole definition of what it writes (law 11). ``progress`` as
+    ``_built`` has it."""
+    reports, fresh, wall = _built(Path(script).resolve(), functions, verify=verify, log=log, daemon=daemon,
+                                  progress=progress)
     return Report(reports, round(wall, 4), fresh)
 
 

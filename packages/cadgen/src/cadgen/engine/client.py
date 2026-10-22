@@ -95,9 +95,10 @@ def wait_gone(timeout: float = 60.0) -> bool:
 
 
 def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = lambda _m: None, *,
-            start: bool = True) -> dict[str, Any] | None:
-    """Send one request; every log line to ``on_log``; the final answer returned (None
-    when no daemon is up and ``start`` is false)."""
+            start: bool = True, on_progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any] | None:
+    """Send one request; every log line to ``on_log`` and every progress frame of its build to
+    ``on_progress`` (``progress.py``); the final answer returned (None when no daemon is up and
+    ``start`` is false)."""
     connection = connect(start=start)
     if connection is None:
         return None
@@ -112,6 +113,10 @@ def request(message: dict[str, Any], on_log: Callable[[dict[str, Any]], None] = 
             answer = json.loads(line)
             if "log" in answer:
                 on_log(answer)
+                continue
+            if set(answer) == {"progress"}:
+                if on_progress is not None:
+                    on_progress(answer["progress"])
                 continue
             return answer
     raise ConnectionError("the engine daemon closed the connection")

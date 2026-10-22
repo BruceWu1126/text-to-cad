@@ -286,7 +286,7 @@ class MemoTest(MemoCase):
         # Through the daemon, the request carries it to the worker's build: code's and a model's.
         asked = []
         answer = {"done": [{"ok": True, "model": "probe"}], "worker": {}}
-        with mock.patch.object(api, "_ask", side_effect=lambda message, _log: asked.append(message) or answer), \
+        with mock.patch.object(api, "_ask", side_effect=lambda message, *_relays: asked.append(message) or answer), \
                 contextlib.redirect_stdout(io.StringIO()):
             cli.main(["build", "result = 1", "--verify"])
             cli.main(["build", "result = 1"])

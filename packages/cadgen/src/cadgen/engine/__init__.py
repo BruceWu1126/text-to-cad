@@ -33,8 +33,8 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "step",
-           "stl", "threemf", "xbf"]
+__all__ = ["Material", "configuration", "glb", "materials", "memo", "motion", "paint", "read_step", "read_xbf", "report",
+           "step", "stl", "threemf", "track", "xbf"]
 
 
 def _main_in_a_package() -> None:
@@ -66,6 +66,10 @@ def __getattr__(name: str) -> Any:
         from cadgen.engine.materials import Material
 
         return Material
+    if name in ("report", "track"):
+        from cadgen.engine import progress
+
+        return getattr(progress, name)
     if name in __all__:
         from cadgen.engine import model
 

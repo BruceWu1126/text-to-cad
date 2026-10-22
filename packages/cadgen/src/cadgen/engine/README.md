@@ -149,7 +149,8 @@ def hinge():
 | `access.py` | which pages may read a served document from another origin: loopback ones |
 | `snapshot.py` | `cadgen xbf snapshot`: a document drawn by OCCT (`render/`), or a mesh file by the CAD Viewer's mesh renderers, into a PNG; a script's model drawn from its worker's memory |
 | `render/` | the stills drawn by OCCT from the engine's meshes: a document held and drawn, and the daemon's render process per served document (`service.py`); the scene (`occt.py`); the viewer's Explode, ported (`explode.py`); a part's buffer as OCCT shapes (`shapes.py`); the headless OpenGL context per platform (`context.py`) |
-| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, connect-or-start; a worker's memory cap |
+| `daemon.py`, `worker.py`, `client.py` | one daemon per installation, one warm worker per model script, at most one per core alive (`Pool`), connect-or-start; a worker's memory cap |
+| `progress.py` | where a build is: the author's `report` and `track`, the engine's stages heard where they begin, the frames, and the terminal's bar |
 | `atomic_replace.py` | the one rename every written file is moved into place with: cadgen's bounded Windows retry, kept in the engine |
 | `cli.py` | `cadgen xbf ...` (also `python -m cadgen.engine`), `python model.py`'s run (`run_script`), and `cadgen where` (`where_main`) |
 | `kernel/` | the memo (`memo.py`), maker history (`history.py`), element naming (`trace.py`), deterministic kernel settings (`determinism.py`) |
@@ -165,7 +166,7 @@ cadgen xbf snapshot SRC OUT.png [--display MODE|exploded=A|JSON] [--grid] [--cam
                     [--pose NAME|JSON] [--annotation FILE] [--measurements FILE]
                     [--width W --height H | --size-profile P] [--no-daemon] [--json]
 cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-cadgen xbf status | stop | daemon
+cadgen xbf status [--json] | stop | daemon
 cadgen where DOC [REF]                      the build closure; with REF: PART/face N (edge, vertex), an element name,
                                             or a part or an assembly: its volume and mass
 ```
@@ -213,13 +214,8 @@ Nor does the day: the creation date the BinXCAF driver writes in the file's
 header is always `01/01/2000` (`document.WRITTEN_DATE`, put over the driver's in
 place), so two cold builds of the same code are the same bytes on any day.
 If a body raises, the error is reported with the model's frames and the
-previous files stay. The daemon starts on demand and exits after an idle hour
-(`CADGEN_ENGINE_IDLE` seconds). A worker whose resident memory is over
-`CADGEN_ENGINE_WORKER_RSS_MB` after a build (default: a quarter of the machine's memory,
-at least 2 GiB; `0` for no cap) is retired: the report says so (`retired`), the worker
-exits once it has answered, and the next build is a fresh worker's -- a restart, which
-takes the xbf whole when its closure is unchanged (**Build closure**). A render process (**The viewer and the
-snapshot**) is held to the same cap after each picture. `CADGEN_ENGINE_DIR` moves its socket and lock.
+previous files stay. Builds run in the daemon's warm workers, at most one per core alive
+(**The daemon and its workers**). `CADGEN_ENGINE_DIR` moves its socket and lock.
 `CADGEN_ENGINE_MEMO=0` turns memo hits off. `CADGEN_ENGINE_MESH=processes|inline`
 picks how parts are meshed. The default, `processes`, uses a warm pool of
 processes started with the server, each handed one part's shape as bytes,
@@ -247,6 +243,107 @@ document is served meanwhile), and one rewritten while it is served is read
 again in the background: the page keeps the old version until the new one is
 in. Its structure says how long the parse took and which process made it
 (`read`: `{seconds, process}`).
+
+## The daemon and its workers
+
+One daemon per installation (`daemon.py`), started on demand by the first command that needs
+it and gone after an idle hour (`CADGEN_ENGINE_IDLE` seconds; a page waiting on a served
+document keeps it). It holds a pool of warm workers, one per model script (and one per code
+name, and one for the documents no worker built), each a process whose memo lives as long as
+it does. Its rules are a standard pool's, and nothing else: no memory budget, no admission
+guess, no refusal; the operating system does the rest.
+
+- **A cap.** At most `CADGEN_ENGINE_WORKERS` workers are alive (default: the machine's
+  cores). A build for a script whose worker is alive goes to it, waiting while it builds
+  something else: one build at a time per worker, builds of different scripts at once.
+- **First come, first served.** A build for a script with no worker starts one under the cap.
+  At the cap, the least recently used idle worker is retired first -- its stdin closed, so it
+  exits -- and its slot is the new one's. With every worker busy, the build waits for the first
+  to come free, and every build that needs a slot after it waits behind it. A build that waits
+  for its own script's busy worker takes no slot.
+- **Idle workers go.** A worker idle `CADGEN_ENGINE_WORKER_IDLE` seconds (default: the
+  daemon's idle time, an hour) is retired.
+- **A memory cap.** A worker whose resident memory is over `CADGEN_ENGINE_WORKER_RSS_MB` after
+  a build (default: a quarter of the machine's memory, at least 2 GiB; `0` for no cap) is
+  retired: the report says so (`retired`), and the worker exits once it has answered.
+
+A retired script's next build is a fresh worker's: a restart, which takes the xbf whole when
+its closure is unchanged (**Build closure**), and else builds the model cold. A render
+process (**The viewer and the snapshot**) is no worker and does not count toward the cap; it
+is held to the same memory cap after each picture, and retired after the same idle time.
+
+`cadgen xbf status` says what the daemon holds (`--json`: the same as data, `api.status()`):
+
+```
+engine daemon 98307, up 2h10m · workers 2/10 · idle timeout 1h · RSS cap 16.0 GB
+  busy  tom.py         98310   12 builds   3.7 GB  building tom.py::tom · Building geometry · 3/7 stages · 41s
+  idle  motorbike.py   98410    3 builds   0.6 GB  4m
+  waiting  2 builds, first come first served
+retired: finger_01.py (LRU) 3m ago · qdd_actuator.py (idle) 41m ago · tom.py (RSS) 2h ago
+serving http://127.0.0.1:52811: 1 document
+```
+
+A worker's memory is as it measured it after its last build; a busy one's build is where its
+last progress frame says (**Progress**); the time is how long it has been busy, or idle. A
+retirement's reason is `LRU` (room at the cap), `idle`, `RSS` (over its memory cap),
+`environment` (a build asked for the script with another `PYTHONPATH`, `PATH` or `VIRTUAL_ENV`:
+its worker is replaced in its slot) or `exited` (it died).
+
+## Progress
+
+A build says where it is (`progress.py`). The author's half is cadgen's own API, unchanged:
+`report(detail)` and `track(items, label=)`, from `cadgen.engine`, each a no-op outside a build.
+
+```python
+from cadgen.engine import report, track, xbf
+
+@xbf
+def hand():
+    fingers = [finger(name) for name in track(FINGERS)]  # "Building geometry  2/5  middle"
+    report("palm loft")                                   # "Building geometry  palm loft"
+    return bd.Compound(children=[palm(), *fingers], label="hand")
+```
+
+`track` counts the items done and names the one in flight (`label(item)`, or the item itself
+when it is a string); a sized iterable gives the count its total, and a lazy one is passed
+through lazily, counted without one. `report` names what runs now. A body the memo replays
+runs nothing, and says nothing. The engine's half is its stages, said where the build reaches
+them (`build.py`, through `progress.current`): `load` (the script loads), `body` (a model's body runs: "Building
+geometry"), `names` (its result collected and its elements named), `document` (its XCAF document
+made) and `write` (each file written: its name the detail, counted of the model's files).
+
+Each is a frame, the whole of where the build is:
+
+```json
+{"model": "hand.py::hand", "outputs": ["/abs/XBF/hand.xbf"], "phase": "body", "label": "Building geometry",
+ "detail": "middle", "done": 2, "total": 5, "determinate": true, "elapsedMs": 4120}
+```
+
+`model` is as the model's report names it, `outputs` the files its build writes, `done` of
+`total` the running `track`'s count (`total` null, `determinate` false, without one) and
+`elapsedMs` counts from the build's start. A phase opens with a frame of its own; the author's
+come at least 100 ms apart, the latest held one sent when the interval is up, so the last
+frame is the build's last state. The worker sends each on its pipe (`{"id", "progress"}`), and
+the daemon:
+
+- passes it to the build's caller as it does the log's lines (`client.request(on_progress=)`):
+  `python model.py` and `cadgen xbf build` draw a bar on stderr when it is a terminal -- each
+  phase finished a line with its time, the one in flight repainted in place -- and nothing when
+  it is not (`progress.Bar`; `api.build(progress=)` takes the frames instead, `False` none);
+- keeps a busy worker's last, which `cadgen xbf status` shows (**The daemon and its workers**);
+- wakes the pages waiting on a served document among the frame's `outputs` (below).
+
+Each model's report holds its last frame (`progress`, which `--json` prints), so a failed build
+says where it was; a worker that dies during a build fails it with where it was in the words.
+
+**The page's route.** `GET /api/doc/<id>/version?after=V&progress=N&wait=S` answers
+`{"version", "patch", "building", "failed", "progress"}` once the version is not `V`, or the
+count `progress` is not `N`, or after `S` seconds (60 at most); without `progress=` it waits on
+the version alone. `building` is the last frame of the build writing the document now, null when
+none is; `failed` is the last build of it that failed, `{"model", "error", "progress"}` -- its
+error, and its last frame -- null once another begins or one succeeds; `progress` is a count that
+moves whenever either does. A page sends back the last answer's `progress`, so each frame and the
+build's end wake it, and nothing polls.
 
 ## The viewer and the snapshot
 

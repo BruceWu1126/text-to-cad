@@ -135,6 +135,24 @@ def _from_source() -> None:
         sys.meta_path.insert(0, _FirstPartyFromSource())
 
 
+def _say(stage: str, *args: Any) -> None:
+    """Say a stage of this process's build (``progress``: ``Progress.plan``, ``body``, ``named``,
+    ``stage``, ``writing``) where it begins; nothing outside a build, and never a failure."""
+    from cadgen.engine import progress
+
+    said = progress.current()
+    if said is None:
+        return
+    try:
+        getattr(said, stage)(*args)
+    except Exception:  # noqa: BLE001 - saying where a build is never fails it
+        pass
+
+
+def _plan_said(model: Any, plan: list) -> None:
+    _say("plan", model, [str(target.path) for target in plan])
+
+
 def load_script(script: Path) -> Any:
     """The script as a fresh module, after every first-party module a previous build loaded is
     forgotten: the model's code as it is on disk now, imported as Python imports it. Its
@@ -388,6 +406,8 @@ def build(script: Path, functions: list[str] | None = None, *, log: Callable[[st
             body_started = time.perf_counter()
             before = set(run.statuses)
             context.called = {}
+            _plan_said(model, model.plan())
+            _say("body", model)
             try:
                 result = context.root(model)
             except Exception as error:  # noqa: BLE001 - the model's own error, reported
@@ -467,6 +487,8 @@ def _finish(model: Any, result: Any, run: Any, report: dict[str, Any], log: Call
     timings = report["timings"]
     plan = plan if plan is not None else model.plan()
     targets = [(target.kind, target.path) for target in plan]
+    _plan_said(model, plan)
+    _say("named", model.name)
     clock = time.perf_counter()
     tree = document.collect(result, model.name)
     xbf = next((path for kind, path in targets if kind == "xbf"), None)
@@ -556,6 +578,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
     if not same or kept is None or kept.doc is None or any(target.kind == "xbf" for target in stale):
         clock = time.perf_counter()
         kept = kept if kept is not None else document.Kept()
+        _say("stage", "document")
         doc = document.to_xcaf(tree, kept)
         timings["document"] = round(time.perf_counter() - clock, 4)
         report["converted"] = {"prototypes": len(tree.order), "converted": kept.converted, "patched": kept.patched}
@@ -566,6 +589,7 @@ def _write(model: Any, plan: list, tree: Any, signature: tuple, report: dict[str
         source = None
         for target in stale:
             clock = time.perf_counter()
+            _say("writing", target.path)
             if target.kind == "xbf":
                 # A file this process did not write as it stands -- in a fresh process, one it
                 # took, one another worker wrote (a child's, which its parent's build writes

@@ -9,7 +9,7 @@ the functions of ``api``; and ``python SCRIPT.py``'s run (``run_script``).
         [--preview] [--pose NAME|JSON] [--annotation FILE] [--measurements FILE] [--width N] [--height N]
         [--size-profile P] [--json]
     cadgen xbf serve DOC [--port N] [--three DIR] [--foreground]
-    cadgen xbf status | stop | daemon
+    cadgen xbf status [--json] | stop | daemon
     cadgen where DOC [REF]                           a document's build closure, or what made one element
 
 ``where`` is the first verb at the top level of ``cadgen`` (``where_main``); the others move up
@@ -79,7 +79,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     from cadgen.engine.snapshot import add_parser as add_snapshot
 
     add_snapshot(verbs)
-    verbs.add_parser("status", help="the daemon's workers and served documents")
+    status = verbs.add_parser("status", help="the daemon's workers, what each is building, and its served documents")
+    status.add_argument("--json", action="store_true", help="the daemon's answer as JSON")
     verbs.add_parser("stop", help="stop the daemon")
     verbs.add_parser("daemon", help="run the daemon in this process")
     return parser
@@ -378,7 +379,7 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
 
     answer = request({"op": args.verb}, start=False)
     if answer is None:
-        print("no engine daemon is running")
+        print("null" if getattr(args, "json", False) else "no engine daemon is running")
         return 0
     if args.verb == "stop":
         from cadgen.engine.client import wait_gone
@@ -387,8 +388,69 @@ def main(argv: list[str] | None = None, prog: str = "cadgen xbf") -> int:
         if not wait_gone():
             print("cadgen xbf stop: the engine daemon did not exit", file=sys.stderr)
             return 1
+    if args.verb == "status" and not args.json:
+        print(status_text(answer))
+        return 0
     print(json.dumps(answer, indent=2))
     return 0
+
+
+def _span(seconds: Any) -> str:
+    """A span of time at a glance: ``41s``, ``4m``, ``2h10m``."""
+    seconds = int(max(0.0, float(seconds or 0)))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    hours, minutes = divmod(seconds // 60, 60)
+    return f"{hours}h{minutes:02d}m" if minutes else f"{hours}h"
+
+
+def _gb(megabytes: Any) -> str:
+    return "-" if megabytes is None else f"{float(megabytes) / 1024:.1f} GB"
+
+
+def status_text(answer: dict[str, Any]) -> str:
+    """``cadgen xbf status``: the daemon and its pool's rules, a line per worker -- busy or idle,
+    its script, process, builds and memory after its last build, where a busy one's build is
+    (its last progress frame), how long it has been busy or idle -- the builds waiting for a
+    worker, the last retirements, and what it serves."""
+    import time
+
+    workers = answer.get("workers") or []
+    cap = answer.get("rssCapMb")
+    lines = [" · ".join([f"engine daemon {answer.get('pid')}, up {_span(answer.get('up'))}",
+                         f"workers {len(workers)}/{answer.get('cap')}",
+                         f"idle timeout {_span(answer.get('idleTimeout'))}",
+                         f"RSS cap {_gb(cap)}" if cap else "no RSS cap"])]
+    names = [Path(str(worker["script"])).name for worker in workers]
+    width = max((len(name) for name in names), default=0)
+    for worker, name in zip(workers, names):
+        builds = f"{worker.get('builds', 0)} build{'' if worker.get('builds') == 1 else 's'}"
+        doing = _span(worker.get("seconds"))
+        frame = worker.get("progress")
+        if worker.get("busy") and frame:
+            from cadgen.engine.progress import describe
+
+            # Where its build is: ``building tom.py::tom · Building geometry · 3/7 stages · 41s``.
+            doing = f"building {frame.get('model')} · {describe(frame)} · {doing}"
+        lines.append(f"  {'busy' if worker.get('busy') else 'idle'}  {name:<{width}}  {str(worker.get('pid')):>6}  "
+                     f"{builds:>10}  {_gb(worker.get('rssMb')):>7}  {doing}")
+    if answer.get("waiting"):
+        waiting = answer["waiting"]
+        lines.append(f"  waiting  {waiting} build{'' if waiting == 1 else 's'}, first come first served")
+    retired = answer.get("retired") or []
+    if retired:
+        now = time.time()
+        lines.append("retired: " + " · ".join(f"{Path(str(row['script'])).name} ({row['reason']}) "
+                                              f"{_span(now - row['at'])} ago" for row in retired))
+    serving = answer.get("serving")
+    if serving:
+        documents = len(serving.get("documents") or [])
+        renders = len(answer.get("renders") or [])
+        lines.append(f"serving {serving['url']}: {documents} document{'' if documents == 1 else 's'}"
+                     + (f" · {renders} render process{'' if renders == 1 else 'es'}" if renders else ""))
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

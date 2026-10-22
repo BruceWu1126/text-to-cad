@@ -5,8 +5,14 @@ structure (``document.Loaded.structure``): its parts with their names, keys, col
 materials and element names, its instances with world matrices, its tree, and its version, and
 for each part already meshed the faces its mesher left without triangles
 (``unmeshed``) with ``BRepCheck``'s verdict on each (``unmeshedCheck``);
-``GET /api/doc/<id>/version?after=V`` answers the version once it is not ``V`` (or after
-``wait`` seconds); ``GET /api/doc/<id>/part/<key>`` is one part's tessellation
+``GET /api/doc/<id>/version?after=V&progress=N&wait=S`` answers ``{"version", "patch",
+"building", "failed", "progress"}`` once the version is not ``V``, or the count ``progress`` is
+not ``N`` (without ``progress=``, the version alone is waited on), or after ``S`` seconds:
+``building`` is the last progress frame of the build writing the document now (``progress.py``;
+null when none is), ``failed`` the last build of it that failed (``{"model", "error",
+"progress"}``: its error and where it was; null once one succeeds or another begins), and
+``progress`` a count that moves whenever either does (``building``, ``built``), which the page
+sends back to wait for the next; ``GET /api/doc/<id>/part/<key>`` is one part's tessellation
 (``mesh.Mesh.to_bytes``), held in memory by the part's geometry key, so a part that two
 documents, two versions of one document or ten instances share is meshed once;
 ``GET /api/doc/<id>/part/<key>/face|edge|vertex/<ordinal>`` is what the kernel measures
@@ -357,6 +363,9 @@ class Server:
         # as it stands (by its state): it is read again once the file changes.
         self.rereading: set[str] = set()
         self.unreadable: dict[str, tuple | None] = {}
+        # Per served path, its build: the last progress frame of the build writing it now, the
+        # last build of it that failed, and a count that moves with either (``build_of``).
+        self.builds: dict[Path, dict[str, Any]] = {}
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -657,17 +666,59 @@ class Server:
             prototypes.append(prototype)
         return found
 
-    def wait(self, ident: str, after: str | None, seconds: float) -> Served:
-        """The document once its version is not ``after``, or after ``seconds``."""
+    def building(self, frame: dict[str, Any]) -> None:
+        """A build's progress frame (``progress.py``): each served document among its
+        ``outputs`` is being built, as the frame says, and its pages are woken."""
+        paths = []
+        for text in frame.get("outputs") or []:
+            try:
+                paths.append(Path(text).resolve())
+            except (OSError, ValueError):
+                continue
+        with self.load_lock:
+            hit = [path for path in paths if path in self.idents]
+            for path in hit:
+                state = self.builds.setdefault(path, {"building": None, "failed": None, "progress": 0})
+                state.update(building=frame, failed=None, progress=state["progress"] + 1)
+        if hit:
+            self._changed()
+
+    def built(self, outcomes: dict[str, dict[str, Any] | None]) -> None:
+        """Builds that answered: per path they wrote, None when its model built, else what failed
+        (``{"model", "error", "progress"}``). Those served are built no longer; their pages are woken."""
+        hit = False
+        with self.load_lock:
+            for text, failed in outcomes.items():
+                try:
+                    path = Path(text).resolve()
+                except (OSError, ValueError):
+                    continue
+                if path not in self.idents:
+                    continue
+                state = self.builds.setdefault(path, {"building": None, "failed": None, "progress": 0})
+                state.update(building=None, failed=failed, progress=state["progress"] + 1)
+                hit = True
+        if hit:
+            self._changed()
+
+    def build_of(self, path: Path) -> dict[str, Any]:
+        """A served document's build: ``building``, ``failed`` and their ``progress`` count."""
+        with self.load_lock:
+            return dict(self.builds.get(path) or {"building": None, "failed": None, "progress": 0})
+
+    def wait(self, ident: str, after: str | None, seconds: float, progress: int | None = None) -> Served:
+        """The document once its version is not ``after``, or its build's ``progress`` count is
+        not ``progress`` (when given), or after ``seconds``."""
         deadline = time.monotonic() + seconds
         while True:
             generation = self.generation
             doc = self.document(ident)
             left = deadline - time.monotonic()
-            if after is None or doc.version != after or left <= 0:
+            if after is None or doc.version != after or left <= 0 or (
+                    progress is not None and self.build_of(doc.path)["progress"] != progress):
                 return doc
             with self.changed:
-                # Woken by a patch or a release; the file is looked at twice a second.
+                # Woken by a patch, a release or a build's progress; the file is looked at twice a second.
                 self.changed.wait_for(lambda: self.generation != generation, timeout=min(left, 0.5))
 
     def topology(self, key: str, data: bytes) -> Any:
@@ -769,8 +820,10 @@ class Server:
                 if len(parts) == 4 and parts[3] == "version":
                     after = (query.get("after") or [None])[0]
                     seconds = min(float((query.get("wait") or ["0"])[0] or 0), WAIT_LIMIT)
-                    doc = self.wait(ident, after, seconds)
-                    return self.json(handler, {"version": doc.version, "patch": doc.patch})
+                    given = (query.get("progress") or [""])[0]
+                    doc = self.wait(ident, after, seconds, int(given) if given.isdigit() else None)
+                    build = self.build_of(doc.path)
+                    return self.json(handler, {"version": doc.version, "patch": doc.patch, **build})
                 doc = self.document(ident)
                 if len(parts) == 3:
                     self.prefetch(doc)  # a page is about to ask for every part
